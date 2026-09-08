@@ -152,8 +152,28 @@ def test_no_cross_form_rule_demands_wc_information_without_a_wc_gate():
     ungated = []
 
     def _strings(node):
+        """Every string constant in the function EXCEPT its docstring.
+
+        A docstring cannot reach a producer, and a rule must be free to EXPLAIN
+        in prose that it is deliberately NOT a Workers Comp rule. Without this
+        exclusion the guard fires on its own documentation: 2026-09-05,
+        `_check_builders_risk_vs_property_deduplication` was re-keyed off ACORD
+        133 (whose template is the Workers Comp Assigned Risk section, not the
+        Builders Risk form the product used to think it was), and the docstring
+        recording that reasoning tripped this test while the rule's actual
+        message never mentions Workers Comp at all. The property being guarded
+        is what a rule SAYS to a user, not what it says to the next engineer.
+        """
+        # `_strings` is also called on expression nodes (the condition scan
+        # below), and `ast.get_docstring` raises TypeError on anything that is
+        # not a module / class / function.
+        doc = None
+        if isinstance(node, (ast.Module, ast.ClassDef,
+                             ast.FunctionDef, ast.AsyncFunctionDef)):
+            doc = ast.get_docstring(node, clean=False)
         return [c.value for c in ast.walk(node)
-                if isinstance(c, ast.Constant) and isinstance(c.value, str)]
+                if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                and not (doc is not None and c.value == doc)]
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef) or not node.name.startswith("_check"):

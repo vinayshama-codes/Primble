@@ -95,7 +95,14 @@ class TestSectionPolicyIdentity:
             "ACORD_137_CO": "6E7-40-02---26",
             "ACORD_126": "BBC7263",
             "ACORD_186": "BBC7263",
-            "ACORD_141": "6C7-40-02---26",
+            # ACORD_141 IS DELIBERATELY ABSENT (corrected 2026-09-04). It used
+            # to expect the INLAND MARINE number here, which encoded a mapping
+            # error: ACORD's own title for this template is "CRIME SECTION", so
+            # the Inland Marine number was precisely "another line's number" -
+            # the thing this test exists to forbid. Orbin carries no Crime
+            # line, so 141 now falls into the else branch below and must be
+            # BLANK. Its positive case (a package that does carry Crime) is
+            # `test_acord_141_takes_the_crime_policy_not_the_inland_marine_one`.
             # Contractors Equipment coverage rides the Inland Marine line by
             # declaration (_SECTION_FORM_LINE_PHRASES), so the IM policy number
             # is ITS OWN line's number on the 138s - not a borrow.

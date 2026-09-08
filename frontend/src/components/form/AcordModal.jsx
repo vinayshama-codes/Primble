@@ -8,6 +8,7 @@ import PDFJsViewer from "./PDFJsViewer";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
 import ResolutionModal from "./ResolutionModal";
+import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -527,10 +528,18 @@ function NextStepBanner({ text }) {
 }
 
 // ── Reusable info tooltip (tap/click, mobile-safe, no clipping) ──────────────
-// Renders a small "i" that toggles a fixed-position popover computed from the
-// icon's rect, so it is never clipped by the sidebar's overflow. Closes on an
-// outside tap or Escape; stops propagation so it never toggles a parent row.
-function InfoTip({ text }) {
+// Fixed-position popover computed from the trigger's rect, so it is never
+// clipped by the sidebar's overflow. The mechanics live in `useTipPopover` + `TipBubble` so there is ONE
+// implementation. `InfoTip` is the "i" icon that uses it; `HoverTip` (below)
+// wraps any element that should explain itself on hover - the "Send to Client"
+// badge, whose native `title` took the browser's ~1s delay and looked nothing
+// like the SQS panel (reported 2026-09-08).
+//
+// The popover also FLIPS above its trigger when there is not enough room below,
+// anchored by `bottom` so no height measurement and no visible reposition is
+// needed. That matters for the Send to Client button, which sits at the very
+// bottom of the sidebar.
+function useTipPopover() {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 220 });
   // Laptops/desktops (a hover-capable, fine pointer) show on hover; phones/tablets
@@ -550,8 +559,29 @@ function InfoTip({ text }) {
     const width = Math.min(220, window.innerWidth - 16);
     let left = r.left + r.width / 2 - width / 2;
     left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-    setPos({ top: r.bottom + 6, left, width });
+    setPos(window.innerHeight - r.bottom < 120
+      ? { bottom: window.innerHeight - r.top + 6, left, width }
+      : { top: r.bottom + 6, left, width });
   };
+  return { open, setOpen, pos, canHover, place };
+}
+
+function TipBubble({ text, pos, canHover, onClose }) {
+  return (
+    <>
+      {/* Outside-tap catcher only needed in tap mode; on hover devices mouseleave closes it. */}
+      {!canHover && <div onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 100000 }} />}
+      <div role="tooltip" style={{ position: "fixed", ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }), left: pos.left, width: pos.width, zIndex: 100001, background: "#1e293b", color: "#fff", fontSize: 11, fontWeight: 500, lineHeight: 1.45, letterSpacing: 0, textTransform: "none", padding: "7px 10px", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,0.28)" }}>
+        {text}
+      </div>
+    </>
+  );
+}
+
+// The small "i" that toggles the popover. Closes on an outside tap or Escape;
+// stops propagation so it never toggles a parent row.
+function InfoTip({ text }) {
+  const { open, setOpen, pos, canHover, place } = useTipPopover();
   const doToggle = (target) => { if (!open) place(target); setOpen(o => !o); };
   // Click: on touch this toggles; on hover devices hover controls visibility, so the
   // click is a no-op here - but we still stop propagation so a parent section header
@@ -572,15 +602,28 @@ function InfoTip({ text }) {
         style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", border: "1px solid #cbd5e1", color: "#94a3b8", fontSize: 9, fontWeight: 700, lineHeight: 1, cursor: "pointer", flexShrink: 0, fontStyle: "normal", textTransform: "none", userSelect: "none" }}>
         i
       </span>
-      {open && (
-        <>
-          {/* Outside-tap catcher only needed in tap mode; on hover devices mouseleave closes it. */}
-          {!canHover && <div onClick={(e) => { e.stopPropagation(); setOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 100000 }} />}
-          <div role="tooltip" style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 100001, background: "#1e293b", color: "#fff", fontSize: 11, fontWeight: 500, lineHeight: 1.45, letterSpacing: 0, textTransform: "none", padding: "7px 10px", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,0.28)" }}>
-            {text}
-          </div>
-        </>
-      )}
+      {open && <TipBubble text={text} pos={pos} canHover={canHover} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+// Wraps an element that ALREADY does something when clicked (a button), so the
+// tip appears on hover without stealing the tap. On a touch device there is no
+// hover and the tap must reach the control, so nothing is shown there - which
+// is why this may only ever carry an explanation, never a label the user needs.
+function HoverTip({ text, children, style }) {
+  const { open, setOpen, pos, canHover, place } = useTipPopover();
+  if (!text) return children;
+  const on = canHover ? {
+    onMouseEnter: (e) => { place(e.currentTarget); setOpen(true); },
+    onMouseLeave: () => setOpen(false),
+    onFocus: (e) => { place(e.currentTarget); setOpen(true); },
+    onBlur: () => setOpen(false),
+  } : {};
+  return (
+    <>
+      <div {...on} style={{ width: "100%", ...style }}>{children}</div>
+      {open && <TipBubble text={text} pos={pos} canHover={canHover} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -745,6 +788,26 @@ function ResolutionHint({ mode, note }) {
   );
 }
 
+// Owner 2026-09-03: an item that cannot move the score should say so, while
+// staying in the warnings list where the producer already looks.
+//
+// Driven by the backend's per-issue `score_neutral` flag, NEVER by severity.
+// "Advisory" severity is a display-routing choice here, not a promise: the
+// loss-history conflict was advisory-typed while its condition capped the Loss
+// History pillar at 45, so a severity-derived note would have printed a false
+// statement about a number. The backend declares neutrality per code only after
+// tracing it (issue_registry.SCORE_NEUTRAL_CODES), and a cluster earns it only
+// when every member does. Missing flag renders nothing, so older payloads and
+// the lite path are unchanged.
+function ScoreNeutralNote({ show }) {
+  if (!show) return null;
+  return (
+    <div style={{ fontSize: 10.5, color: "#94a3b8", fontStyle: "italic", marginTop: 4 }}>
+      Advice only - this does not affect your score.
+    </div>
+  );
+}
+
 // A conflict-family issue (documents disagree on a value) is reconciled in the
 // Data Consistency picker, keyed by its canonical fact. Its issue `code` encodes
 // that fact; derive it so a banner issue can be matched to its Data Consistency
@@ -815,7 +878,13 @@ function IssueCard({ cluster: c, tone, defaultOpen = false, renderItemActions, h
           <IssueLine message={c.primary_message} className={itemClass} />
           {renderItemActions && (
             <div className="issue-card-actions">
-              {renderItemActions(c.items?.[0] || { issue_id: c.issue_id, message: c.primary_message, forms: c.forms })}
+              {/* `score_neutral` is carried from the CLUSTER (true only when
+                  every member is neutral), so the note survives the fallback
+                  object built for a cluster with no items array. */}
+              {renderItemActions({
+                ...(c.items?.[0] || { issue_id: c.issue_id, message: c.primary_message, forms: c.forms }),
+                score_neutral: c.score_neutral,
+              })}
             </div>
           )}
         </CollapsibleSection>
@@ -837,6 +906,32 @@ function _fallbackIssueId(message, forms) {
 function issueIdOf(iss) {
   return (iss && iss.issue_id) || _fallbackIssueId(iss && iss.message, iss && iss.forms);
 }
+// A hard stop / warning that arrived as a BARE STRING, with no grouped view to
+// classify it. Renders the same action row every grouped row gets, so the
+// producer always has somewhere to go.
+//
+// The pre-form Review screen draws its banners from `grouped_issues`, where each
+// row carries a rule code and therefore an "Open to fix" control. When a
+// response ships the stop ARRAYS without that view the screen fell back to
+// printing the sentences as dead text - no fix, no Resolve, no Dismiss, on a
+// blocker holding the score at 60 (found 2026-09-08). The real fix is
+// server-side (`audit_routes._form_selection_view` now travels with every
+// response that carries stops); this is the floor underneath it, so a legacy or
+// third-party payload degrades to "work-tracking only" instead of to nothing.
+//
+// No code means no typed fix can be offered here - `itemResolveAndStatus` sees a
+// row with no `resolution` and renders exactly what it renders for any other
+// uncoded stop.
+function BareStopRow({ message, className, renderActions }) {
+  const item = { message, code: null, forms: [], resolution: null };
+  return (
+    <div>
+      <IssueLine message={message} className={className} />
+      {typeof renderActions === "function" && renderActions(item, [])}
+    </div>
+  );
+}
+
 // Same identity for a grouped-issue CLUSTER (keyed off primary_message, not
 // message). issue_registry._make_clusters always stamps an issue_id, so this
 // is an exact match in practice; the fallback only covers alias-stamp clusters
@@ -1177,6 +1272,14 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
   // Split into the client's 3 buckets + the non-selectable "Never send" row.
   const clientQuestions       = questions.filter(isClientFacing);
   const agencyQuestions       = questions.filter(isAgency);
+  // SYS-01: a Critical is a Critical wherever it is actioned. The backend can
+  // now mark an Agency question Critical (NAICS / SIC stay the producer's per
+  // the client's 12 Aug instruction and simply gain the flag), so counting the
+  // client bucket alone would report "0 Critical" on the very submission the
+  // fix exists to flag. Split so each bucket's badge names its own owner.
+  const criticalClient = clientQuestions.filter(q => q.priority === "critical");
+  const criticalAgency = agencyQuestions.filter(q => q.priority === "critical");
+  const criticalCount  = criticalClient.length + criticalAgency.length;
   const underwritingQuestions = questions.filter(isUnderwriting);
   const neverSendQuestions    = questions.filter(isNeverSend);
 
@@ -1278,8 +1381,13 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             {am && <span style={{ fontSize: 9.5, fontWeight: 700, color: am.fg, background: am.bg, border: `1px solid ${am.bd}`, padding: "1px 6px", borderRadius: 10 }}>{am.label}</span>}
             {/* Cross-form conflict whose fix is a client-answerable fact - producer can tick to add it to the client send */}
             {q.escalatable_to_client && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#047857", background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "1px 6px", borderRadius: 10 }}>Add to client</span>}
-            {/* Priority chip - exact §8.2 item 2 labels */}
-            {hasTaxonomy && q.priority && ARQ_PRIORITY_META[q.priority] && !showAudienceBadge && (
+            {/* Priority chip - exact §8.2 item 2 labels.
+                Hidden in the non-client sub-panels, which would otherwise carry an
+                "Internal" chip on every row, EXCEPT for Critical: SYS-01 lets a
+                required-and-missing fact be Critical in the Agency bucket (NAICS /
+                SIC stay the producer's), and a flag nobody can see is not a flag. */}
+            {hasTaxonomy && q.priority && ARQ_PRIORITY_META[q.priority] &&
+             (!showAudienceBadge || q.priority === "critical") && (
               <span style={{ fontSize: 9.5, fontWeight: 700, color: pm.fg, background: pm.bg, border: `1px solid ${pm.bd}`, padding: "1px 6px", borderRadius: 10 }}>{pm.label}</span>
             )}
             {/* "Suggested" nudge - for Important questions that are shown but not pre-selected */}
@@ -1372,7 +1480,7 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
               {[
                 { t: `${clientQuestions.length} Client`, bg: "#ecfdf5", fg: "#047857" },
                 { t: `${agencyQuestions.length} Agency`, bg: "#fefce8", fg: "#854d0e" },
-                { t: `${clientQuestions.filter(q => q.priority === "critical").length} Critical`, bg: "#fef2f2", fg: "#dc2626" },
+                { t: `${criticalCount} Critical${criticalAgency.length ? ` (${criticalAgency.length} agency)` : ""}`, bg: "#fef2f2", fg: "#dc2626" },
                 { t: `${clientQuestions.filter(q => q.priority === "optional").length} Optional`, bg: "#f1f5f9", fg: "#475569" },
                 ...((summary && summary.merged_removed) ? [{ t: `${summary.merged_removed} duplicates merged`, bg: "#eff6ff", fg: "#1d4ed8" }] : []),
               ].map((c, i) => (
@@ -1396,12 +1504,17 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
           <SchedulePreload sessionId={sessionId} />
           {/* Contextual hint when nothing is pre-selected */}
           {hasTaxonomy && selectedCount === 0 && clientQuestions.length > 0 && (() => {
-            const hasCritical = clientQuestions.some(q => q.priority === "critical");
+            const hasCritical = criticalClient.length > 0;
             return (
               <div style={{ background: hasCritical ? "#fffbeb" : "rgba(230,27,132,0.07)", border: `1px solid ${hasCritical ? "#fde68a" : "rgba(230,27,132,0.25)"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: hasCritical ? "#92400e" : "#9d174d" }}>
                 {hasCritical
                   ? "Critical questions are available - click \"Critical only\" to pre-select them, or choose individual questions below."
-                  : "All critical fields were already answered from your uploaded documents. Select any additional questions to confirm or clarify with the client."}
+                  : criticalAgency.length
+                    // SYS-01: never say "all critical fields were answered" while a
+                    // required fact is still missing. It just is not the client's
+                    // to answer - it is waiting in the Agency panel.
+                    ? `No critical questions for the client - ${criticalAgency.length} required ${criticalAgency.length === 1 ? "detail is" : "details are"} still missing and waiting for your agency below. Select any additional questions to confirm or clarify with the client.`
+                    : "All required details are already answered from your uploaded documents. Select any additional questions to confirm or clarify with the client."}
               </div>
             );
           })()}
@@ -1440,7 +1553,9 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
                     The <strong>producer / CSR / account manager</strong> answers these (carrier info, policy numbers, prior carrier, ACORD edition, submission strategy). Deselected by default - add one only if you want the client to answer it.
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {agencyQuestions.map((q, idx) => renderRow(q, idx, true, true))}
+                    {[...agencyQuestions]
+                      .sort((a, b) => (ARQ_PRIORITY_RANK[a.priority] ?? 2) - (ARQ_PRIORITY_RANK[b.priority] ?? 2))
+                      .map((q, idx) => renderRow(q, idx, true, true))}
                   </div>
                 </div>
               )}
@@ -1552,8 +1667,11 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
       {!hideTitle && <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", marginBottom: 5, textTransform: "uppercase" }}>Sent Questionnaires</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {arqSessions.map(arq => {
-          const isExpired = new Date() > new Date(arq.expires_at) && arq.status !== "submitted";
-          const status = isExpired ? "expired" : arq.status;
+          // BUG-03: read through the same door as the Send to Client badge, so
+          // the chip on a row and the number on the button can never disagree
+          // about whether that questionnaire is still open.
+          const isExpired = isExpiredArq(arq);
+          const status = arqDisplayStatus(arq);
           const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac", label: "Done" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", label: "Expired" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047", label: "Pending" } }[status] || {};
           const remLabel = _ARQ_REMEDIATION_LABEL[arq.remediation_status];
           const fieldsCount = arq.fields_answered_count || 0;
@@ -1729,7 +1847,7 @@ function RemediationDiffBand({ diff, compact = false }) {
 }
 
 // ── Side panel recommendation row - own local state avoids shared-state race ──
-function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue = "" }) {
+function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedule, initialValue = "" }) {
   // `initialValue` carries the value this rec was previously answered with, when the
   // producer has just reopened it - so the input opens ready to edit instead of blank.
   // Only meaningful on the answerable path, where `reason` holds the typed answer.
@@ -1738,16 +1856,40 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
   const [busy, setBusy]     = useState(false);
   const [result, setResult] = useState(null);
   const [errMsg, setErrMsg] = useState("");
+  // Acknowledgement for an answer that applied but did not close the gap.
+  const [savedNote, setSavedNote] = useState("");
   const isObj  = typeof rec === "object" && rec !== null;
   const msg    = isObj ? rec.message : rec;
   const impact = isObj ? rec.score_impact : null;
   const recId  = isObj ? rec.rec_id : `legacy_${index}`;
   const recType = isObj ? rec.type : "suggestion";
   const st = REC_TYPE_STYLE[recType] || REC_TYPE_STYLE.suggestion;
-  // Answerable = the recommendation resolves to a fillable field. Only these route
-  // "Submit" to the producer-answer flow; every other rec keeps the exact prior
-  // dismiss-with-reason (waiver) behavior, so nothing regresses.
-  const answerable = isObj && !!rec.field && typeof onAnswer === "function";
+  // WHAT THIS CARD CAN OFFER IS THE SERVER'S CALL, NOT OURS.
+  //
+  // This used to be `!!rec.field` - any non-empty string drew a "Type your
+  // answer..." box and a Submit button. A rec naming a field the producer-answer
+  // door cannot write therefore offered a control the server refused every time
+  // ("This item can't be answered directly", reported live 2026-09-08 on the
+  // Narrative Quality card), and a rec naming a LIVE CAPTURE SCHEDULE offered a
+  // one-line box whose value replaced the entire extracted table.
+  //
+  // `answer_mode` is computed in `services/answer_routing` from the fact's own
+  // declarations and travels on the rec. Legacy fallback: a session scored
+  // before this shipped carries no `answer_mode`, so it keeps the exact prior
+  // behaviour and nothing already stored changes.
+  const answerMode = isObj
+    ? (rec.answer_mode || (rec.field ? "field" : "none"))
+    : "none";
+  // `field` and `narrative` are both typed here - the difference is server-side
+  // (narrative APPENDS to the ACORD 101 remarks instead of replacing a scalar).
+  const answerable = (answerMode === "field" || answerMode === "narrative")
+    && typeof onAnswer === "function";
+  // A repeating table. Answered by opening the schedule editor - never by typing.
+  const schedulable = answerMode === "schedule"
+    && !!rec.schedule_key && typeof onOpenSchedule === "function";
+  // Why there is no input, in the producer's language, so a card never reads as
+  // though the fix feature skipped it.
+  const answerNote = (!answerable && !schedulable && isObj) ? (rec.answer_note || "") : "";
   // Dismiss-reason (waiver) path only: `reason` holds the picked controlled option;
   // "Other" reveals a free-text field whose value is folded into one string on
   // submit. The answerable path is untouched - there `reason` is the typed answer.
@@ -1764,13 +1906,20 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
 
   const submitAnswer = async () => {
     if (busy) return;
-    setErrMsg(""); setBusy(true);
+    setErrMsg(""); setSavedNote(""); setBusy(true);
     let out;
     try { out = await onAnswer(rec, answerValue); }
     catch (_) { out = { ok: false }; }
     finally { setBusy(false); }
-    if (out?.ok) setResult(out.impact || { status: "user_provided_only" });
-    else setErrMsg(out?.error || "Could not apply answer.");
+    if (out?.ok && out.stillOpen) {
+      // Saved, but this rec needs more than one value - say so instead of
+      // flipping to Resolved (which would be a lie) or going silent.
+      setSavedNote("Saved. This one needs more than one value, so it stays open.");
+    } else if (out?.ok) setResult(out.impact || { status: "user_provided_only" });
+    // `handled` = the caller already took the producer somewhere useful (the
+    // schedule editor, when the server re-decided this item is a table). Showing
+    // an error on top of that would contradict what just opened.
+    else if (!out?.handled) setErrMsg(out?.error || "Could not apply answer.");
   };
   // Submit: answer the gap (answerable) or the legacy waiver-with-reason otherwise.
   const submit  = answerable ? submitAnswer : (() => onDismiss(rec, sqsScore, dismissReasonValue));
@@ -1791,8 +1940,21 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
         </div>
       ) : isObj && (
         <>
-          <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
-            {answerable ? (
+          {answerNote && (
+            <div style={{ marginTop: 6, fontSize: 10, color: "#64748b", lineHeight: 1.45 }}>{answerNote}</div>
+          )}
+          <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: answerMode === "narrative" ? "flex-start" : "center" }}>
+            {schedulable ? (
+              // A repeating table opens the SAME ScheduleTable editor the
+              // inline resolution modal uses, so the producer edits rows
+              // instead of typing one line over the whole schedule.
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); onOpenSchedule(rec); }}
+                style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#eef2ff", fontSize: 10, fontWeight: 600, color: "#4338ca", cursor: "pointer", whiteSpace: "nowrap" }}>
+                Open the table
+              </button>
+            ) : answerable ? (
               answerOptions ? (
                 <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
                   <select
@@ -1816,7 +1978,24 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
                     />
                   )}
                 </div>
-              ) : (
+              ) : answerMode === "narrative" ? (
+              // Prose, appended to the ACORD 101 remarks. A single-line input
+              // was what the producer got for "add Account Overview, Payroll
+              // Context and EMOD detail" - a paragraph typed through a keyhole.
+              // Enter inserts a newline here; Submit is the button.
+              <textarea
+                placeholder="Add the missing detail… (Ctrl+Enter to submit)"
+                value={reason}
+                onChange={e => { setReason(e.target.value); if (errMsg) setErrMsg(""); }}
+                // Enter inserts a newline here - it is prose. Every other card
+                // submits on Enter, so without a keyboard route at all this one
+                // reads as "nothing happened" (reported live 2026-09-08).
+                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } }}
+                disabled={busy}
+                rows={3}
+                style={{ flex: 1, fontSize: 10, padding: "4px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0, resize: "vertical", lineHeight: 1.45 }}
+              />
+            ) : (
               <input
                 placeholder="Type your answer…"
                 value={reason}
@@ -1837,7 +2016,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
                 {DISMISS_REASON_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             )}
-            {!answerable && reason === "Other" && (
+            {!answerable && !schedulable && reason === "Other" && (
               <input
                 placeholder="Describe why…"
                 value={otherReason}
@@ -1847,7 +2026,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
                 style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
               />
             )}
-            {(answerable ? reason.trim() : dismissReasonValue.trim()) && (
+            {!schedulable && (answerable ? reason.trim() : dismissReasonValue.trim()) && (
               <button
                 disabled={busy}
                 onMouseDown={e => { e.preventDefault(); submit(); }}
@@ -1861,6 +2040,9 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
               Dismiss
             </button>
           </div>
+          {savedNote && (
+            <div style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#166534" }}>{savedNote}</div>
+          )}
           {errMsg && (
             <div style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#b91c1c" }}>{errMsg}</div>
           )}
@@ -2592,6 +2774,15 @@ const AcordModal = forwardRef(function AcordModal({
   // Bumped after an inline resolution stamps a value into the forms, so the PDF
   // viewer re-fetches the regenerated PDF and the value shows on the field.
   const [pdfRefreshTick, setPdfRefreshTick] = useState(0);
+  // True while the form viewer holds field edits that have not been saved yet.
+  // The pillar bars below are computed by the SERVER from the last saved state,
+  // so while this is set they describe a version of the form that no longer
+  // matches what is on screen - and a field highlight, which repaints locally
+  // and instantly, will already disagree with them. Reported live in a test of
+  // the loss-history checkbox: the highlight came back on an untick while the
+  // Loss History pillar still showed the ticked score. Mark it stale, never
+  // present a stale number as current.
+  const [pendingEdits, setPendingEdits] = useState(false);
   // Durable-issue-id -> { status, reason } for the rail's resolution status.
   // Work-tracking only; never affects the SQS score.
   const [issueStatuses, setIssueStatuses] = useState(new Map());
@@ -2618,7 +2809,23 @@ const AcordModal = forwardRef(function AcordModal({
   const [arqSummary, setArqSummary] = useState(null);
   const [arqLoadingQ, setArqLoadingQ] = useState(false);
   const [arqSessions, setArqSessions] = useState([]);
-  const [arqNotifCount, setArqNotifCount] = useState(0);
+  // Requests currently out with the client for THIS session - the "Send to
+  // Client" badge. Derived once per render so the badge and its tooltip cannot
+  // read two different clocks. `arqSessions` is reloaded by `refreshArqData`,
+  // so the number falls to zero the moment a questionnaire is answered or its
+  // link lapses, and rises again when another is sent.
+  const openArqRequests = openArqCount(arqSessions);
+  // BUG-03: `arqNotifCount` lived here and fed the "Send to Client" badge. It
+  // counted UNREAD ROWS in `arq_notifications` - written only when a client
+  // SUBMITS, so a count of inbound replies sat on an outbound action button -
+  // and that query filters by user with NO session, so a workspace showed
+  // submissions from every other package the producer had ever run. Nothing
+  // ever marked them read either (`POST /api/arq/notifications/read` had no
+  // caller anywhere in the frontend), so it could only ever count up.
+  // The badge now reads `openArqCount(arqSessions)` - the per-session list this
+  // screen already loads. The notifications table and its endpoints are left
+  // alone: "a client answered you" is worth surfacing, on an account-level bell
+  // rather than on one session's action button.
   const [clientFilledFields, setClientFilledFields] = useState([]);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [generatedFormsOpen, setGeneratedFormsOpen] = useState(false);
@@ -3019,7 +3226,12 @@ const AcordModal = forwardRef(function AcordModal({
     //    text above; kept equal to the fixable branch below so the vertical
     //    rhythm never depends on whether a row also has a fix button.
     if (!inDataConsistency && !canResolve && !explainOnly) {
-      return <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms)}</div>;
+      return (
+        <div>
+          <ScoreNeutralNote show={it?.score_neutral} />
+          <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms)}</div>
+        </div>
+      );
     }
     // A fix affordance (or a why-not note) + the same status control, laid out
     // like the editor's Cross-Form panel. marginTop lives on this shared row,
@@ -3028,6 +3240,7 @@ const AcordModal = forwardRef(function AcordModal({
     return (
       <div>
         {explainOnly && <ResolutionHint mode={mode} note={res && res.note} />}
+        <ScoreNeutralNote show={it?.score_neutral} />
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
@@ -3108,8 +3321,6 @@ const AcordModal = forwardRef(function AcordModal({
       const arqD = arqR.ok ? await arqR.json() : null;
       if (arqD?.success) { arqList = arqD.arq_sessions || []; setArqSessions(arqList); }
     } catch { /* non-fatal */ }
-    fetch(`${API_BASE}/api/arq/notifications`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null).then(d => { if (d?.notifications) setArqNotifCount(d.notifications.filter(n => !n.read_status).length); }).catch(() => {});
     // §6.2: if any ARQ was submitted, pull fresh SQS + package scores from the
     // session endpoint so the producer sees the updated scores without a reload.
     if (arqList.some(a => a.status === "submitted")) {
@@ -3167,7 +3378,7 @@ const AcordModal = forwardRef(function AcordModal({
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
-    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
+    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setIssueDiff(null);
     // Asked upfront on the upload screen now, so it MUST be cleared here - a
     // leftover answer would otherwise be applied to the next submission.
     setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
@@ -3182,7 +3393,7 @@ const AcordModal = forwardRef(function AcordModal({
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
-    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
+    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setIssueDiff(null);
     // Same reason as in resetToUpload above.
     setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
     _resetSqsState();
@@ -4056,7 +4267,12 @@ const AcordModal = forwardRef(function AcordModal({
   // Core Underwriting Data Consistency (Beta Report §4.3): confirm the correct
   // Gross Sales (or similar) value when documents disagree. The server applies
   // it across every relevant form and re-runs scoring.
-  const handleConfirmUnderwriting = async (factKey, value) => {
+  // SYS-06: `scope` is the coverage line this answer belongs to. Sent only
+  // when the backend says the disagreement is about ONE line (conflict_scope
+  // has exactly one entry) - the answer then lands on that line's own record
+  // and its own forms, instead of becoming the submission-wide value. Omitted
+  // otherwise, which is the behaviour this endpoint has always had.
+  const handleConfirmUnderwriting = async (factKey, value, scope) => {
     if (!sessionId || !factKey) return;
     const v = (value ?? "").toString().trim();
     if (!v) { setError("Enter or select a value to confirm."); return; }
@@ -4065,7 +4281,8 @@ const AcordModal = forwardRef(function AcordModal({
       const res = await fetch(`${API_BASE}/api/underwriting/confirm-value`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, fact_key: factKey, value: v }),
+        body: JSON.stringify({ session_id: sessionId, fact_key: factKey, value: v,
+                               ...(scope ? { scope } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -4223,6 +4440,10 @@ const AcordModal = forwardRef(function AcordModal({
   // (reported live 2026-08-31). They are rendered as hard stops below, and
   // filtered out of Key Issues so the same sentence never prints twice.
   const activeCapStops  = (activeSqs && activeSqs.cap_hard_stops) || [];
+  // The same sentences, classified by the server into rows with a rule code and
+  // a resolution descriptor. Empty on a session scored before 2026-09-08, in
+  // which case the block renders exactly as it always did.
+  const activeCapStopItems = (activeSqs && activeSqs.cap_hard_stop_items) || [];
   const activeKeyIssues = ((activeSqs && activeSqs.issues) || [])
     .filter((s) => !activeCapStops.includes(s));
   // Short name of the form the pinned score belongs to. The pinned header is the
@@ -4276,9 +4497,30 @@ const AcordModal = forwardRef(function AcordModal({
           score_impact: rec?.score_impact ?? null,
         }),
       });
-      const data = await res.json();
-      if (!data.success) {
-        return { ok: false, error: data.validation_error || data.message || "Could not apply answer." };
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+      // A 5xx used to be indistinguishable from a validation refusal here, and
+      // both from a rejected fetch - all three printed "Network error. Please
+      // try again." on a server fault that had nothing to do with the network.
+      // Backend 500s now carry CORS headers (main.py), so the status arrives.
+      if (!res.ok) {
+        if (res.status >= 500) {
+          return { ok: false, error: `The server hit an error (${res.status}). Your answer may not have been saved - reload the panel and check before retrying.` };
+        }
+        const detail = data?.validation_error || data?.message || data?.detail;
+        return { ok: false, error: detail || `That answer was rejected (error ${res.status}).` };
+      }
+      if (!data?.success) {
+        // The server re-decides the mode on every write, from the fact's own
+        // shape - it never trusts what the card sent. A card drawn from an
+        // older payload can therefore still offer a box for something that is
+        // really a table; when the server says so, open the table rather than
+        // printing an error the producer cannot act on.
+        if (data?.answer_mode === "schedule" && data?.schedule_key) {
+          handleOpenRecSchedule({ ...rec, schedule_key: data.schedule_key });
+          return { ok: false, handled: true, error: "" };
+        }
+        return { ok: false, error: data?.validation_error || data?.message || "Could not apply answer." };
       }
       // Update per-form SQS from the recomputed scores (same shape as dismiss credit).
       if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
@@ -4318,29 +4560,76 @@ const AcordModal = forwardRef(function AcordModal({
           };
         });
       }
-      // Move the card into "Reviewed", mirroring dismiss. Without this the answer
-      // lived only in SidePanelRec's local state and the card came back as open on
-      // the next reload. loadDismissedRecs then reconciles against the server, which
-      // is what decides whether the answer actually closed the gap.
-      setDismissedRecs(prev => new Set(prev).add(id));
-      setDismissedRecDetails(prev => {
-        const next = new Map(prev);
-        next.set(id, {
-          message: rec?.message ?? "",
-          reason:  "",
-          formId:  formIdAtAnswer ?? null,
-          field,
-          kind:    "answered",
-          answer:  trimmed,
-          impact:  0,
+      // DID THE ANSWER ACTUALLY CLOSE THE GAP? The server decides, and it says so
+      // in `open_recommendations` - we never guess.
+      //
+      // Several recs need a COMBINATION of facts (the umbrella card names four
+      // things; rec_min_cope needs four). Answering one of them saves the value
+      // but leaves the rec open, and `mark_recommendation_answer_recorded`
+      // deliberately does not stamp `action` in that case - so it never reaches
+      // "Reviewed" either. This used to move the card there optimistically and
+      // then `loadDismissedRecs` reconciled it straight back out, so the card
+      // vanished from Open AND from Reviewed and the producer got no
+      // acknowledgement at all that their value had been saved. Reported live
+      // 2026-09-08 on the umbrella card.
+      const _openIds = Array.isArray(data.open_recommendations)
+        ? data.open_recommendations.map(r => (r && typeof r === "object" ? r.rec_id : r))
+        : null;
+      // `null` = the server did not tell us; keep the old optimistic behaviour.
+      const stillOpen = _openIds ? _openIds.includes(id) : false;
+
+      if (!stillOpen) {
+        setDismissedRecs(prev => new Set(prev).add(id));
+        setDismissedRecDetails(prev => {
+          const next = new Map(prev);
+          next.set(id, {
+            message: rec?.message ?? "",
+            reason:  "",
+            formId:  formIdAtAnswer ?? null,
+            field,
+            kind:    "answered",
+            answer:  trimmed,
+            impact:  0,
+          });
+          return next;
         });
-        return next;
-      });
-      loadDismissedRecs(sessionId);
-      return { ok: true, impact: data.impact || null };
+      }
+      // Pass the id so the optimistic Reviewed row survives until the server
+      // list catches up; omit it when the rec is still open, or the reconcile
+      // would park an unresolved item in Reviewed.
+      loadDismissedRecs(sessionId, stillOpen ? null : id);
+      // Keep the typed value on the card, so a rec that needs several answers
+      // reopens with what has already been supplied instead of an empty box.
+      if (stillOpen) setReopenedRecValues(prev => ({ ...prev, [id]: trimmed }));
+      return { ok: true, impact: data.impact || null, stillOpen };
     } catch (e) {
-      return { ok: false, error: "Network error. Please try again." };
+      // Reached only when fetch itself rejected (offline, DNS, TLS) - a real
+      // network fault. Server faults are handled by the !res.ok branch above.
+      return { ok: false, error: "Could not reach the server. Check your connection and try again." };
     }
+  };
+
+  // A recommendation whose answer is a TABLE (`answer_mode === "schedule"`):
+  // vehicles, WC class codes, drivers, loss runs. Opens the SAME ResolutionModal
+  // the Cross-Form panel uses, in the same schedule mode, so the producer edits
+  // rows in the existing ScheduleTable - with CSV import, validation and VIN
+  // decode - instead of typing one line that would replace the whole table.
+  //
+  // The synthetic issue carries `__rec` so `handleIssueResolved` closes the
+  // RECOMMENDATION rather than writing a cross-form issue status: these two
+  // trackers are separate on purpose and a schedule save must not seed a row in
+  // the wrong one.
+  const handleOpenRecSchedule = (rec) => {
+    const key = rec?.schedule_key;
+    if (!key) return;
+    setResolutionIssue({
+      issue_id:   `rec::${rec.rec_id}`,
+      code:       rec.rec_id,
+      message:    rec.message,
+      forms:      activeFormId ? [activeFormId] : [],
+      resolution: { mode: "schedule", schedule_key: key },
+      __rec:      rec,
+    });
   };
 
   // Reopen a dismissed or answered recommendation from "Reviewed". The server
@@ -4472,6 +4761,28 @@ const AcordModal = forwardRef(function AcordModal({
   const handleIssueResolved = (data, issue) => {
     if (!data?.success) return;
     _applyCrossIssuePanelUpdate(data);
+    // Opened from a recommendation card (schedule mode), not from a validation
+    // row: close the REC and leave the issue-status table alone.
+    const _rec = issue?.__rec;
+    if (_rec?.rec_id) {
+      setDismissedRecs(prev => new Set(prev).add(_rec.rec_id));
+      setDismissedRecDetails(prev => {
+        const next = new Map(prev);
+        next.set(_rec.rec_id, {
+          message: _rec.message ?? "",
+          reason:  "",
+          formId:  Array.isArray(issue?.forms) ? issue.forms[0] : null,
+          field:   _rec.field ?? null,
+          kind:    "answered",
+          answer:  "",
+          impact:  0,
+        });
+        return next;
+      });
+      loadDismissedRecs(sessionId);
+      setResolutionIssue(null);
+      return;
+    }
     // Flip the issue's durable status chip to Resolved (work-tracking marker).
     const iid = issueIdOf(issue);
     if (iid) setIssueStatus(iid, "resolved", { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message });
@@ -6293,6 +6604,50 @@ const AcordModal = forwardRef(function AcordModal({
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* SYS-06: the relationship itself, once, as a table -
+                      "Line of Business -> Carrier -> NAIC -> Policy Number ->
+                      Effective Date -> Expiration Date -> Source". Rendered
+                      only on a MULTI-POLICY package: on a single-policy
+                      submission it would just repeat what every other panel
+                      already says. */}
+                  {(() => {
+                    const recs = (underwriting.fields || [])
+                      .map(f => f.line_records).find(r => (r || []).length > 1) || [];
+                    if (recs.length < 2) return null;
+                    const th = { textAlign: "left", padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+                    const td = { padding: "4px 8px", fontSize: 11.5, color: "#0f172a", borderTop: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+                    return (
+                      <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>
+                          Policies in this submission
+                        </div>
+                        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, lineHeight: 1.45 }}>
+                          Each coverage line keeps its own carrier and policy number. Different
+                          numbers across different lines are expected and are not a conflict.
+                        </div>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                            <thead><tr>
+                              <th style={th}>Line</th><th style={th}>Carrier</th><th style={th}>NAIC</th>
+                              <th style={th}>Policy number</th><th style={th}>Term</th><th style={th}>Source</th>
+                            </tr></thead>
+                            <tbody>
+                              {recs.map((r, i) => (
+                                <tr key={i}>
+                                  <td style={td}>{r.line_printed || (r.line || "").replace(/_/g, " ")}</td>
+                                  <td style={td}>{r.carrier_name || "-"}</td>
+                                  <td style={td}>{r.carrier_naic || "-"}</td>
+                                  <td style={td}>{r.policy_number || "-"}</td>
+                                  <td style={td}>{r.effective_date || r.expiration_date ? `${r.effective_date || "?"} - ${r.expiration_date || "?"}` : "-"}</td>
+                                  <td style={{ ...td, whiteSpace: "normal", color: "#64748b" }}>{(r.sources || []).join(", ") || "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* V1 C1 F2b: a multi-policy package legitimately carries one
                       policy number / carrier / term PER POLICY. Client 1.5 says
                       "retain each under its correct scope. Do not create a
@@ -6305,14 +6660,28 @@ const AcordModal = forwardRef(function AcordModal({
                         <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
                           {f.values?.length} policies, {f.values?.length} values - not a conflict
                         </span>
+                        {Object.keys(f.confirmed_scopes || {}).length > 0 && (
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: "#16a34a" }}>
+                            Confirmed: {Object.entries(f.confirmed_scopes).map(([ln, val]) => `${ln.replace(/_/g, " ")} - ${val}`).join("; ")}
+                          </span>
+                        )}
                       </div>
                       <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                         {(f.values || []).map((v, vi) => (
                           <div key={vi} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#475569", flexWrap: "wrap" }}>
                             <span style={{ minWidth: 0, overflowWrap: "anywhere", fontWeight: 600, color: "#1e293b" }}>{v.display}</span>
-                            {(v.scope || []).length > 0 && (
+                            {(v.scope || []).length > 0 ? (
                               <span style={{ fontSize: 10, color: "#64748b", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 4, padding: "1px 6px" }}>
                                 {v.scope.join(" / ").replace(/_/g, " ")}
+                              </span>
+                            ) : (
+                              /* SYS-06: the store placed every other value but not
+                                 this one. Saying so is better than an unexplained
+                                 blank - and it is NOT a conflict, because a value
+                                 we cannot place is not evidence against the ones
+                                 we can. */
+                              <span style={{ fontSize: 10, color: "#94a3b8", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 4, padding: "1px 6px" }}>
+                                not matched to a coverage line
                               </span>
                             )}
                             <span style={{ fontSize: 10.5, color: "#94a3b8", minWidth: 0, overflowWrap: "anywhere" }}>
@@ -6339,6 +6708,12 @@ const AcordModal = forwardRef(function AcordModal({
                     const rowDisabled = busy;
                     const anyConfirmInFlight = underwritingBusy !== null;
                     const picked = underwritingPicks[f.fact_key] ?? "";
+                    // SYS-06: exactly one coverage line in dispute -> the
+                    // answer belongs to THAT line. Two or more (or none) and
+                    // there is no single line to attribute it to, so the
+                    // confirm stays submission-wide as it always was.
+                    const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
+                    const lineScopeLabel = lineScope ? lineScope.replace(/_/g, " ") : null;
                     const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
                     const highlighted = dcHighlight === f.fact_key;
                     return (
@@ -6439,10 +6814,10 @@ const AcordModal = forwardRef(function AcordModal({
                             <button
                               type="button"
                               disabled={anyConfirmInFlight || !picked}
-                              onClick={() => handleConfirmUnderwriting(f.fact_key, picked)}
+                              onClick={() => handleConfirmUnderwriting(f.fact_key, picked, lineScope)}
                               style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !anyConfirmInFlight ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !anyConfirmInFlight ? "pointer" : "not-allowed", flexShrink: 0 }}
                             >
-                              {busy ? "Applying…" : "Confirm & apply to forms"}
+                              {busy ? "Applying…" : (lineScopeLabel ? `Confirm for ${lineScopeLabel}` : "Confirm & apply to forms")}
                             </button>
                           </div>
                         )}
@@ -6495,7 +6870,14 @@ const AcordModal = forwardRef(function AcordModal({
                         />
                       ))
                     ) : (
-                      hardStops.map((s, i) => <IssueLine key={i} message={s} className="stop-item stop-item-hard" />)
+                      hardStops.map((s, i) => (
+                        <BareStopRow
+                          key={i}
+                          message={s}
+                          className="stop-item stop-item-hard"
+                          renderActions={itemResolveAndStatus}
+                        />
+                      ))
                     )}
                   </div>
                 )}
@@ -6523,11 +6905,18 @@ const AcordModal = forwardRef(function AcordModal({
                               it stays a read-only summary. */}
                           <div className="issue-card issue-card-soft">
                             {groupedIssues.important.map((c, i) => (
-                              <IssueLine
-                                key={i}
-                                message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
-                                className="stop-item stop-item-soft"
-                              />
+                              <div key={i}>
+                                <IssueLine
+                                  message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
+                                  className="stop-item stop-item-soft"
+                                />
+                                {/* The promotion stamps severity "soft_warning"
+                                    onto the cluster, so this band is exactly
+                                    where a score-neutral item looks most like a
+                                    real warning. `score_neutral` survives the
+                                    spread, so it can still say otherwise. */}
+                                <ScoreNeutralNote show={c.score_neutral} />
+                              </div>
                             ))}
                           </div>
                         </CollapsibleSection>
@@ -6570,7 +6959,14 @@ const AcordModal = forwardRef(function AcordModal({
                         );
                       })
                     ) : (
-                      softStops.map((s, i) => <IssueLine key={i} message={s} className="stop-item stop-item-soft" />)
+                      softStops.map((s, i) => (
+                        <BareStopRow
+                          key={i}
+                          message={s}
+                          className="stop-item stop-item-soft"
+                          renderActions={itemResolveAndStatus}
+                        />
+                      ))
                     )}
                   </div>
                 )}
@@ -7019,7 +7415,18 @@ const AcordModal = forwardRef(function AcordModal({
                     {(() => {
                       const docSourced = new Set(["property_integrity", "loss_history_alignment", "narrative_quality"]);
                       return (
-                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ background: "#fff", border: `1px solid ${pendingEdits ? "#fde68a" : "#e2e8f0"}`, borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {/* Stale marker. These bars come from the server and cannot
+                              reflect unsaved edits; a field highlight already does.
+                              Two views of one fact must not both look current. */}
+                          {pendingEdits && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "5px 7px", marginBottom: 2 }}>
+                              <span style={{ width: 6, height: 6, background: "#f59e0b", borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />
+                              <span style={{ fontSize: 9.5, color: "#b45309", fontWeight: 600, lineHeight: 1.4 }}>
+                                You have unsaved field edits. These scores are from the last save - click Done Editing to update them.
+                              </span>
+                            </div>
+                          )}
                           {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => {
                             // umbrella_limit_adequacy is null when no umbrella is in the
                             // submission (§6.5 - N/A, not a perfect score).
@@ -7027,7 +7434,7 @@ const AcordModal = forwardRef(function AcordModal({
                             // Weight (and the doc-sourced note) moved off the row into the tooltip.
                             const tip = `Weight: ${SQS_WEIGHTS[key] || 0}% of the score.${docSourced.has(key) ? " Sourced from uploaded documents - editing form fields won't change this." : ""}`;
                             return (
-                            <div key={key}>
+                            <div key={key} style={{ opacity: pendingEdits ? 0.5 : 1, transition: "opacity 0.2s ease" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
                                 <span style={{ color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>
                                   {SQS_LABELS[key] || key}
@@ -7058,15 +7465,27 @@ const AcordModal = forwardRef(function AcordModal({
                         ? packageSqs.cap_hard_stops
                         : (packageSqs.cap_reason ? [packageSqs.cap_reason] : []);
                       if (!reasons.length) return null;
+                      // Classified server-side into rows with a rule code and a
+                      // resolution, so a blocker holding the PACKAGE at 60 gets
+                      // the same "Open to fix" the per-form block does. Empty on
+                      // a session scored before 2026-09-08, in which case this
+                      // renders exactly as it always did.
+                      const capItems = packageSqs.cap_hard_stop_items || [];
                       return (
                         <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                           <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                             HARD STOPS
                             <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package score at 60</span>
                           </div>
-                          {reasons.map((s, i) => (
-                            <div key={i} style={{ fontSize: 11, color: "#7f1d1d", padding: "1px 0", lineHeight: 1.45 }}>• {s}</div>
-                          ))}
+                          {reasons.map((s, i) => {
+                            const it = capItems.find((x) => x?.message === s);
+                            return (
+                              <div key={i} style={{ padding: "2px 0" }}>
+                                <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {s}</div>
+                                {it && itemResolveAndStatus(it, it.forms || [])}
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })()}
@@ -7392,9 +7811,22 @@ const AcordModal = forwardRef(function AcordModal({
                           HARD STOPS
                           <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's SQS at 60</span>
                         </div>
-                        {activeCapStops.map((s, i) => (
-                          <div key={i} style={{ fontSize: 11, color: "#7f1d1d", padding: "1px 0", lineHeight: 1.45 }}>• {s}</div>
-                        ))}
+                        {activeCapStops.map((s, i) => {
+                          // The row the SERVER classified for this sentence, so
+                          // a blocker holding the score at 60 carries the same
+                          // "Open to fix" every other stop does. Before
+                          // 2026-09-08 this block was text only - and two of
+                          // the sentences were internal rule names.
+                          const it = activeCapStopItems.find((x) => x?.message === s);
+                          return (
+                            <div key={i} style={{ padding: "2px 0" }}>
+                              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {s}</div>
+                              {it && itemResolveAndStatus(
+                                { ...it, forms: it.forms?.length ? it.forms : (activeFormId ? [activeFormId] : []) },
+                                activeFormId ? [activeFormId] : [])}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
@@ -7491,6 +7923,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   sqsScore={activeSqs.sqs_score}
                                   onDismiss={handleDismissRec}
                                   onAnswer={handleAnswerRec}
+                                  onOpenSchedule={handleOpenRecSchedule}
                                   initialValue={typeof rec === "object" && rec !== null ? (reopenedRecValues[rec.rec_id] || "") : ""}
                                 />
                               ))}
@@ -7701,15 +8134,17 @@ const AcordModal = forwardRef(function AcordModal({
               <div style={{ padding: "12px 14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
 
                 {/* Primary CTA - Client-in-the-Loop™ */}
+                <HoverTip text={openArqTooltip(openArqRequests, arqSessions?.length || 0)}>
                 <button onClick={handleOpenARQ} disabled={arqLoadingQ}
                   style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
                   onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
                   onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   {arqLoadingQ
                     ? <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</>
-                    : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
+                    : <>Send to Client{openArqRequests > 0 && <span aria-label={openArqTooltip(openArqRequests, arqSessions?.length || 0)} style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{openArqRequests}</span>}</>
                   }
                 </button>
+                </HoverTip>
 
                 {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
@@ -7866,7 +8301,10 @@ const AcordModal = forwardRef(function AcordModal({
                 onOpenSignatureModal={onOpenSignatureModal}
                 clientFilledFields={clientFilledFields}
                 onRefreshFields={refreshArqData}
+                onPendingEditsChange={(fid, dirty) => setPendingEdits(!!dirty)}
                 onSqsUpdate={(fid, newSqs, extras) => {
+                  // A score has arrived for the saved state, so nothing is stale.
+                  setPendingEdits(false);
                   setGeneratedForms(prev => ({
                     ...prev,
                     [fid]: { ...prev[fid], sqs: newSqs }

@@ -53,6 +53,7 @@ from services.submission_integrity import assess_submission_integrity
 from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
     RECONCILABLE_FIELDS, RECONCILABLE_FIELD_KEYS, unresolved_withheld_keys,
+    parse_confirmation_key,
     unresolved_conflict_keys,
 )
 from repositories.session_repository import new_processing_session, upd_processing_session
@@ -515,6 +516,27 @@ async def _finalize_pipeline(
     mflags["_only_dec_page"] = bool(_active_types) and all(
         t == "dec_page" for t in _active_types
     )
+    # THE SAME BUG, ONE BRANCH UP (SYS-05 live run 2, 2026-09-04).
+    # `_tier1_items` collapses the whole submission's Tier 1 checklist to two
+    # items - legal name and effective date - when `is_certificate_doc` is set.
+    # That flag is PER DOCUMENT ("this document IS an ACORD 25/28"), and flags
+    # merge across the package, so adding a supporting certificate to a full
+    # declarations package collapsed its checklist too: "Key details in place"
+    # went from 12 items to 8, dropping mailing address, lines of business,
+    # entity type and contact information - all four of which were correctly
+    # filled on the generated ACORD 125.
+    #
+    # The collapse is RIGHT for a submission that is only a certificate (a COI
+    # cannot carry an application's checklist, and demanding one marks the
+    # submission down for what its document type can never state). It is wrong
+    # the moment the package also carries a dec page or an application.
+    #
+    # Same shape and same remedy as `_only_dec_page` directly above, whose own
+    # comment records this exact class: a per-document signal answering a
+    # package-level question. An empty list is not "only certificates".
+    mflags["_only_certificate"] = bool(_active_types) and all(
+        t == "certificate" for t in _active_types
+    )
     await reporter.package_phase("normalized", "Normalizing data across documents…")
 
     # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
@@ -560,6 +582,28 @@ async def _finalize_pipeline(
             )
     except Exception as _ex:                       # noqa: BLE001 — advisory only
         logger.warning("declared-absent downgrade skipped: %s", _ex)
+
+    # SYS-04. The scan above reads the raw TEXT for an explicit denial. This
+    # reads the package's own structured coverage evidence, which is what
+    # catches the reported shape: `has_workers_comp` is set on a MENTION, and
+    # every ACORD 25 prints "WORKERS COMPENSATION AND EMPLOYERS LIABILITY" as
+    # preprinted text, so a certificate with a BLANK WC row leaves the flag on
+    # and every WC consumer then charges a non-WC package for missing WC data
+    # (measured: package 51 -> 47, Exposure pillar 92 -> 78).
+    #
+    # One door, one place: fixing the FLAG here means the Exposure pillar, the
+    # WC supplemental bucket, the WC questions and the umbrella EL warning are
+    # all correct without any of them knowing this rule exists.
+    try:
+        from services.line_presence import reconcile_line_flags
+        _reconciled = reconcile_line_flags(mflags, merged_facts)
+        if _reconciled:
+            logger.info(
+                "coverage flag reconciliation: %s",
+                ", ".join(f"{k}={v}" for k, v in sorted(_reconciled.items())),
+            )
+    except Exception as _ex:                       # noqa: BLE001 — advisory only
+        logger.warning("coverage flag reconciliation skipped: %s", _ex)
 
     # ── Dedicated umbrella-period pass (Umbrella / Excess period-alignment) ──
     # umbrella_effective_date / umbrella_expiration_date feed the cross-form
@@ -617,6 +661,20 @@ async def _finalize_pipeline(
         _npl = _npl.get("value")
     if _attested_true(_npl):
         mflags["no_prior_losses"] = True
+    elif _npl is not None and str(_npl).strip() not in ("", "null", "None"):
+        # THE OTHER DIRECTION. This was raise-only: an attestation could set the
+        # flag and nothing here could ever clear it, while BOTH `arq_service`
+        # writers have always been two-way. Not reachable today - `mflags` is
+        # rebuilt from the documents on every run and the flags column is
+        # replaced wholesale on save - so this is hardening, not a bug fix, and
+        # it is deliberately behaviour-neutral: `bool(flags.get(...))` reads a
+        # missing key and an explicit False identically.
+        #
+        # It fires ONLY when the fact is PRESENT and says no. An ABSENT fact
+        # leaves the flag alone - inventing a False from silence is the very
+        # thing Principle 3 forbids, and D-BO is the same rule one layer down
+        # ("an untick is an explicit No, never a blank").
+        mflags["no_prior_losses"] = False
 
     # M5 fix: collect which fact keys were contributed by narrative docs so
     # _derive_evidence_labels can emit "stated_in_narrative" for them.
@@ -828,7 +886,14 @@ async def _finalize_pipeline(
     # Fields the user already RESOLVED via the Data Consistency picker
     # (underwriting_consistency confirmations) are no longer cross-doc conflicts:
     # their confirmed value is applied below and they must not keep blocking here.
-    _confirmed_keys = set((confirmations or {}).keys())
+    # SYS-06: a LINE-scoped confirmation is stored as `effective_date@auto`.
+    # This engine asks "which FACTS has the producer resolved?", so it needs the
+    # bare key - otherwise a producer answers the question and the same warning
+    # is still on screen. Only reachable on a package that evidences two
+    # policies on one coverage line (that is the only thing that produces a
+    # line-scoped question), which is exactly where this engine already
+    # downgrades a policy-date difference to a warning.
+    _confirmed_keys = {parse_confirmation_key(k)[0] for k in (confirmations or {})}
     consistency_issues = check_doc_consistency(active_docs, _confirmed_keys)
     doc_conflicts: list[dict] = []
     normalized_differences: list[str] = []
@@ -905,16 +970,36 @@ async def _finalize_pipeline(
     # loss runs: create a Data Consistency conflict; route the issue to the
     # producer; cap the Loss History pillar at 45 until resolved." The 45 cap
     # is applied inside calculate_p4_loss_history (_LOSS_CONFLICT_CAP); this
-    # row is the producer-facing conflict itself. ADVISORY severity on purpose
-    # - the client caps the PILLAR, not the package, so a hard/soft stop here
-    # would wrongly ceiling the whole submission at 60/85 (same routing choice
-    # as unmapped_coverage_line above). Recomputed every pipeline run, so
+    # row is the producer-facing conflict itself. It is appended to
+    # `structured_issues` ONLY and never to hard_stops / soft_stops - the client
+    # caps the PILLAR, not the package, so entering a stop array would wrongly
+    # ceiling the whole submission at 60/85. Recomputed every pipeline run, so
     # reconciling the data retires it with no extra wiring.
     try:
         from services.sqs_service import _loss_history_conflict
-        if _loss_history_conflict(merged_facts, mflags):
+        # 2026-09-05: the conflict requires ACTUAL loss-run evidence, and this
+        # site is the one place that can see the document types directly.
+        _lh_loss_run_doc = any(
+            isinstance(_d, dict) and _d.get("doc_type") == "loss_run"
+            and not _d.get("excluded")
+            for _d in (active_docs or [])
+        )
+        if _loss_history_conflict(merged_facts, mflags, _lh_loss_run_doc):
+            # OWNER 2026-09-03: *"treat the loss history one as a proper warning
+            # as it is capping the score."* It was emitted as an advisory, which
+            # was never true of its EFFECT - the condition behind it caps the
+            # Loss History pillar at 45 (`sqs_service._LOSS_CONFLICT_CAP`), so
+            # it is a warning that costs something, not advice.
+            #
+            # DISPLAY-ONLY, verified before changing it: `structured_issues` is
+            # read by `build_grouped_view` and the audit export and by NOTHING
+            # in any scoring path, and both severities land in the same warning
+            # bucket there, so no cap fires that did not fire before and no
+            # count moves. What changes is that it is no longer eligible for the
+            # "does not affect your score" note - see
+            # `issue_registry.SCORE_NEUTRAL_CODES`, which deliberately omits it.
             structured_issues.append(make_issue(
-                "loss_history_attestation_conflict", "advisory",
+                "loss_history_attestation_conflict", "soft_warning",
                 "Data consistency: a No Known Losses attestation conflicts "
                 "with claims found in the uploaded loss runs. Loss History is "
                 "held at 45 until the discrepancy is resolved - confirm with "
@@ -930,6 +1015,34 @@ async def _finalize_pipeline(
     # document(s), and flags a non-blocking review when values materially
     # differ. Owns RECONCILABLE_FIELD_KEYS so the crude raw-string detector
     # below does not double-report them as formatting conflicts.
+    # ── Teach the Yes/No reader this package's own vocabulary FIRST ────────
+    # A carrier writes its own forms, so the affirmative half of the Yes/No
+    # vocabulary is unlistable ("Covered", "In Force", "Bound", "Endorsed").
+    # Everything the deterministic reader in `normalization` cannot read is
+    # classified ONCE here, before the comparison runs, and cached by the WORD -
+    # so the cost converges to zero and two runs of one package still agree.
+    #
+    # Ordering is the whole point: after this line `fact_equivalence` is a pure
+    # dict read with no I/O, which is what keeps `same_fact` synchronous and
+    # deterministic. A failure here learns nothing and every affected value
+    # keeps producing the "please confirm" card it produced before.
+    try:
+        from services.yes_no_lexicon import (
+            learn as _yn_learn, terms_from_documents as _yn_terms)
+        # The collection lives in the lexicon, not here. Inlining it is how the
+        # first version broke: a per-document fact is an annotated envelope,
+        # not a bare string.
+        _terms = _yn_terms(active_docs)
+        if _terms:
+            _learned = await _yn_learn(_terms)
+            if _learned:
+                logger.info("yes_no_lexicon: learned %d new term(s) from this "
+                            "package's own documents", _learned)
+    except Exception as _ynex:                                # noqa: BLE001
+        logger.warning("yes_no_lexicon: vocabulary pass skipped (%s) - "
+                       "comparison falls back to the deterministic reader "
+                       "exactly as before", _ynex)
+
     underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations)
     # Client 2026-08-15 ("unresolved conflicts must remain unresolved"): facts
     # whose cross-document conflict is unresolved are listed on the session
@@ -1548,6 +1661,7 @@ async def confirm_underwriting_value(
     fact_key: str,
     value: Any,
     user_id: Any = None,
+    scope: Any = None,
 ) -> dict:
     """Record a user-confirmed Core Underwriting Data value (Beta Report §4.3)
     and re-run the post-extraction pipeline so the confirmed value is applied
@@ -1596,7 +1710,11 @@ async def confirm_underwriting_value(
                 for v in (target.get("values") or [])
             ]
             pre_reason = target.get("conflict_reason")
-        for link in (target.get("linked_fields") if target else None) or []:
+        # SYS-06: "apply to all" is a SUBMISSION-WIDE convenience (two fields
+        # showing the identical disagreement from the identical documents). A
+        # LINE-scoped answer is the opposite claim - it is true of one coverage
+        # line - so it must never be sprayed onto another field package-wide.
+        for link in ((target.get("linked_fields") if target else None) or []) if not scope else []:
             lk = link["fact_key"]
             if lk in confirmations:
                 continue
@@ -1608,11 +1726,18 @@ async def confirm_underwriting_value(
     except Exception as exc:                              # pragma: no cover - defensive
         logger.warning("confirm_underwriting_value: linked-field lookup skipped for %s - %s", fact_key, exc)
 
-    confirmations[fact_key] = canonical
+    # SYS-06: a line-scoped answer is stored under its own namespaced key, so
+    # it applies to THAT coverage line and never becomes the submission-wide
+    # value. No scope = the bare key, i.e. exactly today's behaviour.
+    from services.underwriting_consistency import scoped_confirmation_key
+    _store_key = scoped_confirmation_key(fact_key, scope)
+    confirmations[_store_key] = canonical
 
     logger.info(
-        "confirm_underwriting_value: session=%s field=%s value=%r linked_applied=%s (user=%s)",
-        session_id, fact_key, canonical, linked_applied, user_id or session.get("user_id"),
+        "confirm_underwriting_value: session=%s field=%s scope=%s value=%r "
+        "linked_applied=%s (user=%s)",
+        session_id, fact_key, scope or "(submission-wide)", canonical,
+        linked_applied, user_id or session.get("user_id"),
     )
 
     prior_integrity = session.get("integrity") or {}

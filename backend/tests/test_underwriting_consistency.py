@@ -226,6 +226,14 @@ def test_exempt_set_is_exactly_the_free_text_fields():
     assert _TEXT_SCAN_EXEMPT_FIELDS == frozenset({
         "applicant_name", "dba_name", "carrier_name",
         "mailing_address", "physical_address", "entity_type",
+        # SYS-06 curated `policy_number` and `carrier_naic` (they reached the
+        # picker by auto-discovery before, which never text-scans). Both are
+        # correctly exempt and the reason is the same one this test enforces:
+        # neither has a checkable shape. A policy number has no universal
+        # format at all, and a bare "4-6 digits" pattern for a NAIC would
+        # capture any five-digit number in prose - a ZIP, a limit, a class
+        # code - which is the exact defect the exemption exists to prevent.
+        "policy_number", "carrier_naic",
     })
     # It is a strict superset of the ranking set — merging the two would
     # change how address conflicts are ranked as a scanning-fix side effect.

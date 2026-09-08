@@ -356,6 +356,118 @@ _CLAIM_ROW_MONEY_COLUMNS = ("paid", "reserved_amount", "incurred", "amount")
 _CLAIM_ROW_DETAIL_COLUMNS = ("date", "description", "line_of_business")
 
 
+def _row_states_a_claim(row: Any) -> bool:
+    """Does this `loss_history` row assert an actual CLAIM?
+
+    ONE DOOR for that question - `asserted_claims` and `claims_are_corroborated`
+    both ask it, so a row can never count as a claim for one and not the other.
+
+    THE ROW THAT IS NOT A CLAIM (live run 2026-09-05, found in the session data,
+    identical on W1 / W3 / W4):
+
+        {"date": null, "claim_date": null,
+         "description": "no prior losses or claims in the last five years",
+         "amount": null, ...}
+
+    The extraction model wrote the NO-LOSS SENTENCE INTO THE CLAIMS TABLE as a
+    row. `asserted_claims` counts a row on any non-blank detail column, so the
+    sentence saying there are no claims was counted as a claim - which then
+    contradicted the attestation it restates, and printed *"Conflicting -
+    attested no losses but loss runs show claims"* on nine clean packages.
+
+    `normalization.detect_no_loss_assertion` is the door that already decides
+    this question everywhere else (`extraction_pipeline`'s flag, `pdf_service`'s
+    "Check if none" box), so the three can never disagree. Measured against it:
+    "Slip and fall at job site", "water damage to stockroom", "rear-end
+    collision, no injuries" and "No injuries reported on this claim" all still
+    count as claims; "no prior losses or claims in the last five years", "No
+    Known Losses" and "loss-free" do not.
+
+    Money always wins: a row carrying a real amount is a claim whatever its
+    description says.
+    """
+    if not isinstance(row, dict):
+        return False
+    money = 0.0
+    for column in _CLAIM_ROW_MONEY_COLUMNS:
+        money += _to_float(row.get(column)) or 0.0
+    if money > 0:
+        return True
+    try:
+        from services.normalization import detect_no_loss_assertion
+    except Exception:                                          # noqa: BLE001
+        detect_no_loss_assertion = None                        # fail to prior behaviour
+    for column in _CLAIM_ROW_DETAIL_COLUMNS:
+        value = row.get(column)
+        if _is_blank_fact(value):
+            continue
+        if detect_no_loss_assertion is not None:
+            try:
+                if detect_no_loss_assertion(str(value)):
+                    continue        # the attestation restated, not a claim
+            except Exception:                                  # noqa: BLE001
+                pass
+        return True
+    return False
+
+
+def claim_rows(rows: Any) -> list:
+    """The rows of a `loss_history` list that actually state a CLAIM.
+
+    The public face of ``_row_states_a_claim``, added 2026-09-08 so the form
+    STAMPER can ask the same question the scorer already asks.
+
+    WHY IT WAS NEEDED. The 2026-09-05 fix put the gate here, in the scoring
+    module, and nothing else could reach it: the ACORD 125 stamper binds
+    ``LossHistory_OccurrenceDescription`` straight to
+    ``facts["loss_history"][i]["description"]`` through ``_SCHEDULE_REGISTRY``,
+    with no filter of any kind. So the scorer correctly ignored the no-loss
+    SENTENCE the extraction model writes into the claims table, and the printed
+    form carried it anyway - live 2026-09-08, ACORD 125 claim row A read
+    *"The applicant has had no known losses in the past five years."* with SUBRO
+    N and CLAIM OPEN N beside it, on a package with no claims. A gate in the
+    layer the SCREEN does not read is not a gate.
+
+    Order is preserved and non-claim rows are DROPPED, not blanked, so a real
+    claim sitting behind a sentence row moves up into row A where the form
+    expects the first claim.
+
+    A ROW MAY ALSO EARN ITS PLACE BY IDENTITY, and it must (found 2026-09-08).
+    ``_row_states_a_claim`` looks only at money and at date / description /
+    line_of_business. Extraction also emits rows keyed on ``claim_number`` and
+    ``claim_date``, so
+
+        {"claim_number": "88213", "claim_date": "03/14/2024", "open_code": "Y"}
+
+    was dropped - a REAL extracted claim deleted off the printed form. Harmless
+    in the scorer, where that gate was written; unacceptable in a stamper.
+
+    THE SCORER'S GATE IS NOT WIDENED TO FIX IT, deliberately. The live phantom
+    row carries ``open_code: "N"`` beside its no-loss sentence, so admitting
+    status columns as identity would make the sentence a claim again and undo
+    both the 2026-09-05 conflict fix and this one. A claim NUMBER and a claim
+    DATE are hard identifiers a narrative sentence never produces; an open flag
+    is not. That is the structural second condition, and it lives here - on the
+    printing side - rather than in the shared definition of "is this a claim?".
+    """
+    if not isinstance(rows, list):
+        return rows if rows is None else list(rows or [])
+    return [row for row in rows
+            if _row_states_a_claim(row) or _row_has_claim_identity(row)]
+
+
+# Hard identifiers only. `open` / `open_code` / `subrogation_code` are STATUS
+# columns - the phantom row has them - and are deliberately absent.
+_CLAIM_IDENTITY_COLUMNS = ("claim_number", "claim_date")
+
+
+def _row_has_claim_identity(row: Any) -> bool:
+    """Does this row name a specific claim, whatever else it is missing?"""
+    if not isinstance(row, dict):
+        return False
+    return any(not _is_blank_fact(row.get(col)) for col in _CLAIM_IDENTITY_COLUMNS)
+
+
 def asserted_claims(facts: Any) -> tuple:
     """How many claims does this package assert, and for how much?
 
@@ -394,22 +506,86 @@ def asserted_claims(facts: Any) -> tuple:
         row_count = 0
         row_incurred = 0.0
         for row in rows:
-            if not isinstance(row, dict):
+            if not _row_states_a_claim(row):
                 continue
-            money = 0.0
+            row_count += 1
             for column in _CLAIM_ROW_MONEY_COLUMNS:
-                money += _to_float(row.get(column)) or 0.0
-            has_detail = any(
-                not _is_blank_fact(row.get(column))
-                for column in _CLAIM_ROW_DETAIL_COLUMNS
-            )
-            if has_detail or money > 0:
-                row_count += 1
-                row_incurred += money
+                row_incurred += _to_float(row.get(column)) or 0.0
         claims = max(claims, row_count)
         incurred = max(incurred, row_incurred)
 
     return claims, incurred
+
+
+# Fact sources that mean a PERSON stated the value, not the extraction model.
+_HUMAN_SOURCES = frozenset({"producer", "client_arq", "user", "human", "client"})
+
+
+def claims_are_corroborated(facts: Any, has_loss_run_doc: bool = False) -> bool:
+    """Is the claim evidence something OTHER than a bare model inference?
+
+    THE FALSE POSITIVE THIS EXISTS FOR (live run 2026-09-05, nine sessions of
+    nine): every clean package printed *"Conflicting - attested no losses but
+    loss runs show claims"*, *"Losses extracted"* and a producer card worth up
+    to +8 pts, on documents containing **no loss run at all** whose narrative
+    plainly stated *"the applicant reports no prior losses or claims in the last
+    five years."*
+
+    `_loss_history_conflict`'s own docstring has always said the contradiction
+    must come *"by ACTUAL loss-run claims"* - and it never checked one existed.
+    `num_claims` and `total_incurred` reach the extraction schema as bare
+    `string or null` entries with NO guiding rule (`extraction_service` ~:296 /
+    :323), so the model is free to return a figure read off a premium, a limit
+    or prose. A correct rule fed by an invented input - the same class as the
+    `has_workers_comp` mention flag and D43's payroll period.
+
+    THE GATE IS DELIBERATELY NARROW. It refuses ONLY the case it can PROVE:
+    every claim figure present is explicitly `source: "ai"` and nothing else
+    backs it. A bare scalar carries no provenance, so nothing can be asserted
+    about who supplied it and the pre-2026-09-05 behaviour stands - the same
+    reasoning `fact_state.human_provenance_facts` already applies to bare
+    scalars. Positive evidence, never an inference about an inference.
+
+    Corroborated when ANY of:
+
+    1. a document was classified as a loss run;
+    2. `loss_run_age_days` is stated - a valuation age is only derivable from an
+       actual loss run, never from prose;
+    3. the client's / producer's own claims TABLE carries a row with real
+       content - the V1 BETA EXIT (2026-08-28) path, which must keep working:
+       *"attested no losses + one TYPED claim row"* is a genuine conflict with
+       no loss run uploaded anywhere;
+    4. a claim figure that is NOT provably model-authored - human provenance, or
+       a bare value whose origin is unknown.
+
+    Suppressing a WARNING is the safe direction: nothing here deletes a value,
+    and a rule that cries wolf on every clean submission is one producers learn
+    to ignore.
+    """
+    facts = facts if isinstance(facts, dict) else {}
+    if has_loss_run_doc:
+        return True
+    if not _is_blank_fact(_fv(facts, "loss_run_age_days")):
+        return True
+
+    rows = _fv(facts, "loss_history")
+    if isinstance(rows, list):
+        if any(_row_states_a_claim(row) for row in rows):
+            return True
+
+    for key in ("num_claims", "total_incurred"):
+        raw = facts.get(key)
+        value = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+        if _is_blank_fact(value):
+            continue
+        source = (raw.get("source") if isinstance(raw, dict) else None) or ""
+        if str(source).strip().lower() != "ai":
+            return True          # provenance unknown or human - do not second-guess
+    # Every claim figure present is explicitly model-authored, or there is no
+    # claim figure at all. Neither is corroboration. (Caught by the fuzz test:
+    # an empty facts dict used to answer True, which reads as "corroborated" for
+    # a package that asserts nothing.)
+    return False
 
 
 def prior_operations_evidence(facts: dict, flags: dict,

@@ -143,10 +143,15 @@ def test_unit_fragments_and_producer_address_are_not_locations():
     assert len(rows) == 1, [r.get("address") for r in rows]
     row = rows[0]
     assert row["location_number"] == "1"
-    assert row["address_line1"] == "4800 Dahlia St # D13"
+    # UPDATED 2026-09-01: the unit designator now lands on line TWO.
+    assert row["address_line1"] == "4800 Dahlia St"
+    assert row["address_line2"] == "# D13"
     assert row["address_city"] == "Denver"
     assert row["address_zip"] == "80216-3121"
-    assert row.get("address_line2") in (None, "")
+    # The original assertion here was `address_line2 in (None, "")`, a proxy
+    # for "the unit is not printed twice". It is now stated directly, since
+    # line two legitimately carries the unit exactly once.
+    assert "d13" not in row["address_line1"].lower()
 
 
 def test_a_real_suite_line_two_still_stamps():

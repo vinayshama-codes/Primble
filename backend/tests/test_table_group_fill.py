@@ -204,8 +204,12 @@ def test_no_already_filled_context_behaves_exactly_as_before():
         )
     user_msgs = [m[1]["content"] for m in captured if len(m) > 1]
     combined = "\n".join(user_msgs)
-    assert "already filled" not in combined.lower()
-    assert "already captured" not in combined.lower()
+    # The standing RULE text now mentions "already captured or anchored above"
+    # unconditionally (run-5 anchoring, 2 Sep 2026); what must stay absent with
+    # no context are the CONTEXT SECTIONS themselves.
+    assert "ROWS WITH KNOWN IDENTITY" not in combined
+    assert "(already filled):" not in combined
+    assert "belongs to:" not in combined
 
 
 def test_table_survives_columns_with_different_active_row_sets():

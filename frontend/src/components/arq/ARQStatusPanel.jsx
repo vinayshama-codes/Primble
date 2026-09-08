@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { sendArqReminder } from "../../api/arqApi";
 import ARQReceiptModal from "./ARQReceiptModal";
+// BUG-03: "is this request still open?" is read in one place, so the Send to
+// Client badge and this panel can never tell the producer different things.
+import { isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 
 // §6.2: post-remediation status vocabulary (7 states)
 const REMEDIATION_LABEL = {
@@ -48,9 +51,8 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {arqSessions.map((arq) => {
           const now     = new Date();
-          const expires = new Date(arq.expires_at);
-          const isExpired = now > expires && arq.status !== "submitted";
-          const displayStatus = isExpired ? "expired" : arq.status;
+          const isExpired = isExpiredArq(arq, now);
+          const displayStatus = arqDisplayStatus(arq, now);
           const sc = statusColor[displayStatus] || statusColor.pending;
           const remStatus = arq.remediation_status ? REMEDIATION_LABEL[arq.remediation_status] : null;
           const fieldsCount = arq.fields_answered_count || 0;

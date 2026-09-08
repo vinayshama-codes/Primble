@@ -163,8 +163,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TraceIDMiddleware)
 app.add_middleware(InFlightMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
+# ONE definition of the CORS policy. It configures the middleware AND the
+# error-path echo below, so the two can never drift into disagreeing about
+# which origins are allowed.
+_CORS_KWARGS = dict(
     allow_origins=ALLOWED_ORIGINS,
     allow_origin_regex=CORS_ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
@@ -172,21 +174,51 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
+app.add_middleware(CORSMiddleware, **_CORS_KWARGS)
+
+# Not mounted - built only to borrow Starlette's own `is_allowed_origin`, so the
+# error path asks the SAME question the middleware does instead of re-deriving
+# it from ALLOWED_ORIGINS + the regex by hand.
+_cors_policy = CORSMiddleware(app=None, **_CORS_KWARGS)
+
 
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception):
-    """Return a JSON 500 so the response flows through CORSMiddleware properly.
+    """Return a JSON 500 that a browser can actually read.
 
-    Without this, unhandled exceptions propagate through BaseHTTPMiddleware layers
-    before CORSMiddleware can inject Access-Control-Allow-Origin, causing browsers
-    to report a CORS error instead of the real 500.
+    Starlette builds its stack as ServerErrorMiddleware -> user middleware ->
+    ExceptionMiddleware -> router, so an app-level Exception handler's response
+    is produced OUTSIDE CORSMiddleware and never gets Access-Control-Allow-Origin
+    injected. Measured on this repo's Starlette 0.50.0: a 200 carried the header
+    and a 500 did not. Cross-origin (app.primble.io -> api.primble.io) the browser
+    then blocks the response, `fetch` REJECTS, and every caller's catch block runs
+    - which is why one backend NameError surfaced to producers as three different
+    meaningless strings ("Something went wrong applying your answer", "Something
+    went wrong saving the explanation", "Network error. Please try again") with no
+    status code and no way to tell a server fault from a validation failure.
+    This docstring's predecessor claimed the handler already solved that; it did
+    not, because the response never reached the middleware that adds the header.
+
+    The origin is echoed ONLY when the shared policy object already allows it -
+    never a bare "*", which is illegal alongside allow_credentials and would be a
+    real weakening. The body stays a fixed string with no diagnostic detail, so
+    nothing new is disclosed to anyone; the traceback goes to the log.
     """
     logger.error(
         "Unhandled exception on %s %s: %s",
         request.method, request.url.path, exc,
         exc_info=True,
     )
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin and _cors_policy.is_allowed_origin(origin):
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        # The response varies by request origin, so it must never be cached and
+        # replayed to a different one.
+        headers["Vary"] = "Origin"
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"},
+                        headers=headers)
 
 app.include_router(auth_router)
 app.include_router(form_router)

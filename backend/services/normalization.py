@@ -79,6 +79,563 @@ VALUATION_METHOD_FIELDS = frozenset({"valuation_method"})
 _NAME_LIKE_KEYS = frozenset({"certificate_holder"})
 
 
+# ── Yes / No: ONE vocabulary and ONE type door (SYS-07, 2026-09-04) ───────────
+#
+# The client's item: *"The same affirmative answer can arrive as 'Yes,' boolean
+# true, X, or a checked box depending on the source document and extraction
+# path. These representation differences should not create false conflicts...
+# Route this through the same pre-comparison canonicalization layer used for
+# other equivalent values."* This module IS that layer, so the vocabulary lives
+# here and every other module asks it.
+#
+# WHY IT LIVES HERE AND NOT IN THE COMPARATOR. Before this, EIGHT modules each
+# carried a private "what counts as affirmative" list and no two agreed:
+# `fact_equivalence._YES` knew "x", `pdf_service._resolve_bool_indicator` did
+# not (so an affirmative X on a certificate ticked the *No* box on a generated
+# ACORD form), `answer_semantics._AFFIRM_TOKENS` knew neither "x" nor "1", and
+# NONE of them knew a checkmark glyph. Same one-rule-many-copies shape as C1's
+# five comparison sites and H1-C's phantom keys. `normalization` is the leaf
+# every one of those modules can already import, so it is the only place the
+# rule can sit without a new dependency edge.
+#
+# WHAT IT REFUSES TO DECIDE, deliberately:
+#   * "N/A" / "not applicable" - a NON-ANSWER, not a No. `answer_semantics`
+#     owns that distinction (C2-G) and core principle 3 forbids turning an
+#     absence into a negative.
+#   * a bare ballot-X glyph with no box around it (U+2717 / U+2718) - it means
+#     "checked" in a column and "wrong/no" standing alone. No opinion.
+#   * anything that is not the WHOLE value. "Yes - see attached schedule" is
+#     not a bare token, so it falls through to ordinary text comparison rather
+#     than being read as a bald Yes.
+# In every one of those cases the answer is None ("cannot say"), which callers
+# must treat as "compare it as text", never as a No.
+
+_YES_TOKENS = frozenset({
+    "y", "yes", "true", "t", "1", "on", "checked",
+    "x",                  # the mark a broker puts in an ACORD checkbox
+    "✓", "✔",     # ✓ ✔  check marks
+    "☑", "☒",     # ☑ ☒  ballot box CHECKED (either mark inside the box)
+    "included", "include",
+    # A DECLARATIONS PAGE DOES NOT SAY "Yes". It says the coverage is there.
+    # Live-shape vocabulary, whole-value only: a grid cell reading "Covered" is
+    # the same affirmative as the certificate's "X" for the same coverage.
+    # "applicable" is deliberately ABSENT - "Not Applicable" must stay a
+    # NON-answer (core principle 3), and the negation rule below would turn it
+    # into a No the moment "applicable" became an affirmative.
+    "covered", "elected", "purchased", "applies", "provided", "afforded",
+    "carried", "granted",
+})
+_NO_TOKENS = frozenset({
+    "n", "no", "false", "f", "0", "off", "unchecked",
+    "☐",               # ☐  ballot box EMPTY
+    "excluded", "exclude",
+    "declined", "decline", "rejected", "waived",
+})
+# Read AFTER a negation only: "no coverage" is a No, a box reading "coverage"
+# on its own asserts nothing.
+_YN_NEGATABLE_NOUNS = frozenset({"coverage", "cover", "coverages"})
+# NEGATION IS STRUCTURAL, NOT ENUMERATED. "not covered" / "not purchased" /
+# "no coverage" are one rule, not three table rows - so an affirmative added
+# above is negatable the day it is added and cannot be half-covered.
+_YN_NEGATION_RE = re.compile(r"^(?:not|no|non)[\s-]+(?P<rest>.+)$")
+# OCR letter-spacing on a scanned form: "Y e s", "N o". Only when the WHOLE
+# value is single letters - "A B C" joins to "abc" and is still not a token.
+_YN_SPACED_LETTERS_RE = re.compile(r"^(?:[A-Za-z][ ]){1,5}[A-Za-z]$")
+# NOT in either table, on purpose: "none", "null", "blank", "n/a". Those are
+# the machine's own spellings of "no value found" and a human's non-answer -
+# `_fv`, `underwriting_consistency._normalize` and `answer_semantics` already
+# own them, and reading one as a No would turn an absence into a negative
+# (core principle 3). "check" is out too: on its own it is as likely a payment
+# method as a tick.
+# The subset that is unambiguous ENGLISH rather than a mark. Only these license
+# the value-shaped fallback in `fact_equivalence.same_fact`: a bare "1" against
+# a bare "0" on an untyped field must stay two numbers, not become Yes vs No.
+_YES_NO_STRONG_WORDS = frozenset({
+    "yes", "no", "true", "false", "checked", "unchecked",
+})
+# One layer of brackets/parens a checkbox is often transcribed inside: "[X]",
+# "(x)", "{X}". An EMPTY pair strips to nothing and yields no opinion - an
+# empty bracket is far more often OCR noise than an asserted negative.
+_YN_BRACKET_RE = re.compile(r"^[\[\(\{<]\s*(.*?)\s*[\]\)\}>]$")
+# Brackets are trimmed as well as matched by `_YN_BRACKET_RE`: OCR routinely
+# drops one half of a checkbox pair, leaving "X]" or "[X".
+_YN_TRIM_CHARS = " \t\r\n.,;:!*_'\"`[]()<>{}"
+
+
+def yes_no_token(value: Any) -> Optional[str]:
+    """``"Y"`` / ``"N"`` / ``None`` for one value. THE affirmative reader.
+
+    ``None`` means "this is not a Yes/No answer" - never "No". A real ``bool``
+    is answered directly: the previous implementation did ``str(value or "")``,
+    so ``False`` collapsed to the empty string and a stored boolean *False*
+    was silently unreadable.
+    """
+    if isinstance(value, bool):
+        return "Y" if value else "N"
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    # PDF checkbox export values print as /Yes, /On, /1.
+    s = s.lstrip("/").strip()
+    m = _YN_BRACKET_RE.match(s)
+    if m:
+        s = m.group(1).strip()
+    s = s.strip(_YN_TRIM_CHARS)
+    if not s:
+        return None
+    if _YN_SPACED_LETTERS_RE.match(s):
+        s = s.replace(" ", "")
+    if s in _YES_TOKENS:
+        return "Y"
+    if s in _NO_TOKENS:
+        return "N"
+    neg = _YN_NEGATION_RE.match(s)
+    if neg:
+        rest = neg.group("rest").strip(_YN_TRIM_CHARS)
+        if rest in _YES_TOKENS or rest in _YN_NEGATABLE_NOUNS:
+            return "N"
+    return None
+
+
+# A value that arrives carrying its OWN question: "Hired and Non-Owned Auto
+# Coverage: X". Live run 1 (2026-09-04): the extractor returned the whole
+# printed line for the certificate and a bare "X" for the same layout in
+# another package, so one document's answer conflicted with the other's purely
+# because of where the model chose to stop reading. That is SYS-07's own class -
+# the client's wording is "depending on the source document AND EXTRACTION PATH".
+#
+# A LABEL IS NOT A QUALIFIER, and that distinction is the whole safety argument:
+#   "Hired and Non-Owned Auto Coverage: X"  -> the label restates the question,
+#                                              the answer is X
+#   "Yes - see the attached schedule"       -> the tail QUALIFIES the answer and
+#                                              must never be flattened
+# The tail therefore has to be a WHOLE bare token, which the second shape fails.
+# SEPARATORS: EVERY way a printed form divides a question from its answer.
+#
+# The first cut accepted ":" and "=" only, because that is what the live run
+# happened to print - which is fitting the fixture, the exact thing the change
+# quality bar forbids. A dec page, a broker worksheet and a scanned grid divide
+# the two with a dash, a column gap, a dot leader or a table pipe just as often:
+#
+#     Hired and Non-Owned Auto Coverage: X          colon
+#     Hired and Non-Owned Auto Coverage = X         equals
+#     Hired and Non-Owned Auto Coverage - X         hyphen / en / em dash
+#     Hired and Non-Owned Auto Coverage .......  X  dot leader
+#     Hired and Non-Owned Auto Coverage    X        a COLUMN GAP, which is what
+#                                                   a two-column layout becomes
+#                                                   once it is flattened to text
+#     Hired and Non-Owned Auto Coverage | X         a table cell boundary
+#
+# WIDENING THE SEPARATORS IS SAFE BECAUSE THE TAIL TEST DOES THE WORK, not the
+# separator. A qualifier is never a bare Yes/No token:
+#     "Yes - see the attached schedule"   tail = "see the attached schedule"  no
+#     "Yes, but only for scheduled autos" tail is not reached (no separator)   no
+#     "Yes - only scheduled autos"        tail = "only scheduled autos"        no
+# The dash was originally excluded for fear of the first of those. That fear was
+# unfounded - it fails on the tail, not on the separator - and excluding the
+# dash cost real coverage.
+_YN_LABEL_SPLIT_RE = re.compile(
+    r"^(?P<head>.*\S)"                      # greedy: find the LAST separator
+    r"[ \t]*(?::|=|\||\t|—|–|-|\.{2,}|[ ]{1,})[ \t]*"
+    r"(?P<tail>\S{1,24})$"
+)
+# Every character the separator alternation can consume, so a head can never
+# retain one. Kept beside the pattern it mirrors.
+_YN_SEP_CHARS = " 	:=|.—–-"
+_YN_LABEL_MAX_WORDS = 12          # a question label, never a paragraph
+_YN_LABEL_MAX_CHARS = 140
+# A LABEL IS MADE OF WORDS. The structural guard that stops a numeric pair from
+# being read as an answer: "3 - 0" has no label, so its "0" is a score and not a
+# No. Requires one real alphabetic word, which every genuine question label has
+# and no ratio, score, time or measurement does.
+_YN_LABEL_WORD_RE = re.compile(r"[A-Za-z]{3,}")
+# A label that is ITSELF a non-answer cannot license reading the mark beside
+# it: "N/A: X" says the question does not apply, whatever the X is. The same
+# spellings `_fv` and `underwriting_consistency._normalize` already drop.
+_YN_LABEL_NON_ANSWERS = frozenset({
+    "n/a", "na", "n a", "not applicable", "none", "null", "unknown", "tbd",
+})
+
+
+def yes_no_answer(value: Any) -> Optional[str]:
+    """``"Y"`` / ``"N"`` / ``None``, reading a LABELLED answer as well as a bare
+    one. Use this wherever the FIELD is already known to hold a Yes/No.
+
+    ``yes_no_token`` stays strict on purpose: it is what licenses the
+    value-shaped fallback in ``fact_equivalence``, which runs on facts nothing
+    declares, and a labelled value there would be read on no evidence at all.
+    """
+    tok = yes_no_token(value)
+    if tok:
+        return tok
+    if value is None or isinstance(value, bool):
+        return None
+    # A LINE BREAK IS A COLUMN BOUNDARY. Joining with a single space made
+    # a two-line table cell - one of the commonest flattened shapes there
+    # is - indistinguishable from prose. Two spaces keep it a separator.
+    s = "  ".join(str(value).split("\n")).strip()
+    if not s or len(s) > _YN_LABEL_MAX_CHARS:
+        return None
+    m = _YN_LABEL_SPLIT_RE.match(s)
+    if not m:
+        return None
+    head, tail = m.group("head").strip(), m.group("tail").strip()
+    # THE HEAD MUST NOT KEEP A SEPARATOR. Once a single space counts as a
+    # divider the greedy head absorbs the real separator - "Not Applicable - X"
+    # splits to head "Not Applicable -", which is not the string the non-answer
+    # table holds, so the label escaped every check below and the X was read as
+    # a Yes on a question that does not apply. Strip them and the checks see the
+    # actual label.
+    head = head.rstrip(_YN_SEP_CHARS).strip()
+    if not head:
+        return None
+    # THE TAIL CARRIES THE ANSWER, and it has to be a WHOLE bare token. This is
+    # the condition that keeps every qualifier out, whatever divides it.
+    tail_tok = yes_no_token(tail)
+    if not tail_tok:
+        return None
+    # A BARE DIGIT AFTER A LABEL IS A NUMBER, NOT AN ANSWER. "0"/"1" alone on a
+    # Yes/No field can only be the answer - there is nothing else the box holds.
+    # Behind a label they are exactly the shape of a labelled COUNT or amount,
+    # and "Total Losses - 0" is not a No. Found by the fuzz sweep, not by
+    # reasoning: the first cut read it as one.
+    if tail.strip(_YN_TRIM_CHARS).isdigit():
+        return None
+    # The head must read as a LABEL: short, made of words, not a paragraph, and
+    # not itself a non-answer.
+    if len(head.split()) > _YN_LABEL_MAX_WORDS or ". " in head:
+        return None
+    if not _YN_LABEL_WORD_RE.search(head):
+        return None
+    if head.strip(_YN_TRIM_CHARS).lower() in _YN_LABEL_NON_ANSWERS:
+        return None
+    # A NEGATION IMMEDIATELY BEFORE THE TAIL BELONGS TO THE TAIL. Widening the
+    # separator to a single space put "Hired Auto Not Covered" within reach of
+    # the splitter, where the head would end "Not" and the tail read as a Yes -
+    # the exact inversion this whole item exists to prevent. Refuse; ordinary
+    # text comparison then applies and nobody guesses.
+    if head.split()[-1].strip(_YN_TRIM_CHARS).lower() in ("not", "no", "non", "never"):
+        return None
+    # If the label is ITSELF a Yes/No answer, the two must agree. A value that
+    # says both things says neither.
+    head_tok = yes_no_token(head)
+    if head_tok and head_tok != tail_tok:
+        return None
+    return tail_tok
+
+
+def canonical_yes_no(value: Any) -> Optional[str]:
+    """The ONE canonical printing of an affirmative / negative, or None.
+
+    This is the "one canonical true value / one canonical false value" the
+    acceptance criteria asks for. Callers that need ACORD's single-letter form
+    take ``yes_no_answer`` / ``yes_no_token`` instead - same vocabulary,
+    different printing.
+    """
+    tok = yes_no_answer(value)
+    return {"Y": "Yes", "N": "No"}.get(tok) if tok else None
+
+
+
+# ── A POLICY NUMBER FIELD, AND A VALUE CARRYING ITS OWN LABEL ───────────────
+# Both derived, both owned here, for the same reason the Yes/No vocabulary is:
+# `fact_comparison`, `fact_equivalence` and `pdf_service` all need the same
+# answer and a second copy is how the auto-symbol and Umbrella-SIR bugs each
+# survived their first fix.
+_POLICY_NUM_WORDS = ("number", "num", "no", "nbr", "id")
+
+
+def is_policy_number_field(fact_key: Any) -> bool:
+    """True when this fact names a POLICY CONTRACT number.
+
+    Derived from the key's own tokens, never a list: `policy_number`,
+    `prior_policy_number`, `umbrella_policy_number` and the per-coverage-line
+    form `policy_number@auto` all answer True the day they are added.
+    A `certificate_number` does NOT - a certificate is not the contract.
+    """
+    k = str(fact_key or "").split("@", 1)[0].lower()
+    toks = [t for t in re.split(r"[^a-z0-9]+", k) if t]
+    return "policy" in toks and any(w in toks for w in _POLICY_NUM_WORDS)
+
+
+# A value that arrives carrying its own printed label - the SYS-07 shape, one
+# fact over. Live run 1 showed the extractor returning the whole printed line
+# for one document and the bare value for the same layout in another, so one
+# document's answer conflicted with the other's purely by where the model
+# stopped reading. The label must END in a separator or a number-word, so a
+# value that merely BEGINS with one of these words is untouched.
+_LEADING_LABEL_RE = re.compile(
+    r"^(?:policy|certificate|cert|binder|contract|pol)\s*"
+    r"(?:no\.?|number|num|nbr|#)?\s*[:#\-]?\s+(?P<rest>\S.*)$",
+    re.IGNORECASE)
+
+
+def strip_leading_label(value: Any) -> str:
+    """``"Policy No. BBC7263"`` -> ``"BBC7263"``. Unchanged when there is no
+    label, so it is always safe to call."""
+    s = str(value or "").strip()
+    m = _LEADING_LABEL_RE.match(s)
+    return m.group("rest").strip() if m else s
+
+
+def is_strong_yes_no_word(value: Any) -> bool:
+    """True when the value is an unambiguous English boolean word.
+
+    The STRUCTURAL second condition (H1-F's standing lesson: a test that is
+    necessary but not sufficient needs one). "X" is a Yes only when something
+    unambiguous sits opposite it.
+    """
+    if isinstance(value, bool):
+        return True
+    s = str(value or "").strip().lower().lstrip("/").strip()
+    m = _YN_BRACKET_RE.match(s)
+    if m:
+        s = m.group(1).strip()
+    return s.strip(_YN_TRIM_CHARS) in _YES_NO_STRONG_WORDS
+
+
+# ── Which FIELDS hold a Yes/No ───────────────────────────────────────────────
+# Curated overrides only. Everything else is DERIVED from declarations that
+# already exist, so a Yes/No fact added tomorrow is classified correctly the
+# day it is added and nobody has to remember this list.
+YES_NO_FIELDS: FrozenSet[str] = frozenset()
+
+_YES_NO_SHAPE_TOKENS = frozenset({"indicator", "required", "confirmed"})
+_YES_NO_SHAPE_PREFIXES = ("is_", "has_")
+_YES_NO_SHAPE_SUFFIXES = ("_yn", "_y_n")
+# A key that NAMES another type is not a Yes/No however it starts. `has_` and
+# `is_` are a guess, and a guess must never outrank a key that says outright it
+# holds an amount, a count or a date - `has_umbrella` is a boolean,
+# `has_umbrella_limit` would not be. Declared Yes/No facts are unaffected: this
+# only ever gates `yes_no_field_shape`, which is the weakest of the sources.
+_YES_NO_SHAPE_BLOCKERS = frozenset({
+    "amount", "limit", "limits", "value", "values", "premium", "cost", "costs",
+    "payroll", "revenue", "sales", "deductible", "deductibles", "sir",
+    "count", "number", "num", "employees", "vehicles", "locations", "years",
+    "year", "date", "dates", "code", "codes", "rate", "rates", "percent",
+    "pct", "phone", "email", "address", "name", "naic", "fein", "id",
+})
+
+# Probes for the FACT_REGISTRY validator. A field is Yes/No when its own
+# declared validator accepts both booleans and rejects every other shape a
+# fact can hold - a BEHAVIOURAL test, so it needs no source parsing and cannot
+# drift from what the validator actually does.
+_YN_PROBE_ACCEPT = ("Yes", "No")
+_YN_PROBE_REJECT = ("$1,000,000", "Acme Contracting LLC", "12/31/2026",
+                    "84-2210987", "4800 Dahlia St Denver CO 80216", "238160")
+
+_YES_NO_FIELD_CACHE: Dict[str, bool] = {}
+_BOOLEAN_SCHEMA_KEYS: Optional[FrozenSet[str]] = None
+
+
+def _boolean_schema_keys() -> FrozenSet[str]:
+    """Fact keys LLM call 1's own schema declares as ``boolean``.
+
+    Lazy + cached + fail-open: ``extraction_service`` imports this module, so
+    the edge only ever exists at call time. Same pattern ``fact_equivalence``
+    already uses to read ``FACT_REGISTRY``.
+    """
+    global _BOOLEAN_SCHEMA_KEYS
+    if _BOOLEAN_SCHEMA_KEYS is None:
+        try:
+            from services.extraction_service import BOOLEAN_FACT_KEYS
+            _BOOLEAN_SCHEMA_KEYS = frozenset(BOOLEAN_FACT_KEYS)
+        except Exception:                                    # pragma: no cover
+            return frozenset()
+    return _BOOLEAN_SCHEMA_KEYS
+
+
+def _registry_declares_yes_no(field: str) -> bool:
+    try:
+        from services.fact_registry import FACT_REGISTRY
+        entry = FACT_REGISTRY.get(field) or {}
+    except Exception:                                        # pragma: no cover
+        return False
+    hint = str(entry.get("format_hint") or "").strip().lower()
+    if hint.startswith("yes or no") or hint in ("yes/no", "y/n"):
+        return True
+    validate = entry.get("validate")
+    if not callable(validate):
+        return False
+    try:
+        if not all(bool(validate(p)) for p in _YN_PROBE_ACCEPT):
+            return False
+        if any(bool(validate(p)) for p in _YN_PROBE_REJECT):
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def declares_yes_no(field: str) -> bool:
+    """AUTHORITATIVE: this fact is declared Yes/No somewhere it already was."""
+    f = (field or "").strip()
+    if not f:
+        return False
+    return (f in YES_NO_FIELDS
+            or f in _boolean_schema_keys()
+            or _registry_declares_yes_no(f))
+
+
+def yes_no_field_shape(field: str) -> bool:
+    """A GUESS from the key's own shape - weaker than ``declares_yes_no``."""
+    f = (field or "").strip().lower()
+    if not f:
+        return False
+    toks = set(re.split(r"[^a-z0-9]+", f))
+    if toks & _YES_NO_SHAPE_BLOCKERS:
+        return False
+    if toks & _YES_NO_SHAPE_TOKENS:
+        return True
+    return f.startswith(_YES_NO_SHAPE_PREFIXES) or f.endswith(_YES_NO_SHAPE_SUFFIXES)
+
+
+def is_yes_no_field(field: str) -> bool:
+    """True when this fact holds a Yes/No answer. Declared first, shape second.
+
+    Cached: called inside grouping loops by both the merge and the comparator.
+    """
+    f = (field or "").strip()
+    if not f:
+        return False
+    hit = _YES_NO_FIELD_CACHE.get(f)
+    if hit is None:
+        hit = declares_yes_no(f) or yes_no_field_shape(f)
+        _YES_NO_FIELD_CACHE[f] = hit
+    return hit
+
+
+# ── A RATING BUREAU IS NEVER THE CARRIER (2026-09-05) ────────────────────────
+# The client's own SYS-07 screenshot offers three carriers to choose between:
+# EMPLOYERS MUTUAL CASUALTY COMPANY / **AAIS** / EMC Property & Casualty
+# Company. AAIS is the American Association of Insurance Services - an advisory
+# and rating BUREAU. Its name is printed on the policy because it wrote the
+# coverage FORMS ("AAIS Form CL-100"), never because it wrote the policy.
+#
+# Measured before the fix: `compare("carrier_name", [EMC..., "AAIS"])` returned
+# a conflict, `normalize_carrier("AAIS")` returned a carrier family token, and a
+# grep of the whole backend found AAIS mentioned ONLY inside the ISO/AAIS
+# FORM-NUMBER convention. Nothing anywhere said a bureau is not an insurer. A
+# producer who picked it would have stamped "AAIS" as the carrier on a signed
+# ACORD form.
+#
+# This is a DECLARATION, not a heuristic - the same kind of curated table as
+# `_STRICT_TOKEN_CANON` - because there is no derivable signal that separates
+# "American Association of Insurance Services" from a real insurer's name.
+# It is deliberately tiny and holds only bodies that publish forms, rates or
+# standards and write no insurance at all.
+_INSURANCE_BUREAUS: FrozenSet[str] = frozenset({
+    "aais",                                  # American Association of Ins. Services
+    "american association of insurance services",
+    "iso", "insurance services office", "iso properties", "verisk",
+    "ncci", "national council on compensation insurance",
+    "naic", "national association of insurance commissioners",
+    "acord",                                 # publishes the forms themselves
+    "aaisonline",
+    "wcirb", "wcribma", "ncrb", "ncci holdings",
+    "surplus lines association", "aaisdirect",
+})
+
+
+# ── A ROLE LABEL IS NOT A NAME (2026-09-05) ──────────────────────────────────
+# Live 5 Sep 2026: all three generated forms carried an ADDITIONAL INTEREST
+# whose NAME was the words "Certificate Holder". The certificate's remarks say
+# *"Certificate holder is an additional insured with respect to general
+# liability where required by written contract"* - a sentence about the ROLE,
+# naming nobody - and the extractor returned the label as the value.
+#
+# The orphan-row rule already suppresses an UNNAMED interest row. This row had
+# a name, so it survived; the name was just not a name. These are ACORD's own
+# party-role words, and no company is called one of them.
+_PARTY_ROLE_LABELS: FrozenSet[str] = frozenset({
+    "certificate holder", "certificate holders", "cert holder",
+    "additional insured", "additional insureds", "additional interest",
+    "named insured", "first named insured", "other named insured",
+    "loss payee", "lender", "lenders loss payable", "lienholder",
+    "mortgagee", "mortgage holder", "trustee", "registrant", "owner",
+    "employee as lessor", "breach of warranty", "co owner", "co-owner",
+    "insured", "applicant", "producer", "agency", "carrier", "insurer",
+    "as their interests may appear", "atima", "various", "as required",
+    "as per written contract", "where required by written contract",
+    "to whom it may concern", "n a", "same as above", "see attached",
+})
+
+
+def is_party_role_label(value: Any) -> bool:
+    """True when this "name" is an ACORD party ROLE rather than a party.
+
+    A generic role word is what a document prints when it is describing the
+    arrangement instead of naming anybody, so on a name field it carries no
+    signal at all.
+    """
+    s = str(value or "").strip().lower()
+    if not s:
+        return False
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s in _PARTY_ROLE_LABELS
+
+
+# ── WHAT THE BUSINESS IS: ONE CLASSIFICATION DOOR (2026-09-05) ───────────────
+# NAICS sector -> the kind of business it names. An official published taxonomy,
+# not a keyword list. Deliberately PARTIAL: sectors whose reading is genuinely
+# arguable (54 Professional Services is "office" or "service" depending on who
+# you ask; 53 Real Estate is not "apartments") are absent, and absent means the
+# caller falls back to whatever weaker signal it has.
+#
+# Lives here rather than in `pdf_service` because TWO consumers now need it and
+# they must not each keep a copy: the ACORD 125 NATURE OF BUSINESS boxes, and
+# `cross_form_validator`'s crime-exposure advisory - which was reading the same
+# narrative with the same bare substring test and firing "the business mentions
+# 'retail'" at a food wholesaler.
+_NAICS_SECTOR_TO_BUSINESS_TYPE: Dict[str, str] = {
+    "31": "Manufacturing", "32": "Manufacturing", "33": "Manufacturing",
+    "42": "Wholesale",
+    "44": "Retail", "45": "Retail",
+    "61": "Institutional", "62": "Institutional",
+    "23": "Contractor",
+}
+_NAICS_SUBSECTOR_TO_BUSINESS_TYPE: Dict[str, str] = {
+    "722": "Restaurant",          # Food Services and Drinking Places
+    "52": "Financial",            # Finance and Insurance
+}
+
+
+def naics_business_type(naics_code: Any) -> Optional[str]:
+    """The kind of business this NAICS code names, or None if it cannot say."""
+    raw = re.sub(r"\D", "", str(naics_code or ""))
+    if len(raw) < 2:
+        return None
+    return (_NAICS_SUBSECTOR_TO_BUSINESS_TYPE.get(raw[:3])
+            or _NAICS_SUBSECTOR_TO_BUSINESS_TYPE.get(raw[:2])
+            or _NAICS_SECTOR_TO_BUSINESS_TYPE.get(raw[:2]))
+
+
+def is_insurance_bureau(value: Any) -> bool:
+    """True when this name is a rating / advisory bureau rather than an insurer.
+
+    A bureau's name reaches a carrier fact because it is printed on the policy
+    as the author of the coverage FORMS. It is never the party on the risk, so
+    on a carrier field it is not a value at all.
+    """
+    s = str(value or "").strip().lower()
+    if not s:
+        return False
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if s in _INSURANCE_BUREAUS:
+        return True
+    # "AAIS Form CL-100", "ISO Commercial Lines" - the bureau named as the
+    # AUTHOR of something. Only ever the LEADING token, so "Verisk Insurance
+    # Company" (were one to exist) is untouched by a trailing match.
+    head = s.split(" ")[0]
+    if head in _INSURANCE_BUREAUS and len(s.split()) <= 4:
+        return True
+    return False
+
+
 def _infer_field_category(field: str) -> Optional[str]:
     """Infer a normalization category from the SHAPE of a fact key.
 
@@ -377,6 +934,22 @@ _DATE_FORMATS = (
     "%m.%d.%Y", "%m.%d.%y",
     "%B %d %Y", "%b %d %Y",
     "%d %B %Y", "%d %b %Y",
+    # DD-Mon-YYYY, the form carrier and agency-management systems export
+    # ("15-Jul-2025", "15/Jul/25"). Found by the 2026-09-05 fuzz sweep, where
+    # `15-Jul-2025` vs `07/15/2025` came back a CONFLICT - a pure formatting
+    # difference producing a warning, which is exactly what the client's
+    # broader normalization clause forbids.
+    #
+    # SAFE BECAUSE THE MONTH IS A NAME. Day-first NUMERIC ("15/07/2025") is
+    # deliberately still unparsed and must stay that way: "05/09/2026" is the
+    # 5th of September or the 9th of May and nothing in the string can decide
+    # which, so parsing it would invent a date rather than normalise one.
+    # Compact "20250715" is likewise excluded - `same_fact`'s value-shape
+    # fallback tries `normalize_date` on non-date fields too, so an 8-digit
+    # account or policy number would start reading as a date.
+    "%d-%B-%Y", "%d-%b-%Y", "%d-%B-%y", "%d-%b-%y",
+    "%d/%B/%Y", "%d/%b/%Y", "%d/%B/%y", "%d/%b/%y",
+    "%B-%d-%Y", "%b-%d-%Y", "%B-%d-%y", "%b-%d-%y",
 )
 
 
@@ -713,11 +1286,27 @@ def normalize_value(field: str, value: Any) -> str:
     if field in ADDRESS_FIELDS:
         return normalize_address(value)
     if field in CARRIER_FIELDS:
+        # A rating bureau on a carrier field carries NO signal - "" is what this
+        # dispatcher returns for "nothing usable here", and every caller already
+        # treats that as absent. So the picker never offers it as a rival
+        # carrier and the comparison layer never calls it a conflict.
+        if is_insurance_bureau(value):
+            return ""
         return normalize_carrier(value)
     if field in FEIN_FIELDS:
         return normalize_fein(value)
     if field in VALUATION_METHOD_FIELDS:
         return normalize_valuation_method(value)
+    # 1b. Yes/No (SYS-07). Placed AFTER the explicit identity sets - those are
+    #     authoritative and no key belongs to both - and BEFORE the shape
+    #     inference and the generic normalizer, which is what used to make
+    #     "Yes" and "X" two different comparison keys. A value that is not a
+    #     bare Yes/No token ("Yes - see attached") gets no opinion here and
+    #     falls through to the ordinary text path exactly as before.
+    if is_yes_no_field(field):
+        canon = canonical_yes_no(value)
+        if canon:
+            return canon.lower()
     # 2. Shape-based inference for keys outside the explicit sets (Beta Report §5:
     #    normalization must be generic for any document, not only canonical keys).
     category = _infer_field_category(field)
@@ -889,6 +1478,140 @@ _NO_LOSS_QUALIFIERS = (
 )
 
 
+# A qualifier only makes a THRESHOLD when an AMOUNT follows it.
+#
+# LIVE 2026-09-08. "over" was listed to catch "no losses over $10,000", but it
+# matched on the next 20 characters with nothing checking that a figure came
+# next - so the far more common TIME phrasing
+#
+#     "No losses over the past five years"
+#
+# was read as a threshold and `detect_no_loss_assertion` returned False. That is
+# a producer's genuine attestation being discarded. It surfaced the moment
+# `pdf_service._attests_no_loss` began delegating here: the ACORD 125
+# "Check if none" box went from ticked to printing an explicit **No** - a signed
+# form asserting the opposite of what the producer typed.
+#
+# The distinction is what follows the qualifier: a threshold names a SUM, a time
+# phrase names a PERIOD. "greater than" / "in excess" are kept unconditional -
+# they are never used to introduce a time span in this vocabulary.
+_AMOUNT_AFTER_QUALIFIER_RE = re.compile(r"^[\s:$£€]*\d")
+_TIME_QUALIFIERS = frozenset({"over", "above", "more than"})
+
+
+# A NO-LOSS CLAIM THAT CARRIES A LOSS AMOUNT CONTRADICTS ITSELF.
+#
+# The phrase scan reads the first few words and stops, so
+#
+#     "Clean loss history apart from a $40,000 fire in 2023"
+#
+# returned True - the $40,000 fire, the entire point of the sentence, was never
+# read. It scored the account 60 ("attested no losses"), and once
+# `pdf_service._attests_no_loss` began delegating here it also TICKED the ACORD
+# 125 "Check if none" box: a signed form asserting no losses on an account with
+# a fire.
+#
+# WHY THIS IS A MONEY TEST AND NOT A LIST OF EXCEPTION WORDS. "apart from",
+# "except", "other than", "aside from", "but for", "save for", "excluding" ...
+# is an open set, and an open set is the allow-list this project's quality bar
+# forbids - you are always one phrasing behind. A NON-ZERO AMOUNT is structural:
+# a genuine no-loss statement never needs one, and a loss worth excepting almost
+# always carries its number. Peril words ("fire", "accident") were tried and
+# REJECTED - they co-occur with the negation itself ("no claims or accidents in
+# the past 5 years"), so they refuse genuine attestations.
+#
+# SCOPED TO THE PHRASE'S OWN CLAUSE. Scanning the document would refuse every
+# no-loss sentence on every dec page, since dec pages are made of dollar amounts.
+#
+# ZERO IS EXEMPT: "no losses, total incurred $0" is a no-loss statement stating
+# its own zero, and blanking that would be the opposite of the intent.
+#
+# HONEST LIMIT: "clean loss history apart from one fire" carries no figure and
+# still reads as an attestation. That is not covered, and no rule of this shape
+# will cover it. The guarantee is the FAILURE DIRECTION - what this does catch
+# resolves to blank-and-ask, never to a false "yes" on a signed form.
+_LOSS_CLAUSE_BREAK = ".;!?\n\r"
+_LOSS_CLAUSE_WINDOW = 200
+_NONZERO_AMOUNT_RE = re.compile(
+    r"(?:[$£€]\s?|\b)(?!0+(?:[.,]0+)*\b)\d[\d,]*(?:\.\d+)?\s*(?:k\b|m\b|dollars\b)?"
+)
+_MONEY_SHAPE_RE = re.compile(r"[$£€]\s?\d|\d[\d,]*\d\s*dollars\b|\b\d{1,3}(?:,\d{3})+\b")
+
+
+# AN EXCEPTION HAS A GRAMMAR, AND THAT GRAMMAR IS A CLOSED CLASS.
+#
+# The money rule above catches an exception that names a figure. It does not
+# catch "clean loss history apart from ONE FIRE" - no amount, so nothing
+# contradicts the phrase, and it attests.
+#
+# THE CORRECTION THAT MADE THIS FIXABLE. This was first written off as
+# unfixable, on the grounds that exception wording is infinite. It is not. What
+# is infinite is the LOSS - "a fire", "the slip and fall", "that thing with the
+# forklift" - which is why no list of PERILS can work and why the money rule
+# names none. But the words that JOIN "everything clean" to "this one thing" are
+# a closed grammatical class: exceptive prepositions and conjunctions. English
+# has roughly fifteen and coins no more, the way it coins nouns.
+#
+# So the two rules split the space by what each can bound:
+#   * an exception carrying a FIGURE      -> the money rule, no vocabulary at all
+#   * an exception carrying no figure     -> this rule, a closed function-word set
+#
+# NEITHER touches a coordination inside the negation's own scope - "no claims OR
+# ACCIDENTS in the past 5 years" has no amount and no exceptive, so it still
+# attests. That case is what killed the peril-word approach and it is the
+# control for this one.
+#
+# TAIL ONLY, deliberately. A leading exceptive ("Other than the fire, clean loss
+# history") is not caught: checking the head would refuse legitimate preambles
+# like "Per our review of the loss runs, no known losses". Rarer shape, and the
+# money rule still covers it whenever a figure appears. Recorded, not hidden.
+_EXCEPTIVE_MARKERS = (
+    "except", "excepting", "excluding", "exclusive of",
+    "apart from", "aside from", "other than", "otherwise than",
+    "besides", "barring", "save for", "save that", "but for",
+    "with the exception", "outside of", "notwithstanding",
+    "aside of", "bar for",
+)
+
+
+def _tail_introduces_an_exception(tail: str) -> bool:
+    """Does the text after a no-loss phrase carve something out of it?"""
+    return any(m in tail for m in _EXCEPTIVE_MARKERS)
+
+
+def _clause_states_a_loss(lowered: str, idx: int) -> bool:
+    """Does the clause holding this no-loss phrase also state a loss amount?"""
+    lo = max(0, idx - _LOSS_CLAUSE_WINDOW)
+    clause = lowered[lo: idx + _LOSS_CLAUSE_WINDOW]
+    for ch in _LOSS_CLAUSE_BREAK:
+        cut = clause.rfind(ch, 0, idx - lo)
+        if cut >= 0:
+            clause = clause[cut + 1:]
+            idx = idx - lo - cut - 1
+            lo = 0
+    for ch in _LOSS_CLAUSE_BREAK:
+        cut = clause.find(ch, max(0, idx))
+        if cut >= 0:
+            clause = clause[:cut]
+    for m in _MONEY_SHAPE_RE.finditer(clause):
+        digits = re.sub(r"[^\d]", "", m.group())
+        if digits and int(digits) > 0:
+            return True
+    return False
+
+
+def _tail_is_a_threshold(tail: str) -> bool:
+    """Does the text right after a no-loss phrase qualify it into a threshold?"""
+    for q in _NO_LOSS_QUALIFIERS:
+        if not tail.startswith(q):
+            continue
+        if q in _TIME_QUALIFIERS:
+            # Ambiguous word - only a figure makes it a threshold.
+            return bool(_AMOUNT_AFTER_QUALIFIER_RE.match(tail[len(q):]))
+        return True
+    return False
+
+
 def detect_no_loss_assertion(text: str) -> bool:
     """True if ``text`` contains an unqualified "no losses/claims" assertion.
 
@@ -905,8 +1628,15 @@ def detect_no_loss_assertion(text: str) -> bool:
             idx = lowered.find(phrase, start)
             if idx == -1:
                 break
-            tail = lowered[idx + len(phrase): idx + len(phrase) + 20].lstrip()
-            if not any(tail.startswith(q) for q in _NO_LOSS_QUALIFIERS):
+            after = lowered[idx + len(phrase): idx + len(phrase) + _LOSS_CLAUSE_WINDOW]
+            for _brk in _LOSS_CLAUSE_BREAK:
+                _cut = after.find(_brk)
+                if _cut >= 0:
+                    after = after[:_cut]
+            tail = after[:24].lstrip()
+            if (not _tail_is_a_threshold(tail)
+                    and not _tail_introduces_an_exception(after)
+                    and not _clause_states_a_loss(lowered, idx)):
                 return True
             start = idx + len(phrase)
     return False

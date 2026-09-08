@@ -22,6 +22,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.pdf_service import _normalize_for_search, _value_in_raw_text  # noqa: E402
 from services.field_qa import run_field_qa  # noqa: E402
 
+
+def _amt(v):
+    """The stamped amount without a leading currency symbol.
+
+    ACORD prints "$" beside most money boxes, so `pdf_service` no longer
+    stamps one there (2026-09-05, the live "$ $3,954" defect). These tests
+    are about WHICH BOX GOT WHICH AMOUNT, never about the symbol, so they
+    compare the amount and are immune to the display rule.
+    """
+    return str(v or "").strip().lstrip("$").strip()
+
+
 # The exact declarations text from the live test documents.
 _DOC = (
     "COMMERCIAL PACKAGE DECLARATIONS\n"
@@ -1185,7 +1197,7 @@ def test_modified_equipment_description_kept_with_genuine_parent_yes():
     mapped, _ = map_facts_to_form(facts={}, schema=schema, form_id="ACORD_127",
                                   raw_text=raw, pre_filled_gpt=pre)
     assert mapped.get(desc_field) == "Custom ladder rack mounted on roof."
-    assert mapped.get(cost_field) == "$450"
+    assert _amt(mapped.get(cost_field)) == "450"
 
 
 # ── Quote-reuse cap: near-duplicate clustering + generous threshold ──────────

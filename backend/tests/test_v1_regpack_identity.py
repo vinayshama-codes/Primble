@@ -15,10 +15,10 @@ Consistency engine (`underwriting_consistency.assess_underwriting_consistency`),
 the REAL ACORD 25 stamper (`pdf_service.map_facts_to_form` against the real
 schema) and the REAL loss-run identity matcher.
 
-KNOWN GAP - see test_r03_insurer_letters_map_to_their_line, which is an
-xfail(strict=True): V1 item H5 "ACORD 25 Multi-Carrier Mapping" is NOT STARTED.
-The per-line POLICY columns are correct and are pinned here as passing tests;
-the insurer LETTER columns are unmapped. Delete the xfail when H5 ships.
+H5 "ACORD 25 Multi-Carrier Mapping" SHIPPED 2026-09-02 and the pack's one
+xfail is retired: test_r03_insurer_letters_map_to_their_line now passes against
+the real stamper. The per-line POLICY columns were already correct and stay
+pinned here.
 """
 import json
 import sys
@@ -154,15 +154,24 @@ def test_r01_no_sqs_cap_or_deduction_from_formatting():
 
 # Three lines, three DIFFERENT carriers, each with its own NAIC and policy
 # number - the live shape the Orbin package produced.
+#
+# THE COLUMNS ARE `carrier` / `naic`, NOT `carrier_name` / `carrier_naic`.
+# That is what `_EXTRACT_SCHEMA`'s RULE 16 writes and what every production
+# reader asks for (`_build_scoped_fact_store`, `_section_carrier_pair`,
+# `_resolve_package_header_identity`, post-fill Guards 2c / 2c-N). This fixture
+# carried the fact-key spellings until 2026-09-02, which made it a D22 trap:
+# the roster and letter assertions below would have passed against a shape
+# extraction never produces, and every carrier-attestation guard was silently
+# inert on it. Do not "tidy" these back to the fact names.
 MULTI_INSURER_LINES = [
     {"line": "Commercial General Liability", "policy_number": "BBC7263",
-     "carrier_name": "EMC Property & Casualty", "carrier_naic": "25186",
+     "carrier": "EMC Property & Casualty", "naic": "25186",
      "premium": "5,000"},
     {"line": "Business Auto", "policy_number": "6E7-40-02---26",
-     "carrier_name": "Employers Mutual Casualty", "carrier_naic": "21415",
+     "carrier": "Employers Mutual Casualty", "naic": "21415",
      "premium": "2,991"},
     {"line": "Commercial Liability Umbrella", "policy_number": "6J7-40-02---26",
-     "carrier_name": "EMCASCO Insurance Company", "carrier_naic": "21407",
+     "carrier": "EMCASCO Insurance Company", "naic": "21407",
      "premium": "1,200"},
 ]
 
@@ -223,16 +232,16 @@ def test_r03_line_cell_resolver_attributes_by_line(column, expected):
 
 def test_r03_gl_and_auto_umbrella_carriers_remain_separate():
     """The GL carrier and the Auto/Umbrella carriers remain SEPARATE facts."""
-    carriers = {e["carrier_name"] for e in MULTI_INSURER_LINES}
-    naics = {e["carrier_naic"] for e in MULTI_INSURER_LINES}
+    carriers = {e["carrier"] for e in MULTI_INSURER_LINES}
+    naics = {e["naic"] for e in MULTI_INSURER_LINES}
     assert len(carriers) == 3 and len(naics) == 3
 
     # A carrier and its NAIC are only ever paired from ONE entry - the defect
     # this replaced recombined Employers Mutual with EMC P&C's NAIC 25186.
     for entry in MULTI_INSURER_LINES:
-        assert fc.carriers_same_family(entry["carrier_name"], entry["carrier_name"])
+        assert fc.carriers_same_family(entry["carrier"], entry["carrier"])
     gl, auto = MULTI_INSURER_LINES[0], MULTI_INSURER_LINES[1]
-    assert gl["carrier_naic"] != auto["carrier_naic"]
+    assert gl["naic"] != auto["naic"]
 
 
 def test_r03_no_carrier_conflict_solely_because_multiple_insurers_exist():
@@ -250,11 +259,11 @@ def _dec_docs(lines):
         "doc_id": "d%d" % i,
         "doc_type": "dec_page",
         "filename": "dec_%d.pdf" % i,
-        "facts": {"carrier_name": entry["carrier_name"],
+        "facts": {"carrier_name": entry["carrier"],
                   "applicant_name": "Orbin Contracting LLC",
                   "coverage_lines": [entry]},
         "text": "Named Insured: Orbin Contracting LLC\nInsurer: %s\n"
-                "Policy Number %s\n%s" % (entry["carrier_name"],
+                "Policy Number %s\n%s" % (entry["carrier"],
                                           entry["policy_number"], entry["line"]),
     } for i, entry in enumerate(lines, start=1)]
 
@@ -266,7 +275,7 @@ def _scoped_store(lines):
     Omitting this is what makes a healthy 3-carrier package look like a
     cross-document disagreement - the scope is the whole point.
     """
-    return {"carrier_name": [{"value": e["carrier_name"],
+    return {"carrier_name": [{"value": e["carrier"],
                               "scope": {"line": e["line"],
                                         "policy": e["policy_number"]}}
                              for e in lines]}
@@ -311,15 +320,10 @@ def test_r03_two_carriers_on_the_SAME_line_is_still_a_conflict():
     assert assessment["conflict_count"] >= 1
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "V1 REGRESSION PACK GAP - client test 3 'insurer letters map correctly'. "
-    "H5 'ACORD 25 Multi-Carrier Mapping' is NOT STARTED. "
-    "pdf_service._ACORD_FIELD_RULES maps Insurer_FullName to the single "
-    "package-level carrier_name scalar, so Insurer_FullName_B..F are blank on a "
-    "3-carrier package, and every *_InsurerLetterCode_* is unmapped (rule value "
-    "None) and additionally listed in _RAW_TEXT_SKIP_PATTERNS, so no line can "
-    "point at its own insurer row. Per-line POLICY columns are correct and are "
-    "pinned by the passing tests above. Remove this xfail when H5 ships."))
+# WAS AN xfail(strict=True) - the V1 regression pack's one known gap, H5
+# "ACORD 25 Multi-Carrier Mapping". SHIPPED 2026-09-02: the roster comes from
+# `_resolve_certificate_insurer_row` and the letters from
+# `_resolve_certificate_insurer_letter`, both driven by `coverage_lines`.
 def test_r03_insurer_letters_map_to_their_line(acord25_mapped):
     """Insurer letters map correctly: three carriers occupy three insurer rows,
     and each coverage line's letter code points at its own insurer."""

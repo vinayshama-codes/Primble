@@ -50,8 +50,8 @@ logger = logging.getLogger(__name__)
 # model still filled one of them from the operations text, which turned a
 # -15 into a -10. No schema change; the version moves so the five live
 # packages re-extract under the stricter rule instead of serving v15 replies.
-PROMPT_VERSION = "v17"
-SCHEMA_VERSION = "v17"
+PROMPT_VERSION = "v18"
+SCHEMA_VERSION = "v18"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -562,6 +562,61 @@ TRISTATE_BOOLEAN_FACTS: frozenset = frozenset(
     re.findall(r'"([a-z_][a-z0-9_]*)":\s*boolean or null', _EXTRACT_SCHEMA)
 )
 
+# ── Every key LLM call 1 declares as a boolean (SYS-07, 2026-09-04) ─────────
+# The DECLARATION of "this fact is a Yes/No", read from the schema that already
+# makes it. `normalization.is_yes_no_field` consults this so the comparison
+# layer stops guessing a fact's type from the spelling of its KEY - which is
+# how `inside_city_limits` came to be compared as a MONEY amount (the token
+# "limits") and `auto_hired_nonowned` as free text, so that "Yes" from a policy
+# and "X" from a certificate were reported to the producer as a conflict.
+#
+# Both shapes are included (`boolean` and `boolean or null`) - the tri-state
+# distinction above is about what a `false` MEANS, not about what the value's
+# type is, and the type is all this set answers.
+BOOLEAN_FACT_KEYS: frozenset = frozenset(
+    re.findall(r'"([a-z_][a-z0-9_]*)":\s*boolean', _EXTRACT_SCHEMA)
+)
+
+
+def unevidenced_boolean_negative(fact_key: str, value) -> bool:
+    """True when this value is a TWO-WAY boolean's ``false`` - which means
+    "the document did not say", NOT "No" (V1 core principle 3, defect B8).
+
+    The two declarations above are what decide it, and the difference is the
+    whole point:
+
+      * ``boolean or null`` (``TRISTATE_BOOLEAN_FACTS``) - the model is TOLD to
+        answer null when the document does not address the subject, so a
+        ``false`` is the document SAYING NO. Never touched here: a real No must
+        still be able to conflict with a Yes.
+      * bare ``boolean`` - the model has no way to say "not mentioned", so its
+        ``false`` is indistinguishable from silence. That is defect B8.
+
+    LIVE RUN 1 (2026-09-04) proved the pre-existing guard does not hold. B8's
+    protection was `isinstance(v, bool)` in `underwriting_consistency.
+    _auto_scalar_keys` - a TYPE test - and the model returned the STRINGS
+    "True" / "False" for `cyber_controls_mfa` on a certificate that never
+    mentions multi-factor authentication. Two false "documents disagree" cards
+    reached the producer. Measured: as real bools the key is excluded and no
+    card appears; as strings it is included and a card does. **A guard keyed on
+    a TYPE is only as good as the model's willingness to honour that type**, so
+    this one is keyed on the DECLARATION plus the VALUE, which the model cannot
+    defeat.
+
+    Lives here, not in `underwriting_consistency`, because the two declaration
+    sets it reads are defined here and BOTH the picker and the merge have to ask
+    the same question - one door.
+    """
+    if not fact_key or fact_key not in BOOLEAN_FACT_KEYS:
+        return False
+    if fact_key in TRISTATE_BOOLEAN_FACTS:
+        return False
+    try:
+        from services.normalization import yes_no_answer
+        return yes_no_answer(value) == "N"
+    except Exception:                                        # noqa: BLE001
+        return False
+
 # The set of flags the schema ASKS the model to answer as an affirmative
 # absence assertion. Auto-discovered by NAMING CONVENTION - `asserts_no_*` -
 # from the schema string itself, the same way `TRISTATE_BOOLEAN_FACTS` is
@@ -695,7 +750,7 @@ _EXTRACT_PROMPT_PREFIX = (
     '  has_general_liability: true if document mentions "General Liability", "GL", "premises/operations", "products/completed operations", "personal and advertising injury", GL limits, or GL premiums.\n'
     '  has_property_coverage: true if document explicitly lists a building limit or BPP (business personal property) value, commercial property premium, or COPE data (construction type, year built, occupancy, protection class) for a covered location. Do NOT set true based on mailing addresses alone, certificate holder addresses, or GL-only premises descriptions.\n'
     '  has_auto_coverage: true if document mentions business auto, commercial auto, vehicle schedules, VINs, auto liability limits, or fleet coverage as a distinct coverage line or policy section. Do NOT set true based solely on "hired/non-owned auto" appearing as a GL endorsement line — that alone is not a separate commercial auto policy.\n'
-    '  has_workers_comp: true if document mentions workers compensation, WC, payroll by class code, experience modification factor, employers liability, or WC class codes.\n'
+    '  has_workers_comp: true ONLY when the document shows Workers Compensation is actually CARRIED or APPLIED FOR - a WC policy number, a WC premium, stated Employers Liability limits, a WC class-code and payroll schedule, or an experience modification factor for THIS applicant. A printed HEADING alone is NOT enough: every ACORD 25 certificate preprints "WORKERS COMPENSATION AND EMPLOYERS LIABILITY" and the three E.L. limit labels whether or not the row carries a policy, so a blank WC row must leave this false. Do NOT set true because the words appear in an exclusion, a checklist, a coverage menu, or a sentence saying WC is placed elsewhere or not included.\n'
     '  has_umbrella: true if the document explicitly shows an umbrella or excess liability LIMIT or PREMIUM (e.g. "$2M Umbrella", "Excess Liability – $5,000,000") for coverage above a primary GL or auto policy. Do NOT set true merely because the words "excess", "limits", "attachment point", or "SIR" appear without a distinct umbrella/excess policy section or stated dollar amount.\n'
     '  has_multiple_locations: true if document lists 2 or more distinct insured property addresses or locations.\n'
     '  has_loss_history: true if document contains a loss run, claims history table, prior claims, loss amounts, or any mention of paid/incurred/open claims.\n'
@@ -786,6 +841,7 @@ _EXTRACT_PROMPT_PREFIX = (
     'actual loss run data IS present in this document (use loss_history, loss_run_valuation_date, '
     'and related fields for that), and do NOT infer pending status from the absence of loss '
     'runs alone - there must be an affirmative statement that they are outstanding.\n\n'
+    'RULE 12b — num_claims / total_incurred / loss_history (CLAIM EVIDENCE): report only claims the document ACTUALLY LISTS. Set num_claims and total_incurred to null unless the document shows real claim data - a loss run, a claims table, or a stated claim count or incurred total for THIS applicant. NEVER derive them from a premium, a limit, a deductible, a payroll figure or any other amount that is not a loss. When the document states there are NO losses ("no prior losses", "no known losses", "loss-free", "claims-free"), set num_claims to "0", total_incurred to null, and leave loss_history EMPTY. Do NOT put the no-loss sentence into loss_history as a row: that list is for INDIVIDUAL CLAIMS only, and a row whose description merely restates that there are no claims contradicts the very statement it came from. Every loss_history row must describe one real claim and carry at least a date or an amount.\n\n'
     'RULE 13 — Loss-run period dating (loss_run_period_start / loss_run_period_end / '
     'loss_history_years): these are deterministic scoring inputs, not the per-claim list from '
     'RULE 7 - extract them whenever a loss run states its OWN coverage/experience period, even '
@@ -1426,12 +1482,131 @@ _PROSE_CONFUSABLE_TYPES = frozenset({
 })
 
 
+# ── A DOCUMENT DENYING IT HAS SOMETHING IS NOT EVIDENCE THAT IT DOES ─────────
+# LIVE 2026-09-08. A commercial application whose closing line read
+#
+#     "Loss runs have not been attached to this submission."
+#
+# classified as a LOSS RUN, high confidence - loss_run 10.0 against application
+# 4.5 - because `_content_scores` asked only `kw in tl` and the literal phrase
+# "loss runs" is worth 3.0. `has_loss_run_doc` went True, the Loss History
+# pillar took the runs-uploaded path (checked BEFORE the attestation branch,
+# correctly), scored 60 instead of 40, and emitted two recommendations about a
+# document that does not exist.
+#
+# This is the client's own axis. Principle 3, *"Missing Does Not Mean No"*:
+# *"distinguish between information that is actually negative and information
+# that simply was not found."* And his 1 Sep ruling names this exact state -
+# *"a narrative stating no losses, a client confirming no losses, and CARRIER
+# LOSS RUNS NOT BEING PROVIDED are different evidence states and should not be
+# collapsed."* Reading "not provided" as "provided" does not collapse that
+# state, it inverts it. Same class as `coverage_evidence.umbrella_schedule_
+# present` and `text_references_schedule_as_present`, one layer up.
+#
+# THE ADVERSARIAL CASE, WRITTEN FIRST, AND IT DECIDES THE DESIGN. ACORD 25
+# prints its own denial in boilerplate on every certificate ever issued:
+#
+#     "THIS CERTIFICATE OF INSURANCE DOES NOT CONSTITUTE A CONTRACT ..."
+#
+# A rule that deletes any keyword appearing in a negated clause would stop every
+# certificate from classifying as one - far worse than the bug. So the rule is
+# not "strip negated clauses". It is:
+#
+#     a phrase counts when AT LEAST ONE of its occurrences is not denied.
+#
+# The certificate's TITLE is an ordinary mention, so it scores; the application
+# mentions "loss runs" exactly once and denies it, so it does not. The check can
+# only ever REMOVE a keyword the document itself contradicts everywhere it
+# appears - it can cost a match, it can never invent one.
+_NEG_CLAUSE_BREAK = ".;!?\n\r"
+_NEG_CLAUSE_WINDOW = 160          # chars either side; a clause is never longer
+
+# Token-based, not a regex over raw text: punctuation between the phrase and its
+# verb is normal ("Loss runs: not attached", "Loss runs -- not provided") and a
+# character-level pattern kept tripping over it.
+_NEG_TOKEN_RE = re.compile(r"[\w']+")
+# Before the phrase: "no loss runs", "without loss runs", "has never received
+# loss runs".
+_NEG_DETERMINERS = frozenset({"no", "not", "without", "neither", "nor", "never"})
+_NEG_BEFORE_TOKENS = 2      # the determiner, plus at most one word between
+# After the phrase: "loss runs have not been attached", "certificate ... does
+# not constitute", "loss runs: not attached".
+_NEG_CONTRACTIONS = frozenset({
+    "isn't", "aren't", "wasn't", "weren't", "hasn't", "haven't", "won't",
+    "cannot", "can't", "don't", "doesn't", "didn't", "isnt", "arent", "wasnt",
+    "werent", "hasnt", "havent", "wont", "cant", "dont", "doesnt", "didnt",
+})
+_NEG_AFTER_TOKENS = 4       # far enough for "have not been", short enough to
+                            # stay inside the phrase's own predicate
+
+# Bound the work: a phrase like "paid" or "declaration" can appear thousands of
+# times in a 700k-char package. Early exit on the first UNDENIED occurrence
+# makes the common case one scan; the cap makes the pathological case bounded,
+# and hitting it means "keep today's behaviour", never "drop the keyword".
+_NEG_MAX_OCCURRENCES = 200
+
+
+def _occurrence_is_denied(tl: str, start: int, end: int) -> bool:
+    """Does this occurrence's own clause deny the phrase sitting in it?"""
+    before = tl[max(0, start - _NEG_CLAUSE_WINDOW):start]
+    for ch in _NEG_CLAUSE_BREAK:
+        cut = before.rfind(ch)
+        if cut >= 0:
+            before = before[cut + 1:]
+    lead = _NEG_TOKEN_RE.findall(before)[-_NEG_BEFORE_TOKENS:]
+    for i, token in enumerate(lead):
+        if token not in _NEG_DETERMINERS:
+            continue
+        # "Policy No. 12345 - Loss Run" is a NUMBER, not a negation. A real
+        # denial never has a bare figure as its object, and this shape is on
+        # every dec page and loss run we handle.
+        if token == "no" and i + 1 < len(lead) and lead[i + 1].isdigit():
+            continue
+        return True
+
+    after = tl[end:end + _NEG_CLAUSE_WINDOW]
+    for ch in _NEG_CLAUSE_BREAK:
+        cut = after.find(ch)
+        if cut >= 0:
+            after = after[:cut]
+    tail = _NEG_TOKEN_RE.findall(after)[:_NEG_AFTER_TOKENS]
+    # "never" was declared a negation on the BEFORE side and omitted here, so
+    # "loss runs were NEVER provided" read as evidence of a loss run while
+    # "we NEVER received loss runs" did not. An inconsistency in one rule, not a
+    # new vocabulary entry - the word was already in `_NEG_DETERMINERS`.
+    return any(t == "not" or t == "never" or t in _NEG_CONTRACTIONS for t in tail)
+
+
+def _phrase_counts(tl: str, kw: str) -> bool:
+    """True when `kw` appears at least once WITHOUT being denied there.
+
+    Fails toward today's behaviour at every uncertainty: an unfindable phrase is
+    absent as before, and a phrase whose first `_NEG_MAX_OCCURRENCES` mentions
+    are all denied still counts, because at that density the document is about
+    the thing whatever its grammar says."""
+    idx = tl.find(kw)
+    if idx < 0:
+        return False
+    seen = 0
+    klen = len(kw)
+    while idx >= 0 and seen < _NEG_MAX_OCCURRENCES:
+        seen += 1
+        if not _occurrence_is_denied(tl, idx, idx + klen):
+            return True
+        idx = tl.find(kw, idx + 1)
+    return idx >= 0          # ran out of budget -> keep the keyword
+
+
 def _content_scores(tl: str) -> Dict[str, float]:
     """Pure keyword-weighted content score per doc type (no narrative-rule or
     filename influence — those are layered on separately so broad narrative
-    signals can never out-vote a strong structured keyword)."""
+    signals can never out-vote a strong structured keyword).
+
+    A phrase the document denies everywhere it appears does not score - see the
+    note above `_NEG_CLAUSE_BREAK` for the live defect and the ACORD 25
+    adversarial case that shapes the rule."""
     return {
-        dt: sum(w for kw, w in kws if kw in tl)
+        dt: sum(w for kw, w in kws if _phrase_counts(tl, kw))
         for dt, kws in DOC_TYPE_KEYWORDS.items()
     }
 
@@ -3012,9 +3187,21 @@ def _driver_dedup_keys(item: dict) -> List[str]:
 # a contractor can own two identical trucks bought together, and merging those
 # would delete a real vehicle. No identifier, no merge - the same "positive
 # evidence only" rule the rest of this module follows.
+# `claim_number` added 2026-09-01. Same construction as the six above: a carrier
+# issues ONE claim number per claim, so two rows sharing one are one loss printed
+# twice. Measured on the T1 live run - the package prints its loss run as a
+# summary table (no reserve column) and again ~14 pages later as "Supplemental
+# Loss Detail" (with reserves). Both printings survived: `loss_history` came back
+# with EIGHT rows for FIVE losses, and because `LossHistory_*` is schedule-bound
+# the ACORD 131 then printed six rows deterministically, the last three
+# describing claims that had already been printed. Every one of that run's 11
+# cross-row cells traces here.
+#
+# The merge is gap-filling, so it GAINS data: the summary row's empty reserve is
+# filled from the supplemental row rather than either being dropped.
 _NATURAL_ID_SUBKEYS: Tuple[str, ...] = (
     "vin", "license_number", "serial_number", "equipment_serial_number",
-    "identification_number", "item_serial_number",
+    "identification_number", "item_serial_number", "claim_number",
 )
 # Short strings collide; a real identifier of any of these kinds is longer.
 _NATURAL_ID_MIN_CHARS = 6
@@ -3109,10 +3296,79 @@ def _wc_class_dedup_keys(item: dict) -> List[str]:
     return [f"wc_class:{code}:{state}:{pay}"]
 
 
+def _underlying_policy_dedup_keys(item: dict) -> List[str]:
+    """Identity of ONE underlying policy row: the LINE plus the CONTRACT.
+
+    Exactly the `_coverage_line_dedup_keys` shape, applied to the ACORD 131
+    schedule of underlying insurance, which had no key at all. Measured on the
+    T1 live run: the schedule prints once as a table and again as a labelled
+    detail block, so `underlying_policies` came back with EIGHT rows for FOUR
+    policies - and the second GL printing carried the UMBRELLA's $5,000,000 as
+    its limit.
+
+    NEITHER HALF WORKS ALONE, and both failures are already on record:
+      * policy number alone would fold the General Liability and Automobile
+        rows together on this very package - both are written under the ONE
+        package number `CPP 4Q 887214 26`. That is the same trap the comment on
+        `_NATURAL_ID_SUBKEYS` forbids, one schedule over.
+      * line alone is the D-1 defect: two carriers' GL policies are two
+        policies, and collapsing them hides a real conflict from the producer.
+
+    So identity is the PAIR, and a row missing either half gets NO key.
+    """
+    line = re.sub(r"[^a-z0-9]", "", str(item.get("line") or "").lower())
+    pol = re.sub(r"[^a-z0-9]", "", str(item.get("policy_no")
+                                       or item.get("policy_number") or "").lower())
+    if not (line and pol):
+        return []
+    return [f"underlying:{line}:{pol}"]
+
+
+def _gl_hazard_dedup_keys(item: dict) -> List[str]:
+    """Identity of ONE GL schedule-of-hazards row: class code + territory +
+    exposure. The `_wc_class_dedup_keys` shape (code + geography + amount),
+    applied to the GL twin, which had no key.
+
+    Measured on the T1 live run: the hazard schedule prints as two stacked
+    blocks - identity+exposure, then rates+premiums - and both were captured,
+    so `gl_class_code_schedule` came back with SIX rows for THREE
+    classifications.
+
+    LOCATION IS DELIBERATELY NOT PART OF THE KEY, and this is the one place
+    this differs from its WC sibling. On the live run extraction put the WRONG
+    location on the duplicate row (`002` against class 91340, whose real
+    location is `001`), so keying on it would have kept both rows and printed
+    the same classification twice. Territory is the geographic dimension that
+    survived intact. The first row's correct location wins the merge.
+
+    EXPOSURE is what keeps two REAL rows apart - the same reasoning
+    `_wc_class_dedup_keys` gives for payroll: one class code at two locations
+    with different exposures is two rows, and folding them would keep only the
+    first exposure. A row missing any of the three gets NO key.
+    """
+    code = re.sub(r"[^0-9A-Za-z]", "", str(item.get("class_code") or "")).upper()
+    terr = re.sub(r"[^0-9A-Za-z]", "", str(item.get("territory") or "")).upper()
+    exposure = re.sub(r"[^\d]", "", str(item.get("exposure_amount") or ""))
+    if not (code and terr and exposure):
+        return []
+    return [f"gl_hazard:{code}:{terr}:{exposure}"]
+
+
+# NOT REGISTERED, considered and declined 2026-09-01: `property_locations`.
+# `_address_identity_key` (street number + ZIP) already exists and would slot in
+# here, but two genuinely different premises at the same street number in the
+# same ZIP - "100 Main St" and "100 Oak Ave, Denver 80204" - would fold into one
+# and DELETE a real location. The live run needed no such merge (its six rows are
+# five real premises plus one phantom with neither number nor ZIP, which gets no
+# key either way), and `_consolidate_property_locations` already owns location
+# folding. A second door onto one decision is the duplication defect this
+# codebase keeps re-learning; there is no measured benefit to trade for it.
 _SCHEDULE_DEDUP_KEYS: Dict[str, Any] = {
     "auto_drivers": _driver_dedup_keys,
     "coverage_lines": _coverage_line_dedup_keys,
     "wc_class_codes": _wc_class_dedup_keys,
+    "underlying_policies": _underlying_policy_dedup_keys,
+    "gl_class_code_schedule": _gl_hazard_dedup_keys,
 }
 
 
@@ -3143,6 +3399,166 @@ _PARTY_NAME_MIN_CHARS = 5
 # producer's own office, byte-identical to `producer_address`, and it printed on
 # ACORD 125 as a location with no operations description.
 _ADDRESS_SCHEDULE_KEYS: Tuple[str, ...] = ("property_locations",)
+
+# Schedules that are a bare list of NAMES rather than rows. Same principle
+# again, third shape - and the party that reaches this one is a different one.
+#
+# LIVE 2026-09-05 (SYS-09 kit): "Kestrel Terminal Authority", the CERTIFICATE
+# HOLDER, came out of `additional_named_insureds` and printed on ACORD 125 as
+# `NAME (Other Named Insured)` with its own address. That is not a cosmetic
+# mis-file: an Other Named Insured shares the policy, so the form asserted
+# coverage for a party the policy does not name.
+#
+# AN ADDITIONAL INSURED IS NOT AN ADDITIONAL NAMED INSURED, and a certificate
+# saying "certificate holder is an additional insured with respect to
+# operations" - which is what the document said, and is the single most common
+# sentence on a COI - grants limited status by endorsement. It never makes the
+# holder a named insured, so this drop is right even when the document says
+# the holder is an additional insured.
+#
+# Nothing is lost by dropping rather than re-routing: `AdditionalInsured_
+# FullName` appears in NO ACORD schema (verified across all 17), so the ONLY
+# live consumer of this fact is the Named Insured roster, and the holder's own
+# identity already has its own extraction field (`certificate_holder_name`).
+_NAME_LIST_SCHEDULE_KEYS: Tuple[str, ...] = ("additional_named_insureds",)
+
+# ── ONE DOOR: the names this package states for parties OTHER than the applicant
+#
+# DERIVED, NOT LISTED - and that distinction IS the fix. The first version of
+# this guard hard-coded five fact keys, and one of them
+# (`certificate_holder_name`) does not exist at the top level at all: extraction
+# writes the holder as top-level `certificate_holder` AND as
+# `risk_transfer.certificate_holder_name`, nested inside a structured dict that
+# nothing flattens. The guard read a drawer that was never there. It worked for
+# four parties, was dead for the fifth, and 24 tests passed because the fixture
+# invented the missing drawer.
+#
+# A hand-written list of keys cannot survive that. Extraction adds keys, renames
+# them and nests them; every one of those silently reopens the hole, and the
+# symptom is a wrong name on a signed form. So membership is worked out from
+# what a key MEANS, wherever it happens to sit.
+#
+# `test_every_party_identity_fact_is_visible_to_the_door` fails the build if a
+# new party-name fact appears in the extraction schema that this cannot see.
+
+# Words that name a party to the transaction who is NOT the applicant.
+_THIRD_PARTY_ROLE_TOKENS: Tuple[str, ...] = (
+    "producer", "agency", "broker", "carrier", "insurer",
+    "certificate_holder", "mortgagee", "lienholder", "loss_payee", "lender",
+    "trustee", "additional_interest",
+)
+
+# ...and the words that mark a key as one of that party's ATTRIBUTES rather than
+# its identity. `certificate_holder_address` is the holder's street, not a name.
+_PARTY_ATTRIBUTE_TOKENS: Tuple[str, ...] = (
+    "address", "phone", "fax", "email", "website", "naic", "code", "number",
+    "amount", "limit", "date", "description", "percent", "pct", "signature",
+    "city", "state", "zip", "postal", "county",
+)
+
+# The applicant's own names. Blocked from the roster for a DIFFERENT reason than
+# the parties above: the roster stamps from row B onward (row A is the applicant
+# itself), so the applicant appearing in its own "other named insured" list
+# prints the same entity twice. Not a foreign party - a duplicate.
+_APPLICANT_SELF_KEYS: Tuple[str, ...] = ("applicant_name", "dba_name")
+
+# DELIBERATELY NOT A BLOCKED SOURCE: `risk_transfer.additional_insured_names`.
+# An additional insured is not an additional NAMED insured, so blocking the whole
+# list would close the class outright - and it is the one change here that can
+# delete a REAL second insured, because a genuine subsidiary is sometimes listed
+# as an additional insured too. Owner ruling 2026-09-06: do not block wholesale;
+# an additional insured who is ALSO independently identified as a third party
+# (the certificate holder, the mortgagee, the loss payee) is already caught by
+# that identity above, and one with no other role keeps its place on the form.
+
+
+def _is_party_identity_key(key: Any) -> bool:
+    """True when this key names a non-applicant party's own IDENTITY."""
+    k = str(key or "").lower()
+    if not any(tok in k for tok in _THIRD_PARTY_ROLE_TOKENS):
+        return False
+    return not any(tok in k for tok in _PARTY_ATTRIBUTE_TOKENS)
+
+
+def third_party_identity_names(facts: Any) -> set:
+    """Every name this package states for a party that is not the applicant.
+
+    Walks structured containers as well as the top level, so which drawer a fact
+    happens to live in stops being something a caller has to know.
+    """
+    out: set = set()
+
+    def _collect(value: Any) -> None:
+        if isinstance(value, dict) and "value" in value:
+            value = value.get("value")
+        if isinstance(value, str):
+            out.add(value)
+        elif isinstance(value, list):
+            out.update(v for v in value if isinstance(v, str))
+
+    if not isinstance(facts, dict):
+        return out
+    for key, val in facts.items():
+        if isinstance(val, dict) and "value" in val:
+            val = val.get("value")
+        if isinstance(val, dict):
+            # A structured container (`risk_transfer`, ...). Its OWN key says
+            # nothing about a party; its children do.
+            for sub_key, sub_val in val.items():
+                if _is_party_identity_key(sub_key):
+                    _collect(sub_val)
+            continue
+        if _is_party_identity_key(key):
+            _collect(val)
+    return out
+
+
+def _party_match_keys(value: str) -> set:
+    """Comparison keys for one party's stated name.
+
+    A party fact legitimately carries a name PLUS an address - the questionnaire
+    asks for the certificate holder's "name and address" in one box - so exact
+    equality alone misses "Kestrel Terminal Authority, 1201 Port of Tacoma Rd,
+    Tacoma WA 98421". The name is the part before the address, so each
+    comma-prefix whose REMAINDER carries a 5-digit ZIP is also a candidate key.
+    No vocabulary and no allow-list: "Acme, Inc." and "Smith, Jones & Co." have
+    no ZIP after the comma and are never split.
+
+    ONE-WAY, and this is load-bearing: only the PARTY's value is shortened, never
+    the roster entry. Shortening the roster entry - or matching on substrings -
+    would drop "Kestrel Terminal Authority Holdings LLC", a different company.
+    """
+    keys = {_identity_name_key(value)}
+    text = str(value or "")
+    for idx, ch in enumerate(text):
+        if ch != ",":
+            continue
+        if re.search(r"\b\d{5}(?:-\d{4})?\b", text[idx:]):
+            keys.add(_identity_name_key(text[:idx]))
+    return {k for k in keys if k}
+
+
+def _roster_blocked_names(facts: Any) -> set:
+    """Comparison keys no additional-NAMED-insured row may carry."""
+    names = set(third_party_identity_names(facts))
+    if isinstance(facts, dict):
+        for key in _APPLICANT_SELF_KEYS:
+            val = facts.get(key)
+            if isinstance(val, dict) and "value" in val:
+                val = val.get("value")
+            if isinstance(val, str):
+                names.add(val)
+    blocked: set = set()
+    for name in names:
+        blocked |= _party_match_keys(name)
+    return {k for k in blocked if len(k) >= _PARTY_NAME_MIN_CHARS}
+
+# Every list this filter knows how to clean. It exists because the filter was
+# reachable from ONE side of the merge only - see the call site in
+# `merge_facts`, and the comment there for what that cost.
+_PARTY_FILTERED_LIST_KEYS: Tuple[str, ...] = (
+    _PERSON_SCHEDULE_KEYS + _ADDRESS_SCHEDULE_KEYS + _NAME_LIST_SCHEDULE_KEYS
+)
 
 
 def _address_identity_key(value: Any) -> Optional[Tuple[str, str]]:
@@ -3202,6 +3618,25 @@ def _drop_transaction_party_rows(
                 continue
             kept.append(item)
         return kept
+
+    if list_key in _NAME_LIST_SCHEDULE_KEYS:
+        blocked_names = _roster_blocked_names(facts)
+        if not blocked_names:
+            return items
+        kept_names: List[Any] = []
+        for item in items:
+            # The list is declared as [string], but a model that returns
+            # [{"name": ...}] must not slip through a shape check.
+            raw = item.get("name") if isinstance(item, dict) and "name" in item else item
+            if _identity_name_key(raw) in blocked_names:
+                logger.info(
+                    "merge schedule_party_drop field=%r dropped=%r - that party is "
+                    "not an additional NAMED insured on the applicant's policy",
+                    list_key, str(raw)[:70],
+                )
+                continue
+            kept_names.append(item)
+        return kept_names
 
     if list_key not in _PERSON_SCHEDULE_KEYS:
         return items
@@ -3278,7 +3713,7 @@ def _iso_date_or_none(sval: str) -> Optional[str]:
         return None
 
 
-def _variant_group_key(sval: str) -> str:
+def _variant_group_key(sval: str, fact_key: Optional[str] = None) -> str:
     """Group key that ignores FORMATTING but not CONTENT.
 
     THE VOTE-SPLITTING FIX. Cross-chunk merging used `sval.lower()` as the
@@ -3300,11 +3735,30 @@ def _variant_group_key(sval: str) -> str:
     alphanumerics. Genuinely different values - four different policy numbers,
     two different NAIC codes - still land in different groups and still
     compete, because they really are different.
+
+    SYS-07 added the same treatment for Yes/No. Folding to alphanumerics left
+    `yes` / `x` / `true` / `y` as FOUR rivals for one answer, so the winner was
+    decided by which spelling the document happened to print most often and
+    `X` could become the stored canonical fact - and then the value the forms
+    stamp. `fact_key` is optional so the existing single-argument callers (and
+    their tests) are untouched; without it the Yes/No fold simply does not run.
     """
     s = sval.strip()
     iso = _iso_date_or_none(s)
     if iso:
         return "d:" + iso
+    if fact_key:
+        try:
+            from services.normalization import is_yes_no_field, yes_no_answer
+            if is_yes_no_field(fact_key):
+                # Field-gated, so the wider reader is safe here: a chunk that
+                # returned the whole printed line ("Hired and Non-Owned Auto
+                # Coverage: X") must not out-vote the chunk that returned "Yes".
+                tok = yes_no_answer(s)
+                if tok:
+                    return "yn:" + tok
+        except Exception:                                    # noqa: BLE001
+            pass
     folded = re.sub(r"[^a-z0-9]+", "", s.lower())
     return folded or s.lower()
 
@@ -3324,8 +3778,29 @@ def _is_midword_truncation(short: str, long: str) -> bool:
     return b[len(a)].isalnum() and a[-1].isalnum()
 
 
-def _prefer_variant(new: str, current: str) -> bool:
-    """Should `new` replace `current` as its group's representative?"""
+def _prefer_variant(new: str, current: str, fact_key: Optional[str] = None) -> bool:
+    """Should `new` replace `current` as its group's representative?
+
+    On a Yes/No fact the group now holds every printing of one answer, so this
+    also elects the CANONICAL one (SYS-07). Without it the stored fact - and
+    therefore the value stamped on the form - would be whichever spelling the
+    first chunk happened to print, which on the client's package was the
+    certificate's bare "X".
+    """
+    if fact_key:
+        try:
+            from services.normalization import is_yes_no_field, canonical_yes_no
+            if is_yes_no_field(fact_key):
+                cn, cc = canonical_yes_no(new), canonical_yes_no(current)
+                if cn and cc:
+                    # Both are printings of the same answer (they share a group
+                    # key). Prefer the canonical word, and never demote one.
+                    new_is_canon = new.strip().lower() in ("yes", "no")
+                    cur_is_canon = current.strip().lower() in ("yes", "no")
+                    if new_is_canon != cur_is_canon:
+                        return new_is_canon
+        except Exception:                                    # noqa: BLE001
+            pass
     if _is_midword_truncation(current, new):
         return True                       # new restores truncated characters
     if _is_midword_truncation(new, current):
@@ -3437,13 +3912,34 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             if _is_empty(raw_val):
                 continue
             sval     = str(raw_val).strip()
-            norm_key = _variant_group_key(sval)
+            # A RATING BUREAU IS NEVER THE CARRIER (2026-09-05). Dropped at the
+            # merge as well as at the picker, because otherwise the picker would
+            # correctly stop offering it while the merge still ELECTED it and
+            # stamped "AAIS" as the insurer on a signed form - the same
+            # question-retired-answer-kept shape as B8.
+            try:
+                from services.normalization import (
+                    is_carrier_field as _is_carrier, is_insurance_bureau as _is_bureau,
+                    is_party_role_label as _is_role, _infer_field_category as _cat,
+                    NAME_FIELDS as _NAMES, _NAME_LIKE_KEYS as _NAME_LIKE,
+                )
+                if _is_carrier(k) and _is_bureau(sval):
+                    continue
+                # A ROLE LABEL IS NOT A NAME. "Certificate Holder" reached all
+                # three forms as the NAME of an additional interest, from a
+                # sentence describing the arrangement and naming nobody.
+                if (k in _NAMES or k in _NAME_LIKE or _cat(k) in ("name", "carrier")) \
+                        and _is_role(sval):
+                    continue
+            except Exception:                                # noqa: BLE001
+                pass
+            norm_key = _variant_group_key(sval, k)
             bucket   = val_candidates.setdefault(k, {})
             entry    = bucket.get(norm_key)
             if entry is None:
                 entry = {"record": v, "freq": 0, "display": sval, "authority": p_auth}
                 bucket[norm_key] = entry
-            elif _prefer_variant(sval, entry["display"]):
+            elif _prefer_variant(sval, entry["display"], k):
                 entry["record"], entry["display"] = v, sval
             entry["authority"] = _best_authority(entry.get("authority"), p_auth)
             entry["freq"] += 1
@@ -3452,6 +3948,38 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
     # scoring runs, so a value cut off mid-word cannot out-vote itself.
     for _bucket in val_candidates.values():
         _fold_truncated_groups(_bucket)
+
+    # ── A DOCUMENT THAT SAID NOTHING DOES NOT OUT-VOTE ONE THAT ANSWERED ─────
+    # Owner ruling, live run 1 (2026-09-04): *"if any document indicates yes or
+    # no and there is nothing related mentioned in another doc then take yes/no
+    # from that doc, but if there is a conflict then show"*.
+    #
+    # `unevidenced_boolean_negative` is the half that decides what counts as
+    # "nothing mentioned": on a fact LLM call 1 declares a bare `boolean`, the
+    # model has no way to answer "not addressed", so its `false` is silence.
+    # Without this the picker could correctly stop ASKING (it drops the same
+    # candidate) while the merge still ELECTED the silent document's false and
+    # stamped "No" on the form - the question retired and the wrong answer kept.
+    #
+    # DELIBERATELY CONDITIONAL, and this is the whole blast-radius argument: the
+    # negatives are dropped ONLY when some document actually answered. If every
+    # document is silent the bucket is left exactly as it was, so a fact that
+    # merges to `false` today still merges to `false` and nothing downstream -
+    # no stamped box, no flag, no score - moves. A TRI-STATE fact is never
+    # touched at all: there a `false` is the document saying No.
+    for _k, _bucket in val_candidates.items():
+        if not any(unevidenced_boolean_negative(_k, _e["display"])
+                   for _e in _bucket.values()):
+            continue
+        _spoke = {_nk: _e for _nk, _e in _bucket.items()
+                  if not unevidenced_boolean_negative(_k, _e["display"])}
+        if not _spoke:
+            continue                      # every document silent - leave it be
+        logger.info(
+            "merge %s: dropped %d unevidenced negative(s) - another document "
+            "answered (two-way boolean, a false cannot be told from silence)",
+            _k, len(_bucket) - len(_spoke))
+        val_candidates[_k] = _spoke
 
     merged_facts: dict = {}
 
@@ -6179,8 +6707,23 @@ def _consolidate_property_locations(facts: dict) -> None:
     _producer_line1_key = ""
     _producer_addr = _fv(facts, "producer_address")
     if _producer_addr:
-        _p_line1 = _parse_address(str(_producer_addr)).get("line1") or ""
-        _producer_line1_key = normalize_address(_p_line1) if _p_line1 else ""
+        # SPANS LINE 1 *AND* LINE 2, for the same reason the grouping key does
+        # (2026-09-01). `_parse_address` now lifts the unit designator onto line
+        # two, so a line1-only key reduces BOTH sides to the bare street: the
+        # producer's own "9780 S Meridian Blvd Ste 400" and the INSURED's real
+        # premises at "Ste 100" in the same building collapse to one key, and the
+        # insured's location is silently deleted. Measured before the fix: two
+        # premises in, one out.
+        #
+        # Note this is the exact INVERSE of the 2026-08-12 defect recorded just
+        # below, where the suite landed on line2 for the producer and stayed in
+        # line1 for the entry, so equality never matched and the agency's office
+        # printed as premises #4. Joining the lines settles both directions:
+        # same building AND same unit matches; same building, different unit
+        # does not.
+        _p_parsed = _parse_address(str(_producer_addr))
+        _p_street = f"{_p_parsed.get('line1') or ''} {_p_parsed.get('line2') or ''}".strip()
+        _producer_line1_key = normalize_address(_p_street) if _p_street else ""
 
     # STREET-NUMBER + ZIP identity for the producer/carrier, alongside the
     # line1-equality check above. 52-page trap run (2026-08-12): the packet's
@@ -6215,7 +6758,8 @@ def _consolidate_property_locations(facts: dict) -> None:
         )
         if line1 and _unit_only_re.match(line1) and not has_own_geo:
             return False                    # bare unit fragment, not a premises
-        if _producer_line1_key and line1 and normalize_address(line1) == _producer_line1_key:
+        _entry_street = f"{line1} {str(entry.get('address_line2') or '').strip()}".strip()
+        if _producer_line1_key and line1 and normalize_address(_entry_street) == _producer_line1_key:
             return False                    # the agency's address, not the insured's
         if _blocked_party_ids and _address_identity_key(entry) in _blocked_party_ids:
             return False                    # producer/carrier office by street#+ZIP
@@ -6248,7 +6792,22 @@ def _consolidate_property_locations(facts: dict) -> None:
     for entry in entries:
         addr  = str(entry.get("address") or "").strip()
         line1 = str(entry.get("address_line1") or "").strip()
-        key = normalize_address(line1) if line1 else (normalize_address(addr) if addr else "")
+        # THE KEY SPANS LINE 1 *AND* LINE 2, and it must (2026-09-01).
+        # C48's fold rules rely on two suites in one building diverging inside
+        # the key - "Two different suites diverge before the tail ... so they
+        # never fold". That held only while `_parse_address` left the unit
+        # designator inside line1. Now that it lifts the unit onto line2, a
+        # line1-only key would make Ste 400 and Ste 900 identical and collapse
+        # two real premises into one ACORD 125 row - deleting a location.
+        #
+        # Joining the two lines keeps the key BYTE-IDENTICAL either way:
+        # normalize_address("4800 DAHLIA ST # D13") ==
+        # normalize_address("4800 DAHLIA ST" + " " + "# D13"), so a legacy
+        # session regrouped after this change lands on the same keys it had.
+        # Pinned by test_i5_grouping_key_is_stable_wherever_the_unit_sits.
+        line2 = str(entry.get("address_line2") or "").strip()
+        street = f"{line1} {line2}".strip() if line1 else ""
+        key = normalize_address(street) if street else (normalize_address(addr) if addr else "")
         if not key:
             # No usable address signal - keep as its own singleton so whatever
             # sub-field data it carries is never silently dropped.
@@ -7227,15 +7786,30 @@ def _canon_line(text: Any) -> Optional[str]:
     return _lob_canon_line(text)
 
 
+# The ISO/AAIS form-number convention. Mirrors `pdf_service._FORM_NUMBER_RE`,
+# kept local to avoid importing the stamping layer into extraction (the same
+# reason `_looks_like_a_policy_number` gives). Named and hoisted for SYS-06 so
+# the two questions it answers are separable: `_looks_like_a_form_number` is
+# "this string names coverage WORDING, not a contract", while
+# `_looks_like_a_policy_number` additionally requires a usable identifier
+# (length, a digit). Conflating them once cost a short-but-real policy number
+# its scope.
+_FORM_NUMBER_RE = re.compile(r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", re.I)
+
+
+def _looks_like_a_form_number(value: Any) -> bool:
+    """True for 'CG 00 01 04 13', 'IM 7100 06 04', 'IL 00 17 11 98'."""
+    return bool(_FORM_NUMBER_RE.match(str(value or "").strip()))
+
+
 def _looks_like_a_policy_number(value: Any) -> bool:
     """Reject ISO/AAIS FORM numbers ('CG 00 01 04 13', 'IM 7100 06 04') and
     obvious non-identifiers. A form number names the coverage WORDING; a policy
-    number names THIS contract. Mirrors pdf_service._looks_like_a_form_number,
-    kept local to avoid importing the stamping layer into extraction."""
+    number names THIS contract."""
     s = str(value or "").strip()
     if len(s) < 4 or not re.search(r"\d", s):
         return False
-    return not re.match(r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", s, re.I)
+    return not _looks_like_a_form_number(s)
 
 
 def _policy_numbers_by_line(entries: Any) -> Dict[str, set]:
@@ -7259,6 +7833,178 @@ def _policy_numbers_by_line(entries: Any) -> Dict[str, set]:
     return out
 
 
+def _norm_policy_number(value: Any) -> str:
+    """Formatting-insensitive identity for a policy number."""
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def prior_term_policy_numbers(facts: Any) -> set:
+    """{normalised policy number} this session evidences as belonging to a PRIOR
+    TERM - the expiring programme, never the policy being applied for.
+
+    ── WHY THIS EXISTS (measured live, 1 Sep 2026, run 3) ───────────────────
+    The same document was uploaded twice. The second extraction read 43% MORE off
+    the declarations pages (167 -> 238 verified entries) and the forms came out
+    WORSE, which is the opposite of what more evidence should do. The extra
+    entries were the EXPIRING programme's policy numbers, and nothing downstream
+    could tell them from the in-force ones:
+
+        line-identity: dec entries name 2 policy numbers for line
+        ('general liability',) (['CPP 4Q 887214 26', 'GL 7784120 25'])
+        - box left blank rather than choosing
+
+    Refusing is the right instinct and it cost seven of eight coverage lines
+    their policy number, put three expiring policies in ACORD 125's OTHER
+    INSURANCE grid, and stamped the EXPIRING umbrella number on the ACORD 131
+    header.
+
+    ── WHY `prior_coverage_by_line` AND NOT THE SECTION HEADING ─────────────
+    Our fixture prints "EXPIRING PROGRAMME SUMMARY". A real carrier writes
+    "PRIOR POLICY", "RENEWAL OF", "EXPIRING COVERAGE", or nothing at all.
+    Matching heading wording would be a fixture allow-list. `prior_coverage_by_line`
+    is the fact whose entire MEANING is "the expiring programme" - the structure
+    says it, so no vocabulary has to.
+
+    ── THE SAME-NUMBER RENEWAL ──────────────────────────────────────────────
+    A renewal often keeps its number, and then the prior grid documents the
+    policy that is still IN FORCE (`_current_number_from_prior_grid` relies on
+    exactly that). So a number that IS the session's own `policy_number` is never
+    reported as prior.
+    """
+    out: set = set()
+    if not isinstance(facts, dict):
+        return out
+    grid = facts.get("prior_coverage_by_line")
+    if isinstance(grid, dict) and "value" in grid:
+        grid = grid.get("value")
+    if not isinstance(grid, list):
+        return out
+    current = facts.get("policy_number")
+    if isinstance(current, dict) and "value" in current:
+        current = current.get("value")
+    current_norm = _norm_policy_number(current)
+    for row in grid:
+        if not isinstance(row, dict):
+            continue
+        pn = _norm_policy_number(row.get("policy_no") or row.get("policy_number"))
+        if pn and pn != current_norm:
+            out.add(pn)
+    return out
+
+
+def _prior_programme_sections(entries: Any, prior: set) -> set:
+    """Declarations SECTION headings that document the EXPIRING programme.
+
+    **Learned from the document, never from heading vocabulary.** A section is
+    the expiring block when TWO OR MORE distinct prior-term policy numbers are
+    printed under it: one could be a renewal note mentioned in passing ("Renewal
+    of policy GL 7784120 25" sits under COMMON POLICY DECLARATIONS and must NOT
+    condemn that section), but two under one heading is a summary table of last
+    year's programme. Our fixture calls it "EXPIRING PROGRAMME SUMMARY"; a real
+    carrier calls it something else, and this never has to know.
+
+    Why the section and not just the number: measured on the live run, ONE entry
+    inside that block carried the CURRENT package number under a garbled header
+    label ("LINE EXPIRING INSURER POLICY N"), which made the package number a
+    third candidate for the UMBRELLA line and kept the box refusing even after
+    last year's umbrella number was removed. The number itself is perfectly real
+    elsewhere - it is its position INSIDE the expiring block that makes this
+    particular attribution worthless.
+    """
+    if not isinstance(entries, list) or not prior:
+        return set()
+    by_section: Dict[str, set] = {}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        sec = str(e.get("section") or "").strip().lower()
+        if not sec:
+            continue
+        pn = _norm_policy_number(e.get("policy_number"))
+        if pn in prior:
+            by_section.setdefault(sec, set()).add(pn)
+        # ── The prior numbers are often in the entries' VALUES, not the
+        # attribution (run 5, 2 Sep 2026). That extraction stamped every
+        # expiring-block entry with `policy_number = <the CURRENT package
+        # number>` - its "which policy does this page belong to" guess - while
+        # the ACTUAL prior numbers sat in the printed values:
+        #     label='POLICY NUMBER'  value='GL 7784120 25'   pn='CPP 4Q 887214 26'
+        # Counting attributions alone found nothing, the section went
+        # unidentified, and the manufactured CPP->umbrella attribution survived
+        # to make the umbrella box refuse. A section PRINTING two or more
+        # distinct prior-term numbers is the expiring block whichever field
+        # they arrived in.
+        # SUBSTRING, not equality (run 6, 2 Sep 2026): that extraction glued
+        # each expiring row into ONE entry whose value is the whole printed
+        # line - "GENERAL LIABILITY Sentinel Prairie Casualty Company
+        # GL 7784120 25 $54,120" - so a whole-value comparison missed every
+        # prior number and the section went unidentified AGAIN. A normalised
+        # prior number is 10+ alphanumerics; finding one inside a normalised
+        # value is unambiguous at that length, and the session's own number
+        # was already excluded from `prior` by construction.
+        vn = _norm_policy_number(e.get("value"))
+        if vn:
+            for pn in prior:
+                if pn and pn in vn:
+                    by_section.setdefault(sec, set()).add(pn)
+    return {sec for sec, nums in by_section.items() if len(nums) >= 2}
+
+
+def current_numbers_by_line(entries: Any, facts: Any) -> Dict[str, set]:
+    """`_policy_numbers_by_line`, with the EXPIRING programme's evidence removed.
+
+    **TIE-BREAKER ONLY, and that is the safety property.** A line whose every
+    candidate comes from the expiring block keeps them ALL, so this can never
+    empty a set and can therefore never turn a box that resolves today into a
+    blank. It can only ever settle a line that was refusing to choose between an
+    in-force number and last year's.
+    """
+    full = _policy_numbers_by_line(entries)
+    prior = prior_term_policy_numbers(facts)
+    if not prior or not isinstance(entries, list):
+        return full
+    sections = _prior_programme_sections(entries, prior)
+    current: Dict[str, set] = {}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        pn = str(e.get("policy_number") or "").strip()
+        if not pn or not _looks_like_a_policy_number(pn):
+            continue
+        if _norm_policy_number(pn) in prior:
+            continue                       # last year's number
+        if str(e.get("section") or "").strip().lower() in sections:
+            continue                       # printed inside the expiring block
+        line = _canon_line(e.get("line_of_business")) or _canon_line(e.get("section"))
+        if line:
+            current.setdefault(line, set()).add(pn)
+    out: Dict[str, set] = {}
+    for line, numbers in full.items():
+        kept = current.get(line) or set()
+        if kept and len(kept) < len(numbers):
+            logger.info(
+                "line-identity: line %r had %d candidates (%s); %d survive once "
+                "the expiring programme is set aside (%s)",
+                line, len(numbers), sorted(numbers)[:4], len(kept), sorted(kept)[:4],
+            )
+        out[line] = kept if kept else set(numbers)
+    return out
+
+
+def drop_prior_term_numbers(by_line: Dict[str, set], facts: Any) -> Dict[str, set]:
+    """Back-compatible shim - prefer `current_numbers_by_line`, which can also
+    see WHERE a number was printed. Kept so any caller holding a collapsed
+    per-line map still gets the number-level filter."""
+    prior = prior_term_policy_numbers(facts)
+    if not prior:
+        return by_line
+    out: Dict[str, set] = {}
+    for line, numbers in by_line.items():
+        kept = {n for n in numbers if _norm_policy_number(n) not in prior}
+        out[line] = kept if kept else set(numbers)
+    return out
+
+
 def _coverage_lines_are_self_contradictory(lines: Any) -> bool:
     """True when one policy number is attached to two or more DIFFERENT lines of
     business - it cannot be identifying a policy, so the pairing is corrupt."""
@@ -7275,7 +8021,7 @@ def _coverage_lines_are_self_contradictory(lines: Any) -> bool:
     return any(len(v) > 1 for v in by_number.values())
 
 
-def _carriers_by_line(entries: Any) -> Dict[str, set]:
+def _carriers_by_line(entries: Any, facts: Any = None) -> Dict[str, set]:
     """{canonical_line: {carrier names printed under that line}}.
 
     The Orbin ground truth is why this is per-line and not a scalar: EMC
@@ -7287,10 +8033,25 @@ def _carriers_by_line(entries: Any) -> Dict[str, set]:
     out: Dict[str, set] = {}
     if not isinstance(entries, list):
         return out
+    # ── The EXPIRING programme's carrier is not this line's carrier ─────────
+    # Run 5 (2 Sep 2026): the ONLY owner='carrier' entries for the GL line came
+    # from the expiring block ("EXPIRING INSURER" = the outgoing carrier), so
+    # this index answered "Sentinel Prairie" for a line Cascade Summit now
+    # writes - and the merge repair wrote that onto coverage_lines, which put
+    # the EXPIRING carrier on the ACORD 126 header. Same class as the policy-
+    # number fix, same door: entries printed inside a section that
+    # `_prior_programme_sections` identifies are set aside. Fail-open when
+    # `facts` is not supplied or carries no prior grid.
+    _prior_secs: set = set()
+    if isinstance(facts, dict):
+        _prior_secs = _prior_programme_sections(
+            entries, prior_term_policy_numbers(facts))
     for e in entries:
         if not isinstance(e, dict):
             continue
         if str(e.get("owner") or "").strip().lower() != "carrier":
+            continue
+        if str(e.get("section") or "").strip().lower() in _prior_secs:
             continue
         name = str(e.get("value") or "").strip()
         if len(name) < 4:
@@ -7315,8 +8076,8 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
         return
     if not _coverage_lines_are_self_contradictory(lines):
         return
-    by_line = _policy_numbers_by_line(mf.get("dec_page_entries"))
-    by_carrier = _carriers_by_line(mf.get("dec_page_entries"))
+    by_line = current_numbers_by_line(mf.get("dec_page_entries"), mf)
+    by_carrier = _carriers_by_line(mf.get("dec_page_entries"), mf)
     for e in lines:
         if not isinstance(e, dict):
             continue
@@ -7790,6 +8551,16 @@ def _backfill_billing_plan(facts: dict, full_text: str) -> None:
 
 SCOPED_FACTS_KEY = "_scoped"
 
+# SYS-06: the client's own chain, stored as ONE record per (coverage line,
+# policy contract):
+#
+#   Line of Business -> Carrier -> NAIC -> Policy Number -> Effective Date
+#                    -> Expiration Date -> Source
+#
+# `_scoped` is DERIVED from these records rather than built beside them, so
+# there is one structure and one truth. See `_build_line_records`.
+LINE_RECORDS_KEY = "_line_records"
+
 # Which `coverage_lines` column states each line-scoped fact. Mirrors
 # `underwriting_consistency._LINE_SCOPED_FACT_COLUMN`; kept here because the
 # store is BUILT here and read there, and a cross-check test pins the two.
@@ -7802,7 +8573,210 @@ _SCOPED_FACT_COLUMNS: Dict[str, str] = {
 }
 
 
-def _build_scoped_fact_store(mf: dict) -> None:
+def _contract_key(number: Any) -> str:
+    """Stable id fragment for a policy contract printing."""
+    return re.sub(r"[^A-Za-z0-9]", "", str(number or "")).upper()
+
+
+def _line_record_rows(lines: Any, prior: Optional[set] = None) -> List[dict]:
+    """`coverage_lines` rows that carry a canonical line, normalised.
+
+    A FORM number ('IM 7100 06 04') is stripped to no-number here rather than
+    kept: it names the coverage WORDING, not this contract, and letting it
+    stand as a policy number invents a second policy on the line. Same test
+    `_policy_numbers_by_line` already applies.
+
+    ``prior`` is the set of normalised PRIOR-TERM numbers
+    (`prior_term_policy_numbers`). A renewal declarations page prints the
+    expiring number beside the in-force one, and `BBC7263 - 25` is genuinely a
+    different contract from `BBC7263 - 26` - so without this the two land as
+    TWO records on one line and the picker reports "two policies on the same
+    coverage line" on an ordinary renewal. This file already carries that
+    lesson for `dec_page_entries` (see `prior_term_policy_numbers`); the line
+    records were the one identity structure not asking. Fails open: no prior
+    grid, no filtering, and behaviour is exactly what it was.
+    """
+    out: List[dict] = []
+    if not isinstance(lines, list):
+        return out
+    for entry in lines:
+        if not isinstance(entry, dict):
+            continue
+        printed = str(entry.get("line") or "").strip()
+        canon = _canon_line(printed)
+        if not canon:
+            continue                       # unmapped terminology gets no opinion
+        pol = str(entry.get("policy_number") or "").strip()
+        if pol and _looks_like_a_form_number(pol):
+            pol = ""
+        if pol and prior and _norm_policy_number(pol) in prior:
+            continue                       # last year's contract, not this one
+        out.append({"canon": canon, "printed": printed, "pol": pol, "entry": entry})
+    return out
+
+
+def _record_sources(canon: str, numbers: set, docs: Any) -> List[str]:
+    """Which uploaded documents print this (line, contract) - the chain's
+    SOURCE. Best-effort and never raises; no docs means no claim."""
+    names: List[str] = []
+    if not isinstance(docs, list):
+        return names
+    try:
+        from services.fact_comparison import same_policy_contract as _same
+    except Exception:                                         # noqa: BLE001
+        def _same(a, b):                                      # type: ignore
+            return _contract_key(a) == _contract_key(b)
+    for d in docs:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("filename") or d.get("doc_id") or "").strip()
+        if not name or name in names:
+            continue
+        for r in _line_record_rows(_fv(d.get("facts") or {}, "coverage_lines")):
+            if r["canon"] != canon:
+                continue
+            # No number on either side is not proof of a different contract -
+            # a certificate row often omits it. Positive mismatch is.
+            if r["pol"] and numbers and not any(_same(r["pol"], n) for n in numbers):
+                continue
+            names.append(name)
+            break
+    return names
+
+
+def _build_line_records(mf: dict, docs: Any = None) -> List[dict]:
+    """One record per (coverage line, policy contract) - SYS-06's unit of truth.
+
+    THE DEFECT THIS EXISTS TO END. `coverage_lines` is a UNION across every
+    uploaded document, de-duplicated by `_coverage_line_dedup_keys`, which
+    identifies a row as (line, policy number with punctuation stripped). So the
+    dec page's `BBC7263 - 26` and the certificate's `BBC7263` - one General
+    Liability policy printed two ways - survived as TWO rows on ONE line, and
+    the Data Consistency picker reported *"two policies on the same coverage
+    line in one submission"* on a package where nothing was wrong.
+
+    The dedup key is deliberately NOT changed (39 read sites, two recorded
+    defects behind that pairing - see D-A). The fold happens here, where the
+    only consumers are the picker and the E&O record.
+
+    Contract identity comes from `fact_comparison.same_policy_contract`, THE
+    door - so the merge, the stamper and the picker cannot disagree about what
+    counts as one policy. Two genuinely different policies on one line (EMC's
+    GL vs Travelers' GL - defect D-1) stay two records, which is what keeps the
+    client's own review rule alive: *"a mismatch within the same line/policy
+    context is what should trigger review."*
+    """
+    try:
+        _prior = prior_term_policy_numbers(mf)
+    except Exception:                                         # noqa: BLE001
+        _prior = set()
+    rows = _line_record_rows(mf.get("coverage_lines"), _prior)
+    if not rows:
+        # Every row was a prior-term contract. That is not "no evidence" - it
+        # is a package whose in-force numbers are elsewhere, so fall back to
+        # the unfiltered rows rather than losing the line records entirely.
+        rows = _line_record_rows(mf.get("coverage_lines"))
+        if not rows:
+            return []
+    try:
+        from services.fact_comparison import policy_contract_groups
+    except Exception:                                         # noqa: BLE001
+        policy_contract_groups = None                         # type: ignore
+    try:
+        from services.normalization import strict_entity_key as _skey
+    except Exception:                                         # noqa: BLE001
+        def _skey(v):                                         # type: ignore
+            return str(v or "").strip().lower()
+
+    by_line: Dict[str, List[dict]] = {}
+    for r in rows:
+        by_line.setdefault(r["canon"], []).append(r)
+
+    records: List[dict] = []
+    for canon in sorted(by_line):
+        group_rows = by_line[canon]
+        numbered = [r for r in group_rows if r["pol"]]
+        unnumbered = [r for r in group_rows if not r["pol"]]
+        if policy_contract_groups and numbered:
+            buckets = [[numbered[i] for i in g]
+                       for g in policy_contract_groups([r["pol"] for r in numbered])]
+        else:
+            buckets = [[r] for r in numbered]
+        if not buckets:
+            # No contract is NAMED on this line. Several documents mentioning
+            # the same unnumbered line is not evidence of several policies, so
+            # they are ONE record (Principle 3 - absence is not a value).
+            buckets = [list(unnumbered)]
+        elif len(buckets) == 1:
+            buckets[0].extend(unnumbered)
+        else:
+            # Two or more contracts already named here, so this line is a
+            # genuine question either way. An unnumbered row joins the bucket
+            # whose CARRIER it matches; otherwise it stands alone rather than
+            # being assigned to a contract by guesswork (Principle 4).
+            for r in unnumbered:
+                key = _skey(r["entry"].get("carrier"))
+                target = None
+                if key:
+                    for b in buckets:
+                        if any(_skey(x["entry"].get("carrier")) == key for x in b):
+                            target = b
+                            break
+                if target is not None:
+                    target.append(r)
+                else:
+                    buckets.append([r])
+        for bucket in buckets:
+            rec = _merge_line_record(canon, bucket, docs)
+            if rec:
+                records.append(rec)
+    return records
+
+
+def _merge_line_record(canon: str, bucket: List[dict], docs: Any) -> Optional[dict]:
+    """Collapse the rows of ONE (line, contract) into the client's chain."""
+    if not bucket:
+        return None
+    printings: Dict[str, List[str]] = {}
+    for r in bucket:
+        for fact_key, column in _SCOPED_FACT_COLUMNS.items():
+            raw = r["entry"].get(column)
+            val = str(raw).strip() if raw is not None else ""
+            if fact_key == "policy_number":
+                # The row's own number, already form-number filtered.
+                val = r["pol"]
+            if not val:
+                continue
+            seen = printings.setdefault(fact_key, [])
+            if val not in seen:
+                seen.append(val)
+
+    def _fullest(key: str) -> Optional[str]:
+        vals = printings.get(key) or []
+        return max(vals, key=lambda s: (len(_contract_key(s)), len(s))) if vals else None
+
+    numbers = {p for p in (printings.get("policy_number") or [])}
+    canonical_no = _fullest("policy_number")
+    printed = max((r["printed"] for r in bucket if r["printed"]),
+                  key=len, default="")
+    granted = any(_line_entry_grants_coverage(r["entry"]) for r in bucket)
+    rec = {
+        "id":             f"{canon}#{_contract_key(canonical_no) or 'unnumbered'}",
+        "line":           canon,
+        "line_printed":   printed,
+        "policy_number":  canonical_no,
+        "carrier_name":   _fullest("carrier_name"),
+        "carrier_naic":   _fullest("carrier_naic"),
+        "effective_date": _fullest("effective_date"),
+        "expiration_date": _fullest("expiration_date"),
+        "granted":        granted,
+        "printings":      printings,
+        "sources":        _record_sources(canon, numbers, docs),
+    }
+    return rec
+
+
+def _build_scoped_fact_store(mf: dict, docs: Any = None) -> None:
     """Write ``facts["_scoped"]`` - each line-scoped fact WITH its scope.
 
     C1b / D19, owner-directed 2026-08-21: *"we should carry relationship, we
@@ -7822,44 +8796,49 @@ def _build_scoped_fact_store(mf: dict) -> None:
             ...
         ]
 
-    ONE ENTRY PER (fact, coverage line). A line with no canonical family is
-    skipped - unmapped terminology gets no opinion (client 1.7 / D9) - and a
-    fact with no value on that line contributes nothing. Never raises: the
-    store is an enrichment, and its absence returns every consumer to the
-    behaviour it had before C1b.
+    A line with no canonical family is skipped - unmapped terminology gets no
+    opinion (client 1.7 / D9) - and a fact with no value on that line
+    contributes nothing. Never raises: the store is an enrichment, and its
+    absence returns every consumer to the behaviour it had before C1b.
+
+    SYS-06 (2026-09-04): the entries are now DERIVED from
+    ``_build_line_records`` rather than written straight off the rows, so one
+    policy printed two ways is ONE scope instead of two rival policies on one
+    line. The shape above is unchanged; ``scope`` gained a ``record`` id, which
+    is what lets the picker compare within a line/policy CONTEXT rather than
+    within a line alone. Additive - every existing reader still finds
+    ``line`` / ``line_printed`` / ``policy_number`` exactly where they were.
     """
     try:
-        lines = mf.get("coverage_lines")
-        if not isinstance(lines, list) or not lines:
-            mf.pop(SCOPED_FACTS_KEY, None)
-            return
+        records = _build_line_records(mf, docs)
+        if records:
+            mf[LINE_RECORDS_KEY] = records
+        else:
+            mf.pop(LINE_RECORDS_KEY, None)
         store: Dict[str, List[dict]] = {}
-        for entry in lines:
-            if not isinstance(entry, dict):
-                continue
-            printed = str(entry.get("line") or "").strip()
-            canon = _canon_line(printed)
-            if not canon:
-                continue
-            pol = str(entry.get("policy_number") or "").strip() or None
-            scope = {"line": canon, "line_printed": printed, "policy_number": pol}
-            for fact_key, column in _SCOPED_FACT_COLUMNS.items():
-                raw = entry.get(column)
-                val = str(raw).strip() if raw is not None else ""
-                if not val:
-                    continue
-                store.setdefault(fact_key, []).append(
-                    {"value": val, "scope": dict(scope)})
+        for rec in records:
+            scope = {
+                "line":          rec["line"],
+                "line_printed":  rec["line_printed"],
+                "policy_number": rec["policy_number"],
+                "record":        rec["id"],
+            }
+            for fact_key, values in (rec.get("printings") or {}).items():
+                for val in values:
+                    store.setdefault(fact_key, []).append(
+                        {"value": val, "scope": dict(scope)})
         if store:
             mf[SCOPED_FACTS_KEY] = store
             logger.info(
-                "scoped fact store: %s",
+                "scoped fact store: %d line record(s) %s -> %s",
+                len(records), [r["id"] for r in records[:6]],
                 {k: len(v) for k, v in sorted(store.items())})
         else:
             mf.pop(SCOPED_FACTS_KEY, None)
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("merge_facts: scoped fact store failed: %s", exc)
         mf.pop(SCOPED_FACTS_KEY, None)
+        mf.pop(LINE_RECORDS_KEY, None)
 
 
 def _union_list_fact(list_key: str, primary_rows: list, merged_rows: list) -> list:
@@ -7991,12 +8970,23 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     non_primary = [d for d in docs if d["filename"] != primary["filename"]]
 
     if non_primary:
-        # ROLE SCOPE ON THE LIST UNION (D23, client 1.2). A document only
-        # contributes list facts its ROLE covers. One definition, shared with
-        # every cross-document comparison - see fact_comparison._ROLE_BLIND_FACTS
-        # for the measured reason `coverage_lines` is on it for a loss run.
+        # ROLE SCOPE (D23, client 1.2). A document only contributes facts its
+        # ROLE covers. One definition, shared with every cross-document
+        # comparison - see fact_comparison._ROLE_BLIND_FACTS for the measured
+        # reason `coverage_lines` is on it for a loss run.
         # Fail-open: an unknown doc_type contributes everything, so this can
-        # only ever REMOVE a row, never invent one.
+        # only ever REMOVE a value, never invent one.
+        #
+        # WIDENED FROM LISTS TO EVERY FACT, 2026-09-03. The gate read
+        # `k not in _LIST_FIELDS or _witnesses(...)`, so a role-blind SCALAR
+        # sailed straight through and the table only half meant what it said.
+        # Measured on the SYS-05 live run: a certificate's property LIMIT
+        # ("Property - Special Form  $4,200,000") became the package's
+        # `property_building_value`, closing a COPE gap that run 1 - the dec
+        # page alone - had correctly reported as missing. A rule enforced in one
+        # place and not another is the defect class this codebase keeps paying
+        # for (the Umbrella SIR and auto-symbol bugs each survived their first
+        # fix because a second copy went unchanged).
         try:
             from services.fact_comparison import document_witnesses as _witnesses
         except Exception:                                 # noqa: BLE001
@@ -8005,8 +8995,7 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         for i, d in enumerate(non_primary):
             _f = d.get("facts", {}) or {}
             _dt = d.get("doc_type")
-            _kept = {k: v for k, v in _f.items()
-                     if k not in _LIST_FIELDS or _witnesses(_dt, k)}
+            _kept = {k: v for k, v in _f.items() if _witnesses(_dt, k)}
             if len(_kept) != len(_f):
                 logger.info("merge: %s contributes no %s (document role)",
                             d.get("filename"),
@@ -8041,8 +9030,42 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     #
     # The primary's rows go FIRST so anything reading "the first matching row"
     # keeps today's answer; the companions can only ADD.
+    #
+    # ── ROLE SCOPE, THE PRIMARY HALF (SYS-09, 2026-09-05) ───────────────────
+    # The gate above bound only HALF the merge. It filters `non_primary`; this
+    # loop then overwrote its result with `mf[k] = v` for every primary fact,
+    # consulting nothing. So a document whose ROLE cannot state a fact still
+    # decided it - as long as that document was the primary one.
+    #
+    # That is not a corner case. `select_primary_truth` picks by
+    # `_DOC_TYPE_PRIORITY`, where `certificate` ranks 7th and `narrative` 21st,
+    # so a package of [COI, submission narrative] makes the CERTIFICATE primary.
+    # Measured on the client's own SYS-09 screenshot: the COI's producer-side
+    # contact person overwrote the narrative's correct applicant contact, and
+    # because the Data Consistency picker DOES filter by role (it walks every
+    # active document, primary included), blinding the certificate there without
+    # this half would have silenced the conflict row while the wrong name still
+    # stamped - taking away the one screen a producer could have fixed it on.
+    #
+    # NARROW BY CONSTRUCTION: a role-blind primary may not OVERWRITE a sighted
+    # witness, but it is still free to be the SOLE source. So this can only ever
+    # swap one document's value for another's - it can never blank a fact, and
+    # on a single-document package it does nothing at all. The wider rule (blind
+    # the primary outright, so a lone loss run stops stating the policy it is
+    # claiming against) is deliberately NOT taken here: it moves scores and is
+    # Brent's call, not a side effect of this fix.
+    try:
+        from services.fact_comparison import document_witnesses as _p_witnesses
+    except Exception:                                     # noqa: BLE001
+        _p_witnesses = lambda _t, _k: True                # noqa: E731
+    _primary_dt = primary.get("doc_type")
+    _yielded: List[str] = []
+
     for k, v in primary.get("facts", {}).items():
         if _is_empty(v):
+            continue
+        if not _p_witnesses(_primary_dt, k) and not _is_empty(mf.get(k)):
+            _yielded.append(k)
             continue
         _pv = v.get("value") if isinstance(v, dict) and "value" in v else v
         _mv = mf.get(k)
@@ -8050,6 +9073,40 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
             mf[k] = _union_list_fact(k, _pv, _mv)
         else:
             mf[k] = v
+
+    if _yielded:
+        logger.info(
+            "merge: primary %s (%s) yielded %s to a document whose role covers "
+            "them", primary.get("filename"), _primary_dt, sorted(set(_yielded)),
+        )
+
+    # ── THE PARTY FILTER, ON THE FINAL LIST (SYS-09 follow-up, 2026-09-05) ───
+    # `_drop_transaction_party_rows` was reachable from ONE side of the merge:
+    # it runs inside `_merge_list_fields`, which `merge_facts` calls on the
+    # NON-PRIMARY documents only. The primary's own rows never met it, and the
+    # union above then merged its uncleaned list straight back in - so on a
+    # single-document session the filter never ran at all.
+    #
+    # Measured, not reasoned: the certificate holder "Kestrel Terminal
+    # Authority" survived both a one-document and a two-document merge and
+    # printed on ACORD 125 as an Other Named Insured. The helper was correct
+    # the whole time; nothing downstream of the primary ever called it.
+    #
+    # This is the SAME shape as the defect this function was just fixed for one
+    # loop above - a rule enforced on the non-primary branch and not the
+    # primary one - so it is closed for every list the filter knows, not just
+    # the one that was reported. Removal-only and idempotent: re-running it on
+    # an already-filtered list is a no-op, and it can never add a row.
+    for _lk in _PARTY_FILTERED_LIST_KEYS:
+        _held = mf.get(_lk)
+        _rows = (_held.get("value")
+                 if isinstance(_held, dict) and "value" in _held else _held)
+        if not isinstance(_rows, list) or not _rows:
+            continue
+        _kept = _drop_transaction_party_rows(_lk, _rows, mf)
+        if len(_kept) != len(_rows):
+            mf[_lk] = (dict(_held, value=_kept)
+                       if isinstance(_held, dict) and "value" in _held else _kept)
 
     # Override with field-level authoritative sources when a better doc exists
     if len(docs) > 1:
@@ -8237,14 +9294,72 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         _gate_inferred_payroll_period(mf, docs)
     except Exception as exc:  # noqa: BLE001 - never block the pipeline
         logger.warning("merge_facts: payroll-period gate skipped: %s", exc)
+    # Same rule, same place, one coverage line over: a closed choice the model
+    # picked from rather than left null (SYS-05 live run 2, 2026-09-03).
+    try:
+        _gate_inferred_valuation_method(mf, docs)
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: valuation-method gate skipped: %s", exc)
+    # A dec page may state the operations against the PREMISES rather than the
+    # applicant; without this the ACORD 125 "Description of Primary Operations"
+    # box ships blank while the premises row is filled (measured 2026-09-04).
+    try:
+        _derive_operations_description_from_locations(mf)
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: operations-description derivation skipped: %s", exc)
     _derive_from_dec_entries_h1(mf)
 
     # C1b / D19 (owner-directed): scope is STORED on the fact, not re-derived
     # at each point of use. Runs LAST, so it reads the settled `coverage_lines`
     # - after the union, after the entry repair, after renewal routing.
-    _build_scoped_fact_store(mf)
+    # `docs` is passed for SYS-06's SOURCE column - which uploaded document
+    # printed each (line, contract). Optional: without it the records simply
+    # carry no sources.
+    _build_scoped_fact_store(mf, docs)
+
+    _strip_non_value_facts(mf)
 
     return mf, mg
+
+
+# Words that reach a fact because a document was DESCRIBING the arrangement, not
+# stating a value: a rating bureau in a carrier fact (its name is on the policy
+# because it wrote the FORMS), a party ROLE in a name fact ("Certificate Holder"
+# as the name of an additional interest).
+#
+# WHY THIS RUNS HERE AS WELL AS IN THE CANDIDATE LOOP, and it is not belt and
+# braces. `_merge_list_fields` returns EARLY when there is only one partial, and
+# `merge_facts` then applies the primary document's facts as a fallback for
+# unmapped fields - so a single-chunk certificate could carry the label straight
+# through a filter that only ever ran on a contest. The candidate-loop drop is
+# still the better one where it applies, because it lets the REAL value win the
+# vote; this is the floor underneath it.
+def _strip_non_value_facts(mf: dict) -> None:
+    if not isinstance(mf, dict):
+        return
+    try:
+        from services.normalization import (
+            is_carrier_field, is_insurance_bureau, is_party_role_label,
+            _infer_field_category, NAME_FIELDS, _NAME_LIKE_KEYS,
+        )
+    except Exception:                                        # noqa: BLE001
+        return
+    for key in list(mf):
+        raw = mf.get(key)
+        val = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+        if not isinstance(val, str) or not val.strip():
+            continue
+        drop = False
+        if is_carrier_field(key) and is_insurance_bureau(val):
+            drop = True
+        elif (key in NAME_FIELDS or key in _NAME_LIKE_KEYS
+                or _infer_field_category(key) in ("name", "carrier")) \
+                and is_party_role_label(val):
+            drop = True
+        if drop:
+            logger.info("merge: dropped %s=%r - it names a role or a bureau, "
+                        "not a party", key, val[:40])
+            mf.pop(key, None)
 
 
 def _derive_years_in_business(mf: dict) -> None:
@@ -8306,6 +9421,22 @@ def _derive_years_in_business(mf: dict) -> None:
 _PERIOD_NAMED_SOURCES = ("producer", "client_arq", "client", "derived", "human")
 
 
+def _all_document_text(docs: Any) -> str:
+    """Every uploaded document's raw text, or "" for anything unreadable.
+
+    Shared by the inference gates below. Both used to do
+    `" ".join(str(d.get("text") or "") for d in (docs or []))`, which raises
+    AttributeError on a str (a str is truthy and iterable, so it survives the
+    `or []` and yields characters) and on any list holding a non-dict. The
+    callers wrap each gate in try/except, so the failure was not a crash - it
+    was WORSE: the gate would be skipped and the invented value would survive,
+    silently, which is the one outcome these functions exist to prevent.
+    """
+    if not isinstance(docs, (list, tuple)):
+        return ""
+    return " ".join(str(d.get("text") or "") for d in docs if isinstance(d, dict))
+
+
 def _gate_inferred_payroll_period(mf: dict, docs) -> None:
     """Drop a `wc_payroll_period` the model INFERRED rather than read.
 
@@ -8345,7 +9476,7 @@ def _gate_inferred_payroll_period(mf: dict, docs) -> None:
     if source in _PERIOD_NAMED_SOURCES:
         return
     entries = (mf or {}).get("dec_page_entries")
-    text = " ".join(str(_d.get("text") or "") for _d in (docs or []))
+    text = _all_document_text(docs)
     if payroll_period_corroborated(value, entries, text):
         return
     mf["wc_payroll_period"] = None
@@ -8353,6 +9484,113 @@ def _gate_inferred_payroll_period(mf: dict, docs) -> None:
         "payroll-period gate: dropped wc_payroll_period=%r - no wording in the "
         "document names that period for the payroll figure (D43). The 6.4 check "
         "now decides from the payroll's own label / class schedule.", value)
+
+
+def _derive_operations_description_from_locations(mf: dict) -> None:
+    """Fill an absent `operations_description` from the premises schedule.
+
+    A declarations page states what the business does ONCE, and it may state it
+    against the premises rather than against the applicant. Measured
+    2026-09-04 by driving the real stamper: with the scalar present both the
+    premises row AND "Description of Primary Operations" fill; with the value
+    only on `property_locations[0]`, the premises row fills and the PRIMARY
+    OPERATIONS box on ACORD 125 ships BLANK. The binding is one-directional -
+    `BuildingOccupancy_OperationsDescription` is schedule-backed and falls back
+    to the scalar, but nothing goes the other way.
+
+    Derived at the FACT, not at the field, deliberately: the same absence
+    otherwise costs a Tier 2 checklist item, an ACORD 126 narrative and the
+    NAICS suggester's only input. One derivation, every consumer.
+
+    REFUSES TO GUESS. Only when the rows that state a description all state the
+    SAME one - two premises describing different operations is a real
+    distinction and the ACORD's per-location boxes already carry it, so
+    collapsing them into one applicant-level sentence would invent a fact
+    (Principle 4). Never overwrites a stated value, and labels itself `derived`
+    so provenance survives (Principle 6).
+    """
+    if _fv(mf, "operations_description"):
+        return                                  # never overwrite a stated value
+    rows = mf.get("property_locations")
+    if not isinstance(rows, list) or not rows:
+        return
+    stated = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        val = row.get("operations_description")
+        text = str(val.get("value") if isinstance(val, dict) else val or "").strip()
+        if text:
+            stated.append(text)
+    if not stated:
+        return
+    if len({re.sub(r"\s+", " ", s).strip().lower() for s in stated}) != 1:
+        logger.info(
+            "operations-description derivation declined: %d premises state "
+            "DIFFERENT operations - the per-location boxes already carry that "
+            "distinction", len(stated))
+        return
+    mf["operations_description"] = {
+        "value": stated[0],
+        "confidence": "deterministic",
+        "source": "derived",
+        "evidence_state": "derived",
+        "derivation": {"rule": "operations_description_from_premises",
+                       "inputs": ["property_locations"]},
+    }
+    logger.info(
+        "operations-description derived from the premises schedule - the "
+        "applicant-level fact was absent and every premises states the same "
+        "operations")
+
+
+def _gate_inferred_valuation_method(mf: dict, docs) -> None:
+    """Drop a `valuation_method` the model INFERRED rather than read.
+
+    THE TWIN OF `_gate_inferred_payroll_period`, and for the same measured
+    reason one coverage line over. LIVE RUN 2026-09-03 (SYS-05 kit, run 2):
+    neither document states a valuation method anywhere. The declarations page
+    alone produced nothing; adding a certificate whose property row reads
+    "Property - Special Form  $4,200,000" produced `valuation_method = ACV` and
+    the advisory *"Actual Cash Value (ACV) selected on a building valued at
+    $4,200,000"*.
+
+    "Special Form" is a CAUSE OF LOSS form. It says nothing about valuation.
+    `_EXTRACT_SCHEMA` offers `"RCV"|"ACV"|null` and the model picked from the
+    enumeration rather than returning null - Principle 3's forbidden move, and
+    the reason a closed choice needs a gate that an open one does not.
+
+    PROVENANCE DECIDES (Principle 6), through the SAME set the payroll gate
+    uses: a producer or client answer IS the named evidence, and a derived value
+    was computed from a corroborating label to begin with. Only the model's own
+    inference is stripped.
+
+    Dropping it invents no penalty and moves no score by itself - the valuation
+    advisories simply stop firing on a method nobody stated, and
+    `property_valuation_missing` (which already exists for a blank) asks the
+    producer instead. That is the honest question.
+    """
+    try:
+        from services.coverage_evidence import valuation_method_corroborated
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("valuation-method gate unavailable: %s", exc)
+        return
+    env = (mf or {}).get("valuation_method")
+    value = env.get("value") if isinstance(env, dict) else env
+    if not value:
+        return
+    source = str((env.get("source") if isinstance(env, dict) else "") or "").lower()
+    if source in _PERIOD_NAMED_SOURCES:
+        return
+    entries = (mf or {}).get("dec_page_entries")
+    text = _all_document_text(docs)
+    if valuation_method_corroborated(value, entries, text):
+        return
+    mf["valuation_method"] = None
+    logger.info(
+        "valuation-method gate: dropped valuation_method=%r - no wording in any "
+        "uploaded document names it. A cause-of-loss form ('Special Form') is "
+        "not a valuation method; the producer is asked instead.", value)
 
 
 def _derive_from_dec_entries_h1(mf: dict) -> None:

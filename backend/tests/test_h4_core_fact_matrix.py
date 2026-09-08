@@ -306,11 +306,24 @@ def test_every_offered_entity_option_validates_and_ticks_exactly_one_box():
     REFUSED 8 of the 13 options `answer_options` itself offers, and the stamper
     ticked no box for "Sole Proprietorship" and the WRONG box for
     "S Corporation" and "Non-Profit Corporation"."""
-    from services.answer_options import ENTITY_TYPE_OPTIONS
+    from services.answer_options import ENTITY_TYPE_OPTIONS, OTHER
     from services.pdf_service import _derive_indicator
     from routes.audit_routes import _validate_producer_answer
 
     for option in ENTITY_TYPE_OPTIONS:
+        # "Other" is excluded from 2026-09-08: it is the affordance that reveals
+        # the free-text box, not an entity type. It used to be accepted, which
+        # meant a producer who picked it and typed nothing stamped the literal
+        # word "Other" into the legal-entity box - a wrong value on a legal
+        # document, which the blank-over-wrong rule forbids. It is now refused
+        # at the one door with a message telling them to type the real entity.
+        # The rule for every REAL option is unchanged and still asserted here.
+        if option == OTHER:
+            ok, msg = _validate_producer_answer("entity_type", option)
+            assert not ok and "type" in msg.lower(), (
+                "the Other affordance must be refused with an actionable "
+                f"message, got ok={ok} msg={msg!r}")
+            continue
         ok, msg = _validate_producer_answer("entity_type", option)
         assert ok, f"our own dropdown offers {option!r} and our validator refuses it: {msg}"
 

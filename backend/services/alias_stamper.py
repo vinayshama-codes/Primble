@@ -272,6 +272,23 @@ def stamp_form_fields(
         if value is None:
             continue
 
+        # ── Y/N TYPE GATE - same implementation as Pass 1's, one door each ──
+        # Pass 1.5 stamps from an alias map with no notion of the target box's
+        # TYPE, so a canonical spelled in the source system's own vocabulary
+        # ("O"/"C" for a claim's open status) printed verbatim into a column
+        # ACORD heads "Y / N". Measured 2 Sep 2026 alongside the 18 Pass-1
+        # cases. Coerce when the FIELD's own name licenses the reading;
+        # otherwise omit it so the box reaches LLM call 2 and gets ASKED.
+        # Never guess a tick - an unreadable value is evidence for neither
+        # answer. Reads the schema already in context; no schema, no opinion.
+        try:
+            from services import pdf_service as _ps
+            _gated = _ps._yn_gate(field, value, getattr(_ps._SCHEMA_CTX, "schema", None))
+            if _gated is None:
+                continue              # not a Yes/No answer - let call 2 ask
+            value = _gated
+        except Exception:
+            pass                      # a gate must never break the stamper
         filled[field] = value
 
     return filled

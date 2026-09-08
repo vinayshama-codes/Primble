@@ -263,6 +263,24 @@ def _resolve_kind(fact_key: str) -> str:
         from services.normalization import VALUATION_METHOD_FIELDS
         if key in VALUATION_METHOD_FIELDS:
             return KIND_TEXT          # RCV == Replacement Cost, via WS-2
+        # ── Yes/No, from the DECLARATION rather than the key's spelling ─────
+        # SYS-07. This used to live in step 3 as `if "indicator" in tk or
+        # "required" in tk`, i.e. a fact was compared as a Yes/No only when
+        # somebody had happened to put the word "indicator" in its name. Of the
+        # eight facts FACT_REGISTRY itself declares "Yes or No", three were
+        # classified `text` and two - `agreed_value_endorsement` and
+        # `inside_city_limits` - reached the MONEY tokens first (`value`,
+        # `limits`) and were compared as dollar amounts.
+        #
+        # `is_yes_no_field` reads the registry's own format hint and validator,
+        # LLM call 1's `boolean` declarations, and only then the key shape. It
+        # sits HERE, above the shape inference, for the same reason the sets
+        # above do: a declaration outranks a guess. Nothing that is already a
+        # name, date, address, FEIN, entity type or valuation method can reach
+        # it, because those are decided first and no key belongs to both.
+        from services.normalization import is_yes_no_field
+        if is_yes_no_field(key):
+            return KIND_YESNO
         _cat = _infer_field_category(key)
         if _cat == "date":
             return KIND_DATE
@@ -306,8 +324,10 @@ def _resolve_kind(fact_key: str) -> str:
         return KIND_MONEY
     if tk & _COUNT_TOKENS:
         return KIND_COUNT
-    if "indicator" in tk or "required" in tk:
-        return KIND_YESNO
+    # The old `if "indicator" in tk or "required" in tk` lived HERE, below the
+    # money and count tokens. It moved up into step 1 (SYS-07) and is now one
+    # clause of `normalization.is_yes_no_field`, so there is a single owner of
+    # "is this fact a Yes/No" instead of one copy per consumer.
     if tk & _IDENTIFIER_TOKENS_WEAK:
         return KIND_IDENTIFIER
     return KIND_TEXT
@@ -329,6 +349,10 @@ _MONEY_RE = re.compile(
 _PHONE_EXT_RE = re.compile(r"\b(?:x|ext\.?|extension)\s*\d+\s*$", re.I)
 _MULT = {"K": 1_000, "M": 1_000_000, "MM": 1_000_000, "B": 1_000_000_000}
 
+# The Yes/No vocabulary moved to `normalization` (SYS-07) so the comparator,
+# the merge, the stamper and the checkbox writer all read one table. These two
+# names are kept only as the fallback for the (impossible in-app, possible in a
+# stripped import) case where that module cannot be reached.
 _YES = frozenset({"y", "yes", "true", "t", "1", "checked", "x"})
 _NO = frozenset({"n", "no", "false", "f", "0", "unchecked"})
 
@@ -393,12 +417,59 @@ def is_prose(value: Any) -> bool:
 
 
 def _yesno(value: Any) -> Optional[str]:
-    s = str(value or "").strip().lower().rstrip(".")
-    if s in _YES:
-        return "Y"
-    if s in _NO:
-        return "N"
-    return None
+    """"Y" / "N" / None. Delegates to the one vocabulary in `normalization`.
+
+    The local sets below are a fallback only. The real reader also understands
+    a real ``bool`` (this one did ``str(value or "")``, so ``False`` became the
+    empty string and read as None), the checkbox glyphs, and "[X]".
+    """
+    try:
+        from services.normalization import yes_no_token
+        return yes_no_token(value)
+    except Exception:                                        # pragma: no cover
+        s = str(value or "").strip().lower().rstrip(".")
+        if s in _YES:
+            return "Y"
+        if s in _NO:
+            return "N"
+        return None
+
+
+def _yesno_answer(value: Any) -> Optional[str]:
+    """The Yes/No reader for a field ALREADY KNOWN to be Yes/No.
+
+    Wider than ``_yesno``: it also reads a value that arrived carrying its own
+    question ("Hired and Non-Owned Auto Coverage: X"). Deliberately NOT used by
+    the value-shaped fallback, which runs on facts nothing declares.
+    """
+    try:
+        from services.normalization import yes_no_answer
+        tok = yes_no_answer(value)
+    except Exception:                                        # pragma: no cover
+        return _yesno(value)
+    if tok:
+        return tok
+    # THE OPEN HALF. `normalization` owns the deterministic vocabulary and is
+    # always asked first; what it cannot read is a carrier's own wording
+    # ("In Force", "Bound", "Endorsed"), which is unlistable by construction.
+    # `yes_no_lexicon` answers those from a cache the extraction model filled -
+    # a pure dict read here, no I/O, so this function stays synchronous and two
+    # runs of one package still agree. None means "compare it as text", which
+    # is exactly what happened before this existed.
+    try:
+        from services.yes_no_lexicon import lookup as _lex
+        return _lex(value)
+    except Exception:                                        # pragma: no cover
+        return None
+
+
+def _is_strong_yesno(value: Any) -> bool:
+    try:
+        from services.normalization import is_strong_yes_no_word
+        return is_strong_yes_no_word(value)
+    except Exception:                                        # pragma: no cover
+        return str(value or "").strip().lower() in {
+            "yes", "no", "true", "false", "checked", "unchecked"}
 
 
 def _state_code(value: Any) -> Optional[str]:
@@ -469,6 +540,51 @@ def _contains_whole(short: Sequence[str], long: Sequence[str]) -> bool:
 
 # ── The value test ───────────────────────────────────────────────────────────
 
+
+# ── ONE POLICY CONTRACT PRINTED TWO WAYS (SYS-06's rule, moved here 2026-09-05)
+# WHY THE SEPARATED TAIL IS REQUIRED, and why this is not a loose prefix match:
+# `POL123` and `POL12345` are two policies whose digits run together. The term
+# marker is only a term marker when the document PRINTED it as one ("---26",
+# " - 26"). That single condition is what keeps this from folding real
+# contracts, and it is why `BBC7263-26` vs `GL-4471102-26` (two carriers' GL
+# policies on one line) still separates.
+_POLICY_TERM_TAIL_RE = re.compile(r"[\s\-]\s*\d{2}\s*$")
+_POLICY_CONTRACT_MIN = 5
+
+
+def _is_policy_number_field(fact_key: Any) -> bool:
+    try:
+        from services.normalization import is_policy_number_field
+        return is_policy_number_field(fact_key)
+    except Exception:                                        # pragma: no cover
+        return False
+
+
+def _same_policy_contract(a: Any, b: Any) -> bool:
+    """Two printings of ONE policy contract, decided WITHOUT package context."""
+    try:
+        try:
+            from services.normalization import strip_leading_label as _sll
+        except Exception:                                    # pragma: no cover
+            def _sll(v):
+                return str(v or "").strip()
+        a, b = _sll(a), _sll(b)
+        x, y = _alnum(a), _alnum(b)
+        if not x or not y:
+            return False
+        if x == y:
+            return True
+        (lo, _rlo), (hi, raw_hi) = sorted(
+            ((x, str(a or "")), (y, str(b or ""))), key=lambda p: len(p[0]))
+        if len(lo) < _POLICY_CONTRACT_MIN or not hi.startswith(lo):
+            return False
+        if not re.fullmatch(r"\d{2}", hi[len(lo):]):
+            return False
+        return bool(_POLICY_TERM_TAIL_RE.search(raw_hi.strip()))
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def same_fact(fact_key: str, a: Any, b: Any) -> str:
     """SAME / DIFFERENT / INCOMPARABLE for two printings of one fact.
 
@@ -477,6 +593,15 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
     lives in :class:`PackageContext` - keeping them apart is what lets the value
     test be exhaustively swept in a unit test.
     """
+    # A real ``bool`` is a printing of Yes/No, and ``str(a or "")`` turned
+    # ``False`` into the empty string - so a document that answered NO with a
+    # JSON ``false`` was INCOMPARABLE against a document that answered "No"
+    # in words. Coerced here, before the emptiness test, so it can never be
+    # mistaken for an absent value (SYS-07).
+    if isinstance(a, bool):
+        a = "Yes" if a else "No"
+    if isinstance(b, bool):
+        b = "Yes" if b else "No"
     sa, sb = str(a or "").strip(), str(b or "").strip()
     if not sa or not sb:
         return INCOMPARABLE
@@ -591,7 +716,9 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
             pass
 
     elif kind == KIND_YESNO:
-        ya, yb = _yesno(sa), _yesno(sb)
+        # The field is declared Yes/No, so a value carrying its own question
+        # label is read too - see `_yesno_answer`.
+        ya, yb = _yesno_answer(sa), _yesno_answer(sb)
         if ya and yb:
             return SAME if ya == yb else DIFFERENT
 
@@ -613,12 +740,27 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
 
     elif kind == KIND_IDENTIFIER:
         # OCR letter-spacing ("6 C 7 - 4 0 - 0 2---26") and punctuation-only
-        # differences ("BBC7263 - 26") are printings of one contract. A value
-        # that is a strict alphanumeric PREFIX of the other is NOT merged here -
-        # "6E74002" vs "6E7-40-02---26" really are two printings, but proving it
-        # needs the canonical joiner, which lives in extraction_service and is
-        # applied upstream of this module.
+        # differences ("BBC7263 - 26") are printings of one contract.
         if _alnum(sa) and _alnum(sa) == _alnum(sb):
+            return SAME
+        # A PREFIX PLUS A PRINTED TERM MARKER IS ONE CONTRACT (2026-09-05).
+        #
+        # This branch used to say a prefix "is NOT merged here - proving it
+        # needs the canonical joiner, which lives in extraction_service". That
+        # was true when it was written and stopped being true at SYS-06, which
+        # built exactly the context-free proof it wanted: a 2-digit tail the
+        # DOCUMENT printed separated is a policy TERM, not a different policy.
+        # The rule sat in `fact_comparison`, exported, while this branch - the
+        # one the Data Consistency picker actually reaches, via
+        # `_merge_equivalent_value_groups` -> `equivalent_index` - kept
+        # returning DIFFERENT. The client's own package prints `BBC7263 - 26`
+        # on the dec and `BBC7263` on the certificate, so the picker asked a
+        # producer to choose between one policy and itself.
+        #
+        # IMPLEMENTED HERE, DELEGATED TO FROM `fact_comparison`, so there is
+        # ONE implementation and the import direction stays
+        # fact_comparison -> fact_equivalence.
+        if _is_policy_number_field(fact_key) and _same_policy_contract(sa, sb):
             return SAME
         return DIFFERENT
 
@@ -660,6 +802,22 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
     # they are comparable as such whatever the key is called. Deliberately NOT
     # applied to names/addresses (handled above) or narrative (already exited).
     if kind not in (KIND_NAME, KIND_ADDRESS):
+        # Yes/No by VALUE SHAPE, for a fact nothing declares (SYS-07). The
+        # declaration route above covers every key we can name; this covers a
+        # key we have never seen - an auto-discovered fact from a document
+        # shape nobody anticipated.
+        #
+        # TWO CONDITIONS, and the second one is structural (H1-F's standing
+        # lesson: a test that is necessary but not sufficient needs one). Both
+        # sides must read as Yes/No, AND at least one must be an unambiguous
+        # English boolean word. Without the second condition a bare "1"
+        # against a bare "0" on an untyped numeric field would be folded into
+        # Yes vs No, and a "1" against a "y" would be pronounced the same
+        # value on no evidence at all. With it, "Yes" vs "X" is settled and
+        # "1" vs "0" is left to the number rule immediately below.
+        _ya, _yb = _yesno(sa), _yesno(sb)
+        if _ya and _yb and (_is_strong_yesno(sa) or _is_strong_yesno(sb)):
+            return SAME if _ya == _yb else DIFFERENT
         na_, nb_ = money_amounts(sa), money_amounts(sb)
         if len(na_) == 1 and len(nb_) == 1 and _is_bare_number(sa) and _is_bare_number(sb):
             return SAME if na_[0] == nb_[0] else DIFFERENT
@@ -1272,6 +1430,22 @@ def equivalent_index(fact_key: str, values: Sequence[Any],
         return None
 
 
+_YN_PRINTING_RANKS = (
+    frozenset({"yes", "no"}),                 # 0 - the canonical printing
+    frozenset({"y", "n"}),                    # 1 - ACORD's own single letter
+    frozenset({"true", "false"}),             # 2 - a machine's spelling
+)
+
+
+def _yn_printing_rank(value: Any) -> int:
+    """How canonical a Yes/No printing is. Lower is better; 3 is a bare mark."""
+    s = str(value or "").strip().lower().strip(" \t.,;:!*_'\"`")
+    for i, tier in enumerate(_YN_PRINTING_RANKS):
+        if s in tier:
+            return i
+    return 3
+
+
 def _prefer(fact_key: str, a: Any, b: Any) -> bool:
     """True when ``a`` is the better printing to keep as the display value.
 
@@ -1283,10 +1457,22 @@ def _prefer(fact_key: str, a: Any, b: Any) -> bool:
     """
     kind = value_kind(fact_key)
     sa, sb = str(a or "").strip(), str(b or "").strip()
+    # A Yes/No keeps its CANONICAL printing, not its shortest (SYS-07). The
+    # shortest rule was right for an amount and actively wrong here: the moment
+    # these facts started comparing as Yes/No it would have put the
+    # certificate's "X" in front of the producer with a "Suggested" badge on it
+    # and stamped that X onto the form - trading a false conflict for a worse
+    # display. "Yes"/"No" beat "Y"/"N", which beat "true"/"false", which beat a
+    # mark; two printings of equal rank fall back to the shortest.
+    if kind == KIND_YESNO:
+        ra, rb = _yn_printing_rank(sa), _yn_printing_rank(sb)
+        if ra != rb:
+            return ra < rb
+        return len(sa) <= len(sb)
     # BARE wins where the extra characters are an ANNOTATION the form does not
     # want in the box: "$2,000,000", not "$2,000,000 (any one premises)".
     if kind in (KIND_MONEY, KIND_COUNT, KIND_PERCENT, KIND_CODE,
-                KIND_YESNO, KIND_STATE, KIND_URL, KIND_EMAIL):
+                KIND_STATE, KIND_URL, KIND_EMAIL):
         return len(sa) <= len(sb)
     # FULLER wins where the extra characters are COMPLETENESS: the canonical
     # policy printing over a stub, a four-digit year over two, a ZIP+4 address.

@@ -67,14 +67,33 @@ def test_acord_133_selected_with_cost_provided_clears():
     assert issues == []
 
 
-def test_acord_133_selected_without_cost_still_hard_stops():
-    """ACORD 133 actually in the package (form_service.py only adds it with
-    real evidence now) but cost specifically missing - the hard stop must
-    still ask for it; this path is untouched by the fix."""
+def test_builders_risk_evidence_without_cost_still_hard_stops():
+    """A real construction project with an address but no project cost must
+    still be asked for the cost.
+
+    REWRITTEN 2026-09-05. This used to drive the check by putting ACORD_133 in
+    `triggered_ids`, because the product mislabelled 133 as the Builders Risk
+    form. Its template is the Workers Compensation Assigned Risk section, so
+    that trigger has been removed and the check now stands on the builders-risk
+    evidence itself - which is the corroborated half it always required anyway.
+    The PROPERTY under test is unchanged: project evidence without a cost is a
+    hard stop.
+    """
     issues = _check_builders_risk_project_value(
         facts={"builders_risk_project_address": "123 Main St, Denver, CO"},
-        flags={},
-        triggered_ids={"ACORD_133"},
+        flags={"has_builders_risk": True},
+        triggered_ids=set(),
     )
     assert len(issues) == 1
     assert issues[0]["code"] == "builders_risk_project_value_missing"
+
+
+def test_a_workers_comp_form_never_manufactures_a_builders_risk_hard_stop():
+    """ACORD 133 is a Workers Comp form. Selecting it must not demand a
+    construction project cost from a Workers Comp submission."""
+    issues = _check_builders_risk_project_value(
+        facts={"wc_payroll": "250000"},
+        flags={"has_workers_comp": True},
+        triggered_ids={"ACORD_133", "ACORD_130"},
+    )
+    assert issues == []

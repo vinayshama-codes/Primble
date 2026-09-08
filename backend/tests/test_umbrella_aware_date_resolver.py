@@ -51,6 +51,11 @@ _UMB_CODED = ("Umbrella expiration date (07/15/2026) does not match GL/policy "
 _UMB_LEGACY = ("Umbrella and GL expiration dates misaligned. "
                "Fix: Review and correct this before proceeding.")
 
+def _raised(message, *facts):
+    """One entry in the shape `_issues_bound_to_fact` now returns: keyed by the
+    rule, carrying the sentence for display. The key only has to be unique
+    here, so the message doubles as its own code."""
+    return {message: {"message": message, "facts": list(facts)}}
 
 # ── 1. The umbrella date is on the modal ────────────────────────────────────
 
@@ -97,15 +102,21 @@ def test_the_coded_umbrella_issue_binds_to_the_expiration_date():
                                 "type": "hard_stop", "message": _UMB_CODED}]},
         "expiration_date",
     )
-    assert _UMB_CODED in found
-    assert "umbrella_expiration_date" in found[_UMB_CODED]
+    # Keyed on the RULE from 2026-09-08, not on its sentence: several rules
+    # embed a "Missing: ..." list that shrinks as fields are filled, and a
+    # message-keyed diff read that as a brand new issue.
+    assert "umbrella_gl_expiration_misaligned" in found
+    entry = found["umbrella_gl_expiration_misaligned"]
+    assert entry["message"] == _UMB_CODED
+    assert "umbrella_expiration_date" in entry["facts"]
 
 
 def test_a_plain_legacy_string_binds_through_classify_legacy():
     """The stop arrays hold bare sentences with no code attached. Classifying
     them is the only way this reaches the legacy engine's half of the pair."""
     found = _issues_bound_to_fact({"soft_stops": [_UMB_LEGACY]}, "expiration_date")
-    assert _UMB_LEGACY in found
+    assert "legacy_umbrella_gl_expiration_misaligned" in found
+    assert found["legacy_umbrella_gl_expiration_misaligned"]["message"] == _UMB_LEGACY
 
 
 def test_an_unrelated_fact_binds_to_nothing():
@@ -125,8 +136,10 @@ def test_an_unclassifiable_message_is_ignored_not_crashed():
 
 
 def test_the_same_problem_from_both_engines_is_not_double_counted():
-    """Identity is the message, so the coded and legacy copies of one problem
-    each get one row - but two DIFFERENT messages both stay."""
+    """Identity is the rule code, so the coded and legacy copies of one problem
+    each get one row - they are separate rules with separate codes, and the
+    display layer (issue_registry._LEGACY_SUPERSEDED_BY_CODE) is what collapses
+    them on screen. Two rows here, one card there."""
     found = _issues_bound_to_fact(
         {"soft_stops": [_UMB_LEGACY, _UMB_LEGACY],
          "cross_issues_last": [{"code": "umbrella_gl_expiration_misaligned",
@@ -144,7 +157,7 @@ def test_nothing_introduced_means_no_note():
 
 
 def test_the_note_names_the_issue_that_was_raised():
-    note = _trade_off_note({_UMB_CODED: ["umbrella_expiration_date", "expiration_date"]},
+    note = _trade_off_note(_raised(_UMB_CODED, "umbrella_expiration_date", "expiration_date"),
                            ["effective_date", "expiration_date", "umbrella_expiration_date"],
                            "expiration_date")
     assert "07/15/2026" in note and "09/15/26" in note
@@ -153,7 +166,7 @@ def test_the_note_names_the_issue_that_was_raised():
 def test_the_note_points_at_the_input_already_on_screen():
     """The whole point: the remedy is one box away, so say so rather than
     sending the producer back to the panel to start the loop again."""
-    note = _trade_off_note({_UMB_CODED: ["umbrella_expiration_date", "expiration_date"]},
+    note = _trade_off_note(_raised(_UMB_CODED, "umbrella_expiration_date", "expiration_date"),
                            ["effective_date", "expiration_date", "umbrella_expiration_date"],
                            "expiration_date")
     assert "Umbrella Expiration Date" in note
@@ -162,22 +175,27 @@ def test_the_note_points_at_the_input_already_on_screen():
 def test_the_note_never_points_back_at_the_field_just_applied():
     """"Fill in Expiration Date above" - which they just did - is the loop in
     miniature."""
-    note = _trade_off_note({_UMB_CODED: ["expiration_date"]},
+    note = _trade_off_note(_raised(_UMB_CODED, "expiration_date"),
                            ["effective_date", "expiration_date"], "expiration_date")
     assert "fill in" not in note.lower()
 
 
 def test_a_remedy_not_on_this_modal_is_not_offered_here():
     """Suggesting an input the producer cannot see would be worse than silence."""
-    note = _trade_off_note({"Some other issue": ["gl_deductible"]},
+    note = _trade_off_note(_raised("Some other issue", "gl_deductible"),
                            ["effective_date", "expiration_date"], "expiration_date")
     assert "Some other issue" in note and "fill in" not in note.lower()
 
 
 def test_several_introduced_issues_are_counted_not_dumped():
-    note = _trade_off_note({"A": ["x"], "B": ["y"], "C": ["z"]},
-                           ["expiration_date"], "expiration_date")
+    raised = {}
+    for msg, fact in (("A", "x"), ("B", "y"), ("C", "z")):
+        raised.update(_raised(msg, fact))
+    note = _trade_off_note(raised, ["expiration_date"], "expiration_date")
     assert "and 2 more" in note
+    # The one it NAMES is chosen by message order, so the wording is stable
+    # whatever order the engines happened to emit them in.
+    assert note.startswith("Applied - but it raised a new issue (and 2 more): A")
 
 
 # ── 4. Wiring + anti-rot ────────────────────────────────────────────────────
@@ -224,13 +242,40 @@ def test_the_binding_comes_from_the_resolution_map_not_from_words():
 def test_the_resolve_refresh_shows_hard_stops_as_hard_stops():
     """C75 LEAK: form_routes.py was fixed so the display reads the same arrays
     the scorer reads. THIS route kept the old shape, so resolving anything
-    silently flipped severity back to 'warning' on the refreshed panel."""
-    assert "_fs_soft = list(sess.get(\"soft_stops\") or []) + list(_warning_stops)" not in AUDIT
-    assert "_can_proceed_warn, _, _warning_stops = classify_stops(" in AUDIT
+    silently flipped severity back to 'warning' on the refreshed panel.
+
+    Asserted through the BEHAVIOUR rather than a source string (2026-09-08): the
+    computation moved into `_form_selection_view`, shared with `reopen_issue` so
+    that route stops shipping the arrays with no grouped view. A grep for one
+    line of one implementation was passing on the leak's absence, not on the
+    invariant, and broke on a refactor that strengthened it.
+    """
+    from routes.audit_routes import _form_selection_view
+
+    _hard = "Umbrella and GL policy periods misaligned"
+    view = _form_selection_view(
+        {"hard_stops": [_hard], "soft_stops": [], "structured_issues": [], "flags": {}},
+        [],
+    )
+    # The hard stop stays HARD on the refreshed panel - it is never folded into
+    # the soft list, whatever `classify_stops` says about proceeding.
+    assert _hard in view["hard_stops"]
+    assert _hard not in view["soft_stops"]
+    grouped = view["grouped_issues"] or {}
+    assert any(_hard == it.get("message")
+               for c in (grouped.get("hard_stops") or [])
+               for it in (c.get("items") or [])), grouped
 
 
 def test_the_proceed_anyway_data_survives_that_fix():
     """`classify_stops` still decides whether the producer MAY proceed - it just
     no longer decides what they SEE. Emptying it would delete a live feature."""
+    from routes.audit_routes import _form_selection_view
+
     assert '"warning_stops":            _warning_stops,' in AUDIT
     assert '"can_proceed_with_warning": _can_proceed_warn,' in AUDIT
+    # And the shared view really computes them, rather than shipping constants.
+    view = _form_selection_view(
+        {"hard_stops": [], "soft_stops": [], "structured_issues": [], "flags": {}}, [])
+    assert "can_proceed_with_warning" in view
+    assert "warning_stops" in view

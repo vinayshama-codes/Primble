@@ -90,8 +90,14 @@ def test_the_meta_regex_separates_the_live_pair():
 # ── 2. Comma-free address tails ──────────────────────────────────────────────
 
 def test_the_fully_fused_comma_free_address_decomposes():
+    # UPDATED 2026-09-01: the unit designator now lands on LINE TWO, which is
+    # the box ACORD prints it in. Previously it stayed fused to line1 and every
+    # line-two box on every form shipped blank. The assertion is stronger than
+    # it was - it now pins the split AND that the unit is not printed twice.
     p = _parse_address("4800 DAHLIA ST # D13 DENVER CO 80216-3121")
-    assert p["line1"] == "4800 DAHLIA ST # D13"
+    assert p["line1"] == "4800 DAHLIA ST"
+    assert p["line2"] == "# D13"
+    assert p["line2"].lower() not in p["line1"].lower()
     assert p["city"] == "DENVER"
     assert p["state"] == "CO"
     assert p["zip"] == "80216-3121"
@@ -101,13 +107,17 @@ def test_the_live_two_part_fused_city_decomposes():
     """The run-3 page-1 shape: '..., CO 80216-3121' parsed state/zip but left
     'DENVER' fused on the street line while the city box also filled."""
     p = _parse_address("4800 DAHLIA ST # D13 DENVER, CO 80216-3121")
-    assert p["line1"] == "4800 DAHLIA ST # D13"
+    # UPDATED 2026-09-01: the unit designator now lands on line TWO.
+    assert p["line1"] == "4800 DAHLIA ST"
+    assert p["line2"] == "# D13"
     assert p["city"] == "DENVER"
 
 
 def test_the_producers_suite_anchored_city_decomposes():
     p = _parse_address("9780 S MERIDIAN BLVD STE 400 ENGLEWOOD, CO 80112-6072")
-    assert p["line1"] == "9780 S MERIDIAN BLVD STE 400"
+    # UPDATED 2026-09-01: the unit designator now lands on line TWO.
+    assert p["line1"] == "9780 S MERIDIAN BLVD"
+    assert p["line2"] == "STE 400"
     assert p["city"] == "ENGLEWOOD"
 
 
@@ -129,8 +139,12 @@ def test_no_unit_anchor_means_no_city_guess():
 
 
 def test_standard_three_part_addresses_are_untouched():
+    # UPDATED 2026-09-01, same reason as above. The point of this test is that
+    # the COMMA-SEPARATED form decomposes identically to the fused one - and it
+    # now does so more completely, with the unit on its own line.
     p = _parse_address("4800 Dahlia St # D13, Denver, CO 80216-3121")
-    assert p["line1"] == "4800 Dahlia St # D13"
+    assert p["line1"] == "4800 Dahlia St"
+    assert p["line2"] == "# D13"
     assert p["city"] == "Denver"
     assert p["state"] == "CO"
     assert p["zip"] == "80216-3121"

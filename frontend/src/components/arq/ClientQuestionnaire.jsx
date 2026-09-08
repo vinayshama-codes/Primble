@@ -3,25 +3,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '../../config/constants';
 import ScheduleTable from './ScheduleTable';
 import { isBlankRow } from '../../utils/scheduleImport';
+// BUG-01: the progress rule lives in one pure module so the ring, the badge,
+// the per-question styling and the submission receipt cannot disagree.
+import {
+  decodeRows,
+  encodeRows,
+  hasResponded as respondedTo,
+  progressCounts,
+  restoreTouched,
+  DRAFT_MARKER,
+} from '../../utils/questionnaireProgress';
 
 // Schedule answers (Figure 15) travel through the SAME answers map as every
 // other question, JSON-encoded, so draft autosave and submit need no special
 // casing. These two helpers are the only place that encoding is known.
-function decodeRows(raw) {
-  if (Array.isArray(raw)) return raw;
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function encodeRows(rows) {
-  return JSON.stringify(rows || []);
-}
-
 // Validation helpers
 const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE   = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
@@ -169,6 +164,28 @@ export default function ClientQuestionnaire({ token }) {
   const draftTimerRef    = useRef(null);
   const pendingAnswersRef = useRef({});
 
+  // BUG-01: progress must measure the CLIENT's contribution, never the box's
+  // contents. A schedule question ships PRE-FILLED with rows extraction already
+  // found (that is deliberate - the client edits a known fleet instead of
+  // retyping it), so counting "is there something in this field?" reported
+  // 1/11 = 9% on a questionnaire nobody had touched yet.
+  //
+  // Two pieces of state answer the two different questions:
+  //   * `seedRef`     - exactly what the SERVER handed us at load. Frozen.
+  //   * `touched`     - field names the client has actually changed. STICKY:
+  //                     once set it never clears, so deleting five rows and
+  //                     retyping the same five does not walk the bar backwards.
+  // Both are needed. A pure seed-vs-now diff fails the retype case; a pure
+  // touch flag cannot tell a typed-then-cleared box from an untouched one.
+  const seedRef = useRef({});
+  const [touched, setTouched] = useState(() => new Set());
+  // Refs mirror both maps SYNCHRONOUSLY. `setAnswers` has to diff against the
+  // previous answers and union into the previous touch set in the same tick,
+  // and two edits inside one tick (tapping a NAICS chip, then typing) would
+  // read stale values from either React state or a useEffect-updated ref.
+  const answersRef = useRef({});
+  const touchedRef = useRef(new Set());
+
   // Chat state
   const [chatOpen, setChatOpen]       = useState(false);
   // Figure 19: the greeting is NOT stored in history - it is derived on every
@@ -184,10 +201,18 @@ export default function ClientQuestionnaire({ token }) {
   const chatInputRef                  = useRef(null);
 
   // Server-side draft save (debounced 1s) - works across browsers, incognito, devices
-  const saveDraftToServer = useCallback((currentAnswers) => {
+  // The draft carries ONLY what the client has touched. It used to carry the
+  // whole answer map - every untouched empty box and, worse, the pre-filled
+  // schedule seed - so on reload there was no way to tell our own pre-fill from
+  // the client's work. Touched-only makes the stored draft mean exactly one
+  // thing ("what the client supplied"), which is also what restores `touched`
+  // across a reload with no extra column and no extra request.
+  const saveDraftToServer = useCallback((currentAnswers, touchedKeys) => {
     if (!token) return;
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
-    pendingAnswersRef.current = currentAnswers;
+    const draft = { [DRAFT_MARKER]: '1' };
+    touchedKeys.forEach((k) => { draft[k] = currentAnswers[k] ?? ''; });
+    pendingAnswersRef.current = draft;
     draftTimerRef.current = setTimeout(() => {
       fetch(`${API_BASE}/api/arq/draft/${token}`, {
         method: 'PATCH',
@@ -197,16 +222,38 @@ export default function ClientQuestionnaire({ token }) {
     }, 1000);
   }, [token]);
 
-  // Wrapper so the rest of the component calls setAnswers (same as before)
+  // Wrapper so the rest of the component calls setAnswers (same as before).
+  //
+  // Every mutation in this file funnels through here - typing, selecting,
+  // toggling "I'm not sure", tapping a NAICS chip, and every schedule edit
+  // (ScheduleTable routes cell edits, row adds, row deletes and spreadsheet
+  // imports through its single `onChange`). So this is the ONE place that has
+  // to record a touch, and any question type added later inherits the correct
+  // behaviour without a second edit.
+  //
+  // Touch is recorded by DIFFING prev against next, not by trusting the caller:
+  // a no-op write (the blur normaliser re-setting an identical value) must not
+  // mark a field the client never changed.
   const setAnswers = useCallback((updates) => {
     // Editing anything clears the blocked-submit banner, so a stale "fix these
     // fields" message never lingers after the client has fixed them.
     setError(null);
-    setAnswersState(prev => {
-      const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
-      saveDraftToServer(next);
-      return next;
-    });
+    const prev = answersRef.current;
+    const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
+    // Touch is recorded by DIFFING prev against next, never by trusting the
+    // caller: the blur normaliser re-writes an identical value, and that must
+    // not mark a field the client never changed.
+    const changed = Object.keys(next).filter(k => next[k] !== prev[k]);
+    answersRef.current = next;
+    if (changed.length) {
+      const grew = changed.some(k => !touchedRef.current.has(k));
+      if (grew) {
+        touchedRef.current = new Set([...touchedRef.current, ...changed]);
+        setTouched(touchedRef.current);
+      }
+      saveDraftToServer(next, touchedRef.current);
+    }
+    setAnswersState(next);
   }, [saveDraftToServer]);
 
   // Flush any pending draft save immediately (used on submit)
@@ -370,8 +417,23 @@ export default function ClientQuestionnaire({ token }) {
               ? encodeRows(q.current_rows || [])
               : (q.current_value || '');
           });
+          // Freeze what the SERVER supplied before the draft is layered on. This
+          // is the baseline every "did the client provide this?" question is
+          // measured against, and it must never include the client's own work.
+          seedRef.current = init;
           const serverDraft = data.draft_answers || {};
-          setAnswersState({ ...init, ...serverDraft });
+          // The draft holds only fields the client has touched (see
+          // `saveDraftToServer`), so its key set IS the restored touch record -
+          // no extra column, no extra request. A pre-fix draft may still carry
+          // untouched keys; those restore as touched, which over-counts by at
+          // most the old behaviour and never under-counts real work.
+          // One rule, in `utils/questionnaireProgress`, so a pre-fix draft
+          // cannot quietly restore our own pre-fill as the client's work.
+          const restored = restoreTouched(serverDraft, init);
+          touchedRef.current = restored.touched;
+          setTouched(restored.touched);
+          answersRef.current = { ...init, ...restored.answers };
+          setAnswersState(answersRef.current);
         } else if (data.error === 'expired') {
           setError('This questionnaire link has expired. Please contact your insurance agent for a new link.');
         } else if (data.error === 'already_submitted') {
@@ -398,24 +460,29 @@ export default function ClientQuestionnaire({ token }) {
     };
   }, []);
 
+  // ── Progress (BUG-01) ────────────────────────────────────────────────────
   // Progress counts anything the client has RESPONDED to, including "I'm not
   // sure" - the goal is to show forward motion so nobody gets stuck on a
   // question they cannot answer.
-  // A schedule counts as answered once it holds at least one non-blank row -
-  // its raw value is a JSON array, so the string check below would count an
-  // empty "[]" as answered and overstate progress.
-  const isScheduleAnswered = (q) => decodeRows(answers[q.field_name])
-    .some((r) => !isBlankRow(r, q.columns || []));
+  //
+  // What it must NOT count is our own pre-fill. A schedule question arrives
+  // holding the rows extraction already found, so the previous test ("does this
+  // field hold content?") reported one answered question before the client had
+  // typed anything.
+  //
+  // One call, one rule (see `utils/questionnaireProgress`). "I'm not sure" is
+  // split out because it is a response but not an answer: both move the bar,
+  // and saying which is which is the whole point of showing the split.
+  const hasResponded = (q) =>
+    respondedTo(q, answers[q.field_name], seedRef.current[q.field_name], touched);
 
-  const answeredCount = questions.filter(
-    (q) => (q.field_type === 'schedule'
-      ? isScheduleAnswered(q)
-      : (answers[q.field_name] || '').trim() !== '')
-  ).length;
-
-  const notSureCount = questions.filter(
-    (q) => (answers[q.field_name] || '').trim() === NOT_SURE
-  ).length;
+  const {
+    answered:  answeredCount,
+    notSure:   notSureCount,
+    responded: respondedCount,
+    remaining: remainingCount,
+    pct:       progressPct,
+  } = progressCounts(questions, answers, seedRef.current, touched, NOT_SURE);
 
   const isNotSure = (fieldName) => (answers[fieldName] || '').trim() === NOT_SURE;
 
@@ -446,15 +513,23 @@ export default function ClientQuestionnaire({ token }) {
     questions.forEach((q) => {
       const raw = answers[q.field_name];
 
+      // Built from `hasResponded`, the SAME rule the progress counter uses, so
+      // the receipt can never credit the client for a table we pre-filled and
+      // they never opened.
+      if (!hasResponded(q)) return;
+
       if (q.field_type === 'schedule') {
         const rows = decodeRows(raw).filter((r) => !isBlankRow(r, q.columns || []));
-        if (!rows.length) return;
         const singular = q.schedule_singular || 'row';
         answeredItems += 1;
         items.push({
           key:   q.field_name,
           label: q.question,
-          value: `${rows.length} ${rows.length === 1 ? singular : `${singular}s`} provided`,
+          // An emptied table is a real answer ("we do not have any"), and saying
+          // "0 provided" would read like a failure to fill it in.
+          value: rows.length
+            ? `${rows.length} ${rows.length === 1 ? singular : `${singular}s`} provided`
+            : `Confirmed none - the pre-filled ${singular}s were removed`,
           kind:  'answer',
         });
         return;
@@ -508,7 +583,13 @@ export default function ClientQuestionnaire({ token }) {
       const res  = await fetch(`${API_BASE}/api/arq/submit/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers }),
+        // `touched` tells the server which fields the CLIENT supplied, so an
+        // untouched pre-filled schedule is never written back as a client
+        // answer. The server also re-derives this from its own copy of the
+        // seed, so a payload that omits or fakes the list cannot mislabel
+        // provenance - this only adds the cases the seed cannot see (a table
+        // emptied, or restored to identical values).
+        body: JSON.stringify({ answers, touched: Array.from(touched) }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -710,14 +791,49 @@ export default function ClientQuestionnaire({ token }) {
             {expiresAt && (
               <p style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>Expires: {formatDate(expiresAt)}</p>
             )}
+            {/* The ring shows ONE number; this says what it is made of. It sits
+                in the header, next to the ring it explains - it used to be a
+                third line of grey helper text under "Questions (N)", where it
+                read as more instructions and nobody saw it. Chips, not prose,
+                so the three states are scannable at a glance. */}
+            {respondedCount > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
+                               background: 'rgba(16,185,129,0.18)', color: '#6ee7b7',
+                               border: '1px solid rgba(110,231,183,0.35)', borderRadius: 20, padding: '3px 9px' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399' }} />
+                  {answeredCount} answered
+                </span>
+                {notSureCount > 0 && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
+                                 background: 'rgba(251,191,36,0.18)', color: '#fcd34d',
+                                 border: '1px solid rgba(252,211,77,0.35)', borderRadius: 20, padding: '3px 9px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fbbf24' }} />
+                    {notSureCount} not sure
+                  </span>
+                )}
+                {remainingCount > 0 && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
+                                 background: 'rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.75)',
+                                 border: '1px solid rgba(255,255,255,0.18)', borderRadius: 20, padding: '3px 9px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.55)' }} />
+                    {remainingCount} to go
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {questions.length > 0 && (() => {
-            const pct  = Math.round((answeredCount / questions.length) * 100);
+            const pct  = progressPct;
             const r    = 20;
             const circ = 2 * Math.PI * r;
             return (
-              <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <div
+                title={`${answeredCount} answered`
+                       + (notSureCount > 0 ? `, ${notSureCount} marked "I'm not sure"` : '')
+                       + `, ${remainingCount} still open`}
+                style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                 <svg width="56" height="56" viewBox="0 0 52 52">
                   <circle cx="26" cy="26" r={r} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="5" />
                   <circle cx="26" cy="26" r={r} fill="none" stroke="#E61B84" strokeWidth="5"
@@ -726,14 +842,17 @@ export default function ClientQuestionnaire({ token }) {
                     style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
                   <text x="26" y="31" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700" fontFamily="Arial,sans-serif">{pct}%</text>
                 </svg>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)' }}>{answeredCount}/{questions.length}</span>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)' }}>{respondedCount}/{questions.length}</span>
               </div>
             );
           })()}
         </div>
 
-        {/* Auto-save indicator - Shows when draft is being saved */}
-        {answeredCount > 0 && (
+        {/* Auto-save indicator. Gated on the client having actually touched
+            something: it used to read off the same broken counter as the
+            progress ring, so it announced "auto-saving" on a questionnaire
+            where nothing had been typed and nothing had been sent. */}
+        {touched.size > 0 && (
           <div style={{
             margin: '12px 20px 0',
             padding: '8px 12px',
@@ -781,9 +900,9 @@ export default function ClientQuestionnaire({ token }) {
               const notSure    = isNotSure(q.field_name);
               // "Not sure" is a response but not an answer - it gets its own
               // amber treatment rather than the green "answered" styling.
-              const isAnswered = isSchedule
-                ? isScheduleAnswered(q)
-                : ((answers[q.field_name] || '').trim() !== '' && !notSure);
+              // Same rule as the progress bar (see `hasResponded`), so a card can
+              // never render green while the counter says the question is open.
+              const isAnswered = hasResponded(q) && !notSure;
               const hasError   = !!fieldErrors[q.field_name];
               const hint       = q.hint || '';
               const isEmailF   = isEmailField(q.field_name);
@@ -1184,12 +1303,18 @@ export default function ClientQuestionnaire({ token }) {
           </div>
         )}
 
-        {/* SUBMIT BUTTON */}
+        {/* SUBMIT BUTTON + its count badge.
+            BUG-02: the badge is absolutely positioned, but it used to be a
+            SIBLING of the button inside the fixed floating stack - so it
+            anchored to the stack's top-right corner and rendered on the "Contact
+            Your Agent" card, where it read as an unread-message dot. This
+            wrapper is the positioning context it always assumed it had. */}
+        <div style={{ position: 'relative', display: 'flex' }}>
         <button
           onClick={handleSubmit}
           disabled={submitting}
           className="floating-save-btn"
-          title={`Submit Answers (${answeredCount}/${questions.length})`}
+          title={`Submit answers (${respondedCount} of ${questions.length} responded)`}
           style={{
             width: 'auto',
             minWidth: '100px',
@@ -1245,28 +1370,37 @@ export default function ClientQuestionnaire({ token }) {
           )}
         </button>
 
-        {/* Progress badge */}
-        {!submitting && answeredCount > 0 && (
-          <div style={{
-            position: 'absolute',
-            top: '-8px',
-            right: '-8px',
-            background: '#10b981',
-            color: 'white',
-            borderRadius: '50%',
-            width: '24px',
-            height: '24px',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px solid white',
-            pointerEvents: 'none'
-          }}>
-            {answeredCount}
+        {/* Progress badge. It counts the questions the client has responded to -
+            it is not a notification. The tester could not tell, so it now says
+            so on hover and to a screen reader. `pointerEvents` has to be enabled
+            for the tooltip to fire; the badge overhangs the pill's rounded
+            corner, which is transparent, so no clickable area is lost. */}
+        {!submitting && respondedCount > 0 && (
+          <div
+            title={`${respondedCount} of ${questions.length} questions responded`}
+            role="status"
+            aria-label={`${respondedCount} of ${questions.length} questions responded`}
+            style={{
+              position: 'absolute',
+              top: '-8px',
+              right: '-8px',
+              background: '#10b981',
+              color: 'white',
+              borderRadius: '50%',
+              width: '24px',
+              height: '24px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '2px solid white',
+              cursor: 'default',
+            }}>
+            {respondedCount}
           </div>
         )}
+        </div>
 
         {/* CHAT BUTTON */}
         <button
@@ -1401,7 +1535,7 @@ export default function ClientQuestionnaire({ token }) {
 
         /* Tooltip on hover for floating save button */
         .floating-save-btn:hover::after {
-          content: "Submit your answers (${answeredCount}/${questions.length})";
+          content: "Submit your answers (${respondedCount}/${questions.length})";
           position: absolute;
           right: 100%;
           margin-right: 12px;

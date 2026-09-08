@@ -649,32 +649,91 @@ async def answer_recommendation(
             "message": "Producer answers are disabled.",
         })
 
-    ok, err = _validate_producer_answer(req.field, req.answer)
-    if not ok:
-        return JSONResponse({"success": False, "validation_error": err})
-
+    from services.answer_routing import (
+        MODE_NARRATIVE, MODE_NONE, MODE_SCHEDULE, answer_mode, refusal_note,
+    )
     from services.arq_service import (
+        NARRATIVE_ANSWER_MAX, append_producer_narrative,
         apply_producer_answer_to_session, recalculate_session_scores,
     )
+
     # E&O 5.9: read the value being replaced BEFORE the apply overwrites it.
-    # previous_value was hardcoded None here until 2026-08-26.
+    # previous_value was hardcoded None here until 2026-08-26. The same read
+    # also feeds the routing decision below, so the session is loaded once.
+    _prev_sess: dict = {}
+    _prev_facts: dict = {}
     _prev_fact_val = None
     try:
         from services.fact_lineage import envelope_value
-        _prev_sess = await get_processing_session(req.session_id)
-        _prev_fact_val = envelope_value((_prev_sess.get("facts") or {}).get(req.field))
+        _prev_sess = await get_processing_session(req.session_id) or {}
+        _prev_facts = _prev_sess.get("facts") or {}
+        _prev_fact_val = envelope_value(_prev_facts.get(req.field))
         if isinstance(_prev_fact_val, (list, dict)):
             _prev_fact_val = None
     except Exception as _pv_ex:
         logger.warning(f"answer_recommendation: prior-value read failed: {_pv_ex}")
-    applied, _updated = await apply_producer_answer_to_session(
-        req.session_id, req.field, req.answer,
-    )
-    if not applied:
+
+    # ── WHAT THIS ITEM ACTUALLY ACCEPTS ─────────────────────────────────────
+    # Decided HERE, from the fact's own declarations, and never from anything
+    # the client sent. The card renders the control the server named, but a
+    # stale tab or a hand-made request can still arrive claiming otherwise -
+    # the write path is what has to be right.
+    #
+    # Before 2026-09-08 this endpoint applied whatever it was handed and
+    # answered every refusal with one sentence, so a card offering a box the
+    # server could never accept looked identical to a genuine validation
+    # failure. Each mode now has its own outcome, and the reply carries
+    # `answer_mode` so the panel can correct a card that was drawn from an
+    # older payload.
+    _routed = answer_mode(req.field, _prev_facts)
+    _mode = _routed["mode"]
+
+    if _mode == MODE_NONE:
         return JSONResponse({
             "success": False,
-            "message": "This item can't be answered directly. Attach a supporting "
-                       "document or dismiss it with a note.",
+            "answer_mode": MODE_NONE,
+            "message": _routed.get("note")
+                       or "This item can't be answered directly. Attach a "
+                          "supporting document or dismiss it with a note.",
+        })
+
+    if _mode == MODE_SCHEDULE:
+        # A table, not a value. Answered by opening the schedule editor, which
+        # is what the card now offers - typing here would have replaced every
+        # extracted row with one string.
+        return JSONResponse({
+            "success": False,
+            "answer_mode": MODE_SCHEDULE,
+            "schedule_key": _routed.get("schedule_key"),
+            "message": "This one is a table, not a single value - open the "
+                       "schedule and add the rows there.",
+        })
+
+    if _mode == MODE_NARRATIVE:
+        _text = str(req.answer or "").strip()
+        if not _text:
+            return JSONResponse({"success": False, "validation_error": "Enter an answer."})
+        if len(_text) > NARRATIVE_ANSWER_MAX:
+            return JSONResponse({"success": False,
+                                 "validation_error": "That explanation is too long."})
+        applied, _updated = await append_producer_narrative(req.session_id, _text)
+    else:                                                     # MODE_FIELD
+        ok, err = _validate_producer_answer(req.field, req.answer)
+        if not ok:
+            return JSONResponse({"success": False, "validation_error": err})
+        applied, _updated = await apply_producer_answer_to_session(
+            req.session_id, req.field, req.answer,
+        )
+
+    if not applied:
+        # The routing above already cleared every KNOWN reason, so reaching
+        # here means the write itself refused - today only the write door's
+        # "a typed scalar must never replace a table" guard, which can fire on
+        # a fact whose rows arrived between the read above and the write.
+        return JSONResponse({
+            "success": False,
+            "answer_mode": _mode,
+            "message": refusal_note(req.field, _prev_facts),
         })
 
     # Record the typed value BEFORE the recalculation. The recalculation's
@@ -984,10 +1043,70 @@ def _grouped_cross_issues_for_panel(cross_issues: list):
         return None
 
 
+def _form_selection_view(sess: dict, cross_issues: list) -> dict:
+    """The Select Forms (pre-form Review) banner payload for a session.
+
+    THE GROUPED VIEW TRAVELS WITH THE STOPS - ALWAYS. The review screen draws
+    its Hard Stops and Warnings from `grouped_issues`, where every row carries
+    its rule code and therefore its "Open to fix" control. When a response hands
+    it `hard_stops` / `soft_stops` and NO grouped view, the screen silently
+    degrades to printing the raw sentences with no fix, no Resolve and no
+    Dismiss - a blocker holding the score at 60 with nothing to click.
+
+    `reopen_issue` did exactly that (found 2026-09-08): it refreshed the stop
+    ARRAYS while leaving the cards behind, so reopening an item on that screen
+    left the banner disagreeing with the counts beside it. Extracted here from
+    `resolve_issue`, which already got it right, so the two cannot drift and a
+    third caller inherits it for free.
+
+    C75: the DISPLAY reads the RAW stored arrays - the same ones the scorer
+    reads - so a stop can never render as a warning while capping the score at
+    60. `classify_stops` still runs, because its demotion is what decides
+    whether the producer MAY proceed; it just no longer decides what they SEE.
+
+    Best-effort: a display-computation failure must never fail a write that has
+    already succeeded, so it falls back to the raw stored lists.
+    """
+    hard = sess.get("hard_stops") or []
+    soft = sess.get("soft_stops") or []
+    grouped = None
+    can_proceed = False
+    warning_stops: list = []
+    try:
+        from services.sqs_service import classify_stops
+        from services.issue_registry import build_grouped_view
+        can_proceed, _, warning_stops = classify_stops(hard, sess.get("flags") or {})
+        grouped = build_grouped_view(
+            sess.get("structured_issues") or [],
+            hard, soft,
+            cross_issues=cross_issues,
+        )
+    except Exception as _fgx:                                  # noqa: BLE001
+        logger.error(f"form-selection grouped view failed (non-fatal): {_fgx}")
+    return {
+        "hard_stops":               hard,
+        "soft_stops":               soft,
+        "grouped_issues":           grouped,
+        "can_proceed_with_warning":  can_proceed,
+        "warning_stops":            warning_stops,
+    }
+
+
 def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
     """Problems the session currently reports that THIS fact participates in.
 
-    Returns {message: [facts that resolve it]}.
+    Returns {rule code: {"message": str, "facts": [facts that resolve it]}}.
+
+    KEYED ON THE RULE, NOT ON ITS SENTENCE (2026-09-08). It used to key on the
+    message, and several rules embed a LIST that shrinks as the producer fills
+    fields: "Carrier-Grade COPE incomplete - SQS capped at 85. Missing: year
+    built, roof year, sprinkler system, fire protection class, valuation method,
+    coinsurance percentage" becomes the same sentence minus one item the moment
+    valuation method is supplied. A message-keyed before/after diff reads that
+    as a BRAND NEW issue, so the modal told the producer their fix "raised a new
+    issue" when it had in fact made an existing warning smaller - reported live
+    by the owner, and precisely the loop the trade-off note exists to end.
+    The code is stable across that churn; the message rides along for display.
 
     Identity comes from the declared RESOLUTION_MAP binding - the same table
     that decides which inputs the modal renders - never from matching words in
@@ -1006,13 +1125,18 @@ def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
 
     def _add(code, message, tier):
         message = str(message or "").strip()
-        if not message or message in out:
+        if not message:
             return
         if not code:
             code = classify_legacy(message, tier or "soft_warning")[0]
+        # An unclassifiable stop has no stable identity, so its own sentence is
+        # the best key available - the old behaviour, kept for that case only.
+        key = code or message
+        if key in out:
+            return
         facts = (resolution_for(code) or {}).get("facts") or []
         if fact in facts:
-            out[message] = list(facts)
+            out[key] = {"message": message, "facts": list(facts)}
 
     for _key, _tier in (("hard_stops", "hard_stop"), ("soft_stops", "soft_warning")):
         for _m in (sess.get(_key) or []):
@@ -1022,6 +1146,49 @@ def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
         if isinstance(_i, dict):
             _add(_i.get("code"), _i.get("message"), _i.get("type"))
     return out
+
+
+def _trade_off_head(introduced: dict) -> str:
+    """Which raised issue the note names. Ordered by the MESSAGE (what the
+    producer reads) rather than by the internal code, so the wording stays
+    stable, and shared by the note and the settle-here list so the sentence and
+    the button can never be talking about different issues."""
+    return sorted(introduced,
+                  key=lambda k: (introduced.get(k) or {}).get("message") or k)[0]
+
+
+def _trade_off_settleable_here(introduced: dict, open_facts: list,
+                               applied_field: str,
+                               facts: dict | None = None) -> list:
+    """The facts the producer can still fill IN THIS MODAL to close what their
+    value just raised. Empty means there is nothing left to type here.
+
+    Extracted 2026-09-08 so the note's wording and the modal's primary button
+    are decided by ONE computation. They had drifted: the note correctly said
+    "Resolve it from the validation panel when you are ready", while the footer
+    still offered a pink "Apply the fix" as the primary action and demoted
+    "Done" to a grey ghost - telling the producer to do something that was not
+    available, immediately after a save that had in fact succeeded. Deriving the
+    button from this list rather than string-matching the note keeps the two in
+    step by construction.
+    """
+    if not introduced:
+        return []
+    head = _trade_off_head(introduced)
+
+    def _still_missing(f: str) -> bool:
+        if f == applied_field:
+            return False
+        if facts is None:
+            return True                      # no session state - keep prior behaviour
+        try:
+            from services.sqs_service import _fact_is_filled
+            return not _fact_is_filled(facts.get(f))
+        except Exception:                                     # noqa: BLE001
+            return True
+
+    return [f for f in ((introduced.get(head) or {}).get("facts") or [])
+            if f in (open_facts or []) and _still_missing(f)]
 
 
 def _trade_off_note(introduced: dict, open_facts: list, applied_field: str,
@@ -1048,24 +1215,12 @@ def _trade_off_note(introduced: dict, open_facts: list, applied_field: str,
     """
     if not introduced:
         return ""
-    msgs = sorted(introduced)
-    head = msgs[0]
-    more = f" (and {len(msgs) - 1} more)" if len(msgs) > 1 else ""
-    note = f"Applied - but it raised a new issue{more}: {head}"
+    head = _trade_off_head(introduced)
+    more = f" (and {len(introduced) - 1} more)" if len(introduced) > 1 else ""
+    head_msg = (introduced.get(head) or {}).get("message") or head
+    note = f"Applied - but it raised a new issue{more}: {head_msg}"
 
-    def _still_missing(f: str) -> bool:
-        if f == applied_field:
-            return False
-        if facts is None:
-            return True                      # no session state - keep prior behaviour
-        try:
-            from services.sqs_service import _fact_is_filled
-            return not _fact_is_filled(facts.get(f))
-        except Exception:                                     # noqa: BLE001
-            return True
-
-    here = [f for f in (introduced.get(head) or [])
-            if f in (open_facts or []) and _still_missing(f)]
+    here = _trade_off_settleable_here(introduced, open_facts, applied_field, facts)
     if here:
         labels = " / ".join(f.replace("_", " ").title() for f in here)
         note += f"  You can settle it here - fill in {labels} above and apply again."
@@ -1102,8 +1257,9 @@ async def resolve_issue(
         })
 
     from services.arq_service import (
-        apply_producer_answer_to_session, save_session_schedule,
-        recalculate_session_scores,
+        NARRATIVE_ANSWER_FIELD, NARRATIVE_ANSWER_MAX,
+        append_producer_narrative, apply_producer_answer_to_session,
+        save_session_schedule, recalculate_session_scores,
     )
 
     mode = (req.mode or "").strip()
@@ -1151,30 +1307,18 @@ async def resolve_issue(
         text = (req.text or "").strip()
         if not text:
             return JSONResponse({"success": False, "message": "Enter an explanation to apply."})
-        if len(text) > 4000:
+        if len(text) > NARRATIVE_ANSWER_MAX:
             return JSONResponse({"success": False, "message": "Explanation is too long."})
-        # Append to any existing ACORD 101 remarks rather than overwrite, so
-        # explanations for different issues coexist instead of clobbering.
-        try:
-            _proc = await get_processing_session(req.session_id)
-            _existing = (_proc.get("facts") or {}).get("additional_remarks_text")
-            _existing_val = _existing.get("value") if isinstance(_existing, dict) else _existing
-            _existing_val = str(_existing_val or "").strip()
-        except Exception:
-            _existing_val = ""
-        if _existing_val and text not in _existing_val:
-            combined = f"{_existing_val}\n{text}".strip()
-        elif not _existing_val:
-            combined = text
-        else:
-            combined = _existing_val
-        applied, _ = await apply_producer_answer_to_session(
-            req.session_id, "additional_remarks_text", combined,
-        )
+        # Appends to any existing ACORD 101 remarks rather than overwriting,
+        # so explanations for different issues coexist. The compose + write
+        # moved into `arq_service.append_producer_narrative` (2026-09-08)
+        # when the Narrative Quality recommendation card gained the same
+        # narrative mode - two surfaces writing the same fact must not hold
+        # two ideas of what "append" means.
+        applied, _ = await append_producer_narrative(req.session_id, text)
         if not applied:
             return JSONResponse({"success": False, "message": "Could not save the explanation."})
-        _log_field, _log_value = "additional_remarks_text", text
-
+        _log_field, _log_value = NARRATIVE_ANSWER_FIELD, text
     elif mode == "schedule":
         from services import schedule_capture
         list_key = (req.schedule_key or "").strip()
@@ -1277,31 +1421,21 @@ async def resolve_issue(
     # severity silently FLIPPED BACK to warning the moment you resolved anything.
     # Best-effort: a display-computation failure must never fail the resolve that
     # already succeeded server-side, so we fall back to the raw stored lists.
-    _fs_hard = sess.get("hard_stops") or []
-    _fs_soft = sess.get("soft_stops") or []
-    _fs_grouped = None
-    _can_proceed_warn = False
-    _warning_stops: list = []
-    try:
-        from services.sqs_service import classify_stops
-        from services.issue_registry import build_grouped_view
-        _can_proceed_warn, _, _warning_stops = classify_stops(
-            sess.get("hard_stops") or [], sess.get("flags") or {}
-        )
-        _fs_grouped = build_grouped_view(
-            sess.get("structured_issues") or [],
-            _fs_hard, _fs_soft,
-            cross_issues=cross_issues,
-        )
-    except Exception as _fgx:
-        logger.error(f"resolve_issue: form-selection grouped view failed (non-fatal): {_fgx}")
-        _fs_hard = sess.get("hard_stops") or []
-        _fs_soft = sess.get("soft_stops") or []
+    _fs_view = _form_selection_view(sess, cross_issues)
+    _fs_hard = _fs_view["hard_stops"]
+    _fs_soft = _fs_view["soft_stops"]
+    _fs_grouped = _fs_view["grouped_issues"]
+    _can_proceed_warn = _fs_view["can_proceed_with_warning"]
+    _warning_stops = _fs_view["warning_stops"]
 
     # Did the value the producer just typed raise something new? Scoped to issues
     # this exact fact is a declared remedy for, so it names a real trade, never
     # recompute churn. Non-blocking: the write already succeeded and stands.
     _note = ""
+    # Can the producer close the raised issue WITHOUT leaving this modal? Drives
+    # the footer's primary button, so a note saying "resolve it from the panel"
+    # can never sit above an "Apply the fix" call to action.
+    _note_settle_here: list = []
     if mode == "field" and _log_field:
         try:
             _after = _issues_bound_to_fact(sess, _log_field)
@@ -1310,6 +1444,9 @@ async def resolve_issue(
             # actually on file now - never asking for a value already provided.
             _note = _trade_off_note(_introduced, _open_facts, _log_field,
                                     facts=(sess.get("facts") or {}))
+            _note_settle_here = _trade_off_settleable_here(
+                _introduced, _open_facts, _log_field,
+                facts=(sess.get("facts") or {}))
             if _note:
                 logger.info(
                     f"resolve_issue: trade-off surfaced session={req.session_id} "
@@ -1334,6 +1471,9 @@ async def resolve_issue(
         "warning_stops":            _warning_stops,
         # Advisory only - the value WAS applied. Empty string when nothing traded.
         "note":                     _note,
+        # True only when a fact the producer can still type is on THIS screen.
+        "note_settle_here":         bool(_note_settle_here),
+        "note_settle_facts":        _note_settle_here,
     })
 
 
@@ -1490,8 +1630,11 @@ async def reopen_issue(
         "new_package_tier":      package_sqs.get("tier"),
         "cross_issues":          cross_issues,
         "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
-        "hard_stops":            sess.get("hard_stops") or [],
-        "soft_stops":            sess.get("soft_stops") or [],
+        # Reopening an issue changes what the pre-form Review banners must show,
+        # so they get the whole view - not just the raw arrays. Handing over the
+        # arrays alone made that screen fall back to printing bare sentences
+        # with no fix, no Resolve and no Dismiss (2026-09-08).
+        **_form_selection_view(sess, cross_issues),
     })
 
 

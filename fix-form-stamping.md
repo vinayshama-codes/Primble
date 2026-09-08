@@ -13,6 +13,16 @@
 > reported** - including auto liability limits misstating coverage on
 > certificates, and a routing bug that silently undid several fixes.
 >
+>
+> **UPDATE 2026-09-05 - read "SHIPPED 2026-09-05 - THE QUALIFIERS ENFORCED AS A
+> CLASS" at the END of this file first.** The root cause below is still exactly
+> right; what was measured on 5 Sep is WHY it stayed true after being written.
+> The six qualifiers were being enforced as HAND-WRITTEN RESCUES, one per
+> reported field, over an unchanged primitive (`if match_val in val_str`). Two
+> of that run's defects were an August fix that only covered its own reported
+> case, and an August fix that was never WIRED. The prediction test at the
+> bottom of the root-cause section is now a CI test.
+>
 > **The four highest-value things to know before touching anything:**
 >
 > 1. **`return None` from a resolver means "ask the LLM", NOT "leave blank".**
@@ -1715,3 +1725,487 @@ regression - tell Brent before he notices.
 
 
 NOTE :This is for all the forms not just ACORD 125, we need to think about all the forms and relevant issues that can be pointed out in future. 
+---
+
+## SHIPPED 2026-09-05 - THE QUALIFIERS ENFORCED AS A CLASS, NOT AS RESCUES
+
+**Read this with "THE ROOT CAUSE (one sentence)" above. It does not replace that
+diagnosis - it explains why the diagnosis kept being TRUE after it was written.**
+
+### The finding: the rule was known, the ENFORCEMENT was per-field
+
+Every wrong value on the 5 Sep 2026 ACORD 125/126/127 run was one of the six
+qualifiers this file already names. None of them was a new mechanism. What was
+new is the measurement of WHY they keep arriving:
+
+**The six qualifiers are not a gate every value passes. They are hand-written
+rescues, added one at a time after each live run reports the one field that
+broke.** `_derive_indicator` alone carried five - the symbol grid, legal entity,
+no-prior-losses, the `is_contractor` rescue, the `lines_of_business`
+corroboration - and underneath all five the primitive was unchanged:
+
+    if match_val.lower() in val_str:
+        return "Yes"
+
+Measured across `_INDICATOR_RULES`: **46 rules, 17 reading a free-text or list
+fact by bare substring. 8 of those (lines_of_business) got the corroboration
+guard in August. 9 (operations_description) did not.**
+
+**Two of this run's defects prove the pattern exactly:**
+
+1. The August nature-of-business rescue answered "No" to the other boxes ONLY
+   when `is_contractor` was affirmatively TRUE - because the reported case was a
+   contractor. Every other business kept the defect, and when it DID fire it
+   blanked the CORRECT box too. Under-inclusive and over-inclusive at once.
+2. The phantom-hazard-row suppression was written, tested, shipped in August -
+   **and never registered in `_AUTHORITATIVE_BLANK_RESOLVERS`.** Its `None`
+   therefore meant "ask the model", and gap fill did what it always does with a
+   row that does not exist: copied the nearest one. That is the trap this file
+   OPENS WITH, sprung on a fix already in the file. Every unit test passed.
+
+### Measured before the fix - 9 wrong ticks over 7 ordinary businesses
+
+    BUSINESS              WE TICKED                                      SHOULD BE     WRONG
+    Food wholesaler       Restaurant, Wholesale                          Wholesale       1
+    Commercial cleaning   Retail, Service, Office                        Service         2
+    Truck repair shop     Retail, Service                                Service         1
+    Machine shop          Manufacturing                                  Manufacturing   0
+    Property manager      Apartments, Condominiums                       Service         2
+    Plumbing supply       Wholesale                                      Wholesale       0
+    Wholesale bakery      Restaurant, Service, Wholesale, Institutional  Wholesale       3
+
+**Five of seven ordinary businesses got a wrong tick on a signed application.**
+The cause is one sentence of English: a business narrative names OTHER PEOPLE'S
+businesses as a matter of course - customers, premises, markets. *"...to grocery
+and RESTAURANT accounts"*. It is the client's own Part 11/12 complaint one layer
+over: we treated who the applicant SELLS TO as evidence of what it IS.
+
+### What shipped
+
+| Defect | Qualifier | Fix |
+|---|---|---|
+| NATURE OF BUSINESS ticked RESTAURANT on a food wholesaler | OWNERSHIP | `_resolve_business_type_indicator` OWNS the family. Order: `is_contractor` (a decided fact) -> the NAICS SECTOR (a published taxonomy, partial and deliberately so) -> prose, and ONLY when it matches EXACTLY ONE box. Ambiguous prose returns None = ASK, never nine silent "No"s. 9 wrong ticks -> 0, nothing correct lost. |
+| AAIS offered as a rival CARRIER | OWNERSHIP | `normalization.is_insurance_bureau`. A bureau's name is on the policy because it wrote the FORMS. Dropped in `fact_comparison._usable` (the door groups NAME fields on `strict_entity_key`, so a `normalize_value` guard was INERT - the first attempt proved it), in `underwriting_consistency._normalize`, and in the merge. |
+| ADDITIONAL INTEREST named "Certificate Holder" | ROW INTEGRITY | `normalization.is_party_role_label`. The orphan-row rule suppresses an UNNAMED interest; this row had a name, the name just was not one. |
+| ONE GL class code in THREE rows of ACORD 126 | ROW INTEGRITY | The August suppression, finally WIRED - through a narrow `_resolve_phantom_gl_hazard_row` wrapper, because registration is all-or-nothing and registering the whole resolver would have blanked the grid on every package whose schedule extraction merely missed. |
+| CYBER ticked twice (enumerated + "Other") | M4b | `_tokens_describe_same_line` gained a second pass with the purely DESCRIPTIVE words stripped, so "Cyber Liability" is ACORD's "Cyber and Privacy" box. The words that DISTINGUISH - general, commercial, property, auto, umbrella - are deliberately not strippable: "Liquor Liability" vs "General Liability" reduces to `liquor` vs `general` and is still refused. |
+| "GL coverage detected but no class codes found" - FALSE | (a checker, not a stamper) | The check read `gl_class_codes_by_location` only. LLM call 1 records class codes in TWO shapes and fills whichever the document prints. Now reads both. |
+
+### THE PREDICTION TEST IS NOW EXECUTABLE
+
+`tests/test_form_value_qualifiers_20260905.py::
+test_no_indicator_rule_decides_a_box_from_a_narrative_without_an_owner`
+
+fails the build when a new `_INDICATOR_RULES` entry decides a checkbox from a
+NARRATIVE fact without a resolver owning its family. This file's own prediction -
+*"take any field, ask which of the six qualifiers is checked before it stamps.
+If the answer is 'none', that field is already broken or one document away from
+it"* - stops being advice and starts being CI.
+
+### Not done, and why
+
+* **`$ $4,275` on every ACORD 125/126 money box.** `display_canonicalizer.
+  canonicalize_currency` ADDS a `$`; the ACORD form pre-prints one. Confirmed,
+  and the caller is the stamping path only, so the change is safe in principle -
+  but it moves EVERY money box on all 17 forms and only three were verified.
+  Cosmetic damage, wide blast radius: an owner decision, not a drive-by.
+* **`% OF WORK SUBCONTRACTED: 0%`** on a package that never mentions
+  subcontracting. EXTRACTION inventing a value from silence - core principle 3
+  on the extraction side, which is the documented GAP 1, not a stamping defect.
+
+### Verification
+
+Suite **6020 passed / 1 failed / 14 skipped** - the documented `httpx`
+ImportError. Was 5929/1 before. **+91 tests, zero regressions.**
+
+### FORM RUN 2 - 5 OF 6 FIXES CONFIRMED LIVE, 1 MISSED (2026-09-05)
+
+The owner re-ran the **SYS-07 kit** (Northgate / Blackwater), not the new
+`formvalue_test_data` kit. That is a REGRESSION run rather than the targeted
+one - and it is worth more than it looks, because Northgate is the package that
+produced the original wrong values.
+
+#### CONFIRMED FIXED, on the forms
+
+| # | Was | Now |
+|---|---|---|
+| 1 | ACORD 125 NATURE OF BUSINESS: **Restaurant + Wholesale** on a food wholesaler | **WHOLESALE only** |
+| 2 | LINES OF BUSINESS: Cyber ticked twice - the enumerated box AND a free-text "Cyber Liability" in an Other row | **Cyber and Privacy ticked once. The Other row is empty** |
+| 3 | ACORD 126 hazard grid: `11288 / Sales / $9,300,000` repeated in **three** rows | **Row 1 only. Rows 2 and 3 completely empty** |
+| 4 | Review screen: "GL coverage detected but no class codes found" on a package whose code stamps onto two forms | **Gone on Northgate** - and it STILL FIRES on Blackwater, which genuinely states none. Precise, not blanket |
+| 5 | (bonus) ACORD 126 "% OF WORK SUBCONTRACTED: 0%" | **blank on both packages** |
+| 6 | SYS-07 itself | still holding - Northgate "All confirmed", Blackwater still asks with `X` vs `N` |
+
+**The Blackwater half is the strongest evidence.** Its NATURE OF BUSINESS came
+back **MANUFACTURING only** from NAICS 332312 (Fabricated Structural Metal
+Manufacturing), on a narrative - *"Structural steel fabrication and light
+machining for commercial builders"* - that names no business-type keyword at
+all. The classification decided it, which is exactly the design. And its hazard
+grid printed LOC/HAZ/TERR with **no class code**, because that package states
+none: the phantom-row rule is positional, not "always blank".
+
+#### MISSED - "Certificate Holder" is still on ACORD 125 and 126
+
+    NAME AND ADDRESS:     Certificate Holder
+    REASON FOR INTEREST:  Certificate holder is an additional insured with respect
+    ITEM DESCRIPTION:     2023 Freightliner M2 106 1FVACWDT
+
+**The fix was built one layer too low.** Verified: `_strip_non_value_facts`
+DOES remove `certificate_holder` and `additional_interest_name` from the merged
+facts, and `is_party_role_label("Certificate Holder")` is True. But
+`_ACORD_FIELD_RULES` has **no rule touching AdditionalInterest at all** - the
+block is filled by **GAP FILL**, reading the certificate's remarks sentence
+directly out of the raw text. A fact-layer guard can never reach a value that
+never was a fact.
+
+That is the same lesson as the AAIS attempt earlier the same day (a
+`normalize_value` guard that was inert because the door used
+`strict_entity_key`) and the phantom hazard row (a suppression that was never
+wired): **the guard has to sit on the path the value actually travels.**
+
+The right home is `_enforce_post_fill_guards` - the same place C22's type gate
+and the checkbox-value guard already blank a gap-fill answer that cannot be
+what the box asks for. A NAME box answered with a party ROLE is exactly that
+shape, and the reason-for-interest sentence beside it is a second signal.
+
+#### OBSERVED, NOT MINE, NOT FIXED - all gap-fill noise, all new this run
+
+* ACORD 125 `METHOD OF PAYMENT: Annual Premium` and `AUDIT: A` (Northgate) /
+  `AUDIT: O` (Blackwater). Neither box was filled on the earlier run - the model
+  answered them this time. "Annual Premium" is not a method of payment and a
+  bare "A"/"O" is not an audit answer.
+* ACORD 126 for Blackwater printed a full set of GL LIMITS ($1,000,000
+  aggregate, $100,000 damage to rented premises, $5,000 medical) that **neither
+  B document states**. Invented, and on the money boxes that matter most.
+* ACORD 125 page 3 Q4 answered **"Y"** on Blackwater and listed the
+  submission's OWN policies as "other insurance with this company".
+* Northgate gained a new advisory: comprehensive/collision covered-auto symbols
+  not found. Correct - that package states Symbol 1 only.
+* The `restaurant` -> crime-coverage ADVISORY still fires on Northgate. The
+  CHECKBOX is fixed; this is a different consumer of the same word, in
+  `sqs_service`, and it was never in scope. Same class, still open.
+* `$ $4,275` doubled dollar sign - known, deliberately deferred.
+
+#### Still untested
+
+The `formvalue_test_data` kit was NOT run, so the **AAIS bureau rule** and the
+"ambiguous narrative with NO classification must ask rather than tick" control
+have no live evidence yet. Both are unit-tested; neither has been seen on a
+real run.
+
+### FORMVALUE KIT - LIVE RUN, 7 OF 8 PASS (2026-09-05)
+
+Cedar Point Provisions (A, food wholesaler, NAICS 424490) and Harborlight
+Facility Services (B, ambiguous narrative, NO NAICS). ACORD 125 + 126 each.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | A: NATURE OF BUSINESS = **Wholesale only** | **PASS** - the narrative names restaurant, retail, service AND office; the classification decided |
+| 2 | A: Cyber ticked once, Other rows empty | **PASS** |
+| 3 | A: ACORD 126 hazard rows 2 and 3 empty | **PASS** |
+| 4 | A: no interest named "Certificate Holder" | **FAIL** - clean on 125, still there on 126 |
+| 5 | A: AAIS never a carrier | **PASS** (see caveat) |
+| 6 | A: no false "no GL class codes" warning | **PASS** |
+| 7 | B: NATURE OF BUSINESS entirely EMPTY | **PASS** - asked, not guessed, and not nine "No"s |
+| 8 | B: hazard rows 1 AND 2 fill, row 3 empty | **PASS** - `92663 / $3,400,000` and `97447 / $1,450,000`, row 3 blank |
+
+**Checks 1 and 7 together are the whole root-cause fix, and both landed.** A
+still ticks the RIGHT box from its classification; B, with nothing to classify
+on, ticks nothing at all. The fix is not a blanket off-switch, and check 8
+proves the same for the hazard grid - positional, not "always blank".
+
+**Caveat on check 5, stated so nobody over-reads it.** AAIS appears nowhere as a
+carrier and the Data Consistency panel offered no AAIS card - but this run
+cannot distinguish "the bureau guard fired" from "the model never proposed AAIS
+as a carrier in the first place". The outcome is right either way; the guard
+itself is still only unit-proven.
+
+#### CHECK 4 - the miss, and it got WORSE in a new place
+
+    ACORD 126 page 1, LIMITS block:
+        EMPLOYEE BENEFITS                                    $1,000,000
+        Certificate holder is an additional insured with     $1,000,000
+    ACORD 126 page 3:
+        NAME AND ADDRESS:  Certificate Holder
+        ITEM DESCRIPTION:  certificate holder
+
+The certificate's remarks sentence is now also being written into an **"other
+limit" row as a $1,000,000 LIMIT**. That is a money box on a legal form, which
+is materially worse than the name box.
+
+Cause is unchanged and already recorded: the fact-layer strip works
+(`_strip_non_value_facts` removes it, `is_party_role_label` returns True) but
+**nothing feeds these boxes from a fact** - they are GAP FILL reading the raw
+sentence. The guard must move to `_enforce_post_fill_guards`, and it now has to
+cover two shapes: a party ROLE in a NAME box, and a narrative sentence in a
+LIMIT box.
+
+Note ACORD 125 came back CLEAN on the same package, so this is not deterministic
+- it is the model choosing differently per form. A guard is the only fix; there
+is nothing to "correct" upstream.
+
+#### NEW, deterministic, on BOTH packages - a value in the wrong column
+
+    ACORD 126 page 1: PREMIUM BASIS column ....... BLANK on every row
+    ACORD 126 page 2: "DESCRIBE THE TYPE OF WORK SUBCONTRACTED: Gross Sales"
+
+One bug, not two: the hazard schedule's PREMIUM BASIS ("Gross Sales") is landing
+in the CONTRACTORS block's type-of-work box and leaving its own column empty.
+It happened on BOTH packages, so it is deterministic, and it did NOT happen on
+the earlier SYS-07 kit - whose hazard table printed the basis as `Sales` under a
+`BASIS` header rather than `Gross Sales` under `PREMIUM BASIS`. So the value
+only mis-routes on the fuller printing, which is the commoner one on a real dec
+page. ROLE qualifier, `fix-form-stamping.md`'s table. Not previously reported.
+
+#### Smaller, recorded
+
+* ACORD 125 (A) `GL CODE` box blank, though ACORD 126 carries `11288`. On the
+  SYS-07 kit it filled. The class code reached the schedule but not the scalar.
+* ACORD 126 (B) PRODUCTS row: `PRINCIPAL COMPONENTS = "office buildings and
+  retail cente..."` - the customers again, in a components box.
+* B's review screen correctly reports **"Key details missing: NAICS or SIC
+  industry code"** and only ONE warning - the crime-coverage advisory off the
+  word "retail". The CHECKBOX is fixed; that advisory is the same word read by
+  `sqs_service`, still open, still the same class.
+* `$ $9,480` doubled dollar sign - known, deferred by owner decision.
+
+### GUARD THE BOX, NOT THE FACT - SHIPPED 2026-09-05
+
+Two fixes, one lesson. Both came out of the formvalue live run.
+
+#### THE LESSON, and it was learned three times in one day
+
+* the AAIS guard was put in `normalize_value` and was **inert**, because the
+  comparison door groups NAME fields on `strict_entity_key` and never consults
+  the dispatcher;
+* the phantom hazard-row suppression was written, tested, shipped in August and
+  **never wired** into `_AUTHORITATIVE_BLANK_RESOLVERS`;
+* the role-label strip was built at the FACT layer and the value **still reached
+  three forms**.
+
+**A guard only works on the path the value actually travels.** For the
+additional-interest boxes there is no path at all - `_ACORD_FIELD_RULES` touches
+no `AdditionalInterest` field, so every value in them comes from GAP FILL
+reading the raw text. A fact-layer guard can never reach a value that was never
+a fact.
+
+#### Guard 3c - a ROLE is not a party, an ARRANGEMENT is not a coverage
+
+`pdf_service._rejects_role_or_arrangement`, wired into
+`_enforce_post_fill_guards` beside C22's type gate. Two shapes, both measured
+live on the same package:
+
+    ACORD 126 p3  NAME AND ADDRESS ....... "Certificate Holder"
+    ACORD 126 p1  an "other" LIMIT row .... "Certificate holder is an additional
+                                             insured with"        $1,000,000
+
+The second is a MONEY box on a legal form. ACORD 125 came back CLEAN on the same
+package, so the model chooses differently per form - there is nothing upstream
+to correct, only a guard to add.
+
+It rejects the WHOLE value being a party role (via
+`normalization.is_party_role_label`) and a SENTENCE describing the arrangement
+(a role word followed within 80 characters by is / are / shall be / named /
+included / added / endorsed). **A REMARKS or DESCRIPTION OF OPERATIONS box is
+exempt** - that is exactly where the sentence belongs - and a real company whose
+name contains a role word ("Certificate Holdings Inc") is untouched, because the
+role test is whole-value.
+
+This is the client's own Part 11/12 principle one layer over: *"Primble is
+treating policy language describing who COULD be covered as evidence that the
+entity or condition EXISTS."*
+
+#### Guard 3d + the translation - a RATING BASIS belongs in the rating-basis box
+
+Live on BOTH packages, therefore deterministic, and NOT previously reported:
+
+    ACORD 126 p1  PREMIUM BASIS column ................. BLANK on every row
+    ACORD 126 p2  "TYPE OF WORK SUBCONTRACTED" ......... "Gross Sales"
+
+One value, the wrong column - the ROLE qualifier. Fixed on both sides:
+
+1. **The box now gets ACORD's own code.** `rating_basis_code` translates the
+   words to the letter, and `_resolve_gl_hazard_row` uses it for
+   `PremiumBasisCode`. **The legend is PRINTED ON THE FORM** - (S) GROSS SALES,
+   (P) PAYROLL, (A) AREA, (C) TOTAL COST, (M) ADMISSIONS, (U) UNIT, (T) OTHER -
+   and the tooltip says *"Enter code: an industry code designating the rating
+   basis of the exposure amount."* So this is ACORD's table, not one we
+   invented, exactly like the shipped `valuation_method` -> `R`/`A`. An
+   unrecognised basis passes through unchanged rather than being dropped:
+   blanking real data is the worse failure.
+2. **`_rejects_misplaced_rating_basis`** blanks a bare basis term found OUTSIDE
+   a rating-basis box. Bounded to values of three words or fewer, so a real
+   answer that merely contains the word ("Framing and gross sales support
+   work") is never touched.
+
+Why it did not appear on the SYS-07 kit: that hazard table printed `Sales` under
+a `BASIS` header. The formvalue kit prints `Gross Sales` under `PREMIUM BASIS` -
+the fuller printing, and the commoner one on a real dec page.
+
+#### Verification
+
+* Suite **6053 passed / 1 failed / 14 skipped** - the documented `httpx`
+  ImportError. Was 6020/1. **+33 tests, zero regressions.**
+* `tests/test_form_value_qualifiers_20260905.py` now 124 tests.
+
+#### Still open after this
+
+* The `restaurant` / `retail` -> crime-coverage ADVISORY in `sqs_service`. The
+  CHECKBOX is fixed; this is the last consumer of the same word-match.
+* `$ $9,480` doubled dollar sign - owner decision, deferred.
+* The AAIS bureau guard remains unit-proven only: the live run showed no AAIS
+  anywhere, but cannot separate "the guard fired" from "the model never
+  proposed it".
+
+### THE REMAINING OPEN ITEMS - SHIPPED 2026-09-05
+
+#### 1. The crime advisory - the LAST consumer of the word-match class
+
+`cross_form_validator._check_crime_silent_exposure` read the same narrative with
+the same bare `if kw in ops` test. Live, both packages:
+
+    food WHOLESALER  -> "the business description mentions 'restaurant', 'retail'"
+                        from "...to grocery, restaurant and retail service accounts"
+    JANITORIAL firm  -> "...mentions 'retail'"
+                        from "...for office buildings and retail centers"
+
+Both times the word belonged to the CUSTOMERS.
+`_cash_term_is_the_applicants` applies TWO conditions, strongest first:
+
+1. **THE CLASSIFICATION.** A term naming a KIND of business (retail,
+   restaurant, bar, tavern, bank, pawn, jewelry) is discounted when the
+   applicant's own NAICS says it is something else - and CORROBORATED when the
+   NAICS agrees.
+2. **THE SENTENCE.** With no classification, a mention governed by a customer
+   phrase ("to ... accounts", "for ... buildings", "... centers") is somebody
+   else's premises. Every mention is checked, so one genuine mention still
+   fires.
+
+**Terms with no business-type meaning are NEVER discounted by rule 1** - cash,
+vault, armored, currency, atm, teller-less money handling. Being a wholesaler
+does not stop you handling cash.
+
+**ONE OWNER for "what is this business".** The NAICS taxonomy moved to
+`normalization.naics_business_type`, and both consumers - the ACORD 125 NATURE
+OF BUSINESS boxes and this advisory - now ask it. They cannot disagree, so a
+food wholesaler cannot be a wholesaler on the form and a restaurant in the
+warning.
+
+Measured, 9 cases: both live false positives gone; a real restaurant, a real
+retail store, a bar, a cash-handling vending route and an armored-car operator
+all still warn; the roofing contractor (the 2026-08-17 false positive) stays
+silent.
+
+#### 2. The doubled dollar sign - measured PER BOX, never blanket
+
+I nearly got this wrong. `canonicalize_currency` adds a "$" and the form prints
+one, so every live premium read `$ $4,275`. **But a blanket strip is WRONG:**
+ACORD 126's LIMITS column prints a "$" and its PREMIUMS column does NOT, so
+removing the symbol everywhere would lose it exactly where the form does not
+supply it. That is why this was deferred rather than done in the earlier round.
+
+`_fields_with_printed_currency(form_id)` reads the TEMPLATE: each widget's
+`/Rect` gives the box, and the 26pt band immediately to its left is inspected
+for a "$". Cached per form (`lru_cache`), and any failure returns an empty set
+so the value keeps its own symbol exactly as today. Measured: **41 boxes on
+ACORD 125, 13 on 126, 23 on 127** - and the 126 PREMIUMS boxes correctly are
+NOT among them.
+
+**NINE TESTS FAILED, and the CODE was right.** They asserted `== "$3,954"` on
+boxes the form prints a "$" beside - pinning an incidental display detail while
+actually testing *which box got which amount*. Each now compares the AMOUNT via
+a local `_amt()` helper, so the intent is preserved and the display rule can
+never break them again. Files: `test_form_fill_1sep.py`,
+`test_form_fill_ownership_20260810_runf.py`, `test_raw_text_verification.py`,
+`test_relationship_fixes_20260816.py`, `test_stamping_fixes_20260810.py`.
+
+#### DELIBERATELY NOT FIXED, and why - these are NOT "done quietly"
+
+* **`METHOD OF PAYMENT: Annual Premium`** - the box is declared *"Enter text:
+  the method the policy will be paid"*, so it accepts free text and no type
+  guard can reject this. "Annual Premium" is a weak answer, not a provably
+  wrong one.
+* **`AUDIT: A` / `AUDIT: O`** - the box is *"Enter code: the audit term"*, and
+  **"A" is a legitimate ACORD audit-frequency code (Annual)**. Guarding it would
+  need ACORD's own code list, which is not in the schema; inventing an
+  allow-list I cannot verify would be exactly the fixture-fitting this whole
+  arc has been removing. "O" is likely wrong, one value, low confidence.
+* **`PRINCIPAL COMPONENTS = "office buildings and retail centers"`** - the
+  customers in a components box. Same OWNERSHIP class, but a components box has
+  no closed domain to check against and no classification to appeal to.
+* **ACORD 125 `GL CODE` blank while 126 carries `11288`** - a GAP, not a wrong
+  value. The code reached the schedule fact and not the scalar.
+* **Gap fill inventing GL LIMITS** on a package that states none - the generic
+  "gap fill invents" class, out of scope here.
+* **The AAIS bureau guard is still unit-proven only.** The live run showed no
+  AAIS anywhere, but that cannot separate "the guard fired" from "the model
+  never proposed it".
+
+#### Verification
+
+Suite **6066 passed / 1 failed / 14 skipped** - the documented `httpx`
+ImportError, back at the baseline. Was 6053/1 before this round.
+`tests/test_form_value_qualifiers_20260905.py` now **137 tests**.
+
+### FORMVALUE RUN 3 - ALL FIVE CHECKS PASS, TWO ORPHAN HALVES FIXED (2026-09-05)
+
+Cedar Point Provisions (A) and Harborlight Facility Services (B), ACORD 125 + 126.
+
+| Check | Result |
+|---|---|
+| A: NATURE OF BUSINESS = **Wholesale only** | **PASS** |
+| B: NATURE OF BUSINESS **entirely empty** | **PASS** |
+| Cyber ticked once, Other rows empty | **PASS** |
+| A: hazard rows 2-3 empty · B: rows 1-2 fill, row 3 empty | **PASS** |
+| **ACORD 126 PREMIUM BASIS = `S`** on every row, both packages | **PASS** - was blank |
+| **"Gross Sales" out of the subcontracted box** | **PASS** |
+| **No "Certificate Holder"** - not a name, not a limit, either form, either package | **PASS** |
+| **`$ 5,120` / `$ 9,480` / `$ 16,740` / `$ 13,900`** - single symbol | **PASS** - and ACORD 126's PREMIUMS column still shows its own |
+| AAIS never a carrier | **PASS** |
+
+**METHOD OF PAYMENT fixed itself.** It read "Annual Premium" on run 2 and now
+reads **"Producer / Agency"** (A) and **"Direct Bill"** (B) - both real payment
+methods. Nothing was changed for it; the model simply answered better with the
+surrounding boxes cleaner. `AUDIT: A` persists and is still correct as
+discussed - "A" is a legitimate ACORD audit-frequency code (Annual).
+
+#### TWO ORPHAN HALVES, both created BY the fixes, both now closed
+
+**A HALF-FIX IS ITS OWN DEFECT.** Both of these are the same shape: a guard
+removed the wrong value and left its partner behind.
+
+1. **An unlabelled $1,000,000 limit (A, ACORD 126).** Guard 3c correctly blanked
+   *"Certificate holder is an additional insured with"* out of the OTHER
+   coverage DESCRIPTION - and the amount beside it stayed, leaving a limit on a
+   legal form that names no coverage. An "other coverage" row is precisely the
+   one the form does NOT enumerate, so its description is what names it.
+   `_blank_unnamed_other_rows` (Guard 3f) now blanks an OTHER amount whose
+   description is empty - mechanism M4, the same rule Guard 2d already applies
+   to line+number pairs. Enumerated limits are untouched: the form names those
+   itself.
+
+2. **`0%` in "DESCRIBE THE TYPE OF WORK SUBCONTRACTED" (B, ACORD 126).** The
+   rating-basis guard removed "Gross Sales" and the model put a bare percentage
+   there instead, while the "% OF WORK SUBCONTRACTED" column beside it stayed
+   empty. Guard 3e: **a DESCRIBE box needs WORDS.** Identified from ACORD's own
+   declaration - the field name says description AND the tooltip says "Enter
+   text:" - because either condition alone is too loose. A real description
+   carrying a percentage ("Roof work 40%") is untouched.
+
+#### Observed, unchanged, NOT fixed
+
+* **`EMPLOYEE BENEFITS $1,000,000` (A, ACORD 126)** - a NAMED limit nothing in
+  the documents states. That is the generic "gap fill invents a limit" class,
+  not the orphan class, and it is out of scope here.
+* ACORD 126 PRODUCTS table came back empty on A this run where it carried
+  `$11,600,000` last run, and B's `PRINCIPAL COMPONENTS = "office buildings and
+  retail centers"` is gone. Both are model variance, neither a wrong value now.
+* The review screens were not sent this run, so the **crime-advisory fix has no
+  live confirmation yet** - it is unit-proven only (9 cases), like the AAIS
+  guard.
+
+#### Verification
+
+Suite **6077 passed / 1 failed / 14 skipped** - the documented `httpx`
+ImportError. Was 6066/1. **+11 tests, zero regressions.**
+`tests/test_form_value_qualifiers_20260905.py` now **148 tests**.

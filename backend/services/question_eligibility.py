@@ -158,9 +158,35 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     "garage_deductible",
     "garagekeeper_comp_deductible",
     "garagekeeper_coll_deductible",
+    # ── The COMPONENT limits of coverages already listed here - 2026-09-08 ────
+    # `auto_liability_limit` (the CSL) is producer-only two lines up, but the
+    # three SPLIT-limit facts that express the same coverage were not listed and
+    # therefore reached the insured. Same coverage, two audiences, decided by
+    # whether the policy happens to be written CSL or split - which is itself a
+    # producer decision (`auto_liability_structure`). Master-plan 4.9 puts limits
+    # with the producer without qualification, and core principle 5 forbids
+    # asking the client to perform insurance classification.
+    #
+    # Found 2026-09-08 while auditing the BUG-07 fix: these were previously
+    # invisible (they surfaced as the mislabelled "(Nth vehicle)" cards), so the
+    # routing gap could not be seen. Fixing the label exposed it.
+    #
+    # THE LINE IS IN THE WORDING, and it is deliberate. A fact phrased
+    # "What IS the limit?" is read off a policy - producer. A fact phrased
+    # "Do you WANT this coverage? If yes, what limit?" is the insured's own
+    # preference and stays with the client (`auto_um_uim_limit`,
+    # `auto_med_pay_limit`, `extra_expense_limit` are the live examples, and
+    # they are deliberately NOT listed here).
+    "auto_bi_per_person",
+    "auto_bi_per_accident",
+    "auto_pd_per_accident",
+    "auto_liability_structure",   # CSL vs split IS the coverage-structure choice
 
     # General Liability (4.4 "General Liability" + "Coverage limits")
     "gl_limits",
+    # Components of `gl_limits`, same reasoning as the auto block above.
+    "gl_medical_expense",
+    "gl_fire_damage_limit",
     "gl_each_occurrence",
     "gl_aggregate",
     "gl_products_aggregate",
@@ -216,6 +242,13 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     "umbrella_sir",
     "umbrella_attachment_point",
     "employers_liability_limits",
+    # The three components `employers_liability_limits` rolls up. Listing the
+    # rollup and not its parts split one coverage across two audiences - an
+    # insured cannot be expected to choose a disease-policy limit. Same 2026-09-08
+    # audit as the auto/GL component blocks above.
+    "wc_el_each_accident",
+    "wc_el_disease_policy_limit",
+    "wc_el_disease_each_employee",
 
     # Classification (4.4 + principle 5). ADDED 2026-08-26 after live test S2.
     # These were left out on the assumption that

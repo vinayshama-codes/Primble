@@ -26,6 +26,11 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+# The shared word-boundary door. Safe at module level BY CONSTRUCTION: it is
+# stdlib-only and imports nothing from services/, so it cannot participate in
+# the lazy `sqs_service` <-> `cross_form_validator` cycle either direction.
+from services import term_match
+
 logger = logging.getLogger(__name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -412,8 +417,16 @@ def _check_umbrella_attachment_stack(
 
     # Spec: misaligned effective/expiration dates = HARD STOP unless explained.
     # An ACORD 101 narrative is treated as the "explained" exception.
+    #
+    # ...and so is a comparison against a term WE derived rather than one a
+    # document states. On a routed renewal the proposed package term is computed
+    # from the expiring one and flagged low_confidence for the producer to
+    # confirm; capping the score at 60 because a human's stated umbrella term
+    # disagrees with our own guess inverts who is authoritative.
     _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "additional_remarks_text") or _fv(facts, "policy_period_explanation"))
-    _date_sev = "soft_warning" if _dates_explained else "hard_stop"
+    _date_sev = ("soft_warning"
+                 if (_dates_explained or _proposed_package_term_is_derived(facts))
+                 else "hard_stop")
 
     if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
         issues.append(_issue(
@@ -446,15 +459,28 @@ def _check_builders_risk_vs_property_deduplication(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    ACORD 133 (Builders Risk) and ACORD 140 (Completed Property) must not
-    cover the same insured values for the same location - duplication risk.
+    Builders Risk and ACORD 140 (Completed Property) must not cover the same
+    insured values for the same location - duplication risk.
 
     Spec: "If both 133 and 140 exist for same location, ensure period
     covered is disjoint."
+
+    KEYED ON THE BUILDERS-RISK EVIDENCE, NOT ON ACORD 133 (2026-09-05). The
+    spec names 133 because that is what this product used to call the builders
+    risk form; the real ACORD 133 is the Workers Compensation Assigned Risk
+    section (its own template says so, and 67 of its 136 fields are
+    `WorkersCompensation*`). Keying on its selection would now fire this
+    property-duplication warning on a Workers Comp package and could never fire
+    on a genuine construction one. The underwriting check the spec is actually
+    asking for - construction-period values double-counted against
+    completed-property values - is preserved exactly, on the evidence itself.
     """
     issues: List[dict] = []
 
-    if "ACORD_133" not in triggered_ids or "ACORD_140" not in triggered_ids:
+    if "ACORD_140" not in triggered_ids:
+        return issues
+    if not (flags.get("has_builders_risk")
+            or _fv(facts, "builders_risk_project_cost")):
         return issues
 
     br_value   = _to_float(_fv(facts, "builders_risk_project_cost"))
@@ -475,12 +501,12 @@ def _check_builders_risk_vs_property_deduplication(
                 "soft_warning",
                 "builders_risk_property_duplication",
                 (
-                    "Both ACORD 133 (Builders Risk) and ACORD 140 (Commercial "
-                    "Property) are present with overlapping insured values. "
+                    "Builders Risk and ACORD 140 (Commercial Property) are "
+                    "present with overlapping insured values. "
                     "Ensure construction-period and completed-property values are "
                     "not double-counted. Attach ACORD 101 if coverages are disjoint."
                 ),
-                ["ACORD_133", "ACORD_140"],
+                ["ACORD_140"],
             ))
 
     return issues
@@ -708,6 +734,61 @@ def _check_gl_missing_when_umbrella(
     return issues
 
 
+# ── A NARRATIVE NAMES OTHER PEOPLE'S BUSINESSES (2026-09-05) ─────────────────
+# Live 5 Sep 2026, both test packages: a food WHOLESALER was told *"the business
+# description mentions 'restaurant', 'retail'"* off the phrase "...to grocery,
+# restaurant and retail service accounts", and a JANITORIAL company off "...for
+# office buildings and retail centers". Both times the word belonged to the
+# CUSTOMERS. Same bare-substring class as the ACORD 125 NATURE OF BUSINESS
+# boxes, one consumer over - `fix-form-stamping.md`'s OWNERSHIP qualifier.
+#
+# TWO conditions, strongest first:
+#   1. THE CLASSIFICATION. A cash term that names a KIND of business
+#      ("retail", "restaurant", "bar", "tavern") is discounted when the
+#      applicant's own NAICS says it is something else. That is the same door
+#      the nature-of-business boxes now use - `normalization.
+#      naics_business_type` - so the two can never disagree.
+#   2. THE SENTENCE. With no classification to appeal to, a term governed by a
+#      CUSTOMER phrase ("to ... accounts", "for ... buildings", "... centers")
+#      is about somebody else's premises.
+# Terms with no business-type meaning - "cash", "vault", "armored", "atm" -
+# are never discounted by rule 1: nothing about being a wholesaler stops you
+# handling cash.
+_CASH_TERM_BUSINESS_TYPE = {
+    "retail": "Retail", "restaurant": "Restaurant", "bar": "Restaurant",
+    "tavern": "Restaurant", "casino": "Restaurant",
+    "bank": "Financial", "financial": "Financial", "teller": "Financial",
+    "pawn": "Retail", "jewelry": "Retail", "jewellery": "Retail",
+}
+# These two moved to `services/term_match.py` on 2026-09-06 and are re-exported
+# here so there is ONE definition rather than two that drift. They were written
+# for this file's defect and then needed, unchanged, by `sqs_service` - which is
+# how the shared door earned its place.
+_CUSTOMER_BEFORE_RE = term_match._CUSTOMER_BEFORE_RE
+_CUSTOMER_AFTER_RE = term_match._CUSTOMER_AFTER_RE
+
+
+def _cash_term_is_the_applicants(term: str, ops: str, facts: dict) -> bool:
+    """True when this cash term describes the APPLICANT, not its customers."""
+    kind = _CASH_TERM_BUSINESS_TYPE.get(str(term).strip())
+    if kind:
+        try:
+            from services.normalization import naics_business_type
+            own = naics_business_type(_fv(facts, "naics_code"))
+        except Exception:                                    # noqa: BLE001
+            own = None
+        if own and own != kind:
+            return False                  # the classification says otherwise
+        if own == kind:
+            return True                   # positively corroborated
+    # The sentence half, through the shared door. It used to walk `ops.find(term)`
+    # - a BARE SUBSTRING - so the ownership test was inspecting the same
+    # accidental hit that should never have been a match at all: on
+    # "2255 SHOREBANK AVENUE" it found "bank" inside the street name, saw no
+    # customer clause around it, and confirmed the applicant "handles cash".
+    return term_match.describes_the_subject(term, ops)
+
+
 def _check_crime_silent_exposure(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -751,7 +832,14 @@ def _check_crime_silent_exposure(
         )
     ]
     ops = " ".join(str(h) for h in haystacks).lower()
-    matched = sorted({kw.strip() for kw in _CASH_TERMS if kw in ops})
+    # WHOLE WORDS (2026-09-06). `kw in ops` read four joined free-text facts as
+    # one blob, and `certificate_description_of_operations` is the ACORD 25
+    # DESCRIPTION OF OPERATIONS box, which routinely carries a job ADDRESS.
+    # Live: "2255 SHOREBANK AVENUE" -> "bank" -> this applicant was told it
+    # handles cash and should buy Crime coverage. Reproduced with controls, as
+    # were "treatment"/atm, "rebar and"/"bar ", "vaulted"/vault.
+    matched = sorted({kw for kw in term_match.matched(_CASH_TERMS, term_match.fold(ops))
+                      if _cash_term_is_the_applicants(kw, ops, facts)})
 
     if matched:
         # Spec: silent crime exposure = SOFT WARNING (not advisory)
@@ -788,7 +876,16 @@ def _check_cyber_silent_exposure(
     cyber_keywords = ["software", "saas", "cloud", "data", "pci", "phi",
                       "health", "medical", "ecommerce", "e-commerce",
                       "online", "tech", "platform", "digital"]
-    has_cyber_exposure = any(kw in ops for kw in cyber_keywords)
+    # WHOLE WORDS (2026-09-06). "tech" matched "HVAC service TECHNICIANS" and
+    # "GEOTECHNICAL drilling", so contractors with no digital exposure at all
+    # were told to buy Cyber Liability. Both reproduced with controls.
+    #
+    # HONEST RESIDUE, recorded rather than hidden: boundaries do NOT close this
+    # check. "platform" is a whole word in "aerial PLATFORM lift" and "health"
+    # is one in "occupational HEALTH and safety program". Those need longer
+    # phrases ("cloud platform", "protected health information") - a separate
+    # decision about this rule's vocabulary, not a matching fix.
+    has_cyber_exposure = bool(term_match.matched(cyber_keywords, term_match.fold(ops)))
 
     if has_cyber_exposure:
         # Spec: silent cyber exposure = SOFT WARNING (not advisory)
@@ -1329,13 +1426,68 @@ def _package_period_on_umbrella_footing(facts: dict):
     The sibling Auto/WC check needs none of this - those dates come off their
     own dec pages, so they share the umbrella's footing by construction.
     """
-    if _fv(facts, "renewal_dates_routed"):
+    if _fv(facts, "renewal_dates_routed") and not _umbrella_dates_are_proposed(facts):
         return (_fv(facts, "prior_effective_date"),
                 _fv(facts, "prior_expiration_date"),
                 "expiring GL/policy")
     return (_fv(facts, "effective_date"),
             _fv(facts, "expiration_date"),
             "GL/policy")
+
+
+def _fact_source(facts: Optional[dict], key: str) -> str:
+    raw = (facts or {}).get(key)
+    return str(raw.get("source") or "").lower() if isinstance(raw, dict) else ""
+
+
+def _umbrella_dates_are_proposed(facts: Optional[dict]) -> bool:
+    """True when a HUMAN supplied the umbrella term, which flips its footing.
+
+    ONE FACT KEY, TWO MEANINGS - and that is the whole defect. Extraction reads
+    `umbrella_effective_date` off the umbrella's own dec page, so on a renewal
+    it is the EXPIRING term, which is why the helper above compares it to the
+    expiring package term. But `legacy_umbrella_renewal_term_unknown` asks the
+    producer to "confirm the PROPOSED effective and expiration dates", and its
+    resolution writes that answer into the SAME key. From that moment the fact
+    is on the proposed footing and the expiring comparison is apples to oranges
+    again, one direction over from the 2026-08-16 defect this helper's docstring
+    describes fixing.
+
+    Reported live 2026-09-08, and MEASURED as unresolvable before the fix: with
+    the routed renewal above, typing the proposed term raised two hard stops
+    (SQS capped at 60), typing the DERIVED proposed term raised the same two,
+    and the only input that cleared them was the expiring term - i.e. the wrong
+    answer to the question the card asked. A rule no correct answer can satisfy
+    is the defect, not the producer.
+
+    Provenance decides, read through `fact_state._HUMAN_SOURCES` so there is one
+    table of "who counts as a human" rather than a second copy here. Anything
+    extraction- or derivation-sourced keeps the previous behaviour byte for
+    byte, so nothing that worked before this moves.
+    """
+    try:
+        from services.fact_state import _HUMAN_SOURCES
+        human = set(_HUMAN_SOURCES)
+    except Exception:                                         # noqa: BLE001
+        human = {"producer", "client_arq", "user_confirmed"}
+    return any(_fact_source(facts, k) in human
+               for k in ("umbrella_effective_date", "umbrella_expiration_date"))
+
+
+def _proposed_package_term_is_derived(facts: Optional[dict]) -> bool:
+    """The proposed package term was DERIVED by us, not stated by a document.
+
+    `extraction_service._route_renewal_dates` computes the proposed term from
+    the expiring one and stamps `source="derived"`, `confidence="low_confidence"`
+    precisely so the producer can correct it. Hard-stopping a value a human
+    STATED because it disagrees with one we GUESSED is backwards, and matches
+    the standing renewal ruling already in this codebase (the expired-term hard
+    stop downgrades to "confirm the renewal term" when is_renewal is
+    affirmative). So the misalignment is still reported - it is real and worth
+    seeing - but as a warning rather than a 60 cap.
+    """
+    return any(_fact_source(facts, k) == "derived"
+               for k in ("effective_date", "expiration_date"))
 
 
 def _check_umbrella_period_vs_auto_wc(
@@ -1347,6 +1499,19 @@ def _check_umbrella_period_vs_auto_wc(
 
     Spec: "Underlying GL, Auto, and WC policy periods must align with the
     umbrella policy period."
+
+    FOOTING (2026-09-08). `_package_period_on_umbrella_footing`'s docstring used
+    to say this sibling "needs none of this - those dates come off their own dec
+    pages, so they share the umbrella's footing by construction." That was true
+    only while `umbrella_effective_date` was always extraction-sourced. Once a
+    producer answers the renewal card it holds the PROPOSED umbrella term, while
+    `auto_*`/`wc_*` are still the EXPIRING dec-page dates - so the identical
+    apples-to-oranges hard stop appears one check over. There is no proposed
+    Auto or WC term fact to compare against, so the check STANDS DOWN rather
+    than comparing across footings, which is the same choice the GL helper makes
+    when it has no comparable term. Nothing else about this check moves: on a
+    non-renewal, and on a renewal whose umbrella dates came from extraction, it
+    behaves exactly as before.
     """
     issues: List[dict] = []
 
@@ -1357,6 +1522,9 @@ def _check_umbrella_period_vs_auto_wc(
     umb_exp = _fv(facts, "umbrella_expiration_date")
 
     if not umb_eff and not umb_exp:
+        return issues
+
+    if _fv(facts, "renewal_dates_routed") and _umbrella_dates_are_proposed(facts):
         return issues
 
     # Spec: underlying policy period misalignment = HARD STOP unless explained.
@@ -2069,7 +2237,12 @@ def _check_builders_risk_project_value(
         or _fv(facts, "builders_risk_project_cost")
         or _fv(facts, "builders_risk_completion_date")
     )
-    if "ACORD_133" not in triggered_ids and not (flags.get("has_builders_risk") and _br_evidence):
+    # ACORD 133 is NOT the builders-risk form (2026-09-05) - its template is the
+    # Workers Compensation Assigned Risk section, and it no longer triggers on
+    # builders-risk evidence, so keying this check on its selection would key it
+    # on a Workers Comp form. Builders risk now stands on its own evidence,
+    # which is the corroborated half this condition already required.
+    if not (flags.get("has_builders_risk") and _br_evidence):
         return issues
 
     project_cost = _to_float(_fv(facts, "builders_risk_project_cost"))
@@ -2080,7 +2253,7 @@ def _check_builders_risk_project_value(
             "soft_warning" if explained else "hard_stop",
             "builders_risk_project_value_missing",
             (
-                "Builders Risk (ACORD 133) requires a project value/cost. "
+                "Builders Risk requires a project value/cost. "
                 "Provide the total construction cost or attach an ACORD 101 "
                 "narrative explaining the project scope."
             ),

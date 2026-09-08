@@ -35,6 +35,17 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const mode = resolution.mode || 'none';
 
   const [values, setValues] = useState({});     // field mode: fact -> typed value
+  // Which facts the producer put into "Other" (free-text) mode. Tracked
+  // explicitly because it CANNOT be inferred from the value: the old code used
+  // `picked === 'Other'`, so the first character typed into the Other box made
+  // the condition false, unmounted the box mid-keystroke and blanked the select.
+  // "Other" was therefore unusable on every choice field.
+  const [otherFacts, setOtherFacts] = useState(() => new Set());
+  const setOtherMode = (fact, on) => setOtherFacts((prev) => {
+    const next = new Set(prev);
+    if (on) next.add(fact); else next.delete(fact);
+    return next;
+  });
   const [text, setText] = useState('');          // narrative mode: new text to add
   const [existingRemarks, setExistingRemarks] = useState(''); // narrative: what's already saved
   const [schedule, setSchedule] = useState(null); // schedule mode: fetched def + rows
@@ -61,6 +72,13 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // succeeded, so `applied` keeps the authoritative response and EVERY exit
   // path below must still refresh the panel with it.
   const [note, setNote] = useState('');
+  // Does the raised issue have an input the producer can still fill HERE? The
+  // backend decides (audit_routes._trade_off_settleable_here) so the footer's
+  // primary action can never contradict the note's own wording - a note reading
+  // "Resolve it from the validation panel" used to sit above a pink "Apply the
+  // fix" button, telling the producer to do something unavailable right after a
+  // save that had actually succeeded.
+  const [noteSettleHere, setNoteSettleHere] = useState(false);
   const applied = useRef(null);
   // Facts the producer has started editing - the async pre-fill must never
   // overwrite these, or a value would jump under the cursor.
@@ -149,20 +167,46 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onClose]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Returns the parsed body on success, and THROWS an Error whose message is
+  // already fit to show a broker on anything else.
+  //
+  // It used to be `return res.json()` with no status check, so three different
+  // failures were indistinguishable: a real {success:false} validation reply, a
+  // 500, and a rejected fetch. Every one of them landed in a bare catch that
+  // printed one generic sentence. Backend 500s now carry CORS headers
+  // (main.py), so the status actually reaches us instead of the browser killing
+  // the response and rejecting the fetch.
   const post = async (body) => {
-    const res = await fetch(`${API_BASE}/api/audit/resolve-issue`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        issue_id: issue?.issue_id ?? null,
-        code: issue?.code ?? null,
-        form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null,
-        ...body,
-      }),
-    });
-    return res.json();
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/audit/resolve-issue`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          issue_id: issue?.issue_id ?? null,
+          code: issue?.code ?? null,
+          form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null,
+          ...body,
+        }),
+      });
+    } catch {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    if (!res.ok) {
+      // 5xx: the write may or may not have landed before the failure, so we do
+      // not claim either way - saying "nothing was saved" and being wrong is
+      // how a producer ends up applying the same value twice.
+      if (res.status >= 500) {
+        throw new Error(`The server hit an error (${res.status}). Your change may not have been saved - close this and check the panel before retrying.`);
+      }
+      const detail = data?.validation_error || data?.message || data?.detail;
+      throw new Error(detail || `That request was rejected (error ${res.status}).`);
+    }
+    return data || {};
   };
 
   const applyField = async () => {
@@ -199,6 +243,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       if (last?.note) {
         applied.current = last;
         setNote(String(last.note));
+        setNoteSettleHere(!!last.note_settle_here);
         touched.current.clear();
         // Re-read what is now on file so the inputs show the values that just
         // landed instead of the pre-apply snapshot. Without this the producer
@@ -208,30 +253,45 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         setBusy(false);
         return;
       }
-      onApplied?.(last, issue);
-    } catch {
-      setErr('Something went wrong applying your answer.');
+    } catch (e) {
+      setErr(e?.message || 'Could not apply that value.');
       setBusy(false);
+      return;
     }
+    // OUTSIDE the try on purpose. The server write has already succeeded here,
+    // so a panel-refresh callback that throws must never be reported back to
+    // the producer as a failed apply - that invites them to retype a value that
+    // is already on file. Every early return above has already exited.
+    onApplied?.(last, issue);
   };
 
   const applyNarrative = async () => {
     if (!text.trim()) { setErr('Enter an explanation.'); return; }
     setBusy(true); setErr('');
+    let data;
     try {
-      const data = await post({ mode: 'narrative', text: text.trim() });
+      data = await post({ mode: 'narrative', text: text.trim() });
       if (!data?.success) { setErr(data?.message || 'Could not save the explanation.'); setBusy(false); return; }
-      onApplied?.(data, issue);
-    } catch { setErr('Something went wrong saving the explanation.'); setBusy(false); }
+    } catch (e) {
+      setErr(e?.message || 'Could not save the explanation.');
+      setBusy(false);
+      return;
+    }
+    onApplied?.(data, issue);
   };
 
   const applySchedule = async () => {
     setBusy(true); setErr('');
+    let data;
     try {
-      const data = await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows });
+      data = await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows });
       if (!data?.success) { setErr(data?.message || 'Could not save the schedule.'); setBusy(false); return; }
-      onApplied?.(data, issue);
-    } catch { setErr('Something went wrong saving the schedule.'); setBusy(false); }
+    } catch (e) {
+      setErr(e?.message || 'Could not save the schedule.');
+      setBusy(false);
+      return;
+    }
+    onApplied?.(data, issue);
   };
 
   const label = {
@@ -304,7 +364,15 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                 const ctl = (resolution.controls || {})[fact] || {};
                 const opts = Array.isArray(ctl.options) ? ctl.options : null;
                 const picked = values[fact] || '';
-                const isOther = opts && picked === 'Other';
+                const isOther = !!opts && (otherFacts.has(fact) || picked === 'Other');
+                // A value already on file need not be one of the offered labels:
+                // the backend stores the canonical form the fact can hold
+                // ("RCV", "3", "Joisted Masonry") while the list offers readable
+                // labels ("Replacement Cost", "Protection Class 3", ...). Show it
+                // rather than a blank select, so re-opening a resolved card does
+                // not look like the answer was lost.
+                const onFile = opts && picked && !isOther && !opts.includes(picked)
+                  ? picked : null;
                 return (
                 <label key={fact} style={{ display: 'block' }}>
                   <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>{humanizeFact(fact)}</span>
@@ -315,10 +383,20 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                         value={isOther ? 'Other' : picked}
                         disabled={busy}
                         autoFocus={(resolution.facts || [])[0] === fact}
-                        onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                        onChange={(e) => {
+                          const chosen = e.target.value;
+                          touched.current.add(fact);
+                          setOtherMode(fact, chosen === 'Other');
+                          // Entering Other clears the box rather than submitting
+                          // the literal word "Other", which the backend refuses
+                          // (answer_semantics: it is an affordance, not a value).
+                          setValues((v) => ({ ...v, [fact]: chosen === 'Other' ? '' : chosen }));
+                          if (err) setErr('');
+                        }}
                         onFocus={() => { if (note) setNote(''); }}
                       >
                         <option value="">Select an answer...</option>
+                        {onFile && <option value={onFile}>{onFile} (current value)</option>}
                         {opts.map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
                       {isOther && (
@@ -327,6 +405,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                           placeholder="Type the correct value..."
                           disabled={busy}
                           autoFocus
+                          value={picked}
                           onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
                           onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
                         />
@@ -430,16 +509,27 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             <>
               {/* `finish` not `onClose`: once a value has been applied the panel
                   behind this modal is stale, whichever way the producer leaves. */}
-              <button type="button" style={ghostBtn} disabled={busy} onClick={finish}>
-                {note ? 'Done' : 'Cancel'}
-              </button>
+              {/* Nothing left to type here means there is nothing to cancel
+                  either - the value is already saved. One unambiguous "Done"
+                  beats a Close/Done pair that both do the same thing. */}
+              {!(note && !noteSettleHere) && (
+                <button type="button" style={ghostBtn} disabled={busy} onClick={finish}>
+                  {note ? 'Done' : 'Cancel'}
+                </button>
+              )}
               <button
                 type="button"
                 style={primaryBtn}
                 disabled={busy || (mode === 'schedule' && (loading || !schedule))}
-                onClick={mode === 'field' ? applyField : mode === 'narrative' ? applyNarrative : applySchedule}
+                onClick={note && !noteSettleHere
+                  ? finish
+                  : (mode === 'field' ? applyField : mode === 'narrative' ? applyNarrative : applySchedule)}
               >
-                {busy ? 'Applying...' : note ? 'Apply the fix' : 'Apply'}
+                {busy
+                  ? 'Applying...'
+                  : note
+                    ? (noteSettleHere ? 'Apply the fix' : 'Done')
+                    : 'Apply'}
               </button>
             </>
           )}

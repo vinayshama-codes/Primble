@@ -119,13 +119,28 @@ class _Recorder:
 
         Family grouping applies to the general fill; the compliance pass has its
         own partition and is out of scope for that assertion.
+
+        A TABLE block does NOT list its field names as `- Name` lines. It prints
+        a `Columns:` section of short COLUMN labels ("GenderCode", "BirthDate")
+        and then the real field names under "Exact field names per row". Reading
+        the `- Name` lines alone therefore recorded a column LABEL as if it were
+        a field, and `family_of("GenderCode")` is "GenderCode" - a family that
+        does not exist. Latent while few tables were detected; I6 (1 Sep 2026)
+        made table framing the common case and the artifact took over the
+        measurement. The Columns section is now excluded and the per-row lists
+        are parsed.
         """
         out = []
         for _sys, user in self.calls:
             if "Fields to fill" not in user:
                 continue
             block = user.split("Fields to fill", 1)[-1]
-            out.append(re.findall(r"^\s+- ([A-Za-z0-9_]+)", block, re.M))
+            # Drop every table block's COLUMN LABEL section - short names, not fields.
+            block = re.sub(r"\n  Columns:\n(?:.*?)(?=\n  RULE:)", "\n", block, flags=re.S)
+            names = re.findall(r"^\s+- ([A-Za-z0-9_]+)", block, re.M)
+            for _row_list in re.findall(r"^\s+_[A-N]: (.+)$", block, re.M):
+                names.extend(n.strip() for n in _row_list.split(",") if n.strip())
+            out.append(names)
         return out
 
 

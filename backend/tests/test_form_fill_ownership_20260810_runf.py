@@ -17,6 +17,18 @@ import os
 
 import pytest
 
+
+def _amt(v):
+    """The stamped amount without a leading currency symbol.
+
+    ACORD prints "$" beside most money boxes, so `pdf_service` no longer
+    stamps one there (2026-09-05, the live "$ $3,954" defect). These tests
+    are about WHICH BOX GOT WHICH AMOUNT, never about the symbol, so they
+    compare the amount and are immune to the display rule.
+    """
+    return str(v or "").strip().lstrip("$").strip()
+
+
 _BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -47,8 +59,8 @@ def test_prior_grid_premium_cells_fill_from_the_per_line_fact():
          "effective": "09/01/2025", "expiration": "09/01/2026"},
     ]}
     mapped = _map_125(facts, {}, "prior policy schedule")
-    assert mapped.get("PriorCoverage_GeneralLiability_TotalPremiumAmount_A") == "$3,950"
-    assert mapped.get("PriorCoverage_Automobile_TotalPremiumAmount_A") == "$2,880"
+    assert _amt(mapped.get("PriorCoverage_GeneralLiability_TotalPremiumAmount_A")) == "3,950"
+    assert _amt(mapped.get("PriorCoverage_Automobile_TotalPremiumAmount_A")) == "2,880"
     assert mapped.get("PriorCoverage_Property_TotalPremiumAmount_A") is None
 
 
@@ -83,10 +95,27 @@ def test_producer_mailing_block_is_owned_by_one_parse():
         assert f not in unmatched
 
 
-def test_producer_mailing_without_the_fact_keeps_llm_coverage():
+def test_producer_mailing_without_the_fact_is_now_an_owned_blank():
+    """REVERSED DELIBERATELY on 2026-09-05 (SYS-09). This test previously
+    asserted the opposite - `..._LineOne_A in unmatched`, i.e. "with no
+    producer_address fact, keep the LLM's coverage of this block".
+
+    That contract was written when nobody had measured what the coverage was
+    worth. The client's live run measured it: with no producer address stated
+    anywhere in the package, the ACORD 125 PRODUCER block came back carrying the
+    APPLICANT's address, because the only address a field-level gap fill can
+    find in an applicant's own submission is the applicant's own. The same
+    reasoning `_resolve_applicant_contact` already applied to the other party's
+    block in 2026-08-10.
+
+    So the TEST was wrong, not the code - it pinned a coverage guarantee whose
+    only measured output was a wrong value on a signed form. Kept and reversed
+    rather than deleted, so the reversal is on the record.
+    """
     from services.pdf_service import compute_form_gaps
     _m, unmatched, _d = compute_form_gaps("ACORD_125", _schema_125(), {})
-    assert "Producer_MailingAddress_LineOne_A" in unmatched
+    assert "Producer_MailingAddress_LineOne_A" not in unmatched
+    assert "Producer_ContactPerson_FullName_A" not in unmatched
 
 
 # ── J4 ───────────────────────────────────────────────────────────────────────

@@ -153,11 +153,65 @@ def _harvest_standalone_validator_messages() -> list[str]:
     return out
 
 
+def _harvest_cap_gate_reasons() -> list[str]:
+    """The sentences the CAP GATES print, which no other harvester can see.
+
+    THIS IS THE BLIND SPOT THAT SHIPPED FOUR UNFIXABLE BLOCKERS.
+    `_harvest_static_messages` walks `evaluate_stops`' own `hard.append(...)` /
+    `soft.append(...)` sites. The three cap gates in `calculate_sqs` do not
+    append anywhere - they pass a sentence to `_resolve_cap` as
+    `extra_hard_reason` / `extra_soft_reason`, and `calculate_sqs` then returns
+    it in `cap_hard_stops` for the UI to render as the hard stop it already was
+    (2026-08-31). So on the day the cap was MADE VISIBLE, four sentences with no
+    rule row started printing to producers - under "Other validations", with no
+    Open-to-fix control and no Resolve target - and the build stayed green.
+
+    Two of them were internal rule names shown to a broker: "Property integrity
+    gate" and "Property integrity warning".
+
+    Harvested from the AST for the same reason the static harvester is: the
+    gates are mutually exclusive, so no single facts/flags dict trips them all.
+    """
+    import services.sqs_service as sqs
+
+    src = textwrap.dedent(inspect.getsource(sqs.calculate_sqs))
+    tree = ast.parse(src)
+    out: list[str] = []
+
+    def _collect(node) -> None:
+        for n in ast.walk(node):
+            text = _literal_prefix(n) if isinstance(
+                n, (ast.Constant, ast.JoinedStr, ast.BinOp)) else None
+            if text and len(text.strip()) > 10:
+                out.append(text)
+
+    for node in ast.walk(tree):
+        # `_gate_hard_reason = (...)` - the COPE / umbrella / property ladder.
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id in (
+                        "_gate_hard_reason", "_gate_soft_reason"):
+                    _collect(node.value)
+        # `extra_hard_reason=` / `extra_soft_reason=` passed to _resolve_cap.
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg in ("extra_hard_reason", "extra_soft_reason"):
+                    _collect(kw.value)
+            # `_prop_hard_because("...")` / `_prop_soft_because("...")`
+            if (isinstance(node.func, ast.Name)
+                    and node.func.id in ("_prop_hard_because", "_prop_soft_because")
+                    and node.args):
+                _collect(node.args[0])
+
+    return sorted(set(out))
+
+
 def _all_emittable_messages() -> list[str]:
     return (
         _harvest_static_messages()
         + _harvest_field_validation_messages()
         + _harvest_standalone_validator_messages()
+        + _harvest_cap_gate_reasons()
     )
 
 
@@ -171,6 +225,7 @@ def test_harvesting_actually_found_messages():
     assert len(_harvest_static_messages()) >= 20
     assert len(_harvest_field_validation_messages()) >= 10
     assert len(_harvest_standalone_validator_messages()) >= 2
+    assert len(_harvest_cap_gate_reasons()) >= 6
 
 
 @pytest.mark.parametrize("message", _all_emittable_messages())
@@ -184,6 +239,76 @@ def test_every_emittable_message_matches_a_rule_row(message):
     )
     assert cluster != DEFAULT_CLUSTER, f"{message!r} landed in the default bucket"
 
+
+def test_the_property_gate_always_names_its_cause():
+    """`_prop_hard` / `_prop_soft` may only be raised through the helpers that
+    also record WHY.
+
+    The gate used to surface as the literal "Property integrity gate" /
+    "Property integrity warning" - our internal rule names, printed to a broker
+    on a red blocker with no fix control. Each branch now supplies its own
+    sentence, phrased so `classify_legacy` matches it and the row gets a real
+    Open-to-fix.
+
+    A future branch doing `_prop_hard = True` inline would quietly reopen that
+    hole: the flag would be set, no reason recorded, and the generic fallback
+    printed instead of the specific cause. This makes that a build failure.
+    """
+    import services.sqs_service as sqs
+
+    src = textwrap.dedent(inspect.getsource(sqs.calculate_sqs))
+    tree = ast.parse(src)
+    # The two helpers are the ONE place allowed to set the flag - they are also
+    # the place that records the reason, which is the whole point.
+    helpers = {"_prop_hard_because", "_prop_soft_because"}
+    # Everything the two helpers own - they ARE allowed to set the flag, and
+    # they are the place that records the reason alongside it.
+    allowed = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in helpers:
+            allowed.update(id(n) for n in ast.walk(node))
+    assert allowed, "the _prop_*_because helpers are gone - this guard is vacuous"
+
+    inline = []
+    for node in ast.walk(tree):
+        if id(node) in allowed or not isinstance(node, ast.Assign):
+            continue
+        if not (isinstance(node.value, ast.Constant) and node.value.value is True):
+            continue
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id in ("_prop_hard", "_prop_soft"):
+                inline.append((t.id, node.lineno))
+    assert not inline, (
+        "property gate raised without naming its cause - use "
+        f"_prop_hard_because()/_prop_soft_because(): {inline}"
+    )
+
+
+def test_every_cap_gate_reason_offers_a_real_fix():
+    """A sentence that CAPS the score at 60 or 85 must carry a fix, not just a
+    code. The four umbrella/property gate sentences printed under "Other
+    validations" with nothing to click from 2026-08-31 to 2026-09-08."""
+    reasons = _harvest_cap_gate_reasons()
+    assert reasons, "cap-gate harvest is empty - this guard would pass vacuously"
+    dead = []
+    for message in reasons:
+        code, _cluster, _tier = classify_legacy(message, "hard_stop")
+        res = resolution_for(code) or {}
+        if res.get("mode") not in ("field", "schedule", "narrative"):
+            dead.append((message[:60], code, res.get("mode")))
+    assert not dead, f"cap-gate sentences with no actionable fix: {dead}"
+
+
+def test_no_cap_gate_reason_is_an_internal_rule_name():
+    """"Property integrity gate" is what we call the rule. It is not something a
+    broker can act on, and it was printed to one."""
+    banned = ("integrity gate", "integrity warning", "_prop_", "gate)")
+    bad = [m for m in _harvest_cap_gate_reasons()
+           if any(b in m.lower() for b in banned)]
+    assert not bad, f"internal rule names printed to producers: {bad}"
+
+
+# ── 5. Every rule's own phrase still resolves to its own row ─────────────────
 
 # ── 2. Ordering: a row must not be shadowed by an earlier one ────────────────
 

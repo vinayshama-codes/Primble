@@ -153,7 +153,9 @@ export default function ARQReceiptModal({ arqId, clientLabel, onClose }) {
 
                     {it.kind === "schedule" ? (
                       <div style={{ fontSize: 12.5, color: "#0f172a", fontWeight: 600 }}>
-                        {it.row_count} row{it.row_count !== 1 ? "s" : ""} provided
+                        {it.row_count === 0
+                          ? "Confirmed none - the pre-filled rows were removed"
+                          : `${it.row_count} row${it.row_count !== 1 ? "s" : ""} provided`}
                         {it.rows_truncated && (
                           <span style={{ fontWeight: 400, color: "#92400e" }}> (first {it.rows?.length} shown)</span>
                         )}

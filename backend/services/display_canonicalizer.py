@@ -152,6 +152,12 @@ def _s(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
+# At least one "letter." pair, optionally closed by a bare letter, so this
+# matches BOTH "N.A." and the "N.A" that `_split_affix` hands over after it
+# strips the trailing dot as punctuation. A word never takes this shape.
+_DOTTED_INITIALISM_RE = re.compile(r"^(?:[A-Za-z]\.)+[A-Za-z]?$")
+
+
 def _title_core(word: str, *, allow_suffix: bool = True) -> str:
     """Title-case a single alphabetic core word, PRESERVING content.
 
@@ -171,6 +177,14 @@ def _title_core(word: str, *, allow_suffix: bool = True) -> str:
     low = word.lower()
     if allow_suffix and low in _SUFFIX_TITLE:
         return _SUFFIX_TITLE[low]
+    if _DOTTED_INITIALISM_RE.match(word):
+        # A DOTTED INITIALISM keeps its own case. "N.A." (National Association,
+        # the designation of a US national bank) was being title-cased to
+        # "N.a." on a filed application - `word.isupper()` is True for it, so
+        # the branch below lower-cased everything after the first character.
+        # Same shape as U.S.A., L.L.C., P.C. Structural, not a word list:
+        # single letters each followed by a dot is not a word to be cased.
+        return word
     if word.isupper() or word.islower():
         return word[:1].upper() + word[1:].lower()
     return word  # already mixed-case -> leave as-is
@@ -346,6 +360,25 @@ def category_for_field(field_name: str) -> Optional[str]:
         return "currency"
     if "entitytype" in fl or ("legalentity" in fl and "description" in fl):
         return "entity"
+    # ── A CARRIER'S LEGAL NAME IS AN IDENTIFIER, NOT A FORMAT (V1 H5) ────────
+    # Title-casing standardizes how a value is WRITTEN. That is right for the
+    # insured ("ORBIN CONTRACTING LLC" -> "Orbin Contracting LLC") and wrong
+    # for an insurer, because an insurance company's name is routinely an
+    # initialism: a live ACORD 25 printed "Emc Property & Casualty" for EMC
+    # Property & Casualty Company, which is not the name of any company that
+    # exists. ACORD's own tooltip on these boxes asks for "the insurer's full
+    # legal company name(s) AS FOUND IN THE FILE COPY OF THE POLICY", so the
+    # document's own printing is the specification, not a formatting choice we
+    # get to make - and a certificate holder acts on the insurer's identity.
+    #
+    # Deliberately keyed on the party, not on a table of known initialisms:
+    # nothing in a token's shape separates "EMC" from "ORBIN", so any casing
+    # heuristic would be a guess on somebody's legal name. Measured scope: 54
+    # fields across all 17 schemas, every one of them an insurer/carrier name.
+    # Placed AFTER the date/address/currency/state/city/entity checks so an
+    # insurer's ADDRESS or DATE box is unaffected - only its NAME is exempt.
+    if "insurer" in fl or "carrier" in fl:
+        return None
     if "name" in fl:
         return "name"
     return None
@@ -362,6 +395,32 @@ _DISPATCH = {
 }
 
 
+_MACHINE_TOKEN_RE = re.compile(
+    r"""^\s*(?:
+          [^\s@]+@[^\s@]+\.[A-Za-z]{2,}      # an e-mail address
+        | (?:https?://|www\.)\S+             # an explicit URL
+        | [A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+   # a bare domain, foo.bar.com
+        )\s*$""", re.X)
+
+
+def _is_machine_token(raw: str) -> bool:
+    """True for a value that is an ADDRESS FOR A MACHINE, not prose.
+
+    THE DEFECT (audit, 2 Sep 2026, five instances on one package):
+    `category_for_field` classes a website or e-mail box as a "name", so the
+    name title-caser ran over it and a filed ACORD 125 printed
+    `Www.verdantslopebuilders.com` and `Dostrander@verdantslopebuilders.com`.
+    Case is not cosmetic in these values - the local part of an e-mail address
+    is case-SENSITIVE per RFC 5321, so title-casing one can make it undeliverable.
+
+    Fixed here rather than by re-categorising the fields, because it is true of
+    EVERY category: no canonicalizer should ever re-case a URL or an address.
+    A single token with no spaces that parses as an e-mail, a URL or a bare
+    domain is returned untouched. A company name never takes that shape.
+    """
+    return bool(_MACHINE_TOKEN_RE.match(raw or ""))
+
+
 def canonicalize_for_field(field_name: str, value: Any) -> Any:
     """Return the clean display value for ``value`` given its ACORD field name.
 
@@ -374,6 +433,8 @@ def canonicalize_for_field(field_name: str, value: Any) -> Any:
     raw = str(value)
     if raw.strip() == "" or raw.strip() in ("Yes", "No", "null", "None"):
         return value
+    if _is_machine_token(raw):
+        return value                      # a URL / email / domain is not prose
     category = category_for_field(field_name)
     if not category:
         return value

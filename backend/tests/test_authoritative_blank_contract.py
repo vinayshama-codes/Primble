@@ -214,7 +214,40 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         # supplies, so a declarations page has no reason to state it and gap
         # fill can only invent. Same shape as the deposit box above.
         "_resolve_member_manager_count": 3,
+        # +3 and +5 on 2026-09-05 (SYS-09): the PRODUCER's own contact person
+        # and mailing block. The client's live test printed the right agency
+        # name above the APPLICANT's contact person, phone, email and street
+        # address - the exact defect `_resolve_applicant_contact` (24 fields
+        # above) was written for in 2026-08-10, running unguarded in the other
+        # direction because that guard was written for one party only.
+        # A package that states no producer contact/address gives a field-level
+        # gap fill only one place to look: the applicant's own submission.
+        # `_resolve_producer_mailing` already existed and was already
+        # registered - it simply returned _SCHED_SKIP when the fact was absent,
+        # which registers nothing. An owning resolver that steps aside on
+        # absence owns the easy case and abandons the one that bites.
+        "_resolve_producer_contact": 3,
+        "_resolve_producer_mailing": 5,
+        # +1 on 2026-09-06: the AUDIT box. Three live runs stamped a bare "A"
+        # on a package that states no audit term anywhere - the same invention
+        # the PAYMENT PLAN box next to it was closed for in 2026-08-14, in the
+        # same row, left unowned. A code abbreviates a printed word, so no
+        # verbatim or echo check can see it; `audit_period` stamps when a
+        # document really prints one.
+        "_resolve_audit_frequency": 1,
+        # +1 on 2026-09-06: METHOD OF PAYMENT. Two runs printed a SIBLING
+        # checkbox's tooltip - "Direct Bill" and "producer / agency billed" are
+        # verbatim the `Policy_Payment_DirectBillIndicator` and
+        # `ProducerBillIndicator` tooltips - on a package containing neither
+        # phrase. `_is_tooltip_echo` compares only against a field's OWN
+        # tooltip, so a sibling's is invisible to it.
+        "_resolve_payment_method_description": 1,
     }, {k: len(v) for k, v in sorted(claimants.items())}
+    # The other three resolvers added on 2026-09-06 claim NOTHING here, and that
+    # is deliberate: `_resolve_certificate_other_coverage_row` and
+    # `_resolve_certificate_holder_address` are ACORD 25 concepts, and
+    # `_resolve_stated_limit_cell` owns sub-limit boxes that ACORD 125 does not
+    # carry (they live on 25 / 126 / 131 / 160).
     # 113 of 548 on ACORD 125 (20.6%). The ceiling exists so the contract can
     # never quietly swallow a form, and it BIT on 2026-08-13 when the
     # transaction-status family was added - which is the point. Raised to 25%
@@ -235,6 +268,12 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     # 88 of the 113 are the two grids. Excluding them the contract owns 25
     # scalar boxes on a 548-field form - under 5%. If this fires again, check
     # whether the NEW entries are grids or scalars before touching the number.
+    #
+    # 2026-09-05 (SYS-09), MEASURED not carried forward: 117 -> 125 of 548
+    # (22.8%), +3 producer contact and +5 producer mailing. The 25% ceiling is
+    # NOT touched. Note the numbers above had drifted - the prose said 113/25
+    # while the code was already at 117/29 - so both are restated from a real
+    # run here rather than incremented.
     assert len(owned) < 0.25 * len(schema), (
         f"{len(owned)} of {len(schema)} fields withheld from the model"
     )
@@ -244,7 +283,26 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     # thing that actually decides, and a prefix list would drift from it.
     _grid_owners = {"_resolve_prior_coverage_cell", "_resolve_applicant_contact"}
     _scalar = sum(len(v) for k, v in claimants.items() if k not in _grid_owners)
-    assert _scalar < 30, (
+    # 29 -> 37 on 2026-09-05 (SYS-09), raised DELIBERATELY rather than dodged.
+    # The cheap way out was available and refused: the producer contact (3) and
+    # producer mailing (5) blocks could have been declared "grids" to keep the
+    # count flat, but a grid in this file means a REPEATING structure (rows
+    # _A.._N), and each of these is ONE party's single block split across
+    # component boxes. They are scalar growth, so they are counted as scalar
+    # growth and the ceiling moves in the open.
+    #
+    #   +3  producer contact person   - name / phone / email, one person
+    #   +5  producer mailing block    - line1 / line2 / city / state / zip, one
+    #                                   address
+    #
+    # Both are party-identity blocks that no uploaded document states when the
+    # underlying fact is absent - the same bar every other entry in this ledger
+    # had to clear. The prose above this assert had drifted to "25" while the
+    # code stood at 29; 37 is measured, not incremented.
+    #
+    # Ceiling 40, deliberately tight: three short of the next block of this
+    # size, so whoever adds one still has to argue it here.
+    assert _scalar < 40, (
         f"{_scalar} non-grid fields withheld - the contract is growing "
         "scalars, not just repeating structures"
     )

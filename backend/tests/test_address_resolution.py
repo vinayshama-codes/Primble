@@ -63,12 +63,25 @@ _FACTS = {
 
 
 def test_producer_address_no_longer_pulls_named_insured_address():
+    """The guarantee is unchanged and the sentinel moved (SYS-09, 2026-09-05).
+
+    This asserted `== "UNMATCHED"`, which meant "no rule matched, so ask the
+    model". With no `producer_address` fact the block is now an OWNED BLANK
+    (`None`) instead: the live run measured what the model does when asked, and
+    it answered with the insured's address - the very bleed this test is named
+    after, arriving one layer further down. The test now states the guarantee
+    (the producer's box never carries the insured's address) rather than the
+    mechanism that happened to deliver it.
+    """
     for field in (
         "Producer_MailingAddress_LineOne_A",
         "Producer_MailingAddress_CityName_A",
         "Producer_MailingAddress_PostalCode_A",
     ):
-        assert _deterministic_map(field, _FACTS) == "UNMATCHED", field
+        got = _deterministic_map(field, _FACTS)
+        assert got in ("UNMATCHED", None), field
+        assert got != "7740 Foundry Lane", field
+        assert got != "Aurora", field
 
 
 def test_additional_interest_and_certificate_holder_also_excluded():

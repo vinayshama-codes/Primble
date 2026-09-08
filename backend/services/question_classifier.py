@@ -33,8 +33,11 @@ codes) give the well-known cases precise, human-readable labels.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Iterable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Audience taxonomy (Beta Report §8.2 item 1) ───────────────────────────────
 AUDIENCE_CLIENT       = "client"        # client-answerable business facts
@@ -502,6 +505,32 @@ def _hard_stop_resolves(field_name: str, base: str, hard_stop_text: str) -> bool
     return False
 
 
+def _score_impact_labels(score_impact: dict, audience: str, priority: str) -> List[str]:
+    """The badge row for a question, derived from its own score_impact flags.
+
+    ONE builder, because there are now two writers. `classify_question` builds
+    the impact from the STATIC tier, and `_promote_missing_core_requirements`
+    rewrites it when a core fact turns out to be missing (SYS-01). A second
+    hand-written copy at the second site is exactly how the "Submission
+    readiness" badge came to survive a demotion it no longer earned - see
+    `question_eligibility` REASON_CONTACT_SATISFIED, which had to correct the
+    badge by hand for want of this function.
+    """
+    is_client_scoring = audience == AUDIENCE_CLIENT and priority in (
+        PRIORITY_CRITICAL, PRIORITY_IMPORTANT,
+    )
+    labels: List[str] = []
+    if score_impact.get("hard_stop_resolution"):
+        labels.append("Resolves hard stop")
+    if score_impact.get("sqs"):
+        labels.append("SQS")
+    if score_impact.get("submission_readiness"):
+        labels.append("Submission readiness")
+    if score_impact.get("form_completion") and not is_client_scoring:
+        labels.append("Form completion")
+    return labels
+
+
 def classify_question(
     field_name: str,
     form_ids: Optional[Iterable[str]] = None,
@@ -603,16 +632,7 @@ def classify_question(
         "hard_stop_resolution": hard_stop_resolution,
         "points":               _SCORE_POINTS.get(priority, 0),
     }
-    labels = []
-    if score_impact["hard_stop_resolution"]:
-        labels.append("Resolves hard stop")
-    if score_impact["sqs"]:
-        labels.append("SQS")
-    if score_impact["submission_readiness"]:
-        labels.append("Submission readiness")
-    if score_impact["form_completion"] and not is_client_scoring:
-        labels.append("Form completion")
-    score_impact["labels"] = labels
+    score_impact["labels"] = _score_impact_labels(score_impact, audience, priority)
 
     # ── Coarse bucket for the 3-bucket producer UI (client clarification) ─────
     bucket = _AUDIENCE_TO_BUCKET.get(audience, BUCKET_UNDERWRITING)
@@ -649,6 +669,101 @@ def classify_question(
     }
 
 
+# Suppression reasons that mean "we already have this answer". A question
+# carrying one of these must never be promoted to Critical, whatever the tier
+# lists say - the fact reached us by a route the tier check cannot see (a
+# narrative sentence, an earlier answer), or the question itself is unreadable.
+_ANSWER_ALREADY_KNOWN_REASONS = frozenset({
+    "already_provided", "stated_in_narrative", "raw_schema_prompt",
+})
+
+# The two buckets a human actually works. `underwriting` holds cross-form flags
+# and internal plumbing (which already carry their own severity-driven
+# priority), and `do_not_send` must never gain urgency at all.
+_CORE_CRITICAL_BUCKETS = frozenset({BUCKET_CLIENT, BUCKET_AGENCY})
+
+
+def _promote_missing_core_requirements(
+    questions: List[dict],
+    facts: Optional[dict],
+    flags: Optional[dict],
+) -> None:
+    """SYS-01: a CORE fact that is REQUIRED and still MISSING is Critical.
+
+    Client, SYS-01 acceptance criteria: *"Apply the Critical tag to the
+    business-defined questions when their underlying fact is still unfulfilled.
+    If the fact has already been satisfied by the submission or a prior answer,
+    it should not remain Critical. Critical status should be driven by the
+    question/fact rule, not by the order in which the question appears."*
+
+    THE DEFECT THIS CLOSES. `priority` was a STATIC tier label: Critical meant
+    "this fact is in SQS Tier 1", full stop. It never read the submission. So a
+    package whose Tier 1 was complete reported **0 Critical** and told the
+    producer *"All critical fields were already answered from your uploaded
+    documents"* while its own pre-form card printed four missing Tier 2 items -
+    FEIN, annual revenue, employee count, NAICS or SIC. Those four are exactly
+    the ones the client named, and they are exactly the Tier 2 entries that were
+    missing on that run: he read his own "Key details missing" line back to us.
+    The rule he wants is "required AND missing", not a list of four names.
+
+    ONE SOURCE, TWO VIEWS. The required-and-missing set comes from
+    `sqs_service.core_missing_fact_keys`, the KEY projection of the very Tier 1
+    + Tier 2 entries `key_details` prints as labels. A second list here is what
+    caused the defect; a projection cannot disagree with what it projects.
+
+    ADDITIVE BY CONSTRUCTION - the owner's explicit instruction, *"keep list 1
+    as it is for critical and add more to it"*:
+      * it only ever RAISES a priority to Critical, never lowers one;
+      * it never touches `audience` or `bucket`, so NAICS / SIC stay the
+        producer's (client PART 13, 2026-08-12) and simply gain the Critical
+        flag inside the Agency bucket;
+      * every Tier 1 question that is Critical today stays Critical, because a
+        question is only generated when its fact is unfilled and an unfilled
+        Tier 1 fact is in the missing set by definition.
+
+    WHY IT RUNS LAST. `apply_eligibility` may re-route a question to the
+    producer or demote a contact question whose requirement another contact
+    method already met. Running after it means those decisions stand; running
+    after it is also SAFE, because the missing set already agrees with both -
+    a satisfied contact requirement contributes none of its three keys, so
+    there is nothing here to undo the demotion with.
+
+    Fail-open: any failure leaves every priority exactly as the static
+    classifier assigned it, which is today's behaviour.
+    """
+    if facts is None:
+        return
+    try:
+        from services.sqs_service import core_missing_fact_keys
+        missing = core_missing_fact_keys(facts, flags or {})
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("core-critical promotion skipped - %s", exc)
+        return
+    if not missing:
+        return
+    for q in questions:
+        canon = q.get("_canonical_key")
+        if not canon or canon not in missing:
+            continue
+        if q.get("priority") == PRIORITY_CRITICAL:
+            continue                       # already there; idempotent
+        if q.get("suppressed_reason") in _ANSWER_ALREADY_KNOWN_REASONS:
+            continue
+        bucket = q.get("bucket") or _AUDIENCE_TO_BUCKET.get(
+            q.get("audience"), BUCKET_UNDERWRITING)
+        if bucket not in _CORE_CRITICAL_BUCKETS:
+            continue
+        q["priority"] = PRIORITY_CRITICAL
+        q["core_requirement"] = True       # why it is Critical, for the UI
+        impact = dict(q.get("score_impact") or {})
+        impact["submission_readiness"] = True
+        impact["points"] = _SCORE_POINTS.get(PRIORITY_CRITICAL,
+                                             impact.get("points", 0))
+        impact["labels"] = _score_impact_labels(
+            impact, q.get("audience", AUDIENCE_CLIENT), PRIORITY_CRITICAL)
+        q["score_impact"] = impact
+
+
 def decorate_questions(
     questions: List[dict],
     *,
@@ -656,6 +771,7 @@ def decorate_questions(
     narrative_components: Optional[dict] = None,
     hard_stop_text: str = "",
     facts: Optional[dict] = None,
+    flags: Optional[dict] = None,
 ) -> None:
     """Attach taxonomy fields to every question in-place.
 
@@ -742,6 +858,11 @@ def decorate_questions(
             import logging
             logging.getLogger(__name__).warning(
                 "question_classifier: eligibility overlay skipped - %s", exc)
+
+    # ── SYS-01 - Critical means "required AND still missing" ─────────────────
+    # Runs LAST so it sees the final audience/bucket and can only ever raise a
+    # priority. See `_promote_missing_core_requirements` for the full reasoning.
+    _promote_missing_core_requirements(questions, facts, flags)
 
 
 def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP) -> dict:

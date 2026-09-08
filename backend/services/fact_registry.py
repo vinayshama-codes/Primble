@@ -1217,51 +1217,61 @@ FACT_REGISTRY: dict[str, dict] = {
         "format_hint": "Dollar amount",
     },
 
-    # ── Builders Risk — ACORD 133 ────────────────────────────────────────────
+    # ── Builders Risk — NO SECTION FORM (2026-09-05) ─────────────────────────
+    # These seven declared `forms={"ACORD_133"}`, which was wrong twice over:
+    # ACORD 133 is the Workers Compensation Assigned Risk section (its own
+    # template says so; 67 of its 136 fields are WorkersCompensation*, none is
+    # a builders-risk field), so they never had a box to stamp AND the claim
+    # made `fact_equivalence.fact_line` answer "workers_comp" for every one of
+    # them - which in turn made `coverage_evidence.coverage_flag_supported`
+    # return True for has_workers_comp on a builders-risk-only package.
+    # `forms=set()` is the honest statement: builders risk has no section form
+    # in this product. It keeps its ACORD 125 sections-attached indicator and
+    # its own project-value cross-form check. OPEN PRODUCT QUESTION for Brent.
     "builders_risk_project_address": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "What is the full address of the construction or renovation project?",
         "tier": 1, "required": True,
         "validate":    lambda v: len(v.strip()) >= 10,
         "format_hint": "Full project address including street, city, state, ZIP",
     },
     "builders_risk_project_cost": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "What is the total project cost or contract value?",
         "tier": 1, "required": True,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $2,500,000)",
     },
     "builders_risk_completion_date": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "What is the anticipated project completion date?",
         "tier": 1, "required": True,
         "validate":    _is_date,
         "format_hint": "Date in MM/DD/YYYY format",
     },
     "builders_risk_construction_type": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "What is the construction type for this project (Frame, Masonry, Steel, etc.)?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "builders_risk_owner_name": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "Who is the project owner?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "builders_risk_contractor_name": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "Who is the general contractor on this project?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "builders_risk_insured_interest": {
-        "forms":       {"ACORD_133"},
+        "forms":       set(),          # no section form - see the note above
         "question":    "What is the insured's interest in this project (Owner, Contractor, or Lender)?",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().lower() in {"owner", "contractor", "lender", "other"},

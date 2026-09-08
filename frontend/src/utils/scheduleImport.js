@@ -40,7 +40,9 @@ export function validateCell(col, value) {
       if (!isValidVin(val)) return 'VIN must be 17 characters (no I, O or Q)';
       break;
     case 'year':
-      if (!YEAR_RE.test(val)) return `${col.label} must be a 4-digit year`;
+      // Says the rule that is actually enforced. "4-digit year" rejected
+      // 2122 while calling it not-four-digits, which reads as a bug.
+      if (!YEAR_RE.test(val)) return `${col.label} must be between 1900 and 2099`;
       break;
     case 'date':
       if (!DATE_RE.test(val)) return `${col.label} must be MM/DD/YYYY`;

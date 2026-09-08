@@ -72,8 +72,77 @@ _SPECIFIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
                      "garage")),
     (CYBER,         ("cyber", "network security", "privacy liability", "data breach")),
     (PROPERTY,      ("property", "building", "business personal property", "bpp")),
-    (CRIME,         ("crime", "fidelity", "employee dishonesty", "employee theft")),
+    # "dishonesty" widened from "employee dishonesty" 2026-09-03: the ISO 3-D
+    # policy prints as "Comprehensive Dishonesty, Disappearance and
+    # Destruction", which matched nothing - and once `canon_part` can read a
+    # bare "Comprehensive" as Auto physical damage, a phrase this table cannot
+    # place is no longer harmless. No other line of business uses the word.
+    (CRIME,         ("crime", "fidelity", "dishonesty", "employee theft")),
 )
+
+# A phrase that CONTAINS a family's own word while naming something else.
+# Masked out of the string before that family is tested, and ONLY that family -
+# the same word may be perfectly good evidence elsewhere.
+#
+# Measured defect (client SYS-05 sweep, 2026-09-03): "Property Damage Liability"
+# returned PROPERTY. "Property damage" is a category of LOSS that a LIABILITY
+# policy pays for - it is the standard second half of every GL and Auto
+# liability limit ("Bodily Injury and Property Damage Liability") - and it is
+# not the Commercial Property line. So a COI's GL limit row could be read as a
+# Property line, and `denied_families` / the cross-document LOB compare would
+# then reason about a Property line the package does not carry.
+#
+# THE WORD IS NOT REMOVED FROM THE STRING, only from PROPERTY's own haystack:
+# "Business Personal Property" still resolves, and after masking
+# "Property Damage Liability" falls through to the bare-"liability" branch,
+# whose tokens are all GL vocabulary, and lands on GENERAL_LIAB where it belongs.
+_FAMILY_BLIND_PHRASES: dict = {
+    PROPERTY: ("property damage",),
+}
+
+# The same phrases, flattened, for consumers that tokenise a line name WITHOUT
+# knowing which family they are about to compare it against.
+#
+# Exported because `pdf_service` holds a THIRD line-of-business matcher
+# (`_lob_tokens` / `_lob_indicator_index`, which compares a document's words to
+# ACORD's own checkbox tooltips) and it had the identical hole: the Commercial
+# Property checkbox's token set is literally {"property"}, so
+# "Bodily Injury And Property Damage Liability" matched it. Measured on the
+# SYS-05 live run - the GL policy number then appeared to span General Liability
+# AND Commercial Property, `_line_list_is_trustworthy` declared the list corrupt,
+# and the package's total premium could not be computed at all.
+#
+# One definition, three readers. Fixing `canon_line` alone left the defect the
+# client reported alive in a different matcher.
+NON_LINE_PHRASES: Tuple[str, ...] = tuple(
+    p for phrases in _FAMILY_BLIND_PHRASES.values() for p in phrases
+)
+
+
+def strip_non_line_phrases(text: Any) -> str:
+    """`text` with every phrase that merely CONTAINS a line's word removed.
+
+    For tokenisers. Returns the text otherwise untouched, so a caller that
+    splits on non-letters behaves exactly as before on every other input.
+    """
+    s = str(text or "")
+    lowered = s.lower()
+    for phrase in NON_LINE_PHRASES:
+        if phrase in lowered:
+            # Rebuild case-insensitively without a regex: the phrases are plain
+            # words, and a caller may pass any casing.
+            out, i = [], 0
+            while True:
+                j = lowered.find(phrase, i)
+                if j < 0:
+                    out.append(s[i:])
+                    break
+                out.append(s[i:j])
+                out.append(" ")
+                i = j + len(phrase)
+            s = "".join(out)
+            lowered = s.lower()
+    return s
 
 # KNOWN specialty liability lines. Each is its own family so it can never be
 # read as General Liability. Tried AFTER the specific table and BEFORE the GL
@@ -141,6 +210,98 @@ GL_GENERIC_TOKENS = frozenset({
 })
 
 
+# ── COVERAGE PARTS - a component INSIDE a line, not a line of its own ───────
+#
+# Client SYS-05 (P0, 2026-09-01 live test): *"Terms such as UNINSURED AND
+# UNDERINSURED MOTORISTS, COMPREHENSIVE, COLLISION, and Uninsured Motorists are
+# being treated as unrecognized coverage parts. They are components of
+# Automobile coverage and should not become standalone unknown lines. Map these
+# terms into the Commercial Auto/Automobile coverage family BEFORE
+# cross-document comparison."*
+#
+# ROOT CAUSE, and it is not an Auto problem. A declarations page prints a
+# SCHEDULE OF COVERAGES whose rows are the coverage PARTS of one line, each
+# with its own limit and premium, and RULE 16 asks the model for "one entry per
+# coverage line ... as the document prints it". So extraction correctly emits
+# them and `coverage_lines` has exactly one bucket for two different concepts:
+#
+#     Business Auto   $2,991   <- a LINE of business
+#     Comprehensive   $412     <- a PART of that line
+#     Collision       $688     <- a PART of that line
+#     Uninsured Motorists      <- a PART of that line
+#
+# The same hole was measured on every other line, not just Auto: "Personal and
+# Advertising Injury" and "Damage to Premises Rented to You" (GL parts),
+# "Business Income", "Ordinance or Law", "Equipment Breakdown" (Property
+# parts) all returned None too. Fixing only the four words in the client's
+# screenshot would be the pinpoint patch, so the whole class is mapped here.
+#
+# THIS IS A SEPARATE DOOR FROM `canon_line` ON PURPOSE. `canon_line` answers
+# "does this phrase NAME a line?" and its answer is what decides whether a row
+# GRANTS or DENIES coverage (`denied_families`, `coverage_evidence`,
+# `_coverage_lines_are_self_contradictory`). A part is not a line, so it must
+# not become independent proof that a line exists - a lone "COLLISION - NO
+# COVERAGE" row must never deny the whole Auto line, and a Collision row must
+# not on its own flip an HNOA-only account into an owned-fleet one. Parts are
+# for PLACEMENT (which line does this belong to) and COMPARISON only.
+
+# Parts whose phrase can belong to exactly ONE line, whatever else is in the
+# package. "motorist" is the whole UM/UIM family in every printing the phrase
+# takes ("Uninsured Motorists", "UNINSURED AND UNDERINSURED MOTORISTS",
+# "UM/UIM Motorist Coverage") and there is no non-auto motorist coverage.
+_PART_UNAMBIGUOUS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (AUTO,         ("motorist", "um uim", "uninsured", "underinsured",
+                    "collision", "towing", "rental reimbursement",
+                    "personal injury protection", "pip coverage",
+                    "loss of use", "hired car")),
+    (GENERAL_LIAB, ("personal and advertising injury",
+                    "personal advertising injury", "advertising injury",
+                    "damage to premises rented", "premises rented to you",
+                    "fire damage legal", "fire legal liability",
+                    "medical expense")),
+    (PROPERTY,     ("business income", "business interruption", "extra expense",
+                    "ordinance or law", "equipment breakdown",
+                    "boiler and machinery")),
+    # Crime parts. Added 2026-09-03 when the SYS-05 live fixture printed
+    # "Forgery Or Alteration" under a 3-D policy and it surfaced as unplaceable
+    # terminology - the same defect class as the Auto rows the client reported,
+    # one coverage line over. Each names a crime insuring agreement and nothing
+    # else: "forgery", "computer fraud" and "funds transfer fraud" appear on no
+    # other line. "alteration" alone is deliberately absent - a building
+    # alteration is a property exposure, not a crime coverage.
+    (CRIME,        ("forgery", "money and securities", "computer fraud",
+                    "funds transfer fraud", "counterfeit")),
+)
+
+# Parts whose phrase is genuinely shared between lines. "COMPREHENSIVE" is Auto
+# physical damage on an auto schedule, but "Comprehensive Crime" and
+# "Comprehensive General Liability" (the pre-1986 name for CGL) are real; "Medical
+# Payments" and "Bodily Injury" sit on both a GL and an Auto dec page.
+#
+# These resolve ONLY when the package already shows the parent line - the
+# "structural second condition" pattern H1-F made a standing rule after a test
+# that was necessary but not sufficient deleted 13 of 14 real schedules. The
+# phrase alone is never enough. No parent in the package -> stays unplaced ->
+# routes to the producer exactly as it does today (Principle 7).
+#
+# `canon_line` is consulted BEFORE this table, so "Comprehensive General
+# Liability" and "Comprehensive Crime" resolve as LINES and never reach it.
+# A phrase listed under TWO families here is ambiguous in a package that
+# carries both, and `canon_part` then refuses rather than picking one - a
+# coverage part attributed to the wrong line is a coverage misstatement, and
+# Principle 4 says a genuine conflict routes to the producer instead of being
+# silently resolved. "Bodily Injury" and "Property Damage" are the standard
+# liability limit rows on BOTH a GL and an Auto dec page, so they resolve on a
+# monoline package and stay unplaced on a package carrying both.
+_PART_NEEDS_PARENT: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (AUTO,         ("comprehensive", "other than collision", "physical damage",
+                    "medical payments", "med pay",
+                    "bodily injury", "property damage")),
+    (GENERAL_LIAB, ("bodily injury", "property damage",
+                    "medical payments", "med pay")),
+)
+
+
 def _clean(text: Any) -> str:
     s = re.sub(r"[^a-z ]", " ", str(text or "").lower())
     return re.sub(r"\s+", " ", s).strip()
@@ -159,7 +320,12 @@ def canon_line(text: Any) -> Optional[str]:
         return None
     padded = f" {s} "
     for key, phrases in _SPECIFIC:
-        if any(p in s for p in phrases):
+        # A family never sees the phrases that merely CONTAIN its own word while
+        # naming something else ("property damage" is not the Property line).
+        hay = s
+        for blind in _FAMILY_BLIND_PHRASES.get(key, ()):
+            hay = hay.replace(blind, " ")
+        if any(p in hay for p in phrases):
             return key
     for key, phrases in _SPECIALTY:
         if any((p in s) if not p.endswith(" ") else (p in padded) for p in phrases):
@@ -180,6 +346,108 @@ def canon_line(text: Any) -> Optional[str]:
             return GENERAL_LIAB
         return None
     return None
+
+
+def canon_part(text: Any, present_families: Any = (),
+               policy_family: Any = None) -> Optional[str]:
+    """Which line this phrase is a coverage PART of, or None.
+
+    NOT a claim that the phrase names a line - see the block comment above
+    `_PART_UNAMBIGUOUS`. Answers only "if this row belongs to something, what?".
+
+    `present_families` is the set of families the SAME package already
+    establishes by other means. It is required for the shared phrases and
+    ignored for the unambiguous ones. Passing nothing is safe: the ambiguous
+    table simply never fires, which is today's behaviour.
+
+    `policy_family` is the family of the CONTRACT this row was printed under,
+    when the document states one. It is the strongest evidence available and it
+    settles a phrase two present lines would otherwise both claim - a MEDICAL
+    PAYMENTS row carrying the auto policy's number is the auto policy's medical
+    payments. It can only ever narrow the candidates this table already
+    produced, so it can never invent a placement for a phrase that is not a
+    known coverage part.
+    """
+    s = _clean(text)
+    if not s:
+        return None
+    # A phrase that names a line outright is a LINE, not a part. Checked first
+    # so "Comprehensive General Liability" and "Comprehensive Crime" can never
+    # be dragged into Auto by the bare word "comprehensive".
+    if canon_line(s):
+        return None
+    for key, phrases in _PART_UNAMBIGUOUS:
+        if any(p in s for p in phrases):
+            return key
+    try:
+        present = frozenset(present_families or ())
+    except TypeError:                                        # pragma: no cover
+        present = frozenset()
+    candidates = {key for key, phrases in _PART_NEEDS_PARENT
+                  if key in present and any(p in s for p in phrases)}
+    if len(candidates) > 1 and policy_family in candidates:
+        return policy_family
+    # ONE candidate or none. Two present lines that both print this row, with
+    # nothing structural to separate them, is a genuine ambiguity - and
+    # guessing is the forbidden move (Principle 4).
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _policy_key(entry: Any) -> str:
+    """Punctuation-blind policy number, or "" - the same shape the extraction
+    layer's own pairing checks use, so one printing cannot look like two."""
+    if not isinstance(entry, dict):
+        return ""
+    return re.sub(r"[^a-z0-9]", "", str(entry.get("policy_number") or "").lower())
+
+
+def policy_number_families(coverage_lines: Any) -> dict:
+    """{policy number: the ONE family its named lines resolve to}.
+
+    Built from rows that NAME a line only, so a part can never define the
+    contract it is then placed by. A number attached to two different families
+    is dropped: `_coverage_lines_are_self_contradictory` already treats that
+    pairing as corrupt, and a corrupt witness must not settle an ambiguity.
+    """
+    by_num: dict = {}
+    if not isinstance(coverage_lines, list):
+        return {}
+    for entry in coverage_lines:
+        key = _policy_key(entry)
+        fam = canon_line(entry.get("line")) if isinstance(entry, dict) else None
+        if key and fam:
+            by_num.setdefault(key, set()).add(fam)
+    return {k: next(iter(v)) for k, v in by_num.items() if len(v) == 1}
+
+
+def coverage_families_present(coverage_lines: Any) -> frozenset:
+    """Families this package establishes on its own evidence.
+
+    Two passes, because a package can name a line ONLY through its parts. The
+    client's own document is that case: it prints COMPREHENSIVE / COLLISION /
+    UNINSURED MOTORISTS as sibling rows, and "Collision" is unambiguous proof
+    of an Auto line, which is then what lets the bare "COMPREHENSIVE" beside it
+    resolve. A lone "COMPREHENSIVE" on a crime package still resolves to
+    nothing, which is the point.
+    """
+    if not isinstance(coverage_lines, list):
+        return frozenset()
+    names = [str(e.get("line") or "") for e in coverage_lines if isinstance(e, dict)]
+    present: set = {c for n in names if (c := canon_line(n))}
+    present |= {c for n in names if (c := canon_part(n))}
+    return frozenset(present)
+
+
+def canon_line_or_part(text: Any, present_families: Any = ()) -> Optional[str]:
+    """The line this phrase belongs to, whether it NAMES one or is a PART of one.
+
+    The door for PLACEMENT and CROSS-DOCUMENT COMPARISON - client SYS-05's
+    "map these terms into the Automobile family before cross-document
+    comparison". Deliberately NOT the door for "does this row grant or deny
+    coverage": that stays `canon_line`, so a coverage part can never become
+    independent evidence that a line exists or is denied.
+    """
+    return canon_line(text) or canon_part(text, present_families)
 
 
 def is_known_family(token: Any) -> bool:
@@ -298,12 +566,20 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
     seen: set = set()
     if not isinstance(coverage_lines, list):
         return out
+    # SYS-05: a coverage PART is placeable even though it does not NAME a line,
+    # so it is not "terminology not covered by a known rule" and must not reach
+    # the producer as one. Resolved against the families this package's own
+    # rows establish, so an ambiguous part with no parent line is still routed.
+    present = coverage_families_present(coverage_lines)
+    by_policy = policy_number_families(coverage_lines)
     for entry in coverage_lines:
         if not isinstance(entry, dict):
             continue
         raw = str(entry.get("line") or "").strip()
-        if not raw or canon_line(raw):
-            continue                      # blank, or we can place it
+        if not raw:
+            continue
+        if canon_line(raw) or canon_part(raw, present, by_policy.get(_policy_key(entry))):
+            continue                      # we can place it
         if not _grants_coverage(entry):
             continue                      # not carried -> not material
         key = _dedupe_key(raw)

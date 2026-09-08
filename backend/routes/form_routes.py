@@ -1021,6 +1021,7 @@ async def underwriting_confirm_value(
         result = await confirm_underwriting_value(
             session, req.session_id,
             fact_key=req.fact_key, value=req.value, user_id=str(current_user["id"]),
+            scope=req.scope,
         )
     except ValueError as ve:
         code = str(ve)
@@ -1930,7 +1931,11 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             form_id, session.get("facts", {}), current_state, confidence
         )
 
-        from services.pdf_service import _ACORD_FIELD_RULES
+        from services.pdf_service import (
+            _ACORD_FIELD_RULES,
+            writeback_fact_for_field as _writeback_fact_for_field,
+            normalize_writeback_value as _normalize_writeback_value,
+        )
         updated_facts = dict(session.get("facts") or {})
         # V1 BETA EXIT (2026-08-28) - "Overrides preserve prior values".
         # A CLEAR sets the fact to None below, and the facts merge is
@@ -1964,6 +1969,25 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                         if val_str not in ("", "null", "None") else None
                     )
                     break
+            else:
+                # SYS-02. `_ACORD_FIELD_RULES` is primarily the FACT -> FORM
+                # stamping map and does not cover every box a producer can edit
+                # - the whole LossHistory family is absent from it, so ticking
+                # "Check if none" updated the PDF and never reached a fact, and
+                # the re-score below recomputed the identical Loss History
+                # number. A separate, measured table closes that (see
+                # `pdf_service._FORM_FIELD_WRITEBACK`); it is consulted only
+                # when no stamping rule matched, so nothing that works today
+                # changes route.
+                _wb_key = _writeback_fact_for_field(pdf_field)
+                if _wb_key:
+                    _wb_val = _normalize_writeback_value(pdf_field, new_val)
+                    _touched_fact_keys.add(_wb_key)
+                    updated_facts[_wb_key] = (
+                        {"value": _wb_val, "confidence": "filled",
+                         "source": "producer"}
+                        if _wb_val not in ("", "null", "None") else None
+                    )
 
         # Read off the FINAL state, never off the loop: two ACORD fields can map
         # to one fact, and a request that clears one and fills the other must
@@ -2025,6 +2049,27 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             # Fail toward KEEPING the flag: a penalty that stays is visible
             # and fixable; one that silently vanishes is the defect above.
             logger.warning("coverage flag recompute skipped: %s", _cfx, exc_info=True)
+
+        # SYS-04. The block above only ever DEMOTES. This is the other
+        # direction, and it is required rather than symmetric-for-its-own-sake:
+        # a flag reconciled away at extraction time (a certificate whose WC row
+        # was blank) must come back the moment the producer applies for that
+        # line by selecting its application form, or a genuine Workers Comp
+        # submission would lose every WC deduction. It also demotes on the
+        # structured evidence the text scan cannot see.
+        try:
+            from services.line_presence import reconcile_line_flags
+            # Recomputed rather than reusing `_selected_for_flags`, which is
+            # bound inside the try above and would not exist if that import
+            # failed.
+            _sel_ids = list((session.get("selected_form_ids") or [])) + \
+                list((session.get("generated_forms") or {}).keys())
+            _rec = reconcile_line_flags(fresh_flags, updated_facts, _sel_ids)
+            if _rec:
+                logger.info("update_pdf: coverage flags reconciled - %s",
+                            ", ".join(f"{k}={v}" for k, v in sorted(_rec.items())))
+        except Exception as _rfx:                              # noqa: BLE001
+            logger.warning("coverage flag reconciliation skipped: %s", _rfx)
 
         _re_hard, _re_soft = evaluate_stops(updated_facts, fresh_flags)
         # Cross-DOCUMENT identity conflicts are a third detector that runs at

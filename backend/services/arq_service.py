@@ -4,7 +4,8 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple, Optional
+from functools import lru_cache
+from typing import Any, Iterable, List, Tuple, Optional
 
 import httpx
 import openai
@@ -23,6 +24,7 @@ from services.question_classifier import (
     BUCKET_CLIENT,
     BUCKET_LABELS,
     BUCKET_UNDERWRITING,
+    PRIORITY_CRITICAL,
     PRIORITY_IMPORTANT,
     PRIORITY_SUPPRESSED,
     apply_default_selection,
@@ -828,6 +830,65 @@ def _ordinal(n: int) -> str:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(abs(n) % 10, "th")
     return f"{n}{suffix}"
 
+_ROW_LETTER_ORDINALS = "ABCDEFGHIJKLMN"
+
+
+def _record_ordinal(field_name: str) -> Optional[int]:
+    """Which RECORD does this field describe - 1st, 2nd, ...? None when the name
+    carries no record index.
+
+    BUG-07's second half. The ordinal used to come from
+    `group_counts[label] += 1` - a counter over QUESTIONS, shared across every
+    selected form - so the 286th blank box on a package holding 18 vehicles
+    printed as "(286th vehicle)". The number was never a fleet position; it was
+    a running index into an internal loop, which is why the live run showed a
+    hole where card 158 had been filtered out downstream.
+
+    A record index is a property of the NAME, not of iteration order:
+      * `location_address_2` -> 2   (our curated pseudo-fields number records)
+      * `Vehicle_VINIdentifier_C` -> 3  (ACORD's A..N repeating-row convention,
+        the same letters `pdf_service._ROW_LETTER_TO_IDX` stamps by)
+    Anything else describes the only record we can name, and takes no ordinal.
+
+    Two fields of the SAME record now share one ordinal, which is the point -
+    `location_address_2` and `location_city_2` are both about location 2.
+    """
+    name = (field_name or "").strip()
+    if not name:
+        return None
+    m = re.search(r'[_\s](\d{1,3})$', name)
+    if m:
+        n = int(m.group(1))
+        return n if n >= 1 else None
+    m = re.search(r'[_\s]([A-N])$', name)
+    if m:
+        return _ROW_LETTER_ORDINALS.index(m.group(1)) + 1
+    return None
+
+
+def _label_grouped_question(base_question: str, group_label: str,
+                            field_name: str, questions: List[dict]) -> str:
+    """Render a grouped question's text, numbering by RECORD.
+
+    ONE door, used by both generators. They previously held byte-identical
+    copies of this block (`generate_arq_questions` and
+    `generate_arq_questions_from_facts`), which is the duplication class that
+    let the Umbrella SIR and auto-symbol defects survive their first fixes.
+    """
+    n = _record_ordinal(field_name)
+    if not n or n <= 1:
+        return base_question
+    # Retro-label the first card once a second record appears, so the list never
+    # reads "<question>" then "(2nd vehicle)" with no 1st.
+    for prev_q in questions:
+        if prev_q.get("_group_label") == group_label \
+                and _record_ordinal(prev_q.get("field_name") or "") in (None, 1) \
+                and "(1st " not in str(prev_q.get("question") or ""):
+            prev_q["question"] = f"{prev_q['question']} (1st {group_label})"
+            break
+    return f"{base_question} ({_ordinal(n)} {group_label})"
+
+
 _FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
     ("insurer_fullname",         "What is the full name of your insurance company?",                        "insurer"),
     ("insurer_name",             "What is the name of your insurance company?",                             "insurer"),
@@ -1127,6 +1188,76 @@ def _curated_question_for(field_name: str) -> Optional[str]:
     return None
 
 
+@lru_cache(maxsize=1)
+def _acord_field_names() -> frozenset:
+    """Every field name printed on any of the 17 ACORD AcroForms.
+
+    Read once from `forms_schemas/`, which is the same read-only source
+    `pdf_service` uses, so this set cannot drift from the forms themselves and a
+    new form is covered the day its schema lands. Empty on any read failure -
+    `_is_raw_acord_field` carries a structural fallback for that case.
+    """
+    names: set = set()
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "forms_schemas")
+    try:
+        for fn in os.listdir(base):
+            if not fn.endswith("_schema.json"):
+                continue
+            try:
+                with open(os.path.join(base, fn), "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict):
+                    names.update(data.keys())
+            except Exception:                                 # noqa: BLE001
+                continue                     # one unreadable schema is not fatal
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("arq: ACORD field-name index unavailable - %s", exc)
+    return frozenset(names)
+
+
+def _is_raw_acord_field(field_name: str) -> bool:
+    """Is this a raw ACORD AcroForm field name rather than one of OUR fact keys?
+
+    BUG-07 (client, 2026-09-07). `_FIELD_PREFIX_MAP` below is a curated
+    snake_case vocabulary for the pseudo-fields WE invent (`vehicle_vin`,
+    `driver_name`, `location_address`). It was matched with a bare,
+    case-insensitive `startswith`, and ACORD names its whole Commercial Auto
+    section `Vehicle_*` - so `Vehicle_BusinessAutoSymbol_TwoIndicator_G`, a
+    covered-auto symbol checkbox, lowercased into `vehicle_...`, matched
+    `vehicle_`, and was handed the one-vehicle question text, the "vehicle"
+    group label and a CLIENT audience. Measured across the 17 schemas: **1,035
+    distinct ACORD field names collide with that vocabulary (1,390 field/form
+    instances - 1,161 vehicle, 162 driver, 57 insurer, 10 location), and ZERO of
+    them bind a real schedule column.** Live on 2026-09-07 a package holding 18
+    vehicles asked the client about 286.
+
+    Worse than the wrong label: the collision LAUNDERED those fields past
+    `_hide_machine_worded_questions`, which routes raw schema prompts to the
+    internal panel by testing for `_MACHINE_QUESTION_PREFIX`. Giving a checkbox
+    polished English removed the very marker that filter looks for.
+
+    TWO CONDITIONS, deliberately (the H1-F lesson - a test that is necessary but
+    not sufficient needs a structural second one):
+      1. membership of the real schema union - exact, no false positives, and
+         derived from the forms rather than a hand-kept list;
+      2. any uppercase character - every one of the 4,571 real ACORD field names
+         is PascalCase and every curated key is lowercase snake_case (verified
+         against `_FIELD_QUESTION_MAP`, `FACT_REGISTRY` and
+         `FORM_FIELD_INVENTORY`). This is what keeps the gate working if
+         `forms_schemas/` cannot be read, and covers a form added at runtime.
+
+    Only the `_FIELD_PREFIX_MAP` branch consults this. A raw field that resolves
+    to a curated canonical fact still gets that fact's wording, because those
+    branches run first and are untouched.
+    """
+    if not field_name:
+        return False
+    if field_name in _acord_field_names():
+        return True
+    return any(c.isupper() for c in field_name)
+
+
 def _resolve_question(field_name: str) -> tuple[str, str | None]:
     q = _curated_question_for(field_name)
     if q:
@@ -1140,12 +1271,17 @@ def _resolve_question(field_name: str) -> tuple[str, str | None]:
         q = _clean_duplicate_words(q)
         return q, None
 
-    for candidate in (field_name, base_name):
-        lower = candidate.lower()
-        for prefix, question, group_label in _FIELD_PREFIX_MAP:
-            if lower.startswith(prefix):
-                question = _clean_duplicate_words(question)
-                return question, group_label
+    # BUG-07: the curated prefix vocabulary describes OUR fact keys, never an
+    # ACORD box. A raw field falls through to the machine-worded fallback below,
+    # where `_hide_machine_worded_questions` routes it to the internal panel -
+    # which is where a covered-auto symbol checkbox belongs.
+    if not _is_raw_acord_field(field_name):
+        for candidate in (field_name, base_name):
+            lower = candidate.lower()
+            for prefix, question, group_label in _FIELD_PREFIX_MAP:
+                if lower.startswith(prefix):
+                    question = _clean_duplicate_words(question)
+                    return question, group_label
 
     if field_name in _HUMANIZED_CACHE:
         question = _HUMANIZED_CACHE[field_name]
@@ -1555,9 +1691,16 @@ def _is_curated_client_field(field_name: str) -> bool:
     base = re.sub(r'[_\s]+\d+$', '', base)
     if base in _FIELD_QUESTION_MAP:
         return True
-    lower, base_lower = field_name.lower(), base.lower()
-    if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
-        return True
+    # BUG-07: same gate as `_resolve_question`, and it MUST move with it. This
+    # flag is what `classify_question` reads to send a question to the CLIENT,
+    # so fixing the wording alone would leave 376 ACORD 137_CO symbol checkboxes
+    # still addressed to the insured. Measured: with the flag off they classify
+    # internal / underwriting, which is correct for a coverage-symbol election.
+    if not _is_raw_acord_field(field_name):
+        lower, base_lower = field_name.lower(), base.lower()
+        if any(lower.startswith(p) or base_lower.startswith(p)
+               for p, _, __ in _FIELD_PREFIX_MAP):
+            return True
     return _canonical_key(field_name) is not None
 
 
@@ -1779,7 +1922,8 @@ _NARRATIVE_ENRICHMENT_ORDER = (
 
 
 def _maybe_inject_narrative_enrichment_questions(
-    questions: List[dict], facts: dict, flags: dict, session_docs: list = None
+    questions: List[dict], facts: dict, flags: dict, session_docs: list = None,
+    form_ids=None,
 ) -> None:
     """Ask the client for each narrative-quality topic the narrative is MISSING
     (§6.3 item 2: "if the narrative answers it, don't send it; if not, ask").
@@ -1788,17 +1932,22 @@ def _maybe_inject_narrative_enrichment_questions(
     client already answered on a prior pass (its enrichment fact key is filled)
     is also skipped. In-place and additive - never removes existing questions.
     """
-    from services.sqs_service import NARRATIVE_ENRICHMENT_FIELDS
+    from services.sqs_service import (
+        NARRATIVE_ENRICHMENT_FIELDS, applicable_narrative_components,
+    )
     facts = facts or {}
     flags = flags or {}
     components = _narrative_components_from_facts(facts, session_docs=session_docs, flags=flags)
     existing  = {q.get("field_name") for q in questions}
-    # WC Payroll/Class Code and EMOD/XMOD questions are only relevant when the
-    # submission includes workers compensation coverage.
-    _WC_ONLY_COMPS = frozenset({"growth_trends", "target_markets"})
-    has_wc = bool(flags.get("has_workers_comp"))
+    # SYS-04 / Principle 1 - ONE door decides whether a line-specific narrative
+    # topic applies, shared with the SCORER. This used to be a local
+    # `_WC_ONLY_COMPS` frozenset keyed on `flags["has_workers_comp"]`, so the
+    # questionnaire refused to ask a non-WC account for its X-Mod while the
+    # scorer deducted for the same missing answer and the recommendation card
+    # asked the producer for it. Two copies, one screen, opposite verdicts.
+    _applicable = applicable_narrative_components(facts, flags, form_ids)
     for comp in _NARRATIVE_ENRICHMENT_ORDER:
-        if comp in _WC_ONLY_COMPS and not has_wc:
+        if comp not in _applicable:
             continue
         field_key = NARRATIVE_ENRICHMENT_FIELDS.get(comp)
         if not field_key or field_key in existing:
@@ -2011,7 +2160,8 @@ _LOSS_CONFLICT_QUESTION = (
 )
 
 
-def _maybe_inject_loss_conflict_question(questions: List[dict], facts: dict, flags: dict) -> None:
+def _maybe_inject_loss_conflict_question(questions: List[dict], facts: dict, flags: dict,
+                                         has_loss_run_doc: bool = False) -> None:
     """Append a conflict-resolution prompt when a no-loss attestation is
     contradicted by actual loss-run claims (§6.4 item 1). In-place and additive.
 
@@ -2024,7 +2174,7 @@ def _maybe_inject_loss_conflict_question(questions: List[dict], facts: dict, fla
     facts = facts or {}
     flags = flags or {}
 
-    if not _loss_history_conflict(facts, flags):
+    if not _loss_history_conflict(facts, flags, has_loss_run_doc):
         return
     # Don't re-ask if the remarks field is already queued or already answered.
     if any(q.get("field_name") == LOSS_CONFLICT_FIELD for q in questions):
@@ -2427,11 +2577,39 @@ def _schedule_key_for_question_field(field_name: str) -> Optional[str]:
     return None
 
 
-def _partition_schedule_fields(missing_fields: dict, field_current_values: dict) -> dict:
+# REMOVED 2026-09-07 - `_suppress_ghost_schedule_rows`.
+#
+# An uncommitted experiment ("PRE-PARTITION GHOST-ROW GATE (experimental; proves
+# a fix can live here)") deleted every schedule-row field whose row letter was at
+# or beyond `len(facts[list_key])`, BEFORE `_partition_schedule_fields` ran.
+#
+# With an EMPTY schedule that condition is `idx >= 0` - it deleted every row
+# field of that schedule, PASS 1 then found no capturable column, and the capture
+# table was never built. That is the measured cause of the second defect in the
+# 2026-09-07 live run: `A_no_fleet.pdf` (Business Auto, zero vehicles) was
+# offered no vehicle table and no driver table, while `B_fleet_18.pdf` (18
+# vehicles, so nothing was deleted) got both. The emptier the fleet, the more
+# certainly the grid disappeared.
+#
+# Its intent - do not ask about rows that do not exist - is now served properly
+# and at the right layers: raw ACORD row fields no longer reach the client at all
+# (`_is_raw_acord_field`), the capturable ones collapse into ONE table, and
+# PASS 1b guarantees that table is offered when we hold no rows. No behaviour it
+# was reaching for is lost.
+
+def _partition_schedule_fields(missing_fields: dict, field_current_values: dict,
+                               form_schemas: Optional[dict] = None,
+                               facts: Optional[dict] = None) -> dict:
     """Remove schedule-backed fields from `missing_fields`, in place.
 
-    Returns {list_key: set(form_ids)} for the schedules that had at least one
-    missing field, so the caller can emit exactly ONE question per schedule.
+    Returns {list_key: set(form_ids)} for the schedules to raise as ONE table
+    question each.
+
+    A schedule is raised when EITHER
+      (a) at least one of its capturable columns is missing on a form that
+          carries it - the original rule; or
+      (b) the form carries it and we hold NONE of the client's own rows - added
+          2026-09-07, see PASS 1b.
     """
     schedule_forms: dict = {}
     if not ENABLE_SCHEDULE_CAPTURE:
@@ -2451,6 +2629,42 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict)
         if list_key and schedule_capture.binds_a_capturable_column(field_name):
             real_forms.setdefault(list_key, set()).update(form_ids)
 
+    # PASS 1b - A FORM THAT CARRIES A SCHEDULE, ON A PACKAGE HOLDING NONE OF THE
+    # CLIENT'S ROWS, ALWAYS OFFERS THE TABLE.
+    #
+    # Live defect found running the BUG-07 fixture 2026-09-07: `A_no_fleet.pdf`
+    # states Business Auto coverage and names ZERO vehicles, and the client was
+    # offered NO vehicle table and NO driver table - only a free-text "Please
+    # list your business vehicles: year, make, model, and VIN for each."
+    #
+    # Cause: PASS 1 infers "does this form carry the schedule?" from which boxes
+    # happen to be BLANK. With no fleet in the document, gap fill wrote guesses
+    # into ACORD 127's identity columns, so nothing was missing, so the pair was
+    # never justified and the table was never built. The emptier the fleet, the
+    # more certainly the table vanished - backwards, and precisely when the
+    # client most needs the import grid (`_finalize_schedule_taxonomy` says so
+    # in its own docstring).
+    #
+    # `schedules_on_form` answers the question from the FORM'S SCHEMA, so it
+    # states a property of the form and cannot be defeated by what gap fill did.
+    # Bounded by positive evidence in the other direction: once we hold ANY row
+    # for a schedule, rule (a) governs again and this adds nothing.
+    #
+    # C4 stays closed structurally, not by name: ACORD 25 and ACORD 137_CO carry
+    # no capturable schedule column at all, so `schedules_on_form` returns an
+    # empty set for them and neither can ever raise a fleet table.
+    carried_empty: dict = {}
+    for _fid, _schema in (form_schemas or {}).items():
+        try:
+            for _lk in schedule_capture.schedules_on_form(_fid, _schema):
+                if schedule_capture.rows_from_facts(_lk, facts or {}):
+                    continue                  # we already hold rows - rule (a)
+                real_forms.setdefault(_lk, set()).add(_fid)
+                carried_empty.setdefault(_lk, set()).add(_fid)
+        except Exception as exc:                              # noqa: BLE001
+            # Never let schedule discovery break question generation.
+            logger.warning("arq: schedule discovery skipped for %s - %s", _fid, exc)
+
     # PASS 2 - collapse only the fields belonging to a JUSTIFIED (schedule, form)
     # pair. A field on a form with no capturable column is left in
     # `missing_fields` and takes the ordinary question path, where the classifier
@@ -2466,6 +2680,14 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict)
         schedule_forms.setdefault(list_key, set()).update(justified)
         del missing_fields[field_name]
         field_current_values.pop(field_name, None)
+
+    # PASS 3 - a schedule justified by 1b alone has no missing field to collapse,
+    # so PASS 2 never records it. Seed it here or the table is discovered and
+    # then dropped, which is the exact silent-loss shape PASS 2's own guard
+    # comment warns about.
+    for _lk, _fids in carried_empty.items():
+        if schedule_capture.get_def(_lk) is not None:
+            schedule_forms.setdefault(_lk, set()).update(_fids)
     return schedule_forms
 
 
@@ -2571,7 +2793,14 @@ def _finalize_schedule_taxonomy(questions: List[dict]) -> None:
             q["audience"]      = AUDIENCE_CLIENT
             q["bucket"]        = BUCKET_CLIENT
             q["bucket_label"]  = "Client"
-        q["priority"]          = PRIORITY_IMPORTANT
+        # A FLOOR, not a clamp (SYS-01). This runs AFTER `decorate_questions`,
+        # so an unconditional write here would silently undo the core-requirement
+        # promotion for any schedule-backed fact that is on the Tier 1 / Tier 2
+        # checklist. No such fact exists today - which is exactly why it would
+        # have failed silently the day one was added. Schedules still default to
+        # Important; they just stop overwriting a higher priority.
+        if q.get("priority") != PRIORITY_CRITICAL:
+            q["priority"]      = PRIORITY_IMPORTANT
         q["suppressed"]        = False
         q["suppressed_reason"] = ""
 
@@ -2832,12 +3061,30 @@ async def generate_arq_questions(
     # Figure 15: pull repeating-row fields OUT of the per-field flow so they are
     # answered as ONE table per schedule. Done before the humanization pass below
     # so we never spend an LLM call rewriting a field that is about to collapse.
-    schedule_forms = _partition_schedule_fields(missing_fields, field_current_values)
+    schedule_forms = _partition_schedule_fields(
+        missing_fields, field_current_values,
+        form_schemas={_fid: (_fd or {}).get("schema") or {}
+                      for _fid, _fd in (generated_forms or {}).items()
+                      if isinstance(_fd, dict)},
+        facts=facts,
+    )
 
     questions = []
     seen_field_names = set()
     seen_canon_keys = set()   # deduplicate row-indexed variants by canonical fact
-    group_counts: dict[str, int] = {}
+
+    # Reserve each table's canonical fact BEFORE any injector runs, so one
+    # schedule is never asked twice - once as its grid and once as a free-text
+    # box. Live 2026-09-07: the client was offered "Please list your business
+    # vehicles: year, make, model, and VIN for each." (the `auto_vin_schedule`
+    # scalar, injected by the coverage guarantee below) INSTEAD of the grid.
+    # `_build_schedule_questions` runs last, so without this reservation the
+    # scalar wins the race for the canonical key. This also keeps the H1-E rule
+    # that a schedule-backed fact is asked once, as its table, and never also as
+    # a scalar.
+    for _sched_key in schedule_forms:
+        seen_canon_keys.add(_sched_key)
+        seen_field_names.add(_sched_key)
 
     llm_needed = []
     for field_name in missing_fields:
@@ -2853,8 +3100,17 @@ async def generate_arq_questions(
             continue
         # A raw field that resolves to a curated canonical fact reuses that fact's
         # plain-language question text, so it needs no humanization call.
+        #
+        # BOTH question tables, matching `text_key` below - the third site of the
+        # one-table-of-two defect `_curated_question_for` documents. Measured
+        # 2026-09-07: gating on `_FIELD_QUESTION_MAP` alone sent 18 fields across
+        # the 17 schemas to the humanization LLM whose wording already exists in
+        # FACT_REGISTRY (`auto_bi_per_person`, `auto_liability_structure`,
+        # `garage_liability_limit`, ...). Pure waste - `_resolve_question`
+        # consults `_curated_question_for` FIRST, so the rewrite was paid for and
+        # then discarded.
         _canon = _canonical_key(field_name)
-        if _canon and _canon in _FIELD_QUESTION_MAP:
+        if _canon and _curated_question_for(_canon):
             continue
         # Only spend an LLM humanization call on fields that will actually reach
         # the client. Raw/internal form fields get the no-LLM readable fallback
@@ -2898,21 +3154,22 @@ async def generate_arq_questions(
         # Prefer the curated, plain-language question/hint when the raw ACORD
         # field resolves to a known canonical fact, so a client-facing question
         # reads cleanly instead of as a mangled raw field name.
-        text_key = canon if (canon and canon in _FIELD_QUESTION_MAP) else field_name
+        # BOTH question tables, via `_curated_question_for` - not
+        # `_FIELD_QUESTION_MAP` alone. This is the same one-table-of-two defect
+        # its own docstring describes, one level up, and BUG-07's fix exposed
+        # it: `Insurer_NAICCode_A` resolves to `carrier_naic`, which carries
+        # "What is the carrier's NAIC code?" in FACT_REGISTRY but has no
+        # `_FIELD_QUESTION_MAP` entry, so `text_key` stayed on the raw name.
+        # Before BUG-07 that name was rescued by the prefix map (as "...(1st
+        # insurer)"); with the prefix map correctly declining raw ACORD names,
+        # the producer would have lost the question altogether. Reading both
+        # tables gives it the better wording AND no bogus ordinal.
+        text_key = canon if (canon and _curated_question_for(canon)) else field_name
         base_question, group_label = _resolve_question(text_key)
 
         if group_label is not None:
-            group_counts[group_label] = group_counts.get(group_label, 0) + 1
-            count = group_counts[group_label]
-            if count == 1:
-                question_text = base_question
-            else:
-                question_text = f"{base_question} ({_ordinal(count)} {group_label})"
-                if count == 2:
-                    for prev_q in questions:
-                        if prev_q.get("_group_label") == group_label:
-                            prev_q["question"] = f"{base_question} (1st {group_label})"
-                            break
+            question_text = _label_grouped_question(
+                base_question, group_label, field_name, questions)
         else:
             question_text = base_question
 
@@ -3065,14 +3322,17 @@ async def generate_arq_questions(
 
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)
-    # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
-    _maybe_inject_loss_conflict_question(questions, facts, flags)
     # C2 2.10: loss-run availability status (known claims, no runs uploaded).
-    # Doc presence computed once here and reused by the state gate below.
+    # Doc presence computed once here and reused by every gate below - the
+    # conflict question needs it too since 2026-09-05 (the conflict now requires
+    # ACTUAL loss-run evidence), so it MOVED ABOVE that call.
     _lh_has_loss_run = any(
         isinstance(d, dict) and d.get("doc_type") == "loss_run" and not d.get("excluded")
         for d in (session_docs or [])
     )
+    # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
+    _maybe_inject_loss_conflict_question(questions, facts, flags,
+                                         has_loss_run_doc=_lh_has_loss_run)
     _maybe_inject_loss_run_status_question(questions, facts, flags,
                                            has_loss_run_doc=_lh_has_loss_run)
     # NOTE: "Why are you marketing this account?" is intentionally NOT injected
@@ -3087,7 +3347,8 @@ async def generate_arq_questions(
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
     # §6.3 item 2: ask the client for each narrative-quality topic the narrative
     # lacks (and stay silent on the ones it already covers).
-    _maybe_inject_narrative_enrichment_questions(questions, facts, flags, session_docs)
+    _maybe_inject_narrative_enrichment_questions(questions, facts, flags, session_docs,
+                                             form_ids=list(generated_forms or []))
     # Client examples (2026-07): subcontractor % per class code + vehicles-return-
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
@@ -3111,6 +3372,9 @@ async def generate_arq_questions(
         # can read value_state / evidence_state. Without this argument the
         # overlay is skipped entirely and this path behaves as it did before.
         facts=facts,
+        # SYS-01: the core-requirement checklist is flag-aware (dec-page and
+        # certificate-only packages owe a shorter Tier 1).
+        flags=flags,
     )
     # Schedules own their taxonomy explicitly (see docstring): must run after
     # decoration and before the default-selection pass reads priority/suppressed.
@@ -3196,11 +3460,20 @@ def generate_arq_questions_from_facts(
 
     # Figure 15: collapse repeating-row fields into one table question each,
     # matching the form-aware generator above (no-op when none are present).
-    schedule_forms = _partition_schedule_fields(missing_fields, {})
+    # Same PASS 1b inputs as that generator - this path has no generated schemas,
+    # so `schedules_on_form` reads them from `forms_schemas/` by form id.
+    schedule_forms = _partition_schedule_fields(
+        missing_fields, {},
+        form_schemas={fid: None for fid in (selected_form_ids or [])},
+        facts=facts,
+    )
 
     questions: List[dict] = []
     seen_field_names: set = set()
-    group_counts: dict[str, int] = {}
+    # Same one-ask reservation as the form-aware generator: a schedule raised as
+    # a grid is never also raised as a free-text scalar.
+    for _sched_key in schedule_forms:
+        seen_field_names.add(_sched_key)
 
     for field_name, form_ids in missing_fields.items():
         if field_name in seen_field_names:
@@ -3210,17 +3483,8 @@ def generate_arq_questions_from_facts(
         base_question, group_label = _resolve_question(field_name)
 
         if group_label is not None:
-            group_counts[group_label] = group_counts.get(group_label, 0) + 1
-            count = group_counts[group_label]
-            if count == 1:
-                question_text = base_question
-            else:
-                question_text = f"{base_question} ({_ordinal(count)} {group_label})"
-                if count == 2:
-                    for prev_q in questions:
-                        if prev_q.get("_group_label") == group_label:
-                            prev_q["question"] = f"{base_question} (1st {group_label})"
-                            break
+            question_text = _label_grouped_question(
+                base_question, group_label, field_name, questions)
         else:
             question_text = base_question
 
@@ -3250,6 +3514,8 @@ def generate_arq_questions_from_facts(
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)
     # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
+    # No doc list on this path, so has_loss_run_doc stays False; the typed-row
+    # and human-provenance routes in `claims_are_corroborated` still fire.
     _maybe_inject_loss_conflict_question(questions, facts, flags)
     # C2 2.10: loss-run availability status. This facts-only path has no doc
     # list, so has_loss_run_doc stays False (fail-open - asking once too often
@@ -3260,7 +3526,8 @@ def generate_arq_questions_from_facts(
     # but evidence missing) - keeps the Clarity path in step with the form-aware ARQ.
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
     # §6.3 item 2: ask the client for each narrative-quality topic the narrative lacks.
-    _maybe_inject_narrative_enrichment_questions(questions, facts, flags)
+    _maybe_inject_narrative_enrichment_questions(questions, facts, flags,
+                                             form_ids=selected_form_ids)
     # Client examples (2026-07): subcontractor % per class code + vehicles-return-
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
@@ -3277,6 +3544,7 @@ def generate_arq_questions_from_facts(
         narrative_components=_narrative_components_from_facts(facts, flags=flags),
         hard_stop_text=hard_stop_text,
         facts=facts,          # client 4.1 eligibility flow - see path A above
+        flags=flags,          # SYS-01 core-requirement promotion - see path A
     )  # session_docs not available on this path; uses the stored profile + facts
     _finalize_schedule_taxonomy(questions)
     apply_default_selection(questions)
@@ -3551,6 +3819,7 @@ def generate_cross_form_arq_questions(
         present_fact_keys=_present_fact_keys(facts or {}),
         narrative_components=_narrative_components_from_facts(facts or {}, flags=flags),
         facts=(facts or {}),
+        flags=(flags or {}),  # SYS-01 core-requirement promotion - see path A
     )
     _attach_producer_labels(questions)
     _attach_input_types(questions)
@@ -3680,17 +3949,72 @@ async def mark_arq_viewed(token: str) -> None:
 
 
 # ASYNC-SAFE
+def client_supplied_schedule(
+    q: dict,
+    submitted_rows: List[dict],
+    touched: bool,
+    present: bool = True,
+) -> bool:
+    """Did the CLIENT provide this table, or is it our own pre-fill coming home?
+
+    BUG-01: a schedule question is deliberately sent already holding the rows
+    extraction found, so the client edits a known fleet instead of retyping it.
+    The questionnaire posts every field back, so an untouched table used to
+    return as a "client answer" - overwriting `facts`, re-stamping the forms and
+    writing a `client_arq` audit row attesting the insured supplied rows they
+    never scrolled to. (Harmless to the DATA, because the seed came out of facts
+    in the first place; the damage was entirely to provenance and to every count
+    built on it.)
+
+    Two independent signals, either sufficient:
+      * `touched`   - the client says they edited it. Adds the cases the server
+                      cannot see: a table emptied, or changed and changed back.
+      * seed diff   - the rows are not what we sent. Derived from the SERVER's
+                      own copy, so it holds even when the browser sends nothing.
+
+    Then one floor, matching the questionnaire's own rule exactly: something has
+    to be there, on one side or the other. Rows now means they provided a fleet;
+    rows only in the seed means they cleared ours, which is the answer "we do not
+    have any". Empty both sides is a table nobody ever put anything in - opening
+    it and closing it again is not an answer.
+
+    `present` is whether the key was in the payload AT ALL, and it gates
+    everything: "the client cleared this table" and "no answer came back for
+    this table" both arrive as zero rows, and only presence separates them. A
+    retry, a truncated body or a partial request would otherwise read as a
+    deletion and wipe a fleet the client never touched.
+    """
+    if not present:
+        return False
+    # A producer-only table (owners / officers) is never rendered to the insured
+    # - `client_view` drops it - so an answer for one cannot have come from them.
+    # Structural, not a trust decision: it holds for a crafted payload too, which
+    # is the only way this branch is reachable.
+    if schedule_capture.is_producer_only(str(q.get("schedule_key") or "")):
+        return False
+    if not (touched or submitted_rows != schedule_capture.seed_rows(q)):
+        return False
+    return bool(submitted_rows) or bool(schedule_capture.seed_rows(q))
+
+
 async def submit_arq_answers(
     token: str,
     raw_answers: dict,
     processing_session_id: str,
     generated_forms: dict,
+    touched_fields: Optional[Iterable[str]] = None,
 ) -> Tuple[bool, str, List[str], dict]:
     """Returns `(ok, message, updated_fields, field_errors)`.
 
     `field_errors` is a {field_name: message} map. When it is non-empty the
     submission is REJECTED and nothing is written - the client fixes the
     format and resubmits (or marks the question "I'm not sure").
+
+    `touched_fields` names the fields the client actually edited. It only ever
+    ADDS the two cases the server cannot see for itself - a pre-filled table the
+    client emptied, and one they changed and changed back - so a request that
+    omits it (an older cached page) still behaves correctly, and one that inflates
+    it can at most re-assert values the client was already shown.
     """
     arq = await get_arq_by_token(token)
     if not arq:
@@ -3707,6 +4031,7 @@ async def submit_arq_answers(
         return False, "This questionnaire has already been submitted.", [], {}
 
     questions      = arq["questions"]
+    touched_set    = {str(f) for f in (touched_fields or [])}
     cleaned        = {}
     updated_fields = []
     not_sure       = []
@@ -3744,15 +4069,33 @@ async def submit_arq_answers(
             _rows, _report = schedule_capture.validate_rows(
                 _list_key, schedule_capture.decode_answer(raw_val),
             )
-            cleaned_val = schedule_capture.encode_answer(_rows) if _rows else None
-            if cleaned_val is not None and (_report["errors"] or _report["duplicates"]):
+            if not client_supplied_schedule(
+                q, _rows,
+                touched=field_name in touched_set,
+                present=field_name in raw_answers,
+            ):
+                continue
+            # Deliberately NOT `if _rows`: an emptied table that got past the
+            # check above is the answer "we do not have any", and dropping it
+            # would leave the form printing vehicles the insured has just told us
+            # they do not own.
+            cleaned_val = schedule_capture.encode_answer(_rows)
+            if _report["errors"] or _report["duplicates"]:
                 logger.info(
                     "ARQ submit: schedule %s accepted with %d row error(s), %d duplicate(s)",
                     _list_key, len(_report["errors"]), len(_report["duplicates"]),
                 )
             review_reason = ""
         elif q.get("field_type") == "checkbox":
-            cleaned_val = raw_val if raw_val in ("Yes", "No", "true", "false") else None
+            # SYS-07: read through the one Yes/No door and STORE the canonical
+            # printing. The literal four-value tuple dropped a client who
+            # ticked with "X", "Y", "1" or a pasted checkmark - the answer was
+            # given and we recorded nothing.
+            try:
+                from services.normalization import canonical_yes_no as _cyn
+                cleaned_val = _cyn(raw_val)
+            except Exception:                                 # noqa: BLE001
+                cleaned_val = raw_val if raw_val in ("Yes", "No", "true", "false") else None
             review_reason = ""
         else:
             cleaned_val, review_reason = _clean_answer_ex(raw_val, field_name)
@@ -3953,9 +4296,30 @@ def _restamp_schedule_into_forms(
     A prior version only wrote when a row produced a value and silently skipped
     otherwise, so a deleted vehicle's old VIN/make/model kept printing on the
     PDF forever - fixed by always resolving to either the row's value or "".
+
+    THE REST OF THE ROW GOES TOO (added 2026-09-08, found on a live run).
+    "Schedule-bound" meant the columns the capture table binds - 9 of ACORD
+    127's 67 per-vehicle fields. Deleting both vehicles blanked year / make /
+    model / VIN and left the other 58 standing, so the form printed a garaging
+    address of 2140 Harbor Way, a $1,000 collision deductible and a full set of
+    ticked coverage boxes for a unit with no identity at all. Those came from
+    Pass 1, which answers to nothing once the row it described is gone.
+
+    `_clear_orphaned_schedule_rows` sweeps them, under three conditions that
+    are all structural rather than a list of names:
+      * the ROW must be one this schedule actually owns on THIS form (a letter
+        carrying a bound column), so a schedule whose rows start at B can never
+        reach into row A - which on several forms is the applicant;
+      * the row must have no surviving value, judged by the same resolver that
+        does the stamping, so row offsets and capacity cannot drift apart;
+      * the field's root must belong to exactly one capturable schedule
+        (`schedule_capture.row_family_roots`);
+      * and the field must actually REPEAT - its base name has to appear at more
+        than one row letter on this form. A `_A`-only field is applicant-level
+        wearing ACORD's universal suffix, never a row.
     """
     try:
-        from services.pdf_service import _SCHED_SKIP, _resolve_schedule_row
+        from services.pdf_service import _SCHED_SKIP, _SCHED_ROW_RE, _resolve_schedule_row
     except Exception as ex:  # pragma: no cover - defensive
         logger.warning(f"_restamp_schedule: pdf_service import failed: {ex}")
         return []
@@ -3992,6 +4356,12 @@ def _restamp_schedule_into_forms(
                 conf.pop(schema_field, None)
                 cff.discard(schema_field)
 
+        if _clear_orphaned_schedule_rows(
+            schema, field_state, conf, cff, list_key, facts,
+            _SCHED_ROW_RE, _SCHED_SKIP, _resolve_schedule_row,
+        ):
+            form_touched = True
+
         if form_touched or cff != set(form_data.get("client_filled_fields", [])):
             form_data["field_state"] = field_state
             form_data["confidence"] = conf
@@ -4002,6 +4372,101 @@ def _restamp_schedule_into_forms(
             touched_forms.append(fid)
 
     return touched_forms
+
+
+def _clear_orphaned_schedule_rows(
+    schema: dict,
+    field_state: dict,
+    conf: dict,
+    cff: set,
+    list_key: str,
+    facts: dict,
+    row_re,
+    skip_sentinel,
+    resolve_row,
+) -> bool:
+    """Blank every field of a schedule row that no longer has a row behind it.
+
+    Mutates `field_state` / `conf` / `cff` in place; returns True if anything
+    changed. See `_restamp_schedule_into_forms` for why this exists and for the
+    three conditions. Never raises - a sweep that fails must not lose the
+    client's answer, which has already been written to facts by this point.
+    """
+    try:
+        roots = schedule_capture.row_family_roots(list_key)
+        if not roots:
+            return False                   # ambiguous or unknown - own nothing
+
+        # Which row letters does THIS schedule occupy on THIS form? Answered by
+        # where its bound columns actually sit, so a schedule that starts at row
+        # B (because row A is the applicant) can never claim row A.
+        owned_rows: set = set()
+        live_rows: set = set()
+        for field in schema.keys():
+            if schedule_capture.schedule_list_key_for_field(field) != list_key:
+                continue
+            m = row_re.match(field)
+            if not m:
+                continue
+            letter = m.group(2)
+            owned_rows.add(letter)
+            val = resolve_row(field, facts)
+            if val is not skip_sentinel and val is not None and str(val).strip():
+                live_rows.add(letter)
+
+        orphaned = owned_rows - live_rows
+        if not orphaned:
+            return False
+
+        # A ROW LETTER IS NOT A ROW INDEX. `_A` is ACORD's universal field
+        # suffix, and plenty of fields carry it while belonging to the APPLICANT
+        # rather than to any repeating row. On ACORD 125 the `BusinessInformation`
+        # root - a legitimate `property_locations` root - also carries the 12
+        # nature-of-business checkboxes and the parent organisation name, all of
+        # which exist ONLY at `_A`; and `LossHistory` carries the No Prior Losses
+        # attestation the same way. Sweeping by root alone therefore erased a
+        # contractor's own trade classification, and the no-known-losses tick,
+        # the moment a client answered "we have no separate locations" or "no
+        # claims" - the exact `NamedInsured_A` failure this function's guard was
+        # written to prevent, one level further in.
+        #
+        # The structural test: a field is part of a repeating row only if its
+        # base name appears at MORE THAN ONE row letter on this form. Measured
+        # against the real schemas, that protects 15 applicant fields on ACORD
+        # 125's locations and 3 on its loss history, and costs nothing on ACORD
+        # 127 (all 67 vehicle and 20 driver bases are genuinely multi-row).
+        letters_per_base: dict = {}
+        for field in schema.keys():
+            m = row_re.match(field)
+            if m:
+                letters_per_base.setdefault(m.group(1), set()).add(m.group(2))
+
+        changed = False
+        for field in schema.keys():
+            m = row_re.match(field)
+            if not m or m.group(2) not in orphaned:
+                continue
+            if str(m.group(1)).split("_")[0] not in roots:
+                continue
+            if len(letters_per_base.get(m.group(1), ())) < 2:
+                continue                   # single-slot field - not a row at all
+            if str(field_state.get(field) or "").strip() == "":
+                continue                   # already blank - nothing to clear
+            field_state[field] = ""
+            conf.pop(field, None)
+            cff.discard(field)
+            changed = True
+
+        if changed:
+            logger.info(
+                "ARQ apply: cleared orphaned %s row(s) %s - the client's table no "
+                "longer has a row behind them",
+                list_key, ",".join(sorted(orphaned)),
+            )
+        return changed
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("orphaned-row sweep skipped for %s: %s", list_key, exc)
+        return False
 
 
 # ASYNC-SAFE
@@ -4596,6 +5061,49 @@ async def apply_producer_answer_to_session(
     flags     = dict(proc_session.get("flags", {}) or {})
     flags_changed = False
     updated: List[str] = []
+    # Bound HERE, not inside the New Venture branch below, because the
+    # `upd_processing_session(delete_facts=...)` call at the tail reads it on
+    # EVERY path. Between commit d6d09c7 and 2026-09-08 it was assigned only
+    # under `elif canon == NEW_VENTURE_FIELD:`, so every other fact raised
+    # UnboundLocalError -> HTTP 500 -> "Something went wrong applying your
+    # answer" in the correct-value modal, "Network error" on a recommendation
+    # card. That took down every producer answer in the product except the one
+    # fact whose branch happened to bind the name. `[]` is the pre-d6d09c7
+    # behaviour exactly: no facts to delete, so `delete_facts=None`.
+    # `apply_arq_answers_to_session` binds its own accumulator the same way.
+    _nv_delete: List[str] = []
+
+    # ── A TYPED SCALAR MUST NEVER REPLACE A TABLE ────────────────────────────
+    # Found 2026-09-08 while tracing the recommendation cards: `auto_vin_
+    # schedule` and `wc_class_codes` were offered as single-line boxes, and a
+    # producer typing "2019 Ford Transit" replaced the ENTIRE extracted fleet
+    # with that one string while the card printed "Resolved". Silent data loss
+    # that looked like a success.
+    #
+    # The cards are routed to the schedule editor now (`answer_routing`), but
+    # the guard belongs HERE, at the write door, because three surfaces reach
+    # it - the card, the inline resolution modal and the held-client-answer
+    # review - and only the ones that remember to ask would otherwise be
+    # covered.
+    #
+    # Narrow by construction: it refuses only when the fact ALREADY holds rows
+    # (a non-empty list of dicts) and no validator declares that a typed value
+    # can be read into it. An empty list fact still takes a typed answer, which
+    # is how those gaps have always been closed; `auto_covered_symbols` keeps
+    # its documented free-text path (`parse_symbols`), so the four cross-form
+    # symbol resolutions are untouched; and a list of plain STRINGS
+    # (`lines_of_business`, `locations`) is never protected, so the tier-1
+    # "lines of business" fix keeps working exactly as before.
+    try:
+        from services.answer_routing import can_write_scalar
+        if not can_write_scalar(canon, facts):
+            logger.warning(
+                "apply_producer_answer: refused scalar over table "
+                f"session={processing_session_id} field={field_name} canon={canon}"
+            )
+            return False, []
+    except ImportError:                                       # pragma: no cover
+        pass
 
     # Producer-provenance fact. Distinct source from client_arq; same 1.00
     # weight. The VALUE is what the answer MEANS (services/answer_semantics):
@@ -4667,6 +5175,74 @@ async def apply_producer_answer_to_session(
         f"field={field_name} canon={canon} forms={_stamped}"
     )
     return True, updated
+
+
+NARRATIVE_ANSWER_FIELD = "additional_remarks_text"
+NARRATIVE_ANSWER_MAX = 4000
+
+
+def compose_narrative_answer(existing: Any, addition: str) -> str:
+    """The ACORD 101 remarks text after appending `addition`.
+
+    Pure, so both callers below and the tests share one definition of "append".
+    Envelope-aware, because facts are stored as `{"value": ...}` on every path
+    that has been through `answer_semantics` and bare on older sessions.
+
+    APPEND, never overwrite: explanations for different issues have to coexist,
+    and a producer answering a second narrative gap must not erase the first.
+    An addition already contained in the existing text is a no-op, so applying
+    the same answer twice cannot duplicate a paragraph.
+    """
+    try:
+        from services.fact_lineage import envelope_value
+        current = envelope_value(existing)
+    except Exception:                                          # pragma: no cover
+        current = existing.get("value") if isinstance(existing, dict) else existing
+    current = str(current or "").strip()
+    addition = str(addition or "").strip()
+    if not addition:
+        return current
+    if not current:
+        return addition
+    if addition in current:
+        return current
+    return (current + chr(10) + addition).strip()
+
+
+# ASYNC-SAFE
+async def append_producer_narrative(
+    processing_session_id: str,
+    text: str,
+) -> Tuple[bool, List[str]]:
+    """Append a producer explanation to the ACORD 101 remarks fact.
+
+    ONE door for narrative-mode answers, shared by the inline resolution modal
+    (`POST /api/audit/resolve-issue`, mode=narrative) and the recommendation
+    card (`POST /api/audit/answer` on a rec `answer_routing` classified as
+    narrative - the Narrative Quality card, whose typed paragraph must be added
+    to the remarks rather than replace them).
+
+    Extracted from `resolve_issue` unchanged in behaviour; having the card write
+    through the same helper is what stops the two drifting into different ideas
+    of what "append" means.
+    """
+    from repositories.session_repository import get_processing_session
+
+    addition = str(text or "").strip()
+    if not addition:
+        return False, []
+    if len(addition) > NARRATIVE_ANSWER_MAX:
+        return False, []
+    try:
+        proc = await get_processing_session(processing_session_id)
+        existing = (proc.get("facts") or {}).get(NARRATIVE_ANSWER_FIELD)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"append_producer_narrative: read failed: {ex}")
+        existing = ""
+    combined = compose_narrative_answer(existing, addition)
+    return await apply_producer_answer_to_session(
+        processing_session_id, NARRATIVE_ANSWER_FIELD, combined,
+    )
 
 
 def _clear_canonical_from_forms(generated: dict, canon: str) -> List[str]:

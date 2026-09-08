@@ -110,7 +110,14 @@ def test_naics_or_sic_is_one_item_and_sic_alone_satisfies_it():
 
 
 def test_certificate_package_lists_only_its_two_tier1_items():
-    flags = {"is_certificate_doc": True}
+    # `_only_certificate` added 2026-09-04. The short checklist belongs to a
+    # submission that IS a certificate, and `is_certificate_doc` is a PER-
+    # DOCUMENT flag that merges across the package - so this fixture used to
+    # express a package-level condition with a document-level signal, which is
+    # exactly the live defect (SYS-05 run 2: one supporting COI collapsed a full
+    # declarations package's checklist from 12 items to 8). The INTENT of this
+    # test is unchanged; only the signal that carries it is now the right one.
+    flags = {"is_certificate_doc": True, "_only_certificate": True}
     kd = sq.key_details({"applicant_name": "Acme LLC"}, flags)
     assert kd["satisfied"][:1] == ["Applicant legal name"]
     assert "Proposed effective date" in kd["missing"]
@@ -148,7 +155,10 @@ def test_key_details_never_raises_on_bad_input():
     ({"applicant_name": "x"}, (False, ["Proposed effective date"])),
 ])
 def test_check_tier1_is_unchanged(facts, expected):
-    flags = {"is_certificate_doc": True} if facts == {"applicant_name": "x"} else {}
+    # See the certificate test above: a certificate-only package now needs the
+    # package-level flag, not just the per-document one.
+    flags = ({"is_certificate_doc": True, "_only_certificate": True}
+             if facts == {"applicant_name": "x"} else {})
     assert sq.check_tier1(facts, flags) == expected
 
 

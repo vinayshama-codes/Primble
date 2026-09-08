@@ -160,26 +160,44 @@ def test_133_not_recommended_from_bare_keyword_alone():
     assert _tier(recs, "ACORD_133") is None
 
 
-def test_133_recommended_with_keyword_and_real_project_data():
-    """Keyword text PLUS an actual extracted builders-risk fact (address, cost,
-    or completion date) is genuine corroboration - a real active construction
-    project must still get ACORD 133 recommended."""
+def test_133_is_never_recommended_from_builders_risk_evidence():
+    """ACORD 133 is the Workers Compensation Assigned Risk section.
+
+    REWRITTEN 2026-09-05. These two tests used to assert the opposite, because
+    the product mislabelled 133 as "ACORD 133 - Builders Risk Application". Its
+    own template reads "WORKERS COMPENSATION INSURANCE PLAN / ASSIGNED RISK
+    SECTION ... MUST BE ATTACHED TO AN ACORD 130", and 67 of its 136 schema
+    fields are WorkersCompensation* with not one builders-risk field. Because
+    `template_pending` is read by nothing but an admin route, the old behaviour
+    SHIPPED that Workers Comp PDF to a construction project. Recommending it on
+    builders-risk evidence is now the defect, so it is pinned as one.
+    """
     recs = _recs(
         facts={"builders_risk_project_cost": "500000"},
         text="builders risk course of construction project value",
     )
-    assert _tier(recs, "ACORD_133") == TIER_RECOMMENDED
+    assert _tier(recs, "ACORD_133") is None
 
-
-def test_133_recommended_from_flag_and_facts_without_keyword_text():
-    """The careful has_builders_risk LLM flag plus real extracted project data
-    is also sufficient even when the raw keyword phrasing never appears
-    verbatim in the document text."""
     recs = _recs(
         facts={"builders_risk_project_address": "123 Main St, Denver, CO"},
         flags={"has_builders_risk": True},
     )
+    assert _tier(recs, "ACORD_133") is None
+
+
+def test_133_recommended_on_assigned_risk_workers_comp():
+    """The coverage it actually documents. It is a SUPPLEMENT to the ACORD 130,
+    so the Workers Comp line must be present too - assigned-risk wording alone
+    on a package with no WC never triggers it."""
+    recs = _recs(
+        facts={"wc_payroll": "250000"},
+        flags={"has_workers_comp": True},
+        text="workers compensation insurance plan assigned risk application",
+    )
     assert _tier(recs, "ACORD_133") == TIER_RECOMMENDED
+
+    recs = _recs(text="workers compensation insurance plan assigned risk")
+    assert _tier(recs, "ACORD_133") is None
 
 
 def test_133_not_recommended_from_flag_alone_without_facts():

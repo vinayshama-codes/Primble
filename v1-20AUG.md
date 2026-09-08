@@ -170,7 +170,7 @@ Source documents this plan is built against. Read the relevant one before starti
 | H2 | Early Score / Readiness Presentation | **SHIPPED 2026-08-27 (H2-A), LIVE-VERIFIED (H2-B). Closed on the owner's scope.** | The pre-form "Submission Readiness NN%" was `tier2_score` - a Tier 2 completeness ratio, not the SQS. Replaced by the STATUS LABEL of the package SQS as it stands (new one door `sqs_service.current_package_sqs`, stateless before generation, persisted score after) plus a "Key details in place / missing" split from the score's own Tier 1 + Tier 2 lists (`key_details`). Remediation counts live on the Hard Stops / Warnings sections ("N items still need attention · M handled"), and the Review step now re-loads stored Resolve/Dismiss marks. Client 7.2's countdown shipped at section level by owner's call. Read H2-A |
 | H3 | Workers Compensation Data Capture | **SHIPPED + LIVE-VERIFIED 2026-08-27 (H3-A audit, H3-B build, H3-C kit, H3-D live run 1 + 7 fixes, H3-E live run 2 confirmation). Suite 4761 passed / 1 failed (documented `httpx` ImportError), 64 tests.** Round 1 passed every FORM check and found 7 defects on the way to a HUMAN; round 2 confirmed 6 of the 7 on the regenerated forms and questionnaire (the 7th needs the pre-form screen). **Client section 8 is delivered: 8.1 / 8.2 / 8.3 all built and seen live.** STILL TO TEST (3, in H3-E): the pre-form screen for the effective-date fix; the W3 producer step (8.3 "retain producer-entered codes", the one clause never seen live); the client questionnaire link itself. **Q29 deliberately NOT built** - a rows-vs-stated-payroll warning is a new rule, for Brent. Observed and NOT fixed (none are section 8): an invented `# CLAIMS` in the prior-carrier grid, label text in the premium block's Other cells, a second officer's title extraction missed | One door `coverage_evidence`; two tables on the EXISTING facts; extraction v17. **Read H3-A for the audit, H3-D for the 7 live defects and their root causes, H3-E for what remains** |
 | H4 | Core Submission Information Coverage | **CLOSED ON THE MATRIX 2026-08-27 (H4-A..H4-D). MEASURED: routing 29/29, scoring home 29/29, key rules 28/29 (one partial), Desired Outcome 8/8 stages owned** - see H4-D for the scorecard and how it was produced. Only 8 of the 29 rows were broken; the other 21 came from C1-C5/H1-H3 and were verified, not rebuilt. Date hard stop investigated and deliberately UNCHANGED (H4-C). Suite 4824 passed / 1 failed** (the documented `httpx` ImportError), +47 tests, zero regressions. **Not live-verified - the owner's next upload is the check.** Three items open for Brent (Q31, Q32, Q33 - Q33 is a WRONG VALUE on ACORD 125 and is the most serious) | Section 9 is an ACCEPTANCE MATRIX, not a field list. 21 of 30 rows already held; 9 deviated in 5 classes. Shipped: **F15 CLOSED** (the client questionnaire destroyed "None"/"N/A" before `answer_semantics` - and closing it exposed 4 more defects on the same lines, all fixed); `prior_carrier` reaches the client again (Brent Q8 + 9.1); expiration date / GL form type / audit period / billing plan routed to the producer; **entity type made one vocabulary** (5 live false Data Consistency conflicts on ACORD's own wording, a validator refusing 8 of our own 13 dropdown options, and a stamper that ticked the WRONG box for "S Corporation" and "Non-Profit Corporation" and NOTHING for "Sole Proprietorship"); Tier 1 contact demoted not suppressed; new venture is a valid Years-in-Business state; WC payroll period N/A when annual is clear. New standing gate `tests/test_h4_core_fact_matrix.py` (47). **Read H4-A before touching any routing, answer-interpretation or entity path** |
-| H5 | ACORD 25 Multi-Carrier Mapping | Not started | |
+| H5 | ACORD 25 Multi-Carrier Mapping | **SHIPPED + LIVE-VERIFIED 2026-09-02 (H5-A audit, H5-B build, H5-C landmines, H5-D blast radius, H5-E tests, H5-G live run). All four Engineering Direction bullets and both Desired Outcomes met and CONFIRMED ON THE RUNNING APP over two packages - every check passed on the first attempt. +71 tests, the regression pack's last `xfail` retired. Suite 5279 passed / 1 failed (the documented `httpx` ImportError), zero regressions.** Reading the rest of the generated forms found **THREE defects that are NOT H5, all fixed (H5-G)**, and one deliberately left with its reason | **The report was TWO defects.** (1) The certificate could not PRINT multiple insurers: `Insurer_FullName` mapped to the ONE package `carrier_name` scalar so rows B-F were blank, and all five `*_InsurerLetterCode_*` were hard-blanked by `_is_nonfillable_field` before any resolver ran. (2) The picker raised a FALSE CONFLICT: `normalize_carrier` is a FAMILY key, so EMC P&C and Employers Mutual both coarse-keyed to `emc` and fused into one candidate that then straddled two coverage lines - "two policies on the same coverage line" on a healthy package, capping it at 85. The strict entity re-split that undoes exactly this was gated on `len(groups) == 1` and never ran. **Shipped:** `_certificate_insurer_roster` + `_resolve_certificate_insurer_row` + `_resolve_certificate_insurer_letter` (granted lines only, folded on `strict_entity_key`, fullest legal name, NAIC only when attested, all owned blanks); the INSR LTR is matched by the EXACT column its own `Policy_*_PolicyNumberIdentifier_A` twin carries, self-verified by test; the `len(groups)==1` gate removed; and carrier NAMES are exempted from display canonicalization (the live form printed **"Emc Property & Casualty"**, a company that does not exist - 54 fields across 17 schemas). **Owner's sequencing question answered: the conflict test is SCOPE, not form, so it needs no knowledge of form selection - and confirming in the picker writes only the scalar, so `coverage_lines` and the roster survive it. D6: scores move UP both ways.** Read H5-A before touching any carrier-scope or certificate-identity path |
 | H6 | ACORD 125 Form-Generation Foundation | Not started | Answer key is the 125_reference/ folder. Form edition already correct (2025/03) - see D5 |
 | H7 | Audit / Edit History Completion | **DELIVERED 2026-08-27, LIVE-VERIFIED over two rounds (H7-A audit, H7-B build, H7-C kit, H7-D live run 1 + 5 defects, H7-E live run 2 + closure). All 8 client events, all 7 attributes and the Desired Outcome confirmed on the running app. Suite 4890 passed / 1 failed** (the documented `httpx` ImportError), +65 tests, zero regressions, frontend build clean. **STILL OPEN:** S2 (the multi-insured integrity override) never run live; the pre-form hard-stop rail unreachable after generation; the override classification under-claims on some boxes (measured, safe direction) | **Read H7-A for the root cause, H7-B for what shipped, H7-D for the 5 live defects, H7-E for the clause-by-clause closure.** Root cause was ONE class: the operational tables were made to double as the audit trail - correctly MUTABLE for dismiss-credit / the download gate / the issue rail / reopen, and an audit trail must not be, so history died every time the workflow moved on. Fix is D49: workflow tables hold STATE, `audit_events` holds HISTORY, and the event is emitted by the writer the action already goes through. New pure door `services/audit_history.py`; `record_material_change` called from INSIDE the eight existing audit writers; actor resolved once per export and rendered everywhere (it was rendered NOWHERE); `previous_source` closes the generated-value override; `activity_service` became an adapter over the spine (D50); `submission_integrity_audit` got its first reader; retention 180 -> 365 (D48). **Two defects found while building and three more on the live run**, including the owner's own reported "answer not saving" (the record was right, the CARD lied - D56) and a machine `"null"` competing as a VALUE that manufactured TWO false hard stops (D55). **Scores move UP on both - D6.** Source lineage inside the one model is met by design decision (D36), not construction - tell Brent in those words |
 | BE | **V1 Beta Exit Criteria** - verification + fixes | **VERIFIED AND 7 FIXED 2026-08-28 (BE-A..BE-E). 40 of the client's 49 criteria held against the CODE; 9 did not. Seven shipped this session, two are recorded as NOT fixed with reasons. Suite 4917 passed / 1 failed (the documented `httpx` test - see BE-D, its CLAUDE.md description is now WRONG), +27 tests, zero regressions, no frontend change.** | **Read BE-A for what was measured, BE-B for the seven fixes, BE-C for the two left alone.** Fixed: `gl_class_code_schedule` asked the CLIENT for GL class codes (core principle 5); an ungated ACORD 186 HARD STOP demanded WC payroll from GL-only packages (71 -> 60); a field CLEAR was audited but never persisted (D18 not followed); a dismiss was silently dead after any Download Anyway and its credit reverted; the schedule save never rescored; derived provenance was lost on every override; and the client's own `loss_history` claims TABLE was invisible to the no-loss contradiction guard (one door `loss_history_state.asserted_claims`). **D6 BOTH WAYS: GL-only contractor packages go UP, a typed claim contradicting an attestation goes DOWN.** NOT fixed: bare `GL`/`WC`/`BAP` in `lob_canon` (blocked by D9 - needs Brent or an owner override) and extraction's literal `"N/A"` counting as data (CLAUDE.md GAP 1 - needs a measured pass, not a one-liner) |
@@ -9415,6 +9415,18 @@ a floor).
 
 ### THE ONE GAP - client test 3, "insurer letters map correctly"
 
+> **CLOSED 2026-09-02 by H5** (see the H5 session block at the end of this file).
+> The `xfail(strict=True)` is deleted and the pack is 121 tests / 0 xfail. The
+> two mechanisms named below are exactly what H5 replaced: the roster now comes
+> from `_resolve_certificate_insurer_row` and the letters from
+> `_resolve_certificate_insurer_letter`, both driven by `coverage_lines`.
+> One correction to the account below, found while fixing it: this fixture's
+> `coverage_lines` rows used `carrier_name` / `carrier_naic`, which **extraction
+> never writes** - the production columns are `carrier` / `naic`. So the
+> "three carriers raise no conflict" result recorded here was reached on a shape
+> the live pipeline does not produce, and every carrier-attestation guard was
+> silently inert on it. Fixture corrected; the client's values are unchanged.
+
 `tests/test_v1_regpack_identity.py::test_r03_insurer_letters_map_to_their_line`
 is an **`xfail(strict=True)`**. It is **H5 "ACORD 25 Multi-Carrier Mapping",
 which the ledger has always said is Not started** - measured, not assumed, on
@@ -9771,3 +9783,682 @@ so a gate-produced 60 is released the first time a credit lands; and generation 
 does not refresh `groupedIssues` / `hardStops` / `softStops` (`select-forms-bulk`
 returns no `grouped_issues`). None of these hide a cap on the pre-form screen, which is
 what the ruling covered.
+
+---
+
+## Session 2026-09-02 - H5 ACORD 25 MULTI-CARRIER MAPPING - SHIPPED
+
+**Client item 10 (HIGH).** *"An ACORD 25 can legitimately contain several
+insurers... Each coverage row then identifies the applicable insurer through
+INSR LTR. Primble currently has a case where two legitimate carriers were
+treated as a Data Consistency problem merely because both names appeared."*
+
+Ground truth he gave us:
+
+```
+Insurer A -> EMC Property & Casualty Company -> General Liability
+Insurer B -> Employers Mutual Casualty Co.   -> Auto / Umbrella
+```
+
+The ledger has said **Not started** since 2026-08-20. It is now **Done**, and the
+regression pack's one `xfail(strict=True)` is retired.
+
+### H5-A - The report is TWO defects, and only one of them is the form
+
+Read literally, the client describes a certificate that cannot express multiple
+insurers. Read as a data-model complaint - which is what his Desired Outcome
+actually states - he is saying *carrier is not one value per submission*, and
+anything that treats it as one is wrong. That second reading is the root, and it
+had produced two separate live defects:
+
+1. **The certificate could not print it.** `_ACORD_FIELD_RULES` mapped
+   `Insurer_FullName` to the ONE package-level `carrier_name` scalar, so on a
+   multi-carrier package row A held the merge winner and **B-F were blank**; and
+   every `*_InsurerLetterCode_*` was hard-blanked by `_is_nonfillable_field`
+   before any resolver ran, so **no coverage row could point at its insurer**.
+2. **The picker raised a false conflict.** Measured, not theorised:
+
+   ```
+   normalize_carrier("EMC Property & Casualty Company")   -> "emc"
+   normalize_carrier("Employers Mutual Casualty Company") -> "emc"        <- TWO REAL CARRIERS, ONE GROUP
+   normalize_carrier("Employers Mutual Casualty Co")      -> "employers"  <- ONE CARRIER, SPLIT IN TWO
+   ```
+
+   `normalize_carrier` is a FAMILY key and both entities belong to the EMC group.
+   The strict entity re-split that exists to undo exactly this was gated on
+   `len(groups) == 1`; here there are two groups, so it never ran. The fused
+   "emc" candidate then carried printings from the GL line AND the Auto/Umbrella
+   lines, `_scope_from_store` saw one value straddling two coverage lines,
+   returned *"two policies on the same coverage line in one submission"* - and
+   that verdict also short-circuits the legacy fallback (`:1868` requires
+   `conflict_reason is None`). A healthy package, reported as a conflict,
+   capping the score at 85. **The client's literal sentence.**
+
+**The owner's question was the sharp one: the Data Consistency screen renders
+BEFORE form selection, so how do we know the user will pick ACORD 25?** Answer:
+we never need to. The conflict test is *"do two carriers claim the SAME coverage
+line?"* - scope, not form, and scope is known at upload. The client's own Desired
+Outcome says so in those words. ACORD 25 is not special in TOLERATING multiple
+insurers (every form does - the section forms already resolve their own line's
+carrier through `_resolve_section_policy_identity`); it is special in having
+somewhere to PRINT them. And each certificate section is a SINGLE row, so two
+carriers genuinely on one line is a real conflict on ACORD 25 too. The form
+choice cannot change the answer.
+
+Also verified, because it decided whether a warning-note workaround was needed:
+**confirming a value in the picker does not destroy the per-line carriers.**
+`apply_confirmations` writes `out[fact_key] = envelope` - the scalar only - and
+`_finalize_pipeline` rebuilds `coverage_lines` from the stored documents. The
+roster reads `coverage_lines`, so ACORD 25 gets every insurer whatever the
+producer picks. No note, no new screen: **the "N policies, N values - not a
+conflict" panel already exists** (`AcordModal.jsx`, the `status == "scoped"`
+branch). Healthy packages simply were not reaching it.
+
+### H5-B - What shipped
+
+**`services/pdf_service.py` - two new resolvers, both in
+`_AUTHORITATIVE_BLANK_RESOLVERS`, both placed BEFORE
+`_resolve_package_header_identity`** (which owns `Insurer_NAICCode_[A-Z]` on
+every non-section form, the certificate included, and can only reason about the
+one package carrier).
+
+* **`_certificate_insurer_roster(facts)`** - one entry per DISTINCT carrier the
+  package's own GRANTED coverage lines name, in first-appearance order. Only
+  granted lines (`_line_entry_grants_coverage`) - a "No Coverage" line still
+  carries a carrier name and seating it tells a certificate holder an insurer
+  stands behind coverage that does not exist. Folded on `strict_entity_key`, the
+  same door the picker and Guard 2c use, so `Casualty Co.` and `Casualty Company`
+  are ONE insurer; the FULLEST printing wins, because ACORD asks for "the
+  insurer's full legal company name... not the group name or trade name". A NAIC
+  seats only when that carrier's own rows agree on exactly one. Six rows; a
+  seventh carrier is not seated and says so in the log.
+* **`_resolve_certificate_insurer_row`** - `Insurer_FullName_X` /
+  `Insurer_NAICCode_X` from the roster; rows the roster does not reach are OWNED
+  BLANKS. `_SCHED_SKIP` when there are no `coverage_lines`, so a legacy session
+  keeps the scalar path byte for byte.
+* **`_resolve_certificate_insurer_letter`** - the INSR LTR join. Each section is
+  matched to its coverage line with the SAME token machinery
+  (`_tokens_describe_same_line`) the policy-number cell uses, keyed by
+  `_CERT_SECTION_POLICY_COLUMN` - **the exact column string that row's own
+  `Policy_<column>_PolicyNumberIdentifier_A` carries**, so a printed row's letter
+  and its number can never describe different lines. That table is self-verifying
+  (`test_every_certificate_section_binds_to_its_policy_column`).
+  `Vehicle` is why it must exist: measured against the real matcher its own base
+  name matches NO document line ("vehicle" is not a coverage), while its policy
+  twin "AutomobileLiability" reaches "Business Auto" through the existing stem
+  match. Every other section's own name already resolves correctly and rejects
+  every line but its own (`ExcessUmbrella` -> {excess, umbrella} matches
+  "Commercial Liability Umbrella" / "Excess Liability" / "Umbrella" and nothing
+  else; "Liquor Liability" still matches nothing).
+* **`InsurerLetterCode` removed from `_NONFILLABLE_SUBSTRINGS`** - the gate that
+  made the letter resolver reachable. Census first: those **five fields on ACORD
+  25 are the only `*InsurerLetterCode*` fields in all 17 schemas**, and no test
+  pinned them nonfillable.
+* **`services/display_canonicalizer.py`** - an insurer's LEGAL NAME is an
+  identifier, not a format. Title-casing is right for the insured
+  ("ORBIN CONTRACTING LLC" -> "Orbin Contracting LLC") and wrong for a carrier,
+  because insurer names are routinely initialisms: the live form printed
+  **"Emc Property & Casualty"**, which is not the name of any company that
+  exists, and ACORD's own tooltip asks for the name "as found in the file copy of
+  the policy". `category_for_field` now returns None for insurer/carrier NAME
+  fields - placed after the date/address/currency/state/city/entity checks, so an
+  insurer's ADDRESS or DATE box is untouched. **Measured scope: 54 fields across
+  all 17 schemas, every one an insurer/carrier name.** Deliberately keyed on the
+  PARTY, not on a table of known initialisms - nothing in a token's shape
+  separates "EMC" from "ORBIN", so any casing heuristic is a guess on somebody's
+  legal name.
+
+**`services/underwriting_consistency.py` - the `len(groups) == 1` gate on the
+strict entity re-split is gone.** Re-keying on `strict_entity_key` fixes both
+directions at once: the fused "emc" candidate comes apart, and the two printings
+of Employers Mutual come back together. It cannot manufacture a conflict -
+`_merge_equivalent_value_groups` runs immediately below and re-folds every
+genuine formatting/truncation variant; what survives separated is only what
+`entities_materially_differ` calls different legal entities. The re-split also
+now keeps the FULLEST printing as the display, matching the grouping passes
+above, so the producer is shown "Casualty Company", not "Casualty Co".
+
+### H5-C - The three landmines, and the one that bit
+
+**1. THE FIXTURE USED COLUMN NAMES PRODUCTION NEVER WRITES - D22 again.**
+`test_v1_regpack_identity.py`'s `MULTI_INSURER_LINES` built `coverage_lines` rows
+with `carrier_name` / `carrier_naic`. **Every production reader asks for
+`carrier` / `naic`** (`_build_scoped_fact_store`, `_section_carrier_pair`,
+`_resolve_package_header_identity`, Guards 2c / 2c-N); the only tolerance of the
+fact spelling anywhere is `_coverage_line_dedup_keys`. Building the roster
+against that fixture would have passed every test and shipped blank rows to
+production - and every carrier-attestation guard was already silently inert on
+it. Fixture corrected to the production shape (client's values unchanged), and
+`_line_carrier` / `_line_naic` read BOTH spellings for the same reason the dedup
+door does. The fixture now carries a comment saying not to tidy it back.
+
+**2. THE LEGACY LEAK - caught by this session's own test, not by reasoning.**
+Taking `InsurerLetterCode` off the never-fill list removed the only thing that
+had been blanking those boxes. The letter resolver first returned `_SCHED_SKIP`
+when the roster was empty, so on a session with **no `coverage_lines`** all five
+letter boxes fell straight through to the gap-fill LLM - which can only invent a
+cross-reference. `test_no_letter_field_ever_reaches_the_gap_fill_llm` (driven
+through `compute_form_gaps`, the list that becomes the LLM batch, on a package
+WITH a roster and one without) failed and named all five. Fixed: on ACORD 25 the
+resolver **owns every letter box unconditionally** and returns an OWNED BLANK for
+every case it cannot answer. A blank was always the legacy behaviour; it just has
+to be owned now instead of pre-emptively erased.
+
+**3. `Vehicle` matches no coverage line** - covered above.
+
+### H5-D - Blast radius, and the one test that changed
+
+**`test_remaining_relationship_fixes_20260815.py::test_an_unattested_insurer_never_seats_on_the_roster`
+was updated - the TEST was obsolete, not the code.**
+It pinned gap fill writing EMC P&C into row C and Guard 2c cleaning up around it.
+The roster is now deterministic, so the model no longer chooses which slot a
+carrier occupies: on that fixture the two real carriers seat in A and B by their
+own evidence and C-F are owned blanks, which makes the row-C value a DUPLICATE -
+precisely what the same class's first test ("the identical carrier in five
+INSURER slots") exists to prevent. The original intent is now asserted more
+strongly: the fabricated blend "Employers Property & Casualty Company" appears
+NOWHERE on the roster, both real carriers do, and there are exactly two seated
+rows.
+
+Everything else held. Guards 2c / 2c-N are unchanged and still run on the final
+mapped values - a roster built from `coverage_lines` carriers passes 2c's
+attestation by construction, and its NAICs come from the same rows 2c-N checks
+pairs against, so the deterministic roster can never hand the guard something it
+will only blank.
+
+**SCORES MOVE - D6 applies, tell Brent before he sees it.** Both directions and
+both upward: ~8 previously-blank ACORD 25 boxes now fill (fill-rate credit), and
+the false carrier conflict stops capping affected multi-carrier packages at 85.
+
+### H5-E - Tests
+
+`tests/test_h5_acord25_multicarrier.py` (26), every one driving the REAL
+`map_facts_to_form` against the REAL ACORD 25 schema rather than the resolver
+alone - the standing lesson that an offline probe proves the FUNCTION, never the
+SEAM. Covers the client's Orbin example end to end (A -> GL, B -> Auto AND
+Umbrella, two printings of one insurer folded to one row); the letter-to-roster
+join; NAIC never recombined; a line the package does not carry; two insurers on
+one line; a denied line's carrier; unused rows and unanswerable letters as owned
+blanks; the whole-form gap-fill proof; legacy no-`coverage_lines`; single-carrier;
+more than six carriers; conflicting NAICs; a nameless row not shifting letters;
+the legacy column spelling; a malformed NAIC; non-certificate forms declining;
+the self-verifying section->policy-column binding; the never-fill gate staying
+open only for these five; the carrier-name casing fix with a positive control
+that the INSURED is still canonicalized; and the picker half - the client's
+package `scoped`, the two printings shown as one candidate, plus BOTH positive
+controls (two carriers on one line still conflicts, a different insured still
+conflicts).
+
+`tests/test_v1_regpack_identity.py`: the `xfail(strict=True)` on
+`test_r03_insurer_letters_map_to_their_line` is **deleted** - client test 3 now
+passes in full. `pytest -k v1_regpack` is **122 passed, 0 xfailed** (was 121
+passed / 1 xfailed).
+
+**Suite: 5234 passed, 1 failed, 14 skipped, 0 xfailed** (`-p no:randomly`). The
+one failure is the documented `test_arq_acord125_missing_only` `httpx`
+ImportError. Baseline on the same working tree immediately before this work was
+**5207 passed / 1 failed / 14 skipped / 1 xfailed**, so the delta is exactly
++26 new tests +1 retired xfail and **zero regressions**. No frontend change: the
+`status == "scoped"` panel this relies on already exists in `AcordModal.jsx`.
+
+**NOTE for whoever reads the diff:** `services/display_canonicalizer.py` also
+carries two changes that are NOT part of H5 - `_DOTTED_INITIALISM_RE` ("N.A."
+was being title-cased to "N.a.") and `_MACHINE_TOKEN_RE` (a URL / e-mail box was
+being title-cased, and an e-mail local part is case-sensitive per RFC 5321).
+They arrived in the working tree from a concurrent session on the same day and
+were left untouched; they are consistent with the carrier-name exemption but
+were not authored here.
+
+### H5-F - Still open
+
+* ~~Not live-verified.~~ **DONE 2026-09-02 - see H5-G. Both packages passed every
+  check on the first attempt.** What that run did NOT cover, because both
+  fixtures are dec pages: whether a real uploaded **COI** carries per-line
+  carriers into `coverage_lines` as reliably as a dec page does. A certificate
+  prints its carriers in a letter-keyed roster rather than under per-line
+  headings, and nothing extracts the letters (there is no INSR LTR concept
+  anywhere in extraction - verified). The roster would then rest on whatever
+  RULE 16 makes of that table.
+* The certificate's LIMIT cells still map to package-level `gl_*` / `umbrella_*`
+  facts with no per-line resolver, so on a multi-carrier package they can still
+  borrow across carriers the way identity used to. Not reported, not in scope for
+  item 10, and the honest next candidate in this family.
+* `_carriers_by_line` (dec entries, `owner == "carrier"`) is a second, richer
+  source of per-line carrier attribution that the roster does not consult; today
+  it only feeds `_repair_coverage_lines_from_entries`. Worth revisiting if a live
+  run shows `coverage_lines` thinner than the dec index.
+
+### H5-G - LIVE RUN 2026-09-02: H5 PASSED IN FULL, and reading the rest of the pages found THREE defects
+
+**Two packages, one file each, ACORD 25 + 125 on both** (`h5_test_data/`, built
+by `backend/scripts/make_h5_test_pdfs.py`, self-verifying). Every H5 check
+passed on the first attempt, on both packages. The three defects below are NOT
+H5 - they were found by reading the rest of the generated forms line by line.
+
+#### P1 - the client's case. Full pass.
+
+| Check | Result |
+|---|---|
+| INSURER A | `EMC Property & Casualty Company` / 25186 |
+| INSURER B | `Employers Mutual Casualty Company` / **21415** |
+| Two rows, not three | PASS - "Casualty Co." and "Casualty Company" folded to one insurer |
+| "EMC" not "Emc" | PASS - the display-canonicalization exemption holds live |
+| GL / AUTO / UMB INSR LTR | **A / B / B** |
+| WC INSR LTR | blank - never borrowed |
+| The declined line's carrier | `Meridian Grove` appears NOWHERE |
+| Data Consistency | **"2 values - not a conflict"**, scoped `general liab` vs `auto / umbrella` |
+| ACORD 125 header | EMC P&C + 25186 - its own pair, not recombined |
+
+The Data Consistency panel is the client's literal complaint, resolved: each
+carrier is shown read-only, tagged with the coverage lines it actually wrote,
+with nothing to confirm.
+
+#### P2 - the control. Fires correctly.
+
+Carrier conflict raised, reason *"two policies on the same coverage line in one
+submission"*; Policy Number and Carrier NAIC conflicted too, which is right -
+two GL policies genuinely disagree on all three. **GL INSR LTR blank, and AUTO
+INSR LTR = A.** That second half is the one worth keeping: a conflict on ONE
+coverage line did not poison the rest of the certificate. No over-correction.
+
+#### THE THREE DEFECTS, and their ONE root cause
+
+All three are the same shape: **a box whose ACORD tooltip declares a free-text
+or date type had no shape test that a nearby value could fail**, so gap fill
+wrote whatever stood beside it on the dec page.
+
+**D1 - a bare COUNT printed as a DATE. The most serious, because it is a wrong
+value on a filed application, not a blank.** ACORD 125's
+`NamedInsured_BusinessStartDate_A` - the box printed "DATE BUSINESS STARTED
+(MM/DD/YYYY)" - showed **"9"** on P1 and **"6"** on P2. Those are the
+`years_in_business` values. The mapping rule is correct
+(`BusinessStartDate` -> `business_start_date`, and its comment already records
+that it deliberately does NOT take `years_in_business`); the value was invented
+by gap fill off the neighbouring line of the same dec page. `_rejects_declared_
+type`'s `date` branch let it through because its only shape test was *"does it
+contain a digit"*, which a count passes.
+
+*Fix:* a usable date carries a month word, a separator, or a year-length
+number. One to three bare digits is none of those. Structural, not a list.
+
+**D2 - a MONEY FIGURE printed as a DESCRIPTION.** ACORD 25's
+`GeneralLiability_GeneralAggregate_LimitAppliesToCode_A` - the "GEN'L AGGREGATE
+LIMIT APPLIES PER: **OTHER:**" box - printed **"$2,000,000"** on both packages.
+It describes nothing, and it duplicates the General Aggregate limit already
+printed one column to its right (none of POLICY / PROJECT / LOC were ticked).
+Root cause: **`text` was the one declared type with no shape test at all**, so
+any figure standing near the box could land in it.
+
+*Fix:* a new `text` branch refusing a value that is ENTIRELY a money figure.
+Deliberately not "contains one" - a real description that MENTIONS an amount
+("Windstorm $5,000 deductible", "$1M excess of primary") carries words and
+survives, which is the whole point of the box.
+
+**D3 - an ADDITIONAL INTEREST named for another party on the same form.**
+ACORD 125 P1 page 3 listed **"Dana Ostrander"** - the PRODUCER CONTACT printed
+in the contact block of the same form - as an Additional Interest, with
+`Ford F-250 VIN 1FT7W2BT5MED12345` off the fleet schedule as its item
+description. `_drop_fabricated_interest_rows` already kills a row whose
+ADDRESS, PHONE or E-MAIL is byte-equal to a producer/carrier value; this row
+carried none of those, so every borrow test was blind to it and the name
+anchored it as "a real entity".
+
+*Fix:* **the name is an identity detail too** - the identical borrow test the
+address and phone already get, applied to the box beside them.
+
+**D3 IS NOT THE RULE REMOVED ON 2026-08-13, and the difference is the direction
+it fails.** That one REQUIRED the FullName to appear in the dec index, so a
+third party named only in document prose ("Meridian Fleet Leasing, LLC") was
+blanked for want of evidence. This one refuses a name only on POSITIVE evidence
+that it is already another party on this same form. A name appearing nowhere
+else is untouched, so prose parties stay safe - pinned by
+`test_a_genuine_third_party_named_nowhere_else_survives`.
+
+#### FOUND AND DELIBERATELY NOT FIXED
+
+**The covered-auto symbol bleeding into the certificate's description boxes.**
+`Symbol 1 - Any Auto` landed in ACORD 25's vehicle "other covered auto" /
+"other coverage" description, and on P1 picked up a `$1,000,000` limit beside
+it. The ANY AUTO checkbox is already correctly ticked from the same symbol
+(`_derive_symbol_indicator`, 2026-08-07), so this is a duplicate expressed as a
+fabricated extra coverage.
+
+Not fixed, and the reason is the standing rule rather than time. The existing
+door (`_value_names_a_sibling_checkbox`) returns False for this whole family -
+measured, not assumed - and `auto_symbols.indicator_field` maps a symbol to the
+**137/138 grid** boxes (`Vehicle_BusinessAutoSymbol_OneIndicator_A`), not to
+ACORD 25's `Vehicle_AnyAutoIndicator_A`. So a fix means a NEW symbol-to-
+certificate-checkbox mapping plus a NEW guard that blanks description boxes,
+which is exactly the shape H1-F warned about: *a test that is necessary but not
+sufficient needs a structural second condition, and the adversarial case must
+be written FIRST.* It is redundant, not false - the lowest-harm of the four -
+so it waits for its own evidence about what legitimately lives in those boxes.
+
+**Two cosmetic notes, neither a defect:** the scoped panel reads "2 policies, 2
+values" where there are 3 policies and 2 carriers (the label uses the value
+count for both numbers - pre-existing UI copy in `AcordModal.jsx`); and P2's
+Policy Number card lists the AUTO policy as a third candidate beside the two GL
+numbers, which is defensible - it shows every value it saw - but that number is
+not on the conflicted line.
+
+#### Tests
+
+`tests/test_h5_live_run_form_defects.py` (45). Every fix here is a REFUSAL, so
+every one carries a positive control proving it did not also blank legitimate
+data: 11 real date printings still accepted; 12 real descriptions still
+accepted, including two that mention money; the money rule proven NOT to reach
+an amount box; a genuine prose-named third party surviving; a producer-ENTERED
+interest untouchable (the guard only ever blanks what the model authored); and
+a short shared token ("LLC") unable to trigger the borrow.
+
+One test is a cross-schema sweep: **every `date`-declared field in all 17
+schemas** must accept three real dates and refuse a bare count - so the refusal
+is proven on the whole surface it was added to, not just the field that failed.
+The ~49,000-pair `test_declared_type_guard.py` sweep (the one that governs this
+function) is green unchanged.
+
+#### Suite
+
+`py -m pytest -q -p no:randomly` from `backend/` -> **5279 passed, 1 failed,
+14 skipped, 0 xfailed.** The one failure is the documented
+`test_arq_acord125_missing_only` `httpx` ImportError.
+
+The progression across this whole session, all on the same working tree:
+
+| After | passed | failed | xfailed |
+|---|---|---|---|
+| baseline, before any H5 work | 5207 | 1 | 1 |
+| H5 shipped (H5-B) | 5234 | 1 | 0 |
+| the three live-run fixes (H5-G) | 5279 | 1 | 0 |
+
+5234 + 45 = 5279 exactly, so the three fixes added their tests and **regressed
+nothing**. No frontend change in either step.
+
+
+---
+
+## Session 2026-09-03 - SYS-05 COVERAGE NORMALIZATION - SHIPPED
+
+**Client, Sept 1 live test, P0 systemic correction.** *"Terms such as UNINSURED AND
+UNDERINSURED MOTORISTS, COMPREHENSIVE, COLLISION, and Uninsured Motorists are being
+treated as unrecognized coverage parts. They are components of Automobile coverage and
+should not become standalone unknown lines. Map these terms into the Commercial
+Auto/Automobile coverage family BEFORE cross-document comparison."*
+
+### Root cause - and it was never an Auto vocabulary gap
+
+A declarations page prints a SCHEDULE OF COVERAGES whose rows are the coverage PARTS of
+one line, each with its own limit and premium. `extraction_service` RULE 16 asks for
+*"one entry per coverage line ... as the document prints it"*, so extraction correctly
+emits them, and **`coverage_lines` has one bucket for two different concepts**:
+
+```
+Business Auto   $2,991   <- a LINE of business
+Comprehensive   $412     <- a PART of that line
+Collision       $688     <- a PART of that line
+Uninsured Motorists      <- a PART of that line
+```
+
+`canon_line` returns None for a part, so `unmapped_material_lines` (C1-Q, the feature
+built FOR client 1.7) reported each one as *"terminology not covered by a known
+normalization rule"*. Reproduced verbatim on the client's literal rows.
+
+**The same hole was measured on every other line, so fixing only the four reported
+words would have been the pinpoint patch the client's own instructions forbid.**
+Also unmapped: `Personal and Advertising Injury`, `Damage to Premises Rented to You`,
+`Medical Expense` (GL parts); `Business Income`, `Ordinance or Law`, `Equipment
+Breakdown`, `Boiler and Machinery` (Property parts).
+
+### A pre-existing WRONG mapping found by the same sweep
+
+`canon_line("Property Damage Liability")` returned **PROPERTY**. "Property damage" is a
+category of LOSS a LIABILITY policy pays for - the standard second half of every GL and
+Auto liability limit - not the Commercial Property line. So a COI's GL limit row could
+be read as a Property line, and `denied_families` / the cross-document LOB compare would
+then reason about a Property line the package does not carry. New `_FAMILY_BLIND_PHRASES`
+masks the bigram out of PROPERTY's own haystack only; `Business Personal Property` and
+`Commercial Property` are untouched, and the masked phrase falls through to the
+bare-"liability" branch and lands on GENERAL_LIAB.
+
+### What shipped - `services/lob_canon.py`, one new door
+
+**`canon_part(text, present_families, policy_family)` is SEPARATE from `canon_line` on
+purpose, and that is the load-bearing decision.** `canon_line` is what decides whether a
+row GRANTS or DENIES coverage (`denied_families`, `coverage_evidence`,
+`_coverage_lines_are_self_contradictory`), so a part must never reach it: a lone
+`COLLISION - NO COVERAGE` row must not deny the whole Auto line, and a Collision row must
+not flip an HNOA-only account into an owned fleet. **Parts are for PLACEMENT and
+COMPARISON only. No score moves.**
+
+Resolution order, each condition narrowing the last:
+1. `canon_line` first - so `Comprehensive General Liability` and `Comprehensive Crime`
+   resolve as LINES and the bare word never gets a vote.
+2. `_PART_UNAMBIGUOUS` - one possible line whatever else is in the package
+   (`motorist` covers UM/UIM in every printing, `collision`, `towing`, `business income`).
+3. `_PART_NEEDS_PARENT` - shared phrases resolve ONLY when the package already shows the
+   parent line (H1-F's structural second condition). `coverage_families_present` does two
+   passes, so a package that names Auto ONLY through `COLLISION` still places its
+   `COMPREHENSIVE`.
+4. **Two candidates and no separator -> REFUSE.** `BODILY INJURY` / `PROPERTY DAMAGE` /
+   `MEDICAL PAYMENTS` are standard rows on BOTH a GL and an Auto dec. Guessing is
+   Principle 4's forbidden move, so they route to the producer.
+5. `policy_number_families` settles case 4 when the document states the contract - a
+   MEDICAL PAYMENTS row carrying the auto policy's number is the auto policy's medical
+   payments. Built from rows that NAME a line only (a part can never bootstrap the
+   contract it is then placed by), and a number on two families is dropped as corrupt.
+
+`sqs_service.check_doc_consistency` folds parts into their parent before the LOB compare
+(the client's "before cross-document comparison"). A dec listing the whole schedule and a
+COI listing `Automobile Liability` now both resolve to `{auto}`. **Can only ever REMOVE a
+false difference** - an unplaceable name still keeps its own text as its key.
+
+**Client 1.7's other half survives, pinned:** `Kidnap and Ransom` and `Widget Protection`
+still route to the producer, even when sharing a placed policy number.
+
+### Found by the new tests, in my own change
+
+`Comprehensive Dishonesty, Disappearance and Destruction` (the ISO 3-D crime policy)
+matched nothing in `_SPECIFIC`, because CRIME held only `employee dishonesty`. Harmless
+until `canon_part` could read a bare "Comprehensive" as Auto - then it became a real
+false mapping on any package carrying an auto line. CRIME widened to `dishonesty`
+(no other line of business uses the word).
+
+### Verification
+
+- Client's literal rows -> `unmapped_material_lines` returns `[]`.
+- 32 standard line names re-checked: unchanged. (`Plate Glass` / `Burglary and Theft`
+  return None at HEAD too - they are lob_canon's own examples of strings that must NOT
+  match the `gl` abbreviation.)
+- Tests: `tests/test_sys05_coverage_parts.py` (59).
+- Suite: **5337 passed / 2 failed / 14 skipped.** Failure 1 is the documented
+  `test_arq_acord125_missing_only` httpx ImportError. Failure 2 is
+  `test_verified_ai_values_never_read_as_an_empty_form`, which is the **already-open**
+  `confidence_fill_rate` truncation defect at HEAD (`return int((weighted/filled)*100)`;
+  10 x `ai_verified` = 84.99999999999999 -> 84, test wants >= 85). Proved unrelated:
+  `confidence_fill_rate` has no reference to `lob_canon`, and the truncation is in the
+  committed HEAD version. Zero regressions.
+- No frontend change - the warning text is backend-generated.
+
+### Still open, deliberately not touched
+
+- **`unmapped_coverage_line` has no `RESOLUTION_MAP` entry**, so the producer has no
+  Resolve button and the message's own "Confirm which line it belongs to" is a dead
+  instruction. Separate item.
+- **An "advisory" renders as a WARNING.** `issue_registry.build_grouped_view` buckets
+  anything that is not a hard stop into the warning tiers and can promote it into
+  IMPORTANT, which is exactly the client's screenshot. It moves no score but it counts
+  toward "N items still need attention". Related to UI-06.
+- `fact_equivalence.PackageContext._build` still attributes coverage_lines by
+  `canon_line` alone. Folding parts there would attribute a component row's carrier and
+  policy number to its parent line - an improvement, but it changes conflict detection,
+  so it is out of this change's scope.
+- A coverage part is still its own `coverage_lines` row. Nesting them under their parent
+  in RULE 16 is the cleaner model and was declined for V1: it rewrites LLM call 1's
+  output shape and every downstream reader.
+
+### Same session - the two presentation defects behind SYS-05's screenshot
+
+**Full write-up, decision register and reasoning: `1stSep-liveTestFixes.md` at the repo
+root. That file is the running memory for the 1 Sep live test - read and append to it
+for any item from that round.**
+
+**1. The warning had a dead Resolve control.** `unmapped_coverage_line` had NO entry in
+`RESOLUTION_MAP`, so the message said *"Confirm which line it belongs to"* over a button
+that opened nothing. No typed value can clear it (there is no canonical "this part
+belongs to line X" fact), so it now uses `_r_review` - mode `none` plus a short note.
+The machinery already existed (`_r_review`, `ResolutionHint`); it only had to be MOVED
+above `RESOLUTION_MAP`, where it had been a `NameError`.
+
+**2. "Advisory" rendered as a scoring warning, and the obvious fix was a lie.**
+`build_grouped_view` sorts into hard stops and everything-else, so an advisory lands in
+WARNINGS and can be promoted into IMPORTANT - the client's screenshot exactly. The owner
+asked for a "does not affect your score" note. **Deriving it from `severity ==
+"advisory"` is wrong:** measured across all ten advisory emitters, nearly every one's
+CONDITION already costs something - `loss_history_attestation_conflict` caps the Loss
+History pillar at 45, `auto_um_uim_not_specified` drives ACORD 137's structural score and
+an 8-point rec, `acv_high_value_building` reads a fact the scorer mentions 18 times.
+**"Advisory" here is display routing, not a promise about the score.**
+
+So `SCORE_NEUTRAL_CODES` is an explicit per-code claim, currently ONE entry, re-derived
+from the code in `build_grouped_view` (never trusted from the payload), and a cluster
+earns it only when EVERY member does. The loss-history row is now emitted as a real
+`soft_warning` - verified display-only, since `structured_issues` reaches no scoring path
+and both severities share the warning bucket.
+
+Two knock-ons: both codes were falling into `DEFAULT_CLUSTER` (advice and a
+pillar-capping conflict under one "Other validations" heading), so each got its own
+cluster, and `unmapped_coverage_line` is tiered `binder_followup` so it stops displacing
+real work from IMPORTANT. Giving the loss row a cluster then made
+`test_every_cross_form_cluster_code_has_a_resolution` fail - the guard doing its job - so
+it gained `_r_field("loss_history_no_prior_losses_indicator", "num_claims",
+"total_incurred")`, a real fix that lifts the 45 cap on the next pipeline run.
+
+**One test was WRONG and was rewritten, not deleted.**
+`test_conflict_routes_to_data_consistency_as_advisory` asserted the literal string
+`"advisory"` sat near the emission, as a PROXY for "does not cap the package". The proxy
+broke when the severity legitimately changed, and it was always weaker - an edit could
+have kept the word while appending to `soft_stops` on the next line. It now pins the
+PROPERTY (the block writes to `structured_issues` only) and was proved to bite by
+injecting a `soft_stops` write.
+
+Tests: `tests/test_advisory_presentation_20260903.py` (21). Suite **5358 passed /
+2 failed** (the documented `httpx` ImportError plus the already-open
+`confidence_fill_rate` truncation defect, both pre-existing at HEAD). Frontend build clean.
+
+---
+
+## BUG-05 - Remediation actions returned Network / unsupported-action errors (2026-09-08)
+
+**Client report (P0):** the review / recommendation flow returns red errors during normal
+remediation. One card answers *"Network error. Please try again."*; another offers a
+direct-answer box and a Submit button, then rejects it with *"This item can't be answered
+directly. Attach a supporting document or dismiss it with a note."* Owner then added: the
+same class shows up on the **pre-form screen, in warnings and hard stops** - fix it there
+too.
+
+Three defects, one class, plus a fourth found while tracing that nobody reported.
+
+### A - "Network error" was a 500 the browser was not allowed to read
+Chain, each link verified: the card's field (`loss_history_no_prior_losses_indicator`)
+resolves fine -> `apply_producer_answer_to_session` -> `_nv_delete` was bound ONLY inside
+`elif canon == NEW_VENTURE_FIELD:` and read on EVERY path at the tail -> `UnboundLocalError`
+-> 500. Starlette builds `ServerErrorMiddleware -> user middleware (CORS) -> router`, so an
+app-level `Exception` handler's response is produced OUTSIDE `CORSMiddleware` and never gets
+`Access-Control-Allow-Origin`. **Measured on this repo's Starlette 0.50.0: a 200 carries the
+header, a 500 does not.** Cross-origin the browser discards the response, `fetch` REJECTS,
+and the catch block prints "Network error". Introduced in `d6d09c7`. Diagnosed and fixed in
+the working tree by the previous session (`scripts/verify_bug06.py`, 18/18 applied); this
+entry records it because it is the same report.
+
+### B - the card and the server disagreed about what "answerable" means
+`AcordModal.jsx` used `answerable = !!rec.field`; the server used `_canonical_key`.
+`rec_narrative_components` / `rec_narrative_substance` declared **`acord101_remarks`, a
+legacy READ-only alias** (the writable fact is `additional_remarks_text`), so the box was
+drawn and the answer refused on every package with a narrative gap.
+
+### C - NOBODY REPORTED THIS ONE, AND IT IS WORSE
+`rec_auto_vin_schedule` and `rec_wc_class_codes` name **live capture schedules**. The card
+drew a one-line box; typing "2019 Ford Transit" replaced the entire extracted fleet with
+that string and printed **"Resolved"**. Reproduced live before the fix. The issue side has
+forbidden exactly this since 2026-08-08
+(`test_legacy_rules.test_field_mode_facts_are_not_schedule_backed`); recommendations were
+never brought under the same contract.
+
+### D - the pre-form screen: blockers with nothing to click
+Two shapes, both proved:
+1. **Four cap-gate sentences had no rule row.** `calculate_sqs` caps a form at 60 through
+   `_resolve_cap(extra_hard_reason=...)`, and since 2026-08-31 returns that sentence in
+   `cap_hard_stops` for display. `classify_legacy` matched none of them, so they rendered
+   under "Other validations" with no fix control. Two were internal rule names printed to a
+   broker: **"Property integrity gate"** and **"Property integrity warning"**.
+   **The anti-rot harvester could not see them** - it AST-walks `evaluate_stops`' own
+   `append` sites, and these are passed to `_resolve_cap` instead. The build stayed green
+   the whole time.
+2. **`reopen_issue` shipped the stop ARRAYS with no grouped view.** The Review banners draw
+   from `grouped_issues`, where every row carries its code and therefore its "Open to fix";
+   given only the arrays the screen falls back to printing the sentences as dead text - no
+   fix, no Resolve, no Dismiss.
+
+### THE FIX - one door, four declared modes, nothing invented
+**`services/answer_routing.py`** answers, once, "what can the producer do with this item?"
+returning the FOUR modes the inline-resolution feature already speaks
+(`field` / `schedule` / `narrative` / `none`), so `ResolutionModal`, `resolve_issue` and
+`ScheduleTable` needed no new concepts. **Every rule is derived from a declaration we
+already maintain** - `_canonical_key`, `schedule_capture.SCHEDULE_DEFS`,
+`narrative_facts.NARRATIVE_FACT_KEYS`, the extraction schema's `"key": [{` (a table) vs
+`[string]` (a typeable list), and `FACT_REGISTRY[...]["validate"]` (somebody has written the
+reader for a typed value). **No allow-list of known-bad names anywhere.** Unknown resolves
+to `none`, never to a typed box.
+
+- The scorer stamps `answer_mode` on every recommendation it returns; the card renders what
+  it is told. Legacy payloads carry no `answer_mode` and keep the exact prior behaviour.
+- `POST /api/audit/answer` re-decides the mode server-side on every write and never trusts
+  the wire; narrative answers APPEND through the shared
+  `arq_service.append_producer_narrative` (extracted from `resolve_issue`, so the two cannot
+  drift); a schedule card opens the existing ScheduleTable through `ResolutionModal`.
+- **The write door itself refuses a typed scalar over a populated table**, so the resolution
+  modal and the held-client-answer review are covered too, not only the surfaces that
+  remembered to ask. Narrow by construction: only a non-empty list of DICTS with no declared
+  validator. An empty row fact still takes a typed answer (that is how those gaps have always
+  been closed); a list of STRINGS is never protected (the tier-1 lines-of-business fix);
+  `auto_covered_symbols` keeps its documented `parse_symbols` free-text path.
+- The property gate now names its own cause (`_prop_hard_because` / `_prop_soft_because`),
+  reusing the phrases `_LEGACY_MESSAGE_RULES` already matches - so those rows inherit a real
+  fix with no new vocabulary. Three rows added for the umbrella gate pair and the
+  BI/period-of-restoration gate (which was being SHADOWED by the generic "Business income
+  limit" FORMAT row and offering the one fact already present).
+- `audit_routes._form_selection_view` - the grouped view now travels with the stops on every
+  panel-refresh response, `reopen_issue` included. `BareStopRow` is the floor underneath it:
+  a legacy payload degrades to work-tracking, never to dead text.
+
+### Guards (all proved to bite by reverting the fix)
+- `tests/test_answer_routing.py` (51) - drives the REAL scorer over all 17 real schemas with
+  every coverage flag on and empty facts, so every checklist fires; fails the build if any
+  card offers a typed box the server would refuse, a typed box over a schedule, a schedule
+  mode with no live table, a narrative mode on a non-prose fact, or a `none` with no
+  explanation. Plus the write-door tests in both directions and the panel-payload invariant.
+- `tests/test_legacy_rules.py` (+3, now 78) - `_harvest_cap_gate_reasons` closes the
+  harvester blind spot; every cap-gate sentence must offer an actionable fix and must not be
+  an internal rule name; `_prop_hard`/`_prop_soft` may only be raised through the helpers
+  that record the reason.
+- `scripts/verify_bug05.py` - runnable before/after check, no server, no upload.
+- `scripts/make_bug05_test_pdfs.py` -> `bug05_test_data/` - the LIVE kit: TWO
+  packages and 13 numbered checks. Two is the floor, and the reason is worth
+  keeping: a schedule card only fires when the schedule is ABSENT (so proving
+  "it opens a table" needs an empty fleet and proving "the rows survive" needs a
+  populated one), and `_gate_hard_reason` is a ladder - COPE, umbrella,
+  property - so an umbrella cap SHADOWS the property sentence on every form in
+  its package. Each package carries one side of each. Every fixture was designed
+  by DRIVING the real scorer, and the generator scans its own output to prove
+  the deliberate absences really are absent.
+
+**Suite: 7232 passed / 1 failed** (the documented `httpx` ImportError). Frontend build
+clean. One test was REWRITTEN, not deleted:
+`test_umbrella_aware_date_resolver.test_the_resolve_refresh_shows_hard_stops_as_hard_stops`
+grepped for one literal line of one implementation; it now asserts the BEHAVIOUR through
+`_form_selection_view`, which is what the refactor strengthened.
+
+**Standing lesson:** an anti-rot harvester is only as wide as the emission path it walks.
+The cap gates became visible to producers on 2026-08-31 through a path the 2026-08-08
+harvester did not know about, and four unfixable blockers shipped with a green build.
+When you add a new way to SURFACE something, extend the harvester in the same commit.

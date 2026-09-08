@@ -32,6 +32,7 @@ WHAT IT IS NOT
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -51,6 +52,7 @@ __all__ = [
     "ComparisonResult", "compare", "conflict", "values_agree", "verdict",
     "identifiers_match", "feins_match", "carriers_same_family", "build_context",
     "document_witnesses", "entities_materially_differ",
+    "same_policy_contract", "policy_contract_groups",
 ]
 
 
@@ -111,8 +113,38 @@ def build_context(merged_facts: Optional[dict] = None,
         return None
 
 
-def _usable(values: Sequence[Any]) -> List[int]:
-    return [i for i, v in enumerate(values) if str(v or "").strip()]
+def _usable(values: Sequence[Any], fact_key: str = "") -> List[int]:
+    """Indices of values that are a usable answer for ``fact_key``.
+
+    A RATING BUREAU IS NEVER THE CARRIER (2026-09-05). AAIS, ISO and NCCI reach
+    a carrier fact because their names are printed on the policy as the AUTHOR
+    of the coverage forms. On a carrier field that is not a rival value, it is
+    not a value - so it is dropped here, before grouping, and the producer is
+    never asked to choose between an insurer and a bureau.
+
+    Dropped HERE rather than in ``normalize_value`` because ``compare`` groups
+    NAME-kind fields on ``strict_entity_key``, which never consults the
+    dispatcher - the first attempt at this fix was inert for exactly that
+    reason, and every unit test still passed.
+    """
+    out: List[int] = []
+    try:
+        from services.normalization import is_carrier_field, is_insurance_bureau
+        _carrier = is_carrier_field(fact_key)
+    except Exception:                                        # pragma: no cover
+        _carrier = False
+
+        def is_insurance_bureau(_v):                         # type: ignore
+            return False
+    for i, v in enumerate(values):
+        if not str(v or "").strip():
+            continue
+        if _carrier and is_insurance_bureau(v):
+            logger.info("fact_comparison: %s - %r is a rating bureau, not an "
+                        "insurer; not a candidate", fact_key, str(v)[:40])
+            continue
+        out.append(i)
+    return out
 
 
 def compare(fact_key: str, values: Sequence[Any],
@@ -128,7 +160,7 @@ def compare(fact_key: str, values: Sequence[Any],
     Never raises. On an internal failure it returns every usable value as its
     own group - i.e. it reports a conflict rather than hiding one.
     """
-    idx = _usable(values)
+    idx = _usable(values, fact_key)
     if not idx:
         return ComparisonResult([], "empty", [])
     try:
@@ -254,6 +286,90 @@ def identifiers_match(a: Any, b: Any,
     return False
 
 
+# ── ONE POLICY PRINTED TWO WAYS IS STILL ONE POLICY (SYS-06, D-S) ───────────
+# The rule itself is not new - it has lived in `pdf_service._same_policy_contract`
+# since the 2026-08-17 ACORD 125 Q4 audit, where `6E74002` and `6E7-40-02---26`
+# were counted as two policies and one contract displaced the umbrella off the
+# form. What IS new is that it is now behind the door.
+#
+# Before SYS-06 there were THREE answers to "are these the same policy?":
+#
+#   pdf_service._same_policy_contract        term-marker rule, context-free
+#   PackageContext.same_contract_printing    prefix election, needs the index
+#   _coverage_line_dedup_keys                raw alnum equality  <- the weakest
+#
+# and the weakest one decided whether the Data Consistency picker saw one
+# policy or two. On the client's own package `BBC7263 - 26` (dec page) and
+# `BBC7263` (certificate) keyed differently, survived the merge as two rows on
+# the General Liability line, and the picker reported *"two policies on the same
+# coverage line"* on a package where nothing was wrong.
+#
+# WHY THE SEPARATED TAIL IS REQUIRED, and why this is not a loose prefix match:
+# `POL123` and `POL12345` are two policies whose digits run together. The term
+# marker is only a term marker when the document PRINTED it as one ("---26",
+# " - 26"). That single condition is what keeps this from folding real
+# contracts, and it is why `BBC7263-26` vs `GL-4471102-26` (two carriers' GL
+# policies on one line - defect D-1) still separates.
+_POLICY_TERM_TAIL_RE = re.compile(r"[\s\-]\s*\d{2}\s*$")
+_POLICY_CONTRACT_MIN = 5
+
+
+def same_policy_contract(a: Any, b: Any) -> bool:
+    """Two printings of ONE policy contract, decided WITHOUT package context.
+
+    True for ``6E74002`` / ``6E7-40-02---26`` and ``BBC7263`` / ``BBC7263 - 26``
+    (the trailing 2-digit TERM marker, printed separated), and for a value that
+    arrives carrying its own printed label ("Policy No. BBC7263").
+    False for ``POL123`` / ``POL12345`` (digits run together, two policies) and
+    for any pair that is not a prefix of the other.
+
+    THE IMPLEMENTATION MOVED DOWN A LAYER ON 2026-09-05 and this is now a
+    delegation. It had to: the Data Consistency picker merges through
+    ``_merge_equivalent_value_groups`` -> ``fact_equivalence.equivalent_index``,
+    which never reaches this module, so the rule was correct here and unread
+    there. Keeping a second copy would be the one-rule-two-copies shape that
+    let the Umbrella SIR and auto-symbol bugs each survive their first fix.
+
+    Deliberately NOT folded into ``identifiers_match``: that function is the
+    loss-run matcher's contract and widening it would loosen an unrelated
+    comparison. Same question, two audiences, one implementation.
+    """
+    return _fe._same_policy_contract(a, b)
+
+
+def policy_contract_groups(values: Sequence[Any]) -> List[List[int]]:
+    """Group indices of ``values`` that name the SAME policy contract.
+
+    Transitive closure of :func:`same_policy_contract`, so three printings of
+    one number land in one group. Order-independent by construction (the
+    closure is computed over every pair), which matters because the merge sees
+    documents in upload order and must not produce a different answer for the
+    same package uploaded the other way round.
+    """
+    n = len(values or [])
+    adj: Dict[int, set] = {i: set() for i in range(n)}
+    for i in range(n):
+        for j in range(i + 1, n):
+            if same_policy_contract(values[i], values[j]):
+                adj[i].add(j)
+                adj[j].add(i)
+    seen: set = set()
+    out: List[List[int]] = []
+    for start in range(n):
+        if start in seen:
+            continue
+        comp, stack = set(), [start]
+        while stack:
+            node = stack.pop()
+            if node in comp:
+                continue
+            comp.add(node)
+            stack.extend(adj[node] - comp)
+        seen |= comp
+        out.append(sorted(comp))
+    return out
+
+
 # ── Document role (client 1.2: "carrier role", "insured/producer role") ──────
 # A document's ROLE decides which facts it may witness. A loss run states the
 # insured's identity and their CLAIMS; it does not state which policy the
@@ -286,12 +402,61 @@ def identifiers_match(a: Any, b: Any,
 # run is not a witness to which policy covers which line; it is a witness to
 # what was CLAIMED. It still owns loss history, and `loss_run_identity` still
 # reads its policy numbers directly for matching.
+#
+# `certificate` added 2026-09-03 on measured evidence, not by analogy. A
+# certificate of insurance EVIDENCES coverage to a third party: it prints
+# limits, policy numbers, carriers and dates, and by design prints nothing about
+# the risk itself. SYS-05 live run 2 proved what happens when it is allowed to:
+# the certificate's property row read "Property - Special Form  $4,200,000" and
+# that LIMIT became the package's `property_building_value`, which then carried
+# a `valuation_method` the document never stated into the "ACV on a building
+# valued at $4,200,000" advisory. Run 1, the declarations page alone, correctly
+# reported the building value as MISSING.
+#
+# A LIMIT IS NOT A VALUE. The building is worth what it is worth; the policy
+# pays up to its limit. Reading one as the other overstates or understates the
+# risk, and it silently satisfied a COPE completeness check that should have
+# stayed open.
+#
+# Deliberately NOT blind to identity, policy numbers, carriers, dates or
+# coverage lines - those are exactly what a certificate is FOR, and blinding
+# them would break the multi-carrier roster the ACORD 25 work depends on.
 _ROLE_BLIND_FACTS: Dict[str, frozenset] = {
     "loss_run": frozenset({
         "policy_number", "carrier_name", "carrier_naic", "insurer_name",
         "effective_date", "expiration_date",
         "policy_effective_date", "policy_expiration_date",
         "coverage_lines", "lines_of_business",
+    }),
+    "certificate": frozenset({
+        # Values of the risk. A certificate states LIMITS only.
+        "property_building_value", "property_bpp_value", "building_value",
+        "business_personal_property_value",
+        # How the property is valued, and the perils/deductibles behind it -
+        # a certificate carries none of this.
+        "valuation_method", "coinsurance_percentage", "deductible_basis",
+        # COPE. Never printed on a certificate.
+        "year_built", "roof_year", "construction_type", "occupancy_type",
+        "sprinkler_system", "fire_protection_class", "square_footage",
+        # Exposure basis. A certificate is not an application.
+        "total_revenue", "total_payroll", "wc_payroll", "num_employees",
+        "num_employees_full_time", "num_employees_part_time",
+        "annual_gross_sales", "years_in_business",
+        # SYS-09, 2026-09-05. The APPLICANT'S OWN CONTACT PERSON, on structural
+        # evidence rather than analogy: ACORD 25 has exactly three contact
+        # fields - Producer_ContactPerson_FullName / PhoneNumber / EmailAddress
+        # - and its NamedInsured block carries a name and a mailing address and
+        # nothing else. There is no box on a certificate in which an applicant's
+        # contact person can be printed, so EVERY contact person a COI names is
+        # the PRODUCER'S. Read as `contact_name` it put the brokerage's own
+        # contact into the insured's contact box and then raised a Data
+        # Consistency conflict against the real one taken from the submission.
+        "contact_name", "contact_phone", "contact_email",
+        # DELIBERATELY NOT blinded: producer_name / producer_address /
+        # producer_contact_*. Naming the issuing agency is exactly what the
+        # certificate's own Producer block is FOR (see the note above) - the
+        # defect is the applicant's box being filled from it, not the producer's
+        # box existing.
     }),
 }
 

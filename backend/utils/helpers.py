@@ -114,10 +114,69 @@ _ADDR_UNIT_THEN_CITY_RE = re.compile(
     r"|rm|room)\b\.?)\s*[\w-]+)[\s,]+(?P<city>[A-Za-z][A-Za-z .'-]{2,})$",
     re.I,
 )
+# The same designators, but the WHOLE string is the unit and nothing else -
+# "Suite 300", "# D13", "Ste 400". Used to tell a unit glued to a city from a
+# street glued to a city; only the former may be split off. See recovery 4.
+_ADDR_UNIT_ONLY_RE = re.compile(
+    r"^(?:#|\b(?:apt|suite|ste|unit|bldg|building|fl|floor|rm|room)\b\.?)"
+    r"\s*[\w-]+$", re.I,
+)
+
+# ── Comma-free addresses with NO unit designator (2026-09-01) ────────────────
+# `_ADDR_UNIT_THEN_CITY_RE` above needs a unit ("Ste 400", "# D13") to find the
+# street/city boundary. A great many premises have none, and for those the city
+# was silently lost: the live T1 run parsed
+#
+#     "15 Foothills Service Rd Golden CO 80401"
+#         -> line1 "15 Foothills Service Rd Golden", city None
+#
+# and ACORD 125 printed the street box with the city inside it and the CITY box
+# empty. The second anchor is the street-suffix token, which is what actually
+# ends a US street line.
+#
+# GREEDY BY CONSTRUCTION - `.*` before the suffix, so the LAST suffix wins. A
+# non-greedy first draft took "Frontage" out of "2201 S Yuma Frontage Rd Pueblo"
+# and "Ave" out of "77 Park Ave Court Denver", producing "Rd Pueblo" and
+# "Court Denver" as cities. It failed four of the eight real addresses in the
+# fixture before the greedy form was adopted.
+#
+# A LEADING HOUSE NUMBER IS REQUIRED, so "PO Box 4417 Cheyenne" and any bare
+# name are left exactly as they are - the same positive-evidence rule the rest
+# of this function follows. No number, no split, no guess.
+_ADDR_STREET_SUFFIX = (
+    r"(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|"
+    r"court|cir|circle|pl|place|pkwy|parkway|ter|terrace|trl|trail|hwy|highway|"
+    r"crossing|loop|run|row|walk|path|plaza|square|sq)"
+)
+_ADDR_SUFFIX_THEN_CITY_RE = re.compile(
+    rf"^(?P<street>\d.*\b{_ADDR_STREET_SUFFIX}\b\.?)\s+"
+    rf"(?P<city>[A-Za-z][A-Za-z .'-]{{2,}})$",
+    re.I,
+)
+
+# The trailing unit designator, so it can be lifted out of line 1 into line 2.
+# Only ever applied when comma-splitting produced no line2 of its own.
+_ADDR_TRAILING_UNIT_RE = re.compile(
+    r"^(?P<street>\d.*?)\s+(?P<unit>(?:#|\b(?:apt|suite|ste|unit|bldg|building"
+    r"|fl|floor|rm|room|dept|lot)\b\.?)\s*[\w-]+)$",
+    re.I,
+)
 
 
 def _parse_address(addr: str) -> dict:
-    if not addr:
+    # SHAPE FIRST (2026-09-06). This went straight to `addr.split(",")`, so a
+    # fact that arrived as a bool, an int, a list or a dict raised
+    # AttributeError - INSIDE form generation, where an exception does not
+    # surface as a bug report but as a form that failed to produce. Found by
+    # fuzzing the stamper with 5,000 malformed fact dicts: 315 of them crashed,
+    # all on the same line, e.g. `mailing_address = True`.
+    #
+    # An envelope is unwrapped because merged facts routinely arrive as
+    # `{"value": ..., "confidence": ...}`; anything else non-string is not an
+    # address and returns the same empty result an empty string always has.
+    if isinstance(addr, dict):
+        addr = addr.get("value")
+    if not isinstance(addr, str) or not addr:
         return {}
     parts  = [p.strip() for p in addr.split(",")]
     result = {}
@@ -177,6 +236,55 @@ def _parse_address(addr: str) -> dict:
         if cm and cm.group("street").strip():
             result["city"] = cm.group("city").strip()
             result["line1"] = cm.group("street").strip(" ,")
+            line1 = result["line1"]
+    #   4. A UNIT that arrived GLUED TO THE CITY (2026-09-06). Recovery 2 above
+    #      only runs when the city is still unknown, and on this shape the comma
+    #      split has already filled it - wrongly:
+    #
+    #        "2255 Shorebank Avenue, Suite 300 Tacoma, WA 98402"
+    #            -> parts[-2] is the city -> city = "Suite 300 Tacoma"
+    #
+    #      and the ACORD 125 CITY box printed exactly that, live, twice. This is
+    #      not a malformed address: every ACORD and letterhead prints the unit on
+    #      the street line and the city on the NEXT line, and extraction joins
+    #      those two lines with a single comma. Run 3 of the same kit happened to
+    #      emit a second comma and parsed correctly, which is why this looked
+    #      fixed for one run - it was luck, not a fix.
+    #
+    #      Splits ONLY when the leading chunk is a unit and nothing else, so a
+    #      city is never cut at a street name. Same designators as recovery 2.
+    city_val = str(result.get("city") or "")
+    if city_val:
+        um = _ADDR_UNIT_THEN_CITY_RE.match(city_val)
+        if um and um.group("city").strip():
+            unit = um.group("street").strip(" ,")
+            if unit and _ADDR_UNIT_ONLY_RE.match(unit):
+                result["city"] = um.group("city").strip()
+                if not str(result.get("line2") or "").strip():
+                    result["line2"] = unit
+    #   3. CITY after the STREET SUFFIX, for the very common address that has
+    #      no unit at all ("15 Foothills Service Rd Golden"). Runs only when
+    #      rule 2 found nothing, so a unit-bearing address keeps its existing,
+    #      proven behaviour untouched.
+    if line1 and not result.get("city"):
+        sm = _ADDR_SUFFIX_THEN_CITY_RE.match(line1)
+        if sm and sm.group("street").strip():
+            result["city"] = sm.group("city").strip()
+            result["line1"] = sm.group("street").strip(" ,")
+            line1 = result["line1"]
+    #   4. The UNIT belongs on line 2, not buried at the end of line 1. ACORD
+    #      prints them as separate boxes and the live run left every line-two
+    #      box blank while the suite sat inside the street. Runs LAST, because
+    #      rule 2 uses the unit as its city anchor - lifting it earlier would
+    #      remove the anchor before it was used.
+    #
+    #      Never overwrites a line2 that comma-splitting already produced, and
+    #      never empties line1 (the `\d.*?` street part must survive).
+    if line1 and not (result.get("line2") or "").strip():
+        um = _ADDR_TRAILING_UNIT_RE.match(line1)
+        if um and um.group("street").strip():
+            result["line1"] = um.group("street").strip(" ,")
+            result["line2"] = um.group("unit").strip()
     # Validate/correct state against ZIP. The LLM occasionally extracts the
     # wrong state when the document contains multiple addresses from different
     # states (e.g. insured in CO, premises in MO). ZIP codes are unambiguous;

@@ -237,16 +237,34 @@ def test_acord_130_checklist_no_longer_reads_prior_carrier():
 
 # ── 2.6 Contradiction routes to Data Consistency as an advisory ──────────────
 
-def test_conflict_routes_to_data_consistency_as_advisory():
+def test_conflict_routes_to_data_consistency_without_capping_the_package():
+    """The client caps the PILLAR at 45, so this row must never enter a stop
+    array - a hard/soft stop there would ceiling the whole submission at 60/85.
+
+    REWRITTEN 2026-09-03. It used to assert the literal string `"advisory"` sat
+    near the emission, as a PROXY for "does not cap". The proxy broke when the
+    owner ruled the row is a proper warning (its condition really does cost the
+    Loss History pillar 45 points, so calling it advice was a lie about a
+    number) - and the proxy was always the weaker test anyway: a future edit
+    could have kept the word `advisory` while appending to `soft_stops` on the
+    next line, and this would have passed.
+
+    Now it pins the PROPERTY, the same way `test_unmapped_coverage_line`'s own
+    guard does: the emit block writes to `structured_issues` only. Severity is
+    free to change; the routing is not.
+    """
     import inspect
     from services import extraction_pipeline as ep
     src = inspect.getsource(ep)
-    i = src.index("loss_history_attestation_conflict")
-    window = src[max(0, i - 500): i + 500]
-    assert '"advisory"' in window, (
-        "the conflict row must be ADVISORY - a hard/soft stop here would cap "
-        "the whole package at 60/85 when the client caps only the pillar at 45"
-    )
+    emit = src[src.index("from services.sqs_service import _loss_history_conflict"):
+               src.index("loss_history_attestation_conflict") + 800]
+    for forbidden in ("hard_stops = ", "soft_stops = ", "hard_stops.append",
+                      "soft_stops.append"):
+        assert forbidden not in emit, (
+            f"the loss-conflict block writes {forbidden.strip()} - the client "
+            "caps the Loss History pillar at 45, not the package at 60/85"
+        )
+    assert "structured_issues.append" in emit
 
 
 # ── 2.9 The canonical state model ────────────────────────────────────────────

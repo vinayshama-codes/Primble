@@ -267,10 +267,19 @@ def _extract_state_code(value) -> Optional[str]:
     if text in US_STATES:
         return text
 
-    for state_name, code in _STATE_NAME_TO_CODE.items():
-        if re.search(rf"\b{re.escape(state_name)}\b", text):
-            return code
-
+    # ORDER IS THE FIX (2026-09-06), not the patterns - every one of these was
+    # already `\b`-anchored. The state-NAME sweep used to run FIRST and return on
+    # its first hit, so "1450 CALIFORNIA STREET, SUITE 900, DENVER, CO 80202"
+    # answered CA and the trailing "CO 80202" was unreachable. Measured against
+    # the identical address on Dahlia St, which correctly answered CO - so this
+    # shipped a CALIFORNIA state form to a Colorado risk, and a street name was
+    # all it took.
+    #
+    # A state NAME inside free text is the WEAKEST signal here: it is also a
+    # street ("California St", "Nevada Ave", "Indiana Ave"), a city ("Kansas
+    # City", "Oregon City"), and a county. The POSITIONAL shapes - a two-letter
+    # code sitting where an address puts one - are structural, so they go first
+    # and the name stays as the last resort it always should have been.
     zip_match = re.search(r"\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b", text)
     if zip_match and zip_match.group(1) in US_STATES:
         return zip_match.group(1)
@@ -284,6 +293,12 @@ def _extract_state_code(value) -> Optional[str]:
     tokens = [t.strip(".,") for t in text.split()]
     if tokens and tokens[-1] in US_STATES and any(ch.isdigit() for ch in text):
         return tokens[-1]
+
+    # Last: the spelled-out name, which still has to answer "Denver, Colorado"
+    # when no code and no ZIP is present.
+    for state_name, code in _STATE_NAME_TO_CODE.items():
+        if re.search(rf"\b{re.escape(state_name)}\b", text):
+            return code
 
     return None
 
@@ -521,7 +536,7 @@ _FORM_COVERAGE_GOAL = {
     "ACORD_131":    "Umbrella / Excess",
     "ACORD_140":    "Commercial Property",
     "ACORD_141":    "Commercial Property",
-    "ACORD_133":    "Builders Risk",
+    "ACORD_133":    "Workers' Compensation",
     "ACORD_160":    "Inland Marine",
     "ACORD_137_CA": "Commercial Auto", "ACORD_137_CO": "Commercial Auto",
     "ACORD_138_CA": "Commercial Auto", "ACORD_138_CO": "Commercial Auto",
@@ -1300,7 +1315,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
                  trigger_weight=0.95,
                  trigger_reason="is_contractor flag with contractor trade confirmed in document",
                  tier=TIER_RECOMMENDED,
-                 reason_label="Contractor operations detected - supplements GL & WC")
+                 reason_label=("Contractor operations detected - supplements the "
+                               "General Liability section"
+                               + (" and Workers Compensation"
+                                  if flags.get("has_workers_comp") else "")))
 
     # ── Keyword / rule-based (trigger_weight 0.85) ────────────────────────────
 
@@ -1563,37 +1581,43 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              tier=_101_tier,
              reason_label=_101_label)
 
+    # ACORD 133 IS A WORKERS COMPENSATION FORM (2026-09-05). Its template's own
+    # first page reads "WORKERS COMPENSATION INSURANCE PLAN / ASSIGNED RISK
+    # SECTION - THIS FORM ALONG WITH AN ACORD 130 WORKERS COMPENSATION
+    # APPLICATION CONSTITUTE AN APPLICATION FOR ... (ASSIGNED RISK) COVERAGE.
+    # THIS FORM MUST BE ATTACHED TO AN ACORD 130 FOR SUBMISSION." Of its 136
+    # schema fields, 67 are `WorkersCompensation*` and NONE is a builders-risk
+    # field. `_SECTION_FORM_LINE_PHRASES` had it right all along; this block and
+    # `forms_database/ACORD_133.json` were the copies that were wrong.
+    #
+    # The old behaviour SHIPPED A WRONG FORM: a construction project matching
+    # builders-risk facts was offered "ACORD 133 - Builders Risk Application"
+    # and, because `template_pending` is read by nothing but an admin route,
+    # generation stamped the Workers Comp Assigned Risk PDF for it.
+    #
+    # Nothing is lost by removing that. There has never been a builders-risk
+    # SECTION form in this product - only this mislabelled one. Builders risk
+    # keeps its ACORD 125 representation (`pdf_service` ticks
+    # `Policy_SectionAttached_InstallationBuildersRiskIndicator` from
+    # `has_builders_risk`) and its own cross-form project-value check.
+    # OPEN PRODUCT QUESTION for Brent: builders risk has no section form. See
+    # `1stSep-liveTestFixes.md`.
+    #
+    # 133 is now offered for the coverage it actually documents: an assigned-risk
+    # / residual-market WC submission. It is a SUPPLEMENT, so it is offered only
+    # alongside the ACORD 130 its own template requires - never on its own.
     _133_kw = {
-        "builders risk", "builder's risk", "course of construction",
-        "construction loan", "ground-up construction",
+        "assigned risk", "workers compensation insurance plan",
+        "residual market", "state fund", "wc pool", "wc insurance plan",
     }
-    _has_br = flags.get("has_builders_risk")
-    _br_kw_in_text = any(kw in text for kw in _133_kw)
-    # Require at least one extracted builders-risk fact as corroboration, no
-    # matter which signal (flag or keyword) got there first. This prevents a
-    # BARE keyword match from adding ACORD 133 on its own - "builders risk"
-    # showing up in an exclusions clause, a coverage checklist, an endorsement
-    # schedule, or a sentence denying the coverage ("does NOT include builders
-    # risk") all contain the keyword with zero real exposure behind them.
-    # `_br_kw_in_text or (...)` used to make the keyword alone sufficient,
-    # silently skipping the corroboration this comment already promised -
-    # that was the actual bug (client report 2026-08-07: ACORD 133 hard stop
-    # fired on a package with no builders risk exposure at all). A real BR
-    # submission always yields at least one of these facts, so requiring one
-    # costs nothing on genuine cases and closes the false-positive path.
-    _br_facts = any([
-        _fv(facts, "builders_risk_project_address"),
-        _fv(facts, "builders_risk_project_cost"),
-        _fv(facts, "builders_risk_completion_date"),
-    ])
-    if _br_facts and (_has_br or _br_kw_in_text):
+    _ar_kw_in_text = any(kw in text for kw in _133_kw)
+    if _ar_kw_in_text and flags.get("has_workers_comp"):
         _add("ACORD_133",
-             "ACORD 133 - Builders Risk Application",
+             "ACORD 133 - Workers Compensation Insurance Plan (Assigned Risk) Section",
              trigger_weight=0.85,
-             trigger_reason="builders risk flag or construction keywords detected",
-             template_pending=True,
+             trigger_reason="assigned-risk / residual-market workers compensation wording detected",
              tier=TIER_RECOMMENDED,
-             reason_label="Builders Risk / construction project exposure detected")
+             reason_label="Assigned Risk / Workers Compensation Insurance Plan submission detected")
 
     _160_kw = {
         "inland marine", "contractor's equipment", "contractors equipment",
@@ -1654,7 +1678,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              trigger_weight=0.85,
              trigger_reason="contractor-type operations keywords detected in 125 operations description",
              tier=TIER_RECOMMENDED,
-             reason_label="Contractor operations detected - supplements GL & WC")
+             reason_label=("Contractor operations detected - supplements the "
+                               "General Liability section"
+                               + (" and Workers Compensation"
+                                  if flags.get("has_workers_comp") else "")))
 
     # ACORD 141 - property + valuation/coinsurance detail or multiple locations
     _141_kw = {

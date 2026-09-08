@@ -104,7 +104,16 @@ def test_line_two_is_owned_by_the_parsed_mailing_address():
     facts = {"mailing_address": "4800 Dahlia St # D13, Denver, CO 80216-3121"}
     mapped, unmatched, det = compute_form_gaps("ACORD_125", _schema_125(), facts)
     f = "NamedInsured_MailingAddress_LineTwo_A"
-    assert mapped.get(f) is None
+    # UPDATED 2026-09-01. The defect this test guards is the unit printed TWICE
+    # - once fused to line1 and again in line2, by a gap-fill guess. It used to
+    # be prevented by leaving line2 EMPTY; `_parse_address` now lifts the unit
+    # out of line1 instead, so line2 carries it exactly once. That satisfies the
+    # real requirement more completely, and the assertions below now state the
+    # requirement itself (printed once, never LLM-fillable) rather than the old
+    # proxy for it (line2 blank).
+    _l1 = mapped.get("NamedInsured_MailingAddress_LineOne_A") or ""
+    assert mapped.get(f) == "# D13"
+    assert "d13" not in _l1.lower(), "the unit is printed twice - the original defect"
     assert f not in unmatched, "LineTwo still LLM-fillable — the # D13 dup can recur"
     assert f in det
     # A real 4-part address still yields its suite on line two.

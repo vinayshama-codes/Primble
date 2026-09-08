@@ -354,6 +354,82 @@ def _coerce_typed(kind: Optional[str], text: str) -> Optional[str]:
     return None
 
 
+# ── Choice facts: the LABEL is not always the value the fact can HOLD ────────
+# `answer_options` offers human-readable labels ("Replacement Cost",
+# "Protection Class 3", "Yes - fully sprinklered"). The fact's own `validate`
+# in FACT_REGISTRY defines what it can actually hold ("RCV", "3", "Yes"), and
+# EXTRACTION writes that same canonical shape - `extraction_service`'s schema
+# line for valuation_method is literally `"RCV"|"ACV"|null`. Step 0b below
+# returned the label verbatim, on a comment asserting that "the catalogue's
+# exact wording" was canonical. It is not.
+#
+# Measured 2026-09-08 by driving `routes.audit_routes._validate_producer_answer`
+# over every catalogue: SEVEN facts offered a closed dropdown whose options
+# their own validator refused, five of them refusing EVERY option, so those
+# cards could not be resolved at all - fire_protection_class 11/11,
+# period_of_restoration 7/7, sprinkler_system 4/4, valuation_method 5/5,
+# wc_xmod 4/4, construction_type 6/7, gl_form_type 1/3. The producer had no
+# valid input available; there was no workaround.
+#
+# The reduction is GENERIC and SELF-CHECKING: candidates come from the label's
+# own shape and each is tested against the fact's OWN validator, so this can
+# never produce a value that validator would reject and there is no second copy
+# of a per-fact rule anywhere. A fact with no validator, or a label that
+# already passes, is returned unchanged - the eleven catalogues that worked
+# before behave identically.
+_OPTION_TAIL = " - "
+# "RCV (Replacement Cost Value) or ACV (Actual Cash Value)" - the fact's own
+# format hint states the token-to-expansion mapping, so no second table is
+# needed to learn that "Replacement Cost" means RCV.
+_HINT_PAIR_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,5})\s*\(([^)]{3,60})\)")
+_FIRST_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _option_candidates(label: str, entry: dict):
+    """Canonical forms a human-readable option label may reduce to, best first."""
+    yield label
+    head = label.split(_OPTION_TAIL, 1)[0].strip()
+    if head and head != label:
+        yield head            # "Yes - fully sprinklered" -> "Yes"
+    m = _FIRST_NUMBER_RE.search(label)
+    if m:
+        yield m.group(0)      # "Protection Class 3" -> "3"; "6 months" -> "6"
+    low = label.strip().lower()
+    for token, expansion in _HINT_PAIR_RE.findall(
+            str(entry.get("format_hint") or "")):
+        exp = expansion.strip().lower()
+        if low == exp or exp.startswith(low) or low.startswith(exp):
+            yield token       # "Replacement Cost" -> "RCV"
+
+
+def canonical_option_value(fact_key: str, label: str,
+                           entry: Optional[dict] = None) -> Optional[str]:
+    """The value to STORE when a producer picks `label` from this fact's list.
+
+    Returns None when the fact declares a validator and nothing the label
+    reduces to satisfies it. The caller must then fall through to ordinary
+    interpretation rather than store a value the fact cannot hold - which is
+    what turns wc_xmod's "Not applicable" into a NOT_APPLICABLE answer instead
+    of a malformed decimal. Never raises.
+    """
+    entry = entry if entry is not None else _registry_entry(fact_key)
+    checker = entry.get("validate")
+    if not callable(checker):
+        return label          # nothing declares a shape - the label IS the value
+    seen = set()
+    for cand in _option_candidates(label, entry):
+        cand = (cand or "").strip()
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        try:
+            if bool(checker(cand)):
+                return cand
+        except Exception:                                     # noqa: BLE001
+            continue
+    return None
+
+
 # ── The one entry point ──────────────────────────────────────────────────────
 
 _UNREADABLE: List[dict] = []          # coverage evidence, see unresolved_answers()
@@ -402,12 +478,47 @@ def interpret_answer(fact_key: str, answer: Any,
     #     included" is a meaningful answer, not an absence, and "Not stated -
     #     underwriter review recommended" is a deliberate choice, not a
     #     non-answer. Matched case-insensitively and returned in the
-    #     catalogue's exact wording, so the stored value is always canonical.
+    #     catalogue's wording - reduced, when the fact declares a shape, to the
+    #     value that fact can actually hold (see canonical_option_value above:
+    #     the label is NOT automatically canonical, and assuming it was left
+    #     five dropdowns whose every option their own validator refused).
     try:
-        from services.answer_options import options_for
+        from services.answer_options import OTHER, options_for
+        _other = _strip_edges(_normalize(OTHER))
         for opt in (options_for(fact_key) or ()):
-            if stripped == _strip_edges(_normalize(opt)):
-                return out(VALUE, value=opt, reason="declared_option")
+            if stripped != _strip_edges(_normalize(opt)):
+                continue
+            # "Other" is the affordance that REVEALS the free-text box; it is
+            # never itself a value. Submitted bare - the producer picked it and
+            # typed nothing - it must be refused, not stored as the literal
+            # word on a legal document.
+            if stripped == _other:
+                return out(UNKNOWN, reason="other_placeholder", message=(
+                    "Pick one of the listed answers, or choose Other and type "
+                    "the value in the box that appears."))
+            canon = canonical_option_value(fact_key, opt, entry)
+            if canon is not None:
+                return out(VALUE, value=canon, reason="declared_option")
+            # The label cannot be a value for this fact - so it is one of the
+            # list's ABSENCE entries. wc_xmod is the live example: it is a
+            # decimal, and two of its four options ("Not applicable", "No
+            # experience modifier has been assigned") exist precisely to say
+            # the modifier does not exist. Classify them directly rather than
+            # leaving it to the prose readers below, whose short-answer rule
+            # caps at five words and would miss the longer one.
+            #
+            # This branch is reachable ONLY when the fact declares a validator
+            # AND nothing the label reduces to satisfies it, so it cannot touch
+            # a list where "No" is itself the answer (wc_officer_exclusions'
+            # "No - all owners and officers are included" declares no validator,
+            # so canonical_option_value returns the label and we never get here).
+            _head = _strip_edges(_normalize(opt.split(_OPTION_TAIL, 1)[0]))
+            _first = (stripped.split() or [""])[0]
+            if _head in _NA_TOKENS or _NA_RE.search(text):
+                return out(NOT_APPLICABLE, reason="declared_option_na")
+            if _head in _ABSENCE_TOKENS or _first in _ABSENCE_TOKENS:
+                return out(ABSENCE, reason="declared_option_absence")
+            break
     except Exception:                                         # noqa: BLE001
         pass
 
@@ -478,6 +589,27 @@ def interpret_answer(fact_key: str, answer: Any,
                        reason="absence:affirms_negative_fact")
         # A bare "no"/"n" on any other fact means "there is none".
         return out(ABSENCE, reason="absence")
+
+    # 4b. A MARK typed into a Yes/No box (SYS-07). A producer confirming the
+    #     certificate's own printing types "X"; a pasted cell arrives as "✓",
+    #     "[X]" or "true". None of those were in `_AFFIRM_TOKENS`, so they fell
+    #     through to the free-text tail and were stored verbatim - the answer
+    #     was right and its spelling was not, which is the whole SYS-07 class.
+    #
+    #     GATED ON THE FIELD, not on the value. "1" means one employee on a
+    #     count box and Yes only on a Yes/No box, so this module keeps its own
+    #     richer human vocabulary and simply asks the shared reader when - and
+    #     only when - the field is a Yes/No. Placed AFTER the absence step on
+    #     purpose: a bare "No" keeps meaning ABSENCE exactly as it does today,
+    #     which `_attested_true` and `new_venture_answer` depend on.
+    try:
+        from services.normalization import is_yes_no_field, canonical_yes_no
+        if is_yes_no_field(fact_key):
+            _mark = canonical_yes_no(stripped)
+            if _mark:
+                return out(VALUE, value=_mark, reason="affirmation:mark")
+    except Exception:                                         # noqa: BLE001
+        pass
 
     # 5. AFFIRMATION / DENIAL - stored as the canonical Yes/No the ACORD
     #    indicator fields and `_attested_true` already read.

@@ -372,6 +372,15 @@ class UnderwritingConfirmRequest(BaseModel):
     session_id: str
     fact_key: str
     value: str
+    # SYS-06: the COVERAGE LINE this answer belongs to (canonical family, e.g.
+    # "general_liab"). Omitted = the submission-wide meaning this endpoint has
+    # always had, so every existing caller is unaffected. When supplied, the
+    # value is written onto that line's own `coverage_lines` row and reaches
+    # the forms through the per-line stampers that already exist - it never
+    # becomes the package scalar. Client: "apply it only to the applicable
+    # line or lines and populate the corresponding forms from that
+    # line-specific record."
+    scope: Optional[str] = None
     # E&O 5.10 "any resolution note": optional producer free text, stored on
     # the confirmation audit row. The UI may or may not offer it; the backend
     # retains it whenever sent.

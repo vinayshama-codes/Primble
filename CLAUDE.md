@@ -86,7 +86,7 @@ Metadata lives in `backend/forms_database/`.
 - ACORD 127 — Business Auto Section
 - ACORD 130 — Workers Compensation Application
 - ACORD 131 — Umbrella / Excess Section
-- ACORD 133 — Builders Risk Section
+- ACORD 133 — Workers Compensation Insurance Plan / Assigned Risk Section (its template's own title; corrected 2026-09-05 - it was labelled Builders Risk, which shipped a WC form to construction projects)
 - ACORD 137_CA / 137_CO — Contractors / Subcontractors (state variants)
 - ACORD 138_CA / 138_CO — Contractors Equipment (state variants)
 - ACORD 140 — Property Section
@@ -412,6 +412,72 @@ was broken, because each called `_harvest_dec_index` directly and read its retur
 value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
+
+### BUG-05: A Card Must Only Offer What The Server Accepts - SHIPPED 2026-09-08
+
+**Read `v1-20AUG.md`'s BUG-05 entry before touching any recommendation card, the
+pre-form Hard Stops / Warnings banners, `services/answer_routing.py`, or the cap
+gates in `calculate_sqs`.** Client P0: normal remediation returned "Network error.
+Please try again." on one card and "This item can't be answered directly" on
+another, which offered a box and a Submit button first.
+
+**One class, four faces.** Answerability was being INFERRED at the display layer
+instead of DECLARED at the source. `AcordModal` used `answerable = !!rec.field`;
+the server used `_canonical_key`. So:
+1. The "Network error" was a 500 (`_nv_delete` UnboundLocalError, commit
+   `d6d09c7`) whose response carried no CORS header, so `fetch` REJECTED. Fixed
+   in the prior session - `scripts/verify_bug06.py`. **Starlette builds
+   `ServerErrorMiddleware -> user middleware (CORS) -> router`, so an app-level
+   `Exception` handler's response never passes through `CORSMiddleware`.
+   Measured on Starlette 0.50.0: 200 carries the header, 500 does not.**
+2. The narrative cards declared `acord101_remarks` - a legacy READ-only alias.
+   The writable fact is `additional_remarks_text`.
+3. **NOBODY REPORTED THE WORST ONE.** `rec_auto_vin_schedule` /
+   `rec_wc_class_codes` name LIVE CAPTURE SCHEDULES; the card drew a one-line box
+   and a typed answer replaced the entire extracted table while printing
+   "Resolved". Reproduced live.
+4. **Pre-form screen:** four cap-gate sentences had no rule row, so they printed
+   as red blockers under "Other validations" with nothing to click - two of them
+   internal rule names ("Property integrity gate", "Property integrity warning").
+   And `reopen_issue` shipped the stop ARRAYS with no `grouped_issues`, so the
+   banners fell back to dead text.
+
+**`services/answer_routing.py` is the ONE door.** It returns the FOUR modes the
+inline-resolution feature already speaks - `field` / `schedule` / `narrative` /
+`none` - so `ResolutionModal`, `resolve_issue` and `ScheduleTable` needed no new
+concepts. **Every rule is DERIVED from a declaration we already maintain**
+(`_canonical_key`, `SCHEDULE_DEFS`, `NARRATIVE_FACT_KEYS`, the extraction schema's
+`"key": [{` vs `[string]`, and `FACT_REGISTRY[...]["validate"]`). There is no
+allow-list of known-bad field names anywhere, and unknown always resolves to
+`none` - never to a typed box.
+
+**Three things to know before changing this area:**
+1. **The server decides the mode on every write and never trusts the wire.** The
+   card renders what it is told, but a stale tab can still submit anything.
+2. **The write door refuses a typed scalar over a POPULATED table** - so the
+   resolution modal and the held-client-answer review are covered, not just the
+   surfaces that ask. Narrow on purpose: a non-empty list of DICTS with no
+   declared validator. An EMPTY row fact still takes a typed answer (that is how
+   those gaps have always been closed), a list of STRINGS is never protected
+   (the tier-1 lines-of-business fix), and `auto_covered_symbols` keeps its
+   documented `parse_symbols` free-text path.
+3. **A cap gate must name its own cause.** `_prop_hard_because` /
+   `_prop_soft_because` record WHY, phrased so `classify_legacy` matches and the
+   row inherits a real fix. `test_legacy_rules` fails the build on an inline
+   `_prop_hard = True`.
+
+**Standing lesson:** an anti-rot harvester is only as wide as the emission path it
+walks. `test_legacy_rules` AST-walks `evaluate_stops`' `append` sites; the cap
+gates reach producers through `_resolve_cap` instead, so four unfixable blockers
+shipped on 2026-08-31 with a green build. **When you add a new way to SURFACE
+something, extend the harvester in the same commit.**
+
+Tests: `tests/test_answer_routing.py` (52, driving the real scorer over all 17
+real schemas), `tests/test_legacy_rules.py` (+3, now 78). Suite **7233 passed /
+1 failed** (the documented `httpx` ImportError). Frontend build clean.
+**Live kit:** `py backend/scripts/make_bug05_test_pdfs.py` -> `bug05_test_data/`
+(2 packages, 13 checks, `README-HOW-TO-TEST.md`); `scripts/verify_bug05.py` is
+the offline before/after check.
 
 ### OPEN - Three Score-Moving Defects Held For Brent (2026-08-31)
 

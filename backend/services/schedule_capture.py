@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -181,9 +182,24 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
         list_key="property_locations",
         label="Location schedule",
         singular="location",
-        dedup_keys=("address_line1", "address_city"),
+        # `address_line2` IS A COLUMN, and it has to be (2026-09-01).
+        # `rows_from_facts` rebuilds every row from the COLUMNS alone, and
+        # `arq_service` writes the result back over `facts[list_key]` wholesale
+        # - so a sub-field with no column is destroyed the first time anyone
+        # opens the location table. That was harmless while `_parse_address`
+        # left the unit designator inside line1; now that it lifts it onto line
+        # two, omitting the column would DELETE every suite number from the
+        # facts, and `*_PhysicalAddress_LineTwo` would stamp blank on ACORD
+        # 125/130/133/140/160/28 after the first save.
+        #
+        # It is in `dedup_keys` for the same reason: without it, Suite 100 and
+        # Suite 200 in one building are byte-identical rows, and the duplicate
+        # detector tells the client their two premises are the same one.
+        # Measured before the fix: `validate_rows` returned `duplicates: [1]`.
+        dedup_keys=("address_line1", "address_line2", "address_city"),
         columns=[
             Column("address_line1",          "Street address", "text",  required=True, placeholder="789 Commerce Dr", width=210),
+            Column("address_line2",          "Suite / unit",   "text",  placeholder="Ste 400", width=110),
             Column("address_city",           "City",           "text",  placeholder="Houston", width=130),
             Column("address_state",          "State",          "state", placeholder="TX", width=90),
             Column("address_zip",            "ZIP",            "text",  placeholder="77001", width=100),
@@ -349,6 +365,61 @@ def schedule_list_key_for_field(field_name: str) -> Optional[str]:
     return defn.list_key if defn.list_key in SCHEDULE_DEFS else None
 
 
+@lru_cache(maxsize=64)
+def _schedules_on_form_from_disk(form_id: str) -> frozenset:
+    import json as _json
+    import os as _os
+    path = _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        "forms_schemas", f"{form_id}_schema.json",
+    )
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            schema = _json.load(fh)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("schedule_capture: schema unavailable for %s - %s", form_id, exc)
+        return frozenset()
+    return _schedules_in_schema(schema)
+
+
+def _schedules_in_schema(schema: Any) -> frozenset:
+    if not isinstance(schema, dict):
+        return frozenset()
+    found = set()
+    for field_name in schema:
+        if binds_a_capturable_column(field_name):
+            list_key = schedule_list_key_for_field(field_name)
+            if list_key:
+                found.add(list_key)
+    return frozenset(found)
+
+
+def schedules_on_form(form_id: str, schema: Any = None) -> frozenset:
+    """Which capture tables does THIS form physically carry?
+
+    Answered from the form's own schema, so it states a property of the FORM
+    rather than of one submission. `_partition_schedule_fields` previously had
+    to infer this from which boxes happened to be blank, which fails in exactly
+    the case that matters: when gap fill has written something into every
+    identity column, the schedule looks complete and the client is never offered
+    the table (BUG-07 companion defect, live 2026-09-07 - a package with no
+    fleet at all was offered no vehicle table).
+
+    Measured across the 17 schemas:
+      ACORD_127 -> auto_vin_schedule, auto_drivers
+      ACORD_125 -> property_locations, loss_history
+      ACORD_130 -> property_locations, wc_class_codes, wc_officers, loss_history
+      ACORD_131 -> property_locations, loss_history
+      ACORD_133 -> property_locations, auto_drivers
+      ACORD_25  -> NOTHING (a certificate carries no schedule), which is what
+                   keeps the 2026-08-26 C4 fix closed structurally rather than
+                   by a name check.
+    """
+    if isinstance(schema, dict) and schema:
+        return _schedules_in_schema(schema)
+    return _schedules_on_form_from_disk(str(form_id or ""))
+
+
 def binds_a_capturable_column(field_name: str) -> bool:
     """Is this field an EXACT registry binding, i.e. a real column of the table?
 
@@ -441,7 +512,9 @@ def validate_cell(col: dict, value: str) -> str:
             return "VIN must be 17 characters (letters/numbers, no I, O or Q)"
     elif ctype == "year":
         if not _YEAR_RE.match(val):
-            return f"{col['label']} must be a 4-digit year (e.g. 2021)"
+            # Must state the rule `_YEAR_RE` actually enforces (1900-2099).
+            # "4-digit year" rejected 2122 while calling it not-four-digits.
+            return f"{col['label']} must be between 1900 and 2099"
     elif ctype == "date":
         if not _DATE_RE.match(val):
             return f"{col['label']} must be MM/DD/YYYY"
@@ -628,6 +701,74 @@ def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
             row[scalar_key] = _clean_cell(item)
             out.append(row)
     return out
+
+
+@lru_cache(maxsize=None)
+def row_family_roots(list_key: str) -> frozenset:
+    """The ACORD field-name roots that belong to ONE schedule's repeating row.
+
+    `schedule_list_key_for_field` only recognises the handful of columns the
+    capture table binds - 9 of ACORD 127's 67 per-vehicle fields. The other 58
+    (garaging address, deductibles, every coverage indicator, radius, rate
+    class) are stamped by Pass 1 and answer to nobody, so deleting a vehicle
+    left the form printing a garaging address and a $1,000 deductible for a
+    unit with no year, make or VIN. Found live 2026-09-08.
+
+    A root is only returned when it maps to EXACTLY ONE capturable schedule.
+    That guard is the whole reason this is derived rather than written down:
+      * `WorkersCompensation` is a root of BOTH `wc_class_codes` and
+        `wc_officers`, so owning it for either would wipe the other's rows;
+      * `NamedInsured` is a root of `additional_named_insureds`, and
+        `NamedInsured_A` is the APPLICANT.
+    Ambiguous roots are dropped, and that schedule simply keeps the older
+    bound-columns-only behaviour - never wrong, just less complete.
+
+    Returns an empty set for anything unknown, which callers must read as
+    "clear nothing extra".
+    """
+    try:
+        from services.pdf_service import _SCHEDULE_REGISTRY
+    except Exception as ex:                                   # pragma: no cover
+        logger.warning("schedule_capture: pdf_service import failed: %s", ex)
+        return frozenset()
+
+    owners: dict = {}
+    for base, defn in _SCHEDULE_REGISTRY.items():
+        lk = getattr(defn, "list_key", None)
+        if not lk or lk not in SCHEDULE_DEFS:
+            continue                       # not a table we capture - not ours
+        root = str(base).split("_")[0]
+        if root:
+            owners.setdefault(root, set()).add(lk)
+
+    return frozenset(
+        root for root, keys in owners.items()
+        if keys == {list_key}              # unambiguous: this schedule alone
+    )
+
+
+def seed_rows(question: dict) -> List[dict]:
+    """The rows WE pre-filled into a schedule question, cleaned exactly the way
+    the client's copy was.
+
+    A schedule question is sent to the client already holding what extraction
+    (or a producer pre-load) found, so "is this field populated?" is not the same
+    question as "did the client provide this?". Callers compare a submitted
+    answer against this to tell the two apart.
+
+    `validate_rows` is idempotent, so this compares equal to an answer that made
+    the full round trip (client_view -> browser -> sanitize -> submit) without
+    being edited. Never raises: an unknown key or a malformed question is simply
+    "we pre-filled nothing", which is the safe reading everywhere it is used.
+    """
+    try:
+        rows, _ = validate_rows(
+            list_key_from_answer_key(str(question.get("field_name") or "")),
+            question.get("current_rows") or [],
+        )
+        return rows
+    except Exception:                                         # noqa: BLE001
+        return []
 
 
 def encode_answer(rows: List[dict]) -> str:

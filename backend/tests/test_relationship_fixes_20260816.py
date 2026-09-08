@@ -16,6 +16,17 @@ import pytest
 
 import services.pdf_service as P
 
+
+def _amt(v):
+    """The stamped amount without a leading currency symbol.
+
+    ACORD prints "$" beside most money boxes, so `pdf_service` no longer
+    stamps one there (2026-09-05, the live "$ $3,954" defect). These tests
+    are about WHICH BOX GOT WHICH AMOUNT, never about the symbol.
+    """
+    return str(v or "").strip().lstrip("$").strip()
+
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SCHEMAS = os.path.join(_HERE, "..", "forms_schemas")
 
@@ -269,9 +280,9 @@ class TestVehicleDeductiblesAndValuation:
 
     def test_both_deductibles_stamp_on_the_real_row(self):
         mapped = _fill("ACORD_127", self._auto_facts())
-        assert mapped.get(
-            "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_A") == "$1,000"
-        assert mapped.get("Vehicle_Collision_DeductibleAmount_A") == "$1,000"
+        assert _amt(mapped.get(
+            "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_A")) == "1,000"
+        assert _amt(mapped.get("Vehicle_Collision_DeductibleAmount_A")) == "1,000"
 
     def test_a_phantom_row_stays_blank(self):
         mapped = _fill("ACORD_127", self._auto_facts())
@@ -294,7 +305,7 @@ class TestVehicleDeductiblesAndValuation:
     def test_a_real_stated_amount_survives(self):
         mapped = _fill("ACORD_127", self._auto_facts(),
                        {"Vehicle_Coverage_AgreedOrStatedAmount_A": "$26,680"})
-        assert mapped.get("Vehicle_Coverage_AgreedOrStatedAmount_A") == "$26,680"
+        assert _amt(mapped.get("Vehicle_Coverage_AgreedOrStatedAmount_A")) == "26,680"
 
 
 class TestAmountConventionsSurviveTheCheckboxRule:

@@ -3639,3 +3639,106 @@ already-processed package re-extracts once (~14 calls). Same handling as C80.
 registry, `derive_wc_facts_from_class_rows` (merge tail) tidies compound code cells and
 derives `wc_payroll_by_state` from a complete table, and the chunk union now folds an exact
 reprint of a rating row on code + state + payroll. See `v1-20AUG.md` H3-B.
+
+## C86 - Yes/No vocabulary lexicon (NEW CALL SITE, 2026-09-05)
+
+**New LLM call site: `services/yes_no_lexicon.learn`.** Called ONCE per package
+from `extraction_pipeline._finalize_pipeline`, immediately before
+`assess_underwriting_consistency`.
+
+**What it sends.** A JSON array of at most 40 short TERMS - never a document,
+never a fact key, never a value carrying PII. A term qualifies only if it is
+<=40 chars, <=4 words, alphabetic, digit-free, landed in a field
+`normalization.is_yes_no_field` declares Yes/No, and could NOT be read by the
+deterministic reader, the cache or a prior refusal. Prompt is a fixed ~230-word
+system message; reply capped at `max_tokens=600`.
+
+**Cost.** Worst case on a first-ever run: ONE call, ~400 input tokens, <=600
+output. At `gpt-5.4-mini` rates that is fractions of a cent against the ~$1
+package. **It converges to zero**: the answer depends on the WORD alone, so it
+is cached process-wide and on disk (`backend/data/yes_no_lexicon.json`) and a
+term is asked about once, ever, across every session and every customer. A
+mature cache makes zero calls. Measured on the sys07b kit: **0 calls** (every
+term readable deterministically or seeded).
+
+**Latency.** One serialized call before the consistency pass. It runs only when
+`unknown_terms` is non-empty, so the common case adds nothing at all.
+
+**Why this is not a quality regression.** The reply can only decide whether two
+documents AGREE. It never writes a value onto a form - `pdf_service`'s checkbox
+writer and `_yn_gate` stay deterministic and are pinned by
+`test_the_lexicon_never_reaches_the_form_stamping_path`. It cannot override the
+deterministic reader, cannot classify a term `answer_semantics` does not call a
+present value (so an absence can never become a No), and cannot accept a key it
+did not ask about. Every failure path learns nothing, which leaves the producer
+being asked - the behaviour that existed before.
+
+**Kill switch:** `YES_NO_LEXICON=0` makes the module a no-op.
+
+---
+
+## C84 - 2026-09-05 SYS-04 round: two prompt guards, v17 -> v18
+
+**No LLM call added, removed, reordered or resized. Two DEFINITIONS tightened inside the
+existing extraction prompt, plus one new rule.** Both were forced by a live run, and both
+have a deterministic guard already shipped underneath them - the prompt is the second line
+of defence here, never the only one.
+
+### What changed in `_EXTRACT_PROMPT_PREFIX`
+
+**1. `has_workers_comp` - MENTION becomes GRANT.** It read *"true if document mentions
+workers compensation, WC, payroll by class code, experience modification factor, employers
+liability, or WC class codes."* Every ACORD 25 certificate preprints "WORKERS COMPENSATION
+AND EMPLOYERS' LIABILITY" and the three E.L. limit labels whether or not the row carries a
+policy, so the flag was true on packages with no Workers Comp - and
+`apply_declared_absent_downgrades` could not help, because **a blank row is neither a grant
+nor a denial**. Measured cost on a live GL+Property package: SQS 51 -> 48, Exposure pillar
+92 -> 78. Now it demands positive evidence the line is CARRIED or APPLIED FOR and names the
+certificate-heading case explicitly.
+
+**2. NEW `RULE 12b` - claim evidence.** `num_claims` and `total_incurred` reached the
+schema as bare `string or null` with **no guidance whatsoever**, and nothing told the model
+what `loss_history` rows are for. Live run, nine sessions of nine: the model wrote the
+NO-LOSS SENTENCE ITSELF into `loss_history` as a claim row -
+
+    {"date": null, "description": "no prior losses or claims in the last five years", ...}
+
+- which was counted as a claim contradicting the attestation it restates, printing
+*"Conflicting - attested no losses but loss runs show claims"* on every clean package. The
+rule now forbids deriving a claim figure from a premium / limit / deductible / payroll, and
+states that a no-loss statement means `num_claims = "0"` and an EMPTY `loss_history`.
+
+### Cost
+
+**Prefix only, and it grows by ~1,050 characters (~260 tokens) on a 43,139-char prefix -
+about 2.4%.** No change to call count, batching, chunking or the field list; the addition
+sits inside the CACHED prefix, so the marginal cost after the first call of a run is
+approximately zero. `tests/test_prompt_prefix_caching.py` and
+`test_full_document_coverage.py` both pass unchanged (24 tests).
+
+### THE CACHE COST, STATED PLAINLY
+
+`PROMPT_VERSION` / `SCHEMA_VERSION` move **v17 -> v18**, which is the whole point of the
+key: **every cached extraction is invalidated and every existing session re-extracts at
+full price on next touch.** Accepted on the owner's instruction, and cheap here - 0
+production users, localhost only. D-A refused this same trade for RULE 16 when the prize
+was smaller and the blast radius (39 flat-list readers) was larger.
+
+### Why the prompt AND the deterministic gates
+
+Both defects already have deterministic fixes that do not trust the model at all -
+`line_presence.reconcile_line_flags` for the flag, and `_row_states_a_claim` /
+`claims_are_corroborated` for the claims. Those stay and remain the load-bearing half: a
+prompt is guidance, not a guarantee (D43's standing lesson). The prompt change reduces the
+garbage at source so the gates have less to catch; if the model ignores it, nothing
+regresses.
+
+### Verification
+
+Suite **6327 passed / 1 failed / 14 skipped** (the documented `httpx` ImportError). Two
+existing tests were version/behaviour PINS that asked in their own docstrings to be updated
+when evidence arrived - `test_extraction_schema_carries_the_counts_and_moved_to_v17` (a
+bare version pin) and `test_general_liability_and_workers_comp_are_deliberately_left_alone`,
+whose docstring read *"If a client ever reports a false GL or WC tick, harden them then -
+with that report as the evidence."* The evidence arrived; the test is now split so GL stays
+deliberately untouched and WC records why it was hardened.

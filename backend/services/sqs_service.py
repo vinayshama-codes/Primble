@@ -14,6 +14,8 @@ from services.fact_comparison import (
     document_witnesses as _doc_witnesses,
 )
 from services.lob_canon import canon_line as _canon_line_leaf
+from services.lob_canon import canon_part as _canon_part_leaf
+from services import term_match
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,102 @@ NARRATIVE_COMPONENT_LABELS: Dict[str, str] = {
     "growth_trends":       "WC Payroll / Class Code Context",
     "target_markets":      "EMOD / XMOD Information",
 }
+
+# SYS-04 - the coverage line each component belongs to. A component with NO
+# entry here is GENERAL and always applies.
+#
+# `employee_practices` is deliberately absent: payroll and headcount are GL and
+# exposure facts too, so "Employee / Payroll Context" is not a WC-only ask and
+# removing it would be the fixture-shaped fix rather than the class fix.
+#
+# Keyed by component so a future Auto-only or Property-only component inherits
+# the gate for free - nothing here is WC-special-cased. The line names are the
+# `lob_canon.canon_line` vocabulary and must be described in
+# `line_presence._LINE_PROFILES`; an undescribed line answers UNKNOWN, which
+# keeps the component (see `applicable_narrative_components`).
+NARRATIVE_COMPONENT_LINES: Dict[str, str] = {
+    "growth_trends":  "workers_comp",   # WC Payroll / Class Code Context
+    "target_markets": "workers_comp",   # EMOD / XMOD Information
+}
+
+
+def session_form_ids(session_data: Optional[dict],
+                     form_results: Optional[list] = None) -> list:
+    """Every ACORD form id this submission has selected, generated or been
+    recommended - tolerant of every shape the session row uses.
+
+    Only ever ADDS evidence for `line_presence` ("intentionally requested"), so
+    a session shape this misses can never cause a component to be dropped that
+    would otherwise be kept. Never raises.
+    """
+    out: list = []
+    try:
+        sd = session_data if isinstance(session_data, dict) else {}
+        for key in ("generated_forms", "selected_forms", "selected_form_ids",
+                    "form_ids"):
+            value = sd.get(key)
+            if isinstance(value, dict):
+                out.extend(str(k) for k in value)
+            elif isinstance(value, (list, tuple, set)):
+                out.extend(str(v) for v in value if isinstance(v, str))
+        for rec in (sd.get("recommendations") or []):
+            if isinstance(rec, dict) and rec.get("form_id"):
+                out.append(str(rec["form_id"]))
+        for res in (form_results or []):
+            if isinstance(res, dict) and res.get("form_id"):
+                out.append(str(res["form_id"]))
+    except Exception:                                          # noqa: BLE001
+        return []
+    return sorted({f for f in out if f})
+
+
+def applicable_narrative_components(
+    facts: Optional[dict] = None,
+    flags: Optional[dict] = None,
+    form_ids=None,
+) -> Dict[str, str]:
+    """The narrative label map minus components whose line is NOT in the
+    submission (SYS-04).
+
+    *"Gate line-specific recommendations and loss requirements on evidence that
+    the line is actually active or intentionally requested. If Workers'
+    Compensation is not part of the submission, it should not generate Workers'
+    Comp loss requirements, warnings, or remediation tasks."*
+
+    A component is dropped ONLY on a decisive ABSENT from `line_presence`. Every
+    other answer - PRESENT, UNKNOWN, an undescribed line, an import failure -
+    keeps it, so an unrecognised document shape leaves behaviour exactly as it
+    is today. The gate can only ever remove an ask on positive evidence; it can
+    never add one, and it can never return more keys than the label map has.
+
+    THE RETURNED MAP IS THE DENOMINATOR. `_calculate_narrative_quality` derives
+    `component_pct` from `len(components)`, so dropping a key both stops the
+    deduction and removes the label from the "does not include ..." sentence and
+    the producer recommendation card - one edit, all three symptoms.
+    """
+    if not NARRATIVE_COMPONENT_LINES:
+        return dict(NARRATIVE_COMPONENT_LABELS)
+    try:
+        from services.line_presence import line_is_absent
+    except Exception:                                          # noqa: BLE001
+        # No door, no opinion - the full map is the pre-SYS-04 behaviour.
+        return dict(NARRATIVE_COMPONENT_LABELS)
+
+    # One presence answer per LINE, not per component, so two components of the
+    # same line can never disagree and the doors are not re-walked per key.
+    absent_lines = set()
+    for line in set(NARRATIVE_COMPONENT_LINES.values()):
+        try:
+            if line_is_absent(line, facts, flags, form_ids):
+                absent_lines.add(line)
+        except Exception:                                      # noqa: BLE001
+            continue                                # no opinion -> keep
+    if not absent_lines:
+        return dict(NARRATIVE_COMPONENT_LABELS)
+    return {
+        k: v for k, v in NARRATIVE_COMPONENT_LABELS.items()
+        if NARRATIVE_COMPONENT_LINES.get(k) not in absent_lines
+    }
 
 # §6.3 item 2/4: the five narrative-quality components that have NO structured
 # ACORD field behind them (Bucket C). When the narrative does not cover one of
@@ -519,30 +617,114 @@ def producer_fields_exempt(flags: dict | None) -> bool:
     return (flags or {}).get("_only_dec_page") is True
 
 
-def _tier1_items(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
-    """Tier 1 as (applicable labels, missing labels), in checklist order.
+def certificate_only_package(flags: dict | None) -> bool:
+    """True when EVERY active document in the package is a certificate.
 
-    The ONE place the Tier 1 rules live. `check_tier1` is its historical
-    (ok, missing) projection and `key_details` reads both sides, so the
-    "in place" list on the pre-form screen can never disagree with the score
-    (V1 H2, 2026-08-27). Missing is a subset of applicable, always.
+    The gate on Tier 1's two-item checklist. A submission that is only a COI
+    cannot be asked for an application's details - the document type does not
+    carry them, and scoring it down for that marks a submission for what it can
+    never state. But `is_certificate_doc` is a PER-DOCUMENT flag ("this document
+    IS an ACORD 25/28") and flags merge across the package, so a supporting
+    certificate dragged a full declarations package onto the same short list.
+
+    MEASURED, SYS-05 live run 2 (2026-09-04): "Key details in place" went from
+    12 items to 8 the moment a certificate was added beside the dec page -
+    mailing address, lines of business, entity type and contact information all
+    left the list, while the generated ACORD 125 printed every one of them
+    correctly. The data was right; only this checklist was wrong.
+
+    EXACTLY the defect `producer_fields_exempt` above documents in its own
+    correction #1 - a per-document signal answering a package-level question -
+    so it takes the same remedy: a composition flag set by the pipeline only
+    when every ACTIVE document is that type.
+
+    Legacy sessions written before `_only_certificate` existed have no such key,
+    so a genuine certificate-only package stops being exempt on its next
+    recalculation and is asked for the full checklist. That is the conforming
+    direction (it can only ADD items to a checklist, never hide one), and it
+    matches how `_only_dec_page` handled the same migration.
+    """
+    return (flags or {}).get("_only_certificate") is True
+
+
+# ── Core requirement entries: ONE rule, TWO views ─────────────────────────────
+# `_tier1_entries` / `_tier2_entries` are the single definition of what a
+# submission OWES. Everything downstream is a projection of them:
+#
+#   * `_tier1_items` / `_tier2_items`  -> the LABEL view. Feeds `check_tier1` /
+#     `check_tier2` (the Structural score) and `key_details` (the pre-form
+#     "Key details in place / missing" card).
+#   * `core_missing_fact_keys`         -> the KEY view. Feeds the
+#     questionnaire's Critical rule (SYS-01).
+#
+# SYS-01 existed because there was no key view: `question_classifier` kept its
+# own hardcoded idea of "core" (Tier 1 only), so the pre-form card could print
+# four missing Tier 2 details while the Send-to-Client modal reported
+# "0 Critical" and told the producer everything critical was already answered.
+# Two lists, one submission, opposite verdicts. A projection cannot disagree
+# with the thing it projects.
+#
+# An entry is `(fact_keys, label)`. Most items name ONE key; exactly two name
+# more, and both are satisfied by ANY of their keys:
+#   * Contact information  - client 9.1, "any one contact method satisfies Tier 1"
+#   * NAICS or SIC         - client 3.13, the two codes are interchangeable
+# Carrying the whole tuple is what stops the questionnaire marking a `naics_code`
+# question Critical on a submission that already states a SIC code - which a
+# per-key rule would have done, re-opening the very disagreement this closes.
+
+
+def _tier1_entries(facts: dict, flags: dict) -> Tuple[
+        List[Tuple[Tuple[str, ...], str]], List[Tuple[Tuple[str, ...], str]]]:
+    """Tier 1 as (applicable entries, missing entries), in checklist order.
+
+    The ONE place the Tier 1 rules live. `_tier1_items` is its label
+    projection, `check_tier1` its historical (ok, missing) projection and
+    `key_details` reads both sides, so the "in place" list on the pre-form
+    screen can never disagree with the score (V1 H2, 2026-08-27). Missing is a
+    subset of applicable, always.
     """
     flags = flags or {}
-    if flags.get("is_certificate_doc") or flags.get("has_certificate_request"):
-        applicable = ["Applicant legal name", "Proposed effective date"]
+    # The short checklist belongs to a submission that IS a certificate, not to
+    # any package that happens to involve one. BOTH signals are gated on the
+    # package, because both answer a different question than the one asked here:
+    #
+    #   is_certificate_doc     - per-document, "THIS DOCUMENT is an ACORD 25/28".
+    #                            Flags merge across the package, so one
+    #                            supporting COI spoke for the whole submission.
+    #   has_certificate_request - package-level, but it means "a certificate is
+    #                            REQUESTED" - the prompt sets it when a document
+    #                            "lists a certificate holder". A full commercial
+    #                            package routinely needs a COI for a landlord or
+    #                            a terminal. Needing one is not being one.
+    #
+    # Both were measured on the SYS-05 live kit (2026-09-04): the certificate
+    # names Cascade Terminal Authority as its holder, so gating only the first
+    # signal left the checklist collapsed and "Key details in place" still read
+    # 8 items instead of 12. Fixing one and assuming the other was safe is the
+    # same mistake in miniature as the bug itself - a flag that answers question
+    # A deciding question B.
+    #
+    # A package carrying ANY application-grade document (a dec page, an
+    # application, a policy) can be asked for the full checklist, whatever the
+    # reason a certificate is involved.
+    if certificate_only_package(flags) and (
+        flags.get("is_certificate_doc") or flags.get("has_certificate_request")
+    ):
+        applicable = [(("applicant_name",), "Applicant legal name"),
+                      (("effective_date",), "Proposed effective date")]
         missing = []
         if not _fv(facts, "applicant_name"):
-            missing.append("Applicant legal name")
+            missing.append((("applicant_name",), "Applicant legal name"))
         if not _fv(facts, "effective_date"):
-            missing.append("Proposed effective date")
+            missing.append((("effective_date",), "Proposed effective date"))
         return applicable, missing
-    applicable: List[str] = []
-    missing: List[str] = []
+    applicable: List[Tuple[Tuple[str, ...], str]] = []
+    missing: List[Tuple[Tuple[str, ...], str]] = []
     skip_producer_name = producer_fields_exempt(flags)
     for field, label in TIER1_FIELDS.items():
         if skip_producer_name and field == "producer_name":
             continue
-        applicable.append(label)
+        applicable.append(((field,), label))
         # C3 3.4: "Not Applicable fields are removed rather than treated as
         # missing." `_answered` already returns True for a not_applicable state,
         # so an N/A requirement contributes no -20 - which is the same score a
@@ -552,14 +734,24 @@ def _tier1_items(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         # ANSWERED, not "has a value": a human answering "there is none" has
         # answered (Brent 2026-08-24) and must not be counted as a gap.
         if not _answered(facts, field):
-            missing.append(label)
+            missing.append(((field,), label))
     # C3 3.3 (2026-08-25): contact information is required on EVERY submission.
     # It used to be waived alongside producer name on a dec page; neither the
     # client's 3.3 nor spec section 3.1 grants that. See producer_fields_exempt.
-    applicable.append("Contact information")
+    #
+    # ONE item, THREE keys - client 9.1: "any one contact method satisfies
+    # Tier 1". `question_eligibility._contact_requirement_already_met` reads the
+    # same rule from the other side, so the questionnaire and the score agree.
+    applicable.append((tuple(TIER1_CONTACT), "Contact information"))
     if not any(_answered(facts, f) for f in TIER1_CONTACT):
-        missing.append("Contact information")
+        missing.append((tuple(TIER1_CONTACT), "Contact information"))
     return applicable, missing
+
+
+def _tier1_items(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
+    """The LABEL view of `_tier1_entries` - the historical signature."""
+    applicable, missing = _tier1_entries(facts, flags)
+    return [lbl for _keys, lbl in applicable], [lbl for _keys, lbl in missing]
 
 
 def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
@@ -588,21 +780,24 @@ def _tier2_not_applicable(facts: dict, field: str) -> bool:
         return False
 
 
-def _tier2_items(facts: dict) -> Tuple[List[str], List[str]]:
-    """Tier 2 as (applicable labels, missing labels), in checklist order.
+def _tier2_entries(facts: dict) -> Tuple[
+        List[Tuple[Tuple[str, ...], str]], List[Tuple[Tuple[str, ...], str]]]:
+    """Tier 2 as (applicable entries, missing entries), in checklist order.
 
-    The ONE place the Tier 2 rules live - `check_tier2` scores from it and
-    `key_details` lists from it (V1 H2, 2026-08-27). A Not Applicable fact is
+    The ONE place the Tier 2 rules live - `check_tier2` scores from its label
+    projection, `key_details` lists from it (V1 H2, 2026-08-27) and
+    `core_missing_fact_keys` reads its keys (SYS-01). A Not Applicable fact is
     in NEITHER list: 3.6 removes it from the denominator, so it is neither
-    owed nor satisfied.
+    owed nor satisfied - and, because the questionnaire reads the same
+    entries, an N/A fact can never be raised as a Critical question either.
     """
     # The industry-classification requirement is satisfied by EITHER a NAICS or a
     # SIC code (client 3.13: "NAICS or SIC"; spec section 3.1 lists them as
     # interchangeable). A submission carrying a SIC code but no NAICS is
     # credited, and when both are absent the gap is surfaced as one combined
     # "NAICS or SIC" item rather than ignoring SIC.
-    applicable: List[str] = []
-    missing: List[str] = []
+    applicable: List[Tuple[Tuple[str, ...], str]] = []
+    missing: List[Tuple[Tuple[str, ...], str]] = []
     for field, label in TIER2_FIELDS.items():
         if field == "naics_code":
             # N/A only when BOTH keys are N/A - either one satisfies the
@@ -610,17 +805,66 @@ def _tier2_items(facts: dict) -> Tuple[List[str], List[str]]:
             if (_tier2_not_applicable(facts, "naics_code")
                     and _tier2_not_applicable(facts, "sic_code")):
                 continue
-            applicable.append("NAICS or SIC industry code")
+            entry = (("naics_code", "sic_code"), "NAICS or SIC industry code")
+            applicable.append(entry)
             if not (_answered(facts, "naics_code") or _answered(facts, "sic_code")):
-                missing.append("NAICS or SIC industry code")
+                missing.append(entry)
             continue
         if _tier2_not_applicable(facts, field):
             continue                       # 3.6: removed from the denominator
-        applicable.append(label)
+        applicable.append(((field,), label))
         # ANSWERED, not "has a value" - see check_tier1.
         if not _answered(facts, field):
-            missing.append(label)
+            missing.append(((field,), label))
     return applicable, missing
+
+
+def _tier2_items(facts: dict) -> Tuple[List[str], List[str]]:
+    """The LABEL view of `_tier2_entries` - the historical signature."""
+    applicable, missing = _tier2_entries(facts)
+    return [lbl for _keys, lbl in applicable], [lbl for _keys, lbl in missing]
+
+
+# Tier 1 scores the producing agency's own name, but it is never a QUESTION for
+# anybody: `question_classifier.CRITICAL_FIELDS` has excluded it since the
+# taxonomy shipped ("it is the agency's own name - a producer-side item, not a
+# client question"), and the producer-pattern rule routes it away. Excluding it
+# here keeps this door from silently reversing that decision. It is the ONLY
+# exclusion, and it mirrors an existing one rather than inventing a second list.
+_CORE_CRITICAL_EXCLUDED_KEYS = frozenset({"producer_name"})
+
+
+def core_missing_fact_keys(facts: dict, flags: dict | None = None) -> set:
+    """Canonical fact keys this submission still OWES (SYS-01).
+
+    The KEY view of the same Tier 1 + Tier 2 entries `key_details` prints as
+    "Key details missing". The questionnaire promotes a question to CRITICAL
+    when its fact is in here, so the two screens are projections of one
+    calculation and cannot contradict each other again.
+
+    Three properties fall out of reading the entries rather than a second list,
+    and each closes a way this could have gone wrong:
+
+      * ANSWERED facts are absent, so a satisfied requirement can never be
+        Critical - the client's own acceptance criterion, guaranteed by
+        construction rather than by a check somebody could forget.
+      * NOT APPLICABLE facts are absent, because 3.6 already removes them.
+      * A paired requirement contributes BOTH its keys or NEITHER, so a
+        submission stating a SIC code is not asked for NAICS as Critical.
+
+    Fail-closed: anything unreadable yields an empty set, which leaves every
+    priority exactly as the static classifier assigned it.
+    """
+    keys: set = set()
+    try:
+        _t1_missing = _tier1_entries(facts or {}, flags or {})[1]
+        _t2_missing = _tier2_entries(facts or {})[1]
+    except Exception:                                          # noqa: BLE001
+        logger.warning("core_missing_fact_keys: unreadable facts", exc_info=True)
+        return set()
+    for fact_keys, _label in list(_t1_missing) + list(_t2_missing):
+        keys.update(fact_keys)
+    return keys - _CORE_CRITICAL_EXCLUDED_KEYS
 
 
 def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]:
@@ -913,8 +1157,21 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             and not _dec_entries_state_payroll(facts)):
         soft.append("GL coverage detected but no revenue or payroll found")
     if flags.get("has_general_liability"):
+        # ONE DOOR for "do we have GL class codes?". LLM call 1 records them in
+        # TWO shapes - `gl_class_codes_by_location` (location + codes) and
+        # `gl_class_code_schedule` (the full rating rows) - and which one it
+        # fills depends on how the document prints them. This check read only
+        # the first, so a package whose codes arrived as the RICHER schedule was
+        # told none were found. Live 5 Sep 2026: class 11288 stamped onto ACORD
+        # 125's GL CODE box and ACORD 126's hazard row A while this warning said
+        # it did not exist. Same one-rule-two-copies shape as the H1-C phantom
+        # keys - the fact was there, the checker looked in one of its two homes.
         codes = _fv(facts, "gl_class_codes_by_location") or []
-        if isinstance(codes, list) and not codes:
+        schedule = _fv(facts, "gl_class_code_schedule") or []
+        _have = bool(codes) or bool(
+            [r for r in schedule if isinstance(r, dict)
+             and str(r.get("class_code") or "").strip()])
+        if not _have:
             soft.append("GL coverage detected but no class codes found")
 
     # ── Property ──────────────────────────────────────────────────────────────
@@ -1025,9 +1282,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     # submission whose GL landed only in gl_each_occurrence, while the umbrella
     # pillar simultaneously scores it normally. Reading both keeps the headline cap
     # and the pillar score from contradicting each other (§6.5 acceptance criterion).
-    if (flags.get("has_umbrella")
-            and not _fv(facts, "gl_each_occurrence") and not _fv(facts, "gl_limits")
-            and not _auto_liability_stated(facts)):
+    if flags.get("has_umbrella") and not _umbrella_underlying_stated(facts):
         hard.append("Umbrella detected but no underlying GL or Auto limits found")
 
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
@@ -1831,11 +2086,28 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # key, so an unrecognised line is never silently dropped from the compare.
     _cl = _canon_line_leaf
 
+    # SYS-05 (client, 2026-09-01): *"Map these terms into the Commercial
+    # Auto/Automobile coverage family BEFORE cross-document comparison."* A
+    # coverage PART carries its parent line's identity here, so a dec page
+    # listing "Business Auto, Comprehensive, Collision, Uninsured Motorists"
+    # and a COI listing "Automobile Liability" are ONE line of business printed
+    # at two levels of detail, not two different sets. Placement only - it can
+    # never make a document GRANT or DENY a line (that stays `canon_line`), so
+    # this can only ever REMOVE a false difference, never manufacture one.
+    def _fold(values):
+        present = {c for x in values if (c := _cl(x))}
+        present |= {c for x in values if (c := _canon_part_leaf(x))}
+        out = set()
+        for x in values:
+            if not (n := normalize_general(x)):
+                continue
+            out.add(_cl(x) or _canon_part_leaf(x, present) or n)
+        return frozenset(out)
+
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
         if lob and isinstance(lob, list) and lob:
-            norm = frozenset(
-                (_cl(x) or n) for x in lob if (n := normalize_general(x)))
+            norm = _fold(lob)
             if norm:
                 lob_norm_sets.append(norm)
                 lob_raw_display.append(", ".join(str(x).strip() for x in lob if str(x).strip()))
@@ -2199,7 +2471,8 @@ def _resolve_loss_history_years(facts: dict) -> int:
     return _to_int(_fv(facts, "loss_history_years")) or 0
 
 
-def _loss_history_conflict(facts: dict, flags: dict) -> bool:
+def _loss_history_conflict(facts: dict, flags: dict,
+                           has_loss_run_doc: bool = False) -> bool:
     """True when a no-loss attestation (user or narrative) is contradicted by
     ACTUAL loss-run claims (§6.4 item 1 'conflicting').
 
@@ -2207,6 +2480,26 @@ def _loss_history_conflict(facts: dict, flags: dict) -> bool:
     can never disagree. Note: years of loss history alone do NOT contradict a
     no-loss attestation (a clean multi-year loss run CONFIRMS it) - only real
     claims / incurred amounts do.
+
+    THE WORD "ACTUAL" IS NOW ENFORCED (2026-09-05). This docstring has said
+    "loss-run claims" since it shipped, and the code never checked a loss run
+    existed - so a claim count the extraction model INVENTED was enough. Live
+    run, nine sessions of nine: every clean package printed *"Conflicting -
+    attested no losses but loss runs show claims"* with no loss run anywhere and
+    a narrative reading *"no prior losses or claims in the last five years"*.
+    `num_claims` / `total_incurred` reach the extraction schema as bare
+    `string or null` with no guiding rule, so the model can return a figure read
+    off a premium or a limit.
+
+    `loss_history_state.claims_are_corroborated` is the gate: a loss-run
+    document, a typed claims row, or human provenance on the scalar. The V1
+    BETA EXIT (2026-08-28) path - *"attested no losses + one TYPED claim row"*
+    with no loss run uploaded - still raises the conflict, because a typed row
+    IS corroboration.
+
+    `has_loss_run_doc` defaults False so every existing caller keeps compiling;
+    callers that know the answer pass it, and the typed-row / provenance routes
+    cover the rest.
     """
     # V1 BETA EXIT (2026-08-28) - through the ONE door
     # (`loss_history_state.asserted_claims`), which also reads the client's own
@@ -2231,7 +2524,25 @@ def _loss_history_conflict(facts: dict, flags: dict) -> bool:
         or _attested_true(_fv(facts, "no_prior_losses"))
         or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
     )
-    return no_loss and (claims > 0 or incurred > 0)
+    if not (no_loss and (claims > 0 or incurred > 0)):
+        return False
+    # The gate. Fails toward NO conflict: a warning that fires on every clean
+    # submission is one producers learn to ignore, and nothing here deletes a
+    # value - the claim count survives, it simply stops contradicting an
+    # attestation it was never evidenced against.
+    try:
+        from services.loss_history_state import claims_are_corroborated
+    except Exception:                                          # noqa: BLE001
+        return True            # no door -> pre-2026-09-05 behaviour, never silence
+    if claims_are_corroborated(facts, has_loss_run_doc):
+        return True
+    logger.info(
+        "loss-history conflict suppressed: a no-loss attestation is "
+        "contradicted only by an uncorroborated model-extracted claim figure "
+        "(claims=%s incurred=%s, no loss-run document, no typed claim row)",
+        claims, incurred,
+    )
+    return False
 
 
 def _recency_penalty(age_days: int) -> int:
@@ -2303,6 +2614,95 @@ _LOSS_RECOMMENDATION_FIELDS: Tuple[Tuple[str, Optional[str]], ...] = (
     ("no loss runs are available",                      None),
     ("underwriting advisory",                           None),
 )
+
+
+# ── Answer routing for recommendation cards ──────────────────────────────────
+def _cap_stop_items(messages, coded_issues=None):
+    """Turn cap-gate sentences into rows the panel can act on.
+
+    Same shape `issue_registry` builds for every other stop - message, rule
+    code, resolution descriptor - so the frontend renders one control, not two.
+
+    TWO SOURCES OF IDENTITY, in order, because a cap reason can come from either
+    engine and only one of them is a plain string:
+
+      1. An ALREADY-CODED issue carrying the same sentence. The cross-form
+         validator emits `bi_missing_period_of_restoration` etc. with its code
+         attached; `classify_legacy` has no row for those wordings and never
+         will, since they are not legacy messages. Matching the sentence back to
+         the issue that produced it inherits the real code - the same idea
+         `cap_hard_stop_codes`' promote path already uses one layer up.
+      2. `classify_legacy`, for the legacy-engine and cap-gate sentences.
+
+    Best-effort: a classification failure must never cost the producer the
+    sentence itself, so the row degrades to text rather than disappearing.
+    """
+    coded = []
+    for issue in (coded_issues or []):
+        if not isinstance(issue, dict):
+            continue
+        msg = str(issue.get("message") or "").strip()
+        code = issue.get("code")
+        if msg and code:
+            coded.append((msg, code, issue.get("forms") or []))
+
+    def _match(reason: str):
+        """The coded issue this cap reason came from, or None.
+
+        PREFIX, not equality. `cross_form_validator` appends an
+        "(Affects: ACORD 140. Fix: ...)" annotation to some messages AFTER the
+        issue itself was captured, so the stop list carries the long string
+        while the issue carries the short one. Byte-exact matching found nothing
+        and the red box lost its "Open to fix" - reported live 2026-09-08.
+        `issue_registry._present_in` has handled this since it was written; this
+        follows the same rule rather than inventing a second one.
+        """
+        reason = str(reason or "").strip()
+        for msg, code, forms in coded:
+            if reason == msg or reason.startswith(msg) or msg.startswith(reason):
+                return code, forms
+        return None
+
+    out = []
+    for msg in (messages or []):
+        code, forms, resolution = None, [], None
+        try:
+            from services.issue_registry import classify_legacy, resolution_for
+            hit = _match(msg)
+            if hit:
+                code, forms = hit
+            else:
+                code, _cluster, _tier = classify_legacy(msg, "hard_stop")
+            resolution = resolution_for(code)
+        except Exception as _cx:                               # noqa: BLE001
+            logger.warning(f"cap stop not classified: {_cx}")
+        out.append({"message": msg, "code": code, "resolution": resolution,
+                    "severity": "hard_stop", "forms": list(forms)})
+    return out
+
+
+def _route_recommendations(recs, facts=None):
+    """Stamp every recommendation with the ONE answer mode the UI must render.
+
+    The card used to decide for itself, with `!!rec.field` - so a rec naming a
+    field the producer-answer door cannot write offered a typed box the server
+    then refused ("This item can't be answered directly"), and a rec naming a
+    LIVE CAPTURE SCHEDULE offered a single-line box whose value replaced the
+    whole extracted table. Both reported/reproduced 2026-09-08.
+
+    The server decides now, from the fact's own declarations
+    (`services/answer_routing`), and the card draws what it is told. Purely
+    ADDITIVE - `field`, `rec_id`, `message` and `score_impact` are untouched, so
+    dismiss credit, auto-resolve and rec_id dedupe are unaffected, and a session
+    stored before this change simply has no `answer_mode` and keeps the old
+    rendering.
+    """
+    try:
+        from services.answer_routing import stamp_recommendations
+        return stamp_recommendations(recs, facts)
+    except Exception as _ar_ex:                                # noqa: BLE001
+        logger.warning(f"answer routing skipped: {_ar_ex}")
+        return recs
 
 
 def loss_recommendation_field(message: str) -> Optional[str]:
@@ -2417,7 +2817,7 @@ def calculate_p4_loss_history(
     # §6.4 item 1: a no-loss attestation contradicted by ACTUAL loss-run claims
     # cannot earn full credit. Cap every return path so the number matches the
     # 'conflicting' state label (single source: _loss_history_conflict).
-    _conflict = _loss_history_conflict(facts, flags)
+    _conflict = _loss_history_conflict(facts, flags, has_loss_run_doc)
     # Client §6.4 item 2: loss runs must be matched to the insured BEFORE they can
     # be credited. An insured-name mismatch means the runs are not creditable
     # evidence for THIS submission, so the score cannot exceed the no-information
@@ -2679,32 +3079,120 @@ def calculate_p4_loss_history(
 
 NAICS_TO_LOB = {
     "236": "contractor", "237": "contractor", "238": "contractor",
-    "722": "restaurant", "311": "restaurant", "312": "restaurant",
+    # 722 is Food Services and Drinking Places - restaurants. 311 (Food
+    # Manufacturing) and 312 (Beverage Manufacturing) USED to map here too and
+    # were removed 2026-09-05: a cannery is not a restaurant, and this file's
+    # own `_NAICS_SECTOR_INDUSTRY` already says so ("31"/"32"/"33" ->
+    # manufacturing). They now fall through to the ops classifier and land on
+    # `generic`, which asks for LESS - never a harsher rule set on a guess.
+    "722": "restaurant",
     "511": "technology", "518": "technology", "519": "technology",
+    # NOTE, not fixed here: 541 is Professional / Scientific / TECHNICAL
+    # Services, which is law firms and accountants as well as software. The
+    # label is wrong for most of that sector and it is DISPLAYED beside the
+    # package score. Left alone deliberately - it moves scores across a large
+    # sector and was not the reported defect. Flag it, do not improvise it.
     "541": "technology",
     "321": "manufacturing","331": "manufacturing","332": "manufacturing",
     "484": "transportation","485": "transportation","492": "transportation",
 }
 
+# Operations phrases that identify a scoring bucket, matched on WORD BOUNDARIES.
+#
+# WHY THIS EXISTS IN THIS SHAPE (live 2026-09-05). The previous version tested
+# bare substrings - `any(w in desc for w in ["restaurant","food",...])` - so a
+# refrigerated warehouse whose operations read "cold storage of packaged FOOD
+# products" was scored as a RESTAURANT, and `LOB_RULES["restaurant"]` then
+# charged it for `occupancy_type`, a field a warehouse can never have. The same
+# defect sat in every list: "app" matched apparel, "tech" matched technician
+# and geotechnical, "platform" matched platform trailer, "delivery" matched the
+# delivery of janitorial services.
+#
+# Two structural conditions, and both are load-bearing:
+#   1. WORD BOUNDARIES - a phrase must stand as its own word(s), so "food
+#      products" no longer answers a question about restaurants.
+#   2. UNAMBIGUOUS EVIDENCE ONLY - if phrases from more than one bucket appear,
+#      the answer is `generic`. That is what disposes of "restaurant
+#      construction contractor" and of the janitorial company that serves
+#      "grocery, restaurant and retail accounts" - the client's own reported
+#      shape of this mistake, one door over in `cross_form_validator`.
+#
+# Every failure resolves to `generic`, whose rule set is the least demanding, so
+# a classification this function gets WRONG can never score an account harder
+# than making no claim at all.
+#
+# NOT routed through `_ops_to_industry` below, deliberately. That table answers
+# a different question with a different tolerance for error: its verdict is
+# cross-checked against the policy's class codes before it can move a score, so
+# it can afford to be greedy. This one selects the scoring rule alone, with no
+# second signal. Routing through it was tried and rejected - it maps "electrical
+# equipment manufacturing" to construction, which would have handed a
+# manufacturer the CONTRACTOR rule set, a HARSHER one, on a wrong guess.
+_LOB_OPS_PHRASES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("restaurant", ("restaurant", "cafe", "coffee shop", "catering", "caterer",
+                    "food service", "fine dining", "tavern", "bar and grill",
+                    "diner", "pizzeria", "delicatessen", "food truck")),
+    ("contractor", ("contractor", "contracting", "construction", "roofing",
+                    "roofer", "plumbing", "plumber", "electrician", "carpentry",
+                    "masonry", "excavation", "hvac", "drywall", "paving",
+                    "framing", "siding")),
+    # "logistics" is deliberately ABSENT. Every token here has to imply the
+    # thing this bucket's rule set then demands - a vehicle schedule, drivers
+    # and a radius of operation. A freight broker or a 3PL arranges transport
+    # without owning a truck, so "logistics" would charge an account for a fleet
+    # it does not have. It cost a fuzzed case ("cold chain logistics") and was
+    # removed rather than argued with.
+    ("transportation", ("trucking", "freight", "hauling", "courier",
+                        "motor carrier", "long haul", "delivery service")),
+    ("technology", ("software", "saas", "technology company", "cloud platform",
+                    "information technology", "software development",
+                    "web development")),
+)
+
+
+def _lob_from_operations(ops: str) -> str:
+    """The bucket this operations text unambiguously names, else 'generic'.
+
+    THROUGH THE SHARED DOOR since 2026-09-06. This carried its own word-boundary
+    matcher and its own `_phrase_describes_the_applicant` for one day, and in
+    that day the sweep found 32 more sites with the same need - including
+    `_ops_to_industry`, 78 lines above. Both now ask `term_match`.
+
+    Two behaviours the local copy had are deliberately preserved and are pinned
+    by test:
+      * plurals. The local matcher hardcoded `s?`; the door defaults plurals OFF
+        because `_has_explicit_follow_form` breaks the instant "following form"
+        matches "following forms". This bucket list is nouns a business is
+        called ("restaurants", "contractors"), so it opts IN.
+      * the deleted `except: return True` in the old ownership helper. That was
+        a FAIL-OPEN fallback - an import blip silently restored the plain
+        substring match, i.e. the bug. The door is stdlib-only with no import to
+        fail, so the fallback has nothing left to guard and is gone.
+    """
+    return term_match.sole_bucket(
+        _LOB_OPS_PHRASES, ops, plural=True, require_subject=True) or "generic"
+
 
 def infer_lob(facts: dict, flags: dict) -> str:
-    """Infer line of business from NAICS, flags, or operations description."""
+    """Infer line of business from NAICS, flags, or operations description.
+
+    Returns one of the `LOB_RULES` keys. `generic` is the answer whenever the
+    evidence does not single out a bucket - see `_LOB_OPS_PHRASES`.
+    """
     naics = str(_fv(facts, "naics_code") or "")[:3]
     if naics and naics in NAICS_TO_LOB:
         return NAICS_TO_LOB[naics]
-    
-    if flags.get("is_contractor"):
+
+    if (flags or {}).get("is_contractor"):
         return "contractor"
-    
-    desc = (_fv(facts, "operations_description") or "").lower()
-    if any(w in desc for w in ["restaurant","food","catering","kitchen","dining"]):
-        return "restaurant"
-    if any(w in desc for w in ["software","tech","saas","app","cloud","platform"]):
-        return "technology"
-    if any(w in desc for w in ["truck","freight","transport","delivery","fleet"]):
-        return "transportation"
-    
-    return "generic"
+
+    # COERCED, not assumed to be a string. This function is called from inside
+    # both score computations, and `.lower()` on a fact that arrived as a list,
+    # an int or bytes raises - which is the shape of H1-G, the live run that
+    # lost its Total Package Score with no reproducible trigger. A malformed
+    # fact must classify as `generic`, never take a score down with it.
+    ops = _fv(facts, "operations_description")
+    return _lob_from_operations("" if ops is None else str(ops).lower())
 
 
 # ── LOB-specific rules ────────────────────────────────────────────────────────
@@ -2781,10 +3269,31 @@ _CLASS_CODE_INDUSTRY: Dict[str, str] = {
 
 
 def _ops_to_industry(ops: str, naics2: str) -> Optional[str]:
-    """Best-effort industry bucket from operations text, falling back to NAICS sector."""
-    for industry, kws in _OPS_INDUSTRY_KEYWORDS.items():
-        if any(k in ops for k in kws):
-            return industry
+    """Best-effort industry bucket from operations text, falling back to NAICS sector.
+
+    THROUGH THE SHARED DOOR since 2026-09-06, and this function is the reason
+    the door exists. It was `any(k in ops for k in kws)` - a bare substring -
+    sitting 78 lines ABOVE `_lob_from_operations`, which had been given word
+    boundaries, a single-bucket rule and an ownership test the day before. Same
+    file, same question, one fixed and one not: two copies is how this class
+    keeps coming back.
+
+    Measured, with controls: "Apartment building owner; 62 units with long-term
+    tenants RESIDING on site" -> construction (via "siding"); "satisfactory" ->
+    manufacturing (via "factory"); "overhauling" -> transportation (via
+    "hauling"); "cafeteria" -> restaurant (via "cafe"); and "Insurance agency
+    serving CONTRACTORS and building trades" -> construction, which is somebody
+    else's trade. Each fed a -15 ops/class-code mismatch at :3363 and :3411.
+
+    Ambiguity now returns None, which falls through to the NAICS sector exactly
+    as an unrecognised description always has - a path that already exists and
+    already means "no verdict", never a guess.
+    """
+    bucket = term_match.sole_bucket(
+        tuple(_OPS_INDUSTRY_KEYWORDS.items()), ops, plural=True,
+        require_subject=True)
+    if bucket:
+        return bucket
     return _NAICS_SECTOR_INDUSTRY.get(naics2)
 
 
@@ -3667,12 +4176,35 @@ CLIENT_LOSS_STATE_LABELS: Dict[str, str] = {
     # C2 (2026-08-24): a verified new venture is a sixth, honest bucket - none
     # of the five evidence buckets can truthfully describe "no history exists".
     "not_applicable":     "Not applicable",
+    # SYS-02 (2026-09-05). The client's own words: *"a narrative stating no
+    # losses, a client confirming no losses, and carrier loss runs not being
+    # provided are different evidence states and should not be collapsed into
+    # the same result."* The first two already had distinct buckets. The third
+    # did not - it fell into "unknown" alongside "we know nothing", and the
+    # panel printed the internal label and the bucket on consecutive lines, so
+    # it read:
+    #
+    #     No loss runs available          <- the internal label, correct
+    #     Unknown                         <- the bucket, contradicting it
+    #
+    # Two more states had the identical defect and are corrected with it: a
+    # requested loss run and a known prior claim are both stated ANSWERS, not
+    # absences of information. Only `no_information` is genuinely unknown.
+    #
+    # This does not invent a scoring rule - no score moves, and the states
+    # themselves are unchanged. It stops a label asserting we know nothing
+    # about something the same panel has just described. The precedent for
+    # widening the client's five words is `not_applicable` directly above.
+    "runs_requested":       "Loss runs requested",
+    "runs_not_provided":    "Loss runs not provided",
+    "claims_known_no_runs": "Claims known - loss runs not provided",
 }
 
 _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
     # No usable loss information yet (nothing on file, or runs merely requested).
     "no_information":                  "unknown",
-    "loss_runs_pending":               "unknown",
+    # A REQUESTED loss run is a workflow answer, not an absence of information.
+    "loss_runs_pending":               "runs_requested",
     # A "no losses" position mentioned in narrative prose, nothing more.
     "narrative_states_no_losses":      "none_stated",
     # A formal no-loss attestation that no loss-run document yet corroborates.
@@ -3691,8 +4223,10 @@ _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
     # C2 (2026-08-24) states.
     "new_venture_not_applicable":      "not_applicable",
     "no_operating_history_not_applicable": "not_applicable",
-    "no_loss_runs_available":          "unknown",
-    "prior_claims_exist":              "unknown",
+    # SYS-02: the client's third named evidence state. Never "unknown".
+    "no_loss_runs_available":          "runs_not_provided",
+    # We KNOW claims exist; only the runs are missing. Also never "unknown".
+    "prior_claims_exist":              "claims_known_no_runs",
 }
 
 
@@ -3740,7 +4274,7 @@ def _get_loss_history_state(
 
     # Conflict (single source of truth shared with the P4 score): a no-loss
     # attestation contradicted by ACTUAL loss-run claims.
-    if _loss_history_conflict(facts, flags):
+    if _loss_history_conflict(facts, flags, has_loss_run_doc):
         return "loss_history_conflicting"
 
     if has_loss_run_doc:
@@ -4081,11 +4615,45 @@ def _umbrella_has_underlying(facts: dict) -> bool:
     them apart, so it printed "no underlying GL or Auto limits" on packages
     that plainly had both. A second local copy of this test is how that class
     of defect survives, so both callers read this one.
+
+    NUMERIC, and that matters. This answers "can an underlying limit be read as
+    an AMOUNT" - which is what `_calculate_umbrella_adequacy` needs, because it
+    returns 0 outright when the answer is no and otherwise compares against the
+    client-approved thresholds. Do NOT loosen it to mean "is anything stated":
+    that is a different question, it is answered by
+    `_umbrella_underlying_stated` below, and widening this one moves every
+    umbrella score on a package whose limit is printed in words.
     """
     gl_val   = _to_int(_fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits"))
     auto_val = _to_int(_fv(facts, "auto_liability_limit"))
     _auto_split = auto_val is None and _auto_liability_stated(facts)
     return bool(gl_val or auto_val or _auto_split)
+
+
+def _umbrella_underlying_stated(facts: dict) -> bool:
+    """True when the documents MENTION an underlying GL or Auto liability limit.
+
+    PRESENCE, not adequacy - and a separate question from
+    `_umbrella_has_underlying` above, which asks whether that limit can be read
+    as a number.
+
+    Both questions were being answered by whichever test happened to be nearest,
+    and a THIRD hand-written copy in `evaluate_stops` proved the cost: that one
+    tested the raw string while the numeric door parsed it, so on the four
+    conventions an ACORD document really uses for a limit it cannot print as
+    digits - "Included", "Statutory", "See schedule", "$0" - they disagreed.
+    Measured, all four: the package engine raised no hard stop while the form
+    printed "Umbrella present with no underlying GL or Auto limits" beside it.
+
+    Every site that WORDS something about underlying limits reads this one; only
+    the pillar arithmetic reads the numeric door. No score moves - the sentences
+    just stop contradicting the maths.
+    """
+    if _umbrella_has_underlying(facts):
+        return True
+    gl_raw   = _fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits")
+    auto_raw = _fv(facts, "auto_liability_limit")
+    return bool(str(gl_raw or "").strip() or str(auto_raw or "").strip())
 
 
 def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
@@ -4193,12 +4761,22 @@ def _calculate_narrative_quality(
     has_narrative_doc: bool = False,
     flags: Optional[dict] = None,
     narrative_doc_text: str = "",
+    form_ids=None,
 ) -> Tuple[int, Dict[str, bool], int]:
     """P6 - Narrative Quality (10% of SQS) with §6.3 component model.
 
     Returns (score, component_breakdown, substance_pct) where component_breakdown
-    is a per-component present/absent dict keyed by NARRATIVE_COMPONENT_LABELS and
+    is a per-component present/absent dict keyed by the APPLICABLE components and
     substance_pct is the 0-100 underwriting-substance half of the score.
+
+    SYS-04: the component set is no longer the fixed twelve. Components whose
+    coverage line the submission demonstrably does not carry are dropped from
+    the breakdown AND from the denominator, so a non-WC package is not marked
+    down - and not asked - for WC payroll / class code / EMOD context. Dropping
+    requires positive evidence of absence; anything unknown keeps the component.
+    `form_ids` is optional and only ever ADDS evidence (selecting ACORD 130 is
+    "intentionally requested"), so omitting it can never drop a component that
+    passing it would keep.
 
     Scoring: 60% component coverage + 40% text quality, blended.
     Floor of 40 when a narrative document is classified in the package.
@@ -4212,13 +4790,30 @@ def _calculate_narrative_quality(
     """
     remarks = _narrative_remarks_text(facts).strip()
     ops     = str(_fv(facts, "operations_description") or "").strip()
-    empty_components = {k: False for k in NARRATIVE_COMPONENT_LABELS}
+
+    # SYS-04. Resolved ONCE and used at every construction site below. The
+    # function has four return paths and three union comprehensions that used to
+    # re-key over the full label map, so a single filter at the top would have
+    # been silently re-expanded to twelve on three of the four paths - a change
+    # that passes review and does nothing. `_applicable` is the denominator.
+    _applicable = applicable_narrative_components(facts, flags, form_ids)
+    empty_components = {k: False for k in _applicable}
+
+    def _only_applicable(mapping: Dict[str, bool]) -> Dict[str, bool]:
+        """Restrict any component dict to the applicable keys.
+
+        Every producer of a component map (`_score_narrative_components`,
+        `narrative_profile_present_map`, `_narrative_enrichment_present`) emits
+        the full taxonomy, so each one is funnelled through here rather than
+        trusted to already be gated.
+        """
+        return {k: bool(mapping.get(k)) for k in _applicable}
 
     # §6.3 item 2: client-supplied narrative-enrichment answers (Bucket-C topics
     # the narrative lacked and the ARQ asked the client to provide). A filled
     # answer credits its component directly and joins the structured scan text so
     # both the component breakdown and the substance half reflect it.
-    _enrich_present = _narrative_enrichment_present(facts)
+    _enrich_present = _only_applicable(_narrative_enrichment_present(facts))
     _enrich_text    = _narrative_enrichment_text(facts)
     if _enrich_text:
         remarks = " ".join(filter(None, [remarks, _enrich_text])).strip()
@@ -4251,13 +4846,14 @@ def _calculate_narrative_quality(
         # No structured narrative text reached the scorer. The stored LLM profile
         # may still have detected components (e.g. a mis-classified narrative whose
         # body never became narrative_doc_text), so honour it before giving up.
-        _prof_present = narrative_profile_present_map((flags or {}).get("narrative_profile"))
+        _prof_present = _only_applicable(
+            narrative_profile_present_map((flags or {}).get("narrative_profile")))
         if any(_prof_present.values()):
             components = dict(_prof_present)
             if _fv(facts, "carrier_marketing_reason"):
                 components["carrier_market"] = True
             present_count = sum(1 for v in components.values() if v)
-            component_pct = int(present_count / len(components) * 100)
+            component_pct = int(present_count / len(components) * 100) if components else 0
             # No readable text for the 40% substance half; floor at 40 because a
             # real (if mis-classified) narrative exists.
             raw = max(int(component_pct * 0.6), 40)
@@ -4280,12 +4876,12 @@ def _calculate_narrative_quality(
     # marking components present, keeping the per-component breakdown and the
     # targeted "includes X but not Y" gaps honest. The two are OR-ed so a genuine
     # single-mention in the curated field is never lost.
-    components = _score_narrative_components(remarks or ops)
+    components = _only_applicable(_score_narrative_components(remarks or ops))
     if narrative_doc_text:
         _body_components = _score_narrative_components(narrative_doc_text, strict=True)
         components = {
             k: bool(components.get(k) or _body_components.get(k))
-            for k in NARRATIVE_COMPONENT_LABELS
+            for k in _applicable
         }
     # Credit carrier_market when carrier_marketing_reason is supplied via ARQ
     # (the questionnaire answer provides the underwriter context even when the
@@ -4296,18 +4892,19 @@ def _calculate_narrative_quality(
     # so a paraphrased component the fixed phrases missed is still credited.
     # Evidence-gated in narrative_profile_present_map (cannot over-credit); a
     # no-op when the flag is off or detection failed (empty profile).
-    _prof_present = narrative_profile_present_map((flags or {}).get("narrative_profile"))
+    _prof_present = _only_applicable(
+        narrative_profile_present_map((flags or {}).get("narrative_profile")))
     if any(_prof_present.values()):
         components = {
             k: bool(components.get(k) or _prof_present.get(k))
-            for k in NARRATIVE_COMPONENT_LABELS
+            for k in _applicable
         }
     # §6.3 item 2: credit any Bucket-C component the client supplied via the
     # narrative-enrichment ARQ (so an answered topic counts and is not re-asked).
     if any(_enrich_present.values()):
         components = {
             k: bool(components.get(k) or _enrich_present.get(k))
-            for k in NARRATIVE_COMPONENT_LABELS
+            for k in _applicable
         }
     present_count = sum(1 for v in components.values() if v)
     total_count   = len(components)
@@ -5073,6 +5670,7 @@ def calculate_package_sqs(
     p6, _narrative_components, _narr_substance = _calculate_narrative_quality(
         facts, has_narrative_doc=_has_narrative, flags=flags,
         narrative_doc_text=_narr_doc_text,
+        form_ids=session_form_ids(session_data, form_results),
     )
 
     # ── Package pillars = the package's OWN independent calculation ───────────
@@ -5325,6 +5923,17 @@ def calculate_package_sqs(
         # the display promotes instead of drawing a duplicate row.
         "cap_hard_stops":       cap_hard_stops,
         "cap_hard_stop_codes":  cap_hard_stop_codes,
+        # ...and CLICKABLE (2026-09-08). The editor's package HARD STOPS block
+        # falls back to `cap_reason` when `cap_hard_stops` is empty - which is
+        # the COMMON case, because a cap whose reason is already a hard stop
+        # deliberately produces no extra entry. A live run showed the result: a
+        # red blocker holding the package at 60, printed as a bare sentence with
+        # nothing to click. Classified through the same table every other stop
+        # uses, so the row carries the identical "Open to fix".
+        "cap_hard_stop_items": _cap_stop_items(
+            cap_hard_stops
+            or ([cap_reason] if cap_applied == HARD_STOP_CAP and cap_reason else []),
+            coded_issues=cross_issues),
         "tier": tier,
         "lob": lob,
         "pillars": {
@@ -5337,7 +5946,7 @@ def calculate_package_sqs(
         },
         "weights_used":        SPEC_PILLAR_WEIGHTS,
         "weights_version":     "spec_compliant_v2.3.0",
-        "top_recommendations": top_recs,
+        "top_recommendations": _route_recommendations(top_recs, facts),
         "sqs_history":         history,
         "delta_this_session":  delta,
         "routing_decision": (
@@ -5573,6 +6182,7 @@ def calculate_package_sqs_spec_compliant(
     p6, _, _ = _calculate_narrative_quality(
         facts, has_narrative_doc=_has_narrative, flags=flags,
         narrative_doc_text=_extract_narrative_doc_text(_spec_session_docs),
+        form_ids=session_form_ids(session_data, form_results),
     )
 
     # Weighted score with the generic N/A rescaling (client C2 2.2): any None
@@ -5653,7 +6263,7 @@ def calculate_package_sqs_spec_compliant(
         },
         "weights_used": SPEC_PILLAR_WEIGHTS,
         "weights_version": "spec_compliant_v2.1.0",
-        "top_recommendations": all_recs,
+        "top_recommendations": _route_recommendations(all_recs, facts),
         "sqs_history": history,
         "delta_this_session": delta,
         "routing_decision": (
@@ -5905,7 +6515,23 @@ def calculate_sqs(
     fraud_penalty = 0
 
     fid = form_id or (selected_form_ids[0] if selected_form_ids else "UNKNOWN")
-    is_cert_only = fid == "ACORD_25" or flags.get("is_certificate_doc", False)
+    # THIRD SITE OF THE SAME DEFECT (2026-09-04). `is_certificate_doc` is a
+    # PER-DOCUMENT flag and flags merge across the package, so ANY uploaded COI
+    # made this true - and an ACORD 125 was then scored against the CERTIFICATE
+    # checklist (applicant / effective date / policy number) instead of its own
+    # application checklist. Scoring a full commercial application as if it were
+    # a certificate is not a near-miss; it grades the wrong form.
+    #
+    # `fid == "ACORD_25"` is correct and stays: when the form BEING SCORED is
+    # the certificate, the certificate checklist is the right one. The package
+    # signal now has to say the SUBMISSION is certificate-only, through the same
+    # door `_tier1_items` and `producer_fields_exempt` use.
+    #
+    # SCORES MOVE (D6) on any package that carries a COI alongside other
+    # documents - those forms are now graded against their own checklist.
+    is_cert_only = fid == "ACORD_25" or (
+        flags.get("is_certificate_doc", False) and certificate_only_package(flags)
+    )
     total_fields = schema_size if schema_size is not None else len(form_schema)
     filled_fields = fields_mapped if fields_mapped is not None else sum(
         1 for v in mapped_data.values()
@@ -6484,12 +7110,41 @@ def calculate_sqs(
     # ── Property integrity ────────────────────────────────────────────────────
     _prop_hard = False
     _prop_soft = False
+    # WHY the property gate fired, in the producer's language.
+    #
+    # The gate used to surface as the literal strings "Property integrity gate"
+    # and "Property integrity warning" - our internal names for a rule, printed
+    # to a broker on the pre-form Hard Stops list with no fix control, because
+    # `classify_legacy` has no row for either (it cannot: they name nothing).
+    # The score sat at 60 with a dead end beside it.
+    #
+    # Every branch below already KNOWS its own cause, so the gate now carries
+    # it. The wording deliberately reuses the phrases `_LEGACY_MESSAGE_RULES`
+    # already matches, which is what gives these rows a real "Open to fix"
+    # button pointing at the right facts - no new vocabulary, no second table
+    # to keep in step. First cause wins, so the sentence is stable across a
+    # recompute rather than churning with dict order.
+    _prop_hard_reason: Optional[str] = None
+    _prop_soft_reason: Optional[str] = None
+
+    def _prop_hard_because(reason: str) -> None:
+        nonlocal _prop_hard, _prop_hard_reason
+        _prop_hard = True
+        if not _prop_hard_reason:
+            _prop_hard_reason = reason
+
+    def _prop_soft_because(reason: str) -> None:
+        nonlocal _prop_soft, _prop_soft_reason
+        _prop_soft = True
+        if not _prop_soft_reason:
+            _prop_soft_reason = reason
 
     if fid in ("ACORD_140", "ACORD_141"):
         prop = struct
         # BI coverage: BI limit present but period of restoration missing → hard stop per document
         if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
-            _prop_hard = True
+            _prop_hard_because(
+                "Business income limit present but period of restoration not specified")
             issues.append("Business income limit present but period of restoration not specified")
             recommendations.append({
                 "rec_id": "rec_period_of_restoration",
@@ -6502,7 +7157,11 @@ def calculate_sqs(
             })
         # Valuation method soft block
         if not _fv(facts, "valuation_method"):
-            _prop_soft = True
+            # The gate sentence uses the LEGACY RULE's phrasing ("... not
+            # specified", no "(RCV/ACV)" between) so `classify_legacy` matches
+            # it and the row gets its valuation-method fix. `issues` keeps its
+            # own long-standing wording - that list is display-only.
+            _prop_soft_because("Property valuation method not specified")
             issues.append("Property valuation method (RCV/ACV) not specified")
             recommendations.append({
                 "rec_id": "rec_valuation_method_prop",
@@ -6523,7 +7182,9 @@ def calculate_sqs(
                 if not _fv(facts, f)
             ]
             if missing_perils:
-                _prop_hard = True
+                _prop_hard_because(
+                    "Peril-specific deductibles referenced but not defined: "
+                    + ", ".join(l for _, l in missing_perils))
                 for fk, lbl in missing_perils:
                     issues.append(f"Peril-specific {lbl} deductible referenced but not defined")
                 recommendations.append({
@@ -6538,7 +7199,7 @@ def calculate_sqs(
         # Coinsurance: if value present but coinsurance missing → soft block
         if (_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")) and \
                 not _fv(facts, "coinsurance_percentage") and not _fv(facts, "agreed_value_endorsement"):
-            _prop_soft = True
+            _prop_soft_because("Coinsurance percentage not specified for insured property")
             issues.append("Coinsurance percentage not specified for insured property")
             recommendations.append({
                 "rec_id": "rec_coinsurance",
@@ -6573,7 +7234,8 @@ def calculate_sqs(
             prop = max(0, prop - 5)
 
         if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
-            _prop_soft = True
+            _prop_soft_because(
+                "Business income limit present but period of restoration not specified")
             issues.append("BI coverage present but period of restoration not specified")
 
         if flags.get("property_has_peril_deductibles"):
@@ -6586,7 +7248,9 @@ def calculate_sqs(
                 if not _fv(facts, key)
             ]
             if _missing_perils:
-                _prop_hard = True
+                _prop_hard_because(
+                    "Peril-specific deductibles referenced but not defined: "
+                    + ", ".join(_missing_perils))
                 issues.append(
                     "Peril-specific deductible referenced but not defined: "
                     + ", ".join(_missing_perils)
@@ -6639,16 +7303,55 @@ def calculate_sqs(
     # ── Umbrella / limit adequacy (None = N/A, weights re-normalised) ────────
     umbrella_score = _calculate_umbrella_adequacy(facts, flags)
     if flags.get("has_umbrella") and umbrella_score is not None and umbrella_score == 0:
-        issues.append("Umbrella detected but no underlying GL/Auto limits")
-        recommendations.append({
-            "rec_id": "rec_underlying_limits",
-            "field": "gl_limits",
-            "component": "umbrella_limit_adequacy",
-            "message": "Provide underlying limits",
-            "type": "hard_stop",
-            "score_impact": 0,
-            "priority": 1,
-        })
+        # THE PILLAR REACHES 0 TWO WAYS, AND THIS BLOCK USED TO CLAIM ONLY ONE.
+        # `_calculate_umbrella_adequacy` returns 0 either because there genuinely
+        # are no underlying limits, or because ordinary deductions stacked past
+        # 100 on a package whose underlying limits are all stated. The 60-cap
+        # gate was corrected for exactly this on 2026-08-31 via the shared
+        # `_umbrella_has_underlying` door; this sibling was left behind, so a
+        # LIVE RUN (2026-09-08) printed both on one screen:
+        #     HARD STOPS: "...its supporting detail is incomplete..."   (true)
+        #     Key Issues: "Umbrella detected but no underlying GL/Auto limits"
+        # on a package plainly stating $300,000 GL each occurrence and $300,000
+        # auto CSL. The card was worse than the sentence: it asked the producer
+        # to "Provide underlying limits" - values already on file - while the
+        # actually-missing figure, the umbrella limit itself, went unasked.
+        #
+        # Reads the SAME door, never a second copy of the test.
+        _has_underlying = _umbrella_underlying_stated(facts)
+        if not _has_underlying:
+            issues.append("Umbrella detected but no underlying GL/Auto limits")
+            recommendations.append({
+                "rec_id": "rec_underlying_limits",
+                "field": "gl_limits",
+                "component": "umbrella_limit_adequacy",
+                "message": "Provide underlying limits",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
+        else:
+            # Underlying IS stated. Say what is actually missing, and ask for
+            # the fact whose absence is the largest single deduction.
+            issues.append(
+                "Umbrella supporting detail is incomplete - umbrella limit, "
+                "schedule of underlying insurance and follow-form status"
+            )
+            recommendations.append({
+                "rec_id": "rec_umbrella_supporting_detail",
+                "field": "umbrella_limit",
+                "component": "umbrella_limit_adequacy",
+                "message": "Provide the umbrella limit and confirm the schedule "
+                           "of underlying insurance and follow-form status",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
+            # The remaining shortfalls still deserve their own warnings - the
+            # `< 100` branch below is skipped on this path, and without this the
+            # producer would be told about the umbrella limit and nothing else.
+            for w in _build_umbrella_warnings(facts, flags, umbrella_score):
+                issues.append(w)
     elif flags.get("has_umbrella") and umbrella_score is not None and umbrella_score < 100:
         # Use the SAME shared builder as the package scorers so the per-form path
         # can never drift from the package warning set. This adds the Employers
@@ -6662,6 +7365,7 @@ def calculate_sqs(
     narrative_score, _narrative_components, _narr_substance = _calculate_narrative_quality(
         facts, has_narrative_doc=has_narrative_doc, flags=flags,
         narrative_doc_text=narrative_doc_text,
+        form_ids=selected_form_ids,
     )
     breakdown["narrative_quality"] = narrative_score
 
@@ -6675,8 +7379,17 @@ def calculate_sqs(
         if _absent_comps:
             _comp_msg = _narrative_gap_message(_narrative_components)
             recommendations.append({
+                # `additional_remarks_text`, NOT `acord101_remarks`. Both feed
+                # `_calculate_narrative_quality`, but only the first is a
+                # WRITABLE canonical fact - `acord101_remarks` is a legacy
+                # read-only alias, so `_canonical_key` returns None for it and
+                # the producer-answer door refused every submission with "This
+                # item can't be answered directly" while the card kept offering
+                # the box (reported live 2026-09-08). `answer_routing` now
+                # classifies this as `narrative`, so the typed text is APPENDED
+                # to the ACORD 101 remarks instead of overwriting them.
                 "rec_id":       "rec_narrative_components",
-                "field":        "acord101_remarks",
+                "field":        "additional_remarks_text",
                 "component":    "narrative_quality",
                 "message":      _comp_msg,
                 "type":         "missing_field",
@@ -6687,7 +7400,8 @@ def calculate_sqs(
             # All components present but narrative is shallow - flag thin content
             recommendations.append({
                 "rec_id":       "rec_narrative_substance",
-                "field":        "acord101_remarks",
+                # Same correction as rec_narrative_components above.
+                "field":        "additional_remarks_text",
                 "component":    "narrative_quality",
                 "message":      (
                     "Narrative covers all required topics but lacks underwriting depth - "
@@ -6738,17 +7452,28 @@ def calculate_sqs(
         "Minimum Viable COPE incomplete" if cope_hard else
         (
             "Umbrella present with no underlying GL or Auto limits"
-            if not _umbrella_has_underlying(facts) else
+            if not _umbrella_underlying_stated(facts) else
             "Umbrella coverage is present but its supporting detail is incomplete - "
             "umbrella limit, underlying limits, schedule of underlying insurance "
             "and follow-form status"
         ) if umb_fail else
-        "Property integrity gate" if _prop_hard else None
+        # Was the literal "Property integrity gate" - our internal rule name,
+        # printed to a broker. Every branch that raises this gate now supplies
+        # its own cause (`_prop_hard_because`), phrased so `classify_legacy`
+        # matches it and the pre-form row gets a real fix control. The fallback
+        # only fires if a future branch sets the flag without a reason, and it
+        # still says something a broker can act on.
+        (_prop_hard_reason
+         or "Property details are incomplete - review the property section")
+        if _prop_hard else None
     )
     cap_applied, cap_reason = _resolve_cap(
         hard_stops, soft_stops,
         extra_hard_reason=_gate_hard_reason,
-        extra_soft_reason="Property integrity warning" if _prop_soft else None,
+        extra_soft_reason=(
+            (_prop_soft_reason
+             or "Property details are incomplete - review the property section")
+            if _prop_soft else None),
     )
     if cap_applied is not None:
         raw_score = min(raw_score, cap_applied)
@@ -6890,6 +7615,13 @@ def calculate_sqs(
         # Gate-only 60 caps that have no entry in hard_stops - rendered by the
         # UI as hard stops so a held score is never unexplained (2026-08-31).
         "cap_hard_stops":      cap_hard_stops,
+        # ...and CLICKABLE (2026-09-08). Naming the cause is half the job; a
+        # blocker holding the score at 60 with nothing to click is the other
+        # half of the same defect. Each sentence is classified through the SAME
+        # table every other legacy stop uses, so the row carries the identical
+        # "Open to fix" the pre-form banners do.
+        "cap_hard_stop_items": _cap_stop_items(cap_hard_stops,
+                                               coded_issues=cross_issues_full),
         "score_trace":         _score_trace,
         "tier":                tier,
         "tier_color":          tc,
@@ -6898,7 +7630,7 @@ def calculate_sqs(
         "breakdown":           breakdown,   # umbrella_limit_adequacy may be None
         "risk_drivers":        risk_drivers,
         "issues":              issues,
-        "recommendations":     recommendations,
+        "recommendations":     _route_recommendations(recommendations, facts),
         "fraud_penalty":       fraud_penalty,
         "fill_rate":           fill_rate,
         "match_score":         fill_rate,   # §6.1 AC#1: raw field coverage — distinct from SQS and confidence_fill_rate

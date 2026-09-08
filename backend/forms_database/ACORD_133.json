@@ -1,14 +1,26 @@
 {
   "form_id": "ACORD_133",
-  "form_name": "ACORD 133 - Builders Risk Application",
+  "form_name": "ACORD 133 - Workers Compensation Insurance Plan (Assigned Risk) Section",
   "form_type": "application",
   "template_file": "ACORD_133.pdf",
-  "description": "Application for builders risk (course of construction) coverage. Required for properties under construction, renovation projects, or any submission mentioning project value or completion dates.",
+  "description": "Workers Compensation Insurance Plan / Assigned Risk section. The template's own first page reads 'WORKERS COMPENSATION INSURANCE PLAN - ASSIGNED RISK SECTION' and states it must be attached to an ACORD 130 Workers Compensation Application to constitute an application for assigned-risk coverage. 67 of its 136 fields are WorkersCompensation*; it has no builders-risk field.",
   "always_include": false,
-  "matching_flags": ["has_builders_risk"],
-  "matching_keywords": ["builder", "builders risk", "under construction", "renovation", "project value", "completion date"],
-  "coverage_types": ["property"],
-  "policy_types": ["commercial"],
+  "matching_flags": [
+    "has_workers_comp"
+  ],
+  "matching_keywords": [
+    "assigned risk",
+    "workers compensation insurance plan",
+    "residual market",
+    "state fund",
+    "wc pool"
+  ],
+  "coverage_types": [
+    "workers_comp"
+  ],
+  "policy_types": [
+    "commercial"
+  ],
   "tier1_minimum_fields": [
     "applicant_name",
     "effective_date",

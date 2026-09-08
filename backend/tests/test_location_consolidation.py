@@ -450,7 +450,9 @@ def test_client_literal_three_fragment_mentions_fold_to_one_premises():
     only = locs[0]
     # ...and the fold RECOVERS data: street in the street box, city/state/zip
     # in their own boxes, the description carried over from the middle mention.
-    assert only["address_line1"] == "4800 Dahlia St # D13"
+    # UPDATED 2026-09-01: the unit designator now lands on line TWO.
+    assert only["address_line1"] == "4800 Dahlia St"
+    assert only["address_line2"] == "# D13"
     assert only["address_city"] == "Denver"
     assert only["address_state"] == "CO"
     assert str(only["address_zip"]).startswith("80216")

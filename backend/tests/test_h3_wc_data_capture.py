@@ -390,8 +390,12 @@ def test_count_columns_are_never_read_as_money():
 # ── extraction: the row schema and the chunk-union identity ──────────────────
 
 def test_extraction_schema_carries_the_counts_and_moved_to_v17():
+    """v18 since 2026-09-05 - RULE 12b (claim evidence) and the hardened
+    `has_workers_comp` definition. The H3 assertions below are what this test
+    is actually for and are unchanged; the version is pinned only so a schema
+    edit cannot slip through without someone bumping it."""
     from services import extraction_service as es
-    assert es.PROMPT_VERSION == "v17" and es.SCHEMA_VERSION == "v17"
+    assert es.PROMPT_VERSION == "v18" and es.SCHEMA_VERSION == "v18"
     assert '"full_time_employees": string or null' in es._EXTRACT_SCHEMA
     assert '"part_time_employees": string or null' in es._EXTRACT_SCHEMA
 

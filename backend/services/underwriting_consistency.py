@@ -112,8 +112,19 @@ _TEXT_SCAN_PATTERNS: Dict[str, List[str]] = {
     ],
     # Building value — building-specific labels only (the word "building" must
     # precede the amount) so a contents/BPP figure can't masquerade as a conflict.
+    #
+    # `\b` ADDED 2026-09-06, and this is the highest-consequence boundary bug in
+    # the codebase: `property_building_value` is the ONLY key in
+    # GENERATION_BLOCKING_RECONCILABLE_KEYS, so a false conflict here does not
+    # warn - it REFUSES TO GENERATE FORMS. Measured on an ordinary property
+    # schedule:
+    #     Building Value:      1,250,000
+    #     Outbuilding Value:      45,000
+    # Without the boundary the second line matches "building value" INSIDE
+    # "Outbuilding", the document appears to state two different building
+    # values, and the submission is held for review over a shed.
     "property_building_value": [
-        r"building\s+(?:value|limit|coverage|replacement\s+cost|amount)\s*[:\-–]?\s*"
+        r"\bbuilding\s+(?:value|limit|coverage|replacement\s+cost|amount)\s*[:\-–]?\s*"
         + _SCAN_SHAPE_CURRENCY,
     ],
     # ── Identity / policy fields (label-anchored; first labelled match wins) ──
@@ -455,6 +466,22 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     "effective_date":   {"label": "Policy Effective Date",     "kind": "identity", "forms": []},
     "expiration_date":  {"label": "Policy Expiration Date",    "kind": "identity", "forms": []},
     "carrier_name":     {"label": "Carrier",                   "kind": "identity", "forms": []},
+    # ── SYS-06: the rest of the client's chain ───────────────────────────────
+    #   Line of Business -> Carrier -> NAIC -> Policy Number -> Effective Date
+    #                    -> Expiration Date -> Source
+    # `carrier_name`, `effective_date` and `expiration_date` were already
+    # curated; `policy_number` and `carrier_naic` reached the picker only
+    # through `ENABLE_FULL_FIELD_RECONCILIATION` auto-discovery, and an
+    # auto-discovered field is DROPPED from the payload the moment its status
+    # is "scoped". So on a healthy four-policy package the producer was shown
+    # nothing at all about policy numbers, and on an unhealthy one a single
+    # package-wide "pick one" list. Curating them makes the SCOPED row - the
+    # per-line mapping the client asked to see - render like every other
+    # curated field. A "consistent" row still renders nowhere (the panel draws
+    # conflict / confirmed / scoped only), so a single-policy package gains no
+    # new noise.
+    "policy_number":    {"label": "Policy Number",             "kind": "identity", "forms": []},
+    "carrier_naic":     {"label": "Carrier NAIC",              "kind": "identity", "forms": []},
     # ── Core underwriting numeric fields (Beta Report §4.3 "and similar fields") ─
     # Reconciled exactly like Gross Sales: cross-document conflicts are flagged
     # for review (non-blocking) with source attribution and a confirmation path,
@@ -806,6 +833,19 @@ def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optiona
         # (including abbreviations) while keeping distinct entities apart.
         # Grouping too finely costs a merge pass; grouping too coarsely cannot
         # be undone.
+        # A RATING BUREAU IS NEVER THE CARRIER (2026-09-05). Dropped here, beside
+        # the machine non-values above, for the same reason they are: it is not
+        # a rival answer, so it must not become a candidate group. The picker
+        # builds its own groups before consulting the comparison door, so the
+        # door's own filter is not reached from here.
+        try:
+            from services.normalization import (
+                is_carrier_field as _is_carrier, is_insurance_bureau as _is_bureau,
+            )
+            if _is_carrier(fact_key or "") and _is_bureau(value):
+                return None
+        except Exception:                                     # noqa: BLE001
+            pass
         try:
             from services.fact_comparison import _fe as _door
             if _door.value_kind(fact_key or "") == _door.KIND_NAME:
@@ -1336,9 +1376,333 @@ def _scope_by_item(fact_key: str, values: List[dict], context) -> bool:
         return False
 
 
+def _printings_by_line(fact_key: str, docs: Optional[List[dict]]) -> Dict[str, set]:
+    """``{canonical line: {every printing any document states for it}}``.
+
+    Read from each document's OWN `coverage_lines`, not the merged list, so it
+    survives a line-scoped confirmation having already rewritten the merged
+    row - which is exactly when it is needed.
+    """
+    out: Dict[str, set] = {}
+    column = _LINE_SCOPED_FACT_COLUMN.get(fact_key)
+    if not column:
+        return out
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                         # noqa: BLE001
+        return out
+    for d in docs or []:
+        for row in (_fv(d.get("facts") or {}, "coverage_lines") or []):
+            if not isinstance(row, dict):
+                continue
+            canon = _canon_line(row.get("line"))
+            val = str(row.get(column) or "").strip()
+            if canon and val:
+                out.setdefault(canon, set()).add(val)
+    return out
+
+
+def _drop_answered_line_candidates(
+        fact_key: str, values: List[dict], scoped_conf: Dict[str, str],
+        docs: Optional[List[dict]]) -> List[dict]:
+    """Remove candidates the producer has already ruled out FOR THEIR LINE.
+
+    SYS-06 / D-W. A line-scoped confirmation rewrites that line's row in
+    `coverage_lines`, but the picker's candidates also come from each
+    DOCUMENT's own facts - so without this the rejected value comes straight
+    back and the producer is asked the same question forever.
+
+    Narrow on purpose. A candidate is dropped only when it is stated on a line
+    the producer has answered AND it disagrees with their answer AND it is
+    stated on no OTHER line. A value that also belongs to an unanswered line is
+    still that line's value and is never removed on another line's behalf.
+    """
+    if not scoped_conf or len(values) < 2:
+        return values
+    by_line = _printings_by_line(fact_key, docs)
+    if not by_line:
+        return values
+    kept: List[dict] = []
+    for g in values:
+        printings = [g.get("display")] + [
+            s.get("raw") for s in (g.get("sources") or [])]
+        on_lines = {ln for ln, vals in by_line.items()
+                    if any(p and any(_door_values_agree(fact_key, p, v) for v in vals)
+                           for p in printings)}
+        answered = {ln for ln in on_lines if ln in scoped_conf}
+        if answered and answered == on_lines and not any(
+                p and _door_values_agree(fact_key, p, scoped_conf[ln])
+                for ln in answered for p in printings):
+            logger.info(
+                "underwriting: %s - dropping %r; the producer confirmed %r for "
+                "%s", fact_key, g.get("display"),
+                scoped_conf[sorted(answered)[0]], ", ".join(sorted(answered)))
+            continue
+        kept.append(g)
+    return kept or values
+
+
+def _restrict_to_conflicted_lines(
+        fact_key: str, values: List[dict], collided: set,
+        docs: Optional[List[dict]]) -> List[dict]:
+    """Offer only the values that are actually stated on the disputed line(s).
+
+    LIVE RUN B, 2026-09-04. A package with two General Liability policies and
+    one clean Auto line asked *"two policies on the same coverage line (general
+    liab) - confirm which applies"* and then listed THREE policy numbers,
+    including the AUTO one - under a button reading **Confirm for general
+    liab**. Picking it would have written the Auto policy number onto the
+    General Liability line: the exact mis-assignment this whole item exists to
+    prevent, offered as a one-click option.
+
+    The client's criterion is *"compare values only within the same line/policy
+    context"*. A value belonging to another line is not in this question's
+    context and must not be a candidate for it.
+
+    Nothing is hidden: every value still appears in "Policies in this
+    submission" against its own line. Refuses to act unless at least two
+    candidates survive, so it can never turn a real conflict into a silent
+    single value.
+    """
+    if not collided or len(values) < 2:
+        return values
+    try:
+        by_line = _printings_by_line(fact_key, docs)
+        if not by_line:
+            return values
+        wanted: set = set()
+        for ln in collided:
+            wanted |= set(by_line.get(ln) or ())
+        if not wanted:
+            return values
+        kept = [
+            g for g in values
+            if any(p and any(_door_values_agree(fact_key, p, w) for w in wanted)
+                   for p in [g.get("display")] + [s.get("raw") for s in (g.get("sources") or [])])
+        ]
+        if len(kept) < 2 or len(kept) == len(values):
+            return values
+        logger.info(
+            "underwriting: %s - %d candidate(s) dropped from the %s question; "
+            "they belong to another coverage line",
+            fact_key, len(values) - len(kept), ", ".join(sorted(collided)))
+        return kept
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: line restriction failed for %s - %s",
+                       fact_key, exc)
+        return values
+
+
+def _composite_children(fact_key: str) -> List[str]:
+    """The scalar facts a composite display fact renders, or [].
+
+    Read from `extraction_service._CURRENCY_COMPOSITE_PARENT` - the table that
+    already declares this relationship for the merge's own reconciliation, so
+    "which facts is this a rendering of?" keeps ONE owner.
+    """
+    try:
+        from services.extraction_service import _CURRENCY_COMPOSITE_CHILDREN
+        return list(_CURRENCY_COMPOSITE_CHILDREN.get(fact_key) or [])
+    except Exception:                                         # noqa: BLE001
+        return []
+
+
+def _composite_is_reconciled_by_its_children(
+        fact_key: str, effective_fields: dict,
+        docs: Optional[List[dict]]) -> bool:
+    """True when this fact is a COMPOSITE whose children this picker assesses.
+
+    Both halves are required. Being a composite is not enough: on a package
+    that states the block and none of its parts, the composite is the only
+    evidence there is and suppressing it would hide a real disagreement.
+    """
+    children = _composite_children(fact_key)
+    if not children:
+        return False
+    for child in children:
+        if child not in effective_fields:
+            continue
+        for d in docs or []:
+            val = _fv(d.get("facts") or {}, child)
+            if val is not None and str(val).strip():
+                return True
+    return False
+
+
+def _line_records(merged_facts: Optional[dict]) -> List[dict]:
+    """The package's (line, contract) records, or []. See
+    ``extraction_service._build_line_records`` - built at merge, read here."""
+    recs = (merged_facts or {}).get("_line_records")
+    return [r for r in recs if isinstance(r, dict)] if isinstance(recs, list) else []
+
+
+def _store_entries(fact_key: str, merged_facts: Optional[dict]) -> List[dict]:
+    """The stored scope entries for ``fact_key``, deriving them when absent.
+
+    A STORE THAT COVERS ONLY SOME OF THE CHAIN IS A HALF-SCOPED PACKAGE, and
+    that is not a hypothetical: `carrier_naic` was invisible to the picker
+    before SYS-06 (nothing wrote it as a scalar, so auto-discovery never saw
+    it). Curating it made a legitimately three-carrier package report a NAIC
+    conflict, purely because the session's store predated the key - the DATA
+    said one NAIC per line the whole time.
+
+    So when the store cannot speak for a fact, the records are rebuilt from
+    `coverage_lines`, which is where the relationship lives anyway. Pure
+    gap-filling: a stored entry is always preferred, so nothing that scopes
+    today can start scoping differently.
+    """
+    stored = ((merged_facts or {}).get("_scoped") or {}).get(fact_key)
+    if stored:
+        return [e for e in stored if isinstance(e, dict)]
+    if fact_key not in _LINE_SCOPED_FACT_COLUMN:
+        return []
+    try:
+        from services.extraction_service import _build_line_records
+        recs = _line_records(merged_facts) or _build_line_records(merged_facts or {})
+        out: List[dict] = []
+        for rec in recs:
+            for val in (rec.get("printings") or {}).get(fact_key, []):
+                out.append({"value": val, "scope": {
+                    "line": rec.get("line"),
+                    "line_printed": rec.get("line_printed"),
+                    "policy_number": rec.get("policy_number"),
+                    "record": rec.get("id"),
+                }})
+        if out:
+            logger.info(
+                "underwriting: %s - scope derived from %d line record(s); the "
+                "stored scope predates this fact", fact_key, len(recs))
+        return out
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: could not derive scope for %s - %s",
+                       fact_key, exc)
+        return []
+
+
+def _line_records_for(fact_key: str, merged_facts: Optional[dict]) -> List[dict]:
+    """The client's chain, for the rows that state THIS fact.
+
+        Line of Business -> Carrier -> NAIC -> Policy Number
+                         -> Effective Date -> Expiration Date -> Source
+
+    Emitted on a line-scoped field so the producer can see the mapping rather
+    than infer it from a list of values, and so the E&O export carries the
+    relationship rather than a flat set of scalars. Read-only projection of
+    the store; contains no decision.
+    """
+    if fact_key not in LINE_SCOPED_FACT_KEYS:
+        return []
+    out: List[dict] = []
+    for rec in _line_records(merged_facts):
+        out.append({
+            "line":            rec.get("line"),
+            "line_printed":    rec.get("line_printed"),
+            "carrier_name":    rec.get("carrier_name"),
+            "carrier_naic":    rec.get("carrier_naic"),
+            "policy_number":   rec.get("policy_number"),
+            "effective_date":  rec.get("effective_date"),
+            "expiration_date": rec.get("expiration_date"),
+            "sources":         list(rec.get("sources") or []),
+        })
+    return out
+
+
+def _scope_of_group(fact_key: str, group: dict, store: List[dict]) -> tuple:
+    """``(record_ids, lines)`` this value group is stated on.
+
+    THE TWO SETS ARE NOT INTERCHANGEABLE, and conflating them silently folded
+    two real carriers on one line into a single candidate (caught by
+    `test_two_carriers_on_the_SAME_line_is_still_a_conflict`, which builds the
+    pre-SYS-06 store shape by hand).
+
+      * ``lines``   - always available, including on a legacy store.
+      * ``record_ids`` - ONLY from an entry that actually carries one. A store
+        written before SYS-06 has no record ids, and absence is not evidence
+        that two values share a contract (Principle 3). A group with no record
+        id can therefore never be merged, and the legacy behaviour stands.
+    """
+    printings = [group.get("display")] + [
+        s.get("raw") for s in (group.get("sources") or [])]
+    records: set = set()
+    lines: set = set()
+    for rec in store or []:
+        if not isinstance(rec, dict):
+            continue
+        if any(p and _door_values_agree(fact_key, p, rec.get("value"))
+               for p in printings):
+            scope = rec.get("scope") or {}
+            ln = scope.get("line")
+            if ln:
+                lines.add(ln)
+            rid = scope.get("record")
+            if rid:
+                records.add(rid)
+    return records, lines
+
+
+def _merge_by_line_record(fact_key: str, values: List[dict],
+                          merged_facts: Optional[dict]) -> List[dict]:
+    """Fold groups the LINE RECORD store proves are ONE contract's one fact.
+
+    SYS-06. The pure value comparator deliberately refuses to merge
+    ``BBC7263`` into ``BBC7263 - 26``: proving they are one contract needs the
+    package, and `fact_equivalence`'s identifier branch says so in as many
+    words. The package is exactly what the line-record store holds, so the
+    proof happens here instead of loosening the pure test.
+
+    THE AMBIGUITY GUARD, same shape as `equivalent_index`'s: the two groups'
+    record sets must be EQUAL and non-empty. Overlapping-but-different sets are
+    not proof - they are a value that cannot be placed, and it stays put.
+
+    Only ever MERGES, so it cannot manufacture a conflict; any failure returns
+    the input untouched.
+    """
+    if len(values) < 2 or fact_key not in LINE_SCOPED_FACT_KEYS:
+        return values
+    try:
+        store = _store_entries(fact_key, merged_facts)
+        if not store:
+            return values
+        keys = [frozenset(_scope_of_group(fact_key, g, store)[0]) for g in values]
+        out: List[dict] = []
+        taken: Dict[frozenset, dict] = {}
+        for g, k in zip(values, keys):
+            if not k:
+                # No record id: a legacy store, or a value the records cannot
+                # place. Either way there is no PROOF of a shared contract, so
+                # the group stands exactly as it does today.
+                out.append(g)
+                continue
+            keeper = taken.get(k)
+            if keeper is None:
+                keeper = dict(g)
+                keeper["sources"] = list(g.get("sources") or [])
+                taken[k] = keeper
+                out.append(keeper)
+                continue
+            # One contract, two printings. Keep the fuller one and every source.
+            for s in (g.get("sources") or []):
+                if s not in keeper["sources"]:
+                    keeper["sources"].append(s)
+            if _value_completeness(fact_key, "identity", str(g.get("display"))) > \
+                    _value_completeness(fact_key, "identity", str(keeper.get("display"))):
+                keeper["display"] = g.get("display")
+                keeper["normalized"] = g.get("normalized")
+        if len(out) < len(values):
+            logger.info(
+                "underwriting: %s - %d printing(s) folded into their own "
+                "line/policy record (%d remain); one policy printed two ways "
+                "is one policy", fact_key, len(values) - len(out), len(out))
+        return out or values
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: line-record merge failed for %s - %s",
+                       fact_key, exc)
+        return values
+
+
 def _scope_from_store(fact_key: str, values: List[dict],
                       merged_facts: Optional[dict]) -> tuple:
-    """(scoped, reason) decided from the STORED scope, not from spelling.
+    """(scoped, reason, collided_lines) from the STORED scope, not from spelling.
 
     C1b / D19. `facts["_scoped"]` carries each line-scoped fact WITH the
     coverage line and policy it belongs to, written once at merge while the
@@ -1357,42 +1721,94 @@ def _scope_from_store(fact_key: str, values: List[dict],
     ``(False, None)`` and the caller behaves exactly as it did before C1b.
     """
     if len(values) < 2 or not isinstance(merged_facts, dict):
-        return False, None
+        return False, None, set()
     try:
-        store = (merged_facts.get("_scoped") or {}).get(fact_key)
+        store = _store_entries(fact_key, merged_facts)
         if not store:
-            return False, None
-        # value -> the lines that value is stated on, matched through the ONE
-        # comparison door so a spelling variant still finds its scope.
+            return False, None, set()
+        # value -> the (line, contract) RECORDS that value is stated on,
+        # matched through the ONE comparison door so a spelling variant still
+        # finds its scope.
+        #
+        # ── SYS-06: THE UNIT IS THE RECORD, NOT THE LINE ────────────────────
+        # The client's criterion is *"compare values only within the same
+        # line/policy context"*. Comparing within the LINE alone was not the
+        # same thing, and the difference was the whole defect: the dec page's
+        # `BBC7263 - 26` and the certificate's `BBC7263` are ONE General
+        # Liability policy printed two ways, so they share a RECORD - but as
+        # bare line members they looked like two policies on one line and the
+        # field was reported as a conflict on a package where nothing was
+        # wrong. Groups that share a record are printings of one contract's one
+        # fact; they can never be rivals.
+        recs_for: List[set] = []
         lines_for: List[set] = []
         for g in values:
-            printings = [g.get("display")] + [s.get("raw") for s in (g.get("sources") or [])]
-            found: set = set()
-            for rec in store:
-                if any(p and _door_values_agree(fact_key, p, rec.get("value"))
-                       for p in printings):
-                    ln = (rec.get("scope") or {}).get("line")
-                    if ln:
-                        found.add(ln)
-            lines_for.append(found)
-        if not all(lines_for):
-            return False, None                    # something is unplaceable
-        for i in range(len(lines_for)):
-            for j in range(i + 1, len(lines_for)):
-                if lines_for[i] & lines_for[j]:
-                    return False, ("two policies on the same coverage line in one "
-                                   "submission - confirm which applies")
+            r, l = _scope_of_group(fact_key, g, store)
+            recs_for.append(r)
+            lines_for.append(l)
+        # ── ONE UNPLACEABLE VALUE MUST NOT UNSCOPE THE WHOLE FIELD ──────────
+        # STRESS TEST, 2026-09-04. The all-or-nothing gate that used to live
+        # here handed the entire field to `_scope_values`, the LEGACY path that
+        # attributes a value by its own CHARACTERS. Two measured consequences on
+        # shapes the client's real package actually carried:
+        #
+        #   * an ISO form number in `coverage_lines` -> the field still reported
+        #     "scoped", but every chip printed a POLICY-NUMBER TOKEN instead of
+        #     a coverage line ("bbc7263 / bbc726326"), and the form number was
+        #     listed as a fifth policy;
+        #   * a package-level `policy_number` scalar no line states -> the
+        #     equivalence pass then folded four real policies into ONE candidate
+        #     and asked the producer to choose between it and a scalar. Confirm
+        #     the wrong one and the package scalar becomes the GL box's value -
+        #     the client's original complaint, reproduced.
+        #
+        # So the store's knowledge is used for what it CAN place. A value it
+        # cannot place is not evidence against the values it can.
+        placed = [i for i, l in enumerate(lines_for) if l]
+        if not placed:
+            return False, None, set()             # no evidence at all - legacy path
+        unplaced = [i for i, l in enumerate(lines_for) if not l]
+        collided: set = set()
+        for i in placed:
+            for j in placed:
+                if j <= i:
+                    continue
+                if recs_for[i] and recs_for[j] and (recs_for[i] & recs_for[j]):
+                    # Same contract, two printings - not a disagreement, and
+                    # never a reason to refuse the whole field. Requires a
+                    # record id on BOTH sides: on a legacy store there is none,
+                    # and a shared line then means what it always meant.
+                    continue
+                collided |= (lines_for[i] & lines_for[j])
+        if collided:
+            # A genuine second policy on one coverage line (defect D-1, and the
+            # client's own review rule). Name the line so the producer knows
+            # which one to look at instead of being handed the whole package.
+            pretty = ", ".join(sorted(l.replace("_", " ") for l in collided))
+            return False, (f"two policies on the same coverage line ({pretty}) "
+                           "in one submission - confirm which applies"), collided
         for g, own in zip(values, lines_for):
-            g["scope"] = sorted(own)
+            g["scope"] = sorted(own)              # [] when the store cannot place it
+        if len(unplaced) >= 2:
+            # Two or more values competing for a slot nothing can identify is
+            # still a real question - but it is a question about THEM, not
+            # about the lines the store placed correctly.
+            logger.info(
+                "underwriting: %s - %d value(s) scoped to their line; %d could "
+                "not be placed and remain the question",
+                fact_key, len(placed), len(unplaced))
+            return False, ("these values could not be matched to a coverage "
+                           "line - confirm which applies"), set()
         logger.info(
             "underwriting: %s - %d value(s) retained under their own STORED "
-            "line scope (%s); not a conflict", fact_key, len(values),
-            ", ".join(sorted({l for s_ in lines_for for l in s_})))
-        return True, None
+            "line/policy scope (%s)%s; not a conflict", fact_key, len(placed),
+            ", ".join(sorted({l for s_ in lines_for for l in s_})),
+            f"; {len(unplaced)} shown without a line" if unplaced else "")
+        return True, None, set()
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("underwriting: stored-scope check failed for %s - %s",
                        fact_key, exc)
-        return False, None
+        return False, None, set()
 
 
 def _door_values_agree(fact_key: str, a, b) -> bool:
@@ -1492,6 +1908,20 @@ def _conflict_reason(fact_key: str, kind: str, values: List[dict]) -> str:
     return "materially different values remain after normalization and scope matching"
 
 
+def unevidenced_boolean_negative(fact_key: str, value: Any) -> bool:
+    """A two-way boolean's `false` is silence, not a No - see the definition in
+    `extraction_service`, which owns the two declaration sets it reads. Re-
+    exported here because this module is where it is applied, and both the
+    picker and the merge must ask ONE function."""
+    try:
+        from services.extraction_service import (
+            unevidenced_boolean_negative as _door,
+        )
+        return _door(fact_key, value)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
     """Fact keys eligible for generic cross-document reconciliation.
 
@@ -1500,6 +1930,10 @@ def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
     key. Determined from the actual values, so it needs no static schema and
     never trips over list/structured facts - those cannot use a two-value picker
     and are intentionally left to the existing detectors.
+
+    A two-way boolean's ``false`` does not make a key eligible either - see
+    ``unevidenced_boolean_negative``. A key whose ONLY appearance is such a
+    value never opens a picker row at all.
     """
     keys: set = set()
     for d in docs or []:
@@ -1511,6 +1945,8 @@ def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
                 continue
             val = v["value"] if isinstance(v, dict) and "value" in v else v
             if val is None or isinstance(val, (list, dict, bool)):
+                continue
+            if unevidenced_boolean_negative(k, val):
                 continue
             keys.add(k)
     return keys
@@ -1658,6 +2094,15 @@ def assess_underwriting_consistency(
             if not _door_witnesses(dt, fact_key):
                 continue
             raw = _fv(d.get("facts") or {}, fact_key)
+            # A TWO-WAY boolean's `false` is silence, not a rival answer. Owner
+            # ruling, live run 1: "if any document indicates yes or no and there
+            # is nothing related mentioned in another doc then take yes/no from
+            # that doc, but if there is a conflict then show". This is the half
+            # that decides what counts as "nothing mentioned" - see
+            # `unevidenced_boolean_negative`. A tri-state fact keeps both
+            # answers and still conflicts.
+            if raw is not None and unevidenced_boolean_negative(fact_key, raw):
+                continue
             llm_norm = None
             if raw is not None:
                 llm_norm = _normalize(raw, kind, fact_key)
@@ -1772,7 +2217,30 @@ def assess_underwriting_consistency(
         # lacks), the group is RE-SPLIT on the strict key so the conflict
         # surfaces and the client is asked - "unresolved conflicts must remain
         # unresolved". Formatting/truncation/suffixless variants stay merged.
-        if kind == "identity" and len(groups) == 1:
+        # WIDENED FOR V1 H5 - the `len(groups) == 1` gate this used to carry was
+        # the client's ACORD 25 multi-carrier complaint, one layer down.
+        # `normalize_carrier` is a FAMILY key, so on the Orbin package it sorted
+        # the same three printings like this:
+        #
+        #     EMC Property & Casualty Company    -> "emc"        <- two REAL
+        #     Employers Mutual Casualty Company  -> "emc"        <- carriers, ONE group
+        #     Employers Mutual Casualty Co       -> "employers"  <- one carrier, split off
+        #
+        # Two groups, so the re-split never ran, and the fused "emc" candidate
+        # then carried printings belonging to BOTH the General Liability line and
+        # the Auto/Umbrella lines. `_scope_from_store` saw one value straddling
+        # two coverage lines, called it "two policies on the same coverage line"
+        # and raised a conflict on a package where nothing was wrong - the
+        # client's literal report, "two legitimate carriers were treated as a
+        # Data Consistency problem merely because both names appeared".
+        #
+        # Re-keying on the strict entity key fixes BOTH directions at once: the
+        # fused group comes apart, and the two printings of Employers Mutual
+        # come back together. It cannot manufacture a conflict, because
+        # `_merge_equivalent_value_groups` runs immediately below and re-folds
+        # every genuine formatting/truncation variant; what it separates is only
+        # what `entities_materially_differ` says are different legal entities.
+        if kind == "identity" and groups:
             try:
                 # The sameness decision comes from the ONE DOOR (D3); only the
                 # key builder and the field tables come from `normalization`.
@@ -1800,6 +2268,14 @@ def assess_underwriting_consistency(
                                     sk, {"normalized": sk,
                                          "display": s["raw"], "sources": []})
                                 ng["sources"].append(s)
+                                # Keep the fullest printing as the display, the
+                                # same rule the grouping passes above apply.
+                                # Two printings of one insurer now land in one
+                                # group, and "Casualty Company" is the name the
+                                # producer should be shown, not "Casualty Co".
+                                if _value_completeness(fact_key, kind, s["raw"]) > \
+                                        _value_completeness(fact_key, kind, ng["display"]):
+                                    ng["display"] = s["raw"]
                         groups = _regrouped
                         logger.info(
                             "underwriting: %s promoted to conflict - the "
@@ -1864,7 +2340,36 @@ def assess_underwriting_consistency(
         # character-keyed path cannot (a carrier printed two ways). The legacy
         # path still runs when the store cannot place every group, which is
         # every pre-C1b session and any package with no `coverage_lines`.
-        scoped, conflict_reason = _scope_from_store(fact_key, values, merged_facts)
+        # SYS-06: one policy printed two ways is one policy. Runs BEFORE the
+        # scope decision because two printings of one contract would otherwise
+        # look like two policies on one coverage line - the client's literal
+        # report. Merge-only, so it can never hide a disagreement.
+        values = _merge_by_line_record(fact_key, values, merged_facts)
+        # A question the producer has already answered FOR ITS LINE is not
+        # asked again (SYS-06 "apply it only to the applicable line or lines").
+        scoped_conf = {
+            sc: str(v) for k, v in confirmations.items()
+            for _fk, sc in [parse_confirmation_key(k)]
+            if _fk == fact_key and sc and v is not None
+        }
+        if scoped_conf:
+            values = _drop_answered_line_candidates(
+                fact_key, values, scoped_conf, docs)
+        scoped, conflict_reason, collided_lines = _scope_from_store(
+            fact_key, values, merged_facts)
+        # A question about ONE coverage line may only offer THAT line's values.
+        # Live run B: a "Confirm for general liab" button listed the Auto policy
+        # number as a choice.
+        if collided_lines:
+            values = _restrict_to_conflicted_lines(
+                fact_key, values, collided_lines, docs)
+        elif conflict_reason and any(v.get("scope") == [] for v in values):
+            # The store placed some values and could not place others. Only the
+            # unplaceable ones are in question; the placed ones keep their line
+            # and must not be offered as answers to it.
+            _unplaced = [v for v in values if v.get("scope") == []]
+            if len(_unplaced) >= 2:
+                values = _unplaced
         if not scoped and conflict_reason is None:
             scoped, conflict_reason = _scope_values(fact_key, values, eq_context)
 
@@ -1903,6 +2408,38 @@ def assess_underwriting_consistency(
         # listed. Curated fields keep their existing behavior (consistent rows
         # are still emitted, unchanged).
         if is_auto and status in ("consistent", "scoped"):
+            continue
+
+        # ── A COMPOSITE IS A WITNESS, NOT A RIVAL ANSWER (Principle 2) ──────
+        # Live run A: the dec page's `gl_limits` came back "$1,000,000 /
+        # $2,000,000" and the certificate's "$1,000,000 Each Occurrence", and
+        # the producer was told *"the documents state different amounts"*.
+        # They do not. They agree on every amount BOTH state; one simply also
+        # states the aggregate. Principle 2 names it: *"differing levels of
+        # specificity should be normalized before deciding that two values
+        # conflict."*
+        #
+        # The comparator is not wrong to refuse - an UNLABELLED single amount
+        # against a composite really is ambiguous, and
+        # `test_a_composite_amount_is_never_flattened` guards that. The QUESTION
+        # is wrong. `gl_limits` is a rendering of four scalars
+        # (`_CURRENCY_COMPOSITE_PARENT`), every one of which this picker
+        # reconciles on its own. Asking a producer to choose between two
+        # printings of the block is not a fact question, and whichever they
+        # confirm REPLACES the other - a certificate's one row would overwrite
+        # the dec page's six limits.
+        #
+        # POSITIVE EVIDENCE ONLY: suppressed solely when the package actually
+        # carries a child this picker can assess, so nothing is ever silenced
+        # without a better question already on screen in its place.
+        if status == "conflict" and _composite_is_reconciled_by_its_children(
+                fact_key, effective_fields, docs):
+            logger.info(
+                "underwriting: %s not asked - it renders %s, which are "
+                "reconciled on their own (a composite is a witness, not a "
+                "rival answer)", fact_key,
+                ", ".join(_composite_children(fact_key)))
+            conflict_count -= 1
             continue
 
         # Figure 3: recommend the most complete/correct value + a confidence level.
@@ -1952,6 +2489,13 @@ def assess_underwriting_consistency(
                 fact_key, len(eq_context.contracts))
 
         fields_out.append({
+            # SYS-06: WHICH coverage line(s) this question is about, so a
+            # confirmation can be applied to that line instead of the whole
+            # submission. Empty when the disagreement is not line-specific -
+            # the confirm then behaves exactly as it always has.
+            "conflict_scope":   sorted(collided_lines) if status == "conflict" else [],
+            "confirmed_scopes": dict(scoped_conf),
+            "line_records":     _line_records_for(fact_key, merged_facts),
             "narrative_note":  narrative_note,
             "blocking_downgraded": blocking_downgraded,
             "fact_key":        fact_key,
@@ -2045,6 +2589,165 @@ def _resolve_reconcilable_cfg(fact_key: str, docs: Optional[List[dict]] = None) 
     return None
 
 
+SCOPED_CONFIRM_SEPARATOR = "@"
+
+
+def scoped_confirmation_key(fact_key: str, scope: Optional[str]) -> str:
+    """The confirmations-map key for a value confirmed FOR ONE COVERAGE LINE.
+
+    SYS-06: *"When the producer confirms a mapping, apply it only to the
+    applicable line or lines."* A package-wide confirmation keeps its bare
+    ``fact_key`` - so every stored confirmation written before this change
+    still means exactly what it meant - and a line-scoped one is namespaced
+    ``policy_number@general_liab``.
+
+    Everything that iterates the map already skips a key it cannot resolve to
+    a reconcilable field, so the namespaced entry is inert to every existing
+    reader. That is the whole reason for encoding it in the key rather than
+    changing the map's value shape, which would have had to be understood by
+    the audit writer, the pipeline and five call sites at once.
+    """
+    s = str(scope or "").strip()
+    return f"{fact_key}{SCOPED_CONFIRM_SEPARATOR}{s}" if s else fact_key
+
+
+def parse_confirmation_key(key: Any) -> Tuple[str, Optional[str]]:
+    """``("policy_number@auto")`` -> ``("policy_number", "auto")``."""
+    s = str(key or "")
+    if SCOPED_CONFIRM_SEPARATOR not in s:
+        return s, None
+    fact_key, _, scope = s.partition(SCOPED_CONFIRM_SEPARATOR)
+    return fact_key, (scope.strip() or None)
+
+
+def _pair_naic_with_its_carrier(
+        rows: List[Any], scoped: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    """A carrier and its NAIC move as a MATCHED PAIR, or not at all.
+
+    THE CLIENT'S OWN RULE, and a defect this codebase has already paid for once:
+    *"Carrier name and NAIC should move through the system as a matched pair."*
+    RC1 (2026-08-15) recorded `Employers Mutual Casualty Company` acquiring
+    `EMC Property & Casualty`'s NAIC 25186 - *"a pair no document ever printed"*.
+
+    The line-scoped confirm path reopened it. The producer answers three
+    separate cards, so confirming carrier = `Redwood Basin` for General
+    Liability while picking `36161` (Trinity Ridge's NAIC) on the NAIC card
+    writes both onto the GL row and prints a company beside an identifier that
+    belongs to a different company - on a signed application.
+
+    So the confirmed CARRIER decides. Its NAIC is read from the rows that
+    actually state that carrier on that line, and a contradicting NAIC answer
+    is overridden rather than stamped.
+
+    POSITIVE EVIDENCE ONLY. The pair is set only when the document states
+    exactly ONE NAIC for the confirmed carrier on that line; a typed-in carrier
+    the document does not name, or two NAICs for one carrier, leaves the NAIC
+    untouched - blank or stale is recoverable, a wrong pair is not.
+    """
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                         # noqa: BLE001
+        return scoped
+    carriers = {sc: val for fk, sc, val in scoped if fk == "carrier_name"}
+    if not carriers:
+        return scoped
+    out = [e for e in scoped if e[0] != "carrier_naic" or e[1] not in carriers]
+    for line, carrier in carriers.items():
+        found: set = set()
+        for row in rows:
+            if not isinstance(row, dict) or _canon_line(row.get("line")) != line:
+                continue
+            if not _door_values_agree("carrier_name", row.get("carrier"), carrier):
+                continue
+            naic = str(row.get("naic") or "").strip()
+            if naic:
+                found.add(naic)
+        dropped = next((v for fk, sc, v in scoped
+                        if fk == "carrier_naic" and sc == line), None)
+        if len(found) == 1:
+            naic = next(iter(found))
+            out.append(("carrier_naic", line, naic))
+            if dropped and dropped != naic:
+                logger.warning(
+                    "underwriting: NAIC %r was answered for %s but %r is the "
+                    "NAIC the documents print for %r - stamping the matched "
+                    "pair, not the answer", dropped, line, naic, carrier)
+        elif dropped is not None:
+            # Cannot establish the pair. Refuse to stamp an NAIC that the
+            # confirmed carrier may not own; the box stays as the documents
+            # left it.
+            logger.warning(
+                "underwriting: NAIC %r for %s is not applied - the documents "
+                "do not pair it with the confirmed carrier %r (%d candidate "
+                "NAICs)", dropped, line, carrier, len(found))
+    return out
+
+
+def _apply_scoped_confirmations(out: dict, scoped: List[Tuple[str, str, str]]) -> bool:
+    """Write each line-scoped confirmation onto ITS OWN `coverage_lines` rows.
+
+    THE FORMS NEED NO CHANGE, and that is the point. Every per-line stamper -
+    `_resolve_section_policy_identity`, `_resolve_current_policy_line_cell`,
+    `_section_carrier_pair` - already reads this line's own row. Writing the
+    producer's answer into the row it belongs to means "populate the
+    corresponding forms from that line-specific record" is satisfied by the
+    machinery that already exists, instead of by a second stamping path.
+
+    Rows are COPIED before mutation: `merged_facts` is shallow-copied by the
+    caller, so editing a row in place would reach back into the session's
+    stored facts and silently rewrite history.
+    """
+    if not scoped:
+        return False
+    rows = out.get("coverage_lines")
+    if not isinstance(rows, list) or not rows:
+        return False
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                         # noqa: BLE001
+        return False
+    column = _LINE_SCOPED_FACT_COLUMN
+    scoped = _pair_naic_with_its_carrier(rows, scoped)
+    changed = False
+    new_rows: List[Any] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            new_rows.append(row)
+            continue
+        canon = _canon_line(row.get("line"))
+        edit = {fk: val for fk, sc, val in scoped
+                if canon and sc == canon and fk in column}
+        if not edit:
+            new_rows.append(row)
+            continue
+        copy = dict(row)
+        for fk, val in edit.items():
+            copy[column[fk]] = val
+        new_rows.append(copy)
+        changed = True
+        logger.info(
+            "underwriting: line-scoped confirmation applied to the %s row - %s",
+            canon, {column[k]: v for k, v in edit.items()})
+    if changed:
+        # Rewriting two rival rows of one line to the producer's answer can
+        # leave two rows that are now byte-identical. Only an EXACT duplicate
+        # is dropped - two rows still differing in premium, limit or anything
+        # else are both kept, because deciding which of those to discard is
+        # not what the producer was asked (Principle 4 / "preserve the
+        # information").
+        seen: List[Any] = []
+        deduped: List[Any] = []
+        for row in new_rows:
+            if isinstance(row, dict):
+                key = sorted((k, str(v)) for k, v in row.items())
+                if key in seen:
+                    continue
+                seen.append(key)
+            deduped.append(row)
+        out["coverage_lines"] = deduped
+    return changed
+
+
 def apply_confirmations(merged_facts: dict, confirmations: Optional[dict], docs: Optional[List[dict]] = None) -> dict:
     """Return a copy of ``merged_facts`` with every confirmed value applied.
 
@@ -2062,7 +2765,38 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict], docs:
     if not confirmations:
         return merged_facts
     out = dict(merged_facts or {})
+    # SYS-06: line-scoped answers first. They never touch the package scalar -
+    # confirming the Auto policy number must not make it the submission's
+    # policy number, which is the client's "do not default a confirmed value to
+    # the GL package policy".
+    scoped_edits: List[Tuple[str, str, str]] = []
+    for key, raw in confirmations.items():
+        fk, scope = parse_confirmation_key(key)
+        if not scope or raw is None:
+            continue
+        if _resolve_reconcilable_cfg(fk, docs) is None:
+            continue
+        if fk not in _LINE_SCOPED_FACT_COLUMN:
+            # Only a fact that legitimately has ONE VALUE PER LINE may be
+            # confirmed per line. Anything else scoped would invent a
+            # relationship the package does not have.
+            logger.warning(
+                "underwriting: ignoring line-scoped confirmation for %s - it is "
+                "not a line-scoped fact", fk)
+            continue
+        scoped_edits.append((fk, scope, str(raw)))
+    if _apply_scoped_confirmations(out, scoped_edits):
+        # The line records and `_scoped` are DERIVED from `coverage_lines`, so
+        # they must be rebuilt or the picker would keep comparing against the
+        # values the producer just corrected.
+        try:
+            from services.extraction_service import _build_scoped_fact_store
+            _build_scoped_fact_store(out, docs)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning("underwriting: scope store rebuild skipped - %s", exc)
     for fact_key, raw in confirmations.items():
+        if SCOPED_CONFIRM_SEPARATOR in str(fact_key):
+            continue                       # handled above; never a package scalar
         cfg = _resolve_reconcilable_cfg(fact_key, docs)
         if cfg is None or raw is None:
             continue
@@ -2118,6 +2852,17 @@ def validate_confirmation(fact_key: str, value: Any, docs: Optional[List[dict]] 
         norm = _normalize_text(value)
     if not norm:
         raise ValueError("underwriting_invalid_value")
+    # A confirmed Yes/No is stored in ITS canonical printing (SYS-07). The
+    # producer confirming the certificate's "X" is confirming the answer, not
+    # the mark - and this value is what gets stamped onto every form.
+    try:
+        from services.normalization import is_yes_no_field, canonical_yes_no
+        if is_yes_no_field(fact_key):
+            canon = canonical_yes_no(value)
+            if canon:
+                return canon
+    except Exception:                                        # noqa: BLE001
+        pass
     return str(value).strip()
 
 

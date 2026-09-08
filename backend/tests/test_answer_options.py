@@ -33,16 +33,50 @@ def test_the_catalogue_is_not_empty():
 
 
 @pytest.mark.parametrize("fact", catalogued_facts())
-def test_every_option_round_trips_as_its_own_value(fact):
-    """THE guard. A chosen option must be stored exactly as offered - never
-    re-read as an absence ("No - all officers are included") or as a
-    non-answer ("Not stated - underwriter review recommended")."""
+def test_every_option_round_trips_as_a_value_the_fact_can_hold(fact):
+    """THE guard. A chosen option must be ACCEPTED as an answer - never re-read
+    as a non-answer ("Not stated - underwriter review recommended") and never
+    re-read as an absence when the fact can actually hold it ("No - all officers
+    are included" is the answer, not a blank).
+
+    REWRITTEN 2026-09-08. It used to assert `r.value == opt` - that the label is
+    stored verbatim. That premise was the BUG-06b defect: the label is not
+    canonical, the fact's own `validate` in FACT_REGISTRY is, and extraction
+    already writes that shape (`"valuation_method": "RCV"|"ACV"|null`). Storing
+    the label meant the fact's own validator then refused it at the door, so
+    fire_protection_class, period_of_restoration, sprinkler_system,
+    valuation_method and wc_xmod offered dropdowns where EVERY choice was
+    rejected and the card could not be resolved at all.
+
+    So the guard now asserts the property that actually matters - a chosen
+    option becomes a value the fact accepts - and keeps the original
+    never-a-non-answer rule intact.
+    """
+    from services.answer_semantics import ABSENCE, NOT_APPLICABLE
+    from services.fact_registry import FACT_REGISTRY
+
+    checker = (FACT_REGISTRY.get(fact) or {}).get("validate")
     for opt in options_for(fact):
         if opt == OTHER:
             continue
         r = interpret_answer(fact, opt)
+        assert r.accepted, f"{fact}: {opt!r} was not accepted as an answer ({r.reason})"
+        if r.intent in (ABSENCE, NOT_APPLICABLE):
+            # Legitimate ONLY when the fact declares a shape this option cannot
+            # take - wc_xmod is a decimal and two of its options exist to say
+            # the modifier does not exist. Never an escape hatch for a fact that
+            # could have held the value.
+            assert callable(checker) and not checker(opt), (
+                f"{fact}: {opt!r} was read as {r.intent} but the fact could "
+                f"have held it - that is the absence bug this guard exists for")
+            continue
         assert r.intent == VALUE, f"{fact}: {opt!r} -> {r.intent} ({r.reason})"
-        assert r.value == opt, f"{fact}: {opt!r} stored as {r.value!r}"
+        if callable(checker):
+            assert checker(r.value), (
+                f"{fact}: {opt!r} stored as {r.value!r}, which its own "
+                f"validator refuses - the door will reject it")
+        else:
+            assert r.value == opt, f"{fact}: {opt!r} stored as {r.value!r}"
 
 
 @pytest.mark.parametrize("fact", catalogued_facts())

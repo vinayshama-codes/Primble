@@ -91,9 +91,15 @@ CLUSTER_MAP: Dict[str, str] = {
     "wc_subcontracting_payroll_conflict": "WC payroll reconciliation",
     "wc_multi_state_no_breakdown": "WC payroll reconciliation",
     "wc_state_payroll_total_mismatch": "WC payroll reconciliation",
-    # WC/GL class codes
+    # Class codes. SYS-04 (2026-09-05): a GL-only finding must NOT render under a
+    # heading naming Workers Comp - the client's criterion is that a line not in
+    # the submission generates no WC language, and a cluster TITLE is language.
+    # Live run: a GL+Property contractor with no WC saw "WC / GL class code
+    # alignment" over a single item reading "GL coverage detected but no class
+    # codes found". `wc_gl_class_code_mismatch` genuinely compares the two and
+    # keeps naming both.
     "wc_gl_class_code_mismatch": "WC / GL class code alignment",
-    "gl_codes_no_operations": "WC / GL class code alignment",
+    "gl_codes_no_operations": "GL class code alignment",
     # Contractor / subcontracting
     "contractor_missing_acord186": "Contractor exposure (ACORD 186)",
     "acord186_high_sub_high_wc_payroll": "Contractor exposure (ACORD 186)",
@@ -140,6 +146,13 @@ CLUSTER_MAP: Dict[str, str] = {
     "legal_name_equals_dba": "Identity data quality",
     # Narrative
     "acord101_required": "Narrative requirement (ACORD 101)",
+    # Coverage terminology / data consistency (2026-09-03). Both were falling
+    # into DEFAULT_CLUSTER, which put an advice-only terminology note and a
+    # pillar-capping loss conflict in ONE cluster headed "Other validations" -
+    # so neither read as what it is, and the cluster could not carry the
+    # "does not affect your score" note because its members disagreed.
+    "unmapped_coverage_line": "Coverage terminology not recognised",
+    "loss_history_attestation_conflict": "Loss history conflict",
 }
 
 # code -> tier, consulted ONLY when the issue's effective severity is not
@@ -198,6 +211,10 @@ TIER_MAP: Dict[str, str] = {
     "acv_high_value_building": "binder_followup",
     "rcv_old_building": "binder_followup",
     "legal_name_equals_dba": "binder_followup",
+    # Advice only, and nothing can be typed to clear it - the lowest tier is
+    # where it belongs, so it stops displacing a real Required/Recommended item
+    # from the IMPORTANT band (that promotion skips binder_followup by design).
+    "unmapped_coverage_line": "binder_followup",
 }
 
 # ── Inline resolution (SQS panel: "Open" a validation and fix it in place) ────
@@ -273,14 +290,36 @@ def _r_schedule(schedule_key: str) -> dict:
 _R_NARRATIVE = {"mode": "narrative"}
 _R_NONE = {"mode": "none"}
 
+
+def _r_review(note: str) -> dict:
+    """A 'none'-mode resolution carrying a CONTEXT-SPECIFIC review note. mode
+    'none' renders no functional value input (nothing is auto-applied) - the
+    `note` just replaces the generic "needs a coverage/form change" hint with
+    wording that fits WHY this particular item can't be typed (client #4: a
+    cross-document conflict on a nested sub-field is reconciled on the form, not
+    by a picker/typed value, so it must say that instead of looking skipped)."""
+    return {"mode": "none", "note": note}
+
 RESOLUTION_MAP: Dict[str, dict] = {
     # ── Property COPE ──
     "minimum_viable_cope_missing": _r_field(
         "occupancy_type", "construction_type",
         "property_building_value", "property_bpp_value",
     ),
+    # Six facts, not the four this rule's own MESSAGE names, because its legacy
+    # twin is suppressed below and the twin's modal was the only place the
+    # producer could type `coinsurance_percentage` at all. Measured 2026-09-08:
+    # with coinsurance the sole missing COPE item, `evaluate_stops` emits ONLY
+    # "Carrier-Grade COPE incomplete" - there is no dedicated coinsurance card
+    # the way there is for valuation method - so suppressing the twin without
+    # widening this first would have deleted that fix path outright.
+    # A resolution descriptor is UI only (the modal reads it, and audit_routes'
+    # trade-off note reads it for wording); no scorer reads it, so offering two
+    # extra boxes moves nothing. The modal already prints "Provide the correct
+    # value for whichever applies - you don't have to fill every field."
     "carrier_grade_cope_incomplete": _r_field(
         "year_built", "roof_year", "sprinkler_system", "fire_protection_class",
+        "valuation_method", "coinsurance_percentage",
     ),
     "per_location_cope_incomplete": _r_schedule("property_locations"),
     # ── Property deductibles ──
@@ -399,6 +438,34 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "legal_name_equals_dba": _r_field("dba_name"),
     # ── Narrative requirement ──
     "acord101_required": _R_NARRATIVE,
+    # ── Coverage terminology we could not place (client 1.7 / SYS-05) ──
+    # NO typed fix exists and pretending otherwise is the defect this replaces:
+    # the message said "Confirm which line it belongs to" over a button that
+    # opened nothing, because the code was absent from this map entirely.
+    # Clearing it would need a canonical "this part belongs to line X" fact,
+    # a writer for it and a re-canonicalisation path - none of which exist, so
+    # the honest answer is a note, not a dead input (owner, 2026-09-03).
+    "unmapped_coverage_line": _r_review(
+        "Primble can't tell which line this belongs to. Check the source "
+        "document, then mark it resolved."
+    ),
+    # ── Loss history attestation vs the uploaded loss runs (client C2 2.6) ──
+    # Owner 2026-09-03: this one is a PROPER warning, because the condition
+    # behind it caps the Loss History pillar at 45 (`_LOSS_CONFLICT_CAP`). It
+    # needed an entry the moment it earned its own cluster - the guard test
+    # `test_every_cross_form_cluster_code_has_a_resolution` caught that, doing
+    # exactly its job.
+    #
+    # It IS typeable, unlike the row above: the conflict is between an
+    # attestation and a claim count, and the message already asks the producer
+    # to "confirm with the insured which is correct". These three are the facts
+    # that decide it, all writable through the producer-answer path, so stating
+    # the truth retires the conflict on the next pipeline run - no extra wiring,
+    # and the 45 cap lifts with it. `no_prior_losses` is deliberately absent: it
+    # is a FLAG, not a writable canonical fact, and the guard test would fail.
+    "loss_history_attestation_conflict": _r_field(
+        "loss_history_no_prior_losses_indicator", "num_claims", "total_incurred",
+    ),
 }
 
 
@@ -433,20 +500,66 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
     return None
 
 
-def _r_review(note: str) -> dict:
-    """A 'none'-mode resolution carrying a CONTEXT-SPECIFIC review note. mode
-    'none' renders no functional value input (nothing is auto-applied) - the
-    `note` just replaces the generic "needs a coverage/form change" hint with
-    wording that fits WHY this particular item can't be typed (client #4: a
-    cross-document conflict on a nested sub-field is reconciled on the form, not
-    by a picker/typed value, so it must say that instead of looking skipped)."""
-    return {"mode": "none", "note": note}
-
-
 _CONFLICT_REVIEW_NOTE = (
     "Documents disagree on this value. Confirm the correct one on the relevant "
     "form, then mark it resolved - it can't be applied automatically."
 )
+
+
+# ── "This one does not affect your score" - DECLARED, never inferred ─────────
+#
+# Owner, 2026-09-03: an item that cannot move the score should say so, and one
+# that CAN must be treated as a proper warning.
+#
+# THE OBVIOUS IMPLEMENTATION IS WRONG, and it is worth saying why. Deriving the
+# note from `severity == "advisory"` looks equivalent and is not:
+# `loss_history_attestation_conflict` was emitted as an advisory while the
+# condition behind it caps the Loss History pillar at 45
+# (`sqs_service._LOSS_CONFLICT_CAP`). A blanket severity rule would have printed
+# "does not affect your score" on a row that demonstrably does - a lie about a
+# number, which is the one thing this codebase treats as unrecoverable. That
+# issue is now emitted as a real `soft_warning` and is deliberately absent here.
+#
+# So membership is an EXPLICIT per-code claim. A new advisory gets no note until
+# somebody has checked what its condition costs, which is the correct default:
+# silence is not a promise, and the promise is what has to be earned.
+# MEASURED 2026-09-03, and the result is why this list is one entry long. Of
+# the ten advisory-typed issues, the underlying CONDITION of nearly every one
+# already costs something somewhere else:
+#
+#   loss_history_attestation_conflict -> caps the Loss History pillar at 45
+#                                        (`_LOSS_CONFLICT_CAP`)
+#   auto_um_uim_not_specified         -> `auto_um_uim_limit` drives ACORD 137's
+#                                        structural score AND an 8-point rec
+#   auto_pip_medpay_not_specified     -> same, via `auto_med_pay_limit`
+#   acv_high_value_building           -> `valuation_method` appears 18 times in
+#   rcv_old_building                     the scorer
+#   acord101_required                 -> `additional_remarks_text` downgrades
+#                                        hard stops
+#
+# "Advisory" in this codebase is a DISPLAY ROUTING choice, not a promise about
+# the score. Anything added below needs its own trace first.
+SCORE_NEUTRAL_CODES: frozenset = frozenset({
+    # Client 1.7 / SYS-05. Verified end to end: emitted to `structured_issues`
+    # only (never hard_stops / soft_stops, pinned by
+    # test_unmapped_coverage_line), and there is no FACT behind it to deduct
+    # against - it is raw terminology we could not place. Principle 7 states the
+    # rule outright: "give it no new scoring effect until a rule is explicitly
+    # defined."
+    "unmapped_coverage_line",
+})
+
+SCORE_NEUTRAL_NOTE = "Advice only - this does not affect your score."
+
+
+def is_score_neutral(code: Any) -> bool:
+    """True when this issue provably cannot move any score.
+
+    Read by `make_issue` so every emitter gets it for free, and re-derived per
+    CLUSTER in `_make_clusters` - a cluster only earns the note when EVERY
+    member does, because one scoring member makes the sentence false.
+    """
+    return bool(code) and code in SCORE_NEUTRAL_CODES
 
 
 def _writable_fact(fact: str) -> bool:
@@ -665,13 +778,52 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
          "property_deductible_flood")),
     ("Property valuation method not specified", "Property valuation method", "recommended",
      "legacy_valuation_method_missing", _r_field("valuation_method")),
+    # The property-integrity gate's LAST-RESORT sentence, for a future branch
+    # that raises the gate without naming its own cause. Unreachable from
+    # today's code - every branch calls `_prop_hard_because` /
+    # `_prop_soft_because`, pinned by
+    # `test_legacy_rules.test_the_property_gate_always_names_its_cause` - but a
+    # 60-cap must never be able to print without a fix, so it carries the four
+    # facts the four property gates are actually about.
+    ("Property details are incomplete", "Property COPE completeness", "required",
+     "legacy_property_integrity_gate", _r_field(
+         "valuation_method", "coinsurance_percentage",
+         "period_of_restoration", "property_deductible_wind")),
     ("Valuation basis conflict", "Property valuation advisories", "binder_followup",
      "legacy_valuation_basis_conflict", _r_field("valuation_method")),
     ("Business Income coverage detected", "Business Income coverage", "recommended",
      "legacy_bi_no_limit", _r_field("business_income_limit", "period_of_restoration")),
+    # The PROPERTY-INTEGRITY GATE's own sentence (sqs_service `_prop_hard_because`).
+    # It must sit above the generic "Business income limit" FORMAT row at the
+    # bottom of this table: first match wins on substring, and that row would
+    # otherwise claim it and offer only `business_income_limit` - the one fact
+    # that is already present. The missing fact is the period of restoration.
+    ("Business income limit present but period of restoration not specified",
+     "Business Income coverage", "required",
+     "legacy_bi_period_of_restoration_missing", _r_field("period_of_restoration")),
     ("Coinsurance percentage", "Property coinsurance", "recommended",
      "legacy_coinsurance_percentage", _r_field("coinsurance_percentage")),
     # ── Umbrella (specific phrases before the generic "Umbrella ..." ones) ───
+    # THE TWO ADEQUACY-GATE SENTENCES. `calculate_sqs` caps a form at 60 through
+    # `extra_hard_reason` when the umbrella pillar reaches 0, and those two
+    # sentences are what the producer reads. Neither matched a row until
+    # 2026-09-08, so both rendered under "Other validations" with no fix control
+    # at all - a red blocker, a held score, and nothing to click.
+    #
+    # They are NOT harvested by the legacy-message guard (it walks
+    # `evaluate_stops`' append sites, and these are passed to `_resolve_cap`
+    # instead), which is exactly why they went unnoticed. That blind spot is now
+    # closed by `test_legacy_rules._harvest_cap_gate_reasons`.
+    ("Umbrella present with no underlying GL or Auto limits",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_gate_no_underlying", _r_field(
+         "gl_each_occurrence", "gl_limits", "auto_liability_limit")),
+    ("Umbrella coverage is present but its supporting detail is incomplete",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_gate_detail_incomplete", _r_field(
+         "umbrella_limit", "gl_each_occurrence", "gl_aggregate",
+         "auto_liability_limit", "employers_liability_limits",
+         "schedule_of_underlying_insurance", "umbrella_follow_form")),
     ("Umbrella detected but no underlying", "Umbrella underlying coverage", "required",
      "legacy_umbrella_no_underlying", _r_field(
          "gl_each_occurrence", "gl_limits", "auto_liability_limit")),
@@ -705,7 +857,7 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # GL class codes are a per-location SCHEDULE with no live capture table
     # (schedule_capture.SCHEDULE_DEFS has none), so there is nothing to type
     # into and nothing to open - an honest note beats a dead button.
-    ("GL coverage detected but no class codes found", "WC / GL class code alignment", "recommended",
+    ("GL coverage detected but no class codes found", "GL class code alignment", "recommended",
      "legacy_gl_no_class_codes", _r_review(
          "GL class codes are captured per location on ACORD 126. Add them there, "
          "then mark this resolved - there is no single value to enter here.")),
@@ -889,12 +1041,39 @@ _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
     # string still caps at 85; the coded issue still feeds the cross bucket as
     # spec section 7 defines) - this only stops two cards for one gap.
     "auto_agreed_value_requires_schedule":       "Vehicle schedule not provided",
-    "umbrella_auto_expiration_misaligned":       "Umbrella and Auto expiration dates misaligned",
-    "umbrella_gl_period_misaligned":             "Umbrella and GL effective dates misaligned",
-    "umbrella_auto_period_misaligned":           "Umbrella and Auto effective dates misaligned",
-    "umbrella_wc_period_misaligned":             "Umbrella and WC effective dates misaligned",
+    # CORRECTED 2026-09-08. The phrase read "Umbrella and GL effective dates
+    # misaligned", which no engine emits - `sqs_service.evaluate_stops` says
+    # "Umbrella and GL policy periods misaligned." (:1415). So this row matched
+    # nothing and the GL-period twins had been rendering TWICE the whole time,
+    # exactly like the Carrier-Grade COPE pair the owner reported. Found by
+    # test_every_suppression_entry_still_names_a_real_legacy_message, which now
+    # fails the build on a phrase no legacy rule can produce - the phrase-side
+    # counterpart of the existing code-side guard.
+    # No fix path is lost: both twins resolve the identical pair of facts
+    # (umbrella_effective_date, effective_date).
+    "umbrella_gl_period_misaligned":             "Umbrella and GL policy periods misaligned",
+    # REMOVED 2026-09-08: `umbrella_auto_expiration_misaligned`,
+    # `umbrella_auto_period_misaligned` and `umbrella_wc_period_misaligned`.
+    # The legacy engine has NEVER emitted an Auto or WC misalignment string -
+    # only the two GL ones above exist in evaluate_stops - so these three rows
+    # named phrases nothing can produce and suppressed nothing. Same dead-row
+    # class as the `umbrella_sir_below_gl_deductible` entry removed 2026-08-14,
+    # and worse than useless: they made the map look like it covered the Auto
+    # and WC twins. The coded rules themselves are untouched and still render.
     "auto_split_limits_incomplete":              "Split liability limits incomplete",
     "bi_coverage_no_limit":                      "Business Income coverage detected",
+    # Reported live by the owner 2026-09-08: the Property COPE quality cluster
+    # rendered BOTH twins - "Carrier-Grade COPE incomplete - SQS capped at 85.
+    # Missing: ..." (legacy) above "Carrier-Grade COPE detail incomplete -
+    # missing: ..." (coded) - each with its own Open to fix. Both already mapped
+    # to the same cluster, which this map's docstring calls the codebase's own
+    # signal that they are one rule; only the row was missing.
+    # The phrase is a substring of the LEGACY message only: the coded message
+    # reads "Carrier-Grade COPE detail incomplete", and "detail" breaks the
+    # match, so this can never suppress its own keeper.
+    # SAFE ONLY BECAUSE the coded resolution above was widened to the legacy
+    # six first - see the note there. Do not narrow it back.
+    "carrier_grade_cope_incomplete":             "Carrier-Grade COPE incomplete",
 }
 
 
@@ -1037,6 +1216,9 @@ def make_issue(
         "cluster": cluster,
         "tier": tier,
         "resolution": resolution,
+        # Owner 2026-09-03: an item that cannot move the score says so. Attached
+        # here so every emitter gets it without changing a single rule body.
+        "score_neutral": is_score_neutral(code),
     }
 
 
@@ -1074,6 +1256,10 @@ def _make_clusters(items: List[dict]) -> List[dict]:
             "forms": forms,
             "items": members,
             "resolution": _cluster_res,
+            # EVERY member, not any: a cluster carrying one scoring item cannot
+            # tell the producer its score is untouched. A member that predates
+            # the flag has no key and is read as scoring, which fails safe.
+            "score_neutral": all(m.get("score_neutral") for m in members),
         })
     clusters.sort(key=_cluster_rank_key)
     return clusters
@@ -1291,6 +1477,13 @@ def build_grouped_view(
             "tier": tier,
             "resolution": issue.get("resolution") or resolution_for(code)
                           or _fallback_resolution(code, message),
+            # Re-derived from the CODE, never carried from the incoming dict.
+            # Issues reach this view from several sources (persisted sessions,
+            # the legacy string arrays, the cross-form mirror) and only some of
+            # them went through `make_issue`, so trusting the inbound key would
+            # make the note depend on which door an issue happened to arrive
+            # through. The code is the same in every one of them.
+            "score_neutral": is_score_neutral(code),
         })
 
     # Safety net: guarantee every message the caller is actually about to show

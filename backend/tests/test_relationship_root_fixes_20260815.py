@@ -120,10 +120,13 @@ class TestCoverageLineRepair:
 
     def test_repaired_lines_flow_through_to_the_forms(self):
         facts = dict(_repaired_facts())
+        # ACORD_141 expects None (corrected 2026-09-04): its ACORD template is
+        # the CRIME SECTION, and this fixture grants no Crime line. It used to
+        # expect the Inland Marine number, which was another line's.
         for form_id, expected in (("ACORD_131", "6J7-40-02---26"),
                                   ("ACORD_127", "6E7-40-02---26"),
                                   ("ACORD_126", "BBC7263"),
-                                  ("ACORD_141", "6C7-40-02---26")):
+                                  ("ACORD_141", None)):
             f = {**facts, "_form_id": form_id}
             assert _deterministic_map("Policy_PolicyNumberIdentifier_A", f) == expected
 

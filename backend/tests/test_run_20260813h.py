@@ -241,8 +241,19 @@ def test_total_losses_opens_up_with_a_real_signal():
     assert ps._resolve_loss_history_summary(
         "LossHistory_TotalAmount_A",
         {"asserts_no_known_losses": True}) is ps._SCHED_SKIP
+    # UPDATED 2 Sep 2026. This used to assert SKIP - "with real entries the
+    # normal flow fills the total" - and the normal flow was the measured live
+    # defect: gap fill summed the THREE rows the grid displays ($129,400) while
+    # the schedule held FIVE losses and the document stated $568,495. With real
+    # entries the box now opens up STRONGER than gap fill: the total is DERIVED
+    # from the whole schedule. The InformationYearCount sibling keeps the old
+    # skip-to-normal-flow contract, which this test still pins.
     assert ps._resolve_loss_history_summary(
         "LossHistory_TotalAmount_A",
+        {"loss_history": [{"date": "01/02/2024", "paid": "$5,000"}]},
+    ) == "$5,000"
+    assert ps._resolve_loss_history_summary(
+        "LossHistory_InformationYearCount_A",
         {"loss_history": [{"date": "01/02/2024", "paid": "$5,000"}]},
     ) is ps._SCHED_SKIP
 

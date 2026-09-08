@@ -116,7 +116,16 @@ def build_receipt_payload(arq: dict) -> dict:
 
         if schedule_capture.is_schedule_answer_key(field_name):
             rows = schedule_capture.decode_answer(raw) if raw else []
-            if not rows:
+            # Two conditions, and both are needed.
+            #   * PRESENCE - `submit_arq_answers` stores a schedule only when the
+            #     client actually supplied it, so a missing key means they never
+            #     did (that is where an untouched pre-filled table stops).
+            #   * CONTENT on one side - rows now, or rows we pre-filled and they
+            #     cleared. An emptied table is the answer "we do not have any",
+            #     and filing it as blank told the producer the client had ignored
+            #     the question; but with nothing pre-filled there was nothing to
+            #     clear, so empty stays blank.
+            if field_name not in answers or not (rows or schedule_capture.seed_rows(q)):
                 item["kind"] = KIND_BLANK
                 items.append(item)
                 continue

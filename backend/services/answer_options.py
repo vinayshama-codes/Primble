@@ -117,11 +117,23 @@ OCCUPANCY_TYPE_OPTIONS = _with_other(
     "Vacant building",
 )
 
+# ONLY the two methods the fact can hold. `valuation_method`'s contract is
+# stated in two places that already agree: FACT_REGISTRY's validator accepts
+# {"RCV", "ACV"} and extraction_service's schema line is literally
+# `"valuation_method": "RCV"|"ACV"|null`. Offering a third and fourth method
+# here produced a dropdown whose choice was then refused by the fact's own
+# validator - a card the producer could not resolve at all (2026-09-08).
+#
+# KNOWN GAP, deliberately not closed here: ACORD 140's own ValuationCode
+# tooltip lists four methods (A Actual Cash Value / R Replacement Cost /
+# V Agreed Amount / M Market Value), so an agreed-value or market-value policy
+# has no canonical fact to land in. Widening it means changing the extraction
+# schema, the validator and the stamping map together - an owner decision, not
+# a side effect of a bug fix. Until then those policies go through Other, and
+# the producer is told plainly why rather than being handed a dead choice.
 VALUATION_METHOD_OPTIONS = _with_other(
     "Replacement Cost",
     "Actual Cash Value",
-    "Agreed Value",
-    "Functional Replacement Cost",
 )
 
 SPRINKLER_OPTIONS = _with_other(
@@ -186,6 +198,23 @@ WC_PAYROLL_PERIOD_OPTIONS = _with_other(
     "Quarterly",
     "Monthly",
     "Year to date",
+)
+
+# SYS-04. The X-Mod box was the one WC field most likely to be answered with a
+# free-text sentence, and a sentence is where meaning gets lost: measured,
+# `fact_state.value_state_of` reads "Not applicable - we do not carry workers
+# compensation" as a VALUE (present) while the bare "Not applicable" reads as
+# not_applicable. So the escape hatch is offered as an OPTION whose text the
+# state reader already understands, instead of hoping the client types it.
+#
+# Each option maps to the state it should:
+#   "Not applicable"                    -> not_applicable -> the line is ABSENT
+#   "No experience modifier ..."        -> present        -> WC exists, no mod
+#   a typed mod value via Other         -> present
+WC_XMOD_OPTIONS = _with_other(
+    "Not applicable",
+    "No experience modifier has been assigned",
+    "1.00 - neither a credit nor a debit mod",
 )
 
 WC_OFFICER_EXCLUSION_OPTIONS = _with_other(
@@ -267,6 +296,7 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "umbrella_follow_form":        (UMBRELLA_FOLLOW_FORM_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
     "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
+    "wc_xmod":                     (WC_XMOD_OPTIONS, False),
     "wc_officer_exclusions":       (WC_OFFICER_EXCLUSION_OPTIONS, False),
     "wc_payroll_period":           (WC_PAYROLL_PERIOD_OPTIONS, False),
     "additional_insured":          (ADDITIONAL_INSURED_OPTIONS, True),

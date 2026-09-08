@@ -571,6 +571,17 @@ async def submit_arq(token: str, request: Request):
 
     sanitized_answers = _sanitize_answers(raw_answers)
 
+    # BUG-01: which fields the CLIENT actually edited. Bounded and coerced like
+    # any other public payload; `submit_arq_answers` treats it as corroboration
+    # only (it re-derives the same verdict from the server's own copy of the
+    # pre-filled rows), so a missing, truncated or inflated list cannot make us
+    # attribute our own pre-fill to the insured.
+    raw_touched = body.get("touched")
+    touched_fields = (
+        [_sanitize_str(str(t), 128) for t in raw_touched[:500]]
+        if isinstance(raw_touched, list) else []
+    )
+
     arq = await get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "message": "Questionnaire not found."}, status_code=404)
@@ -580,6 +591,7 @@ async def submit_arq(token: str, request: Request):
         raw_answers=sanitized_answers,
         processing_session_id=arq["session_id"],
         generated_forms={},
+        touched_fields=touched_fields,
     )
 
     if field_errors:
@@ -621,7 +633,12 @@ async def submit_arq(token: str, request: Request):
                 await conn.execute(
                     "UPDATE arq_sessions SET remediation_status=$1, fields_answered_count=$2 WHERE id=$3",
                     score_update["status"],
-                    len(sanitized_answers),
+                    # Was `len(sanitized_answers)`, i.e. the size of the posted
+                    # map. The questionnaire posts EVERY question back, blanks
+                    # included, so this number has always just been the question
+                    # count wearing a different label. `updated_fields` is what
+                    # the server actually accepted and stored.
+                    len(updated_fields),
                     arq["id"],
                 )
         except Exception as _persist_ex:
@@ -668,7 +685,14 @@ async def submit_arq(token: str, request: Request):
         # `receipt_id` is what attaches the response receipt to the package
         # audit trail: the timeline entry now points at the immutable record of
         # what was said, instead of only counting it.
-        {"client_first": _cf, "fields": len(sanitized_answers),
+        # `len(sanitized_answers)` was the same defect fixed for
+        # `fields_answered_count` a few lines below: the questionnaire posts
+        # EVERY question back, blanks included, so this logged the question
+        # count under the name "fields". `updated_fields` is what the server
+        # actually accepted and stored. Found by audit 2026-09-08 - one copy of
+        # a rule got fixed and its twin did not, which is the shape that let
+        # several earlier defects here survive their first fix.
+        {"client_first": _cf, "fields": len(updated_fields),
          "receipt_id": receipt_id, "arq_id": arq["id"]},
     )
     if apply_ok:

@@ -250,8 +250,13 @@ def test_the_primary_loop_does_not_blindly_overwrite_list_fields():
     only symptom is a conflict that never appears."""
     import inspect
     src = inspect.getsource(es.merge_facts)
-    start = src.index("legacy fallback for unmapped fields")
-    block = src[start:start + 1800]
+    # ANCHORED ON THE LOOP, NOT ON A BYTE COUNT (2026-09-05). This used to slice
+    # 1800 chars from the "legacy fallback" comment, so it measured how long the
+    # COMMENTS above the loop were, not what the loop does - and it failed on a
+    # change that added an explanation above it while leaving the union intact.
+    # A structural test must anchor on the structure.
+    start = src.index('for k, v in primary.get("facts", {}).items():')
+    block = src[start:]
     assert "_union_list_fact" in block, (
         "merge_facts no longer unions list fields - the primary document's "
         "rows will replace every companion's again (D-1)")

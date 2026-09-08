@@ -661,3 +661,64 @@ def test_the_gl_rating_schedule_is_producer_routed():
     })
     overlay = overlay_for(question, {})
     assert overlay.get("audience", classified.get("audience")) == "producer"
+
+
+# ── Anti-phantom guard for INSURANCE_JUDGMENT_FACTS (2026-09-08) ─────────────
+
+def test_every_judgment_fact_is_a_real_registry_key():
+    """A typo here fails SILENTLY: the key matches nothing, so the question it
+    was meant to route keeps going to the insured and nobody sees an error.
+
+    This is the phantom-fact-key class that shipped the auto-symbol defect
+    (five keys nothing ever wrote, two checks firing on every submission). It
+    bit again on 2026-09-08: three of ten entries added in one pass were
+    guessed rather than looked up - `gl_damage_to_rented_premises`,
+    `wc_el_disease_policy` and `auto_medical_payments_limit` do not exist; the
+    real keys are `gl_fire_damage_limit`, `wc_el_disease_policy_limit` and
+    `auto_med_pay_limit`. Every one was caught by measurement, not review.
+
+    The module's own docstring promises "every key was verified to exist"; this
+    makes that promise executable. Entries deliberately absent from the registry
+    are listed in `_NOT_REGISTRY_FACTS` with their reason, mirroring the
+    docstring's own "NOT INCLUDED, deliberately" note.
+    """
+    from services.fact_registry import FACT_REGISTRY
+
+    # Keys that are legitimately not FACT_REGISTRY facts. Keep the reason with
+    # the entry so a future reader can tell an exemption from a typo.
+    _NOT_REGISTRY_FACTS = {
+        # Question-key namespace, not a fact - routed by the cross-form branch.
+        *getattr(qe, "INSURANCE_JUDGMENT_QUESTION_KEYS", frozenset()),
+    }
+
+    phantoms = sorted(
+        k for k in qe.INSURANCE_JUDGMENT_FACTS
+        if k not in FACT_REGISTRY and k not in _NOT_REGISTRY_FACTS
+    )
+    assert not phantoms, (
+        f"{len(phantoms)} INSURANCE_JUDGMENT_FACTS entries match no "
+        f"FACT_REGISTRY key, so they route nothing: {phantoms}"
+    )
+
+
+def test_limit_facts_split_by_wording_not_by_coverage():
+    """The 2026-09-08 rule, pinned so it cannot be half-applied again.
+
+    "What IS the limit?" is read off a policy -> producer.
+    "Do you WANT this coverage? If yes, what limit?" is the insured's own
+    preference -> client.
+
+    Before this, `auto_liability_limit` (the CSL) was producer-only while its
+    three split-limit equivalents reached the insured - one coverage, two
+    audiences, decided by how the policy happened to be written.
+    """
+    for key in ("auto_bi_per_person", "auto_bi_per_accident",
+                "auto_pd_per_accident", "auto_liability_structure",
+                "gl_medical_expense", "gl_fire_damage_limit",
+                "wc_el_each_accident", "wc_el_disease_policy_limit",
+                "wc_el_disease_each_employee"):
+        assert qe.is_insurance_judgment(key), f"{key} still reaches the client"
+    # Coverage PREFERENCES stay with the client - the other direction matters
+    # just as much, or the questionnaire stops asking what the insured wants.
+    for key in ("auto_um_uim_limit", "auto_med_pay_limit", "extra_expense_limit"):
+        assert not qe.is_insurance_judgment(key), f"{key} was over-suppressed"

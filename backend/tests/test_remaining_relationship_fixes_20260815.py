@@ -820,6 +820,21 @@ class TestPhantomDriverRowAndInsurerRoster:
     def test_an_unattested_insurer_never_seats_on_the_roster(self):
         # Third fresh run: INSURER E = "Employers Property & Casualty Company",
         # a blend of the two real names - a carrier that does not exist.
+        #
+        # UPDATED 2026-09-02 (V1 H5). This test used to assert that gap fill's
+        # row-C copy of EMC P&C SURVIVED while the blend in row E was blanked -
+        # i.e. it pinned Guard 2c cleaning up after the model. The roster is now
+        # resolved deterministically from `coverage_lines`
+        # (`_resolve_certificate_insurer_row`), so the model no longer chooses
+        # which slot a carrier occupies: the package's two real carriers seat in
+        # A and B by their own evidence, and C-F are OWNED BLANKS. The row-C
+        # value is now a DUPLICATE of a seated carrier, which is exactly what
+        # this class's first test ("the identical carrier in five INSURER
+        # slots") exists to prevent.
+        #
+        # The original intent is asserted below, and more strongly: the
+        # fabricated blend appears NOWHERE on the roster, and both real carriers
+        # do - by evidence rather than by the model's placement.
         facts = _routed_renewal_facts(coverage_lines=_third_run_lines())
         mapped, _ = P.map_facts_to_form(
             facts, _schema("ACORD_25"), form_id="ACORD_25",
@@ -828,8 +843,13 @@ class TestPhantomDriverRowAndInsurerRoster:
                 "Insurer_FullName_C": "Emc Property & Casualty Company",
                 "Insurer_FullName_E": "Employers Property & Casualty Company",
             }))
-        assert P._same_value_key(mapped.get("Insurer_FullName_C")) == \
-            P._same_value_key("EMC Property & Casualty Company")
+        seated = {P._same_value_key(mapped.get("Insurer_FullName_%s" % L))
+                  for L in "ABCDEF" if mapped.get("Insurer_FullName_%s" % L)}
+        assert P._same_value_key("Employers Property & Casualty Company") \
+            not in seated, "the fabricated blend seated on the certificate"
+        assert P._same_value_key("EMC Property & Casualty Company") in seated
+        assert P._same_value_key("Employers Mutual Casualty Company") in seated
+        assert len(seated) == 2, seated       # no duplicate row for one carrier
         assert mapped.get("Insurer_FullName_E") is None
 
 

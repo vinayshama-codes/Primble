@@ -337,7 +337,12 @@ _COPE_FACTS = ["occupancy_type", "construction_type",
 
 def _note(applied_field, facts):
     from routes.audit_routes import _trade_off_note
-    return _trade_off_note({_COPE_MSG: _COPE_FACTS}, _COPE_FACTS,
+    # `_issues_bound_to_fact` keys on the RULE from 2026-09-08 (a message that
+    # embeds a shrinking "missing: ..." list is not a new issue when it gets
+    # shorter), so an entry is {code: {"message", "facts"}}.
+    return _trade_off_note(
+        {"legacy_minimum_viable_cope": {"message": _COPE_MSG,
+                                        "facts": _COPE_FACTS}}, _COPE_FACTS,
                            applied_field, facts=facts)
 
 

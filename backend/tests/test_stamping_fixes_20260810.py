@@ -31,6 +31,18 @@ import os
 
 import pytest
 
+
+def _amt(v):
+    """The stamped amount without a leading currency symbol.
+
+    ACORD prints "$" beside most money boxes, so `pdf_service` no longer
+    stamps one there (2026-09-05, the live "$ $3,954" defect). These tests
+    are about WHICH BOX GOT WHICH AMOUNT, never about the symbol, so they
+    compare the amount and are immune to the display rule.
+    """
+    return str(v or "").strip().lstrip("$").strip()
+
+
 _BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCHEMA_125 = os.path.join(_BACKEND, "forms_schemas", "ACORD_125_schema.json")
 
@@ -234,7 +246,7 @@ def test_premium_present_in_document_still_stamps():
     ]}
     raw = "COMMERCIAL GENERAL LIABILITY $3,954 annual premium for the policy period."
     mapped = _run_125(facts, raw)
-    assert mapped.get(_GL_PREMIUM_BOX) == "$3,954"
+    assert _amt(mapped.get(_GL_PREMIUM_BOX)) == "3,954"
 
 
 def test_short_premium_amounts_fail_open():
@@ -245,7 +257,7 @@ def test_short_premium_amounts_fail_open():
     ]}
     raw = "text that does not contain the amount at all"
     mapped = _run_125(facts, raw)
-    assert mapped.get("CommercialInlandMarineLineOfBusiness_PremiumAmount_A") == "$300"
+    assert _amt(mapped.get("CommercialInlandMarineLineOfBusiness_PremiumAmount_A")) == "300"
 
 
 if __name__ == "__main__":

@@ -100,32 +100,53 @@ def test_most_lob_driving_flags_are_guarded():
             "has_property_coverage", "has_auto_coverage"} <= guarded
 
 
-def test_general_liability_and_workers_comp_are_deliberately_left_alone():
+def test_general_liability_is_deliberately_left_alone():
     """DELIBERATE, not an oversight - re-read before "fixing" this.
 
-    Both are still pure-mention definitions and both drive an LOB checkbox, so
-    they look like the same defect. They are not worth the same treatment:
+    General Liability is present on the overwhelming majority of commercial
+    packages. A false POSITIVE is rare and cheap; a false NEGATIVE unticks the
+    GL box on a real GL policy and disturbs ACORD 126 recommendation. The
+    asymmetry runs the wrong way, it fails toward MORE coverage (the standing
+    product preference), and no client has reported a false GL tick.
 
-      * General Liability is present on the overwhelming majority of commercial
-        packages. A false POSITIVE is rare and cheap; a false NEGATIVE unticks
-        the GL box on a real GL policy and disturbs ACORD 126 recommendation.
-        The asymmetry runs the wrong way.
-      * Workers Comp: the client's actual reported case ("Workers Compensation -
-        No Coverage") is already handled deterministically by
-        `apply_declared_absent_downgrades`, which reads the denial off the dec
-        page. Adding a prompt guard on top buys nothing reported and risks
-        dropping ACORD 130 for a genuine WC submission.
-
-    Neither was reported. Both fail toward MORE coverage, which is the standing
-    product preference. If a client ever reports a false GL or WC tick, harden
-    them then - with that report as the evidence."""
+    If one ever does, harden it then - with that report as the evidence, which
+    is exactly what happened to `has_workers_comp` below.
+    """
     defs = _flag_definitions()
-    for flag in ("has_general_liability", "has_workers_comp"):
-        assert flag in defs, f"{flag} lost its definition"
-        assert "do not set true" not in defs[flag].lower(), (
-            f"{flag} was hardened - if that was intentional, update this test and "
-            "explain the evidence; see the docstring for why it was left"
-        )
+    assert "has_general_liability" in defs, "has_general_liability lost its definition"
+    assert "do not set true" not in defs["has_general_liability"].lower(), (
+        "has_general_liability was hardened - if that was intentional, update "
+        "this test and explain the evidence; see the docstring for why it was left")
+
+
+def test_workers_comp_was_hardened_and_here_is_the_evidence():
+    """THE EVIDENCE THIS TEST USED TO ASK FOR ARRIVED (live run 2026-09-05).
+
+    Until then `has_workers_comp` was a pure-mention definition, left alone on
+    the reasoning that the client's reported case ("Workers Compensation - No
+    Coverage") is already caught deterministically by
+    `apply_declared_absent_downgrades` - which is still true, and still tested
+    below.
+
+    What that reasoning did not cover is the case the live run produced: an
+    ACORD 25 certificate preprints "WORKERS COMPENSATION AND EMPLOYERS
+    LIABILITY" and the three E.L. limit labels whether or not the row carries a
+    policy. **A blank row is neither a grant nor a denial**, so the downgrade
+    scanner never fires and the flag stayed true on a package with no Workers
+    Comp - charging it for missing WC data on the Exposure pillar (measured:
+    package 51 -> 48, Exposure 92 -> 78).
+
+    So the definition now demands a GRANT - a policy number, a premium, stated
+    EL limits, a class-code and payroll schedule, or an experience mod. The
+    deterministic half is untouched: `line_presence.reconcile_line_flags` still
+    corrects the flag from the coverage evidence whatever the model returns, so
+    a genuine WC submission whose wording the model misreads is not dropped.
+    """
+    defs = _flag_definitions()
+    text = defs["has_workers_comp"].lower()
+    assert "do not set true" in text, "the WC guard was removed"
+    assert "heading" in text, "the guard must name the certificate-heading case"
+    assert "carried" in text or "applied for" in text,         "the guard must demand a grant, not merely forbid a mention"
 
 
 def test_workers_comp_denial_is_still_caught_deterministically():

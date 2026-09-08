@@ -37,6 +37,7 @@ export default function PDFJsViewer({
   clientFilledFields = [],
   onRefreshFields,
   onSqsUpdate,
+  onPendingEditsChange,
 }) {
   const canvasRef              = useRef(null);
   const containerRef           = useRef(null);
@@ -66,6 +67,7 @@ export default function PDFJsViewer({
   const [pageDims,      setPageDims]      = useState([]);
   const [fieldValues,   setFieldValues]   = useState({});
   const [saveStatus,    setSaveStatus]    = useState("idle");
+  const [pendingEdits,  setPendingEdits]  = useState(false);
   const [fieldsLoaded,  setFieldsLoaded]  = useState(false);
   const [isSignedLocal, setIsSignedLocal] = useState(isSigned);
   const [showSignPrompt,setShowSignPrompt]= useState(null);
@@ -99,6 +101,8 @@ export default function PDFJsViewer({
   useEffect(() => {
     setPageNum(1); setEditMode(false); setFields([]); setFieldValues({});
     fieldValuesRef.current = {}; originalFieldValuesRef.current = {};
+    setPendingEdits(false);
+    if (onPendingEditsChange) onPendingEditsChange(formId, false);
     fieldConfLabelRef.current = {};
     fieldsRef.current = []; pageDimsRef.current = []; editModeRef.current = false;
     setPageDims([]); setFieldsLoaded(false); setSaveStatus("idle");
@@ -199,6 +203,12 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
+        // Both refs were just replaced from the server, so nothing is unsaved
+        // any more. Without this the "Unsaved" marker and AcordModal's dimmed
+        // pillar bars stayed on forever after a Refresh - the panel telling the
+        // producer their score was stale when it was current. Found by review.
+        clearedSigFieldsRef.current = new Set();
+        _syncPending();
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
         // If the canvas is already painted (e.g. refresh), rebuild the overlay immediately.
@@ -237,6 +247,12 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
+        // Both refs were just replaced from the server, so nothing is unsaved
+        // any more. Without this the "Unsaved" marker and AcordModal's dimmed
+        // pillar bars stayed on forever after a Refresh - the panel telling the
+        // producer their score was stale when it was current. Found by review.
+        clearedSigFieldsRef.current = new Set();
+        _syncPending();
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
         requestAnimationFrame(() => {
@@ -420,7 +436,33 @@ export default function PDFJsViewer({
     });
   };
 
-  const triggerSave = (fn, v) => { fieldValuesRef.current = { ...fieldValuesRef.current, [fn]: v }; };
+  // ── Unsaved-edit tracking ──────────────────────────────────────────────
+  // A field edit repaints its own highlight IMMEDIATELY and locally, but the
+  // SQS panel only moves when `handleToggleEditMode` posts and the backend
+  // re-scores. Nothing said so, and the two indicators describe the SAME fact:
+  // during a live test of the loss-history checkbox the highlight came back on
+  // an untick while the Loss History pillar still read the ticked score, which
+  // reads as a scoring bug and is not one. A score computed from a state the
+  // user has already changed must not be presented as current.
+  //
+  // ONE DOOR: `hasUnsavedEdits()` is both the signal reported upward and the
+  // gate `handleToggleEditMode` uses to decide whether to post - so the panel
+  // can never call an edit pending that the save would then skip, or vice versa.
+  const hasUnsavedEdits = () =>
+    Object.keys(fieldValuesRef.current).some(
+      k => fieldValuesRef.current[k] !== (originalFieldValuesRef.current[k] ?? "")
+    ) || clearedSigFieldsRef.current.size > 0;
+
+  const _syncPending = () => {
+    const dirty = hasUnsavedEdits();
+    setPendingEdits(prev => (prev === dirty ? prev : dirty));
+    if (onPendingEditsChange) onPendingEditsChange(formId, dirty);
+  };
+
+  const triggerSave = (fn, v) => {
+    fieldValuesRef.current = { ...fieldValuesRef.current, [fn]: v };
+    _syncPending();
+  };
 
   const handleApplySignature = async () => {
     setShowSignPrompt(null); setApplyingSign(true); setApplySigStage("applying");
@@ -461,7 +503,7 @@ export default function PDFJsViewer({
   const handleToggleEditMode = async () => {
     if (editMode) {
       const allValues = fieldValuesRef.current;
-      const hasChanges = Object.keys(allValues).some(k => allValues[k] !== (originalFieldValuesRef.current[k] ?? "")) || clearedSigFieldsRef.current.size > 0;
+      const hasChanges = hasUnsavedEdits();
       if (hasChanges) {
         setSaveStatus("saving");
         try {
@@ -480,6 +522,9 @@ export default function PDFJsViewer({
           if (res.ok) {
             const data = await res.json();
             setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
+            // The panel's score is current again as of this response. Cleared
+            // only on OK - a failed save leaves the edits genuinely pending.
+            _syncPending();
             const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
             if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
             if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues, groupedCrossIssues: data.grouped_cross_issues });
@@ -598,6 +643,15 @@ export default function PDFJsViewer({
         </div>
 
         <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          {/* A highlight repaints the instant a field changes; the score does not
+              move until this edit is saved. Say so, next to the button that saves. */}
+          {pendingEdits && saveStatus !== "saving" && saveStatus !== "generating" && (
+            <span title="Field highlights update as you type. The score is recalculated by the server when you click Done Editing."
+                  style={{ display: "flex", alignItems: "center", gap: 4, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}>
+              <span style={{ width: 6, height: 6, background: "#f59e0b", borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />
+              Unsaved - score updates on Done Editing
+            </span>
+          )}
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
           {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}

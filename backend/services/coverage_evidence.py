@@ -1126,6 +1126,61 @@ _ANNUAL_QUALIFIES = _qualifying_re(_ANNUAL_WORDS)
 _OTHER_QUALIFIES = _qualifying_re(_OTHER_WORDS)
 
 
+# ── Does the document NAME the valuation method the fact claims? ────────────
+#
+# LIVE RUN 2026-09-03 (SYS-05 kit, run 2). Neither uploaded document states a
+# valuation method anywhere. Run 1 - the declarations page alone - produced no
+# valuation advisory. Run 2 added a certificate whose property row reads
+# "Property - Special Form  $4,200,000", and the merged facts came back
+# `valuation_method = ACV`, which raised
+# "Actual Cash Value (ACV) selected on a building valued at $4,200,000".
+#
+# "Special Form" is a CAUSE OF LOSS form (Basic / Broad / Special). It says
+# nothing about valuation. `_EXTRACT_SCHEMA` offers `"RCV"|"ACV"|null` and the
+# model picked from the enumeration instead of returning null - Principle 3's
+# forbidden move ("Missing Does Not Mean No"), and CLAUDE.md's documented GAP 1:
+# `answer_semantics` guards what a HUMAN types and nothing guards what the model
+# extracts.
+#
+# SAME SHAPE AS D43/H1-K, so the same remedy: a prompt is a request, this is the
+# guarantee. `valuation_method` is read by the scorer in ~18 places, so an
+# invented one is not cosmetic.
+#
+# WHOLE TOKENS for the abbreviations. "acv"/"rcv" are three letters and a
+# substring test would match inside ordinary words - the D9 lesson in miniature
+# ("the danger was never the equivalence, it was the matching mechanism").
+_VALUATION_NAMED_RE: Dict[str, Any] = {
+    "acv": re.compile(r"\bactual\s+cash\s+value\b|\bacv\b", re.I),
+    "rcv": re.compile(r"\breplacement\s+cost\b|\brcv\b", re.I),
+    "agreed_amount": re.compile(r"\bagreed\s+(?:amount|value)\b", re.I),
+    "market_value": re.compile(r"\bmarket\s+value\b", re.I),
+}
+
+
+def valuation_method_corroborated(method, entries=None, text="") -> bool:
+    """True when the DOCUMENT literally names the valuation method claimed.
+
+    Returns True for anything it cannot interpret, exactly like
+    `payroll_period_corroborated`: this exists to strip an INVENTED method, not
+    to police free text the scoring rules already ignore. A method the
+    normalizer does not recognise is left alone.
+    """
+    try:
+        from services.normalization import normalize_valuation_method
+        canon = normalize_valuation_method(method)
+    except Exception:                                         # noqa: BLE001
+        return True
+    rx = _VALUATION_NAMED_RE.get(canon)
+    if rx is None:
+        return True                       # not a method we can check - no opinion
+    if isinstance(entries, list):
+        for e in entries:
+            if isinstance(e, dict) and rx.search(
+                    str(e.get("label") or "") + " " + str(e.get("value") or "")):
+                return True
+    return bool(rx.search(str(text or "")))
+
+
 def payroll_period_corroborated(period, entries=None, text=""):
     """Does the DOCUMENT actually name the period this fact claims?
 
