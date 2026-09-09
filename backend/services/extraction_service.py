@@ -6382,6 +6382,51 @@ def _conflict_field_label(field: str) -> str:
     return _humanize_label(field)
 
 
+def _door_conflict(fact_key: str, values: List[Any], context=None) -> bool:
+    """Does the ONE COMPARISON DOOR call these printings a real disagreement?
+
+    C1/D3 named five places that decided "do these documents disagree?" on their
+    own. ``fact_comparison.py``'s own header records what each one had:
+    ``detect_source_conflicts`` had **none** - it compared normalised strings and
+    read "not identical" as "conflict". It was the only one never migrated, and
+    the client's PROD-02 card is what that costs: two documents printing
+    different boilerplate paragraphs (a dec-page service-of-process clause and
+    the ACORD 25's own preprinted footer) were reported as a value the producer
+    had to choose between. ``fact_equivalence`` has answered that since 2026-08-21
+    - ``_PROSE_WORD_FLOOR``: *"nobody picks between two true paragraphs"*, so
+    prose is INCOMPARABLE - and this function simply never asked.
+
+    AN ADDITIONAL GATE, NEVER A REPLACEMENT. The caller still runs its original
+    distinct-normalised-string test first and only asks here when that test
+    already says "conflict", so a card needs BOTH to agree. That ordering is
+    load-bearing, not caution: the door deliberately groups entity names on
+    ``strict_entity_key`` and NOT on ``normalize_carrier`` (its own comment,
+    Round 10 fix 46 - folding aliases there would pronounce two real carriers
+    consistent before the typed comparator ever saw them). The carrier-alias
+    suppression this function has always had lives in that coarse normaliser, and
+    two tests pin it ("Employers Mutual Casualty Company" vs "EMC Property &
+    Casualty Company" must stay silent). Replacing the old test instead of adding
+    to it re-opened both - caught by the suite, not by reasoning.
+
+    Both gates are SUPPRESSIVE, so the net effect is strictly one-way: every
+    conflict suppressed today stays suppressed, the door removes further FALSE
+    ones (prose, typed equivalence, a rating bureau standing in for an insurer),
+    and no new card can ever appear.
+
+    Fails toward TODAY'S BEHAVIOUR: if the door is unavailable, keep the answer
+    the caller's own test already reached rather than dropping a real conflict.
+    """
+    try:
+        from services.fact_comparison import conflict as _door
+        return _door(fact_key, values, context)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(
+            "detect_source_conflicts: comparison door unavailable for %s (%s) - "
+            "keeping the distinct-normalised-string verdict", fact_key, exc,
+        )
+        return True
+
+
 def _humanize_conflict_sources(sources: str) -> str:
     """Rewrite the 'doc_type=value, doc_type=value' source string so each source
     shows the DOCUMENT'S readable name, not its internal doc_type token
@@ -6399,7 +6444,7 @@ def _humanize_conflict_sources(sources: str) -> str:
 
 def _structured_dict_field_conflicts(
     field: str, values_by_doc: List[Tuple[str, dict]],
-    normalize_value, is_carrier_field,
+    normalize_value, is_carrier_field, context=None,
 ) -> List[Tuple[str, str, bool]]:
     """Per-sub-key conflict tuples ``(field_key, message, is_carrier)`` for a
     structured dict fact (Fix 4's
@@ -6440,11 +6485,22 @@ def _structured_dict_field_conflicts(
         # "risk_transfer_mortgagee_name" reuses the same name-aware normalizer a
         # top-level "mortgagee_name" field would get, with no extra mapping.
         sub_field = f"{field}_{subkey}"
-        normalized = {
-            n for _, sv in sub_values
-            if (n := normalize_value(sub_field, _display_scalar(sv)))
-        }
+        # Gate 1, unchanged: values that normalize to '' carry no usable signal,
+        # and identical normalised strings are one value. Gate 2 is the one
+        # comparison door - see _door_conflict for why it ADDS to this test
+        # rather than replacing it.
+        comparable: List[str] = []
+        normalized: set = set()
+        for _, sv in sub_values:
+            disp = _display_scalar(sv)
+            n = normalize_value(sub_field, disp)
+            if not n:
+                continue
+            comparable.append(disp)
+            normalized.add(n)
         if len(normalized) <= 1:
+            continue
+        if not _door_conflict(sub_field, comparable, context):
             continue
 
         raw_sources = ", ".join(f"{dt}={_display_scalar(sv)}" for dt, sv in sub_values[:3])
@@ -6499,6 +6555,15 @@ def detect_source_conflicts(
         normalize_value, is_carrier_field,
     )
 
+    # The package's verified contract index, so two printings of ONE policy
+    # number are not read as two policies. Built once, fail-open (None = compare
+    # without it, which is the behaviour on a package with no dec index).
+    try:
+        from services.fact_comparison import build_context
+        eq_context = build_context(None, docs)
+    except Exception:                                         # pragma: no cover
+        eq_context = None
+
     skip_fields = skip_fields or set()
     conflicts: List[Tuple[str, str, bool]] = []
     all_keys: set = set()
@@ -6519,6 +6584,7 @@ def detect_source_conflicts(
                 continue
             conflicts.extend(_structured_dict_field_conflicts(
                 field, dict_values_by_doc, normalize_value, is_carrier_field,
+                eq_context,
             ))
             continue
 
@@ -6546,14 +6612,25 @@ def detect_source_conflicts(
         if len(values_by_doc) < 2:
             continue
 
-        # Beta Report §5: compare NORMALIZED values so formatting/terminology
-        # differences (case, punctuation, date format, $1,000,000 vs 1000000,
-        # CSL vs Combined Single Limit, LLC vs Limited Liability Company, address
-        # abbreviations) do not manufacture a conflict. Values that normalize to
-        # '' carry no usable signal and are ignored. Raw values are kept in the
-        # message so they remain visible to the user (§5.1).
-        normalized = {n for _, v in values_by_doc if (n := normalize_value(field, v))}
+        # Beta Report §5, GATE 1 (unchanged): compare NORMALIZED values so
+        # formatting/terminology differences (case, punctuation, date format,
+        # $1,000,000 vs 1000000, CSL vs Combined Single Limit, LLC vs Limited
+        # Liability Company, address abbreviations, carrier aliases) do not
+        # manufacture a conflict. Values that normalize to '' carry no usable
+        # signal and are ignored. GATE 2 is the one comparison door, which
+        # removes what this test cannot see - two paragraphs above all. Raw
+        # values are kept in the message so they remain visible (§5.1).
+        comparable: List[Any] = []
+        normalized: set = set()
+        for _, v in values_by_doc:
+            n = normalize_value(field, v)
+            if not n:
+                continue
+            comparable.append(v)
+            normalized.add(n)
         if len(normalized) <= 1:
+            continue
+        if not _door_conflict(field, comparable, eq_context):
             continue
 
         raw_sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])

@@ -388,12 +388,12 @@ def test_the_middleware_and_the_error_path_share_one_policy():
 
 # ══ 4. The Carrier-Grade COPE twins ═════════════════════════════════════════
 
-_LEGACY_COPE = ("Carrier-Grade COPE incomplete - SQS capped at 85. Missing: "
-                "year built, roof year, sprinkler system, fire protection class, "
-                "valuation method, coinsurance percentage")
+_LEGACY_COPE = ("Carrier-Grade COPE incomplete - Submission Quality Score (SQS) capped "
+                "at 85. Missing: year built, roof year, sprinkler system, fire "
+                "protection class, valuation method, coinsurance percentage")
 _CODED_COPE = ("Carrier-Grade COPE detail incomplete - missing: year built, roof "
                "year, sprinkler system, protection class. Submission can proceed "
-               "but SQS will be capped.")
+               "but your Submission Quality Score (SQS) will be capped.")
 
 
 def _view_codes(structured, cross, soft):
@@ -634,11 +634,12 @@ def test_the_auto_wc_sibling_is_otherwise_untouched():
 
 # ══ 7. A shrinking warning is not a new one ═════════════════════════════════
 
-_COPE_6 = ("Carrier-Grade COPE incomplete - SQS capped at 85. Missing: year built, "
-           "roof year, sprinkler system, fire protection class, valuation method, "
-           "coinsurance percentage")
-_COPE_5 = ("Carrier-Grade COPE incomplete - SQS capped at 85. Missing: year built, "
-           "roof year, sprinkler system, fire protection class, coinsurance percentage")
+_COPE_6 = ("Carrier-Grade COPE incomplete - Submission Quality Score (SQS) capped at "
+           "85. Missing: year built, roof year, sprinkler system, fire protection "
+           "class, valuation method, coinsurance percentage")
+_COPE_5 = ("Carrier-Grade COPE incomplete - Submission Quality Score (SQS) capped at "
+           "85. Missing: year built, roof year, sprinkler system, fire protection "
+           "class, coinsurance percentage")
 
 
 def test_filling_one_field_of_a_list_warning_raises_nothing():

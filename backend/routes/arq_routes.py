@@ -354,7 +354,7 @@ async def send_arq(
 
     arq_link      = f"{FRONTEND_URL}/questionnaire/{arq_data['token']}"
     producer_name = current_user.get("full_name", "") or current_user.get("email", "")
-    first_name    = producer_name.split()[0] if producer_name else "Your Agent"
+    first_name    = producer_name.split()[0] if producer_name else "Your Broker"
 
     email_sent = send_arq_email(
         to_email=client_email,
@@ -426,7 +426,7 @@ async def client_view(token: str, request: Request):
             producer_email = dict(row).get("email", "") or ""
             producer_name  = dict(row).get("full_name", "") or ""
             # Previously never populated: the query omitted `phone`, so the
-            # client's "Contact Your Agent" card silently dropped the number.
+            # client's "Contact Your Broker" card silently dropped the number.
             producer_phone = dict(row).get("phone", "") or ""
     except Exception as ex:
         logger.warning(f"client_view: could not fetch producer info: {ex}")
@@ -711,7 +711,7 @@ async def submit_arq(token: str, request: Request):
         "scores_updated": bool(score_update.get("ok")),
         "score_update":   score_update,
         # Short human-quotable reference so the client's confirmation is an
-        # actual receipt they can cite back to their agent. Only the leading
+        # actual receipt they can cite back to their broker. Only the leading
         # segment of the uuid is exposed - enough to look up, not enough to
         # enumerate, and the endpoint that serves receipts is keyed on arq_id
         # + owner anyway, never on this string.
@@ -776,7 +776,7 @@ def _assistant_field_block(q: dict) -> str:
                 "UNCONFIRMED SUGGESTIONS SHOWN NEXT TO THIS FIELD (derived from this "
                 f"business's described operations, NOT confirmed): {rendered}. "
                 "You may discuss these and explain what each one covers, but always "
-                "say they must be confirmed with their agent before being relied on, "
+                "say they must be confirmed with their broker before being relied on, "
                 "and that leaving the box blank is fine."
             )
     return "\n".join(lines)
@@ -851,20 +851,20 @@ async def _assistant_package_context(arq: dict) -> str:
     return "\n".join(lines)
 
 
-_ARQ_ASSISTANT_RULES = """You are Primble's Form Assistant. You help a business owner fill in an insurance questionnaire their agent sent them. Assume they are not an insurance expert.
+_ARQ_ASSISTANT_RULES = """You are Primble's Form Assistant. You help a business owner fill in an insurance questionnaire their broker sent them. Assume they are not an insurance expert.
 
 WHAT YOU DO:
-1. Explain what a question on this form means, in plain English.
+1. Explain what a question on this questionnaire means, in plain English.
 2. Explain where to find information they do not have on hand - which document, filing, or website to look at, or who to ask.
 3. Explain what format an answer must be in, using the ANSWER TYPE given for that field.
-4. Answer general insurance-terminology questions when they relate to a question on this form.
+4. Answer general insurance-terminology questions when they relate to a question on this questionnaire.
 
 WHAT YOU NEVER DO:
-5. Never recommend coverage, limits, deductibles, endorsements or carriers, and never say whether a coverage is enough, needed, wise or a good deal. That is their agent's job. If asked, say so plainly and offer to explain what the question means instead.
+5. Never recommend coverage, limits, deductibles, endorsements or carriers, and never say whether a coverage is enough, needed, wise or a good deal. That is their broker's job. If asked, say so plainly and offer to explain what the question means instead.
 6. Never give legal, tax, or claims advice.
-7. Never state a specific code, number, date or dollar amount as though it were this business's real answer. You may give a clearly-labelled example of the right SHAPE ("a roofing contractor would use something like 238160"), and you must tell them to confirm it with their agent before relying on it.
+7. Never state a specific code, number, date or dollar amount as though it were this business's real answer. You may give a clearly-labelled example of the right SHAPE ("a roofing contractor would use something like 238160"), and you must tell them to confirm it with their broker before relying on it.
 8. Never claim to fill in, change, or submit an answer. You cannot - you can only explain.
-9. If a request has nothing to do with this form or with insurance, politely steer back.
+9. If a request has nothing to do with this questionnaire or with insurance, politely steer back.
 
 HOW YOU ANSWER:
 10. Be concise and friendly: 2-4 sentences. No jargon. No bullet lists unless you are listing allowed options.
@@ -934,7 +934,7 @@ async def arq_chat(token: str, request: Request):
 
     # Both uses below are technical failures (empty completion / exception), not
     # refusals - so this must not read like the assistant declined to help.
-    fallback = "Sorry, I couldn't get you an answer just now. Please try again in a moment, or ask your agent."
+    fallback = "Sorry, I couldn't get you an answer just now. Please try again in a moment, or ask your broker."
 
     try:
         reply = await groq_chat(

@@ -7,6 +7,7 @@ import { GOOGLE_CLIENT_ID, API_BASE } from "./config/constants";
 import { useAuth }            from "./hooks/useAuth";
 import { useSignature }       from "./hooks/useSignature";
 import { useUpgradePolling, useBillingReturnPolling } from "./hooks/useUpgradePolling";
+import { useToasts }         from "./hooks/useToasts";
 import { applyOverage }       from "./api/stripeApi";
 
 import UpgradeStageOverlay    from "./components/overlays/UpgradeStageOverlay";
@@ -121,7 +122,11 @@ function AppContent() {
   const [resumeSessionId,     setResumeSessionId]     = useState(null);
   const [upgradeChecking,     setUpgradeChecking]     = useState(false);
   const [upgradeFailed,       setUpgradeFailed]       = useState(false);
-  const [overageToast,        setOverageToast]        = useState(null);
+  // UI-10: same door as AcordModal's job toasts. This one had the MIRROR
+  // defect - it auto-dismissed at 8s but had no close button, and its bare
+  // setTimeout was never cleared, so it fired setState into an unmounted
+  // component if the user navigated away first.
+  const { toasts: overageToasts, push: pushOverageToast, dismiss: dismissOverageToast } = useToasts();
   const [marketingPage,       setMarketingPage]       = useState(null);
   const [portalRedirecting,   setPortalRedirecting]   = useState(false);
   const acordModalRef = useRef(null);
@@ -191,15 +196,13 @@ function AppContent() {
         fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
           .then(r => r.ok ? r.json() : null).then(me => { if (me) setUser(me); });
         const applied = data.credited || data.already_applied;
-        setOverageToast(applied
-          ? `${qty} extra package${qty !== "1" ? "s" : ""} added!`
-          : `Could not verify payment. Contact support if packages were not credited.`);
-        setTimeout(() => setOverageToast(null), 8000);
+        pushOverageToast(applied
+          ? { body: `${qty} extra package${qty !== "1" ? "s" : ""} added!`, tone: "success" }
+          : { body: `Could not verify payment. Contact support if packages were not credited.`, tone: "warning" });
         if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }
       })
       .catch(() => {
-        setOverageToast("Payment received but could not auto-credit. Please refresh.");
-        setTimeout(() => setOverageToast(null), 8000);
+        pushOverageToast({ body: "Payment received but could not auto-credit. Please refresh.", tone: "warning" });
         if (savedSid) { setResumeSessionId(savedSid); setShowModal(true); }
       });
   }, []); // eslint-disable-line
@@ -276,11 +279,74 @@ function AppContent() {
 
  return (
     <div className="landing-container">
-      {overageToast && (
-        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#10b981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.18)" }}>
-          {overageToast}
-        </div>
-      )}
+      {/* Live region stays mounted even when empty: a screen reader only reliably
+          announces additions to a region that was already in the DOM. */}
+      <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="false"
+          style={{
+            position: "fixed",
+            // Pinned edges instead of `left: 50%` + translate: the old pill could
+            // not shrink, so a long message overhung the viewport on a phone.
+            left: "max(16px, env(safe-area-inset-left))",
+            right: "max(16px, env(safe-area-inset-right))",
+            bottom: "max(24px, env(safe-area-inset-bottom))",
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+            pointerEvents: "none",
+          }}>
+          {overageToasts.map(t => (
+            <div key={t.id}
+              onClick={() => dismissOverageToast(t.id)}
+              style={{
+                pointerEvents: "auto",
+                position: "relative",
+                maxWidth: "min(420px, 100%)",
+                background: "#10b981",
+                color: "#fff",
+                padding: "12px 40px",
+                borderRadius: 10,
+                fontWeight: 600,
+                fontSize: 14,
+                textAlign: "center",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.18)",
+                cursor: "pointer",
+                WebkitTapHighlightColor: "transparent",
+                touchAction: "manipulation",
+              }}>
+              {t.body}
+              <button
+                type="button"
+                aria-label="Dismiss notification"
+                onClick={(e) => { e.stopPropagation(); dismissOverageToast(t.id); }}
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  right: 6,
+                  transform: "translateY(-50%)",
+                  width: 30,
+                  height: 30,
+                  border: "none",
+                  borderRadius: "50%",
+                  background: "transparent",
+                  color: "#fff",
+                  fontSize: 16,
+                  lineHeight: "20px",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
+                }}>×</button>
+            </div>
+          ))}
+      </div>
 
       {upgradeChecking && <UpgradeStageOverlay />}
 

@@ -45,7 +45,7 @@ from services.form_service import (
 )
 from services.sqs_service import (
     check_tier1, check_tier2, evaluate_stops, check_doc_consistency,
-    _has_explicit_follow_form,
+    _has_explicit_follow_form, parse_normalization_notice,
 )
 from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues
 from services.issue_registry import make_issue, classify_legacy
@@ -896,7 +896,10 @@ async def _finalize_pipeline(
     _confirmed_keys = {parse_confirmation_key(k)[0] for k in (confirmations or {})}
     consistency_issues = check_doc_consistency(active_docs, _confirmed_keys)
     doc_conflicts: list[dict] = []
-    normalized_differences: list[str] = []
+    # Rows, not sentences (client UI-04). Each carries `message` - the exact
+    # string this list used to hold - plus the field, its label, the raw
+    # printings and the normalization category that made them equal.
+    normalized_differences: list[dict] = []
     if consistency_issues:
         logger.warning("Doc consistency issues: %s", consistency_issues)
         for issue in consistency_issues:
@@ -923,9 +926,16 @@ async def _finalize_pipeline(
                 # Normalization notice: values differed in format but were treated
                 # as equivalent. Surface to the user as an informational notice
                 # (Beta Report §5.1: "Raw values remain visible to the user").
-                rest = issue[len("[info]"):].strip()
-                rest = re.sub(r"^(?:field|code)=\S+\s*", "", rest)
-                normalized_differences.append(rest)
+                #
+                # Parsed by the ONE door (sqs_service.parse_normalization_notice)
+                # rather than a second inline regex here. The row carries the
+                # normalization CATEGORY, which this branch used to strip and
+                # discard - so the card could assert two values were equivalent
+                # and never say why (client UI-04). `message` on the row is
+                # byte-identical to what this branch produced before.
+                _norm_row = parse_normalization_notice(issue)
+                if _norm_row is not None:
+                    normalized_differences.append(_norm_row)
             else:
                 # Unknown prefix — treat as warning so it does not silently cap SQS at 60.
                 soft_stops = list(soft_stops) + [issue]
@@ -1292,6 +1302,8 @@ async def _finalize_pipeline(
                 _t,
                 _cf_issue.get("message", ""),
                 _cf_issue.get("forms"),
+                # UX-05: keep the Add-form affordance on the card copy too.
+                add_forms=(_cf_issue.get("resolution") or {}).get("add_forms"),
             ))
 
     # Human-friendly label for the submissions history (Beta Report §4.1). Prefer

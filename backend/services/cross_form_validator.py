@@ -79,7 +79,8 @@ def _dates_differ(a: Any, b: Any) -> bool:
     return str(a).strip() != str(b).strip()
 
 
-def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
+def _issue(issue_type: str, code: str, message: str, forms: List[str],
+           add_forms: Optional[List[str]] = None) -> dict:
     # `issue_id` is a durable, content-derived barcode used only by the display /
     # resolution-status layer (issue_registry.issue_id_for). It never affects the
     # cross-form gating below, which continues to key off `code`/`message`.
@@ -88,6 +89,21 @@ def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
     # producer can fix THIS issue inline (enter a value / edit a schedule / add
     # an ACORD 101 note), keyed purely off `code`. Additive: None for any code
     # without an inline resolution, and never consulted by scoring/gating.
+    #
+    # `add_forms` (UX-05, 2026-09-08) names the ACORD form(s) THIS MESSAGE tells
+    # the producer to add or attach. Declared HERE, at the call that writes the
+    # sentence, rather than derived from the sentence later: a rule that says
+    # "Add ACORD 186" already knows which form it means, and a regex over prose
+    # cannot tell it apart from "Add EL limits on ACORD 130" (a value, on a form
+    # that is already present). `tests/test_add_form_resolution.py` harvests
+    # every message below and fails the build if one instructs the producer to
+    # add a form without declaring it, so a new rule cannot go silent - the same
+    # anti-rot device as `test_legacy_rules`.
+    #
+    # Nothing here decides whether the form is actually MISSING. That is filtered
+    # once, against the real trigger set, in `run_cross_form_validation` - so a
+    # rule can declare its form unconditionally and never has to re-derive
+    # "is it selected?" for itself.
     from services.issue_registry import issue_id_for, resolution_for
     issue = {
         "type": issue_type, "code": code, "message": message, "forms": forms,
@@ -95,7 +111,15 @@ def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
     }
     _res = resolution_for(code)
     if _res:
+        if add_forms:
+            _res = dict(_res)
+            _res["add_forms"] = list(add_forms)
         issue["resolution"] = _res
+    elif add_forms:
+        # A code with no inline resolution can still be closed by adding a form
+        # (nothing in RESOLUTION_MAP is required for that), so give it the same
+        # `none`-mode envelope every other unfixable row already renders.
+        issue["resolution"] = {"mode": "none", "add_forms": list(add_forms)}
     return issue
 
 
@@ -151,6 +175,7 @@ def _check_wc_payroll_reconciliation(
                     "tolerance. Reconcile or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
+                add_forms=["ACORD_101"],
             ))
 
     # Spec §121: "WC payroll must reconcile with ACORD 125 revenue/operations".
@@ -168,6 +193,7 @@ def _check_wc_payroll_reconciliation(
                     "Reconcile with operations or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
+                add_forms=["ACORD_101"],
             ))
 
     # Contractor subcontracting check against WC payroll
@@ -222,6 +248,7 @@ def _check_gl_class_code_vs_operations(
                 "operations description. Add operations detail or attach ACORD 101."
             ),
             ["ACORD_125", "ACORD_126"],
+            add_forms=["ACORD_101"],
         ))
 
     # If contractor flag is set and ACORD 186 is missing, warn
@@ -235,6 +262,7 @@ def _check_gl_class_code_vs_operations(
                 "Add ACORD 186 to capture subcontracting and high-hazard details."
             ),
             ["ACORD_126", "ACORD_186"],
+            add_forms=["ACORD_186"],
         ))
 
     return issues
@@ -287,6 +315,7 @@ def _check_location_address_reconciliation(
                 "Location counts must match or be explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_140"],
+            add_forms=["ACORD_101"],
         ))
 
     # Spec §56-61: Address Mapping - physical locations must align between
@@ -325,6 +354,7 @@ def _check_location_address_reconciliation(
                     "ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_140"],
+                add_forms=["ACORD_101"],
             ))
 
     return issues
@@ -438,6 +468,7 @@ def _check_umbrella_attachment_stack(
                 "align or be explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
+            add_forms=["ACORD_101"],
         ))
 
     if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
@@ -450,6 +481,7 @@ def _check_umbrella_attachment_stack(
                 "or be explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
+            add_forms=["ACORD_101"],
         ))
 
     return issues
@@ -507,6 +539,7 @@ def _check_builders_risk_vs_property_deduplication(
                     "not double-counted. Attach ACORD 101 if coverages are disjoint."
                 ),
                 ["ACORD_140"],
+                add_forms=["ACORD_101"],
             ))
 
     return issues
@@ -692,6 +725,7 @@ def _check_acord125_always_present(
                 "review the missing baseline data before generating forms."
             ),
             ["ACORD_125"],
+            add_forms=["ACORD_125"],
         ))
 
     return issues
@@ -1343,6 +1377,7 @@ def _check_wc_gl_class_code_alignment(
                 "explanation - attach ACORD 101 to clarify."
             ),
             ["ACORD_126", "ACORD_130"],
+            add_forms=["ACORD_101"],
         ))
 
     return issues
@@ -1546,6 +1581,7 @@ def _check_umbrella_period_vs_auto_wc(
                     "umbrella attaches to Auto (or be explained via ACORD 101)."
                 ),
                 ["ACORD_127", "ACORD_131"],
+                add_forms=["ACORD_101"],
             ))
 
         if umb_exp and auto_exp and _dates_differ(umb_exp, auto_exp):
@@ -1558,6 +1594,7 @@ def _check_umbrella_period_vs_auto_wc(
                     "umbrella attaches to Auto (or be explained via ACORD 101)."
                 ),
                 ["ACORD_127", "ACORD_131"],
+                add_forms=["ACORD_101"],
             ))
 
     # WC period alignment
@@ -1575,6 +1612,7 @@ def _check_umbrella_period_vs_auto_wc(
                     "umbrella attaches over WC (or be explained via ACORD 101)."
                 ),
                 ["ACORD_130", "ACORD_131"],
+                add_forms=["ACORD_101"],
             ))
 
     return issues
@@ -1910,16 +1948,54 @@ def _check_acord101_triggers(
         needs_101 = True
         reason_parts.append(f"{num_claims} prior claims - narrative explanation required")
 
+    # ── SATISFIED once the producer has actually DONE what this asks ─────────
+    #
+    # The message is "Attach ACORD 101 with narrative before submission", and
+    # until 2026-09-09 the rule read NEITHER half: not whether ACORD 101 was in
+    # the package, not whether a narrative existed. So a producer could add the
+    # form, write the explanation, and watch the row sit there unchanged - the
+    # only way to clear it was Resolve or Dismiss, i.e. to OVERRULE a warning
+    # rather than satisfy it. Found live 2026-09-09 while testing UX-05.
+    #
+    # Same family as BUG-05: a card asking for something the rule cannot see.
+    #
+    # BOTH halves are required, matching the sentence exactly. An empty ACORD
+    # 101 in the package is not an explanation, and a narrative with no form to
+    # print it on is not an attachment.
+    #
+    # NO SCORE MOVES. This issue is `advisory`, so `split_cross_form_issues`
+    # never puts it in hard_stops / soft_stops, nothing caps on it, and the
+    # string "acord101_required" appears nowhere in sqs_service - verified, not
+    # assumed. It is a display row only.
+    if needs_101 and "ACORD_101" in (triggered_ids or set()):
+        _narrative = str(_fv(facts, "additional_remarks_text") or "").strip()
+        if _narrative:
+            needs_101 = False
+
     if needs_101:
+        # The closing sentence names the work that is ACTUALLY LEFT. Until
+        # 2026-09-09 it always read "Attach ACORD 101 with narrative", so once
+        # the producer had added the form the row told them to attach a form
+        # sitting in their own package - and the only thing still missing, the
+        # narrative, was the half the sentence buried. Same defect shape as the
+        # satisfaction gate above: the message did not read the state.
+        #
+        # `add_forms` is declared either way; `_filter_add_forms` drops it when
+        # ACORD 101 is present, so the card offers the button only in the branch
+        # whose sentence asks for the form.
+        _101_present = "ACORD_101" in (triggered_ids or set())
         issues.append(_issue(
             "advisory",
             "acord101_required",
             (
                 "ACORD 101 (Additional Remarks Schedule) is required to explain: "
                 + "; ".join(reason_parts) + ". "
-                "Attach ACORD 101 with narrative before submission."
+                + ("ACORD 101 is in this package - add the narrative before "
+                   "submission." if _101_present else
+                   "Attach ACORD 101 with narrative before submission.")
             ),
             ["ACORD_101"],
+            add_forms=["ACORD_101"],
         ))
 
     return issues
@@ -2258,6 +2334,7 @@ def _check_builders_risk_project_value(
                 "narrative explaining the project scope."
             ),
             ["ACORD_133"],
+            add_forms=["ACORD_101"],
         ))
 
     return issues
@@ -2348,7 +2425,7 @@ def _check_carrier_grade_cope_quality(
             (
                 "Carrier-Grade COPE detail incomplete - missing: "
                 + ", ".join(missing_quality)
-                + ". Submission can proceed but SQS will be capped."
+                + ". Submission can proceed but your Submission Quality Score (SQS) will be capped."
             ),
             ["ACORD_140"],
         ))
@@ -2470,6 +2547,7 @@ def _check_certificate_requested_but_missing(
                 "ACORD 25 to satisfy the request."
             ),
             ["ACORD_25"],
+            add_forms=["ACORD_25"],
         ))
 
     mortgagee = bool(_fv(facts, "mortgagee_name")) or bool(_fv(facts, "loss_payee_name"))
@@ -2486,6 +2564,7 @@ def _check_certificate_requested_but_missing(
                     "forms. Add ACORD 28 to satisfy the lender requirement."
                 ),
                 ["ACORD_28"],
+                add_forms=["ACORD_28"],
             ))
 
     return issues
@@ -2563,7 +2642,40 @@ def run_cross_form_validation(
                 exc,
             )
 
+    _filter_add_forms(all_issues, triggered_ids)
     return all_issues
+
+
+def _filter_add_forms(issues: List[dict], triggered_ids: set) -> None:
+    """Keep only the forms that are genuinely NOT in this package (UX-05).
+
+    ONE place decides "is it missing?", against the real trigger set, so no rule
+    has to re-derive it and no two rules can disagree. Rules declare the form
+    their own sentence names; this drops it the moment that form is present.
+
+    Why this must run even for rules that already gate on absence
+    (`contractor_missing_acord186` only fires when ACORD 186 is unselected):
+    most of the ACORD 101 declarations do NOT gate - `wc_payroll_mismatch` fires
+    on a package that already has ACORD 101, and offering to add a form that is
+    sitting in the list is the same "control the server would refuse" defect
+    BUG-05 was about.
+
+    Removing the key entirely (rather than leaving `[]`) matters: every display
+    layer tests truthiness, and an empty list would render an Add button with
+    nothing behind it.
+    """
+    present = set(triggered_ids or ())
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        res = issue.get("resolution")
+        if not isinstance(res, dict) or not res.get("add_forms"):
+            continue
+        remaining = [f for f in res["add_forms"] if f not in present]
+        if remaining:
+            res["add_forms"] = remaining
+        else:
+            res.pop("add_forms", None)
 
 
 def split_cross_form_issues(

@@ -842,7 +842,7 @@ _HINT_OVERRIDES = {
     "wc_class_codes": (
         "One row per group of employees who do similar work - for example "
         "office staff, sales, field crew. Give the yearly payroll for each "
-        "group and the state they work in. Your agent will handle the class codes."
+        "group and the state they work in. Your broker will handle the class codes."
     ),
     "wc_officers": (
         "Type Included or Excluded for each owner or officer."

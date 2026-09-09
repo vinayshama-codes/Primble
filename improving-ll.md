@@ -3742,3 +3742,27 @@ bare version pin) and `test_general_liability_and_workers_comp_are_deliberately_
 whose docstring read *"If a client ever reports a false GL or WC tick, harden them then -
 with that report as the evidence."* The evidence arrived; the test is now split so GL stays
 deliberately untouched and WC records why it was hardened.
+
+---
+
+## C-UI01 - ARQ assistant prompt: "agent" -> "broker" (2026-09-09)
+
+**Copy only, no cost change.** UI-01 (client review) asked for broker terminology in every
+client-facing surface. `_ARQ_ASSISTANT_RULES` and `_assistant_field_block` in
+`routes/arq_routes.py` referred to the producer as the client's "agent" three times; those
+words now read "broker". Same call count, same call sites, same batching, byte-for-byte
+same length class - the ARQ assistant prompt is per-question and was never part of the
+gap-fill cached prefix, so `PROMPT_VERSION` / `SCHEMA_VERSION` do NOT move and no cached
+extraction is invalidated.
+
+The generated ANSWER text changes only in that word, which is the point: the assistant told
+clients to "confirm it with their agent" while the questionnaire around it said broker.
+
+## C-UI02 - ARQ assistant prompt: "this form" -> "this questionnaire" (2026-09-09)
+
+**Copy only, no cost change.** UI-02 rewrote the client-side greeting; rules 1, 4
+and 9 of `_ARQ_ASSISTANT_RULES` still had the model calling the client's
+questionnaire "this form", which is OUR word for the ACORD output. Three words,
+same call count, same call sites, same batching. `PROMPT_VERSION` /
+`SCHEMA_VERSION` do NOT move - see C-UI01 for why this prompt is outside the
+gap-fill cached prefix.

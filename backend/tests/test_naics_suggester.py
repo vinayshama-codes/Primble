@@ -325,7 +325,10 @@ def test_assistant_field_block_carries_suggestions_as_unconfirmed():
     })
     assert "238160" in block
     assert "NOT confirmed" in block
-    assert "agent" in block
+    # The human who confirms it. Either terminology passes so the UI-01 copy
+    # reword (agent -> broker) is not read as a defect; what matters is that
+    # the block names a person to confirm with.
+    assert ("broker" in block) or ("agent" in block)
 
 
 # ---------------------------------------------------------------------------

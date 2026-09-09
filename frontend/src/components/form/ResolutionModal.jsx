@@ -11,7 +11,15 @@
 //   schedule  -> the shared ScheduleTable (vehicles / locations / ...)
 //   narrative -> a textarea appended to the ACORD 101 remarks
 //   none      -> read-only detail + the existing Resolve / Dismiss work-tracking
-//                controls (no single value fixes it - e.g. "add ACORD 186")
+//                controls (a coverage decision, an advisory)
+//
+// UX-05 (2026-09-08) adds `resolution.add_forms` ALONGSIDE any of those four:
+// the ACORD form(s) this validation's own message tells the producer to add,
+// already filtered server-side to the ones missing from this package. It is not
+// a fifth mode because it composes - `acord101_required` needs the narrative
+// box AND the offer to add ACORD 101; `contractor_missing_acord186` is `none`
+// mode whose only fix IS the form. The producer used to get Dismiss / Mark
+// resolved, neither of which adds anything.
 
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../config/constants';
@@ -51,13 +59,15 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const [schedule, setSchedule] = useState(null); // schedule mode: fetched def + rows
   const [rows, setRows] = useState([]);
   // ONLY the schedule table needs data before it can render at all; field and
-  // narrative render immediately (typeable) and hydrate their saved values in the
-  // background, so the producer never waits to start typing.
+  // narrative hold a brief spinner instead, so nothing flashes an empty state
+  // before its saved value lands.
   const [loading, setLoading] = useState(mode === 'schedule');
   // Field/narrative modes hydrate their saved values from the server (so
   // reopening a resolved validation shows what was applied). `prefillLoading`
-  // gates the field inputs behind a spinner until that value lands, instead of
-  // flashing an empty box that fills a beat later (client #3).
+  // gates BOTH behind a spinner until that value lands, instead of flashing an
+  // empty box that fills a beat later (client #3, and the same complaint on
+  // narrative 2026-09-09 - "Already on ACORD 101" popped in after a second, so
+  // for that beat the modal said nothing was saved).
   const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative');
   // Bumped after an apply that raised a follow-up, to re-read what is now on
   // file. Without it the producer is asked to "apply again" while looking at
@@ -84,21 +94,50 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // overwrite these, or a value would jump under the cursor.
   const touched = useRef(new Set());
 
+  // UX-05. Forms this validation says are missing, as the SERVER declared them.
+  // Held in state, not read straight off `resolution`, because a successful add
+  // must drop that form from the offer immediately - the panel behind refreshes
+  // asynchronously and the producer is still looking at this modal.
+  const [addForms, setAddForms] = useState(() =>
+    (Array.isArray(resolution.add_forms) ? resolution.add_forms : []).filter(Boolean));
+  const [addingForm, setAddingForm] = useState(null);   // form id in flight
+  const [addedForms, setAddedForms] = useState([]);     // form ids added here
+  const formLabel = (fid) => String(fid || '').replace(/_/g, ' ');
+
+  // The add's own payload, kept so it survives a LATER apply in the same modal.
+  //
+  // A composite card does two things in one visit: `acord101_required` needs
+  // the form AND the narrative. Adding sets `applied.current`, but
+  // applyNarrative / applyField / applySchedule then call `onApplied` with
+  // THEIR OWN response, which carries no `added_form` - so the panel never
+  // learned the form existed and the Generated Forms list stayed one short
+  // until a reload. Reported live 2026-09-09: ACORD 101 was in the package
+  // (the validation cleared, which requires it) and absent from the list.
+  const addedRef = useRef(null);
+
+  // Carry the add forward onto whatever response finally reaches the panel.
+  // Never overwrites a fresher field: the later response's `cross_issues`,
+  // scores and stop lists win, because they are the ones computed last.
+  const withAdded = (data) => (
+    addedRef.current && data && !data.added_form
+      ? { ...data, ...addedRef.current }
+      : data
+  );
+
   // Leave the modal, refreshing the panel if anything was applied while it was
   // open. Cancel, the X, Escape and the backdrop all route through here, so a
   // producer who reads the note and walks away still gets an accurate panel.
   const finish = () => {
     const data = applied.current;
     applied.current = null;
-    if (data) onApplied?.(data, issue);
+    if (data) onApplied?.(withAdded(data), issue);
     else onClose?.();
   };
 
   // Pre-fill field inputs (and narrative's "already saved" context) from the
   // current session facts, so reopening a validation shows what was applied.
-  // Field mode holds a spinner until this resolves (client #3) so a
-  // previously-entered value never flashes in a beat after an empty box;
-  // narrative stays non-blocking (its textarea is empty on open anyway).
+  // Both modes hold a spinner until this resolves, so a previously-entered
+  // value never flashes in a beat after an empty box (client #3).
   useEffect(() => {
     if (mode !== 'field' && mode !== 'narrative') { setPrefillLoading(false); return; }
     let alive = true;
@@ -162,10 +201,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
   // Close on Escape.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && !busy) finish(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !busy && !addingForm) finish(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [busy, addingForm, onClose]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Returns the parsed body on success, and THROWS an Error whose message is
   // already fit to show a broker on anything else.
@@ -262,7 +301,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     // so a panel-refresh callback that throws must never be reported back to
     // the producer as a failed apply - that invites them to retype a value that
     // is already on file. Every early return above has already exited.
-    onApplied?.(last, issue);
+    onApplied?.(withAdded(last), issue);
   };
 
   const applyNarrative = async () => {
@@ -277,7 +316,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       setBusy(false);
       return;
     }
-    onApplied?.(data, issue);
+    onApplied?.(withAdded(data), issue);
   };
 
   const applySchedule = async () => {
@@ -291,7 +330,47 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       setBusy(false);
       return;
     }
-    onApplied?.(data, issue);
+    onApplied?.(withAdded(data), issue);
+  };
+
+  // UX-05: generate a missing ACORD form into this package.
+  //
+  // Slow on purpose - this runs a real form generation (Pass 1 / 1.5 / gap
+  // fill), so it can take minutes. The button holds a spinner rather than
+  // closing the modal, because closing would strand the producer on a stale
+  // panel with no idea whether the form is coming.
+  //
+  // The modal does NOT close on success. Adding a form can raise NEW
+  // validations (a form in the package switches on every rule scoped to it),
+  // and a modal that vanished would hide that. `applied` carries the refresh to
+  // whichever exit they take, exactly like the field path.
+  const addForm = async (formId) => {
+    if (!formId || addingForm) return;
+    setAddingForm(formId); setErr(''); setNote('');
+    let data;
+    try {
+      data = await post({ mode: 'add_form', add_form_id: formId });
+    } catch (e) {
+      setErr(e?.message || 'Could not add that form.');
+      setAddingForm(null);
+      return;
+    }
+    if (!data?.success) {
+      setErr(data?.message || 'Could not add that form.');
+      // The server refuses an add it can no longer justify - already in the
+      // package, or no open validation asking for it. Both mean the offer is
+      // stale, so retire it rather than leaving a button that will fail again.
+      if (data?.outcome === 'already_present' || data?.outcome === 'not_requested') {
+        setAddForms((prev) => prev.filter((f) => f !== formId));
+      }
+      setAddingForm(null);
+      return;
+    }
+    applied.current = data;
+    addedRef.current = { added_form: data.added_form, form_ids: data.form_ids };
+    setAddForms((prev) => prev.filter((f) => f !== formId));
+    setAddedForms((prev) => (prev.includes(formId) ? prev : [...prev, formId]));
+    setAddingForm(null);
   };
 
   const label = {
@@ -310,7 +389,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const stop = (e) => e.stopPropagation();
 
   return (
-    <div style={overlay} onMouseDown={() => { if (!busy) finish(); }}>
+    <div style={overlay} onMouseDown={() => { if (!busy && !addingForm) finish(); }}>
       <div style={card} onMouseDown={stop}>
         {/* Header */}
         <div style={{ padding: '18px 20px 12px', borderBottom: '1px solid #f1f5f9' }}>
@@ -328,7 +407,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             <button
               type="button"
               onClick={finish}
-              disabled={busy}
+              disabled={busy || !!addingForm}
               aria-label="Close"
               style={{
                 flexShrink: 0, width: 30, height: 30, borderRadius: '50%',
@@ -346,10 +425,59 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
         {/* Body */}
         <div style={{ padding: '16px 20px' }}>
-          {mode === 'field' && prefillLoading && (
+          {/* UX-05 - the missing form(s) this validation is asking for. Sits
+              ABOVE the mode content on purpose: for a `none`-mode row it is the
+              only real action on the card, and for a narrative row it is the
+              other half of what the message asked for ("attach ACORD 101"). */}
+          {addForms.length > 0 && (
+            <div style={{ marginBottom: mode === 'none' ? 0 : 14, background: '#fdf2f8', border: '1px solid #f9a8d4', borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#be185d', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                {addForms.length > 1 ? 'Missing forms' : 'Missing form'}
+              </div>
+              <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5, marginBottom: 10 }}>
+                {addForms.length > 1
+                  ? 'These forms are not in this package yet. Adding one generates it and re-runs the checks.'
+                  : 'This form is not in this package yet. Adding it generates the form and re-runs the checks.'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {addForms.map((fid) => (
+                  <button
+                    key={fid}
+                    type="button"
+                    disabled={busy || !!addingForm}
+                    onClick={() => addForm(fid)}
+                    style={{ ...primaryBtn, opacity: (busy || addingForm) ? 0.6 : 1, cursor: addingForm ? 'wait' : 'pointer' }}
+                  >
+                    {addingForm === fid ? `Adding ${formLabel(fid)}...` : `Add ${formLabel(fid)}`}
+                  </button>
+                ))}
+              </div>
+              {addingForm && (
+                <div style={{ fontSize: 11.5, color: '#9d174d', marginTop: 8, lineHeight: 1.45 }}>
+                  Generating the form and re-checking the package - this can take a few minutes. Please keep this window open.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Added in this session of the modal. Green, and deliberately honest
+              about what an added form does NOT do: putting a form in the package
+              switches on every rule scoped to it, so new items can appear. */}
+          {addedForms.length > 0 && (
+            <div style={{ marginBottom: mode === 'none' ? 0 : 14, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, padding: '11px 13px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                {addedForms.length > 1 ? 'Forms added' : 'Form added'}
+              </div>
+              <div style={{ fontSize: 12.5, color: '#166534', lineHeight: 1.5 }}>
+                {addedForms.map(formLabel).join(', ')} {addedForms.length > 1 ? 'are' : 'is'} now in this package and the checks have been re-run. Adding a form can raise new items for that form - check the panel before you download.
+              </div>
+            </div>
+          )}
+
+          {(mode === 'field' || mode === 'narrative') && prefillLoading && (
             <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#64748b', fontSize: 13 }}>
               <span style={{ width: 15, height: 15, border: '2px solid #e2e8f0', borderTopColor: PINK, borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
-              Loading current value...
+              {mode === 'field' ? 'Loading current value...' : 'Loading saved remarks...'}
             </div>
           )}
           {mode === 'field' && !prefillLoading && (
@@ -429,7 +557,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </div>
           )}
 
-          {mode === 'narrative' && (
+          {mode === 'narrative' && !prefillLoading && (
             <div>
               <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 8 }}>Your explanation is added to the ACORD 101 Additional Remarks Schedule and sent to the underwriter.</div>
               {existingRemarks.trim() && (
@@ -474,7 +602,11 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </div>
           )}
 
-          {mode === 'none' && (
+          {/* The generic "handle it elsewhere" sentence is only true when there
+              is nothing to click. With an Add-form action on the card it was
+              actively wrong, so it is suppressed while one is offered or has
+              just been used (UX-05). */}
+          {mode === 'none' && addForms.length === 0 && addedForms.length === 0 && (
             <div style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.55, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
               {resolution.note
                 || "This validation can't be fixed by entering a single value - it usually means adding or adjusting a coverage or form. Handle it on the relevant form, then mark it resolved here, or dismiss it with a note."}
@@ -500,10 +632,25 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
         {/* Footer */}
         <div style={{ padding: '12px 20px 18px', display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9' }}>
-          {mode === 'none' ? (
+          {mode === 'none' && addedForms.length > 0 ? (
+            // A form WAS added, so Dismiss / Mark resolved are both wrong here.
+            // The producer already fixed it - asking them to also file a status
+            // is paperwork about their own action, and it is what created the
+            // confusing state reported on 2026-09-09: "Mark resolved" made a
+            // Resolved receipt, "Reopen" flipped it to open, and the row then
+            // rendered nowhere because the validation no longer fires and could
+            // never fire again. One "Done"; the panel marks it resolved itself,
+            // and only if the validation actually stopped firing.
+            <button type="button" style={primaryBtn} onClick={finish}>Done</button>
+          ) : mode === 'none' ? (
             <>
-              <button type="button" style={ghostBtn} onClick={() => { onSetStatus?.(issue, 'dismissed'); onClose?.(); }}>Dismiss</button>
-              <button type="button" style={primaryBtn} onClick={() => { onSetStatus?.(issue, 'resolved'); onClose?.(); }}>Mark resolved</button>
+              {/* `finish`, not `onClose`: since UX-05 a `none`-mode card can
+                  APPLY something (add a form), and leaving via Dismiss / Mark
+                  resolved must still refresh the panel behind it. `finish`
+                  falls through to onClose when nothing was applied, so the
+                  no-add case is byte-identical to the old behaviour. */}
+              <button type="button" style={ghostBtn} disabled={!!addingForm} onClick={() => { onSetStatus?.(issue, 'dismissed'); finish(); }}>Dismiss</button>
+              <button type="button" style={primaryBtn} disabled={!!addingForm} onClick={() => { onSetStatus?.(issue, 'resolved'); finish(); }}>Mark resolved</button>
             </>
           ) : (
             <>

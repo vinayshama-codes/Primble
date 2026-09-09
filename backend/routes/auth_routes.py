@@ -821,7 +821,7 @@ async def update_profile(
     if req.phone is not None:
         # Stored as free text (international formats vary) but constrained to
         # phone-safe characters so nothing script-like can reach the client's
-        # "Contact Your Agent" card via a tel: link. Empty clears the value.
+        # "Contact Your Broker" card via a tel: link. Empty clears the value.
         raw_phone = req.phone.strip()[:32]
         if raw_phone and not re.fullmatch(r"[0-9+()\-.\s]{7,32}", raw_phone):
             raise HTTPException(400, "Enter a valid phone number.")

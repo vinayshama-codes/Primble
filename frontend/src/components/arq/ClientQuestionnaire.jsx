@@ -25,7 +25,7 @@ const NUMBER_RE  = /^\$?[\d,]+(\.\d+)?$/;
 
 // Shown only when the request itself fails (network error / empty response), so
 // it must read as a technical hiccup - not as the assistant refusing to answer.
-const FALLBACK_REPLY = "Sorry, I couldn't reach the assistant just now. Please try again in a moment, or ask your agent.";
+const FALLBACK_REPLY = "Sorry, I couldn't reach the assistant just now. Please try again in a moment, or ask your broker.";
 
 // Client requirement (Figure 14): a client who genuinely cannot answer a question
 // - SIC / NAICS being the canonical example - must be able to say so and move on
@@ -349,22 +349,30 @@ export default function ClientQuestionnaire({ token }) {
     const sp  = cut.lastIndexOf(' ');
     return `${(sp > 40 ? cut.slice(0, sp) : cut).replace(/[\s(,;:-]+$/, '')}...`;
   };
+  // UI-02: the opener names itself AND names a question that is genuinely still
+  // open, so the client can see what the assistant is for without typing first.
+  //
+  // "Still open" is read off `respondedTo` - the SAME door the progress bar and
+  // the receipt use - so the greeting can never offer a question the bar counts
+  // as done, nor stay silent on one it counts as remaining. It used to test
+  // `answers[...]` directly and skip schedules outright: a table the producer
+  // pre-loaded and the client never opened read as ANSWERED to that rule while
+  // the bar called it remaining, and a questionnaire whose only gaps were
+  // schedules got the "everything is answered" greeting.
   const chatGreeting = (() => {
     const active = questions.find(q => q.field_name === activeField);
     if (active) {
-      return `Hi! You're on "${clipQ(active.question)}" - I can explain what it means, `
-           + `where to find it, or what format it needs. Ask away.`;
+      return `Hi! I'm your automated forms assistant. You're on "${clipQ(active.question)}" - `
+           + `I can explain what it means, where to find it, or what format it needs. Ask away.`;
     }
-    // Schedules store a JSON array, so a blank one is not an empty string -
-    // they are skipped here rather than counted as already answered.
     const next = questions.find(
-      q => q.field_type !== 'schedule' && !(answers[q.field_name] || '').trim()
+      q => !respondedTo(q, answers[q.field_name], seedRef.current[q.field_name], touched)
     );
     if (next) {
-      return `Hi! I'm your form assistant - I can explain any question here in plain English. `
-           + `"${clipQ(next.question)}" is still open, so ask me about that, or anything else on the form.`;
+      return `Hi! I'm your automated forms assistant. For example, "${clipQ(next.question)}" is still open, `
+           + `so feel free to ask me about that or anything else on this questionnaire.`;
     }
-    return `Hi! I'm your form assistant. Ask me what any question on this form means, `
+    return `Hi! I'm your automated forms assistant. Ask me what any question on this questionnaire means, `
          + `or where to find the information it's asking for.`;
   })();
 
@@ -435,7 +443,7 @@ export default function ClientQuestionnaire({ token }) {
           answersRef.current = { ...init, ...restored.answers };
           setAnswersState(answersRef.current);
         } else if (data.error === 'expired') {
-          setError('This questionnaire link has expired. Please contact your insurance agent for a new link.');
+          setError('This questionnaire link has expired. Please contact your insurance broker for a new link.');
         } else if (data.error === 'already_submitted') {
           setSubmitted(true);
         } else {
@@ -640,7 +648,7 @@ export default function ClientQuestionnaire({ token }) {
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
         marginBottom: '12px',
       }}>
-        <div style={{ fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>Contact Your Agent</div>
+        <div style={{ fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>Contact Your Broker</div>
         {producerName && <div style={{ color: '#0f172a', marginBottom: 4 }}>{producerName}</div>}
         {producerEmail && (
           <div style={{ color: '#475569', marginBottom: 2 }}>
@@ -671,7 +679,7 @@ export default function ClientQuestionnaire({ token }) {
       <div style={{ maxWidth: 600, margin: '40px auto', padding: '32px 24px', textAlign: 'center', background: '#fff', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
         <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12, color: '#1e293b' }}>Thank You!</h2>
         <p style={{ fontSize: 16, color: '#475569', marginBottom: 24 }}>
-          Your answers have been submitted successfully. Your insurance agent has been notified and the forms will be updated automatically.
+          Your answers have been submitted successfully. Your insurance broker has been notified and the forms will be updated automatically.
         </p>
         {scoreUpdate && (() => {
           // All 7 post-remediation states from §6.2 - messages are plain-language
@@ -679,11 +687,11 @@ export default function ClientQuestionnaire({ token }) {
           const msgs = {
             resolved:                    { text: 'Your answers resolved outstanding items on this submission - thank you!',                                          bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
             improved:                    { text: 'Your answers improved this submission - thank you!',                                                               bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
-            pending_validation:          { text: 'Your answers have been received and are pending review by your agent.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
-            user_provided_only:          { text: 'Your answers have been recorded. Your agent will confirm the details.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
-            conflicting_evidence_remains:{ text: 'Your answers have been submitted. Your agent will review a few items that need clarification.',                    bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
-            requires_supporting_document:{ text: 'Your answers have been submitted. You may also need to provide supporting documents - your agent will be in touch.', bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
-            still_missing:               { text: 'Your answers have been submitted. Your agent may follow up for any remaining information.',                         bg: '#f1f5f9', border: '#cbd5e1', color: '#475569' },
+            pending_validation:          { text: 'Your answers have been received and are pending review by your broker.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+            user_provided_only:          { text: 'Your answers have been recorded. Your broker will confirm the details.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+            conflicting_evidence_remains:{ text: 'Your answers have been submitted. Your broker will review a few items that need clarification.',                    bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+            requires_supporting_document:{ text: 'Your answers have been submitted. You may also need to provide supporting documents - your broker will be in touch.', bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+            still_missing:               { text: 'Your answers have been submitted. Your broker may follow up for any remaining information.',                         bg: '#f1f5f9', border: '#cbd5e1', color: '#475569' },
           };
           const m = msgs[scoreUpdate.status];
           if (!m) return null;
@@ -710,7 +718,7 @@ export default function ClientQuestionnaire({ token }) {
               </div>
               {receiptRef && (
                 <div style={{ fontSize: 10.5, color: '#94a3b8', fontFamily: 'monospace', flexShrink: 0 }}
-                     title="Quote this reference if you contact your agent about this submission">
+                     title="Quote this reference if you contact your broker about this submission">
                   Ref {receiptRef}
                 </div>
               )}
@@ -755,7 +763,7 @@ export default function ClientQuestionnaire({ token }) {
             expected of them. */}
         <p style={{ fontSize: 13, color: '#475569', marginBottom: 24, lineHeight: 1.55 }}>
           You don't need to do anything else right now. If anything further is needed,
-          your agent{producerName ? ` (${producerName})` : ''} will follow up with you directly.
+          your broker{producerName ? ` (${producerName})` : ''} will follow up with you directly.
         </p>
 
         <button onClick={() => window.close()} style={{ padding: '12px 28px', background: '#E61B84', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', minWidth: 140 }}>
@@ -770,7 +778,7 @@ export default function ClientQuestionnaire({ token }) {
       <div style={{ maxWidth: 500, margin: '40px auto', padding: '32px 24px', textAlign: 'center', background: '#fff', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #fee2e2' }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12, color: '#dc2626' }}>Questionnaire Unavailable</h2>
         <p style={{ fontSize: 14, color: '#475569', marginBottom: 24 }}>{error}</p>
-        <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Please contact your agent or broker for further assistance.</p>
+        <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Please contact your broker for further assistance.</p>
         <AgentContactCard />
         <button onClick={() => window.close()} style={{ marginTop: 20, padding: '10px 24px', background: '#64748b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Close</button>
       </div>
@@ -786,7 +794,7 @@ export default function ClientQuestionnaire({ token }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Insurance Information Needed</h1>
             <p style={{ fontSize: 13, opacity: 0.9 }}>
-              {clientName ? `Hi ${clientName},` : 'Hello,'} your insurance agent needs a few details to complete your application.
+              {clientName ? `Hi ${clientName},` : 'Hello,'} your insurance broker needs a few details to complete your application.
             </p>
             {expiresAt && (
               <p style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>Expires: {formatDate(expiresAt)}</p>
@@ -880,11 +888,11 @@ export default function ClientQuestionnaire({ token }) {
                   confusing question never becomes a dead end. */}
               <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
                 Not sure about something? Tap <strong>"I'm not sure"</strong> on that question and your
-                agent will take care of it - or tap the <strong>Help</strong> button to ask a question.
+                broker will take care of it - or tap the <strong>Help</strong> button to ask a question.
               </p>
               {notSureCount > 0 && (
                 <p style={{ fontSize: 12, color: '#92400e', marginTop: 6, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px' }}>
-                  {notSureCount} question{notSureCount !== 1 ? 's' : ''} marked "I'm not sure" - your agent will follow up on {notSureCount !== 1 ? 'these' : 'this'}.
+                  {notSureCount} question{notSureCount !== 1 ? 's' : ''} marked "I'm not sure" - your broker will follow up on {notSureCount !== 1 ? 'these' : 'this'}.
                 </p>
               )}
             </div>
@@ -972,12 +980,12 @@ export default function ClientQuestionnaire({ token }) {
                       {/* Figure 20: industry-classification candidates derived from
                           the business's own operations text. These are SUGGESTIONS,
                           never answers - nothing is pre-filled, the client has to tap
-                          one, and the copy tells them to confirm it with their agent. */}
+                          one, and the copy tells them to confirm it with their broker. */}
                       {!notSure && Array.isArray(q.suggestions) && q.suggestions.length > 0 && (
                         <div style={{ marginTop: 8 }}>
                           <div style={{ fontSize: 11, color: '#7c2d12', marginBottom: 5 }}>
                             Suggested for your business - tap one to use it, then confirm with
-                            your agent. Leaving this blank is still fine.
+                            your broker. Leaving this blank is still fine.
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {q.suggestions.map((s) => {
@@ -992,7 +1000,7 @@ export default function ClientQuestionnaire({ token }) {
                                   key={s.code}
                                   type="button"
                                   onClick={() => setAnswers({ [q.field_name]: s.code })}
-                                  title={`Suggestion only - ${s.label}. Confirm with your agent before relying on it.`}
+                                  title={`Suggestion only - ${s.label}. Confirm with your broker before relying on it.`}
                                   style={{
                                     display: 'flex', alignItems: 'center', gap: 6,
                                     padding: '5px 10px', borderRadius: 16, cursor: 'pointer',
@@ -1018,7 +1026,7 @@ export default function ClientQuestionnaire({ token }) {
                           </div>
                           {q.suggestions.some((s) => (answers[q.field_name] || '').trim() === s.code) && (
                             <div style={{ marginTop: 5, fontSize: 11, color: '#92400e' }}>
-                              You picked a suggestion. It is not confirmed - your agent will check it.
+                              You picked a suggestion. It is not confirmed - your broker will check it.
                             </div>
                           )}
                         </div>
@@ -1046,7 +1054,7 @@ export default function ClientQuestionnaire({ token }) {
                           border: '1px solid #fde68a', color: '#92400e', fontSize: 12.5, lineHeight: 1.5,
                         }}>
                           Marked <strong>"I'm not sure"</strong>. That's fine - you can skip it and your
-                          agent will follow up on this one. Tap below if you'd like to answer after all.
+                          broker will follow up on this one. Tap below if you'd like to answer after all.
                         </div>
                       ) : isCheckbox ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1307,7 +1315,7 @@ export default function ClientQuestionnaire({ token }) {
             BUG-02: the badge is absolutely positioned, but it used to be a
             SIBLING of the button inside the fixed floating stack - so it
             anchored to the stack's top-right corner and rendered on the "Contact
-            Your Agent" card, where it read as an unread-message dot. This
+            Your Broker" card, where it read as an unread-message dot. This
             wrapper is the positioning context it always assumed it had. */}
         <div style={{ position: 'relative', display: 'flex' }}>
         <button
@@ -1465,7 +1473,7 @@ export default function ClientQuestionnaire({ token }) {
               <span style={{ fontSize: 18 }}></span>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Form Assistant</div>
-                <div style={{ fontSize: 10, opacity: 0.7 }}>Ask me anything about this form</div>
+                <div style={{ fontSize: 10, opacity: 0.7 }}>Ask me anything about this questionnaire</div>
               </div>
             </div>
             <button onClick={() => setChatOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1, opacity: 0.7, padding: '4px 8px' }}>✕</button>

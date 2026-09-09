@@ -125,7 +125,7 @@ async def init_db() -> None:
         for col, definition in [
             ("organization_name",            "TEXT"),
             # Producer contact phone — shown to the client on the questionnaire's
-            # "Contact Your Agent" card. Optional; blank simply hides the line.
+            # "Contact Your Broker" card. Optional; blank simply hides the line.
             ("phone",                        "TEXT"),
             ("acord_disclaimer_accepted",    "INTEGER DEFAULT 0"),
             ("acord_disclaimer_accepted_at", "TEXT"),

@@ -350,9 +350,9 @@ _FIELD_QUESTION_MAP = {
     "year_built":               "What year was your building originally built?",
     "roof_year":                "What year was the roof last replaced or repaired?",
     "sprinkler_system":         "Does your building have a fire sprinkler system installed?",
-    "fire_protection_class":    "How close is your building to a fire station or fire hydrant? (Your agent may help determine this — share what you know)",
+    "fire_protection_class":    "How close is your building to a fire station or fire hydrant? (Your broker may help determine this — share what you know)",
     "valuation_method":         "If there is a loss, how would you like your property valued? Choose one: Full rebuild cost (Replacement Cost) or Current depreciated value (Actual Cash Value)",
-    "coinsurance_percentage":   "Does your insurance require you to insure your property for a minimum percentage of its value? If yes, what percentage? (Your agent can clarify if needed)",
+    "coinsurance_percentage":   "Does your insurance require you to insure your property for a minimum percentage of its value? If yes, what percentage? (Your broker can clarify if needed)",
     "business_income_limit":    "If your business had to close temporarily due to a covered loss, how much income would you need covered per month?",
     "period_of_restoration":    "If your business had to shut down due to damage, how many months do you estimate it would take to reopen?",
     "property_deductible_aop":  "How much would you pay out of pocket for most property claims before insurance covers the rest?",
@@ -372,7 +372,7 @@ _FIELD_QUESTION_MAP = {
     "auto_physical_damage_valuation": "How is physical damage valued on the vehicle schedule - Actual Cash Value or Stated Amount?",
     # Workers Compensation
     "wc_payroll":               "What is the total annual payroll for employees covered under Workers Compensation?",
-    "wc_class_codes":           "What types of work do your employees perform? (Describe their job duties — your agent will assign the appropriate codes)",
+    "wc_class_codes":           "What types of work do your employees perform? (Describe their job duties — your broker will assign the appropriate codes)",
     "wc_xmod":                  "Has your business received a workers compensation safety rating or modifier from your previous insurer? If yes, what is the number?",
     "wc_officer_exclusions":    "Are there any business owners or officers who should NOT be covered under Workers Compensation? If yes, list their names.",
     # ADDED 2026-08-26 (V1 H1 6.4 / 6.3). Both had a registry question but no
@@ -452,7 +452,7 @@ _FIELD_HINT_MAP = {
     "physical_address":         "Enter the street address where your business actually operates. Leave blank if it's the same as your mailing address.",
     "contact_name":             "Enter the full name of the person handling this insurance application, e.g. 'Jane Smith'.",
     "contact_phone":            "Enter a direct phone number including area code, e.g. '(512) 555-1234'.",
-    "contact_email":            "Enter the email address your agent should use to reach you, e.g. 'jane@acmecorp.com'.",
+    "contact_email":            "Enter the email address your broker should use to reach you, e.g. 'jane@acmecorp.com'.",
     "fein":                     "This is your 9-digit IRS Employer Identification Number — find it on any IRS letter or your prior tax return, e.g. '12-3456789'.",
     "entity_type":              "Choose how your business is legally structured, e.g. 'LLC', 'Corporation', 'Sole Proprietor', or 'Partnership'.",
     "effective_date":           "Enter the date you want coverage to begin in MM/DD/YYYY format, e.g. '06/01/2025'.",
@@ -469,14 +469,14 @@ _FIELD_HINT_MAP = {
     # (Figure 20) replaces this with a hint naming THAT business's likely code.
     # The example below is deliberately labelled as an illustration of the
     # shape, so a bakery is never shown a roofing code as if it were theirs.
-    "naics_code":               "This is a 6-digit industry code - leave blank if unsure, your agent can look it up. As an example of the format, a roofing contractor would use something like '238160'.",
+    "naics_code":               "This is a 6-digit industry code - leave blank if unsure, your broker can look it up. As an example of the format, a roofing contractor would use something like '238160'.",
     "sic_code":                 "This is a 4-digit older industry code - leave blank if unsure. As an example of the format, a roofing contractor would use something like '1761'.",
     "years_in_business":        "Enter the number of years your business has been operating, e.g. '7'.",
-    "gl_limits":                "Enter your desired coverage limits, e.g. '$1,000,000 per occurrence / $2,000,000 aggregate'. Your agent can advise if unsure.",
+    "gl_limits":                "Enter your desired coverage limits, e.g. '$1,000,000 per occurrence / $2,000,000 aggregate'. Your broker can advise if unsure.",
     "gl_each_occurrence":       "Enter the max payout for a single incident, e.g. '$1,000,000'.",
     "gl_aggregate":             "Enter the total max payout across all claims in a policy year, e.g. '$2,000,000'.",
     "gl_deductible":            "Enter how much you'd pay out of pocket before insurance covers the rest, e.g. '$500' or '$0' for no deductible.",
-    "gl_class_codes":           "Describe the type of work your business performs — your agent will assign the classification code, e.g. 'residential painting contractor'.",
+    "gl_class_codes":           "Describe the type of work your business performs — your broker will assign the classification code, e.g. 'residential painting contractor'.",
     "retro_date":               "If your policy has been active without gaps since a certain date, enter that original start date, e.g. '01/01/2018'. Leave blank if unsure.",
     "additional_insured":       "List any landlords, clients, or partners who need to be named on your policy, e.g. 'City of Austin, 123 City Hall Ave'.",
     "property_building_value":  "Estimate the cost to completely rebuild the building from scratch today (not market value), e.g. '$800,000'.",
@@ -486,9 +486,9 @@ _FIELD_HINT_MAP = {
     "year_built":               "Enter the 4-digit year the building was originally constructed, e.g. '1998'.",
     "roof_year":                "Enter the 4-digit year the roof was last replaced or significantly repaired, e.g. '2019'.",
     "sprinkler_system":         "Answer Yes if the building has an active fire sprinkler system installed throughout, No if it does not.",
-    "fire_protection_class":    "Enter your building's fire protection class (1–10) if you know it — your agent can help determine this. Lower numbers mean better protection.",
+    "fire_protection_class":    "Enter your building's fire protection class (1–10) if you know it — your broker can help determine this. Lower numbers mean better protection.",
     "valuation_method":         "Choose 'Replacement Cost' to be paid the full rebuild cost, or 'Actual Cash Value' to be paid the depreciated value after a loss.",
-    "coinsurance_percentage":   "Enter the minimum insured percentage required by your policy, e.g. '80%'. Your agent can clarify — leave blank if unsure.",
+    "coinsurance_percentage":   "Enter the minimum insured percentage required by your policy, e.g. '80%'. Your broker can clarify — leave blank if unsure.",
     "business_income_limit":    "Enter how much monthly income you'd need covered if your business had to temporarily close, e.g. '$20,000 per month'.",
     "period_of_restoration":    "Estimate how many months it would take to reopen your business after a major loss, e.g. '6 months'.",
     "property_deductible_aop":  "Enter your deductible for most property claims (All Other Perils), e.g. '$2,500'.",
@@ -498,7 +498,7 @@ _FIELD_HINT_MAP = {
     "auto_deductible_comp":     "Enter what you'd pay out of pocket for non-collision damage like theft or weather, e.g. '$500'.",
     "auto_deductible_collision": "Enter what you'd pay out of pocket if a business vehicle is in a collision, e.g. '$1,000'.",
     "wc_payroll":               "Enter the total annual wages paid to employees covered under Workers Comp, e.g. '$350,000'. Found on your payroll records.",
-    "wc_class_codes":           "Describe your employees' job duties — your agent assigns the codes, e.g. 'office staff, field installers, drivers'.",
+    "wc_class_codes":           "Describe your employees' job duties — your broker assigns the codes, e.g. 'office staff, field installers, drivers'.",
     "wc_xmod":                  "Enter your experience modification factor if you have one, e.g. '0.95'. Found on your current WC policy. Leave blank if unknown.",
     "wc_officer_exclusions":    "List any owners or officers who should be excluded from WC coverage by name, e.g. 'John Smith, Jane Doe'. Leave blank if none.",
     "wc_payroll_period":        "State what period the payroll figure covers, e.g. 'annual'. A quarterly or monthly figure must be labelled as such so it is not read as a full year.",
@@ -747,7 +747,7 @@ def _attach_classification_suggestions(questions: List[dict], facts: dict) -> No
     Purely additive and fail-open: a question with no confident match keeps its
     existing hint and gains no `suggestions` key, so the renderer shows exactly
     what it shows today. Nothing here fills an answer - `suggestions` is a list
-    the client must tap, and the hint says to confirm with their agent.
+    the client must tap, and the hint says to confirm with their broker.
 
     ── OFF FOR V1 (C3 3.13, 2026-08-25) ────────────────────────────────────
     Client 3.13, on a missing NAICS / SIC: *"route to producer; do not ask the
@@ -892,7 +892,7 @@ def _label_grouped_question(base_question: str, group_label: str,
 _FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
     ("insurer_fullname",         "What is the full name of your insurance company?",                        "insurer"),
     ("insurer_name",             "What is the name of your insurance company?",                             "insurer"),
-    ("insurer_naic",             "What is your insurance company's NAIC number? (Your agent can look this up if needed)", "insurer"),
+    ("insurer_naic",             "What is your insurance company's NAIC number? (Your broker can look this up if needed)", "insurer"),
     ("insurer_policy",           "What is the policy number for this insurance?",                           "insurer"),
     ("insurer_phone",            "What is the phone number for your insurance company?",                    "insurer"),
     ("insurer_address",          "What is the address of your insurance company?",                          "insurer"),
@@ -5894,7 +5894,7 @@ async def send_arq_reminder(arq_id: str, user: dict) -> bool:
 
     arq_link      = f"{FRONTEND_URL}/questionnaire/{arq['token']}"
     producer_name = user.get("full_name", "") or user.get("email", "")
-    first_name    = producer_name.split()[0] if producer_name else "Your Agent"
+    first_name    = producer_name.split()[0] if producer_name else "Your Broker"
 
     ok = send_arq_reminder_email(
         to_email=arq["email"],

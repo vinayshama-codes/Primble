@@ -24,7 +24,7 @@ Warnings/advisories are tiered required / recommended / binder_followup.
 
 import hashlib
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 DEFAULT_CLUSTER = "Other validations"
 DEFAULT_TIER = "recommended"
@@ -234,9 +234,25 @@ TIER_MAP: Dict[str, str] = {
 #              renders a textarea whose text is appended to the
 #              `additional_remarks_text` fact (which several rules here read to
 #              downgrade a hard stop to a warning).
-#   none     - no single value/table/narrative fixes it (add a form, a coverage
-#              decision, an advisory). The modal shows the detail read-only with
-#              the existing Resolve / Dismiss work-tracking controls.
+#   none     - no single value/table/narrative fixes it (a coverage decision, an
+#              advisory). The modal shows the detail read-only with the existing
+#              Resolve / Dismiss work-tracking controls.
+#
+# ── `add_forms`: a FIFTH capability, orthogonal to the four modes (UX-05) ─────
+#
+# A resolution may ALSO carry `add_forms` - the ACORD form(s) this issue's own
+# message tells the producer to add, minus any already in the package. It is not
+# a mode, because it composes with every one of them: `acord101_required` needs
+# BOTH the narrative textarea and the offer to add ACORD 101, and
+# `contractor_missing_acord186` is `none` mode whose only fix IS the form.
+# Making it a fifth mode would have forced a false either/or.
+#
+# It is NOT declared in this map, because it is not a property of the CODE - it
+# is a property of the ISSUE against THIS package. `cross_form_validator._issue`
+# declares which form the sentence names, `_filter_add_forms` drops the ones
+# already selected, `make_issue` carries it across the mirror into the grouped
+# view, and `services/form_addition` re-derives it server-side on the write so a
+# stale tab can never add a form nothing is asking for.
 #
 # This map is the SINGLE source of truth for the feature. It attaches to every
 # issue and cluster centrally (make_issue / build_grouped_view / _make_clusters
@@ -369,7 +385,9 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "wc_gl_class_code_mismatch": _R_NARRATIVE,            # explain exposure mismatch via 101
     "gl_codes_no_operations": _r_field("operations_description"),
     # ── Contractor / subcontracting ──
-    "contractor_missing_acord186": _R_NONE,               # add ACORD 186 form
+    # `none` + `add_forms=["ACORD_186"]` (declared at the emit site). No typed
+    # value closes it; the form itself is the fix.
+    "contractor_missing_acord186": _R_NONE,
     "acord186_high_sub_high_wc_payroll": _r_field("percent_subcontracted", "wc_payroll"),
     "high_subcontracting_no_wc_payroll": _r_field("wc_payroll"),
     # ── Umbrella ──
@@ -430,11 +448,16 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # ── Silent exposure (coverage decisions - handled on their own forms) ──
     "crime_silent_exposure": _R_NONE,
     "cyber_silent_exposure": _R_NONE,
-    # ── Certificates / evidence (add the requested form) ──
+    # ── Certificates / evidence ──
+    # `none` MODE, but no longer a dead end (UX-05, 2026-09-08): the emitting
+    # rule declares `add_forms`, so the modal draws an "Add ACORD 25 / 28"
+    # action over these. Decision_Tree.txt L501 asked for exactly that -
+    # "Prompt user to generate ACORD 25/28 post-bind" - and only the warning
+    # half was ever built.
     "certificate_requested_but_acord25_missing": _R_NONE,
     "property_evidence_requested_but_acord28_missing": _R_NONE,
     # ── Baseline / identity ──
-    "acord125_missing": _R_NONE,                          # add ACORD 125
+    "acord125_missing": _R_NONE,                          # + add_forms ACORD 125
     "legal_name_equals_dba": _r_field("dba_name"),
     # ── Narrative requirement ──
     "acord101_required": _R_NARRATIVE,
@@ -1189,6 +1212,7 @@ def _fallback_resolution(code: Optional[str], message: str) -> Optional[dict]:
 def make_issue(
     code: str, severity: str, message: str, forms: Optional[List[str]] = None,
     cluster: Optional[str] = None, tier: Optional[str] = None,
+    add_forms: Optional[List[str]] = None,
 ) -> dict:
     """Build one structured issue dict. `severity` is the issue's OWN
     classification at emit time ("hard_stop" / "soft_warning" / "advisory") -
@@ -1208,6 +1232,16 @@ def make_issue(
     # load-bearing - so it can never override or collide with a cross-form,
     # tier-1 or source-conflict resolution.
     resolution = resolution_for(code) or _fallback_resolution(code, message)
+    # UX-05: `add_forms` is decided per ISSUE (which forms are missing from THIS
+    # package), never per code, so it cannot come from the registry lookup above
+    # and MUST be threaded through by the caller mirroring a cross-form issue.
+    # This is the layer that used to drop it: `build_structured_from_sources`
+    # rebuilds every cross-form issue through here, so a resolution assembled in
+    # `cross_form_validator._issue` reached the flat list and was silently lost
+    # on the grouped one - the exact "fix the layer the screen reads" trap.
+    if add_forms:
+        resolution = dict(resolution or {"mode": "none"})
+        resolution["add_forms"] = list(add_forms)
     return {
         "code": code,
         "severity": severity,
@@ -1248,6 +1282,17 @@ def _make_clusters(items: List[dict]) -> List[dict]:
         _cluster_res = next(
             (m.get("resolution") for m in members if m.get("resolution")), None,
         )
+        # ...but `add_forms` does NOT survive that borrow (UX-05). The borrowed
+        # resolution can come from a member OTHER than the one whose message is
+        # `primary_message`, which is harmless for a mode (the family is the
+        # same) and actively wrong for a form: the cluster would print one
+        # sentence and offer to generate a form a DIFFERENT sentence asked for.
+        # Stripped rather than re-derived, so nothing that works today changes -
+        # the per-row control below still carries each member's own.
+        if _cluster_res and _cluster_res.get("add_forms") and (
+            _cluster_res is not members[0].get("resolution")
+        ):
+            _cluster_res = {k: v for k, v in _cluster_res.items() if k != "add_forms"}
         clusters.append({
             "cluster": key,
             "issue_id": members[0].get("issue_id") or issue_id_for(members[0]["message"], forms),
@@ -1434,6 +1479,38 @@ def build_grouped_view(
             return True
         return any(s.startswith(message) for s in final_list if message)
 
+    # ── THE PICKER'S OWN ROW DOES NOT ALSO PRINT AS A WARNING (UI-13) ───────
+    # Owner, 2026-09-09, on the client's UI-13: the same conflict was on the
+    # review screen TWICE. Once in Data Consistency - each document's value,
+    # the conflict reason, a suggestion and a Confirm that applies the value
+    # across every form - and again, lower down, as a warning whose only
+    # affordance ("Fix in Data Consistency") scrolled back up to that picker.
+    # The picker is where it gets fixed, so the warning is removed.
+    #
+    # Suppressed by CODE, not by field name: `underwriting_reconciliation_*` IS
+    # a picker row by construction (extraction_pipeline emits exactly one per
+    # picker field carrying `review_required`), so a fact added to
+    # RECONCILABLE_FIELDS is covered the day it ships and nothing here needs a
+    # list to maintain. The doc-consistency twins of these rows are already
+    # hidden by the supersession block above, so a conflict now prints in one
+    # place instead of three.
+    #
+    # WARNINGS ONLY, and the call is made on the severity THIS view resolved
+    # (promotion + the classify_stops downgrade), never on the severity the
+    # emitter claimed:
+    #   * a hard stop keeps its red row - the four HARD_STOP_RECONCILABLE_KEYS
+    #     (applicant name, FEIN, both policy dates) block submission, and a
+    #     blocker is never hidden behind a section the producer may have
+    #     collapsed;
+    #   * a `promote_codes` row keeps its card - it is what is holding a score
+    #     at 60, and that card carries the only control that clears it.
+    #
+    # Display only. The caller's hard_stops / soft_stops are the SQS capping
+    # inputs and are not mutated, so no cap, no dismiss credit and no issue_id
+    # moves. `counts`, the tier badges and the "Important" preview are all
+    # summed from what this function RENDERS, so they follow automatically.
+    _picker_hidden_msgs: Set[str] = set()
+
     enriched: List[dict] = []
     for issue in structured_issues or []:
         code = issue.get("code") or "uncategorized"
@@ -1453,6 +1530,13 @@ def build_grouped_view(
                 severity = "hard_stop"
         else:
             severity = orig_severity
+
+        # UI-13 (full reasoning in the note above `enriched`): this row is a
+        # Data Consistency row and it is rendering as a warning - drop it, the
+        # picker above already shows it with a control that fixes it.
+        if severity != "hard_stop" and picker_fact_key(code):
+            _picker_hidden_msgs.add(message.strip())
+            continue
 
         # Prefer an explicit cluster/tier the caller already computed (e.g.
         # classify_legacy_message(), which has no code to key a lookup off of)
@@ -1485,6 +1569,28 @@ def build_grouped_view(
             # through. The code is the same in every one of them.
             "score_neutral": is_score_neutral(code),
         })
+
+    # A hidden picker row's sentence is still in the caller's soft_stops, and the
+    # safety net below re-adds any message it cannot find in `enriched` - which
+    # would reprint the row we just hid under "Other validations". Drop it from
+    # the LOCAL copy only, exactly as the two supersession blocks above do.
+    _picker_hidden_msgs -= {(i["message"] or "").strip() for i in enriched}
+    if _picker_hidden_msgs:
+        def _is_hidden_picker_message(s: str) -> bool:
+            # Bidirectional prefix, mirroring `_covered_by` below: a caller may
+            # append an "(Affects: ... Fix: ...)" annotation to the sentence
+            # this issue was created with, so equality is not enough.
+            t = (s or "").strip()
+            if not t:
+                return False
+            return any(t == m or t.startswith(m) or m.startswith(t)
+                       for m in _picker_hidden_msgs)
+
+        # hard_stops is deliberately NOT filtered: a picker sentence sitting in
+        # the blocking array while this view called it a warning would mean the
+        # two disagree, and the right failure there is a visible row, not a
+        # silent one.
+        soft_stops = [m for m in soft_stops if not _is_hidden_picker_message(m)]
 
     # Safety net: guarantee every message the caller is actually about to show
     # (the final hard_stops/soft_stops lists) is represented SOMEWHERE in this
@@ -1632,7 +1738,15 @@ def build_structured_from_sources(
         message = iss.get("message") or ""
         code = iss.get("code")
         if code:
-            structured.append(make_issue(code, itype, message, forms=iss.get("forms") or []))
+            structured.append(make_issue(
+                code, itype, message, forms=iss.get("forms") or [],
+                # UX-05: carry the per-issue "which form is missing" decision
+                # made in cross_form_validator. make_issue re-derives the
+                # resolution from `code`, which knows nothing about THIS
+                # package, so without this the grouped view loses the Add-form
+                # affordance the flat list has.
+                add_forms=(iss.get("resolution") or {}).get("add_forms"),
+            ))
         else:
             # sqs_service.cross_validate() predates rule codes and returns bare
             # {type, message} dicts. Classify by message text, exactly like the

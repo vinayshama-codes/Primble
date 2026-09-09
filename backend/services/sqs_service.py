@@ -1194,7 +1194,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             ]}
             missing_c = [k.replace("_", " ") for k, v in carrier_cope.items() if not v]
             if missing_c:
-                soft.append("Carrier-Grade COPE incomplete - SQS capped at 85. Missing: " + ", ".join(missing_c))
+                soft.append("Carrier-Grade COPE incomplete - Submission Quality Score (SQS) capped at 85. Missing: " + ", ".join(missing_c))
 
         if flags.get("property_has_bi_coverage"):
             # BI limit + POR ownership moved to cross_form_validator as hard stop.
@@ -1787,6 +1787,12 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
     return issues
 
 
+# Separator between the raw printings inside an [info] equivalence notice.
+# `parse_normalization_notice` splits on it, so the two must move together.
+# A comma cannot be used: the values contain commas (see `_show_values`).
+_INFO_VALUE_SEP = " | "
+
+
 # ── Cross-document consistency ────────────────────────────────────────────────
 
 def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
@@ -1871,13 +1877,37 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         with a clean comma-separated string so the user-facing message never
         leaks bracket/quote syntax (Beta Report §8.2.7 / P2 #28).
         """
+        return ", ".join(_dedup_display(raw))
+
+    def _dedup_display(raw: List) -> List[str]:
+        """The de-duplication both display joins share. One copy, on purpose."""
         seen, out = set(), []
         for v in raw:
             s = str(v).strip()
             if s and s.lower() not in seen:
                 seen.add(s.lower())
                 out.append(s)
-        return ", ".join(out)
+        return out
+
+    def _show_values(raw: List) -> str:
+        """`_show`, but for the [info] equivalence notices only.
+
+        Same de-duplication; the separator is `_INFO_VALUE_SEP` (" | ").
+
+        A comma cannot separate these: the values themselves contain commas
+        ("Orbin Contracting, LLC", and every address), so the client's own
+        screenshot reads "Orbin Contracting, LLC, ORBIN CONTRACTING LLC" -
+        three commas, two values, and no way to see where one ends. That is
+        half of why UI-04 was raised: an equivalence you cannot read is an
+        equivalence you cannot check.
+
+        Deliberately NOT applied to the [hard_stop] / [warning] messages. Those
+        are hashed into issue_ids, matched by `classify_legacy` and carry stored
+        resolution status, so their text must stay byte-identical. An [info] row
+        is never an issue, never hashed and never scored, so its display text is
+        free to be legible.
+        """
+        return _INFO_VALUE_SEP.join(_dedup_display(raw))
 
     # Human labels for the soft-divergence fields so the message reads in plain
     # business language instead of the raw snake_case fact key.
@@ -1932,7 +1962,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     elif len(applicant_raw) >= 2 and _raw_differ(applicant_raw):
         issues.append(
             f"[info] code=name_normalized "
-            f"Applicant name: {_show(applicant_raw)}"
+            f"Applicant name: {_show_values(applicant_raw)}"
         )
 
     # DBA consistency - spec: "DBAs must be consistently represented or explicitly explained"
@@ -1969,14 +1999,14 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         elif len(vals_raw) >= 2 and _raw_differ(vals_raw):
             issues.append(
                 f"[info] code={key}_normalized "
-                f"{_ADDR_LABELS[key]}: {_show(vals_raw)}"
+                f"{_ADDR_LABELS[key]}: {_show_values(vals_raw)}"
             )
 
     fein_raw = _raw("fein")
     if "fein" not in confirmed_keys and _conflicts("fein", fein_raw):
         issues.append(
             "[hard_stop] code=fein_conflict "
-            "FEIN differs across uploaded documents. Score is capped at 60 until this is confirmed."
+            "FEIN differs across uploaded documents. Submission Quality Score (SQS) is capped at 60 until this is confirmed."
             + _bracket("fein", _DATA_CONSISTENCY_FIX)
         )
 
@@ -2050,11 +2080,11 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             f"{_date_prefix} code=date_conflict "
             "Policy date mismatch across documents." + (
                 _date_multi_note or
-                " Score is capped at 60 unless the difference is explained.")
+                " Submission Quality Score (SQS) is capped at 60 unless the difference is explained.")
             + _bracket("effective_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(eff_raw) >= 2 and _raw_differ(eff_raw):
-        issues.append(f"[info] code=effective_date_normalized Effective date: {_show(eff_raw)}")
+        issues.append(f"[info] code=effective_date_normalized Effective date: {_show_values(eff_raw)}")
 
     exp_raw = _raw("expiration_date")
     if "expiration_date" in confirmed_keys:
@@ -2066,11 +2096,11 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             f"{_date_prefix} code=expiration_conflict "
             "Policy expiration date mismatch across documents." + (
                 _date_multi_note or
-                " Score is capped at 60 unless the difference is explained.")
+                " Submission Quality Score (SQS) is capped at 60 unless the difference is explained.")
             + _bracket("expiration_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(exp_raw) >= 2 and _raw_differ(exp_raw):
-        issues.append(f"[info] code=expiration_date_normalized Expiration date: {_show(exp_raw)}")
+        issues.append(f"[info] code=expiration_date_normalized Expiration date: {_show_values(exp_raw)}")
 
     # Beta Report §5.2: compare lines of business by their NORMALIZED form so
     # terminology differences (CGL vs Commercial General Liability, GL vs General
@@ -2210,7 +2240,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         )
     elif len(lob_raw_display) >= 2 and len({d.strip().lower() for d in lob_raw_display}) > 1:
         issues.append(
-            f"[info] code=lob_normalized Coverage terms: {'; '.join(lob_raw_display)}"
+            f"[info] code=lob_normalized Coverage terms: {_INFO_VALUE_SEP.join(lob_raw_display)}"
         )
 
     # NOTE: total_revenue (Gross Sales) cross-doc consistency is now owned by the
@@ -2231,6 +2261,89 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
 # exactly what let that divergence exist.
 
 _DOC_ISSUE_TOKEN_RE = re.compile(r"^(?:field|code)=(\S+)\s*")
+
+
+# ── The [info] equivalence notice: ONE parser (client UI-04) ─────────────────
+# `check_doc_consistency` tags every equivalence with the rule that produced it
+# (`code=effective_date_normalized`). TWO separate parsers then stripped that
+# token - the inline one in `extraction_pipeline` and the door below - so the
+# category was computed and thrown away one layer before the screen, and the
+# Submission Integrity card could only say "treated as equivalent" with no
+# reason. Both call this now, so a future change to the wire format cannot fix
+# one path and leave the other reading a bare sentence.
+#
+# The door keeps returning the message STRING - that is its contract, pinned by
+# `test_sqs_scoring_fixes_20260816` and consumed as text by `doc_consistency_
+# stops`. `extraction_pipeline` takes the whole row, because it is the only
+# producer of `normalized_differences`.
+
+# The two [info] codes that are not simply "<fact_key>_normalized". Deliberately
+# aliased here rather than renamed at the emitter: the codes are harvested by
+# `test_doc_conflict_supersession` and one of them is a literal fixture in
+# `test_sqs_scoring_fixes_20260816`, so a rename buys nothing and costs two
+# tests.
+_INFO_CODE_FACT_ALIASES = {
+    "name": "applicant_name",
+    "lob":  "lines_of_business",
+}
+
+
+def parse_normalization_notice(issue: str) -> Optional[dict]:
+    """Parse one ``[info]`` equivalence line into a structured row.
+
+    ``"[info] code=effective_date_normalized Effective date: 09/23/26 | 9/23/2026"``
+    becomes::
+
+        {"code":     "effective_date_normalized",
+         "field":    "effective_date",
+         "label":    "Effective date",
+         "values":   ["09/23/26", "9/23/2026"],
+         "category": "Date format",
+         "message":  "Effective date: 09/23/26 | 9/23/2026"}
+
+    ``message`` is byte-identical to what this line has always rendered, so a
+    caller that only wants the sentence is unaffected.
+
+    Returns None for anything that is not an ``[info]`` line. Fails soft on a
+    malformed one: an unrecognised code still yields a row with the generic
+    category and the raw text as its label, because a missing row on screen is
+    worse than a vaguely-labelled one.
+    """
+    if not isinstance(issue, str) or not issue.startswith("[info]"):
+        return None
+
+    rest = issue[len("[info]"):].strip()
+    m = _DOC_ISSUE_TOKEN_RE.match(rest)
+    code = m.group(1) if m else ""
+    message = _DOC_ISSUE_TOKEN_RE.sub("", rest)
+
+    # code -> fact key. "effective_date_normalized" -> "effective_date".
+    stem = code[:-len("_normalized")] if code.endswith("_normalized") else code
+    field = _INFO_CODE_FACT_ALIASES.get(stem, stem)
+
+    # "Label: value | value" -> label + values. Split on the FIRST colon only:
+    # a value can contain one (a time, a ratio), a label never does.
+    label, sep, tail = message.partition(":")
+    if not sep:
+        label, tail = "", message
+    values = [v.strip() for v in tail.split(_INFO_VALUE_SEP) if v.strip()]
+
+    try:
+        from services.normalization import equivalence_category
+        category = equivalence_category(field)
+    except Exception:                                          # noqa: BLE001
+        # Never let a labelling failure cost the user the row itself.
+        logger.warning("equivalence_category failed for %r", field, exc_info=True)
+        category = ""
+
+    return {
+        "code":     code,
+        "field":    field,
+        "label":    label.strip(),
+        "values":   values,
+        "category": category,
+        "message":  message,
+    }
 
 
 def split_doc_consistency_issues(
@@ -2262,7 +2375,11 @@ def split_doc_consistency_issues(
             soft.append(_DOC_ISSUE_TOKEN_RE.sub("", rest))
             conflicts.append({"code": code, "message": soft[-1], "hard_stop": False})
         elif issue.startswith("[info]"):
-            info.append(_DOC_ISSUE_TOKEN_RE.sub("", issue[len("[info]"):].strip()))
+            # One parser (see parse_normalization_notice). This door's contract
+            # is the message string, so it takes only that half of the row.
+            _row = parse_normalization_notice(issue)
+            if _row is not None:
+                info.append(_row["message"])
         else:
             # Unknown prefix - treat as a warning so it can never silently cap at 60.
             soft.append(issue)
@@ -2296,6 +2413,62 @@ def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
     except Exception as exc:                                   # pragma: no cover
         logger.error("doc_consistency_stops failed (non-fatal): %s", exc, exc_info=True)
         return [], []
+
+
+def doc_consistency_normalizations(session_data: dict) -> List[dict]:
+    """The `[info]` equivalence rows, recomputed from a STORED session.
+
+    `/extraction-result` restores a session after a browser refresh and its own
+    docstring says it returns "the same shape as the synchronous upload
+    response". It did not: `normalized_differences` was only ever built on the
+    upload path, so pressing F5 emptied the Submission Integrity card's
+    "Resolved formatting difference" block AND dropped its chip (the severity
+    is derived from the list being non-empty). Nothing was wrong with the data
+    - the server simply was never asked to work it out again.
+
+    Deterministic and cheap: string comparison over facts we already hold. No
+    LLM, no I/O, nothing persisted.
+
+    Mirrors the UPLOAD path (`extraction_pipeline`), not its sibling
+    `doc_consistency_stops`, because the contract being fixed is "a refresh
+    shows what the upload showed":
+      * `excluded` docs are dropped, falling back to all of them if that would
+        leave nothing - `active_docs`' own rule;
+      * confirmations are reduced with `parse_confirmation_key`, so a
+        LINE-scoped resolution (`effective_date@auto`, SYS-06) still counts and
+        a fact the producer already settled does not reappear as an
+        equivalence row.
+
+    Fails open to `[]`, which is exactly what this endpoint returned before, so
+    the worst case of this function is the behaviour it replaces.
+    """
+    try:
+        raw_docs = [d for d in ((session_data or {}).get("docs") or [])
+                    if isinstance(d, dict)]
+        # A doc with no facts dict cannot witness anything and would raise
+        # inside check_doc_consistency; dropping it can only ever remove a
+        # crash, never a row.
+        raw_docs = [d for d in raw_docs if isinstance(d.get("facts"), dict)]
+        docs = [d for d in raw_docs if not d.get("excluded")] or raw_docs
+        if len(docs) < 2:
+            return []                  # nothing to compare against
+        try:
+            from services.underwriting_consistency import parse_confirmation_key
+            confirmed = {parse_confirmation_key(k)[0]
+                         for k in ((session_data or {}).get("underwriting_confirmations") or {})}
+        except Exception:                                      # noqa: BLE001
+            confirmed = set(((session_data or {}).get("underwriting_confirmations") or {}).keys())
+
+        rows = []
+        for issue in check_doc_consistency(docs, confirmed):
+            row = parse_normalization_notice(issue)   # None for non-[info]
+            if row is not None:
+                rows.append(row)
+        return rows
+    except Exception as exc:                                   # pragma: no cover
+        logger.error("doc_consistency_normalizations failed (non-fatal): %s",
+                     exc, exc_info=True)
+        return []
 
 
 # ── Confidence-weighted fill rate ────────────────────────────────────────────
@@ -5811,7 +5984,7 @@ def calculate_package_sqs(
     if hard_stops or any(hard_cross):
         _hs_list = list(hard_stops) + [i.get("message", "") for i in hard_cross if i.get("message")]
         top_recs.append({"pillar": "hard_stops_present", "score": 0,
-                          "action": _hs_list[0] if _hs_list else "Resolve hard stops to lift the SQS cap",
+                          "action": _hs_list[0] if _hs_list else "Resolve hard stops to lift the Submission Quality Score (SQS) cap",
                           "missing": _hs_list[:3]})
     for pillar, score in _ranked_pillars:
         if len(top_recs) >= 3:

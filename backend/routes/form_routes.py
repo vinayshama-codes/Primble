@@ -53,6 +53,7 @@ from services.sqs_service import (
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
     current_package_sqs, key_details,
     _check_loss_run_insured_match, _extract_narrative_doc_text, doc_consistency_stops,
+    doc_consistency_normalizations,
 )
 from services.issue_registry import (
     build_grouped_view, build_structured_from_sources, make_issue, normalize_issue_type,
@@ -125,6 +126,48 @@ def _humanize_fact(v):
         return ""
     s = str(v).strip()
     return "" if s.lower() in ("", "null", "none") else s
+
+
+def _document_fact_rows(facts: dict) -> list:
+    """The rows the 'Review extracted data' popup prints for one document.
+
+    Its own function so the rule below is testable through the seam the screen
+    actually reads, not through the primitive underneath it.
+
+    THE RULE: a fact key starting with an underscore is pipeline machinery, not
+    extracted data, and is never shown. That marker is a codebase-wide
+    convention already honoured by every other generic walker over `facts` -
+    `audit_service` (which shipped this exact fix on 2026-08-26, after junk rows
+    like "_scoped: [structured value]" reached the client), the
+    `underwriting_consistency` auto-discovery, `fact_state`, `form_service`,
+    `pdf_service`, `arq_service`, `line_presence`, `chunk_router`. This popup
+    was the last generic walker that did not, so `_merge_rejected` - the merge's
+    private note of the values it did NOT elect - rendered as a row headed
+    MERGE REJECTED followed by the losing values (client UI-12).
+
+    SUPPRESSED, NOT DELETED. The key is real internal state with a real
+    consumer: `merge_facts` hands it to `_flag_intra_document_limit_conflicts`,
+    which is what turns a document that disagrees with itself into the Data
+    Consistency picker's plain-language question - the very thing UI-12 asks for
+    in its place. Stripping it at extraction would silence that picker on
+    single-document packages. The defect was only ever the DISPLAY.
+    """
+    rows = []
+    for key, raw in (facts or {}).items():
+        if str(key).startswith("_"):
+            continue
+        confidence = raw.get("confidence") if isinstance(raw, dict) and "value" in raw else None
+        display = _humanize_fact(raw)
+        if not display:
+            continue
+        rows.append({
+            "key":        key,
+            "label":      str(key).replace("_", " ").title(),
+            "value":      display,
+            "confidence": confidence,
+        })
+    rows.sort(key=lambda f: f["label"])
+    return rows
 
 
 async def _pre_form_status(
@@ -2508,6 +2551,13 @@ async def get_extraction_result(
         "integrity":                 integrity,
         "integrity_review_required": bool(integrity.get("review_required")),
         "underwriting_consistency":  proc_session.get("underwriting_consistency") or {},
+        # UI-04 follow-up: the "Resolved formatting difference" rows. Only the
+        # UPLOAD response ever carried them, so a browser refresh - which lands
+        # here - emptied the block and dropped its chip, even though this
+        # endpoint's own docstring promises the upload response's shape.
+        # Recomputed, never stored: deterministic, no LLM, fails open to [] -
+        # which is precisely what this key was missing to before.
+        "normalized_differences":    doc_consistency_normalizations(proc_session),
     })
 
 
@@ -2533,20 +2583,7 @@ async def get_document_extracted_data(
     if doc is None:
         raise HTTPException(404, "Document not found in this submission.")
 
-    facts = doc.get("facts") or {}
-    fields = []
-    for key, raw in facts.items():
-        confidence = raw.get("confidence") if isinstance(raw, dict) and "value" in raw else None
-        display = _humanize_fact(raw)
-        if not display:
-            continue
-        fields.append({
-            "key":        key,
-            "label":      str(key).replace("_", " ").title(),
-            "value":      display,
-            "confidence": confidence,
-        })
-    fields.sort(key=lambda f: f["label"])
+    fields = _document_fact_rows(doc.get("facts") or {})
 
     dt = doc.get("doc_type") or "unknown"
     return JSONResponse({

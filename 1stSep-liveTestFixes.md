@@ -47,6 +47,8 @@ handoff items, 40 source screenshots, grouped by engineering type and priority).
 | - | **class fix, found by SYS-09 run 3** | Bare-substring keyword matching over document text | **ONE DOOR SHIPPED 2026-09-06** - `services/term_match.py`. Swept the whole backend: **38 candidates, 33 CONFIRMED** by running the real code with control inputs, 5 refuted. `"bank"` inside **SHOREBANK Avenue** sold Crime cover; `"California"` inside **CALIFORNIA STREET, Denver CO** shipped the **wrong state's form**; `"building"` inside **OUTBUILDING Value** **REFUSED TO GENERATE FORMS**; `"tech"` inside **TECHNICIANS** sold Cyber; `"siding"` inside **RESIDING** cost **-15**. Root cause is the COPIES, not the boundaries - proof: `_lob_from_operations` was fixed 2026-09-05 while its twin **78 lines below in the same file** was not. Door is stdlib-only so it sits below every consumer; `stem`/`plural` default OFF; every function total (30,000 fuzzed pairs, zero raises). **22 of 33 fixed, 11 recorded as NOT boundary problems.** Suite **6551 / 1 / 14**. Scores move BOTH ways - D6. |
 | B8 | defect | Two-way boolean false read as No | **SHIPPED + LIVE-VERIFIED 2026-09-04** (found by the SYS-07 kit, not SYS-07) |
 | - | root cause | Wrong VALUES on generated forms (6 defects, one class) | **SHIPPED 2026-09-05** - see `fix-form-stamping.md`, section "THE QUALIFIERS ENFORCED AS A CLASS" |
+| PROD-02 | P2 - product decision | Warnings / underwriting language | **SHIPPED + LIVE-VERIFIED 2026-09-09** (session `299cd414`). *"Reassess whether the Specific Wording Requirements warning belongs in Important."* **Not a product decision - the last unmigrated comparator.** `detect_source_conflicts` compared normalised STRINGS, and two paragraphs are never identical, so a prose fact conflicted every time. Both sides were boilerplate: a dec-page service-of-process CONDITION and the **ACORD 25's own preprinted footer**. `fact_comparison.py`'s header has listed this site as having **"none"** since C1 (2026-08-21) - the only one of five never migrated; the build guard watches three function names and this one imports a fourth. The rule it was missing is the client's OWN 2026-08-17 ruling, already shipped as `_PROSE_WORD_FLOOR` (*"nobody picks between two true paragraphs"*). Fixed as a **SECOND gate, not a replacement** - the first attempt replaced gate 1 and re-opened the carrier-alias suppression (`Employers Mutual` vs `EMC P&C`), caught by the suite and now pinned as a property. One change closes all four complaints: card gone, #1 IMPORTANT slot freed, dead "Fix:" gone, 85 cap gone. Blast radius **6 of 176** facts (narrative-kind); every enumerated type still competes. Tests `tests/test_prod02_prose_conflicts.py` (28). Suite **7460 / 1 / 21**. **D6: scores go UP - Brent first.** |
+| UX-04 | P2 - UX / safeguard & guidance | Document processing | **SHIPPED 2026-09-09.** *"Explain Exclude, Supporting only, and Review data actions before use."* The three controls on each Documents Processed row carried a bare native `title` (~1s delay, one terse clause) and two of them re-run the whole pipeline, so the producer was committing a write with no idea what it did. Copy now states the EFFECT and the UNDO: **Exclude** *"Ignores this document everywhere - forms, score, recommendations. Use it if the file doesn't belong here. Click \"Include\" to undo."*; **Supporting only** *"Still uses this document's values, but never as the main source. If documents disagree, this one gives way. Click again to undo."*; **Review data** *"See exactly what Primble read from this document. Read-only, changes nothing."* Verified against the code, not the labels: `exclude` drops the doc from `active_docs` so its text and facts leave the merge, scoring, form fill and recommendations (`extraction_pipeline.py:439`); `supporting_only` keeps the facts in the merge but removes the doc from `_primary_candidates`, so it can never be primary truth (`:451`); `review data` is a read-only GET. Delivered through the EXISTING `HoverTip` (hover + keyboard focus, and the native `title` is REMOVED on those three - two tooltips on one control is worse than none), plus one `InfoTip` on the Documents Processed header carrying all three in a sentence, because `HoverTip` shows nothing on touch by design (a tap must reach the button). One `DOC_ACTION_TIPS` map is the single source for both, so the header summary cannot drift from the buttons. The toggled states get their own line (`Include`, `Supporting only ✓`). Copy only - no behaviour, no scores, no backend. The type dropdown keeps its own title (not in the client's ask). Frontend build clean; eslint 0 errors. |
 
 Suite after the full 5 Sep form-value arc: **6077 passed / 1 failed / 14 skipped.** The one failure is the
 long-documented `httpx`/`openai` ImportError. Frontend production build clean.
@@ -545,8 +547,20 @@ Tests: `backend/tests/test_advisory_presentation_20260903.py` (21).
   `[info] code=lob_normalized Coverage terms: ...` branch in
   `sqs_service.check_doc_consistency` is the other half of that noise, and SYS-05's fold
   already shrinks it. Not separately addressed yet.
-- **PROD-02** (whether the Specific Wording Requirements warning belongs in Important) is
-  the same family of question as the advisory-bucket work, and is a product decision.
+- ~~**PROD-02** (whether the Specific Wording Requirements warning belongs in Important) is
+  the same family of question as the advisory-bucket work, and is a product decision.~~
+  **CLOSED 2026-09-09 - it was not a product decision, it was the last unmigrated
+  comparator.** Full entry at the end of this file.
+- **The IMPORTANT band ranks by TIER, and the tiers are wrong.** Fixing PROD-02 removed
+  the card, not the ordering. Measured by driving the real `build_grouped_view`: the
+  `required` tier is document-conflict prefixes plus 10 coded rules, while **43 rules -
+  umbrella attachment, property COPE, auto symbols, WC payroll, claims-made retro date,
+  business income, coinsurance - are `recommended`**. IMPORTANT fills from `required`
+  first, so a real coverage gap can never outrank a cross-document text conflict, however
+  many forms it affects (`_cluster_rank_key`'s form count only sorts WITHIN a tier). The
+  next genuine carrier disagreement will sit above "the owned fleet has no liability
+  symbol" for the same structural reason. **Owner's call, not a defect fix** - re-tiering
+  changes what every producer sees first on every submission.
 
 ---
 
@@ -8207,3 +8221,182 @@ frontend build clean.
 - `period_of_restoration` and `business_income_limit` print on **no ACORD form** -
   verified across all 17 schemas. Scoring facts only. Do not send anyone looking for
   them on the 140.
+
+---
+
+## PROD-02 - Two documents printing different BOILERPLATE are not a conflict - SHIPPED 2026-09-09
+
+**Client:** the pre-form **IMPORTANT** band - the 5-second "fix these first" shortlist -
+led with
+
+> *"Conflicting values for Specific Wording Requirements across documents - Dec Page: If
+> the insured's whereabouts for service of process cannot be determined through reasonable
+> effort, the insured agrees to designate and irrevocably appoint us as the agent of the
+> insured for service of process, pleadings or other filings in a civil action brought
+> against the insured., Certificate of Insurance: If the certificate holder is an
+> ADDITIONAL INSURED, the policy(ies) must have ADDITIONAL INSURED provisions or be
+> endorsed. If SUBROGATION IS WAIVED... **Fix:** Review and confirm the correct value."*
+
+Their ask was framed as a product decision - *"confirm the business rule; if it is
+informational or policy boilerplate, downgrade or remove it."* **It was not a product
+decision.** It was a defect with a root cause already named in this repo.
+
+### Neither side was ever a value
+
+The first is a **service-of-process policy CONDITION** - legal housekeeping present in
+essentially every carrier's wording. The second is the **ACORD 25's own PREPRINTED
+FOOTER**, printed on every certificate ever issued before anyone types into it.
+
+There is no correct value to confirm. They are not two answers to one question.
+
+### Root cause - the comparator, not the paragraph
+
+`extraction_service.detect_source_conflicts` compared **normalised strings** and read "not
+identical" as "conflict". Two paragraphs are essentially never identical, so on a prose
+fact it fired every time.
+
+**`fact_comparison.py`'s own header has recorded this since C1 (2026-08-21).** Of the five
+places that decided *"do these documents disagree?"*, it listed what each one had:
+
+```
+underwriting_consistency  (the Data Consistency picker)   equivalence filter: yes
+sqs_service.check_doc_consistency                          3 of its 8 fields only
+extraction_service.detect_source_conflicts                 none          <-- this one
+sqs_service._check_loss_run_insured_match                  FEIN + policy compared raw
+extraction_service._consolidate_property_locations         its own address regex
+```
+
+**"none."** It was named as the worst offender and was the only one never migrated. The
+build guard (`test_comparison_has_one_owner.py`) watches three function names -
+`values_conflict`, `distinct_normalized`, `entity_identity_conflict` - and this site
+imports `normalize_value`, which is not one of them, so it passed the build for 19 days.
+
+### The rule it was missing was already shipped, and it is the client's own
+
+The client said this on **2026-08-17**, about Additional Remarks:
+
+> *"A paragraph containing policy numbers, dates, limits, premiums, exclusions, etc. should
+> not be treated as one competing value. The individual facts within it need to be
+> interpreted in their appropriate context."*
+
+We answered it in two halves, both live since C1: `fact_equivalence._PROSE_WORD_FLOOR`
+(*"nobody picks between two true paragraphs"* -> INCOMPARABLE), and `narrative_facts.py`,
+which mines the STATEMENTS inside a paragraph so it can EXPLAIN a conflict rather than be
+one. **`detect_source_conflicts` simply never asked.** Proof on the client's literal text:
+
+```
+word counts: 45 and 37   (prose floor = 25)
+TODAY   (normalize_value only)  -> 2 distinct values  => CONFLICT RAISED
+ONE DOOR (fact_comparison)      -> incomparable       => NO CARD
+```
+
+### The fix - a SECOND gate, never a replacement
+
+New `extraction_service._door_conflict`. The original distinct-normalised test still runs
+first; the door is asked **only when that test already says conflict**, so a card needs
+BOTH to agree. Both gates are suppressive, so the net effect is strictly one-way: nothing
+suppressed today can start firing, and no new card can ever appear.
+
+**That ordering is load-bearing, and the first attempt got it wrong.** Replacing gate 1
+re-opened the carrier-alias suppression - `"Employers Mutual Casualty Company"` vs
+`"EMC Property & Casualty Company"` started drawing a card - because the door groups entity
+names on `strict_entity_key` and **deliberately not** on `normalize_carrier` (its own
+comment: Round 10 fix 46 - folding aliases there would pronounce two real carriers
+consistent before the typed comparator ever saw them). **Caught by the suite, not by
+reasoning**, and now pinned by `test_the_door_can_only_remove_a_card_never_add_one`.
+
+Also wired: the package's `PackageContext` is built once and passed in, so two printings of
+one policy number are not read as two policies; and the door's `_usable` drops a **rating
+bureau standing in for an insurer** (AAIS was in the client's own carrier card).
+
+### Blast radius, measured not assumed
+
+Exactly **6 of 176** registry facts are narrative-kind and therefore stop raising a
+source-conflict card: `operations_description`, `additional_remarks_text`,
+`account_description`, `certificate_description_of_operations`,
+`wc_description_of_operations`, `garage_operations_type`. Every **enumerated** text field
+still competes - `construction_type`, `entity_type`, `valuation_method`, `occupancy_type` -
+which is the boundary that matters and is pinned from both sides (here, and
+`fact_equivalence.test_no_enumerated_type_field_is_treated_as_narrative`).
+
+A genuinely different INSURED is still caught by `applicant_name`, which is a hard stop.
+
+### What this fixed, in one change
+
+| Complaint | Result |
+|---|---|
+| Boilerplate card exists | Gone - never raised |
+| Ranked #1 in IMPORTANT | Gone with it; no tier change needed |
+| Said "Fix:" but had no control (`mode: none`) | Gone with it |
+| Capped the SQS at 85 | Gone with it |
+
+**D6 - scores go UP.** Fewer soft stops on any multi-document package that hit this.
+Brent sees the numbers before it ships.
+
+### Checked and deliberately NOT changed
+
+- **The boilerplate is still stored as a fact.** `risk_transfer.specific_wording_
+  requirements` still holds the ACORD 25 footer. Traced every consumer: `sqs_service.
+  risk_transfer_check` is its only reader and **has zero callers anywhere in the backend,
+  and the frontend has no reference to `risk_transfer` at all** - the advisory checklist is
+  dead code. The value never reaches a screen or a form, so a boilerplate-detection
+  heuristic (which could drop a GENUINE wording requirement) buys nothing today. Named
+  here rather than fixed blind.
+- **The IMPORTANT tiering.** See "Still open, deliberately" - owner's call.
+
+Tests: `backend/tests/test_prod02_prose_conflicts.py` (28), including the client's literal
+paragraphs, the top-level prose shape, an assertion through `build_grouped_view` (the layer
+the screen reads), a spy proving both code paths actually reach the door (the seam, not the
+function), the gate-ordering property, and the fail-open direction. Suite
+**7460 passed / 1 failed / 21 skipped** - the one failure is the documented `httpx`
+ImportError. Zero regressions.
+
+### LIVE VERIFIED 2026-09-09 - session `299cd414`, and NOT by the screenshot
+
+`prod02_test_data/` (2 files, one session). On screen: **no wording card anywhere**, while
+`Mortgagee Name` and `Certificate Holder Name` both still raised their conflicts, `Loss
+Payee` stayed silent on two printings of one name, the carrier alias folded to one
+`Employers Mutual Casualty Company` on both policy rows, and the policy number labelled
+itself *"2 POLICIES, 2 VALUES - NOT A CONFLICT"*. IMPORTANT now leads with the auto-symbol
+gap and the missing vehicle schedule in 2 of its 3 slots.
+
+**A screenshot cannot tell a fix from an absent fact**, so the session was read back
+(`scripts/dump_session_facts.py`). The fact was populated on BOTH documents, and the two
+values are not the two this kit planted:
+
+```
+P1_dec_page.pdf   14 words  "Additional insured status is provided where required by
+                             written contract executed prior to loss."
+P2_certificate.pdf 37 words  the ACORD 25 preprinted footer, verbatim
+```
+
+The model preferred the shorter, more relevant sentence on the dec page over the 45-word
+service-of-process clause. Replaying the REAL values through both gates:
+
+```
+GATE 1 (the old code)  2 distinct normalised strings  ->  WOULD HAVE FIRED
+GATE 2 (the door)      verdict = equivalent           ->  no card
+```
+
+**That is a stronger proof than the kit was designed for.** Only ONE side cleared the
+25-word prose floor (`is_prose` False / True), so the suppression came from the
+narrative-KIND merge rather than the floor - a harder case than the client's, where both
+sides are paragraphs. The client's exact both-sides-prose pair stays pinned by
+`test_the_clients_two_boilerplate_paragraphs_raise_no_card`.
+
+### Found by the live run, PRE-EXISTING, and NOT PROD-02
+
+**One conflict, two screens, contradictory instructions.** `Certificate Holder` and
+`Mortgagee Name` each render as a Data Consistency picker row (radio buttons, both source
+files, a working **Confirm**) AND as a warning card saying *"it can't be applied
+automatically"* - one panel apart. Extraction writes these names in TWO places, top-level
+(`certificate_holder`, `mortgagee_name`) and nested under `risk_transfer`;
+`_auto_scalar_keys` auto-discovers the top-level scalars into the picker's `skip_fields`
+and cannot see the nested copies, so each engine owns one. **UI-13 does not catch it** -
+that suppression keys on `underwriting_reconciliation_*` and these carry
+`source_conflict_*`. Same defect, different door. Both engines behaved this way before
+2026-09-09; the kit only made it visible by putting two clean conflicts on one screen.
+
+**Standing lesson:** `fact_comparison.py` listed this exact site as unmigrated, in its own
+header, for 19 days. A migration is not finished while its own docstring still names a
+holdout - and a build guard that watches three function names cannot see a fourth.

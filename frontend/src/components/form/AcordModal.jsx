@@ -8,7 +8,9 @@ import PDFJsViewer from "./PDFJsViewer";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
 import ResolutionModal from "./ResolutionModal";
+import ContactModal from "../account/ContactModal";
 import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
+import { useToasts } from "../../hooks/useToasts";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -368,6 +370,131 @@ function IntegritySeverityChip({ severity }) {
 // confidence, suggested value, and apply-to-all) - suppressed here, display-only,
 // so the underlying data/scoring is untouched. The exact phrase match is safe
 // because these are fixed constant strings, never interpolated with values.
+// ── One "treated as equivalent" row (client UI-04) ──────────────────────────
+// The card told the broker that two visibly different values were the same
+// fact and gave no reason, because the backend stripped the normalization
+// category one layer before the wire. It now sends a ROW - field, label, the
+// raw printings, and the category that made them equal.
+//
+// A plain string is still accepted and renders exactly as it did. That is not
+// defensive padding: a session open across a deploy, or any older payload,
+// must keep its block rather than lose it to a shape check.
+function normalizationRow(entry) {
+  if (entry && typeof entry === "object") {
+    return {
+      field: entry.field || "",
+      label: entry.label || "",
+      values: Array.isArray(entry.values) ? entry.values.filter(Boolean) : [],
+      category: entry.category || "",
+    };
+  }
+  // Legacy shape: "Label: a | b". Split on the FIRST colon only - a value can
+  // contain one, a label never does.
+  const s = String(entry == null ? "" : entry);
+  const at = s.indexOf(":");
+  const tail = at >= 0 ? s.slice(at + 1) : s;
+  return {
+    // A legacy payload never carried the fact key, so it can never be matched
+    // to a Data Consistency conflict. "" opts it out of the dedup below and it
+    // renders exactly as it always did - the safe direction.
+    field: "",
+    label: at >= 0 ? s.slice(0, at) : "",
+    values: tail.split(" | ").map((v) => v.trim()).filter(Boolean),
+    category: "",
+  };
+}
+
+// ── One equivalence row, collapsed when it is verbose (client UI-06) ─────────
+// *"Keep the concise normalization outcome and remove the verbose duplicate
+// coverage-term dump. If detailed normalized values are needed for
+// auditability, place them behind an expandable details control rather than in
+// the primary review flow."*
+//
+// The defect is LENGTH, not the coverage field. A package listing eleven
+// coverage parts twice renders ~465 characters on one row; so does a
+// four-document address row, and so will the next long list nobody has
+// uploaded yet. So the threshold is applied to EVERY row identically and there
+// is no field name anywhere in this logic - special-casing `lines_of_business`
+// would fix the client's screenshot and leave the class open.
+//
+// Below the threshold nothing changes at all: the row renders byte-identically
+// to what shipped for UI-04, values and all. Above it, the row states the
+// outcome and offers the printings on demand. Nothing is ever dropped.
+const NORMALIZATION_INLINE_MAX_CHARS = 160;   // ~one line of this card's width
+const NORMALIZATION_VALUE_SEP = "  ·  ";
+
+function NormalizationDiffRow({ row }) {
+  const [open, setOpen] = useState(false);
+  const joined = row.values.join(NORMALIZATION_VALUE_SEP);
+  const verbose = joined.length > NORMALIZATION_INLINE_MAX_CHARS;
+
+  const chip = row.category ? (
+    <span style={{ display: "inline-block", marginLeft: 8, background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 999, padding: "1px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+      {row.category}
+    </span>
+  ) : null;
+
+  // The chevron gets its OWN column, so every label in the block starts on the
+  // same x whether or not its row expands. Without it the one collapsible row
+  // sits ~14px right of its neighbours and the block reads ragged - visible on
+  // the 2026-09-09 live run. A short row reserves the column and leaves it
+  // empty: it is spacing, not a hidden control.
+  const gutter = (
+    <span aria-hidden="true" style={{ display: "inline-block", width: 14, flexShrink: 0 }} />
+  );
+
+  // A short row is not a control at all - no chevron, no button, no hover
+  // affordance suggesting something is hidden when nothing is.
+  if (!verbose) {
+    return (
+      <div style={{ display: "flex", alignItems: "baseline", fontSize: 12, color: "#1e293b", padding: "3px 0", lineHeight: 1.7 }}>
+        {gutter}
+        <span style={{ minWidth: 0 }}>
+          {row.label && <span style={{ fontWeight: 600 }}>{row.label}: </span>}
+          <span>{joined}</span>
+          <span style={{ fontStyle: "italic", color: "#475569" }}> - treated as equivalent</span>
+          {chip}
+        </span>
+      </div>
+    );
+  }
+
+  // The app's own disclosure control (CollapsibleSection's chevron), not a
+  // second invention: same glyph, size, colour and rotation, so a broker who
+  // has opened "Documents Processed" already knows what this does.
+  //
+  // Expanded, each document's printing gets its OWN line. The row this ticket
+  // is about was ONE 465-character run-on precisely because two lists were
+  // joined into a single sentence; re-printing that inside a dropdown would
+  // move the wall rather than remove it.
+  return (
+    <div style={{ fontSize: 12, color: "#1e293b", padding: "3px 0", lineHeight: 1.7 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        style={{ display: "flex", alignItems: "baseline", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", color: "inherit", textAlign: "left", lineHeight: 1.7 }}
+      >
+        <span style={{ width: 14, fontSize: 8, color: "#94a3b8", transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", display: "inline-block", flexShrink: 0 }}>▶</span>
+        <span style={{ minWidth: 0 }}>
+          {row.label && <span style={{ fontWeight: 600 }}>{row.label}: </span>}
+          <span style={{ fontStyle: "italic", color: "#475569" }}>
+            {row.values.length} versions - treated as equivalent
+          </span>
+          {chip}
+        </span>
+      </button>
+      {open && (
+        <div style={{ margin: "2px 0 4px 14px", paddingLeft: 10, borderLeft: "2px solid #e2e8f0" }}>
+          {row.values.map((v, i) => (
+            <div key={i} style={{ padding: "2px 0", color: "#475569", lineHeight: 1.6 }}>{v}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const INTEGRITY_REASON_TO_FACT_KEY = {
   "DBA / trade name differs across documents": "dba_name",
   "Entity type differs across documents":      "entity_type",
@@ -653,6 +780,20 @@ function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false, r
   );
 }
 
+// ── Documents Processed row actions (UX-04) ───────────────────────────
+// Client ask: explain Exclude / Supporting only / Review data BEFORE they are
+// used. Each line says what the control does and how to undo it, because the
+// two write actions re-run the whole pipeline. Carried by a HoverTip on each
+// button - deliberately NOT repeated as a summary on the section header, where
+// the bubble covered the document rows it was describing (owner, 2026-09-09).
+const DOC_ACTION_TIPS = {
+  exclude:          "Ignores this document everywhere - forms, score, recommendations. Use it if the file doesn't belong here. Click \"Include\" to undo.",
+  include:          "Uses this document again as a normal source.",
+  supporting_only:  "Still uses this document's values, but never as the main source. If documents disagree, this one gives way. Click again to undo.",
+  supporting_undo:  "Uses this document as a normal source again.",
+  review:           "See exactly what Primble read from this document. Read-only, changes nothing.",
+};
+
 // ── Review-page section badge ────────────────────────────────────────────────
 // Client feedback item 13: the pre-scoring page is now a work list, so each
 // section has to say at a glance whether it wants anything from the broker.
@@ -746,6 +887,23 @@ function OpenToFixButton({ onClick }) {
     >
       Open to fix
       <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M3 2l4 4-4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    </button>
+  );
+}
+
+// UX-05: this validation says an ACORD form is missing, and we are still BEFORE
+// generation - so the fix is one tick on the Select Forms list, not a
+// generation run. Same look as "Open to fix" because it is the same promise:
+// this button actually fixes the thing the sentence complains about.
+function AddFormButton({ formId, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+    >
+      <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M2 6h8" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round"/></svg>
+      Add {String(formId || "").replace(/_/g, " ")}
     </button>
   );
 }
@@ -941,6 +1099,29 @@ function clusterIdOf(c) {
   return (c && c.issue_id) || _fallbackIssueId(c && c.primary_message, c && c.forms);
 }
 
+// ── What each action does, on the button itself ──────────────────────
+// UX-03: "Define Resolved and Dismissed in short, direct language AT THE POINT
+// OF ACTION ... tell the user what each action means and whether it changes the
+// underlying data or score." A `title` is the point of action - it stays with
+// the button however far the list is scrolled, and costs the screen nothing.
+//
+// One definition per BEHAVIOUR, shared by every surface that renders the
+// control, because the same two words mean two different things here: on the
+// issue rails they are work-tracking bookmarks whose endpoint is deliberately
+// isolated from scoring, while a recommendation card's buttons really do move
+// the score (see audit_service.dismiss_earned_credit - a bare Dismiss never
+// credits, a reasoned one does). Two surfaces describing one button two ways is
+// exactly what this item was raised about.
+const ACTION_TIP = {
+  resolve: "For when you've already fixed it, or will fix it on the form. Ticks it off your list - your data and score don't change.",
+  dismiss: "For when this doesn't apply to your account. Sets it aside - your data and score don't change.",
+  reopen: "Puts it back on your list. Your data and score don't change.",
+  reopenAnswered: "For when your answer was wrong. Clears it from the forms and puts it back on your list - your score goes back down.",
+  reopenDismissed: "Puts it back on your list so you can answer it - any points credited for dismissing it are taken back.",
+  recAnswer: "Applies your answer to the forms. This can raise your score.",
+  recWaive: "Waives this gap with the reason you gave. The reason is recorded and the points are credited back.",
+};
+
 // ── Issue-rail resolution status control (Open / Resolved / Dismissed) ────────
 // Compact and wraps on small screens. Purely a work-tracking marker: setting a
 // status never changes the SQS score (its endpoint is isolated from scoring).
@@ -973,11 +1154,17 @@ function IssueStatusControl({ issueId, meta, status, onSet }) {
       )}
       {st === "open" ? (
         <>
-          <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
-          <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
+          <HoverTip text={ACTION_TIP.resolve} style={{ width: "auto", display: "inline-flex" }}>
+            <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
+          </HoverTip>
+          <HoverTip text={ACTION_TIP.dismiss} style={{ width: "auto", display: "inline-flex" }}>
+            <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
+          </HoverTip>
         </>
       ) : (
-        <button type="button" className="issue-status-btn issue-status-btn-reopen" onMouseDown={e => { e.preventDefault(); onSet(issueId, "open", meta); }} style={btn}>Reopen</button>
+        <HoverTip text={ACTION_TIP.reopen} style={{ width: "auto", display: "inline-flex" }}>
+          <button type="button" className="issue-status-btn issue-status-btn-reopen" onMouseDown={e => { e.preventDefault(); onSet(issueId, "open", meta); }} style={btn}>Reopen</button>
+        </HoverTip>
       )}
     </div>
   );
@@ -1932,7 +2119,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
           {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
         </div>
-        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Resolved" : "Open"}</span>
+        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Answered" : "Open"}</span>
       </div>
       {result ? (
         <div style={{ marginTop: 7, fontSize: 10, fontWeight: 700, color: "#065f46", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 5, padding: "4px 7px" }}>
@@ -2027,18 +2214,22 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
               />
             )}
             {!schedulable && (answerable ? reason.trim() : dismissReasonValue.trim()) && (
-              <button
-                disabled={busy}
-                onMouseDown={e => { e.preventDefault(); submit(); }}
-                style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: busy ? "default" : "pointer", whiteSpace: "nowrap", opacity: busy ? 0.7 : 1 }}>
-                {busy ? "…" : "Submit"}
-              </button>
+              <HoverTip text={answerable ? ACTION_TIP.recAnswer : ACTION_TIP.recWaive} style={{ width: "auto", display: "inline-flex" }}>
+                <button
+                  disabled={busy}
+                  onMouseDown={e => { e.preventDefault(); submit(); }}
+                  style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: busy ? "default" : "pointer", whiteSpace: "nowrap", opacity: busy ? 0.7 : 1 }}>
+                  {busy ? "…" : "Submit"}
+                </button>
+              </HoverTip>
             )}
-            <button
-              onMouseDown={e => { e.preventDefault(); dismiss(); }}
-              style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap" }}>
-              Dismiss
-            </button>
+            <HoverTip text={ACTION_TIP.dismiss} style={{ width: "auto", display: "inline-flex" }}>
+              <button
+                onMouseDown={e => { e.preventDefault(); dismiss(); }}
+                style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap" }}>
+                Dismiss
+              </button>
+            </HoverTip>
           </div>
           {savedNote && (
             <div style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#166534" }}>{savedNote}</div>
@@ -2603,7 +2794,10 @@ const AcordModal = forwardRef(function AcordModal({
   const [uploadProgressToken, setUploadProgressToken] = useState(null);
   const [resumingUpload, setResumingUpload] = useState(false);
   const [showSlowUploadMsg, setShowSlowUploadMsg] = useState(false);
-  const [jobToasts, setJobToasts] = useState([]);
+  // UI-10: toast lifetime is owned by the shared hook, never by this component.
+  // These cards used to have no timer at all and stayed until clicked, covering
+  // the form the user was reading.
+  const { toasts: jobToasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
   useEffect(() => {
     if (step === "editor") {
@@ -2771,6 +2965,15 @@ const AcordModal = forwardRef(function AcordModal({
   // The cross-form issue currently open in the inline-resolution modal (SQS
   // panel "Open" -> fix in place), or null. Set from a validation row/cluster.
   const [resolutionIssue, setResolutionIssue] = useState(null);
+  // issue_id -> why a Reopen click did nothing. Shown on the row itself, so a
+  // no-op action is never silent (2026-09-09).
+  const [reopenNotices, setReopenNotices] = useState(new Map());
+  // Reopen requests in flight. The status flips to "open" optimistically, but a
+  // resolved-and-no-longer-firing row lives in NEITHER list while that is true
+  // (not live, not resolved), so it blinked out for the second or two the round
+  // trip took and reappeared afterwards. Reported live 2026-09-09. These ids
+  // keep the row rendered - and spinning - for the whole request.
+  const [reopeningIds, setReopeningIds] = useState(new Set());
   // Bumped after an inline resolution stamps a value into the forms, so the PDF
   // viewer re-fetches the regenerated PDF and the value shows on the field.
   const [pdfRefreshTick, setPdfRefreshTick] = useState(0);
@@ -2833,6 +3036,9 @@ const AcordModal = forwardRef(function AcordModal({
   const [downloadExpanded, setDownloadExpanded] = useState(false);
   const [showEnterprisePopup, setShowEnterprisePopup] = useState(false);
   const [enterprisePopupPos, setEnterprisePopupPos] = useState({ top: 0, left: 0 });
+  // UI-09: the restricted-integration popup's "Contact sales" opens the same
+  // Contact Primble box the navbar and the Enterprise plan card already use.
+  const [showContactSales, setShowContactSales] = useState(false);
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteGenerating, setLiteGenerating] = useState(false);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
@@ -3173,7 +3379,11 @@ const AcordModal = forwardRef(function AcordModal({
   // are both marked resolved AND no longer present at all.
   const liveIssueIds = new Set(crossIssues.map(iss => issueIdOf(iss)));
   const ghostIssues = Array.from(issueStatuses.entries())
-    .filter(([iid, st]) => st.status === "resolved" && st.message && !liveIssueIds.has(iid))
+    // `reopeningIds` keeps a row here while its Reopen is in flight. Without it
+    // the optimistic flip to "open" made the row belong to no list at all and
+    // it vanished for the length of the round trip (live report 2026-09-09).
+    .filter(([iid, st]) => (st.status === "resolved" || reopeningIds.has(iid))
+      && st.message && !liveIssueIds.has(iid))
     .map(([iid, st]) => ({ issue_id: iid, message: st.message, forms: st.form_id ? [st.form_id] : [], code: st.rule_code }));
 
   // One compact status control for a SINGLE issue. Every hard-stop / warning
@@ -3203,6 +3413,57 @@ const AcordModal = forwardRef(function AcordModal({
   // Open/Resolve/Dismiss work-tracking control. mode "none" or an uncoded legacy
   // stop (no descriptor) shows work-tracking only, exactly as before - so nothing
   // regresses, some rows just gain the fix affordance.
+  // UX-05, pre-generation half. The server already filtered `add_forms` down to
+  // what is missing from the trigger set; this drops anything the producer has
+  // ALREADY ticked since that list was computed, and anything the form list
+  // cannot offer (no template for this submission), so the button can never be
+  // a promise the Select Forms screen won't keep.
+  // Every form the Select Forms screen can actually offer a tick for. It is the
+  // UNION, and that matters: `allAvailableForms` is NOT "all forms" - the
+  // backend builds it with `score_extra_forms`, which SKIPS anything already
+  // recommended. So a recommended-but-unticked form (the common case) is absent
+  // from it, and checking membership there alone silently dropped the button.
+  //
+  // Measured 2026-09-09 on a live package: ACORD 25 was not recommended, so it
+  // was in the list and got its button; ACORD 28 WAS recommended, so it was
+  // missing from the list and its row fell back to "Can't be fixed by typing a
+  // value" - two rows in one cluster, one with a fix and one without, for no
+  // reason a producer could see.
+  const tickableFormIds = () => new Set([
+    ...(recommendations || []).map((r) => r.form_id),
+    ...(allAvailableForms || []).map((f) => f.form_id),
+  ].filter(Boolean));
+
+  const pendingAddForms = (it) => {
+    const list = it?.resolution?.add_forms;
+    if (!Array.isArray(list) || !list.length) return [];
+    const tickable = tickableFormIds();
+    return list.filter((f) => tickable.has(f) && !checkedFormIds.has(f));
+  };
+
+  // ...and the other half: forms this row asked for that the producer HAS now
+  // ticked. Without this the row fell straight back to the generic "Can't be
+  // fixed by typing a value - needs a coverage decision or a form change" note
+  // the moment they acted on it, which is the most discouraging sentence on the
+  // screen and by then simply untrue - the fix is done and sitting in the list.
+  // Reported live 2026-09-09: ticked ACORD 25, came back to Review, and the row
+  // said it could not be fixed.
+  const tickedAddForms = (it) => {
+    const list = it?.resolution?.add_forms;
+    if (!Array.isArray(list) || !list.length) return [];
+    return list.filter((f) => checkedFormIds.has(f));
+  };
+
+  // Tick it and take them to the list, so they SEE it selected rather than
+  // being told it happened. No API call: before generation, selecting a form is
+  // free and reversible - the expensive add-and-generate path exists only in
+  // the editor, where there is no list to go back to.
+  const addFormBeforeGeneration = (formId) => {
+    if (!formId) return;
+    setCheckedFormIds((prev) => new Set(prev).add(formId));
+    setStep("form_selection");
+  };
+
   const itemResolveAndStatus = (it, forms) => {
     // 1) Conflict-family issue that IS an open row in the Data Consistency
     //    picker (documents disagree on name / FEIN / dates / Gross Sales / DBA):
@@ -3213,19 +3474,42 @@ const AcordModal = forwardRef(function AcordModal({
       (f) => f.fact_key === dcKey && f.status === "conflict"
     );
     // 2) Otherwise, a cross-form issue carrying an inline-resolution descriptor.
-    //    Only `field` / `schedule` are typed/edited in the modal; `narrative` and
-    //    `none` cannot be typed-fixed - they get an explanatory note instead of a
-    //    button (client ask), so a row never looks like the feature just skipped it.
+    //    `field` / `schedule` / `narrative` are all applied in the modal; only
+    //    `none` cannot be fixed there, and it gets an explanatory note instead of
+    //    a button (client ask) so a row never looks like the feature skipped it.
+    //
+    //    NARRATIVE WAS EXCLUDED HERE AND THAT WAS WRONG. ResolutionModal has
+    //    spoken narrative since the mode shipped - a textarea that appends to
+    //    `additional_remarks_text` via the same `resolve_issue` endpoint the
+    //    field path uses, under the label "Explain via ACORD 101" - and the
+    //    editor's Cross-Form Validation panel opens any row with a descriptor,
+    //    so the SAME `acord101_required` row was clickable after generation and
+    //    a dead end before it. The row printed "Needs a written explanation, not
+    //    a value", which read as "you cannot do this here" while the server was
+    //    ready to accept it. BUG-05's class, mirrored: a card refusing what the
+    //    server accepts (reported live 2026-09-09).
     const res = it?.resolution;
     const mode = res && res.mode;
-    const canResolve = mode === "field" || mode === "schedule";
-    const explainOnly = !inDataConsistency && (mode === "narrative" || mode === "none");
+    const canResolve = mode === "field" || mode === "schedule" || mode === "narrative";
+    // 2b) UX-05: the validation names a form that is missing from the package.
+    //     Offered on top of whatever mode the row already has - `acord101_
+    //     required` gets the ACORD 101 button next to its narrative note, and
+    //     `contractor_missing_acord186` gets the only real action it has ever
+    //     had.
+    const addable = pendingAddForms(it);
+    const ticked = tickedAddForms(it);
+    // The "can't be fixed by typing a value" note is TRUE only when there is
+    // nothing to click AND nothing has been done. With an Add-form button
+    // beside it, it read as a contradiction; with the form already ticked it
+    // read as a flat contradiction of the producer's own last action.
+    const explainOnly = !inDataConsistency && !addable.length && !ticked.length
+      && !canResolve && mode === "none";
     // 3) None of the above (uncoded legacy stop, no descriptor at all): the
     //    work-tracking control alone. marginTop here (not on the control itself
     //    - client review #4 "align them") is what separates it from the message
     //    text above; kept equal to the fixable branch below so the vertical
     //    rhythm never depends on whether a row also has a fix button.
-    if (!inDataConsistency && !canResolve && !explainOnly) {
+    if (!inDataConsistency && !canResolve && !explainOnly && !addable.length && !ticked.length) {
       return (
         <div>
           <ScoreNeutralNote show={it?.score_neutral} />
@@ -3240,10 +3524,22 @@ const AcordModal = forwardRef(function AcordModal({
     return (
       <div>
         {explainOnly && <ResolutionHint mode={mode} note={res && res.note} />}
+        {/* The producer has already ticked the form this row asked for. Say so
+            - the alternative was silence or, worse, the generic "can't be
+            fixed" note contradicting what they just did. */}
+        {ticked.length > 0 && (
+          <div style={{ fontSize: 10.5, color: "#15803d", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            {ticked.map((f) => String(f).replace(/_/g, " ")).join(", ")} selected - {ticked.length > 1 ? "they" : "it"} will be generated with this package.
+          </div>
+        )}
         <ScoreNeutralNote show={it?.score_neutral} />
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
+          {addable.map((fid) => (
+            <AddFormButton key={fid} formId={fid} onClick={() => addFormBeforeGeneration(fid)} />
+          ))}
           {itemStatusControl(it, forms)}
         </div>
       </div>
@@ -3664,8 +3960,10 @@ const AcordModal = forwardRef(function AcordModal({
     } catch {}
   };
   const _pushJobToast = (title, body, ok) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setJobToasts(prev => [...prev, { id, title, body, ok }]);
+    // `ok === false` is the action-needed case ("Background alerts are off",
+    // "Action needed"), which carries an instruction to read and act on - it
+    // gets the longer dwell. See hooks/useToasts.js for the duration policy.
+    pushToast({ title, body, ok, tone: ok === false ? "error" : "success" });
   };
   const _notifyJobDone = async (kind, ok, statusOverride = null) => {
     // Workstream 6 §9.1 - never announce a bare "Ready". When the caller knows the
@@ -3759,6 +4057,18 @@ const AcordModal = forwardRef(function AcordModal({
   // the tab is hidden, the issue is OS-level (Focus/DND mode, Chrome quieter
   // messaging, Brave shields) - NOT a bug in Primble's notification code.
   useEffect(() => {
+    // UI-10 smoke test. Fires the real in-page toast through the real door, so
+    // the auto-dismiss policy can be verified in a browser without running a
+    // whole upload/generate pipeline:
+    //     window.__primbleTestToast()        -> success card, clears in 5s
+    //     window.__primbleTestToast(false)   -> action-needed card, clears in 10s
+    window.__primbleTestToast = (ok = true) => {
+      _pushJobToast(
+        ok ? "Primble - Forms Generated" : "Primble - Action needed",
+        ok ? "Your ACORD forms are ready for review." : "There was an issue with your submission. Please reopen to review.",
+        ok
+      );
+    };
     window.__primbleTestNotification = async (delaySec = 3) => {
       const ms = Math.max(0, Number(delaySec) * 1000);
       console.info("[primble-notify] TEST scheduled in", ms, "ms - switch tabs now");
@@ -3786,7 +4096,16 @@ const AcordModal = forwardRef(function AcordModal({
         console.error("[primble-notify] TEST showNotification rejected:", err && err.message ? err.message : err);
       }
     };
-    return () => { try { delete window.__primbleTestNotification; } catch {} };
+    return () => {
+      try {
+        delete window.__primbleTestNotification;
+        delete window.__primbleTestToast;
+      } catch {}
+    };
+    // Diagnostics only, installed once on mount. `_pushJobToast` delegates to the
+    // useToasts hook's `push`, which is a stable useCallback, so the first-render
+    // closure stays correct for the life of the component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clear the title badge when the user returns to the tab, and track every
@@ -4204,6 +4523,22 @@ const AcordModal = forwardRef(function AcordModal({
       return !(fk && openConsistencyFields.has(fk));
     });
 
+    // UI-06, second half: *"later repeats normalization conclusions that were
+    // already resolved above ... can make users think there is still an
+    // unresolved coverage problem."* The inverse was on screen too - this card
+    // declared a fact "treated as equivalent" while Data Consistency, further
+    // down the SAME page, was still asking the producer which value is correct
+    // (a line-scoped date conflict is the shape the client screenshotted).
+    //
+    // The reasons list above has had that dedup since UI-04; the equivalence
+    // rows never did, only because they had no fact key to match on. They do
+    // now, so this is the SAME guard applied to the other half of the card -
+    // not a new rule. Display-only: the row stays in `normalized_differences`,
+    // so nothing about scoring, capping or the payload moves.
+    const normalizedRows = normalizedDiffs
+      .map(normalizationRow)
+      .filter(r => !(r.field && openConsistencyFields.has(r.field)));
+
     const title = { high: "Documents verified", medium: "Review recommended", low: "Possible multiple submissions" }[st];
     if (!title) return null;
     const desc = st === "high"
@@ -4216,9 +4551,13 @@ const AcordModal = forwardRef(function AcordModal({
     // resolved formatting differences -> that label, HIGH with nothing at all
     // to note -> no label. A fully clean submission isn't "low risk" (Advisory),
     // it's no-risk - there is nothing left to advise about, so no chip renders.
+    // Reads `normalizedRows`, not `normalizedDiffs`: if every equivalence row
+    // was deduped away because Data Consistency owns those facts, the block
+    // below does not render, and a chip labelling a section that is not on
+    // screen is the confusion this ticket is about.
     const severity = st === "low" ? "hard_stop"
       : st === "medium" ? "warning"
-        : normalizedDiffs.length > 0 ? "resolved_formatting_difference"
+        : normalizedRows.length > 0 ? "resolved_formatting_difference"
           : null;
 
     return (
@@ -4243,20 +4582,22 @@ const AcordModal = forwardRef(function AcordModal({
             ))}
           </ul>
         )}
-        {normalizedDiffs.length > 0 && (
+        {normalizedRows.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
-            <div style={{ fontWeight: 700, fontSize: 12, color: "#1e293b", marginBottom: 4 }}>
-              Resolved formatting difference
+            {/* UI-04: ONE "i" on the heading, never one per row - the rows
+                carry their own category tag, and an icon on every line is the
+                clutter the pillar sub-rows were cleaned of on 2026-08-27. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 12, color: "#1e293b" }}>
+                Resolved formatting difference
+              </span>
+              <InfoTip text="Same value, written differently in each document. We compare a standardised version, so nothing was changed or removed." />
             </div>
             <div style={{ fontSize: 12, color: "#1e293b", marginBottom: 5 }}>
               These values appeared in different formats across your documents but refer to the same thing. No action needed.
             </div>
-            {normalizedDiffs.map((s, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#1e293b", padding: "2px 0" }}>
-                <span style={{ fontWeight: 600 }}>{s.split(":")[0]}:</span>
-                <span>{s.includes(":") ? s.slice(s.indexOf(":") + 1) : ""}</span>
-                <span style={{ fontStyle: "italic" }}> - treated as equivalent</span>
-              </div>
+            {normalizedRows.map((row, i) => (
+              <NormalizationDiffRow key={i} row={row} />
             ))}
           </div>
         )}
@@ -4405,7 +4746,7 @@ const AcordModal = forwardRef(function AcordModal({
   // Client feedback item 13 asked for a page they "click into items to resolve
   // them by entering the correct data" on. Only two of this screen's sections
   // accept data: a document's type (reclassify/exclude) and a cross-document
-  // value conflict (pick or type, then Confirm & apply). Hard stops and warnings
+  // value conflict (pick or type, then Confirm). Hard stops and warnings
   // are advisory - their Resolve/Dismiss chips are work-tracking markers whose
   // endpoint is deliberately isolated from scoring - so they are reported
   // separately and NOT folded into this count. Counting them here would promise
@@ -4446,6 +4787,11 @@ const AcordModal = forwardRef(function AcordModal({
   const activeCapStopItems = (activeSqs && activeSqs.cap_hard_stop_items) || [];
   const activeKeyIssues = ((activeSqs && activeSqs.issues) || [])
     .filter((s) => !activeCapStops.includes(s));
+  // The recommendation cards actually on screen. Derived once so the list and the
+  // note above it read the same thing - gating on the unfiltered array would
+  // print the note over nothing once every rec has been answered or dismissed.
+  const activeOpenRecs = ((activeSqs && activeSqs.recommendations) || [])
+    .filter((r) => !dismissedRecs.has(typeof r === "string" ? r : r.rec_id));
   // Short name of the form the pinned score belongs to. The pinned header is the
   // only thing left at the top of the panel once it scrolls, so it has to name
   // its own form - see the comment on that card.
@@ -4714,6 +5060,19 @@ const AcordModal = forwardRef(function AcordModal({
   // the modal and a value cleared via Reopen refresh the panel exactly the
   // same way. Keeping this in one place means the two can't drift apart.
   const _applyCrossIssuePanelUpdate = (data) => {
+    // UX-05: a validation was resolved by ADDING the missing ACORD form. Splice
+    // the new form into the list rather than replacing it - the response carries
+    // one form, and rebuilding the list from it is exactly how reusing
+    // select-forms-bulk would have wiped the forms already generated.
+    if (data.added_form?.form_id) {
+      const nf = data.added_form;
+      setGeneratedForms(prev => (prev[nf.form_id] ? prev : { ...prev, [nf.form_id]: nf }));
+      // The producer asked for this form, so take them to it. Only when nothing
+      // is open yet or they are still on the form they started from - never
+      // yanking them off a form they navigated to themselves.
+      setActiveFormId(prev => prev || nf.form_id);
+      setPdfLoading(prev => (nf.form_id in prev ? prev : { ...prev, [nf.form_id]: false }));
+    }
     if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
       setGeneratedForms(prev => {
         const next = { ...prev };
@@ -4783,6 +5142,32 @@ const AcordModal = forwardRef(function AcordModal({
       setResolutionIssue(null);
       return;
     }
+    // UX-05: an ADD-FORM resolution must not flip the chip on its own. Two
+    // reasons, both real:
+    //   1. It is not always the whole fix. Adding ACORD 101 does not clear
+    //      `acord101_required` (that rule reads claim counts and payroll, not
+    //      the form list), so "Resolved" would be a claim we cannot make.
+    //   2. On a `none`-mode card the producer leaves through Dismiss or Mark
+    //      resolved, and `onSetStatus` has ALREADY run with their actual
+    //      choice. Setting "resolved" here would silently overwrite a Dismiss.
+    // ...but when the added form DID clear it, leave a receipt. Derived, never
+    // assumed: the issue is marked resolved only if it is no longer in the
+    // freshly recomputed cross-issue list. `acord101_required` fires on the
+    // claim count, not the form list, so it stays live and stays unmarked -
+    // which is the whole reason this cannot be a blanket "resolved".
+    if (data.added_form?.form_id) {
+      const iid = issueIdOf(issue);
+      const stillLive = Array.isArray(data.cross_issues)
+        && data.cross_issues.some((i) => issueIdOf(i) === iid);
+      if (iid && !stillLive) {
+        setIssueStatus(iid, "resolved", {
+          form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null,
+          rule_code: issue?.code, message: issue?.message,
+        });
+      }
+      setResolutionIssue(null);
+      return;
+    }
     // Flip the issue's durable status chip to Resolved (work-tracking marker).
     const iid = issueIdOf(issue);
     if (iid) setIssueStatus(iid, "resolved", { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message });
@@ -4804,6 +5189,8 @@ const AcordModal = forwardRef(function AcordModal({
     // network call is slow; a failure below just leaves it at "open", which is
     // the correct end state either way (worst case: the fact wasn't cleared).
     setIssueStatuses(prev => { const n = new Map(prev); const existing = prev.get(issueId) || {}; n.set(issueId, { ...existing, status: "open", reason: "" }); return n; });
+    setReopeningIds(prev => new Set(prev).add(issueId));
+    setReopenNotices(prev => { const n = new Map(prev); n.delete(issueId); return n; });
     try {
       const res = await fetch(`${API_BASE}/api/audit/reopen-issue`, {
         method: "POST",
@@ -4818,8 +5205,37 @@ const AcordModal = forwardRef(function AcordModal({
         }),
       });
       const data = await res.json();
-      if (data?.success && data.cleared) _applyCrossIssuePanelUpdate(data);
+      if (data?.success && data.cleared) { _applyCrossIssuePanelUpdate(data); return; }
+      // Reopen undid nothing AND the validation is not firing again, so there
+      // is no "open" row for it to become: it would render in neither the
+      // severity sections (not live) nor the Resolved section (not resolved)
+      // and would simply vanish. Put the receipt back and say why.
+      //
+      // Reported 2026-09-09 on an add-form row - "it got vanished... and ACORD
+      // 25 is also not removed" - but the hole is older and wider: any
+      // schedule / narrative / none-mode issue whose condition was fixed
+      // elsewhere did the same. Reopen has never removed a generated form and
+      // must not start: a form can carry producer edits, ARQ answers and a
+      // signature, and this codebase's standing rule is that a wrongly-kept
+      // artefact is visible while a wrongly-deleted one is not.
+      if (data?.success && data.cleared === false && data.still_live === false) {
+        setIssueStatuses(prev => {
+          const n = new Map(prev);
+          const existing = prev.get(issueId) || {};
+          n.set(issueId, { ...existing, status: "resolved" });
+          return n;
+        });
+        setReopenNotices(prev => new Map(prev).set(
+          issueId,
+          "This one is already fixed - the validation has stopped firing. Reopening the note can't undo it, and it never removes a form that has been generated.",
+        ));
+      }
     } catch { /* optimistic status already applied; non-fatal */ }
+    finally {
+      // Release the row from the in-flight set LAST, so it is never briefly
+      // homeless between the status settling and the spinner clearing.
+      setReopeningIds(prev => { const n = new Set(prev); n.delete(issueId); return n; });
+    }
   };
 
   // Open the inline-resolution modal for a validation row/cluster that carries a
@@ -5496,14 +5912,22 @@ const AcordModal = forwardRef(function AcordModal({
           <div style={{ position: "absolute", top: 14, left: -6, width: 11, height: 11, background: "#fdf2f8", border: "1px solid #f9a8d4", borderRight: "none", borderTop: "none", transform: "rotate(45deg)" }} />
           <div style={{ padding: "10px 10px 10px 14px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#be185d" }}>Enterprise only for now</span>
-              <span style={{ fontSize: 11, color: "#9d174d", lineHeight: 1.45 }}>Join the waitlist to get early access.</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#be185d" }}>Enterprise Only</span>
+              <span style={{ fontSize: 11, color: "#9d174d", lineHeight: 1.45 }}>
+                <button
+                  onClick={() => { setShowEnterprisePopup(false); setShowContactSales(true); }}
+                  style={{ background: "none", border: "none", padding: 0, margin: 0, font: "inherit", color: "#be185d", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}>
+                  Contact sales
+                </button>
+                {" for access."}
+              </span>
             </div>
             <button onClick={() => setShowEnterprisePopup(false)} style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#be185d", fontSize: 15, lineHeight: 1, padding: "1px 3px", opacity: 0.6 }} onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.6"}>×</button>
           </div>
           <div style={{ height: 3, background: "linear-gradient(90deg, #f9a8d4, #E61B84)" }} />
         </div>
       )}
+      {showContactSales && <ContactModal user={user} onClose={() => setShowContactSales(false)} />}
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} summary={arqSummary} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
       {/* "Review extracted data" panel (Beta Report §4.2 item #6) */}
@@ -5569,44 +5993,62 @@ const AcordModal = forwardRef(function AcordModal({
           hasHardBlock={preflightHardBlock}
         />
       )}
-      {jobToasts.length > 0 && (
-        <div style={{
+      {/* Live region stays mounted even when empty: a screen reader only reliably
+          announces additions to a region that was already in the DOM. */}
+      <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="false"
+          style={{
           position: "fixed",
+          // UI-10 responsiveness: pin BOTH edges rather than setting a width off
+          // 100vw. On Windows 100vw includes the scrollbar, so `calc(100vw - 32px)`
+          // could still overhang a narrow window; and on a phone a fixed 340px card
+          // simply did not fit. Pinned edges + `min()` below shrink it correctly on
+          // iOS and Windows without a media query.
+          left: "max(16px, env(safe-area-inset-left))",
           right: "max(16px, env(safe-area-inset-right))",
           bottom: "max(16px, env(safe-area-inset-bottom))",
           zIndex: 10000,
           display: "flex",
           flexDirection: "column",
+          alignItems: "flex-end",
           gap: 10,
-          maxWidth: "calc(100vw - 32px)",
-          width: 340,
           pointerEvents: "none",
         }}>
           {jobToasts.map(t => (
             <div key={t.id}
-              onClick={() => setJobToasts(prev => prev.filter(x => x.id !== t.id))}
+              onClick={() => dismissToast(t.id)}
               style={{
                 pointerEvents: "auto",
                 position: "relative",
+                width: "min(340px, 100%)",
                 background: "#ffffff",
                 border: `1px solid ${t.ok ? "#f9a8d4" : "#fecaca"}`,
                 borderLeft: `4px solid ${t.ok ? "#e6007a" : "#dc2626"}`,
                 borderRadius: 10,
                 boxShadow: "0 10px 30px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08)",
-                padding: "12px 30px 12px 14px",
+                padding: "12px 38px 12px 14px",
                 cursor: "pointer",
                 animation: "slideDown 0.18s ease-out",
+                // iOS Safari: kill the grey flash and the 300ms double-tap-zoom
+                // wait so a tap-to-dismiss registers immediately.
+                WebkitTapHighlightColor: "transparent",
+                touchAction: "manipulation",
               }}>
               <button
                 type="button"
                 aria-label="Dismiss notification"
-                onClick={(e) => { e.stopPropagation(); setJobToasts(prev => prev.filter(x => x.id !== t.id)); }}
+                onClick={(e) => { e.stopPropagation(); dismissToast(t.id); }}
                 style={{
                   position: "absolute",
-                  top: 6,
-                  right: 6,
-                  width: 22,
-                  height: 22,
+                  top: 4,
+                  right: 4,
+                  // 30px, up from 22 - the old target was too small to hit
+                  // reliably on a touch screen, and this card now auto-dismisses,
+                  // so the manual exit has to actually work first time.
+                  width: 30,
+                  height: 30,
                   border: "none",
                   borderRadius: "50%",
                   background: "transparent",
@@ -5618,13 +6060,14 @@ const AcordModal = forwardRef(function AcordModal({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
                 }}>×</button>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>{t.title}</div>
-              <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.4 }}>{t.body}</div>
+              {t.title && <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>{t.title}</div>}
+              {t.body && <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.4 }}>{t.body}</div>}
             </div>
           ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 
@@ -5901,7 +6344,7 @@ const AcordModal = forwardRef(function AcordModal({
                         <div className="lite-stops-grid">
                           {liteHardStops.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - Caps Your Score at 60</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - Caps your Submission Quality Score (SQS) at 60</div>
                               {liteHardStops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -5911,7 +6354,7 @@ const AcordModal = forwardRef(function AcordModal({
                           )}
                           {liteSqsData?.soft_stops?.length > 0 && (
                             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings - Will Cap Your Score at 85</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings - Will cap your Submission Quality Score (SQS) at 85</div>
                               {liteSqsData.soft_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -6456,19 +6899,37 @@ const AcordModal = forwardRef(function AcordModal({
                 all statuses (HIGH / MEDIUM / LOW). LOW/MEDIUM expose an on-demand
                 "Review / separate documents" action; nothing is force-paused. */}
             {renderIntegrityStatus()}
-            {/* Collapsible so a clean submission does not make the broker scroll
-                past a list that wants nothing from them. Opens by default only
-                while something in it actually needs setting - that is what makes
-                "click into items to resolve them" land on the right section. */}
+            {/* UX-06 (client, 2026-09-09): OPEN on first view, always.
+                It used to open only when `docsNeedingReview.length > 0`, on the
+                theory that a clean submission should not have to scroll past a
+                list wanting nothing from it. That reasoning was wrong for this
+                section: the document rows carry the classification the broker is
+                being asked to CHECK, and Exclude / Supporting only / Review data
+                are part of the review workflow whether or not our own confidence
+                pill flags a row - so hiding them behind a chevron made the whole
+                step easy to miss. `true` is a literal, not a data test, so the
+                section cannot be locked shut by mounting before doc_summary
+                arrives. The chevron still collapses it, and that choice sticks
+                for the rest of the visit (no resetKey - a reclassify re-render
+                will not force it back open). */}
             <div className="doc-summary review-section">
               <CollapsibleSection
                 title={`Documents Processed (${docSummary.length})`}
-                defaultOpen={docsNeedingReview.length > 0}
+                defaultOpen
                 titleSize={14}
                 headerColor="#1e293b"
                 marginBottom={0}
                 titleRight={<ReviewCountBadge count={docsNeedingReview.length} />}
               >
+              {/* Only reachable on a session whose backend never returned a
+                  doc_summary (pre-UX-04 sessions). Collapsed-by-default used to
+                  hide this case; now that the section always opens, say why it
+                  is empty instead of showing a blank panel. */}
+              {docSummary.length === 0 && (
+                <div style={{ fontSize: 11, color: "#64748b" }}>
+                  No document details are available for this submission.
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {docSummary.map((d, i) => {
                   const docType = d.doc_type || "unknown";
@@ -6533,43 +6994,46 @@ const AcordModal = forwardRef(function AcordModal({
                           )}
                         </div>
                       )}
-                      <button
-                        type="button"
-                        disabled={anyReclassBusy}
-                        onClick={() => handleReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}
-                        title={excluded ? "Include this document in scoring" : "Exclude this document from scoring"}
-                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
-                      >
-                        {busy && reclassBusyBtn === "toggle"
-                          ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{excluded ? "Include" : "Exclude"}</>
-                          : (excluded ? "Include" : "Exclude")}
-                      </button>
-                      {/* "Include as supporting document only" (Beta Report §4.2 item #6) */}
-                      {!excluded && (
+                      <HoverTip text={excluded ? DOC_ACTION_TIPS.include : DOC_ACTION_TIPS.exclude} style={{ width: "auto", display: "inline-flex" }}>
                         <button
                           type="button"
                           disabled={anyReclassBusy}
-                          onClick={() => handleReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}
-                          title={supportingOnly ? "Use this document as a normal source again" : "Include facts but never treat as the primary source"}
-                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                          onClick={() => handleReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}
+                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
                         >
-                          {busy && reclassBusyBtn === "supporting"
-                            ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{supportingOnly ? "Supporting only ✓" : "Supporting only"}</>
-                            : (supportingOnly ? "Supporting only ✓" : "Supporting only")}
+                          {busy && reclassBusyBtn === "toggle"
+                            ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{excluded ? "Include" : "Exclude"}</>
+                            : (excluded ? "Include" : "Exclude")}
                         </button>
+                      </HoverTip>
+                      {/* "Include as supporting document only" (Beta Report §4.2 item #6) */}
+                      {!excluded && (
+                        <HoverTip text={supportingOnly ? DOC_ACTION_TIPS.supporting_undo : DOC_ACTION_TIPS.supporting_only} style={{ width: "auto", display: "inline-flex" }}>
+                          <button
+                            type="button"
+                            disabled={anyReclassBusy}
+                            onClick={() => handleReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}
+                            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                          >
+                            {busy && reclassBusyBtn === "supporting"
+                              ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{supportingOnly ? "Supporting only ✓" : "Supporting only"}</>
+                              : (supportingOnly ? "Supporting only ✓" : "Supporting only")}
+                          </button>
+                        </HoverTip>
                       )}
                       {/* "Review extracted data" (Beta Report §4.2 item #6) */}
-                      <button
-                        type="button"
-                        disabled={reviewBusy}
-                        onClick={() => handleReviewData(d.doc_id)}
-                        title="See the data Primble extracted from this document"
-                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: reviewBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
-                      >
-                        {reviewBusy
-                          ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Review data</>
-                          : "Review data"}
-                      </button>
+                      <HoverTip text={DOC_ACTION_TIPS.review} style={{ width: "auto", display: "inline-flex" }}>
+                        <button
+                          type="button"
+                          disabled={reviewBusy}
+                          onClick={() => handleReviewData(d.doc_id)}
+                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: reviewBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                        >
+                          {reviewBusy
+                            ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Review data</>
+                            : "Review data"}
+                        </button>
+                      </HoverTip>
                     </div>
                   );
                 })}
@@ -6600,7 +7064,7 @@ const AcordModal = forwardRef(function AcordModal({
                 >
                 {underwritingBusy !== null && (
                   <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-                    Applying your confirmation and updating the forms - you can prepare any other item, confirming it will apply once this finishes.
+                    Confirming and updating everything this value affects - you can prepare any other item, confirming it will apply once this finishes.
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -6714,6 +7178,11 @@ const AcordModal = forwardRef(function AcordModal({
                     // confirm stays submission-wide as it always was.
                     const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
                     const lineScopeLabel = lineScope ? lineScope.replace(/_/g, " ") : null;
+                    // UI-08: this list is DERIVED from the stamping paths
+                    // (`forms_consuming_fact`) - it is where a confirmed value
+                    // CAN land, not proof it has been written. On the pre-form
+                    // screen no form exists yet, so the copy reads "available
+                    // for". Reserve "applied to" for a confirmed write event.
                     const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
                     const highlighted = dcHighlight === f.fact_key;
                     return (
@@ -6737,7 +7206,7 @@ const AcordModal = forwardRef(function AcordModal({
                               Confidence: {CONFIDENCE_META[f.confidence].label}
                             </span>
                           )}
-                          {isConfirmed && <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a" }}>Confirmed: {f.confirmed_value}{formsLabel ? ` - applied to ${formsLabel}` : ""}</span>}
+                          {isConfirmed && <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a" }}>Confirmed: {f.confirmed_value}{formsLabel ? ` - available for ${formsLabel}` : ""}</span>}
                           {f.status === "consistent" && <span style={{ fontSize: 11, color: "#16a34a" }}>Consistent: {f.values?.[0]?.display}</span>}
                         </div>
 
@@ -6817,7 +7286,17 @@ const AcordModal = forwardRef(function AcordModal({
                               onClick={() => handleConfirmUnderwriting(f.fact_key, picked, lineScope)}
                               style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !anyConfirmInFlight ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !anyConfirmInFlight ? "pointer" : "not-allowed", flexShrink: 0 }}
                             >
-                              {busy ? "Applying…" : (lineScopeLabel ? `Confirm for ${lineScopeLabel}` : "Confirm & apply to forms")}
+                              {/* UI-07: "Confirm", not "Confirm & apply to
+                                  forms". Confirming IS applying - the server
+                                  re-runs the whole pipeline on this value
+                                  (re-stamp, re-validate, re-score), so naming
+                                  the propagation made one deterministic action
+                                  read as two the producer has to think about.
+                                  The line-scoped label KEEPS its scope: SYS-06
+                                  makes that answer true of ONE coverage line
+                                  rather than the submission, and a bare
+                                  "Confirm" would hide the difference. */}
+                              {busy ? "Confirming…" : (lineScopeLabel ? `Confirm for ${lineScopeLabel}` : "Confirm")}
                             </button>
                           </div>
                         )}
@@ -6831,27 +7310,20 @@ const AcordModal = forwardRef(function AcordModal({
 
             <RemediationDiffBand diff={issueDiff} />
 
-            {/* Honest framing, added with the item-13 split. Everything above this
-                point can be fixed in place; these two lists cannot. Their
-                Resolve/Dismiss chips are work-tracking markers whose endpoint is
-                deliberately isolated from scoring (see IssueStatusControl), so
-                saying so out loud is better than letting the broker click Resolve
-                and assume the score moved. They are excluded from openItemCount
-                for the same reason. */}
-            {(hasHardStops || hasWarnings) && (
-              <div style={{ fontSize: 11.5, color: "#64748b", margin: "0 2px 8px", lineHeight: 1.5 }}>
-                These come from the submission itself. Correct them at source - in the
-                documents above, or in the generated forms after this step. Marking one
-                Resolved or Dismissed tracks your progress; it does not change the score.
-              </div>
-            )}
+            {/* UX-03: what Resolve and Dismiss mean, at the point of action. The
+                chips are work-tracking markers whose endpoint is deliberately
+                isolated from scoring (see IssueStatusControl), so saying so out
+                loud is better than letting the broker click Resolve and assume the
+                score moved. They are excluded from openItemCount for the same
+                reason. The wording is shared with the editor's Cross-Form
+                Validation panel, which renders the same control. */}
             {(hasHardStops || hasWarnings) && (
               <div className="stops-row">
                 {hasHardStops && (
                   <div className="stops-banner stops-hard">
                     <div className="stops-title">
                       Hard Stops
-                      <span className="stops-title-meta">Required before submission - Caps your SQS at 60</span>
+                      <span className="stops-title-meta">Required before submission - Caps your Submission Quality Score (SQS) at 60</span>
                       {sectionProgress(groupedIssues?.hard_stops)}
                     </div>
                     {/* Hard-stop cards stay expanded by default: these block
@@ -6885,7 +7357,7 @@ const AcordModal = forwardRef(function AcordModal({
                   <div className="stops-banner stops-soft">
                     <div className="stops-title">
                       Warnings
-                      <span className="stops-title-meta">Caps your SQS at 85</span>
+                      <span className="stops-title-meta">Caps your Submission Quality Score (SQS) at 85</span>
                       {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat())}
                     </div>
                     {/* "Important" preview - the top 3 warning clusters, shown as
@@ -7475,7 +7947,7 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                           <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                             HARD STOPS
-                            <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package score at 60</span>
+                            <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package Submission Quality Score (SQS) at 60</span>
                           </div>
                           {reasons.map((s, i) => {
                             const it = capItems.find((x) => x?.message === s);
@@ -7809,7 +8281,7 @@ const AcordModal = forwardRef(function AcordModal({
                       <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                           HARD STOPS
-                          <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's SQS at 60</span>
+                          <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's Submission Quality Score (SQS) at 60</span>
                         </div>
                         {activeCapStops.map((s, i) => {
                           // The row the SERVER classified for this sentence, so
@@ -7911,22 +8383,20 @@ const AcordModal = forwardRef(function AcordModal({
                         )}
 
                         {/* Active recommendation cards (fill-in / dismiss), below Best Solutions */}
-                        {activeSqs.recommendations?.length > 0 && (
+                        {activeOpenRecs.length > 0 && (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {activeSqs.recommendations
-                              .filter(r => !dismissedRecs.has(typeof r === "string" ? r : r.rec_id))
-                              .map((rec, i) => (
-                                <SidePanelRec
-                                  key={typeof rec === "object" && rec !== null ? rec.rec_id : `legacy_${i}`}
-                                  rec={rec}
-                                  index={i}
-                                  sqsScore={activeSqs.sqs_score}
-                                  onDismiss={handleDismissRec}
-                                  onAnswer={handleAnswerRec}
-                                  onOpenSchedule={handleOpenRecSchedule}
-                                  initialValue={typeof rec === "object" && rec !== null ? (reopenedRecValues[rec.rec_id] || "") : ""}
-                                />
-                              ))}
+                            {activeOpenRecs.map((rec, i) => (
+                              <SidePanelRec
+                                key={typeof rec === "object" && rec !== null ? rec.rec_id : `legacy_${i}`}
+                                rec={rec}
+                                index={i}
+                                sqsScore={activeSqs.sqs_score}
+                                onDismiss={handleDismissRec}
+                                onAnswer={handleAnswerRec}
+                                onOpenSchedule={handleOpenRecSchedule}
+                                initialValue={typeof rec === "object" && rec !== null ? (reopenedRecValues[rec.rec_id] || "") : ""}
+                              />
+                            ))}
                           </div>
                         )}
                       </CollapsibleSection>
@@ -7948,6 +8418,16 @@ const AcordModal = forwardRef(function AcordModal({
                             // (field / schedule / narrative / none) from the backend,
                             // so this is generic across all forms and rules.
                             const actionable = !!iss.resolution;
+                            // UX-05: when the fix IS a missing form, say so on
+                            // the button. "Open to fix" over a card that only
+                            // offered Dismiss / Mark resolved is the exact
+                            // complaint this change answers - the label has to
+                            // change with the capability, or the modal is still
+                            // a surprise.
+                            const addNames = (iss.resolution?.add_forms || []);
+                            const actionLabel = addNames.length
+                              ? `Add ${String(addNames[0]).replace(/_/g, " ")}${addNames.length > 1 ? ` +${addNames.length - 1}` : ""}`
+                              : "Open to fix";
                             return (
                             <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: divider ? "1px solid #f1f5f9" : "none" }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -7964,7 +8444,7 @@ const AcordModal = forwardRef(function AcordModal({
                                     tabIndex={0}
                                     onClick={() => openResolution(iss)}
                                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openResolution(iss); } }}
-                                    title="Open to fix"
+                                    title={actionLabel}
                                     style={{ fontSize: 12, color: "#000", lineHeight: 1.4, cursor: "pointer" }}
                                     onMouseEnter={(e) => { e.currentTarget.style.color = "#be185d"; }}
                                     onMouseLeave={(e) => { e.currentTarget.style.color = "#000"; }}
@@ -7981,7 +8461,7 @@ const AcordModal = forwardRef(function AcordModal({
                                       onClick={() => openResolution(iss)}
                                       style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
                                     >
-                                      Open to fix
+                                      {actionLabel}
                                       <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M3 2l4 4-4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
                                     </button>
                                   )}
@@ -7993,7 +8473,20 @@ const AcordModal = forwardRef(function AcordModal({
                                       onSet={handleReopenIssue}
                                     />
                                   ); })()}
+                                  {reopeningIds.has(issueIdOf(iss)) && (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 600, color: "#be185d" }}>
+                                      <span style={{ width: 10, height: 10, border: "2px solid #f9a8d4", borderTopColor: "#be185d", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                                      Reopening...
+                                    </span>
+                                  )}
                                 </div>
+                                {/* A Reopen that could not do anything says so
+                                    here, instead of the row silently vanishing. */}
+                                {reopenNotices.has(issueIdOf(iss)) && (
+                                  <div style={{ fontSize: 10.5, color: "#78350f", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 7, padding: "6px 9px", marginTop: 6, lineHeight: 1.45 }}>
+                                    {reopenNotices.get(issueIdOf(iss))}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           ); };
@@ -8094,15 +8587,16 @@ const AcordModal = forwardRef(function AcordModal({
                                     up front: reopening genuinely takes the points
                                     back, which is the honest consequence and not
                                     something a producer should discover after. */}
-                                <button
-                                  disabled={!!reopeningRecId}
-                                  onMouseDown={e => { e.preventDefault(); handleReopenRec(rid); }}
-                                  title={d.kind === "answered"
-                                    ? "Clear the value you entered and put this back on the list. The score goes back down."
-                                    : "Put this back on the list so you can enter a value. Any points credited for dismissing it are reversed."}
-                                  style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, fontWeight: 600, color: "#475569", cursor: reopeningRecId ? "wait" : "pointer", opacity: reopeningRecId && reopeningRecId !== rid ? 0.5 : 1, whiteSpace: "nowrap" }}>
-                                  {reopeningRecId === rid ? "Reopening…" : "Reopen"}
-                                </button>
+                                <HoverTip
+                                  text={d.kind === "answered" ? ACTION_TIP.reopenAnswered : ACTION_TIP.reopenDismissed}
+                                  style={{ width: "auto", display: "inline-flex" }}>
+                                  <button
+                                    disabled={!!reopeningRecId}
+                                    onMouseDown={e => { e.preventDefault(); handleReopenRec(rid); }}
+                                    style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, fontWeight: 600, color: "#475569", cursor: reopeningRecId ? "wait" : "pointer", opacity: reopeningRecId && reopeningRecId !== rid ? 0.5 : 1, whiteSpace: "nowrap" }}>
+                                    {reopeningRecId === rid ? "Reopening…" : "Reopen"}
+                                  </button>
+                                </HoverTip>
                                 {d.stillSatisfied && (
                                   <span style={{ fontSize: 9.5, color: "#94a3b8", fontStyle: "italic" }}>
                                     Already satisfied by other data - nothing to reopen.

@@ -6,7 +6,7 @@ chose its own normalisation:
 
     underwriting_consistency  (the Data Consistency picker)   equivalence filter: yes
     sqs_service.check_doc_consistency                          3 of its 8 fields only
-    extraction_service.detect_source_conflicts                 none
+    extraction_service.detect_source_conflicts                 none (MIGRATED 2026-09-09)
     sqs_service._check_loss_run_insured_match                  FEIN + policy compared raw
     extraction_service._consolidate_property_locations         its own address regex
 

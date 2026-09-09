@@ -463,7 +463,7 @@ class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None
     organization_name: Optional[str] = None
     # Optional producer contact phone surfaced to the client on the ARQ
-    # "Contact Your Agent" card. Empty string clears it.
+    # "Contact Your Broker" card. Empty string clears it.
     phone: Optional[str] = None
 
 
@@ -532,6 +532,7 @@ class ResolveIssueRequest(BaseModel):
     #   field    -> `field` (a canonical fact key) + `value` (the typed value)
     #   narrative -> `text` (an ACORD 101 explanation, appended)
     #   schedule -> `schedule_key` + `rows` (the edited table)
+    #   add_form -> `add_form_id` (an ACORD form the issue says is missing)
     # `issue_id` / `code` identify the issue for logging and status marking.
     session_id: str
     issue_id: Optional[str] = None
@@ -543,6 +544,12 @@ class ResolveIssueRequest(BaseModel):
     schedule_key: Optional[str] = None
     rows: Optional[List[dict]] = None
     form_id: Optional[str] = None
+    # UX-05. Deliberately NOT reusing `form_id`: that one is the LOGGING form
+    # (which form the producer was looking at) and is written to the audit row
+    # for every mode. Overloading it would make "the form I was on" and "the
+    # form to create" the same field, which is how a mis-send creates a form
+    # nobody asked for.
+    add_form_id: Optional[str] = None
 
 
 class ReopenIssueRequest(BaseModel):

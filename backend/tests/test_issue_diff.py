@@ -524,7 +524,8 @@ def test_changed_count_reports_what_moved_not_cluster_size():
 
 def test_index_clusters_lets_a_hard_stop_win_its_cluster():
     """Same cluster reported at both severities must index as the hard stop."""
-    cope_soft = "Carrier-Grade COPE incomplete - SQS capped at 85. Missing: year built"
+    cope_soft = ("Carrier-Grade COPE incomplete - Submission Quality Score (SQS) "
+                 "capped at 85. Missing: year built")
     view = build_grouped_view(
         _legacy(hard=[COPE_HARD], soft=[cope_soft]), [COPE_HARD], [cope_soft],
     )

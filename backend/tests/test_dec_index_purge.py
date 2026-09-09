@@ -136,6 +136,24 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # pinned by test_h1_coverage_gap_closure.py::
         # test_dec_entry_signals_survive_the_purge_through_derived_facts.
         "coverage_evidence.py",
+        # form_addition (UX-05, 2026-09-08). The only mention there is the module
+        # docstring, and it is there because this module is the FIRST thing that
+        # deliberately generates a form AFTER the purge has run: the producer
+        # adds a missing ACORD form from a validation finding.
+        #
+        # DECIDED, not waved through. It reads no entries itself - it calls
+        # `compute_form_gaps` / `combined_gap_fill`, and pdf_service's Stage A
+        # simply finds no index, so every field walks the raw document. That IS
+        # the pre-2026-08-13 pipeline. Measured blast radius of running without
+        # the index, across all 17 schemas: 9 of 5,852 fields degrade to a blank
+        # or a shorter printing of the same policy number, and no field ever gets
+        # a wrong value (see form_routes' own purge comment).
+        #
+        # So an added form is very slightly thinner than its siblings and never
+        # wrong. Rebuilding the index would mean re-running LLM call 1 over the
+        # whole package to add one form - the wrong trade, and it would undo the
+        # PII minimisation the purge exists for.
+        "form_addition.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

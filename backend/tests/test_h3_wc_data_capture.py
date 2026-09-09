@@ -599,11 +599,14 @@ def test_no_client_question_asks_for_a_classification_code():
              "emod", "xmod", "experience modifier", "ncci")
     # NAMING a classification is allowed when the copy explicitly says the
     # client does NOT supply it - that IS principle 5 being honoured, and
-    # `gl_class_codes` does exactly this ("your agent will assign the
+    # `gl_class_codes` does exactly this ("your broker will assign the
     # classification code"). The structural second condition, so a necessary
-    # test does not become a wrong one.
-    disclaimed = ("your agent will", "your agent assigns", "we will assign",
-                  "your agent or underwriter", "if unsure, leave blank")
+    # test does not become a wrong one. Both terminologies are accepted so a
+    # copy reword (UI-01: agent -> broker) can never be read as a defect.
+    disclaimed = ("your broker will", "your broker assigns",
+                  "your agent will", "your agent assigns", "we will assign",
+                  "your broker or underwriter", "your agent or underwriter",
+                  "if unsure, leave blank")
     producer_owned = set(INSURANCE_JUDGMENT_FACTS) | set(INSURANCE_JUDGMENT_QUESTION_KEYS)
     offenders = []
     for key, text in list(_FIELD_QUESTION_MAP.items()) + list(_FIELD_HINT_MAP.items()):

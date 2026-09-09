@@ -20,7 +20,7 @@ Design decisions worth knowing before changing this:
 2. **Suggestions are never answers.** This module only produces candidates.
    Nothing here writes a fact, pre-fills an input, or stamps a form. The client
    must tap a candidate for it to become their answer, and the copy tells them
-   to confirm it with their agent.
+   to confirm it with their broker.
 
 3. **Confidence is about the MATCH, not about the code.** "high" means the
    business text named this trade distinctly and nothing else scored close.
@@ -437,7 +437,7 @@ def hint_for(kind: str, suggestions: List[dict], fallback: str = "") -> Optional
     return (
         f"This is a {width}{older} industry code. Based on what your business does, a "
         f"{_confidence_phrase(top['confidence'])} match is '{code}' ({top['label']}). "
-        "Treat that as a suggestion to confirm with your agent, not a confirmed answer - "
+        "Treat that as a suggestion to confirm with your broker, not a confirmed answer - "
         "and leave the box blank if you are unsure."
     )
 

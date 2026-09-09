@@ -1322,6 +1322,85 @@ def normalize_value(field: str, value: Any) -> str:
     return normalize_general(value)
 
 
+# ── Why two spellings were treated as one value (client UI-04) ───────────────
+# The Submission Integrity card tells the broker that two visibly different
+# values are the same fact. It could not say WHY, so the claim had to be taken
+# on faith. This names the rule.
+#
+# DERIVED, not a lookup table: the branches below are the SAME dispatch
+# `normalize_value` walks to decide the two values are equal, in the same
+# order. A new identity key added to any *_FIELDS set, or any key matching
+# `_infer_field_category`'s shapes, gets a label for free - which is the point,
+# because a hand-maintained table would drift out of step with the comparison
+# itself and start naming the wrong rule.
+
+# Plain English, short enough to sit in a pill beside the values. These are
+# read by a broker mid-submission, not by an underwriter reading a spec.
+_EQUIVALENCE_LABELS = {
+    "name":             "Name format",
+    "date":             "Date format",
+    "address":          "Address format",
+    # NOT "Entity type" - that is the row's own label, and a pill repeating it
+    # answers nothing (caught auditing the first live run against the client's
+    # acceptance criteria). It is also the wrong word: "LLC" and "Limited
+    # Liability Company" are not two FORMATS of one string, they are two
+    # accepted terms for one thing - the client's own phrasing, "formatting or
+    # accepted terminology".
+    "entity_type":      "Accepted terminology",
+    "carrier":          "Carrier name",
+    "fein":             "ID number format",
+    "valuation_method": "Valuation term",
+    "yes_no":           "Yes / No wording",
+    "coverage_line":    "Coverage name",
+    "general":          "Wording",
+}
+
+# The ONE key whose equivalence is not decided by `normalize_value`.
+# `lines_of_business` is compared through `_canon_line_leaf` / `_canon_part_leaf`
+# in sqs_service, so it cannot be inferred from the dispatch below and names
+# itself here instead. Kept as an explicit, commented exception rather than
+# folded into the table above, so it stays obvious that it is one.
+_COVERAGE_LINE_FIELDS = frozenset({"lines_of_business", "coverage_lines"})
+
+
+def equivalence_category(field: str) -> str:
+    """Name the normalization rule that lets two spellings of ``field`` agree.
+
+    Returns a short human label ("Date format", "Address format", ...). Never
+    returns None or "": an unrecognised key is a real, if generic, answer -
+    `normalize_general` genuinely is what compared it - and a blank pill on the
+    screen would read as a missing value rather than a broad rule.
+    """
+    if not field:
+        return _EQUIVALENCE_LABELS["general"]
+    if field in _COVERAGE_LINE_FIELDS:
+        return _EQUIVALENCE_LABELS["coverage_line"]
+
+    # Mirror normalize_value's dispatch order exactly. The explicit sets are
+    # authoritative there, so they are authoritative here.
+    if field in NAME_FIELDS:
+        return _EQUIVALENCE_LABELS["name"]
+    if field in DATE_FIELDS:
+        return _EQUIVALENCE_LABELS["date"]
+    if field in ENTITY_TYPE_FIELDS:
+        return _EQUIVALENCE_LABELS["entity_type"]
+    if field in ADDRESS_FIELDS:
+        return _EQUIVALENCE_LABELS["address"]
+    if field in CARRIER_FIELDS:
+        return _EQUIVALENCE_LABELS["carrier"]
+    if field in FEIN_FIELDS:
+        return _EQUIVALENCE_LABELS["fein"]
+    if field in VALUATION_METHOD_FIELDS:
+        return _EQUIVALENCE_LABELS["valuation_method"]
+    if is_yes_no_field(field):
+        return _EQUIVALENCE_LABELS["yes_no"]
+
+    inferred = _infer_field_category(field)
+    if inferred in _EQUIVALENCE_LABELS:
+        return _EQUIVALENCE_LABELS[inferred]
+    return _EQUIVALENCE_LABELS["general"]
+
+
 # ── Strict entity identity (audit 2026-08-15 round 10) ───────────────────────
 # The coarse normalizers above are EQUIVALENCE tools: normalize_carrier
 # collapses a carrier GROUP's printings to one family token (right for

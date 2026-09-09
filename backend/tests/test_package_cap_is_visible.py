@@ -60,6 +60,19 @@ _UW = {"fields": [{
 }]}
 
 
+def _all_messages(view):
+    """Every message the grouped view renders, from ALL sections. `important` is
+    an ECHO of the top warning clusters, so it is deliberately excluded - it
+    would double-count a row that is rendered once."""
+    out = []
+    for cluster in list(view.get("hard_stops") or []) + [
+            c for tier in (view.get("warnings") or {}).values() for c in tier]:
+        for item in (cluster.get("items") or [cluster]):
+            if item.get("message"):
+                out.append(item["message"])
+    return out
+
+
 def _score(uw=_UW, hard=None, soft=None, facts=None, flags=None):
     facts = facts if facts is not None else _FACTS
     flags = flags if flags is not None else _FLAGS
@@ -95,6 +108,10 @@ def test_promotion_upgrades_the_existing_card_and_does_not_duplicate_it():
 
     before = build_grouped_view(structured, hard, soft)
     assert before["counts"]["hard_stops"] == 0        # the defect
+    # Since UI-13 the un-promoted picker row does not render as a warning here
+    # either (Data Consistency owns it), which makes promotion the ONLY thing
+    # keeping a capping conflict on this screen.
+    _before_warn = before["counts"]["warnings"]
 
     after = build_grouped_view(
         structured, hard, soft, promote_codes=pkg["cap_hard_stop_codes"])
@@ -104,8 +121,11 @@ def test_promotion_upgrades_the_existing_card_and_does_not_duplicate_it():
     # ("Fix in Data Consistency", derived from the code) moves with it.
     assert after["hard_stops"][0]["items"][0]["message"] == _WARN
     assert after["hard_stops"][0]["items"][0]["code"] == _PICKER_CODE
-    # Exactly one row total for this problem.
-    assert before["counts"]["warnings"] - after["counts"]["warnings"] == 1
+    # Exactly one row total for this problem - counted over the whole view,
+    # which states "not duplicated" directly instead of inferring it from a
+    # warning-count delta.
+    assert _all_messages(after).count(_WARN) == 1
+    assert after["counts"]["warnings"] == _before_warn
 
 
 def test_promotion_is_inert_without_codes():

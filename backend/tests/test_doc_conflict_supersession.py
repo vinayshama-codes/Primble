@@ -15,6 +15,13 @@ so the older row read exactly like the bug the folding fixed.
 The picker's row wins: folded groups, per-document attribution, a reason, a
 suggestion and a working control. These tests pin that, both directions, plus
 the two properties that make the suppression safe.
+
+UI-13, 2026-09-09 (owner): a picker row that renders as a WARNING is now hidden
+from this view too. It is not lost - the Data Consistency section prints it, at
+the top of the same screen, with the control that actually applies the value -
+so a non-blocking cross-document disagreement renders ONCE, there, and zero
+times in the warnings list. A BLOCKING picker row still renders here; the two
+hard-stop tests at the bottom are what pin that.
 """
 import os
 import re
@@ -96,31 +103,44 @@ def _view(issues, hard, soft):
 # ── 1. The reported case, both fields ───────────────────────────────────────
 
 def test_the_legacy_twin_is_hidden_when_the_picker_row_is_present():
-    """Run B's literal shape: one row survives per disagreement, the picker's."""
+    """Run B's literal shape. The legacy twin is hidden because the picker's row
+    is better; UI-13 then hides that picker row from THIS view as well, because
+    Data Consistency renders it one section up with a working control. Net: a
+    warning-level disagreement leaves the warnings list empty."""
     issues = [
         _issue("doc_conflict_warn_dba_name", "soft_warning", LEGACY_DBA),
         _issue("underwriting_reconciliation_dba_name", "soft_warning", PICKER_DBA),
         _issue("doc_conflict_warn_mailing_address", "soft_warning", LEGACY_ADDR),
         _issue("underwriting_reconciliation_mailing_address", "soft_warning", PICKER_ADDR),
     ]
-    msgs = _messages(_view(issues, [], [LEGACY_DBA, PICKER_DBA, LEGACY_ADDR, PICKER_ADDR]))
-    assert PICKER_DBA in msgs
-    assert PICKER_ADDR in msgs
+    view = _view(issues, [], [LEGACY_DBA, PICKER_DBA, LEGACY_ADDR, PICKER_ADDR])
+    msgs = _messages(view)
     assert LEGACY_DBA not in msgs
     assert LEGACY_ADDR not in msgs
+    assert PICKER_DBA not in msgs, "Data Consistency owns this row now (UI-13)"
+    assert PICKER_ADDR not in msgs, "Data Consistency owns this row now (UI-13)"
+    # Not merely absent from the cards - absent from the COUNTS, so the toast
+    # and the next-step banner cannot announce a warning nothing renders.
+    assert msgs == []
+    assert view["counts"] == {"hard_stops": 0, "warnings": 0}
 
 
 def test_the_folded_address_spellings_stop_being_reprinted():
-    """The legacy copy is the ONLY row that listed all three spellings. Hiding
-    it is what stops the screen re-showing what the picker just folded."""
+    """The legacy copy is the ONLY row that listed all three spellings, so no
+    row in this view may reprint the spelling the picker folded - from either
+    engine. Since UI-13 that is satisfied by neither row rendering here; the
+    REAL rival still reaches the producer on the picker's own row, which
+    test_a_hard_stop_IS_superseded_by_an_equally_hard_picker_row pins."""
     issues = [
         _issue("doc_conflict_warn_mailing_address", "soft_warning", LEGACY_ADDR),
         _issue("underwriting_reconciliation_mailing_address", "soft_warning", PICKER_ADDR),
     ]
-    joined = " ".join(_messages(_view(issues, [], [LEGACY_ADDR, PICKER_ADDR])))
+    msgs = _messages(_view(issues, [], [LEGACY_ADDR, PICKER_ADDR]))
+    joined = " ".join(msgs)
     assert "4800 Dahlia Street D13" not in joined, (
         "the equivalent second spelling is being shown as a rival value again")
-    assert "2255 S Wadsworth Blvd" in joined, "the REAL rival must still show"
+    assert LEGACY_ADDR not in msgs
+    assert PICKER_ADDR not in msgs, "Data Consistency owns this row now (UI-13)"
 
 
 # ── 2. Nothing is ever lost ─────────────────────────────────────────────────
