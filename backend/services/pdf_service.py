@@ -3,6 +3,7 @@ import difflib
 import io
 import json
 import logging
+import contextlib
 import os
 import re
 import threading
@@ -17,7 +18,9 @@ from fastapi import HTTPException
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_SCHEMAS_DIR, groq_chat
 from utils.helpers import _parse_address
 from typing import NamedTuple
-from services.extraction_service import _fv, ACTIVE_MODEL, _COVERAGE_DENIAL_RE
+from services.extraction_service import (
+    _fv, ACTIVE_MODEL, _COVERAGE_DENIAL_RE, _PRODUCER_IDENTITY_KEYS,
+)
 from services.fact_registry import FACT_REGISTRY
 from services.normalization import detect_no_loss_assertion
 # SYS-07: ONE Yes/No vocabulary for the whole codebase. Before this, four of
@@ -512,6 +515,12 @@ class _ScheduleDef(NamedTuple):
     row_offset: int = 0      # subtract from letter-index before list lookup
 
 
+# "Is this schedule column a RATING CODE rather than an identity?" ONE
+# definition, read by the cross-line code fence (Guard 2d-ii) and by the
+# ghost-row sweep. Two copies of this question is how the sweep started
+# treating a leaked class code as proof a vehicle exists.
+_CODE_SUBKEY_RE = re.compile(r"(code|territory|class)", re.I)
+
 _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     # ── Vehicles (ACORD 127) ────────────────────────────────────────────────
     # NOTE (2026-07-21): the four `Vehicle_*Identifier`/`*Name`/`BodyCode` entries
@@ -547,6 +556,15 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     # "Comprehensive 07" that applies to every scheduled vehicle).
     "Vehicle_ComprehensiveSymbolCode": _ScheduleDef("auto_vin_schedule", "comp_symbol"),
     "Vehicle_CollisionSymbolCode":     _ScheduleDef("auto_vin_schedule", "coll_symbol"),
+    # v19 (client 2026-09-11 item 6). Until the extraction schema gained
+    # these two columns the CLASS and TERRITORY boxes had no fact at all,
+    # so gap fill decided them by reading the nearest number in 271 pages
+    # of raw text - which is how a GL contractor class reached the Subaru
+    # and a Drive Other Car territory reached the GL hazard grid. A bound
+    # column is also a WITNESS, which is what makes the cross-line code
+    # fence (Guard 2d-ii) bidirectional instead of one-way.
+    "Vehicle_RateClassCode":           _ScheduleDef("auto_vin_schedule", "class_code"),
+    "Vehicle_RatingTerritoryCode":     _ScheduleDef("auto_vin_schedule", "territory"),
     "Vehicle_SymbolCode":              _ScheduleDef("auto_vin_schedule", "symbol"),
 
     # ── Drivers (ACORD 127) ─────────────────────────────────────────────────
@@ -822,6 +840,23 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
 _SCHED_ROW_RE = re.compile(r"^(.+)_([A-N])$")
 
 
+def scalar_rules_reach(field_name: Any) -> bool:
+    """Can a policy-level SCALAR fact answer this box? Not on a non-primary row.
+
+    The row-variant guard's own rule (`_deterministic_map`): a box on row
+    _B.._N is another entity's slot - a 2nd named insured, a SUBSIDIARY on
+    ACORD 131, a second premises - so `_ACORD_FIELD_RULES` must never lend it
+    the primary record's scalar. ONE definition, read by the stamper and by
+    the questionnaire (`arq_service._canonical_key`), so the two cannot
+    disagree again: on 15 Sep 2026 the client was asked "What is the full
+    legal name of your business?" off ACORD 131's subsidiary row B - a box the
+    stamper had correctly refused to fill with the applicant's name - and a
+    client's answer would have been restamped into that subsidiary row.
+    """
+    m = _SCHED_ROW_RE.match(str(field_name or ""))
+    return not (m and _ROW_LETTER_TO_IDX.get(m.group(2), 0) >= 1)
+
+
 def _schedule_def_for_base(base: str):
     """The `_ScheduleDef` a row field's base name binds to, or None.
 
@@ -998,6 +1033,22 @@ def _resolve_schedule_row_inner(field_name: str, facts: dict):
             return wc_class_shared_state(items) if list_idx == 0 else None
         states = wc_class_row_states(items)
         return states[list_idx] if list_idx < len(states) else None
+    # ONE PREMISES: its description of operations IS the business's (15 Sep
+    # 2026). Client PART 19 item 16 rejected the carrier's cut-off BUSINESS DESC
+    # "COMMERCIAL GENERAL CONTRA" as "not a usable underwriting description",
+    # and the full `operations_description` became row A's fallback - which only
+    # runs when the location row is SILENT. Run 5's extraction copied the policy
+    # header's BUSINESS DESC onto the location itself, the fallback never ran,
+    # and the shorthand was back on ACORD 125 (flagged by our own field QA
+    # against the full description). With one location its operations and the
+    # account's are the same thing, and the account fact is the full one. Two or
+    # more locations keep their own text - see
+    # test_a_genuine_per_location_description_still_wins.
+    if (defn.list_key == "property_locations" and defn.sub_key == "operations_description"
+            and list_idx == 0 and isinstance(items, list) and len(items) == 1):
+        _ops = _fv(facts, "operations_description")
+        if isinstance(_ops, str) and _ops.strip():
+            return _ops.strip()
     if not isinstance(items, list) or list_idx >= len(items):
         logger.debug(
             f"schedule_row: field={field_name!r} list={defn.list_key!r} "
@@ -1345,11 +1396,29 @@ _ACORD_FIELD_RULES = [
     # including the umbrella's own each-occurrence limit field, which
     # confirmed-live stamped the GL each-occurrence limit onto ACORD 131's
     # umbrella limit field instead of the umbrella's real, distinct amount.
+    # The aggregate's BASIS ticks - per policy / project / location / other -
+    # are not the aggregate AMOUNT. The `..._LimitApplies` -> None rule further
+    # down was written for them and never fired: first match wins, and the
+    # bare `GeneralLiability_GeneralAggregate` rule below claimed them first,
+    # so every reader of this table took them for `gl_aggregate` boxes. Field
+    # QA then printed 'LimitAppliesPerLocationIndicator shows "No" but the
+    # source value is "$2,000,000"' (client 11 Sep, Orbin). Stamping does not
+    # change: the Y/N gate already refused the amount and sent these ticks to
+    # gap fill - now the table says so itself. The OTHER-basis description box
+    # (`..._LimitAppliesToCode`, a text box) keeps its route on purpose: moving
+    # it would ASK gap fill about a box that ships blank today.
+    ("GeneralLiability_GeneralAggregate_LimitAppliesPerPolicyIndicator",   None),
+    ("GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator",  None),
+    ("GeneralLiability_GeneralAggregate_LimitAppliesPerLocationIndicator", None),
+    ("GeneralLiability_GeneralAggregate_LimitAppliesToOtherIndicator",     None),
     ("GeneralLiability_GeneralAggregate_LimitAmount",      "gl_aggregate"),
     ("GeneralLiability_GeneralAggregate",                  "gl_aggregate"),
     ("GeneralLiability_Aggregate",                         "gl_aggregate"),
     ("GeneralAggregate",                                   "gl_aggregate"),
-    ("GeneralLiability_OtherCoverageLimitAmount",          "gl_deductible"),
+    # (No "GeneralLiability_OtherCoverageLimitAmount" -> gl_deductible rule: a
+    # deductible is never a LIMIT. Live run 10 printed the pollution
+    # endorsement's "$1,000 Each Pollution Incidents" as the OTHER coverage
+    # limit through it.)
     ("GeneralLiability_PropertyDamage_DeductibleAmount",   "gl_deductible"),
     ("GeneralLiability_BodilyInjury_DeductibleAmount",     "gl_deductible"),
     ("GeneralLiability_OtherDeductibleAmount",             "gl_deductible"),
@@ -1432,6 +1501,16 @@ _ACORD_FIELD_RULES = [
     ("CommercialStructure_PhysicalAddress_CityName",       "_loc_city"),
     ("CommercialStructure_PhysicalAddress_StateOrProv",    "_loc_state"),
     ("CommercialStructure_PhysicalAddress_PostalCode",     "_loc_zip"),
+    # ACORD 131 "PRIMARY LOCATION & SUBSIDIARIES": row 1 IS the applicant (the
+    # printed heading is "name and location of primary and all subsidiary
+    # companies"), so its NAME is the applicant's name. Only ACORD 131 carries
+    # this box (swept across all 17 schemas - 133's `Location_FullName_A` is a
+    # payroll-records address and does not match). Rows B-F are subsidiaries and
+    # stay with the row-variant guard in `_deterministic_map`, which never lends
+    # a _B/_C row the primary record's scalars. Live run 6 (15 Sep 2026): the
+    # model put the ADDRESS here, a guard rightly refused it, and the primary
+    # row printed a location with no name.
+    ("CommercialStructure_Location_FullName",              "applicant_name"),
     ("CommercialStructure_Location_ProducerIdentifier",    None),
     ("CommercialStructure_Building_ProducerIdentifier",    None),
     ("CommercialStructure_Building_Sublocation",           None),
@@ -1484,6 +1563,14 @@ _ACORD_FIELD_RULES = [
     # `_deterministic_map` fill it deterministically; rows B+ stay
     # schedule-scoped exactly as before.
     ("BuildingOccupancy_OperationsDescription",            "operations_description"),
+    # The same box on ACORD 131's primary row and ACORD 160's first premises
+    # ("the description of the operations of this risk"). Row A is the
+    # applicant's own operations; rows B+ (131's subsidiaries, 160's second
+    # premises) are held back by the row-variant guard. Live run 6 (15 Sep
+    # 2026): with no rule the box went to gap fill, the model pasted the same
+    # sentence into 131 Q11 as well, and Guard 4 - finding no owner for either
+    # copy - deleted both. The fact is the owner.
+    ("BusinessInformation_OperationsDescription",          "operations_description"),
     ("BuildingExposure_",                                  None),
     ("BuildingSecurity_",                                  None),
 
@@ -1690,6 +1777,20 @@ _FACT_ENTITY: Dict[str, str] = {
     "contact_phone":          "NamedInsured",
     "contact_email":          "NamedInsured",
 }
+
+# The EXPIRING agency is still the producer party - the same block, recorded on
+# a second axis once the submitting agency is known
+# (`extraction_service._route_producer_party` moves it to `expiring_producer_*`).
+# Derived from the keys that router moves (`_PRODUCER_IDENTITY_KEYS`), so the
+# guard names exactly the facts it writes. Without it every ownership guard below
+# stopped recognising the old agency the moment its details moved: live 15 Sep,
+# ACORD 125 printed the expiring agency's phone as the APPLICANT's business
+# phone - a value the same guard had removed on the 10 Sep run, when the phone
+# still sat under `producer_contact_phone`.
+_FACT_ENTITY.update({
+    _key.replace("producer_", "expiring_producer_", 1): _FACT_ENTITY[_key]
+    for _key in _PRODUCER_IDENTITY_KEYS if _key in _FACT_ENTITY
+})
 
 # Leading field-name segments that name a party. Anything not starting with one
 # of these (BusinessInformation_*, CommercialPolicy_*, Policy_*, ...) has no
@@ -1989,6 +2090,8 @@ def _resolve_auto_liability_limit_cell(field_name: str, facts: dict):
     behaviour for that box - so this can only ever REMOVE the three duplicate
     stamps, never the real one.
     """
+    if _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP            # 137's "CSL / BI EA PER" box - see state_auto_grid
     is_csl_box = _CSL_FIELD_TOKEN in field_name and "Indicator" not in field_name
     split_fact = next(
         (fact for token, fact in _SPLIT_FIELD_FACTS if token in field_name), None
@@ -2207,8 +2310,41 @@ def _schedule_root_bindings() -> Dict[str, Tuple[Tuple[str, int], ...]]:
 def _unanchored_schedule_row_fields(mapped: dict, schema: dict,
                                     gpt_filled_set: set) -> set:
     """Gap-fill values sitting in a schedule row whose identity is empty."""
+    # ── AN ANCHOR SAYS WHAT THE ROW *IS*, NOT WHAT IT COSTS ─────────────────
+    # A row is judged a ghost when none of its IDENTITY cells carry a value, so
+    # what counts as identity decides what this whole net can see. Every
+    # registered column was treated as one until 11 Sep 2026, which was true
+    # only by accident: a vehicle row's registered columns were year / make /
+    # model / VIN / body / GVW / symbols, and each of those does name the
+    # vehicle.
+    #
+    # v19 registered `class_code` and `territory` so ACORD 127's CLASS box
+    # would stop being answered by gap fill. Both are RATING columns, and
+    # admitting them as anchors immediately resurrected the 2026-08-13 defect:
+    # a phantom row B carrying a leaked GL class code and nothing else "had an
+    # identity" and survived the sweep. Two existing tests caught it.
+    #
+    # DERIVED from the schedule COLUMN, which is the thing that says what the
+    # value MEANS, and through the same `_CODE_SUBKEY_RE` the cross-line fence
+    # uses - so "is this a code?" has one answer in this file, not two.
+    #
+    # MEASURED, because the first version of this comment claimed a scope that
+    # was not checked: it excludes 10 of the 131 registered columns, not the 2
+    # that prompted it - the v19 vehicle pair, six Workers Compensation code
+    # columns and two loss-status codes. That wider reach is the rule working
+    # rather than over-reaching, and the sweep's own precondition is why: it
+    # only ever clears a GAP-FILLED cell. A real WC class row comes from the
+    # extracted table and is deterministic, so it is never a candidate; a bare
+    # class code the model invented in row C, with no payroll, state, duties or
+    # description beside it, is the same fabricated-rating-row defect H3-D
+    # reported. Every root still keeps real anchors - Vehicle its VIN / make /
+    # model / year, WC its payroll / state / duties / names, LossHistory its
+    # dates / amounts / claim number - and no root is left with none, which
+    # `test_no_schedule_root_loses_every_identity_anchor` pins.
     identity_bases: Dict[str, set] = {}
-    for base in _SCHEDULE_REGISTRY:
+    for base, _sdef in _SCHEDULE_REGISTRY.items():
+        if _CODE_SUBKEY_RE.search(str(getattr(_sdef, "sub_key", "") or "")):
+            continue                       # a rating code identifies nothing
         identity_bases.setdefault(base.split("_", 1)[0], set()).add(base)
     min_offset: Dict[str, int] = {}
     for root, bindings in _schedule_root_bindings().items():
@@ -2268,6 +2404,8 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
     `_SCHED_SKIP` means "not my business" - not a row field, not a known
     schedule root, no row-count evidence, or a row that really exists.
     """
+    if _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP            # a 137 grid row is a coverage, not a vehicle
     name = field_name or ""
     if len(name) < 3 or name[-2] != "_":
         return _SCHED_SKIP
@@ -2283,8 +2421,17 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
     # high can only ever leave today's behaviour in place.
     capacity = 0
     have_schedule = False
+    separated_out = False
     for list_key, row_offset in bindings:
         rows = (facts or {}).get(list_key)
+        if isinstance(rows, list) and not rows and _every_row_left_as_named_individual(
+                list_key, facts):
+            # READ, AND EMPTIED ON EVIDENCE: the merge moved every row out as a
+            # Drive Other Car named individual, so the document's driver list
+            # holds no drivers. That is the "schedule exists" evidence below;
+            # an empty list with nothing moved out still says nothing.
+            have_schedule = True
+            separated_out = True
         if isinstance(rows, list) and rows:
             # The schedule EXISTS - that is the positive evidence this resolver
             # acts on, and it is read off the RAW list. Capacity is then counted
@@ -2296,7 +2443,33 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
             counted = _countable_schedule_rows(list_key, rows)
             capacity = max(capacity, len(counted) + (row_offset or 0))
     if capacity <= 0:
-        # No schedule at all still means "no evidence -> change nothing".
+        # ── NO SCHEDULE AT ALL: STILL "CHANGE NOTHING", AND HERE IS WHY ─────
+        # On 11 Sep 2026 this branch was changed to blank the grid on a section
+        # form, generalising the rule that fixed ACORD 126's schedule of
+        # hazards. THAT WAS WRONG, and three existing tests caught it inside one
+        # suite run. The two grids are not the same case:
+        #
+        #   ACORD 126's hazard grid has NO alternative source. Its only input is
+        #   the GL classification schedule; with no such fact, anything gap fill
+        #   writes there came from another line's table. Measured three times.
+        #
+        #   A VEHICLE grid does have one. The vehicles are in the uploaded
+        #   document as text, so gap fill reading them is a plausible RECOVERY,
+        #   not a fabrication by construction - and blanking the grid would
+        #   delete a real fleet extraction merely missed, a bigger deletion than
+        #   the defect being fixed.
+        #
+        # The measured 2026-08-13 defect (GL class 91585 as a vehicle's rate
+        # class) was in row B, and `_unanchored_schedule_row_fields` already
+        # sweeps any row past the first whose identity columns are empty. That
+        # is the right-sized guard for this grid.
+        #
+        # A second, independent reason the generalisation failed: nothing
+        # separated a grid CELL from a per-form field that merely repeats.
+        # `Vehicle_Question_ModifiedEquipmentDescription_A/B` is a General
+        # Information answer printed twice, and it was being blanked as a
+        # vehicle row - the same row-versus-singleton confusion this resolver
+        # already carries a scar from.
         if not have_schedule:
             return _SCHED_SKIP
         # AN EMPTY-BUT-PRESENT SCHEDULE OWNS ITS BLANKS - BUT ONLY ITS OWN CELLS.
@@ -2323,10 +2496,46 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
         m_base = _SCHED_ROW_RE.match(name)
         if m_base and _schedule_def_for_base(m_base.group(1)) is not None:
             return None
+        # A table the merge EMPTIED on evidence owns every COLUMN it prints,
+        # not only the ones bound to a fact. Live 15 Sep 2026, ACORD 127: with
+        # the only "driver" moved out as a named individual, the model still
+        # copied the insured's city, ZIP and state into all 13 driver rows -
+        # none of those columns is bound, so the bound-cells rule above never
+        # reached them. `_is_table_column` asks the form itself (a base printed
+        # on more than one row), so a per-form box sharing the root word - the
+        # LossHistory summary lesson above - is still left alone.
+        if separated_out and m_base and _is_table_column(m_base.group(1)):
+            return None
         return _SCHED_SKIP
     if idx < capacity:
         return _SCHED_SKIP            # a real row -> normal handling
     return None                       # beyond the schedule -> must stay blank
+
+
+# A schedule the merge empties on POSITIVE evidence, and where its rows went.
+# `services.named_individuals` (Chat 5, 14 Sep 2026) moves a Drive Other Car
+# named individual out of `auto_drivers`. After it, an EMPTY `auto_drivers`
+# beside a non-empty `auto_named_individuals` means the document's driver list
+# was read and held no drivers - the one case where "no rows" is a finding
+# rather than silence.
+_SEPARATED_SCHEDULES: Dict[str, str] = {"auto_drivers": "auto_named_individuals"}
+
+
+def _every_row_left_as_named_individual(list_key: str, facts: dict) -> bool:
+    moved_to = _SEPARATED_SCHEDULES.get(list_key)
+    if not moved_to or not isinstance(facts, dict):
+        return False
+    moved = _fv(facts, moved_to)
+    return isinstance(moved, list) and any(isinstance(r, dict) and r for r in moved)
+
+
+def _is_table_column(base: str) -> bool:
+    """True when the current form prints `base` on more than one row - a
+    column of a table, not a per-form box that happens to share its root."""
+    schema = getattr(_SCHEMA_CTX, "schema", None)
+    if not isinstance(schema, dict) or not base:
+        return False
+    return sum(1 for letter in _ROW_LETTERS if f"{base}_{letter}" in schema) > 1
 
 
 # Resolvers that OWN a field outright: when they decline to produce a value the
@@ -2347,6 +2556,15 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
 # three. Unit tests missed it because they called `_deterministic_map` directly
 # and never exercised the routing above it.
 _AUTHORITATIVE_BLANK_RESOLVERS = (
+    # The PRODUCER block on a NEW application. Once the merge has established
+    # that the only agency the documents name is the EXPIRING one
+    # (`expiring_producer_name`), that box is an owned blank - otherwise gap
+    # fill reads the same 271 page headers and puts the old agency straight
+    # back (client 2026-09-11 item 4). Same two-sided rule as the form number.
+    "_resolve_submitting_producer",
+    # A holder / payee / mortgagee the document printed as a placeholder
+    # ("For Informational Purposes Only") - see _resolve_rejected_party_box.
+    "_resolve_rejected_party_box",
     # ACORD 130 rating factors: the experience mod or blank. A factor gap fill
     # invents misstates the premium (V1 H3-D).
     "_resolve_wc_premium_cell",
@@ -2383,9 +2601,17 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     # ...and its coverage-checkbox twin: the umbrella is never underlying to
     # itself, and ADDITIONAL INTERESTS has no fact that could ever state it.
     "_resolve_underlying_coverage_grid",
+    # ACORD 137's coverage grid and sections (services/state_auto_grid). AHEAD
+    # of the 127-shaped vehicle resolvers below: `authoritative_expected_value`
+    # takes the FIRST owner, and on a 137 those resolvers read a section letter
+    # as a vehicle.
+    "_resolve_state_auto_grid_owned",
     # ACORD 127 physical-damage deductibles: extracted, reconciled and - until
     # 2026-08-16 - never bound to a field. See _resolve_vehicle_deductible_cell.
     "_resolve_vehicle_deductible_cell",
+    # ACORD 127 vehicle coverage ticks from the covered-auto symbols, and the
+    # boxes they rule out - see _resolve_vehicle_coverage_tick.
+    "_resolve_vehicle_coverage_tick",
     # Producer-assigned certificate/revision numbers: no uploaded document can
     # state them, so gap fill reading a policy number there is always wrong.
     # NO. OF MEMBERS AND MANAGERS: organisational data no carrier document
@@ -2405,6 +2631,10 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     # every unanswerable letter would fall through to gap fill, which can only
     # invent one. A letter is a cross-reference, never a fact in the text.
     "_resolve_certificate_insurer_letter",
+    # ACORD 125 CARRIER / NAIC / POLICY NUMBER: the carrier receiving the
+    # submission, never the expiring one (Brent's 125 answer key). AHEAD of
+    # the package header identity, which would print the current policy's.
+    "_resolve_page_one_receiving_carrier",
     # Package-form headers (125/101): one true package policy number or blank,
     # and a NAIC only ever as an attested pair with the named carrier.
     "_resolve_package_header_identity",
@@ -2495,6 +2725,26 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     # Employee counts drive rating; run 9 invented "1 full-time / 0 part-time"
     # on the 126 while the 125's identical boxes were correctly blank.
     "_resolve_exposure_count",
+    # ACORD 137 NON-OWNED group counts: a whole number the auto dec states for
+    # that group, or blank. Live run 7 printed PARTNERS "104" - the Drive Other
+    # Car TERRITORY code. See _resolve_nonowned_group_count.
+    "_resolve_nonowned_group_count",
+    # ACORD 126 $ PAID TO SUBCONTRACTORS: the GL schedule's Total-Cost exposure,
+    # or blank when it cannot be summed. See _resolve_subcontracted_cost.
+    "_resolve_subcontracted_cost",
+    # ACORD 127 VEHICLE TYPE from the vehicle's own classification line, and a
+    # BODY box that would only receive that type. See _resolve_vehicle_type_cell.
+    "_resolve_vehicle_type_cell",
+    # Audit of live runs 4-7 (15 Sep 2026) - boxes the facts already decide:
+    # the 127 USE set (no stated use is not an "other" use), COST NEW, the
+    # garaging address and its COUNTY, the 126 COMMERCIAL GENERAL LIABILITY
+    # tick, the 131 ANNUAL PAYROLL and the 125 premises employee counts' blank.
+    "_resolve_vehicle_use_indicator",
+    "_resolve_vehicle_cost_new",
+    "_resolve_vehicle_garaging_cell",
+    "_resolve_gl_master_coverage_box",
+    "_resolve_business_total_payroll",
+    "_resolve_premises_count_blank",
     # The 131's habitational row (#28): run 7e95e3ae invented "1 story /
     # 1 unit". The 125's %-of-sales boxes are deliberately NOT owned - see
     # _resolve_property_rating_row's comment for the withdrawn twin.
@@ -2511,6 +2761,19 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     # valued loss runs"), so when the deterministic signals say nothing, the
     # box stays EMPTY and the ARQ asks - the model never gets to guess it.
     "_resolve_no_loss_checkbox_owned",
+    # A coverage PART (Employee Benefits on the ACORD 126) the package never
+    # evidences - see _resolve_uncarried_coverage_part.
+    "_resolve_uncarried_coverage_part",
+    # A box printed under "APPLICABLE ONLY IN <STATE>" on a risk in another
+    # state (services/state_restricted_boxes).
+    "_resolve_out_of_state_box",
+    # ACORD 131 CARE, CUSTODY, CONTROL and the umbrella's OTHER limit row:
+    # nothing a policy prints can fill them - see their resolvers.
+    "_resolve_care_custody_control",
+    "_resolve_umbrella_other_limit",
+    # ...and ACORD 126's OTHER limit row: a limit the GL declarations print that
+    # has no box of its own, or blank - never the GL deductible, never a guess.
+    "_resolve_gl_other_limit",
 )
 
 
@@ -2524,6 +2787,39 @@ def _is_authoritative_blank_field(field_name: str, facts: dict) -> bool:
         except Exception:                                 # noqa: BLE001
             continue
     return False
+
+
+def _owned_blank_claim(field_name: str, facts: dict) -> bool:
+    """True when an owning resolver's ANSWER for this field is the blank (None).
+
+    Narrower than `_is_authoritative_blank_field`, which is True for any claim
+    at all - including a resolver that owns the box WITH a value. The
+    non-fillable schedule door uses this: a schedule value may stamp unless a
+    resolver has decided the box is empty."""
+    for name in _AUTHORITATIVE_BLANK_RESOLVERS:
+        try:
+            if globals()[name](field_name, facts) is None:
+                return True
+        except Exception:                                 # noqa: BLE001
+            continue
+    return False
+
+
+def _unless_owned_blank(field_name: str, sched: Any, facts: dict) -> Any:
+    """A schedule cell's value, or None when a resolver owns the box as blank.
+
+    AN OWNED BLANK WINS OVER THE SCHEDULE'S OWN CELL (live run 7, 15 Sep 2026),
+    at both schedule doors (compute_form_gaps and map_facts_to_form), as it
+    already did at the non-fillable door. Those doors never asked: ACORD 127's
+    BODY box took `body_type` = "PRIV PASSENGER" - the vehicle's TYPE - straight
+    from the schedule, past the resolver that owns that box, and only a
+    name-shape guard removed it (then listed it on the cover page as a refused
+    value). Swept over runs 4-7 x 17 schemas: that box and 131's CARE, CUSTODY,
+    CONTROL LOC (already owned) are the only values it changes."""
+    if (sched is not _SCHED_SKIP and sched is not None and not _is_empty_llm_value(sched)
+            and _owned_blank_claim(field_name, facts)):
+        return None
+    return sched
 
 
 # Entity blocks that are OPTIONAL - unlike the Named Insured, whose row A always
@@ -2636,6 +2932,18 @@ _FORM_NUMBER_RE = re.compile(
     r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", re.I)
 
 
+# Every ACORD box that holds a POLICY NUMBER, by ACORD's own naming convention.
+# Derived, not listed: `Policy_`, `OtherPolicy_`, `PriorCoverage_`,
+# `UnderlyingPolicy_*_` and the certificate rows all end the same way, so a form
+# we have never stamped is covered the day it is added.
+_POLICY_NUMBER_BOX_RE = re.compile(r"PolicyNumberIdentifier(?:_[A-Z])?$")
+
+
+def _is_policy_number_box(field: str) -> bool:
+    """Does this ACORD field hold a policy number?"""
+    return bool(_POLICY_NUMBER_BOX_RE.search(str(field or "")))
+
+
 def _looks_like_a_form_number(value: Any) -> bool:
     """True for `IM 7100 06 04`, `CG 00 01 04 13`, `IL 00 17 11 98`.
 
@@ -2691,18 +2999,39 @@ def _same_policy_contract(a: Any, b: Any) -> bool:
     return bool(re.search(r"[\s\-]\s*\d{2}\s*$", raw_hi.strip()))
 
 
+def _fold_contracts(printings: List[str]) -> List[str]:
+    """Distinct CONTRACTS among policy-number printings, each kept in its fullest
+    printing. `6E74002` (the umbrella's schedule) and `6E7-40-02---26` (the auto
+    dec) are one policy, so they are one entry here."""
+    reps: List[str] = []
+    for raw in printings:
+        raw = str(raw or "").strip()
+        if not raw:
+            continue
+        for i, rep in enumerate(reps):
+            if _norm_policy_no(rep) == _norm_policy_no(raw) or _same_policy_contract(rep, raw):
+                if len(raw) > len(rep):
+                    reps[i] = raw
+                break
+        else:
+            reps.append(raw)
+    return reps
+
+
+def _names_a_standard_line(name: Any) -> bool:
+    """True when a printed name is exactly one of ACORD's line-of-business names
+    ("Business Auto", "Commercial General Liability") - not a coverage PART
+    printed on that line ("Covered Autos Liability")."""
+    doc = _lob_tokens(str(name or ""))
+    return bool(doc) and any(
+        doc == ts for token_sets in _lob_indicator_index().values() for ts in token_sets)
+
+
 def _dedupe_rows_by_policy_contract(rows: List[dict]) -> List[dict]:
     """One row per POLICY, keeping the entry whose name actually names a line of
     business. "Covered Autos Liability" is a coverage PART printed on the auto
     declarations; "Business Auto" is the line. Both carry the auto policy's
     number, so the grid must show ONE row - and it must be the line."""
-    index = _lob_indicator_index()
-
-    def _names_a_standard_line(name: str) -> bool:
-        doc = _lob_tokens(name)
-        return bool(doc) and any(
-            doc == ts for token_sets in index.values() for ts in token_sets)
-
     groups: List[List[dict]] = []
     for e in rows:
         for g in groups:
@@ -2730,6 +3059,21 @@ def _resolve_other_policy_cell(field_name: str, facts: dict):
     if not m:
         return _SCHED_SKIP
     attr, letter = m.group(1), m.group(2)
+    # "ANY OTHER INSURANCE WITH THIS COMPANY?" - the company RECEIVING the
+    # submission (Brent's 125 answer key). Live run 10 (15 Sep 2026) printed a
+    # blank CARRIER above four EMC policies listed as "with this company". Until
+    # page one knows the receiving carrier the answer is unknown, so the list is
+    # blank; once a person names it, only that company's policies are listed.
+    if _page_one_current_policy(facts, "carrier_is_current_policy", "carrier_name"):
+        return None
+    _receiving = None
+    if (str((facts or {}).get("_form_id") or "") == "ACORD_125"
+            and _stated_by_a_person(facts, "carrier_name")):
+        try:
+            from services.normalization import strict_entity_key as _entity
+            _receiving = _entity(_fv(facts, "carrier_name")) or None
+        except Exception:                                 # noqa: BLE001
+            _receiving = None
     lines = _fv(facts, "coverage_lines")
     if not isinstance(lines, list) or not lines:
         return _SCHED_SKIP                 # no per-line data - legacy path
@@ -2777,6 +3121,8 @@ def _resolve_other_policy_cell(field_name: str, facts: dict):
                     "underlying_policies", line_name, number)
         if not number:
             continue
+        if _receiving and str(e.get("carrier") or "").strip() and _entity(e.get("carrier")) != _receiving:
+            continue                       # another company's policy
         rows.append(dict(e, policy_number=number))
     # One row per DISTINCT POLICY. A live run stamped the same number on every
     # Q4 row because extraction attached one number to several lines - visibly
@@ -2820,9 +3166,59 @@ def _resolve_other_policy_cell(field_name: str, facts: dict):
 _ESTIMATED_TOTAL_RE = re.compile(r"^Policy_Payment_EstimatedTotalAmount_[A-N]$")
 
 
+def _page_one_current_policy(facts: dict, flag: str, key: str) -> bool:
+    """ACORD 125 page 1 describes the policy being APPLIED FOR - Brent's own
+    ACORD 125 answer key (125_reference, 8-19-26): CARRIER is the "carrier
+    receiving submission", NAIC "only if verified", POLICY NUMBER "blank for
+    new-business quote unless an existing/current policy number applies",
+    POLICY PREMIUM "blank at submission stage unless known"; the current
+    policies go in the PRIOR CARRIER grid. The merge marks what only the
+    CURRENT policy's documents state (extraction_service.
+    _mark_page_one_current_policy); that box is an owned blank on ACORD 125,
+    unless a person entered the value."""
+    return (str((facts or {}).get("_form_id") or "") == "ACORD_125"
+            and (facts or {}).get(flag) is True
+            and not _stated_by_a_person(facts, key))
+
+
+# ACORD 125's page-one identity boxes -> the fact each one prints.
+_PAGE_ONE_IDENTITY: Dict[str, str] = {
+    "Insurer_FullName_A": "carrier_name",
+    "Insurer_NAICCode_A": "carrier_naic",
+    "Policy_PolicyNumberIdentifier_A": "policy_number",
+}
+
+
+# Q4 "Any other insurance with this company?" - answerable only once the
+# receiving company is known (live run 10, 15 Sep 2026).
+_PAGE_ONE_RECEIVING_QUESTION = "CommercialPolicy_Question_AAHCode_A"
+
+
+def _resolve_page_one_receiving_carrier(field_name: str, facts: dict):
+    """ACORD 125 CARRIER / NAIC / POLICY NUMBER belong to the carrier RECEIVING
+    the submission (15 Sep 2026). Live Orbin run 9 printed EMCC - the auto
+    line's carrier - there, on a package two companies write and a quote
+    nobody has asked for yet. The current policies print in the prior-carrier
+    grid instead. A renewal written by one carrier goes back to it (the merge
+    does not mark it); a person's entry always prints."""
+    if field_name == _PAGE_ONE_RECEIVING_QUESTION:
+        return (None if _page_one_current_policy(facts, "carrier_is_current_policy", "carrier_name")
+                else _SCHED_SKIP)
+    key = _PAGE_ONE_IDENTITY.get(field_name or "")
+    if key is None:
+        return _SCHED_SKIP
+    if not _page_one_current_policy(facts, "carrier_is_current_policy", "carrier_name"):
+        return _SCHED_SKIP
+    if _stated_by_a_person(facts, key):
+        return _SCHED_SKIP
+    return None
+
+
 def _resolve_estimated_total(field_name: str, facts: dict):
     if not _ESTIMATED_TOTAL_RE.match(field_name):
         return _SCHED_SKIP
+    if _page_one_current_policy(facts, "premium_is_current_policy", "total_policy_premium"):
+        return None                    # the current policy's premium is not the proposal's
     # A total the DOCUMENT states beats one we compute. Measured on the real
     # 271-page package: summing per-line premiums produced $9,438 because one
     # line's premium was missed at extraction, while the dec page prints the
@@ -3229,7 +3625,11 @@ def _resolve_additional_interest_type(field_name: str, facts: dict):
 # ticked and every sibling (Quote/Issue/Bound/Change/Cancel/New/AssignedRisk,
 # their date/time/AM/PM boxes) is an authoritative blank. When is_renewal is
 # not affirmatively known the resolver steps aside and the legacy path runs.
-_POLICY_STATUS_RE = re.compile(r"^Policy_Status_\w+_[A-N]$")
+# ACORD 131 prints the same decision under its own name - TRANSACTION TYPE, with
+# an "Other" box and a description line. Live 15 Sep 2026: gap fill ticked Other
+# and wrote '"8 Other"' there - section 8 of the policy's own premium summary.
+_POLICY_STATUS_RE = re.compile(
+    r"^(?:Policy_Status_\w+|ExcessUmbrella_Transactiontype_\w+)_[A-N]$")
 
 
 def _resolve_policy_status(field_name: str, facts: dict):
@@ -3247,6 +3647,14 @@ def _resolve_policy_status(field_name: str, facts: dict):
     is_ren = str(_fv(facts, "is_renewal") or "").strip().lower()
     if "RenewIndicator" in field_name:
         return "Yes" if is_ren in ("yes", "true", "y", "renewal") else None
+    # QUOTE on ACORD 125 (15 Sep 2026): Brent's own 125 answer key ticks QUOTE
+    # on a submission - asking the market for a quote is what this product
+    # sends. A known renewal is RENEW above; every other status stays the
+    # producer's to tick, and no other form is touched.
+    if ("QuoteIndicator" in field_name
+            and str((facts or {}).get("_form_id") or "") == "ACORD_125"
+            and is_ren not in ("yes", "true", "y", "renewal")):
+        return "Yes"
     # ── THE WHOLE FAMILY IS OURS, and non-determinism is what proved it ──────
     # The owner ran the SAME declarations package through TWO accounts: ISSUE
     # POLICY came back ticked on one and blank on the other. A document cannot
@@ -3295,6 +3703,83 @@ def _resolve_address_line_two(field_name: str, facts: dict):
         return _SCHED_SKIP
     line2 = (parsed.get("line2") or "").strip()
     return line2 or None
+
+
+# ── An address LINE TWO that repeats its own block (11 Sep 2026) ───────────
+# Live run 3, every interest block on both runs: LineOne `800 Walnut Street`,
+# LineTwo `800 Walnut St`; Run B printed the CITY `Boulder` on line two.
+# Third-party address blocks have no fact at all (`_deterministic_map` returns
+# UNMATCHED for `_addr_*` outside NamedInsured), so every component is its own
+# gap-fill answer, and the model fills the second-line box with a piece of the
+# address it already wrote. `_resolve_address_line_two` fixed the same shape
+# for the Named Insured by OWNING the box; a third party has no fact to own it
+# from, so the rule has to be structural.
+#
+# ACORD's LineTwo is by definition the part of the street NOT on LineOne. A
+# LineTwo whose words already appear, in order, inside its own block's LineOne
+# - or whose every word is its own block's city / state / ZIP / county - adds
+# nothing to the address. It is a copy, whichever pass stamped it. Only the
+# LineTwo box is ever blanked; LineOne and the locality are never touched.
+#
+# The unit marker is KEPT as a token, deliberately unlike `normalize_address`
+# (which drops it so the picker folds "#D13" and "Ste D13"): "Suite 100" beside
+# "100 Main St" is a real suite, and dropping the marker would make it look
+# contained. A LineTwo that reduces to bare numbers is never compared with
+# LineOne - a lone "5" says too little to call it a copy of a street number.
+_ADDRESS_BLOCK_PART_RE = re.compile(
+    r"^(\w+?Address)_(LineOne|LineTwo|CityName|StateOrProvinceCode|PostalCode"
+    r"|CountyName)_([A-Z])$")
+_ADDRESS_UNIT_TOKENS = {
+    "suite": "ste", "ste": "ste", "unit": "unit", "apt": "apt",
+    "apartment": "apt", "rm": "rm", "room": "rm", "fl": "fl", "floor": "fl",
+    "bldg": "bldg", "building": "bldg",
+}
+
+
+def _address_words(value: Any) -> List[str]:
+    """Address tokens for a within-block copy test: suffixes and directionals
+    folded with the comparison door's own tables, unit markers kept."""
+    from services.normalization import _DIRECTIONALS, _STREET_SUFFIXES
+    s = str(value if value is not None else "").lower().replace("#", " unit ")
+    s = re.sub(r"\b(\d{5})-\d{4}\b", r"\1", s)
+    s = re.sub(r"[^a-z0-9\s]+", " ", s)
+    out: List[str] = []
+    for tok in s.split():
+        tok = _ADDRESS_UNIT_TOKENS.get(tok, tok)
+        tok = _DIRECTIONALS.get(tok, tok)
+        out.append(_STREET_SUFFIXES.get(tok, tok))
+    return out
+
+
+def _line_two_repeats_its_block(mapped: dict) -> Dict[str, str]:
+    """{LineTwo field: why} for every LineTwo that only repeats its own block."""
+    blocks: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for f, v in mapped.items():
+        m = _ADDRESS_BLOCK_PART_RE.match(str(f))
+        if m and v is not None and str(v).strip():
+            blocks.setdefault((m.group(1), m.group(3)), {})[m.group(2)] = f
+    out: Dict[str, str] = {}
+    for parts in blocks.values():
+        two_f = parts.get("LineTwo")
+        if not two_f:
+            continue
+        two = _address_words(mapped[two_f])
+        if not two:
+            continue
+        locality: set = set()
+        for c in ("CityName", "StateOrProvinceCode", "PostalCode", "CountyName"):
+            if c in parts:
+                locality.update(_address_words(mapped[parts[c]]))
+        if locality and set(two) <= locality:
+            out[two_f] = "repeats its own city / state / ZIP"
+            continue
+        if all(t.isdigit() for t in two) or "LineOne" not in parts:
+            continue
+        one = _address_words(mapped[parts["LineOne"]])
+        n = len(two)
+        if any(one[i:i + n] == two for i in range(len(one) - n + 1)):
+            out[two_f] = f"repeats its own line one {str(mapped[parts['LineOne']])[:40]!r}"
+    return out
 
 
 # ── Producer mailing block: owned by the producer_address fact ──────────────
@@ -3515,12 +4000,9 @@ def _org_tokens_for_domain(name) -> set:
     "LLC" and every broker an "Insurance Agency" - and a domain rarely repeats
     them.
     """
-    stop = {"llc", "inc", "incorporated", "corp", "corporation", "company",
-            "co", "ltd", "limited", "lp", "llp", "plc", "group", "holdings",
-            "the", "and", "of", "insurance", "brokers", "broker", "brokerage",
-            "agency", "agencies", "services", "service"}
-    return {w for w in re.findall(r"[a-z]+", str(name or "").lower())
-            if len(w) > 2 and w not in stop}
+    # One copy, shared with the merge - see extraction_service.
+    from services.extraction_service import org_tokens_for_domain
+    return org_tokens_for_domain(name)
 
 
 def _contact_email_party(facts: dict):
@@ -3540,18 +4022,18 @@ def _contact_email_party(facts: dict):
     """
     if not isinstance(facts, dict):
         return None
-    m = re.search(r"@([a-z0-9.-]+)",
-                  str(_fv(facts, "contact_email") or "").strip().lower())
-    if not m:
-        return None
-    domain = re.sub(r"[^a-z]", "", m.group(1))
-    if not domain:
-        return None
-    in_app = any(t in domain for t in _org_tokens_for_domain(_fv(facts, "applicant_name")))
-    in_prod = any(t in domain for t in _org_tokens_for_domain(_fv(facts, "producer_name")))
-    if in_app == in_prod:
-        return None                        # both or neither - no opinion
-    return "applicant" if in_app else "producer"
+    # One copy, shared with the merge - see extraction_service.
+    from services.extraction_service import contact_email_party
+    email, applicant = _fv(facts, "contact_email"), _fv(facts, "applicant_name")
+    party = contact_email_party(email, applicant, _fv(facts, "producer_name"))
+    # An address on the EXPIRING agency's domain is a producer's too: once the
+    # submitting agency comes from the login, `producer_name` no longer names
+    # the agency the documents print (see `_FACT_ENTITY`'s expiring twins).
+    expiring = _fv(facts, "expiring_producer_name")
+    if party is None and str(expiring or "").strip():
+        if contact_email_party(email, applicant, expiring) == "producer":
+            return "producer"
+    return party
 
 
 def _resolve_applicant_contact(field_name: str, facts: dict):
@@ -3567,16 +4049,16 @@ def _resolve_applicant_contact(field_name: str, facts: dict):
     # opposite case - gap fill fabricating a producer contact out of the
     # applicant's - is what the resolver below already handles, and the two
     # rules must never both fire and blank everything.
-    _producer_twin = {"contact_name":  "producer_contact_name",
-                      "contact_phone": "producer_contact_phone",
-                      "contact_email": "producer_contact_email"}
+    # Both producer axes: the submitting agency's contact and the expiring one's.
+    _producer_twin = {key: (f"producer_{key}", f"expiring_producer_{key}")
+                      for key in ("contact_name", "contact_phone", "contact_email")}
     _party = _contact_email_party(facts)
     for key in ("contact_name", "contact_phone", "contact_email"):
         val = _fv(facts, key)
         if val is None or not str(val).strip():
             continue
         if _party == "producer" and _echoes_another_partys_value(
-                val, facts, (_producer_twin[key],)):
+                val, facts, _producer_twin[key]):
             logger.info(
                 "applicant contact: %r is the PRODUCER's own contact (its email "
                 "domain names the agency, not the applicant) - the applicant "
@@ -3912,6 +4394,53 @@ def _evidenced_standard_lob_boxes(facts: dict) -> Optional[frozenset]:
     return frozenset(out)
 
 
+def _census_omits_box_line(field_name: str, facts: dict) -> bool:
+    """The package's own line inventory is a census that never names this
+    box's line: three or more lines evidenced as policies, and no
+    `coverage_lines` row of the line at all, granted or not.
+
+    Live run 11: CYBER AND PRIVACY ticked off `has_cyber`, which extraction
+    set from the GL policy's "Exclusion - Cyber Incident" - a clause saying
+    the line is NOT covered. The same census `_line_absent_from_package`
+    applies to workers comp. A line the inventory merely mentions keeps its
+    flag's say; a box whose line no rule can place (Boiler and Machinery)
+    is not judged."""
+    lines = _fv(facts, "coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return False
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        return False
+    canons = {_canon(" ".join(sorted(ts))) for ts in (_lob_indicator_index().get(field_name) or ())}
+    canons.discard(None)
+    if len(canons) != 1:
+        return False
+    canon = next(iter(canons))
+    evidenced = [e for e in lines if _line_entry_evidences_policy(e)]
+    if len(evidenced) < 3:
+        return False
+    # A policy whose name no rule can place ("Commercial Package Policy",
+    # "Data Compromise", "Builders Risk") may BE this box's line: no census
+    # (review of run 11). Coverage parts (Comprehensive, UM) and premium
+    # subtotals ("Premium for Endorsements") name no line of their own.
+    try:
+        from services.lob_canon import canon_part as _part
+    except Exception:                                     # noqa: BLE001
+        return False
+    present = {_canon(str(e.get("line") or "")) for e in evidenced} - {None}
+    for e in evidenced:
+        name = str(e.get("line") or "")
+        if (not _canon(name) and not _part(name, present)
+                and not _PREMIUM_SUBTOTAL_NAME_RE.search(name)):
+            return False
+    return not any(isinstance(e, dict) and _canon(str(e.get("line") or "")) == canon for e in lines)
+
+
+_PREMIUM_SUBTOTAL_NAME_RE = re.compile(
+    r"\b(?:premiums?|total|subtotal|fees?|tax(?:es)?|surcharges?|endorsements?|minimum)\b", re.I)
+
+
 def _resolve_standard_lob_box(field_name: str, facts: dict):
     m = _ENUM_LOB_BOX_RE.match(field_name)
     if not m:
@@ -3925,7 +4454,11 @@ def _resolve_standard_lob_box(field_name: str, facts: dict):
     # is not silently dropped - but a box no evidence supports is an owned
     # blank, never a question for the model.
     if _derive_indicator(field_name, facts) == "Yes":
-        return "Yes"
+        if not _census_omits_box_line(field_name, facts):
+            return "Yes"
+        logger.info("lob-grid: %s left blank - its flag says yes, but the package's "
+                    "line inventory never names this line", field_name)
+        return None
     logger.info(
         "lob-grid: %s left blank - no granted coverage line and no flag names "
         "this line of business", field_name)
@@ -4624,9 +5157,9 @@ def _resolve_max_vehicle_exposure(field_name: str, facts: dict):
 _EXPOSURE_COUNT_FIELDS = {
     "FullTimeEmployeeCount": ("full_time_employees", "num_employees_full_time"),
     "PartTimeEmployeeCount": ("part_time_employees", "num_employees_part_time"),
-    # Run 7e95e3ae: the 131's # EMPL box shipped "1" - stated nowhere. The
-    # document's own statement is the num_employees fact ("0 - 25" on Orbin,
-    # from the non-ownership schedule's NUMBER OF EMPLOYEES line).
+    # Run 7e95e3ae: the 131's # EMPL box shipped "1" - stated nowhere. The box
+    # takes the num_employees fact only as ONE whole number: Orbin's "0 - 25"
+    # is the auto non-ownership RATING BAND, not a headcount.
     "EmployeeCount": ("num_employees",),
 }
 # THE PAIRING IS EXACT, and the suite enforces it. Widening to
@@ -4671,11 +5204,286 @@ def _resolve_exposure_count(field_name: str, facts: dict):
     m = _EXPOSURE_COUNT_RE.match(field_name or "")
     if not m:
         return _SCHED_SKIP
+    # ONE WHOLE NUMBER, OR NOTHING (audit, 15 Sep 2026). The merge's count gate
+    # drops a band like "0 - 25", but a producer answer or a stored session
+    # reaches this box without passing it - and a band is a rating bracket.
     for key in _EXPOSURE_COUNT_FIELDS[m.group(1) or m.group(2)]:
-        val = _fv(facts, key)
-        if val is not None and str(val).strip():
-            return str(val).strip()
+        val = str(_fv(facts, key) or "").strip().replace(",", "")
+        count = re.fullmatch(r"(\d{1,6})(?:\.0+)?", val)
+        if count:
+            return str(int(count.group(1)))
     return None
+
+
+# ── ACORD 137 NON-OWNED group counts (live run 7, 15 Sep 2026) ───────────────
+# PARTNERS printed "104" - the Drive Other Car endorsement's TERRITORY code -
+# after earlier runs put "0", "0 - 25" and a named individual in the same row.
+# The box asks how many employees / partners / volunteers USE THEIR OWN AUTOS
+# (ACORD's tooltip). The non-ownership schedule's "NUMBER OF EMPLOYEES" is ISO's
+# RATING headcount (the whole staff on the "other than a social service agency"
+# branch - Orbin's "0 - 25" is one of those bands), so a count prints only when
+# the auto dec's own line states the use-own-auto subset; otherwise the box is
+# an owned blank (review of run 7). An EMPLOYEES line never answers PARTNERS.
+_NONOWNED_GROUP_COUNT_RE = re.compile(
+    r"^Vehicle_NonOwnedGroup_(Employee|Partner|Volunteer)(Count|Indicator)_([A-Z])$")
+# The count, optionally followed by the premium the same schedule line prints
+# ("12 $ 137.00"). Anything else - "0 - 25", "IF ANY", prose - is not a count.
+_NONOWNED_COUNT_VALUE_RE = re.compile(r"^\s*(\d{1,6})\s*(?:\$\s*[\d,]+(?:\.\d{1,2})?)?\s*$")
+
+
+_NONOWNED_BAND_RE = re.compile(r"^\s*(\d{1,6})\s*-\s*(\d{1,6})\b")
+_NOT_RATED_VALUE_RE = re.compile(
+    r"^\s*(?:\$\s*)?0+(?:\.0+)?\s*$|^\s*(?:none|n\s*/?\s*a|not\s+applicable|not\s+covered|"
+    r"excluded|-+)\s*$", re.I)
+_OWN_AUTO_USE_RE = re.compile(
+    r"\buse[sd]?\s+(?:of\s+)?(?:their|his|her|its)\s+own\b|\bown\s+autos?\b|"
+    r"\bduties\s+involve\s+the\s+use\b", re.I)
+
+
+def _nonowned_group_reading(facts: dict, group: str) -> Tuple[Optional[str], Optional[bool]]:
+    """(count, rated) for the auto dec's NUMBER OF <group>S line(s) - ONE
+    reader, so the count and the tick cannot disagree.
+
+    count: a whole number, only where the line states the use-own-auto subset
+           the ACORD box asks for; else None.
+    rated: True for a number above 0, a band reaching above 0 ("0 - 25") or a
+           premium above 0; False when the line prints 0 / NONE / N/A (the
+           group is NOT rated - review of run 7: "NUMBER OF PARTNERS 0" ticked
+           PARTNERS); None for no line, prose, or lines that disagree."""
+    label_re = re.compile(rf"\bNUMBER\s+OF\s+{group}S?\b", re.I)
+    rated_votes: set = set()
+    counts: set = set()
+    for e in _auto_dec_entries(facts):
+        label = str(e.get("label") or "")
+        if not label_re.search(label):
+            continue
+        value = str(e.get("value") or "").strip()
+        num = _NONOWNED_COUNT_VALUE_RE.match(value)
+        band = _NONOWNED_BAND_RE.match(value)
+        if num:
+            n = int(num.group(1))
+            rated_votes.add(n > 0)
+            if _OWN_AUTO_USE_RE.search(f"{label} {e.get('section') or ''}"):
+                counts.add(str(n))
+        elif band:
+            rated_votes.add(int(band.group(2)) > 0)
+        elif _NOT_RATED_VALUE_RE.match(value):
+            rated_votes.add(False)
+        elif re.search(r"\$\s*[\d,]+", value) and _currency_to_int(value.split("$")[-1]) > 0:
+            rated_votes.add(True)
+        else:
+            rated_votes.add(None)
+    rated = next(iter(rated_votes)) if len(rated_votes) == 1 else None
+    return (next(iter(counts)) if len(counts) == 1 else None), rated
+
+
+def _resolve_nonowned_group_count(field_name: str, facts: dict):
+    m = _NONOWNED_GROUP_COUNT_RE.match(field_name or "")
+    if not m:
+        return _SCHED_SKIP
+    group, kind, row = m.group(1), m.group(2), m.group(3)
+    blank = None if kind == "Count" else _SCHED_SKIP
+    count, rated = _nonowned_group_reading(facts, group)
+    if kind == "Indicator":
+        # The group's tick (audit, 15 Sep 2026): YES when a liability symbol
+        # proves non-owned autos are covered AND the schedule rates this group.
+        # A line printing 0 / NONE / N/A says it is not rated: an owned blank,
+        # never a "No" and never back to gap fill, which would read that row.
+        if rated is False:
+            return None
+        if not (rated is True and _liability_symbols_cover(facts, "nonowned")):
+            return _SCHED_SKIP
+        value = "Yes"
+    else:
+        value = count
+        if value is None:
+            return None
+    # A 137 row letter is a SECTION (business auto / truckers / motor carrier).
+    # The answer belongs to a section the package carries; a page whose family
+    # cannot be read gets it on row A only.
+    form_id = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    if form_id.startswith("ACORD_137"):
+        try:
+            from services import state_auto_grid as _sag
+            page = _sag.field_families(form_id).get(field_name)
+            present, _absent = _sag.families(facts)
+        except Exception:                                 # noqa: BLE001
+            return blank
+        if page is None:
+            return value if row == "A" else blank
+        if page not in present:
+            return blank
+    return value
+
+
+# ── ACORD 126 $ PAID TO SUBCONTRACTORS (live run 7, 15 Sep 2026) ─────────────
+# $350,000 on one run, blank on the other three: the model either read the GL
+# schedule's Total-Cost row or it did not. The figure is the policy's own
+# rating exposure - ISO's premium base "C - Total Cost" is the total cost of
+# all work let or sublet (the legend ACORD prints on this form's hazard grid;
+# see _RATING_BASIS_TO_CODE) - so the box is the sum of the schedule's
+# Total-Cost exposures. No cost-basis row leaves the box to the document. A
+# cost row whose exposure cannot be read ("IF ANY", a figure in thousands), or
+# one class printed with two figures, makes the sum unknowable, and an
+# unknowable sum is an owned blank - never a partial one.
+_SUBCONTRACTED_COST_RE = re.compile(r"^Contractors_SubcontractorsPaidAmount_[A-Z]$")
+
+
+def _schedule_key_part(value: Any) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return str(int(digits)) if digits else str(value or "").strip().lower()
+
+
+def _is_policy_level_line(row: Any) -> bool:
+    """A GL schedule row that is the carrier's POLICY-LEVEL line, not a class:
+    no class code, no rating basis, and printed under a location numbered zero
+    or as a credit. Live run 11: "Location 000 / Fungi Or Bacteria Exclusion /
+    ($33)" and "Location 000 / Limited Pollution Coverage - Work Sites / $150"
+    printed a third ACORD 126 hazard row (the exclusion, with gap fill's 91585
+    / "Total Cost"), and their unreadable basis made $ PAID TO SUBCONTRACTORS
+    and the TYPE OF WORK look partial, so both shipped blank. A row missing
+    its code and basis at a real location may be a class extraction half-read,
+    so it still counts - and still blocks a partial sum (review of run 11)."""
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("class_code") or "").strip() or str(row.get("premium_basis") or "").strip():
+        return False
+    loc = re.findall(r"\d+", str(row.get("location") or ""))
+    zero_location = bool(loc) and all(int(n) == 0 for n in loc)
+    credit = bool(re.fullmatch(r"\(\s*\$?\s*[\d,]+(?:\.\d+)?\s*\)", str(row.get("exposure_amount") or "").strip()))
+    return zero_location or credit
+
+
+def _is_rated_class_row(row: Any) -> bool:
+    """A GL schedule row that is a classification (see _is_policy_level_line)."""
+    return isinstance(row, dict) and not _is_policy_level_line(row)
+
+
+def _names_a_classification(row: Any) -> bool:
+    """Any GL schedule row but a policy-level line; a bare code counts."""
+    return not _is_policy_level_line(row)
+
+
+def _gl_schedule_rows(facts: dict) -> List[dict]:
+    rows = _fv(facts, "gl_class_code_schedule")
+    return [r for r in rows if _is_rated_class_row(r)] if isinstance(rows, list) else []
+
+
+def _gl_hazard_rows(facts: dict) -> list:
+    """The rows the ACORD 126 hazard grid prints: the schedule's classifications,
+    else the legacy `gl_class_codes` list's."""
+    for key in ("gl_class_code_schedule", "gl_class_codes"):
+        rows = _fv(facts, key)
+        if isinstance(rows, list):
+            kept = [r for r in rows if _names_a_classification(r)]
+            if kept:
+                return kept
+    return []
+
+
+def _basis_letter(value: Any) -> str:
+    """ACORD's rating-basis letter, read by BOTH readers of it: the legend
+    translation, then the merge's word reader (which also knows "(C) Total
+    Cost", "Cost of Work Sublet"). "" when neither can read it."""
+    code = rating_basis_code(value)
+    if code:
+        return code
+    try:
+        from services.extraction_service import _hazard_basis_letter
+        return _hazard_basis_letter(value) or ""
+    except Exception:                                     # noqa: BLE001
+        return ""
+
+
+# OCP / railroad protective classes rate on the DESIGNATED contractor's cost -
+# a separate coverage form, not work the applicant sublet.
+_PROTECTIVE_CLASS_RE = re.compile(r"\bprotective\b", re.I)
+
+
+def _cost_basis_rows(facts: dict) -> List[dict]:
+    """The GL schedule's rows rated on ISO (C) Total Cost - work let or sublet."""
+    return [r for r in _gl_schedule_rows(facts)
+            if _basis_letter(r.get("premium_basis")) == "C"
+            and not _PROTECTIVE_CLASS_RE.search(str(r.get("classification") or ""))]
+
+
+def _schedule_has_unread_basis(facts: dict) -> bool:
+    """A row with an exposure whose basis neither reader can place - it may be
+    a cost row, so a sum over the rows we CAN read is only a partial one."""
+    return any(str(r.get("exposure_amount") or "").strip()
+               and not _basis_letter(r.get("premium_basis"))
+               for r in _gl_schedule_rows(facts))
+
+
+def _resolve_subcontracted_cost(field_name: str, facts: dict):
+    if not _SUBCONTRACTED_COST_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    rows = _cost_basis_rows(facts)
+    if not rows:
+        return _SCHED_SKIP
+    if _schedule_has_unread_basis(facts):
+        return None                       # a partial sum is never printed
+    # One class at one place (and territory) is one exposure. A row with no
+    # location, or the carrier's policy-level "Location 000", is a COPY when it
+    # repeats one located figure of its class, or that class's TOTAL when it
+    # equals their sum (run 6; review of run 7). Any other figure beside
+    # located rows cannot be told from an extra exposure: blank, never a guess.
+    placed: Dict[Tuple[str, str, str], int] = {}
+    unplaced: Dict[Tuple[str, str], set] = {}
+    for r in rows:
+        raw = str(r.get("exposure_amount") or "").strip()
+        # "$" required: a bare "2,500" may be thousands of dollars.
+        amount = _currency_to_int(raw) if ("$" in raw and _CURRENCY_ONLY_RE.match(raw)) else 0
+        if amount < 1000:
+            return None                   # "IF ANY", thousands, prose: unknowable
+        loc = _schedule_key_part(r.get("location"))
+        cls = _schedule_key_part(r.get("class_code"))
+        terr = _schedule_key_part(r.get("territory"))
+        if loc in ("", "0"):
+            unplaced.setdefault((cls, terr), set()).add(amount)
+            continue
+        if placed.get((loc, cls, terr), amount) != amount:
+            return None                   # one class, one place, two figures
+        placed[(loc, cls, terr)] = amount
+    total = sum(placed.values())
+    for (cls, terr), amounts in unplaced.items():
+        same = [amt for (_l, c, t), amt in placed.items() if c == cls and t == terr]
+        any_located = any(c == cls for (_l, c, _t) in placed)
+        for amt in amounts:
+            if same and (amt in same or amt == sum(same)):
+                continue
+            if any_located:
+                return None
+            total += amt
+    return f"${total:,}"
+
+
+# ── ...and the TYPE of work subcontracted (audit of live runs 4-7) ───────────
+# The model proposed the Total-Cost class's own wording on runs 5-7 and a guard
+# refused it each time. That class names the work sublet, so the box prints the
+# Total-Cost classifications verbatim, de-duplicated; a percentage only when
+# the document states one (`percent_subcontracted`), never computed.
+_SUBCONTRACTED_WORK_RE = re.compile(
+    r"^GeneralLiabilityLineOfBusiness_TypeOfWorkSubcontractedDescription_[A-Z]$")
+
+
+def _resolve_subcontracted_work_description(field_name: str, facts: dict):
+    if not _SUBCONTRACTED_WORK_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    if _schedule_has_unread_basis(facts):
+        return _SCHED_SKIP                # the list could be partial
+    seen: Dict[str, str] = {}
+    for r in _cost_basis_rows(facts):
+        text = re.sub(r"\s+", " ", str(r.get("classification") or "")).strip()
+        if text:
+            seen.setdefault(text.casefold(), text)
+    if not seen:
+        return _SCHED_SKIP
+    out = "; ".join(seen.values())
+    pct = str(_fv(facts, "percent_subcontracted") or "").strip().rstrip("%").strip()
+    if re.fullmatch(r"\d{1,3}(?:\.\d+)?", pct) and 0 < float(pct) <= 100:
+        out += f" - {pct}%"
+    return out
 
 
 # ── CLAIMS-MADE dates on an OCCURRENCE policy ────────────────────────────────
@@ -4699,7 +5507,15 @@ _CLAIMS_MADE_DATE_RE = re.compile(
 def _resolve_claims_made_dates(field_name: str, facts: dict):
     if not _CLAIMS_MADE_DATE_RE.match(field_name or ""):
         return _SCHED_SKIP
-    if facts.get("gl_is_claims_made"):
+    # Through the ONE door (11 Sep 2026, finding F4). Reading the raw flag here
+    # let one narrative sentence out-vote a declarations page that says
+    # OCCURRENCE, and this box then printed an invented retroactive date.
+    try:
+        from services.coverage_evidence import gl_is_claims_made as _cm
+        claims_made = _cm(facts, facts)
+    except Exception:                          # noqa: BLE001 - never block
+        claims_made = bool(facts.get("gl_is_claims_made"))
+    if claims_made:
         return _SCHED_SKIP                     # real claims-made: normal flow
     return None
 
@@ -5740,6 +6556,22 @@ def _tokens_describe_same_line(doc: frozenset, col: frozenset) -> bool:
     )
 
 
+def _row_names_another_line(row_line: Any, column: str) -> bool:
+    """PROOF a coverage row belongs to a different line than a certificate
+    column: both canonicalise, and differently. The word match above lets a
+    bare "Liability" row - the GL premium row - claim the Excess Liability and
+    Automobile Liability columns, {liability} being a subset of both; once that
+    row carried its number and carrier, ACORD 25 lost the umbrella number and
+    two INSR LTRs (review of run 8). Wording nothing places never vetoes."""
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        return False
+    row_c = _canon(str(row_line or ""))
+    col_c = _canon(re.sub(r"(?<!^)(?=[A-Z])", " ", str(column or "")))
+    return bool(row_c and col_c and row_c != col_c)
+
+
 def _prior_coverage_column(line_text: str) -> str:
     """Which of ACORD's four prior-coverage columns a document line belongs to."""
     doc = _lob_tokens(line_text)
@@ -5828,6 +6660,7 @@ def _resolve_current_policy_line_cell(field_name: str, facts: dict):
         e for e in lines
         if isinstance(e, dict)
         and _tokens_describe_same_line(_lob_tokens(str(e.get("line") or "")), col_tokens)
+        and not _row_names_another_line(e.get("line"), column)
     ]
 
     values = {
@@ -5866,6 +6699,12 @@ def _resolve_current_policy_line_cell(field_name: str, facts: dict):
         return None                             # cannot choose
 
     if len(lines) == 1 and matched:
+        # The certificate's line is the EXISTING policy: a moved term is its
+        # term, never the derived proposal left in effective_date (15 Sep 2026).
+        if attr in ("EffectiveDate", "ExpirationDate") and _fv(facts, "renewal_dates_routed"):
+            moved = _moved_current_term(facts, attr)
+            if moved is not None:
+                return moved
         return _fv(facts, _CURRENT_POLICY_SCALARS[attr]) or None   # rule 2
     return None                                 # rule 3
 
@@ -6122,6 +6961,7 @@ def _resolve_certificate_insurer_letter(field_name: str, facts: dict):
             e for e in granted
             if _tokens_describe_same_line(
                 _lob_tokens(str(e.get("line") or "")), col_tokens)
+            and not _row_names_another_line(e.get("line"), column)
         ]
 
     keys = {_carrier_identity_key(_line_carrier(e)) for e in matched
@@ -6218,9 +7058,159 @@ def _norm_policy_no(v: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
 
 
+def _section_line_names_this_form(printed: str, phrases, phrase_tokens) -> bool:
+    """Does the line name PRINTED on the document name this form's line?
+
+    ONE DOOR, asked two ways, because the codebase already had two and they
+    disagreed (11 Sep 2026). `canon_line` - which `current_numbers_by_line` and
+    the whole dec-entry index use - places `CGL`, `GL`, `Liability Coverage
+    Part` and `Premises/Operations Liability` on General Liability. The token
+    matcher used here did not, so the SAME document wording resolved a policy
+    number through the entries and then failed to match the form that needed it.
+    Measured: 4 of 14 realistic spellings got two different answers.
+
+    Canonical agreement is tried FIRST and is decisive when both sides canonicalise;
+    the token matcher remains as the fallback for wording `canon_line` cannot place
+    (it returns None there, and None must never equal None - two unplaceable
+    strings are not the same line). Strictly ADDITIVE: every pairing that matched
+    before still matches, so this can only recover a line, never lose one.
+    """
+    if not printed:
+        return False
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        _canon = lambda _s: None                          # noqa: E731
+    doc_canon = _canon(printed)
+    if doc_canon:
+        for p in phrases:
+            if _canon(p) == doc_canon:
+                return True
+    doc_tokens = _lob_tokens(printed)
+    return any(_tokens_describe_same_line(doc_tokens, pt) for pt in phrase_tokens)
+
+
+# Every Producer_* box names the agency or a person at it - except the
+# signature itself (non-fillable) and its date.
+_SUBMITTING_PRODUCER_BOX_RE = re.compile(
+    r"^Producer_(?!AuthorizedRepresentative_Signature)(\w+)$")
+_PRODUCER_ROW_SUFFIX_RE = re.compile(r"_[A-Z]{1,2}$")
+
+# The submitting side's own fact for a box. A box with no fact here (agency
+# phone, e-mail, website, licence and national identifiers, CSR name) has no
+# source but the documents - and they name the EXPIRING agency.
+_PRODUCER_BOX_TO_FACT = {
+    "FullName": "producer_name",
+    "ContactPerson_FullName": "producer_contact_name",
+    "ContactPerson_PhoneNumber": "producer_contact_phone",
+    "ContactPerson_EmailAddress": "producer_contact_email",
+    "FaxNumber": "producer_fax",
+    "AuthorizedRepresentative_FullName": "producer_contact_name",
+}
+
+
+def _resolve_submitting_producer(field_name: str, facts: dict):
+    """The PRODUCER block belongs to the agency SUBMITTING this application.
+
+    Fires only once the merge has recorded an expiring producer
+    (`expiring_producer_name`) that is a DIFFERENT agency from `producer_name`
+    - see `extraction_service._route_producer_party`. Then a box is stamped
+    only from the submitting side's own fact; every other box is an owned
+    BLANK, so gap fill cannot read the old agency back off the page headers.
+
+    Unchanged (_SCHED_SKIP) when no expiring producer is recorded, or when it
+    is the same agency as `producer_name` (an incumbent re-marketing its own
+    account), or when that cannot be told.
+
+    The row letter is stripped before the lookup. The old pattern's `\\w+`
+    swallowed "_A", so every ContactPerson box silently looked up
+    `producer_name` instead of its own fact.
+    """
+    m = _SUBMITTING_PRODUCER_BOX_RE.match(str(field_name or ""))
+    if not m:
+        return _SCHED_SKIP
+    expiring = str(_fv(facts, "expiring_producer_name") or "").strip()
+    if not expiring:
+        return _SCHED_SKIP
+    current = str(_fv(facts, "producer_name") or "").strip()
+    if current:
+        try:
+            from services.fact_comparison import same_agency
+            if same_agency(current, expiring) is not False:
+                return _SCHED_SKIP         # the incumbent is also submitting
+        except Exception:                                     # noqa: BLE001
+            return _SCHED_SKIP
+    box = _PRODUCER_ROW_SUFFIX_RE.sub("", m.group(1))
+    fact_key = ("producer_address" if box.startswith("MailingAddress_")
+                else _PRODUCER_BOX_TO_FACT.get(box))
+    if fact_key and str(_fv(facts, fact_key) or "").strip():
+        return _SCHED_SKIP                 # the submitting side's own value
+    return None                            # owned blank, excluded from gap fill
+
+
+# A holder / payee / mortgagee the document printed as a PLACEHOLDER is not a
+# gap for the model: the merge judged the fact and recorded the rejection
+# (`extraction_service.drop_non_party_names`). Left open, gap fill re-reads the
+# same box off the page - the COI prints `ForInformationalPurposesOnly` there -
+# and fills the holder's address from the insured's own. An owned blank.
+_REJECTED_PARTY_BOX_RE = re.compile(r"^(CertificateHolder|Mortgagee|LossPayee)_\w+$")
+_REJECTED_PARTY_BOX_FACT = {
+    "CertificateHolder": "certificate_holder",
+    "Mortgagee": "mortgagee_name",
+    "LossPayee": "loss_payee_name",
+}
+
+
+def _resolve_rejected_party_box(field_name: str, facts: dict):
+    m = _REJECTED_PARTY_BOX_RE.match(str(field_name or ""))
+    if not m or not isinstance(facts, dict):
+        return _SCHED_SKIP
+    key = _REJECTED_PARTY_BOX_FACT[m.group(1)]
+    if str(_fv(facts, key) or "").strip():
+        return _SCHED_SKIP                 # a real party is named - normal path
+    ledger = facts.get("_rejected_facts")
+    if isinstance(ledger, dict) and key in ledger:
+        return None                        # the document's box named no party
+    return _SCHED_SKIP
+
+
+def _line_names_a_different_line(printed: str, form_id: str) -> bool:
+    """PROOF that a document line belongs to some OTHER coverage line than this
+    form's - not merely that it failed to match.
+
+    Positive evidence both sides: the printed wording must canonicalise, this
+    form's phrases must canonicalise, and the two must differ. Wording nothing
+    can place returns False, so an unrecognised line never blocks anything.
+    """
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        return False
+    other = _canon(printed)
+    if not other:
+        return False
+    mine = {_canon(p) for p in _SECTION_FORM_LINE_PHRASES.get(form_id, ())}
+    mine.discard(None)
+    return bool(mine) and other not in mine
+
+
 def _section_matched_lines(facts: dict, form_id: str):
-    """(granted_entries, entries_matching_this_form's_line) or (None, None)
-    when there is no usable per-line data (legacy path)."""
+    """(identified_entries, entries_matching_this_form's_line) or (None, None)
+    when there is no usable per-line data (legacy path).
+
+    THE POOL IS IDENTITY EVIDENCE, NOT GRANT EVIDENCE (11 Sep 2026). It used to
+    be `_line_entry_grants_coverage`, which demands a premium or a limit - so a
+    declarations page printing ONE package total (the commonest layout, and the
+    one the extraction prompt explicitly asks for) left every row ungranted,
+    switched this resolver off, and handed the header boxes back to the flat
+    package scalars. That is how a General Liability form printed the Auto
+    carrier with another company's NAIC and an AAIS form number as the policy
+    number, from per-line data that was completely correct.
+
+    `_line_entry_identifies_policy` answers the question these callers actually
+    ask. The grant test is unchanged and still owns coverage-flag downgrades and
+    the line-of-business checkboxes, where demanding money is right.
+    """
     phrases = _SECTION_FORM_LINE_PHRASES.get(form_id)
     if not phrases:
         return None, None
@@ -6228,23 +7218,40 @@ def _section_matched_lines(facts: dict, form_id: str):
     if not isinstance(lines, list) or not lines:
         return None, None
     try:
-        from services.extraction_service import _line_entry_grants_coverage as _grants
+        from services.extraction_service import (
+            _line_entry_identifies_policy as _identifies,
+            _line_entry_denies_coverage as _denies,
+        )
     except Exception:                                     # noqa: BLE001
-        def _grants(_e):                                  # type: ignore
+        def _identifies(_e):                              # type: ignore
             return True
-    granted = [e for e in lines if isinstance(e, dict) and _grants(e)]
-    if not granted:
+
+        def _denies(_e):                                  # type: ignore
+            return False
+    rows = [e for e in lines if isinstance(e, dict)]
+    identified = [e for e in rows if _identifies(e)]
+    if not identified:
         return None, None
+    # ── `matched` ANSWERS A THIRD QUESTION: IS THIS FORM'S LINE PRESENT? ─────
+    # It is deliberately NOT filtered by identity evidence. The first cut of
+    # this change did filter it, and broke a case the identity fix was supposed
+    # to protect: a package whose Umbrella row names the line and nothing else,
+    # beside a row carrying the single package policy number. Dropping the
+    # value-less Umbrella row made the form unable to tell that its own line
+    # existed at all, so it blanked a number it should have inherited.
+    #
+    # Presence is about the line being THERE; identity is about which contract
+    # it is. A row with no identity data contributes no VALUE here - it has
+    # none to give - so admitting it is free, and excluding it loses the one
+    # thing it does prove. A denied line ("No Coverage") is not present.
     phrase_tokens = [_lob_tokens(p) for p in phrases]
     matched = [
-        e for e in granted
-        if any(
-            _tokens_describe_same_line(
-                _lob_tokens(str(e.get("line") or "")), pt)
-            for pt in phrase_tokens
-        )
+        e for e in rows
+        if not _denies(e)
+        and _section_line_names_this_form(
+            str(e.get("line") or ""), phrases, phrase_tokens)
     ]
-    return granted, matched
+    return identified, matched
 
 
 def _policy_number_for_line_phrases(facts: dict, phrases) -> Optional[str]:
@@ -6459,36 +7466,131 @@ def _underlying_carrier(facts: dict, phrases) -> Optional[str]:
     return next(iter(by_key.values())) if len(by_key) == 1 else None
 
 
-def _section_carrier_pair(granted: List[dict], matched: List[dict]) -> Tuple[Optional[str], Optional[str]]:
+def _carrier_entity_key(name: Any) -> str:
+    """Strict identity key for a carrier name - spelling variants of ONE company
+    fold, two different companies never do.
+
+    STRICT on purpose. `normalize_carrier` is a FAMILY key and fuses EMC
+    Property & Casualty with Employers Mutual Casualty, which is the exact
+    recombination this whole area exists to prevent (H5, 2026-09-02). Falls back
+    to a plain lowercase compare if the leaf is unavailable, i.e. to the
+    behaviour this replaced.
+    """
+    try:
+        from services.normalization import strict_entity_key
+        return strict_entity_key(name) or str(name or "").strip().lower()
+    except Exception:                                     # noqa: BLE001
+        return str(name or "").strip().lower()
+
+
+def _naic_printed_with(name: Any, rows: List[dict]) -> Optional[str]:
+    """The ONE NAIC any row prints beside this carrier ENTITY, or None.
+
+    A NAIC identifies the legal entity, not the line, so a certificate that pairs
+    "Employers Mutual Casualty Co." with 21415 answers it for every line that
+    company writes - Orbin's Inland Marine included, which no certificate row
+    names. Printed-together pairs only, the strict entity key (so EMC Property &
+    Casualty never borrows Employers Mutual's number), and two NAICs is None.
+    """
+    key = _carrier_entity_key(name)
+    if not key:
+        return None
+    naics = {
+        str(e.get("naic") or "").strip() for e in rows or []
+        if isinstance(e, dict) and _carrier_entity_key(e.get("carrier")) == key
+        and _NAIC_SHAPE_RE.match(str(e.get("naic") or "").strip())
+    }
+    return next(iter(naics)) if len(naics) == 1 else None
+
+
+def _section_carrier_pair(identified: List[dict], matched: List[dict]) -> Tuple[Optional[str], Optional[str]]:
     """(carrier_name, naic) for a section form - always from ONE entry set.
 
     The pair rule: the NAIC may only come from entries carrying the chosen
-    carrier NAME. Preference order: entries matching this form's line; then -
-    only when the whole package has exactly ONE distinct carrier (the
-    recombination defect needs two) - the package-wide carrier. Anything
-    ambiguous is (None, None): blank beats a pair no document printed.
+    carrier NAME.
+
+    THE PACKAGE-WIDE FALLBACK IS NOW GATED (11 Sep 2026). It used to run
+    whenever this form's own line named no carrier, and it produced a
+    systematically WRONG value rather than an unlucky one. Reproduced on the
+    real resolver, and value-independent across 360 name/NAIC/policy-number
+    combinations:
+
+        ACORD 126, package = one Business Auto line only
+            -> stamped the AUTO carrier and the AUTO NAIC on a GENERAL
+               LIABILITY form, for a line the package does not even carry.
+
+    A form whose own line is silent about its carrier has no evidence, and
+    another line's carrier is not evidence about it. The fallback survives for
+    the one case where it is sound - a package written end to end by a SINGLE
+    carrier, where there is nothing to confuse it with - and the entity test is
+    strict, so two companies never collapse into one.
+
+    Spelling variants of one company FOLD (`_carrier_entity_key`) and the fullest
+    printed name wins. That is not cosmetic: this pool now admits every row that
+    identifies a policy rather than only the priced ones, so one carrier printed
+    two ways across two rows became a new way to blank a box that used to fill.
     """
     def _pair_from(entries: List[dict]) -> Tuple[Optional[str], Optional[str]]:
-        by_name: Dict[str, dict] = {}
+        by_key: Dict[str, dict] = {}
         for e in entries:
             name = str(e.get("carrier") or "").strip()
             if not name:
                 continue
-            key = name.lower()
-            by_name.setdefault(key, {"name": name, "naics": set()})
+            key = _carrier_entity_key(name)
+            if not key:
+                continue
+            rec = by_key.setdefault(key, {"name": name, "naics": set()})
+            if len(name) > len(rec["name"]):
+                rec["name"] = name            # fullest printed legal name (H5)
             naic = str(e.get("naic") or "").strip()
             if _NAIC_SHAPE_RE.match(naic):
-                by_name[key]["naics"].add(naic)
-        if len(by_name) != 1:
+                rec["naics"].add(naic)
+        if len(by_key) != 1:
             return None, None
-        rec = next(iter(by_name.values()))
+        rec = next(iter(by_key.values()))
         naic = rec["naics"].pop() if len(rec["naics"]) == 1 else None
         return rec["name"], naic
 
     name, naic = _pair_from(matched)
     if name:
-        return name, naic
-    return _pair_from(granted)
+        return name, naic or _naic_printed_with(name, identified)
+    # TWO CONDITIONS, and the first is the one the original fallback lacked.
+    #
+    #   1. This form's line must actually BE in the package (`matched`). An
+    #      empty `matched` means the line is absent, and a General Liability
+    #      form has no business printing the Auto carrier for a line the
+    #      package does not carry - which is exactly what it did.
+    #   2. The package must name exactly ONE carrier entity. With two, "the
+    #      package carrier" is not a fact, it is a coin toss.
+    #
+    # Both hold => the line is present, merely silent about its carrier, and
+    # there is only one carrier it could possibly be. Anything else is blank.
+    if not matched:
+        return None, None
+    if len({_carrier_entity_key(e.get("carrier"))
+            for e in (identified or [])
+            if str(e.get("carrier") or "").strip()}) != 1:
+        return None, None
+    fb_name, fb_naic = _pair_from(identified)
+    if not fb_name:
+        return None, None
+    # THIRD CONDITION, found by the edge matrix while building this: the
+    # borrowed pair must not CONTRADICT what this line already states. A GL row
+    # carrying NAIC 11111 and no carrier name, beside an Auto row carrying
+    # "Acme Mutual"/22222, was handed Acme Mutual AND 22222 - overwriting the
+    # line's own identifier with another company's. Silence may be filled;
+    # a stated value may never be overruled by a borrowed one.
+    own_naics = {str(e.get("naic") or "").strip() for e in matched
+                 if _NAIC_SHAPE_RE.match(str(e.get("naic") or "").strip())}
+    if own_naics:
+        if fb_naic and fb_naic in own_naics and len(own_naics) == 1:
+            return fb_name, fb_naic       # the borrow agrees with this line
+        logger.info(
+            "section-identity: not borrowing carrier %r - this line states "
+            "NAIC(s) %s and the package carrier is attested with %r",
+            fb_name, sorted(own_naics)[:3], fb_naic)
+        return None, None
+    return fb_name, fb_naic
 
 
 def _resolve_section_policy_identity(field_name: str, facts: dict):
@@ -6498,7 +7600,7 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
         return _SCHED_SKIP
     form_id = str((facts or {}).get("_form_id") or "")
     attr = m.group(1) or m.group(2)                 # Policy_* attr or Insurer_* attr
-    granted, matched = _section_matched_lines(facts, form_id)
+    identified, matched = _section_matched_lines(facts, form_id)
 
     # THE VERIFIED DEC ENTRIES ARE INDEPENDENT EVIDENCE, so they are consulted
     # even when `coverage_lines` yields nothing usable. It yields nothing in two
@@ -6512,11 +7614,11 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
         if direct:
             return direct
 
-    if granted is None:
+    if identified is None:
         return _SCHED_SKIP                          # legacy path preserved
 
     if attr in ("FullName", "NAICCode"):
-        name, naic = _section_carrier_pair(granted, matched)
+        name, naic = _section_carrier_pair(identified, matched)
         if attr == "FullName":
             if name:
                 return name
@@ -6524,7 +7626,7 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
             # the scalar path is the recombination defect, so blank - unless
             # the package-wide evidence carries no carrier at all, in which
             # case the per-line data is silent and the legacy path may run.
-            return None if any(str(e.get("carrier") or "").strip() for e in granted) else _SCHED_SKIP
+            return None if any(str(e.get("carrier") or "").strip() for e in identified) else _SCHED_SKIP
         if naic:
             return naic
         # THE MATCHED-PAIR RULE, and the client's literal complaint:
@@ -6542,9 +7644,9 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
         # sessions predating `coverage_lines`). The moment the document names
         # carriers per line - as Orbin does, with two - an unattributed NAIC
         # must stay blank.
-        if name or any(str(e.get("carrier") or "").strip() for e in granted):
+        if name or any(str(e.get("carrier") or "").strip() for e in identified):
             return None
-        return None if any(str(e.get("naic") or "").strip() for e in granted) else _SCHED_SKIP
+        return None if any(str(e.get("naic") or "").strip() for e in identified) else _SCHED_SKIP
 
     if attr == "PolicyNumberIdentifier":
         lines = _fv(facts, "coverage_lines")
@@ -6638,12 +7740,33 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
             # This form's line exists but states no number of its own: safe
             # only when the whole package carries exactly ONE policy number.
             all_norm: Dict[str, str] = {}
-            for e in granted:
+            for e in identified:
                 raw = str(e.get("policy_number") or "").strip()
                 if raw and not _looks_like_a_form_number(raw):
                     all_norm.setdefault(_norm_policy_no(raw), raw)
-            if len(all_norm) == 1:
+            # ...AND no OTHER identifiable line has already claimed it.
+            # Found by the invariant fuzz, 11 Sep 2026: a package whose only
+            # readable number sat on the UMBRELLA row satisfied "exactly one
+            # number in the package" and stamped 6J7... on the General
+            # Liability form. "We could only read one number" is not the same
+            # fact as "this package has one policy". A row we cannot place does
+            # not block - it may well be ours - but a row that names a
+            # different line does.
+            claimed_elsewhere = {
+                _norm_policy_no(raw)
+                for e in identified
+                if e not in matched
+                and _line_names_a_different_line(str(e.get("line") or ""), form_id)
+                for raw in (str(e.get("policy_number") or "").strip(),)
+                if raw and not _looks_like_a_form_number(raw)
+            }
+            if len(all_norm) == 1 and next(iter(all_norm)) not in claimed_elsewhere:
                 return next(iter(all_norm.values()))
+            if len(all_norm) == 1:
+                logger.info(
+                    "section-identity: %s form=%s - the package's only policy "
+                    "number is printed against a different coverage line, "
+                    "box left blank", field_name, form_id)
         # Line absent from the package, or several candidate numbers and no
         # way to attribute one: never another line's number.
         return None
@@ -6722,11 +7845,14 @@ def _resolve_section_prior_policy(field_name: str, facts: dict):
         want = [_lob_tokens(p) for p in phrases]
         sub = {"PolicyNumberIdentifier": "policy_no",
                "EffectiveDate": "effective", "ExpirationDate": "expiration"}[attr]
+        # Same door as the header resolver (11 Sep 2026) - the prior grid prints
+        # the same line wording as the dec page, so it must be read by the same
+        # rule or the EXPIRING box disagrees with the CURRENT box on one form.
         vals = {
             str(e[sub]).strip() for e in entries
             if isinstance(e, dict) and e.get(sub)
-            and any(_tokens_describe_same_line(
-                _lob_tokens(str(e.get("line") or "")), w) for w in want)
+            and _section_line_names_this_form(
+                str(e.get("line") or ""), phrases, want)
         }
         if len(vals) == 1:
             val = vals.pop()
@@ -6769,6 +7895,17 @@ _RENEWAL_PROPOSED_RE = re.compile(r"^Policy_(EffectiveDate|ExpirationDate)_[A-N]
 _CERTIFICATE_FORM_IDS = frozenset({"ACORD_25", "ACORD_28"})
 
 
+def _moved_current_term(facts: dict, attr: str) -> Optional[str]:
+    """The current policy's own date the merge moved to prior_* (marked
+    `routed_from: current_term`), or None when no term was moved there."""
+    key = "prior_effective_date" if attr == "EffectiveDate" else "prior_expiration_date"
+    held = (facts or {}).get(key)
+    if not (isinstance(held, dict) and held.get("routed_from") == "current_term"):
+        return None
+    s = str(held.get("value") or "").strip()
+    return s or None
+
+
 def _resolve_renewal_proposed_period(field_name: str, facts: dict):
     m = _RENEWAL_PROPOSED_RE.match(field_name)
     if not m:
@@ -6776,11 +7913,31 @@ def _resolve_renewal_proposed_period(field_name: str, facts: dict):
     if not _fv(facts, "renewal_dates_routed"):
         return _SCHED_SKIP
     if str((facts or {}).get("_form_id") or "") in _CERTIFICATE_FORM_IDS:
-        return _SCHED_SKIP
+        # A certificate documents the EXISTING policy. Once the merge moved that
+        # term out of the proposed dates (15 Sep 2026: every in-force current
+        # policy, not only an ended renewal), it prints the moved term - never
+        # the derived proposal the application forms print.
+        moved = _moved_current_term(facts, m.group(1))
+        return moved if moved is not None else _SCHED_SKIP
     key = "effective_date" if m.group(1) == "EffectiveDate" else "expiration_date"
     val = _fv(facts, key)
     s = str(val).strip() if val is not None else ""
     return s or None
+
+
+def _umbrella_term_is_the_moved_term(facts: dict) -> bool:
+    """The umbrella's own start date IS the current term the merge moved to
+    prior_* - an in-force umbrella on the package's term is expiring too, so it
+    is never the proposal (15 Sep 2026)."""
+    moved = _moved_current_term(facts, "EffectiveDate")
+    umb = _fv(facts, "umbrella_effective_date")
+    if not (moved and umb):
+        return False
+    try:
+        from services.normalization import normalize_date
+        return bool(normalize_date(str(moved))) and normalize_date(str(moved)) == normalize_date(str(umb))
+    except Exception:                                     # noqa: BLE001
+        return False
 
 
 def _umbrella_period_is_current(facts: dict) -> bool:
@@ -7331,18 +8488,22 @@ def _line_declared_absent(facts: dict, phrases) -> bool:
             _line_entry_grants_coverage as _grants,
             _COVERAGE_DENIAL_RE as _denial_re,
             _LINE_EVIDENCE_KEYS as _evidence_keys,
+            row_is_a_denied_line as _denied_row,
         )
     except Exception:                                     # noqa: BLE001
         return False
     denied = granted = False
     lines = _fv(facts, "coverage_lines")
+    entries = _fv(facts, "dec_page_entries")
     if isinstance(lines, list):
         for e in lines:
             if not isinstance(e, dict):
                 continue
             if not _entry_matches_line_strict(str(e.get("line") or ""), phrases):
                 continue
-            if _line_entry_evidences_policy(e):
+            # A row whose only "grant" is another line's policy number restates
+            # the denial (live run 11: WC carried the Inland Marine's 6C7).
+            if _line_entry_evidences_policy(e) and not _denied_row(e, lines, entries):
                 granted = True
                 continue
             for key in _evidence_keys:
@@ -7542,15 +8703,19 @@ def _resolve_underlying_policy_row(field_name: str, facts: dict):
             return None, False
         vals: Dict[str, str] = {}
         if attr == "InsurerFullName":
+            # ONE company printed two ways is one value: "Employers Mutual
+            # Casualty Company" (umbrella schedule) and "... Co." (certificate)
+            # read as two and blanked Orbin's underlying Auto carrier.
             for r in matched_facts:
                 raw = str(r.get("carrier") or "").strip()
                 if raw:
-                    vals.setdefault(_same_value_key(raw), raw)
+                    k = _carrier_entity_key(raw)
+                    if k not in vals or len(raw) > len(vals[k]):
+                        vals[k] = raw
         elif attr == "PolicyNumberIdentifier":
-            for r in matched_facts:
-                raw = str(r.get("policy_no") or "").strip()
-                if raw and not _looks_like_a_form_number(raw):
-                    vals.setdefault(_norm_policy_no(raw), raw)
+            vals = {str(i): v for i, v in enumerate(_fold_contracts([
+                str(r.get("policy_no") or "").strip() for r in matched_facts
+                if not _looks_like_a_form_number(str(r.get("policy_no") or "").strip())]))}
         else:
             sub = ("effective_date" if attr == "PolicyEffectiveDate"
                    else "expiration_date")
@@ -7575,22 +8740,24 @@ def _resolve_underlying_policy_row(field_name: str, facts: dict):
         if not matched:
             return None
         if attr == "InsurerFullName":
-            names = {str(e.get("carrier") or "").strip() for e in matched}
-            names = {n for n in names if n}
-            by_key = {n.lower(): n for n in names}
+            by_key: Dict[str, str] = {}
+            for e in matched:
+                n = str(e.get("carrier") or "").strip()
+                if n:
+                    k = _carrier_entity_key(n)
+                    if k not in by_key or len(n) > len(by_key[k]):
+                        by_key[k] = n
             if len(by_key) == 1:
                 return next(iter(by_key.values()))
             # Ambiguous/absent among the entries: a term-matched prior-grid
             # row for this line may still name the carrier unambiguously.
             return _current_carrier_from_prior_grid(facts, phrases, matched)
         if attr == "PolicyNumberIdentifier":
-            by_norm: Dict[str, str] = {}
-            for e in matched:
-                raw = str(e.get("policy_number") or "").strip()
-                if raw and not _looks_like_a_form_number(raw):
-                    by_norm.setdefault(_norm_policy_no(raw), raw)
+            by_norm = _fold_contracts([
+                str(e.get("policy_number") or "").strip() for e in matched
+                if not _looks_like_a_form_number(str(e.get("policy_number") or "").strip())])
             if len(by_norm) == 1:
-                return next(iter(by_norm.values()))
+                return by_norm[0]
             if not by_norm:
                 direct = _policy_number_for_line_phrases(facts, phrases)
                 if direct:
@@ -7618,7 +8785,12 @@ def _resolve_underlying_policy_row(field_name: str, facts: dict):
     lines_val = _from_lines()
     if fact_val and lines_val:
         if attr == "PolicyNumberIdentifier":
-            same = _norm_policy_no(fact_val) == _norm_policy_no(lines_val)
+            # One contract printed two ways is agreement, not a conflict: the
+            # umbrella schedule's `6E74002` IS the auto dec's `6E7-40-02---26`
+            # (the same-contract door). A plain string compare blanked both
+            # of Orbin's underlying policy numbers on ACORD 131.
+            same = (_norm_policy_no(fact_val) == _norm_policy_no(lines_val)
+                    or _same_policy_contract(fact_val, lines_val))
         elif attr == "InsurerFullName":
             # Spelling-canonical compare ("&" vs "and", Co vs Company) - two
             # printings of one carrier must not read as a conflict.
@@ -7723,6 +8895,246 @@ def _resolve_member_manager_count(field_name: str, facts: dict):
     return None
 
 
+# ── ACORD 131 CARE, CUSTODY, CONTROL is the insured's knowledge (15 Sep 2026) ─
+# The section asks what property OF OTHERS the applicant holds - its type,
+# value, square footage, and whether a lease holds the applicant harmless. A
+# policy never states that: the CGL only EXCLUDES such property, and quoting the
+# exclusion proves nothing about what is held. No fact carries it, so every
+# value the section has ever received was the model's - the premises address on
+# the 15 Sep run, then PERSONAL ticked beside "COMMERCIAL GENERAL CONTRA" (the
+# carrier's business description) on run 5. Owned blank, never asked: the
+# producer or the applicant states it. Same contract as NO. OF MEMBERS above.
+_CARE_CUSTODY_RE = re.compile(r"^CareCustodyAndControl_\w+_[A-Z]$")
+
+
+def _resolve_care_custody_control(field_name: str, facts: dict):
+    if not _CARE_CUSTODY_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    return None
+
+
+# ── ACORD 131's OTHER umbrella limit row (15 Sep 2026) ──────────────────────
+# POLICY INFORMATION prints EACH OCCURRENCE, AGGREGATE and a third "other
+# coverage" limit of the SAME umbrella. The umbrella's limits are extracted
+# facts; a third one is not something any fact captures, so every value was gap
+# fill - "Commercial Umbrella $3,000,000" (the umbrella naming itself, refused by
+# the label-echo guard) and then "Commercial Auto Liability $3,000,000" on run 5,
+# an UNDERLYING policy's name beside the umbrella's own limit. Owned blank.
+# SCOPED TO ACORD 131 by `_form_id`: on ACORD 25 the same name is the
+# certificate's umbrella OTHER line, where "Excess Employers Liability" is a
+# real entry (test_acord25_final_three_20260906).
+#
+# ...UNLESS the umbrella's own declarations print exactly ONE other limit
+# (audit of live runs 4-7, 15 Sep 2026): Orbin's umbrella dec prints Each
+# Occurrence, Aggregate and "Personal & Advertising Injury Limit $ 3,000,000".
+# The name and the amount come from that ONE entry, as a pair: the umbrella
+# line, a DECLARATIONS section (never the schedule of UNDERLYING insurance,
+# which prints the GL's own $1,000,000 P&AI under the umbrella's number), a
+# label naming a limit, one amount. Occurrence, aggregate, retention and
+# employee-benefits limits have their own boxes; two survivors, or one policy
+# number too many, is an owned blank again.
+_UMBRELLA_OTHER_LIMIT_RE = re.compile(
+    r"^ExcessUmbrella_OtherCoverage(?:Description|LimitAmount)_[A-Z]$")
+_UMBRELLA_OWN_LIMIT_DROP_RE = re.compile(
+    r"\b(?:occurrence|aggregate|retention|retain\w*|self[- ]?insured|s\.?\s?i\.?\s?r\b|deductible|"
+    r"employee\s+benefits?|underlying|required|minimum)", re.I)
+# Words that restate the umbrella itself or any limit. A name built only of
+# them ("of Liability", "Umbrella Liability", "Policy") names no coverage -
+# review of run 7: "Limit of Liability $5,000,000" printed as an OTHER coverage
+# called "of Liability", the main limit a second time.
+_UMBRELLA_NAME_FILLER = frozenset({
+    "of", "the", "and", "limit", "limits", "insurance", "liability", "liab", "umbrella",
+    "excess", "policy", "coverage", "commercial", "total", "each", "per", "any", "one",
+    "combined", "single",
+})
+# A section that is another policy's, or a schedule of them, is never the
+# umbrella's own declarations, whatever else its heading says.
+_NOT_OWN_DECLARATIONS_RE = re.compile(r"UNDERLYING|PRIMARY|SCHEDULE\s+OF|EXTENSION\s+OF")
+
+
+def _umbrella_other_limit(facts: dict) -> Optional[Tuple[str, str]]:
+    """(coverage name, amount) of the umbrella's one printed limit that has no
+    box of its own, or None."""
+    entries = _fv(facts, "dec_page_entries")
+    if not isinstance(entries, list):
+        return None
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                     # noqa: BLE001
+        return None
+    picks: Dict[str, Tuple[str, set]] = {}
+    numbers: set = set()
+    for e in entries:
+        if not isinstance(e, dict) or _canon_line(str(e.get("line_of_business") or "")) != "umbrella":
+            continue
+        section = str(e.get("section") or "").upper()
+        if "DECLARATION" not in section or _NOT_OWN_DECLARATIONS_RE.search(section):
+            continue
+        label = str(e.get("label") or "")
+        if not re.search(r"\blimits?\b", label, re.I) or _UMBRELLA_OWN_LIMIT_DROP_RE.search(label):
+            continue
+        value = str(e.get("value") or "").strip()
+        if not _CURRENCY_ONLY_RE.match(value) or _currency_to_int(value) <= 0:
+            continue
+        name = re.sub(r"\([^)]*\)", " ", label)
+        name = re.sub(r"\blimits?\b(?:\s+of\s+insurance)?", " ", name, flags=re.I)
+        name = re.sub(r"\s+", " ", name).strip(" -:,")
+        if not (set(re.findall(r"[a-z]+", name.lower())) - _UMBRELLA_NAME_FILLER):
+            continue                      # restates the umbrella or a limit
+
+        pick = picks.setdefault(name.lower(), (name, set()))
+        pick[1].add(_currency_to_int(value))
+        numbers.add(re.sub(r"[^A-Z0-9]", "", str(e.get("policy_number") or "").upper()))
+    numbers.discard("")
+    if len(picks) != 1 or len(numbers) > 1:
+        return None
+    name, amounts = next(iter(picks.values()))
+    return (name, f"${next(iter(amounts)):,}") if len(amounts) == 1 else None
+
+
+def _umbrella_other_limit_superseded(facts: dict, amount: Any) -> bool:
+    """Is the declarations' other umbrella limit stale against the CURRENT
+    umbrella limit? (15 Sep 2026, the client's full Orbin package.)
+
+    The pick is read off the umbrella's ORIGINAL declarations. The COI says
+    "Reduced Umbrella Limit from $3,000,000 to $1,000,000" effective 7/25/25,
+    and `_apply_dated_changes` makes `umbrella_limit` the current $1,000,000 -
+    so ACORD 131 printed EACH OCC / AGG $1,000,000 beside a third row
+    "Personal & Advertising Injury $3,000,000", the superseded figure. Two
+    structural tests, either one enough:
+      * the umbrella limit carries a dated change and this amount is its
+        PRIOR value - it moved with the limit, so its current figure is unknown;
+      * the amount exceeds the umbrella's current limit - a limit inside the
+        umbrella cannot be larger than the umbrella.
+    Right-or-blank: the row goes blank as a pair, never a guessed figure.
+    """
+    other = _currency_to_int(amount)
+    if other <= 0:
+        return False
+    raw = (facts or {}).get("umbrella_limit")
+    if isinstance(raw, dict) and raw.get("prior_value") is not None:
+        if _currency_to_int(raw.get("prior_value")) == other:
+            return True
+    current = _currency_to_int(_fv(facts, "umbrella_limit"))
+    return current > 0 and other > current
+
+
+def _resolve_umbrella_other_limit(field_name: str, facts: dict):
+    if not _UMBRELLA_OTHER_LIMIT_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    if str((facts or {}).get("_form_id") or "") != "ACORD_131":
+        return _SCHED_SKIP
+    pick = _umbrella_other_limit(facts)
+    if pick is None or not field_name.endswith("_A"):
+        return None
+    if _umbrella_other_limit_superseded(facts, pick[1]):
+        return None                    # the dec's figure outlived the limit
+    return pick[0] if "Description" in field_name else pick[1]
+
+
+# ── ACORD 126 OTHER limit row: a limit the GL declarations print, or blank ────
+# Live run 10 (15 Sep 2026) printed "Commercial General Liability / Commercial
+# Auto Liability $1,000" - and runs 4, 8 and 9 each printed a different wrong
+# pair ($500 with no name, a $150 premium, the pollution deductible) - because
+# nothing owned the row: it went to gap fill, and the substring rule sends the
+# amount to `gl_deductible`, a DEDUCTIBLE. ACORD's own tooltip says "the general
+# liability, other coverage LIMIT amount", and the 126 has its own OTHER
+# deductible boxes. Same shape as the umbrella's third limit: the GL
+# declarations' one printed limit with no box of its own, name and amount as a
+# pair; none, or two, is an owned blank. ACORD 25 keeps its existing rule.
+_GL_OTHER_LIMIT_RE = re.compile(r"^GeneralLiability_OtherCoverageLimit(?:Amount|Description)_A$")
+_GL_OWN_LIMIT_DROP_RE = re.compile(
+    r"\b(?:occurrence|aggregate|premises|rented|fire|medical|personal|advertising|"
+    r"employee\s+benefits?|deductible|retention|retain\w*|self[- ]?insured|s\.?\s?i\.?\s?r\b)", re.I)
+_GL_NAME_FILLER = frozenset({
+    "of", "the", "and", "limit", "limits", "insurance", "liability", "liab", "general",
+    "commercial", "policy", "coverage", "total", "each", "per", "any", "one",
+})
+
+
+def _gl_other_limit(facts: dict) -> Optional[Tuple[str, str]]:
+    """(coverage name, amount) of the GL declarations' one printed limit that has
+    no 126 box of its own, or None."""
+    entries = _fv(facts, "dec_page_entries")
+    if not isinstance(entries, list):
+        return None
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                     # noqa: BLE001
+        return None
+    picks: Dict[str, Tuple[str, set]] = {}
+    numbers: set = set()
+    for e in entries:
+        if not isinstance(e, dict) or _canon_line(str(e.get("line_of_business") or "")) != "general_liab":
+            continue
+        section = str(e.get("section") or "").upper()
+        if "DECLARATION" not in section or _NOT_OWN_DECLARATIONS_RE.search(section):
+            continue
+        label = str(e.get("label") or "")
+        if not re.search(r"\blimits?\b", label, re.I) or _GL_OWN_LIMIT_DROP_RE.search(label):
+            continue
+        value = str(e.get("value") or "").strip()
+        if not _CURRENCY_ONLY_RE.match(value) or _currency_to_int(value) <= 0:
+            continue
+        name = re.sub(r"\([^)]*\)", " ", label)
+        name = re.sub(r"\blimits?\b(?:\s+of\s+insurance)?", " ", name, flags=re.I)
+        name = re.sub(r"\s+", " ", name).strip(" -:,")
+        if not (set(re.findall(r"[a-z]+", name.lower())) - _GL_NAME_FILLER):
+            continue                      # restates the line or "a limit"
+        pick = picks.setdefault(name.lower(), (name, set()))
+        pick[1].add(_currency_to_int(value))
+        numbers.add(re.sub(r"[^A-Z0-9]", "", str(e.get("policy_number") or "").upper()))
+    numbers.discard("")
+    if len(picks) != 1 or len(numbers) > 1:
+        return None
+    name, amounts = next(iter(picks.values()))
+    return (name, f"${next(iter(amounts)):,}") if len(amounts) == 1 else None
+
+
+def _resolve_gl_other_limit(field_name: str, facts: dict):
+    if not _GL_OTHER_LIMIT_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    if str((facts or {}).get("_form_id") or "") != "ACORD_126":
+        return _SCHED_SKIP
+    pick = _gl_other_limit(facts)
+    if pick is None:
+        return None
+    return pick[0] if "Description" in field_name else pick[1]
+
+
+# ── UMBRELLA or EXCESS: the policy's own printed name decides (15 Sep 2026) ──
+# ACORD 131 and ACORD 25 print UMBRELLA and EXCESS as a pair of ticks, and no
+# resolver owned them: on run 5 gap fill ticked both, the single-choice guard
+# cleared both, and an umbrella application shipped with neither ticked. The
+# policy names itself - the umbrella-family rows of `coverage_lines` say
+# "umbrella" or "excess" in their own printed words. Both words across those
+# rows, or neither, is a real ambiguity and stays with the document; a row the
+# document marks NOT carried is not evidence of either.
+_POLICY_TYPE_RE = re.compile(r"^Policy_PolicyType_(?P<kind>Umbrella|Excess)Indicator_[A-Z]$")
+
+
+def _resolve_umbrella_or_excess(field_name: str, facts: dict):
+    m = _POLICY_TYPE_RE.match(field_name or "")
+    if not m:
+        return _SCHED_SKIP
+    lines = _fv(facts, "coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return _SCHED_SKIP                    # legacy sessions: unchanged
+    try:
+        from services.lob_canon import UMBRELLA, canon_line
+        from services.extraction_service import _line_entry_denies_coverage
+    except Exception:                                     # noqa: BLE001
+        return _SCHED_SKIP
+    names = [str(e.get("line") or "").lower() for e in lines
+             if isinstance(e, dict) and canon_line(e.get("line")) == UMBRELLA
+             and not _line_entry_denies_coverage(e)]
+    says_umbrella = any(re.search(r"\bumbrella\b", n) for n in names)
+    says_excess = any(re.search(r"\bexcess\b", n) for n in names)
+    if says_umbrella == says_excess:
+        return _SCHED_SKIP                    # both words, or neither: the document decides
+    return "Yes" if (m.group("kind") == "Umbrella") == says_umbrella else "No"
+
+
 def _resolve_certificate_producer_ids(field_name: str, facts: dict):
     m = _CERT_PRODUCER_IDS_RE.match(field_name)
     if not m:
@@ -7816,10 +9228,68 @@ _VEHICLE_DEDUCTIBLE_RE = re.compile(
     r"|Vehicle_Collision_DeductibleAmount)_([A-N])$")
 
 
+# ── ACORD 137: the state auto grid is owned by services/state_auto_grid ─────
+# Client Orbin audit 2026-09-11, item 10 - read that module's docstring. On a
+# 137 a row letter is a COVERAGE row or a SECTION, never a vehicle, so the
+# 127-shaped resolvers (this deductible binding, the phantom vehicle rows, the
+# CSL-or-split box) step aside for every field that module decides.
+def _resolve_state_auto_grid(field_name: str, facts: dict):
+    """The 137 owner's answer: a value, None (owned blank), "UNMATCHED" (ask
+    the document), or _SCHED_SKIP (not decided there)."""
+    form_id = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    if not form_id.startswith("ACORD_137"):
+        return _SCHED_SKIP
+    try:
+        from services import state_auto_grid as _sag
+        out = _sag.resolve(form_id, field_name, facts)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("state_auto_grid: %s on %s skipped: %s", field_name, form_id, exc)
+        return _SCHED_SKIP
+    return _SCHED_SKIP if out is _sag.SKIP else out
+
+
+def _resolve_state_auto_grid_owned(field_name: str, facts: dict):
+    """The `_AUTHORITATIVE_BLANK_RESOLVERS` face: an ASK is not ownership - that
+    box must still reach gap fill."""
+    out = _resolve_state_auto_grid(field_name, facts)
+    return _SCHED_SKIP if out == "UNMATCHED" else out
+
+
+def _state_auto_grid_decides(field_name: str, facts: dict) -> bool:
+    return _resolve_state_auto_grid(field_name, facts) is not _SCHED_SKIP
+
+
+# Words a deductible's own wording is made of. Run 11 extracted the comp
+# deductible as "$ 1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO"; the
+# prose guard then blanked the amount box. A value that is ONE figure plus
+# only these words is that figure. Anything else ("$1,000 Each Pollution
+# Incident" - another coverage's deductible) is left exactly as it was.
+_DEDUCTIBLE_WORDING = frozenset({
+    "ded", "deductible", "deductibles", "for", "all", "perils", "peril", "each", "any",
+    "one", "covered", "auto", "autos", "vehicle", "vehicles", "per", "occurrence",
+    "claim", "loss", "accident", "applies", "apply"})
+_MONEY_FIGURE_RE = re.compile(r"\$?\s*\d[\d,]*(?:\.\d{1,2})?")
+
+
+def _deductible_amount_of(value: Any) -> Optional[str]:
+    s = str(value or "")
+    if "%" in s:
+        return None                   # "1% deductible" is a rate, not an amount
+    figures = _MONEY_FIGURE_RE.findall(s)
+    if len(figures) != 1:
+        return None
+    words = re.findall(r"[a-z]+", _MONEY_FIGURE_RE.sub(" ", s).lower())
+    if any(w not in _DEDUCTIBLE_WORDING for w in words):
+        return None
+    return figures[0].strip()
+
+
 def _resolve_vehicle_deductible_cell(field_name: str, facts: dict):
     m = _VEHICLE_DEDUCTIBLE_RE.match(field_name)
     if not m:
         return _SCHED_SKIP
+    if _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP            # a 137 letter is a section, not a vehicle
     value = str(_fv(facts, _VEHICLE_DEDUCTIBLE_FIELDS[m.group(1)]) or "").strip()
     if not value or not re.search(r"\d", value):
         return _SCHED_SKIP            # no fact: gap fill keeps its chance
@@ -7828,7 +9298,134 @@ def _resolve_vehicle_deductible_cell(field_name: str, facts: dict):
         return _SCHED_SKIP            # no fleet evidence: change nothing
     if _ROW_LETTERS.find(m.group(2)) >= len(sched):
         return _SCHED_SKIP            # phantom row: its own resolver owns it
-    return value
+    return _deductible_amount_of(value) or value
+
+
+# ── ACORD 127 vehicle coverage ticks: the covered-auto symbols decide (15 Sep) ─
+# A vehicle row's CHECK COVERAGES boxes say which coverages apply to THAT auto,
+# which is precisely what a covered-auto symbol designates: Symbol 1 is any auto,
+# 2 every owned auto, 7 the autos the schedule describes - all three cover a
+# SCHEDULED auto (the `auto_symbols` table). The boxes were pure gap fill, so a
+# tick depended on which line the model happened to quote: live run 5 ticked
+# MED PAY, UM, UIM, COMP and COLL on the Subaru and lost LIAB, because the quote
+# it chose ("COVERED AUTOS LIABILITY 01 $1,000,000") is a coverage artifact the
+# evidence gate refuses. The 15 Sep run quoted something else and kept it.
+#
+# The same POLICY-LEVEL INHERITANCE as the comp/collision SYMBOL columns and the
+# deductible cells above: a declarations page prints one symbol per coverage for
+# the whole schedule, and a row that states its own comp/collision symbol wins.
+#
+# Decides "Yes" only. A symbol that does not cover the auto may be one extraction
+# missed, so no box is ticked "No" from absence - it stays with the document.
+# Two consequences of a decided COMPREHENSIVE are owned blanks. The named-peril
+# alternatives (specified causes of loss, fire, fire and theft, FTW, limited
+# specified perils) insure the same "other than collision" risk, and a vehicle
+# carries ONE of them; run 5's SPEC C OF L tick beside COMP was exactly that
+# contradiction. And the OTHER coverage box is an owned blank on every real row:
+# no extracted fact carries a per-vehicle "other" coverage, and the model's only
+# candidates are policy-level lines - run 5 printed "Drive O" (Drive Other Car,
+# CA 99 10), which insures the NAMED INDIVIDUALS, not the car.
+_VEHICLE_TICK_RE = re.compile(r"^Vehicle_Coverage_(?P<box>[A-Za-z]+)_(?P<row>[A-N])$")
+_VEHICLE_TICK_COVERAGE = {
+    "MedicalPaymentsIndicator": "medical",
+    "NoFaultIndicator":         "pip",
+    "TowingAndLabourIndicator": "towing",
+}
+_VEHICLE_OWN_SYMBOL = {
+    "ComprehensiveIndicator": ("comp_symbol", ("comprehensive", "physical_damage")),
+    "CollisionIndicator":     ("coll_symbol", ("collision", "physical_damage")),
+}
+_UM_LABEL_RE = re.compile(r"\buninsured\b|\bum\b", re.I)
+_UIM_LABEL_RE = re.compile(r"\bunderinsured\b|\buim\b", re.I)
+# A named-peril physical-damage coverage, spelled out or in ACORD's own codes
+# (the 127 tooltip lists SCL, F, F&T, F,T&W, LSP, SP).
+_NAMED_PERIL_LABEL_RE = re.compile(
+    r"specified|\bspec\.?\s*c(?:auses?)?\.?\s*(?:of\s*)?l(?:oss)?\b|\bs\.?\s?c\.?\s?o?\.?\s?l\b|"
+    r"\bf\s*&\s*t\b|\bf\s*,\s*t\s*&\s*w\b|\blsp\b|\bsp\b|named\s+peril|fire|theft|peril|wind",
+    re.I)
+_OTHER_THAN_COLLISION_ALTERNATIVES = frozenset({
+    "SpecifiedCauseOfLossIndicator", "SpecifiedCauseOfLossDeductibleIndicator",
+    "FireIndicator", "FireTheftIndicator", "FireTheftWindstormIndicator",
+    "LimitedSpecifiedPerilsIndicator",
+})
+_VEHICLE_OTHER_COVERAGE_BOXES = frozenset({"OtherIndicator", "OtherDescription"})
+_VEHICLE_TICK_BOXES = (
+    frozenset(_VEHICLE_TICK_COVERAGE) | frozenset(_VEHICLE_OWN_SYMBOL)
+    | _OTHER_THAN_COLLISION_ALTERNATIVES | _VEHICLE_OTHER_COVERAGE_BOXES
+    | {"LiabilityIndicator", "UninsuredMotoristsIndicator",
+       "UnderinsuredMotoristsIndicator", "ComprehensiveDeductibleIndicator"})
+
+
+def _vehicle_row_numbers(box: str, row_item: Any, facts: dict) -> List[int]:
+    """The covered-auto symbols that designate this box's coverage for one row."""
+    from services import auto_symbols as _sym
+    if box == "LiabilityIndicator":
+        return list(_sym.liability_symbols(facts))
+    if box == "UninsuredMotoristsIndicator":
+        return _sym.symbols_labelled(facts, _UM_LABEL_RE)
+    if box == "UnderinsuredMotoristsIndicator":
+        return _sym.symbols_labelled(facts, _UIM_LABEL_RE)
+    if box in _VEHICLE_TICK_COVERAGE:
+        return list(_sym.symbols_by_coverage(facts).get(_VEHICLE_TICK_COVERAGE[box], []))
+    sub_key, coverages = _VEHICLE_OWN_SYMBOL[box]
+    own = row_item.get(sub_key) if isinstance(row_item, dict) else None
+    if isinstance(own, dict):
+        own = own.get("value")
+    if own not in (None, ""):
+        return [int(n) for n in re.findall(r"\d{1,3}", str(own))]
+    parsed = _sym.symbols_by_coverage(facts)
+    out: List[int] = []
+    for cov in coverages:
+        out += [n for n in parsed.get(cov, []) if n not in out]
+    return out
+
+
+def _vehicle_row_covered(box: str, row_item: Any, facts: dict) -> bool:
+    from services import auto_symbols as _sym
+    return _sym.covers(_vehicle_row_numbers(box, row_item, facts), _sym.SCHEDULED) is True
+
+
+def _resolve_vehicle_coverage_tick(field_name: str, facts: dict):
+    m = _VEHICLE_TICK_RE.match(field_name or "")
+    if not m or m.group("box") not in _VEHICLE_TICK_BOXES:
+        return _SCHED_SKIP
+    form_id = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    if form_id.startswith("ACORD_137"):
+        return _SCHED_SKIP            # a 137 letter is a section, not a vehicle
+    sched = _fv(facts, "auto_vin_schedule")
+    if not isinstance(sched, list) or not sched:
+        return _SCHED_SKIP            # no fleet evidence: change nothing
+    idx = _ROW_LETTERS.find(m.group("row"))
+    if idx < 0 or idx >= len(sched):
+        return _SCHED_SKIP            # phantom row: its own resolver owns it
+    box, item = m.group("box"), sched[idx]
+    try:
+        if box in _VEHICLE_OTHER_COVERAGE_BOXES:
+            return None
+        if box in _OTHER_THAN_COLLISION_ALTERNATIVES:
+            if _vehicle_row_covered("ComprehensiveIndicator", item, facts):
+                return None
+            # No covered-auto symbol can designate a named-peril alternative
+            # (auto_symbols has no key for one), so a captured symbol grid that
+            # names none of them has declared them not carried (audit, 15 Sep
+            # 2026). A grid row the document LABELS with one - in ACORD's own
+            # abbreviations too (SCOL, SPEC C OF L, F&T, LSP) - or any label the
+            # parser cannot place keeps the box with the document: an unread
+            # label means "cannot say", never "not carried".
+            from services import auto_symbols as _sym
+            if (_sym.all_numbers(facts)
+                    and not _sym.symbols_by_coverage(facts).get(_sym.UNSPECIFIED)
+                    and not _sym.symbols_labelled(facts, _NAMED_PERIL_LABEL_RE)):
+                return None
+            return _SCHED_SKIP
+        if box == "ComprehensiveDeductibleIndicator":
+            stated = re.search(r"\d", str(_fv(facts, "auto_deductible_comp") or ""))
+            covered = _vehicle_row_covered("ComprehensiveIndicator", item, facts)
+            return "Yes" if (stated and covered) else _SCHED_SKIP
+        return "Yes" if _vehicle_row_covered(box, item, facts) else _SCHED_SKIP
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("vehicle coverage tick %s skipped: %s", field_name, exc)
+        return _SCHED_SKIP
 
 
 # ── ACORD 25 "OTHER" policy row: the leftover line or blank (2026-08-15) ─────
@@ -8096,6 +9693,99 @@ def _prior_rows_from_underlying_policies(facts: dict) -> List[dict]:
     return out
 
 
+# A policy family's prior-carrier column, in that column's own wording; any
+# other family goes to OTHER under its own name.
+_PRIOR_GRID_FAMILY_LINE: Dict[str, str] = {
+    "general_liab": "General Liability", "auto": "Automobile", "property": "Property",
+}
+
+
+def _line_premiums_by_family(facts: dict) -> Dict[str, str]:
+    """{line family: that line's own premium}, read by the SAME picker as the
+    ACORD 125 line-of-business premium boxes (`_resolve_lob_premium` refuses a
+    coverage PART - the auto line is $2,991, never its $1,496 liability part -
+    and a line two boxes could claim). A family whose boxes disagree is left
+    out."""
+    try:
+        from services.lob_canon import canon_line as _cl
+        schema = _all_form_schemas().get("ACORD_125") or {}
+    except Exception:                                     # noqa: BLE001
+        return {}
+    found: Dict[str, set] = {}
+    for field, token_sets in _lob_premium_index().items():
+        if field not in schema:
+            continue
+        fams = {_cl(" ".join(sorted(ts))) for ts in token_sets} - {None}
+        if len(fams) != 1:
+            continue
+        amount = _resolve_lob_premium(field, facts)
+        if amount and str(amount).strip():
+            found.setdefault(next(iter(fams)), set()).add(str(amount).strip())
+    return {fam: next(iter(v)) for fam, v in found.items() if len(v) == 1}
+
+
+def _prior_rows_from_current_policies(facts: dict) -> List[dict]:
+    """Year one of the prior-carrier grid from the policies the package holds,
+    once the merge has moved their term out of the proposed boxes (15 Sep 2026).
+
+    Brent's ACORD 125 answer key fills PRIOR CARRIER INFORMATION with the
+    current programme - "2025-26 / GL / Current Carrier / GL-123456 / $18,450 /
+    10/01/2025 / 10/01/2026" beside a PROPOSED 10/01/2026 - and says "populate
+    only the year it can substantiate". The rule below ("THE CURRENT POLICY IS
+    NOT PRIOR COVERAGE") was right while the current term was ALSO printed as
+    the proposed one, and it still holds wherever the term was not moved.
+
+    Only when the merge moved the term (`renewal_dates_routed`, the prior dates
+    marked as that term) and no quote or application added policies of its own
+    (`current_term_rows_ok`). One row per policy - the same records as the
+    review screen's "Policies in this submission". A policy names its carrier
+    and its number; a form number is never one."""
+    facts = facts or {}
+    if not _fv(facts, "renewal_dates_routed") or facts.get("current_term_rows_ok") is not True:
+        return []
+    held = facts.get("prior_expiration_date")
+    if not (isinstance(held, dict) and held.get("routed_from") == "current_term"):
+        return []
+    try:
+        from services.extraction_service import policy_line_records
+        from services.normalization import normalize_date
+    except Exception:                                     # noqa: BLE001
+        return []
+
+    def _date(v: Any) -> Optional[str]:
+        iso = normalize_date(str(v)) if v is not None and str(v).strip() else None
+        if not iso:
+            return None
+        y, m, d = iso.split("-")
+        return f"{m}/{d}/{y}"
+
+    term = (_date(_fv(facts, "prior_effective_date")), _date(_fv(facts, "prior_expiration_date")))
+    records = _fv(facts, "_line_records")
+    premiums: Optional[Dict[str, str]] = None
+    out: List[dict] = []
+    for rec in policy_line_records(records if isinstance(records, list) else []):
+        fam = str(rec.get("line") or "").strip()
+        carrier = str(rec.get("carrier_name") or "").strip()
+        number = str(rec.get("policy_number") or "").strip()
+        if number and _looks_like_a_form_number(number):
+            number = ""
+        if not fam or not carrier or not number:
+            continue
+        if premiums is None:
+            premiums = _line_premiums_by_family(facts)
+        out.append({
+            "line": _PRIOR_GRID_FAMILY_LINE.get(fam, fam.replace("_", " ").title()),
+            "carrier": carrier, "policy_no": number, "premium": premiums.get(fam),
+            "effective": _date(rec.get("effective_date")) or term[0],
+            "expiration": _date(rec.get("expiration_date")) or term[1],
+            "_current_term": True,
+        })
+    if out:
+        logger.info("prior-coverage: year one from the %d current policies - their "
+                    "term was moved out of the proposed boxes", len(out))
+    return out
+
+
 def _prior_coverage_grid(facts: dict) -> Tuple[Dict[Tuple[str, int], dict], List[str]]:
     """Lay `prior_coverage_by_line` out as {(column, row_index): entry} plus the
     year label for each row.
@@ -8109,6 +9799,8 @@ def _prior_coverage_grid(facts: dict) -> Tuple[Dict[Tuple[str, int], dict], List
     entries = _fv(facts, "prior_coverage_by_line")
     if not isinstance(entries, list) or not entries:
         entries = _prior_rows_from_underlying_policies(facts)
+    if not entries:
+        entries = _prior_rows_from_current_policies(facts)
     if not entries:
         return {}, []
     # ONE POLICY, ONE PRINTING (client audit 2026-08-16): the umbrella schedule
@@ -8156,7 +9848,7 @@ def _prior_coverage_grid(facts: dict) -> Tuple[Dict[Tuple[str, int], dict], List
     for e in entries:
         if not isinstance(e, dict):
             continue
-        if e.get("_derived_from_underlying"):
+        if e.get("_derived_from_underlying") or e.get("_current_term"):
             kept.append(e)
             continue
         if _pn(e.get("policy_no")) and _pn(e.get("policy_no")) in current_numbers:
@@ -8188,9 +9880,21 @@ def _prior_coverage_grid(facts: dict) -> Tuple[Dict[Tuple[str, int], dict], List
     grid: Dict[Tuple[str, int], dict] = {}
     if all(y for _, y, _ in parsed):
         years = sorted({y for _, y, _ in parsed}, reverse=True)[:3]
+        cells: Dict[Tuple[str, int], List[dict]] = {}
         for col, year, e in parsed:
             if year in years:
-                grid[(col, years.index(year))] = e
+                cells.setdefault((col, years.index(year)), []).append(e)
+        # ONE BOX, ONE POLICY (15 Sep 2026). Two different policies in one
+        # column for one year - an inland marine AND an umbrella both belong to
+        # OTHER - kept whichever came last. One box cannot name both.
+        for cell, group in cells.items():
+            contracts = {(_pn(e.get("policy_no")), _same_value_key(e.get("carrier") or ""))
+                         for e in group}
+            if len(contracts) == 1:
+                grid[cell] = group[0]
+            else:
+                logger.info("prior-coverage: %s row %d holds %d policies - left blank, "
+                            "one box cannot name them all", cell[0], cell[1], len(contracts))
         return grid, years
 
     per_col: Dict[str, int] = {}
@@ -8481,6 +10185,84 @@ def _set_checkbox_checkmark_ap(pdf: pikepdf.Pdf, item, on_state_key: str):
         pass
 
 
+# ── A one-line value must fit its box (15 Sep 2026) ──────────────────────────
+# Every text box on all 17 ACORD templates carries a FIXED font size in its /DA
+# (8pt Arial on 125/126/131 - 921 boxes, none auto-sized), and `fill_pdf` hands
+# appearance generation to the viewer (/NeedAppearances), which draws at that
+# size and clips. Live run 6 cut five values mid-word: 125 AUDIT "Annual" in a
+# 22pt box, the premises DESCRIPTION OF OPERATIONS, 131's ZIP, 131's underlying
+# auto carrier and 126's OTHER deductible description. The fix is the ordinary
+# PDF one - a smaller size in that box's own /DA - measured, not guessed: Arial
+# is metrically Helvetica's twin, and reportlab (already a dependency) carries
+# the Helvetica widths. An explicit size is honoured by every viewer, unlike a
+# 0 (auto) size. Boxes that fit are untouched; multi-line and comb boxes wrap
+# or space by design and are skipped. The 3.5pt floor is the smallest size that
+# still reads when zoomed; at 4pt two of run 6's live values (126's OTHER
+# deductible description, 131's primary DESCRIPTION) still lost a character.
+# A value that cannot fit even at the floor is printed at the floor.
+_DA_FONT_SIZE_RE = re.compile(r"(\d+(?:\.\d+)?)(\s+Tf)")
+_FIT_MIN_FONT_PT = 3.5
+_FIT_SIDE_PAD_PT = 2.0
+_FF_MULTILINE = 1 << 12
+_FF_COMB = 1 << 24
+
+
+def _fit_text_to_box(field, text: str, pdf: pikepdf.Pdf = None) -> None:
+    """Shrink a ONE-LINE text box's font, in its own /DA, until `text` fits."""
+    try:
+        ff = int(field.get("/Ff", 0) or 0)
+    except Exception:                                     # noqa: BLE001
+        ff = 0
+    if ff & (_FF_MULTILINE | _FF_COMB):
+        return
+    line = " ".join(str(text or "").split())
+    if not line:
+        return
+    try:
+        import math
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+    except Exception:                                     # noqa: BLE001
+        return
+    default_da = None
+    try:
+        if pdf is not None and "/AcroForm" in pdf.Root:
+            default_da = pdf.Root["/AcroForm"].get("/DA")
+    except Exception:                                     # noqa: BLE001
+        default_da = None
+    if "/Rect" in field:
+        widgets = [field]
+    else:
+        widgets = [k for k in (field.get("/Kids") or [])
+                   if "/Rect" in k and k.get("/T") is None]
+    for w in widgets:
+        try:
+            da = w.get("/DA")
+            if da is None:
+                da = field.get("/DA")
+            if da is None:
+                da = default_da
+            da_s = str(da or "")
+            m = _DA_FONT_SIZE_RE.search(da_s)
+            if not m:
+                continue
+            size = float(m.group(1))
+            if size <= 0:
+                continue                  # 0 Tf: the viewer already auto-sizes
+            rect = w.get("/Rect")
+            avail = abs(float(rect[2]) - float(rect[0])) - 2 * _FIT_SIDE_PAD_PT
+            if avail <= 0:
+                continue
+            text_w = stringWidth(line, "Helvetica", size)
+            if text_w <= avail:
+                continue
+            new = max(_FIT_MIN_FONT_PT, math.floor(size * avail / text_w * 10) / 10)
+            if new >= size:
+                continue
+            w["/DA"] = pikepdf.String(da_s[:m.start(1)] + f"{new:g}" + da_s[m.end(1):])
+        except Exception:                                 # noqa: BLE001
+            continue
+
+
 def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list, pdf: pikepdf.Pdf = None):
     for item in arr:
         try:
@@ -8514,6 +10296,7 @@ def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list, pdf: p
                         item["/V"] = pikepdf.String(str(val))
                         if "/AP" in item:
                             del item["/AP"]
+                        _fit_text_to_box(item, str(val), pdf)
                         counter[0] += 1
             if kids:
                 _fill_and_highlight(kids, data, confidence, counter, pdf)
@@ -8778,6 +10561,13 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     # GL form type
     "GeneralLiability_OccurrenceIndicator":    ("gl_form_type", "occurrence"),
     "GeneralLiability_ClaimsMadeIndicator":    ("gl_form_type", "claims"),
+    # ...and ACORD 131's "CHECK ALL COVERAGES IN UNDERLYING POLICIES" twins (CGL -
+    # OCCURRENCE / CGL - CLAIMS MADE), one underscore shorter, so the two rules
+    # above never matched them. Live run 5 printed OCCUR on the underlying GL row
+    # from this fact while the grid box beside it went to gap fill and was
+    # refused. One fact, both boxes; no stated basis still asks the document.
+    "UnderlyingCoverage_Coverage_GeneralLiabilityOccurrenceIndicator": ("gl_form_type", "occurrence"),
+    "UnderlyingCoverage_Coverage_GeneralLiabilityClaimsMadeIndicator": ("gl_form_type", "claims"),
     # Named insured entity type — longer/more-specific substrings first
     # THE NINE LEGAL-ENTITY RULES LIVED HERE AND WERE REMOVED (V1 H4,
     # 2026-08-27). They were nine independent substring tests over one
@@ -8836,9 +10626,13 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     "ValuationCode_ActualCashValueIndicator": ("valuation_method", "acv"),
     # Loss history — handled by _derive_no_prior_losses_indicator (evidence-driven,
     # multi-input); intentionally NOT a generic single-key substring rule.
-    # Umbrella form type
-    "ExcessUmbrella_OccurrenceIndicator": ("gl_form_type", "occurrence"),
-    "ExcessUmbrella_ClaimsMadeIndicator": ("gl_form_type", "claims"),
+    # Umbrella form type - the UMBRELLA's own trigger, never the GL's. These
+    # read `gl_form_type` until 14 Sep 2026, so ACORD 131/25 printed the GL
+    # basis as the umbrella's - and, with the GL fact holding the umbrella's
+    # form title, an explicit "No" in BOTH boxes. No umbrella basis stated ->
+    # no derived tick: the box is asked, never inherited.
+    "ExcessUmbrella_OccurrenceIndicator": ("umbrella_form_type", "occurrence"),
+    "ExcessUmbrella_ClaimsMadeIndicator": ("umbrella_form_type", "claims"),
     # WC statutory limits indicator
     "WorkersCompensationEmployersLiability_WorkersCompensationStatutoryLimitIndicator": ("wc_el_each_accident", "statutory"),
     # Builders risk
@@ -9969,6 +11763,20 @@ def _set_schema_context(schema: Optional[dict]) -> None:
     _SCHEMA_CTX.schema = schema if isinstance(schema, dict) else None
 
 
+@contextlib.contextmanager
+def _schema_context(schema: Optional[dict]):
+    """Set the schema context for one resolution and RESTORE the previous one.
+
+    For callers outside a generation pass (the post-generation re-stamps), which
+    must not leave another form's schema behind for whatever runs next."""
+    prev = getattr(_SCHEMA_CTX, "schema", None)
+    _set_schema_context(schema)
+    try:
+        yield
+    finally:
+        _SCHEMA_CTX.schema = prev
+
+
 def _field_meta(field_name: str) -> dict:
     schema = getattr(_SCHEMA_CTX, "schema", None)
     meta = (schema or {}).get(field_name)
@@ -10028,6 +11836,88 @@ def _single_row_schedule(field_name: str, facts: dict) -> bool:
     return not isinstance(items, list) or len(items) <= 1
 
 
+def _gl_schedule_evidence(facts: dict) -> bool:
+    """Does this package state ANY General Liability classification of its own?
+
+    DERIVED, not listed: a fact whose KEY names this line (`gl_class_code_
+    schedule`, `gl_class_codes_by_location`, `gl_class_codes`) and which holds
+    rows is that line's schedule evidence - the same `_canon_from_name`
+    derivation the cross-line code fence uses, so a GL schedule fact added
+    tomorrow counts the day it is named after its line.
+    """
+    if not isinstance(facts, dict):
+        return False
+    for key, raw in facts.items():
+        if str(key).startswith("_"):
+            continue
+        if _canon_from_name(key) != "general_liab":
+            continue
+        rows = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+        if isinstance(rows, list) and any(
+                _names_a_classification(r) for r in rows if r not in (None, "", {}, [])):
+            return True
+    return False
+
+
+# ── A coverage PART the package never evidences has nothing to fill ─────────
+# ACORD 126 prints an Employee Benefits Liability block. Orbin carries no EBL,
+# and that block still printed a $1,000,000 limit (gap fill) and "0 - 25"
+# employees - the AUTO non-ownership rating band, reaching it through
+# `num_employees`. The part is an owned blank unless the package's own per-line
+# census or a verified declarations entry names its family (lob_canon's own
+# constant - no name list). No census at all keeps the legacy behaviour.
+# Scoped to the form each entry was measured on (15 Sep 2026). ACORD 160 prints
+# seven boxes under the same `GeneralLiability_EmployeeBenefits_` prefix, and the
+# owner froze ACORD 160 on 14 Sep - so a prefix match alone reached a form this
+# rule was never tested on.
+_OPTIONAL_COVERAGE_PART_BOXES: Tuple[Tuple[str, str, frozenset], ...] = (
+    ("GeneralLiability_EmployeeBenefits_", "employee_benefits", frozenset({"ACORD_126"})),
+    # ACORD 131's UNDERLYING coverage grid EBL tick (audit of live runs 4-7,
+    # 15 Sep 2026): run 5 answered "No" on a coverage-grant box the package
+    # never evidences. Same rule - any EBL line or entry hands it back.
+    ("UnderlyingCoverage_Coverage_EmployeeBenefitsLiabilityIndicator_", "employee_benefits",
+     frozenset({"ACORD_131"})),
+)
+
+
+def _resolve_uncarried_coverage_part(field_name: str, facts: dict):
+    form_id = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    part = next((fam for pre, fam, forms in _OPTIONAL_COVERAGE_PART_BOXES
+                 if form_id in forms and str(field_name or "").startswith(pre)), None)
+    if part is None:
+        return _SCHED_SKIP
+    lines = _fv(facts, "coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return _SCHED_SKIP
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                         # noqa: BLE001
+        return _SCHED_SKIP
+    if any(isinstance(e, dict) and _canon(e.get("line")) == part for e in lines):
+        return _SCHED_SKIP
+    ents = _fv(facts, "dec_page_entries")
+    for e in ents if isinstance(ents, list) else []:
+        if isinstance(e, dict) and part in (
+                _canon(e.get("label")), _canon(e.get("line_of_business")),
+                _canon(e.get("section"))):
+            return _SCHED_SKIP
+    return None
+
+
+def _resolve_out_of_state_box(field_name: str, facts: dict):
+    """A box printed under "APPLICABLE ONLY IN <STATE>", on a risk provably in
+    another state, is an owned blank - see services/state_restricted_boxes."""
+    form_id = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    if not form_id:
+        return _SCHED_SKIP
+    try:
+        from services.state_restricted_boxes import outside_its_state
+        return None if outside_its_state(form_id, field_name, facts) else _SCHED_SKIP
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("state-restricted box check skipped for %s: %s", field_name, exc)
+        return _SCHED_SKIP
+
+
 def _resolve_gl_hazard_row(field_name: str, facts: dict):
     """Resolve an ACORD 126 schedule-of-hazards data cell from the structured
     `gl_class_code_schedule` fact.
@@ -10044,16 +11934,16 @@ def _resolve_gl_hazard_row(field_name: str, facts: dict):
         return _SCHED_SKIP
     col, letter = m.group(1), m.group(2)
     idx = _ROW_LETTER_TO_IDX[letter]
-    rows = _fv(facts, "gl_class_code_schedule")
-    if not isinstance(rows, list) or not rows:
-        rows = _fv(facts, "gl_class_codes")
-    if isinstance(rows, list) and idx < len(rows):
+    rows = _gl_hazard_rows(facts)
+    if rows and idx < len(rows):
         row = rows[idx]
         if isinstance(row, dict):
             _key = _GL_HAZARD_COL_TO_KEY[col]
             if _key is _HAZARD_ORDINAL_KEY:
                 return _hazard_ordinal_within_location(rows, idx)
             val = row.get(_key)
+            if col == "LocationProducerIdentifier" and val is not None and str(val).strip():
+                return _hazard_location_number(val, facts)
             if val is not None and str(val).strip():
                 # THE BOX ASKS FOR ACORD'S CODE, and the legend is printed
                 # beside it: (S) GROSS SALES, (P) PAYROLL, (A) AREA, (C) TOTAL
@@ -10065,6 +11955,13 @@ def _resolve_gl_hazard_row(field_name: str, facts: dict):
                 if col == "PremiumBasisCode":
                     return rating_basis_code(val) or str(val).strip()
                 return str(val).strip()
+            if col == "TerritoryCode":
+                # A GL schedule row that prints no territory has none to give,
+                # and the only other "TERRITORY" a package offers gap fill is
+                # another line's: Orbin's auto Drive Other Car line ("TERRITORY:
+                # 104 6679") landed on both GL hazard rows. Owned blank -
+                # registered through `_resolve_phantom_gl_hazard_row`.
+                return None
         return "UNMATCHED"           # row exists, this column is genuinely empty
     # ── PHANTOM HAZARD ROW ───────────────────────────────────────────────────
     # C46's phantom-vehicle-row rule, one form over. Run 9's ACORD 126 printed
@@ -10079,6 +11976,31 @@ def _resolve_gl_hazard_row(field_name: str, facts: dict):
     # there. No schedule at all still returns "UNMATCHED", because suppressing
     # on no evidence would delete a schedule the extractor merely missed.
     if isinstance(rows, list) and rows and idx >= len(rows):
+        return None
+    # ── NO GL SCHEDULE AT ALL: STILL THIS LINE'S GRID, STILL BLANK ──────────
+    # This branch returned "UNMATCHED" until 11 Sep 2026, on the reasoning that
+    # "suppressing on no evidence would delete a schedule the extractor merely
+    # missed". THREE live runs have now measured what actually happens instead,
+    # and not one of them recovered a schedule:
+    #
+    #   2026-08-13  auto_vin_schedule missing  -> gap fill owned 220 vehicle
+    #               questions and printed GL class 91585 as the RATE CLASS
+    #   11 Sep r1   no GL schedule             -> the 126 hazard grid printed
+    #               the VEHICLE class 7398 twice, plus TERR 7398 and TERR CO
+    #   11 Sep r2   no GL schedule             -> the same grid printed
+    #               "Symbol 07", "CO", "NO", "F-250" and "2019" - an entire
+    #               auto row, laundered through a General Liability form
+    #
+    # Gap fill cannot recover a schedule that is not in the document, and it
+    # cannot attribute what it does find to a line - that is the whole D1/D5
+    # lesson. Asked for General Liability classifications it does not have, it
+    # reaches for the nearest table, which is the auto schedule.
+    #
+    # So the grid follows the same rule as this form's identity boxes: THIS
+    # LINE's evidence or blank. The producer is not left guessing - the package
+    # already raises "GL coverage detected but no class codes found (up to +12
+    # pts)" on exactly these packages, which is the correct place for a gap.
+    if not _gl_schedule_evidence(facts):
         return None
     return "UNMATCHED"
 
@@ -10097,14 +12019,75 @@ def _resolve_phantom_gl_hazard_row(field_name: str, facts: dict):
     m = _GL_HAZARD_ROW_RE.match(field_name or "")
     if not m:
         return _SCHED_SKIP
-    rows = _fv(facts, "gl_class_code_schedule")
-    if not isinstance(rows, list) or not rows:
-        rows = _fv(facts, "gl_class_codes")
-    if not isinstance(rows, list) or not rows:
-        return _SCHED_SKIP                 # no evidence - gap fill keeps the box
-    if _ROW_LETTER_TO_IDX[m.group(2)] < len(rows):
+    rows = _gl_hazard_rows(facts)
+    if not rows:
+        # NO GL SCHEDULE AT ALL. Guarding the mapper and leaving the box open is
+        # how this defect came back twice - the blank is handed straight to gap
+        # fill, which refills it from the auto schedule. See the measured runs
+        # in `_resolve_gl_hazard_row`. Both doors, or neither.
+        return None if not _gl_schedule_evidence(facts) else _SCHED_SKIP
+    _idx = _ROW_LETTER_TO_IDX[m.group(2)]
+    if _idx < len(rows):
+        _row = rows[_idx]
+        if (m.group(1) == "TerritoryCode" and isinstance(_row, dict)
+                and not str(_row.get(_GL_HAZARD_COL_TO_KEY["TerritoryCode"]) or "").strip()):
+            return None                    # a real row that prints no territory
+        if (m.group(1) == "LocationProducerIdentifier" and isinstance(_row, dict)
+                and str(_row.get(_GL_HAZARD_COL_TO_KEY["LocationProducerIdentifier"]) or "").strip()
+                and _hazard_location_number(
+                    _row.get(_GL_HAZARD_COL_TO_KEY["LocationProducerIdentifier"])) is None):
+            return None                    # the carrier's policy-level bucket, not a premises
         return _SCHED_SKIP                 # a real row
     return None                            # past the end: an owned blank
+
+
+# The location number a hazard row's label names: "Location 001", "Loc #2",
+# "Premises 3". Keyword-anchored first, so "Bldg 2 Loc 1" is location 1.
+_HAZARD_LOCATION_WORD_RE = re.compile(r"\b(?:loc(?:ation)?|prem(?:ises)?)\b\W{0,3}(\d+)", re.I)
+_FIRST_NUMBER_RE = re.compile(r"\d+")
+
+
+def _hazard_location_number(value, facts: Optional[dict] = None) -> Optional[str]:
+    """ACORD 126 LOC # for a hazard row's stated location, or None.
+
+    The box's own tooltip: "the location number of the risk's location AS IT
+    APPEARS ON THE APPLICANT INFORMATION SECTION OF ACORD 125". Carriers print
+    the row LABEL ("Location 001"), which the number box refused as text, so
+    the column shipped blank on every live Orbin run. So:
+      * the number is read out of the label (keyword-anchored first);
+      * when exactly ONE scheduled premises carries that number, ACORD 125's
+        own printing of it is used ("1" for Orbin's "Location 001") - the
+        tooltip's cross-reference, taken literally;
+      * otherwise the number is printed as the document writes it ("001" stays
+        "001" - `test_3b_the_loc_number_reaches_the_hazard_grid`), which is
+        also the width `_hazard_ordinal_within_location` matches;
+      * a location numbered ZERO is the carrier's policy-level bucket (Orbin
+        prints its fungi exclusion and pollution endorsement under "Location
+        000"), never a premises: None, and `_resolve_phantom_gl_hazard_row`
+        owns that blank. A label with no digits is returned as written.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return None
+    m = _HAZARD_LOCATION_WORD_RE.search(s) or _FIRST_NUMBER_RE.search(s)
+    if not m:
+        return s
+    digits = m.group(m.lastindex or 0)
+    n = int(digits)
+    if n <= 0:
+        return None
+    locs = _fv(facts, "property_locations") if isinstance(facts, dict) else None
+    if isinstance(locs, list):
+        printed = {
+            str(loc.get("location_number")).strip()
+            for loc in locs
+            if isinstance(loc, dict)
+            and re.fullmatch(r"\d+", str(loc.get("location_number") or "").strip())
+            and int(str(loc.get("location_number")).strip()) == n
+        }
+        if len(printed) == 1:
+            return next(iter(printed))
+    return digits
 
 
 def _hazard_ordinal_within_location(rows: list, idx: int) -> Optional[str]:
@@ -10277,6 +12260,10 @@ def _resolve_via_field_rules(field_name: str, facts: dict):
                     return "UNMATCHED"
                 return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
             val = _fact_with_fallback(facts, fact_key)
+            if _is_declared_choice_box(field_name, fact_key):
+                # Same door as `_deterministic_map`: a choice answers as a tick.
+                return (expected_tick_for_box(field_name, fact_key, val)
+                        if val is not None else None)
             if fact_key == "valuation_method" and isinstance(val, str):
                 val = _VALUATION_METHOD_TO_ACORD_CODE.get(val.strip().lower(), val)
             if isinstance(val, list):
@@ -10297,34 +12284,88 @@ def _resolve_via_field_rules(field_name: str, facts: dict):
 # line's own evidence or the box ships blank, and gap fill is excluded.
 _UNDERLYING_GL_EDITION_RE = re.compile(
     r"^UnderlyingPolicy_GeneralLiability_FormEditionDate_[A-Z]$")
-# The BASE CGL coverage form only (CG 00 01) - the question asks for the
-# coverage form's edition, and a package lists dozens of CG-prefixed
-# ENDORSEMENTS (CG 00 69, CG 21 47, ...) whose editions are not the answer.
+# The BASE CGL coverage forms only - CG 00 01 (occurrence) and CG 00 02
+# (claims-made) - because the question asks for the coverage form's edition,
+# and a package lists dozens of CG-prefixed ENDORSEMENTS (CG 00 69, CG 21 47,
+# ...) whose editions are not the answer. Carriers print the edition "04 13",
+# "04-13", "04/13", "(04 13)" or run together; the MONTH is checked in code
+# (`_cgl_editions`) so a year printed after the form number ("2013") can never
+# be read as an edition.
 _CGL_BASE_FORM_EDITION_RE = re.compile(
-    r"\bCG\s*00\s*01\b[\s:]*(\d{2})[\s-]+(\d{2})\b")
+    r"\bCG\s*00\s*0[12]\b[\s:(]*(\d{2})[\s/\-]{0,3}(\d{2})\b")
+
+
+def _cgl_editions(text: str) -> set:
+    """Every distinct CGL coverage-form edition ("MM YY") printed in `text`."""
+    out: set = set()
+    for m in _CGL_BASE_FORM_EDITION_RE.finditer(str(text or "")):
+        if 1 <= int(m.group(1)) <= 12:
+            out.add(f"{m.group(1)} {m.group(2)}")
+    return out
+
+
+def cgl_coverage_form_edition_in_text(text: str) -> Optional[str]:
+    """The CGL coverage form's edition as the documents print it, or None.
+
+    The edition is printed in the policy's forms schedule AND in the footer of
+    every page of the coverage form itself ("CG 00 01 04 13 (c) Insurance
+    Services Office"), so the document text is the durable witness - the dec
+    index is an LLM's selection from it, and run 6 (15 Sep 2026) did not
+    select it. Exactly ONE distinct edition, or nothing: two (a prior-term
+    policy uploaded beside the current one, an occurrence and a claims-made
+    form) are ambiguous, and an unknown stays unknown.
+    """
+    eds = _cgl_editions(text)
+    return next(iter(eds)) if len(eds) == 1 else None
+
+
+def _edition_from_fact(value) -> Optional[str]:
+    """A stored edition fact as "MM YY", or None when it cannot be read.
+    Accepts the document spelling ("CG 00 01 04 13") and a person's ("04/13",
+    "4/13", "0413")."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    eds = _cgl_editions(s)
+    if len(eds) == 1:
+        return next(iter(eds))
+    groups = re.findall(r"\d+", s)
+    if len(groups) == 2 and all(len(g) <= 2 for g in groups):
+        mm, yy = groups[0].zfill(2), groups[1].zfill(2)
+    elif len(groups) == 1 and len(groups[0]) == 4:
+        mm, yy = groups[0][:2], groups[0][2:]
+    else:
+        return None
+    return f"{mm} {yy}" if 1 <= int(mm) <= 12 else None
 
 
 def _resolve_underlying_gl_form_edition(field_name: str, facts: dict):
     """The GL coverage form's own edition, or an owned blank. _SCHED_SKIP only
-    when there are no dec entries at all (legacy sessions keep gap fill)."""
+    when there is no evidence source at all (legacy sessions keep gap fill).
+
+    Two witnesses, one answer: the GL-keyed dec entries and the
+    `gl_coverage_form_edition` fact the pipeline reads off the document text
+    (`cgl_coverage_form_edition_in_text`). They must agree - two different
+    editions between them is ambiguous and the box stays blank."""
     if not _UNDERLYING_GL_EDITION_RE.match(field_name):
         return _SCHED_SKIP
     entries = _fv(facts, "dec_page_entries")
-    if not isinstance(entries, list) or not entries:
+    has_entries = isinstance(entries, list) and bool(entries)
+    stated = _edition_from_fact(_fv(facts, "gl_coverage_form_edition"))
+    if not has_entries and not stated:
         return _SCHED_SKIP
-    try:
-        from services.extraction_service import _canon_line
-    except Exception:                                     # noqa: BLE001
-        return None
-    editions: set = set()
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        if _canon_line(str(e.get("line_of_business") or "")) != "general_liab":
-            continue
-        blob = f"{e.get('label') or ''} {e.get('value') or ''}"
-        for m in _CGL_BASE_FORM_EDITION_RE.finditer(blob):
-            editions.add(f"{m.group(1)} {m.group(2)}")
+    editions: set = {stated} if stated else set()
+    if has_entries:
+        try:
+            from services.extraction_service import _canon_line
+        except Exception:                                 # noqa: BLE001
+            return stated or None
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            if _canon_line(str(e.get("line_of_business") or "")) != "general_liab":
+                continue
+            editions |= _cgl_editions(f"{e.get('label') or ''} {e.get('value') or ''}")
     if len(editions) == 1:
         return next(iter(editions))
     return None          # zero (unknown stays unknown) or several (ambiguous)
@@ -10437,6 +12478,40 @@ _VEHICLE_USE_CLASSES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("Service",    ("service",)),
     ("Commercial", ("commercial", "hauling")),
 )
+# A USE cell that answers without naming a use - see _resolve_vehicle_use_indicator.
+_USE_NON_ANSWERS = frozenset({
+    "na", "n/a", "n a", "n.a.", "n.a", "not applicable", "none", "null", "unknown",
+    "tbd", "not stated", "-", "--",
+})
+
+
+_USE_NON_ANSWER_LETTERS = frozenset({"na", "none", "notapplicable", "null", "unknown", "tbd",
+                                     "notstated", "nil"})
+_USE_CELL_UNREAD_RE = re.compile(r"\b(?:see|refer|per|schedule|attached|not|no|non)\b", re.I)
+
+
+def _use_cell_reading(value: Any) -> Optional[Tuple[str, str]]:
+    """(meaning, printed) for one dec USE cell, or None when it cannot be read.
+
+    Meaning is "na" for a non-answer in any punctuation ("NA", "N/A.", "None",
+    "-"), the class a known use word names, or "other:<word>" for a worded use
+    the table does not know - ACORD's answer for that is the Other box. A
+    reference ("SEE SCHEDULE"), a code (a digit, or a one-letter piece as in
+    "LIAB-I") and a negation ("NOT FOR HIRE") are unread and leave the fact to
+    decide (review of run 9)."""
+    v = str(value or "").strip()
+    if not v:
+        return None
+    letters = re.sub(r"[^a-z]", "", v.lower())
+    if not letters:
+        return None if re.search(r"\d", v) else ("na", "NA")
+    if letters in _USE_NON_ANSWER_LETTERS:
+        return ("na", "NA")
+    if (re.search(r"\d", v) or _USE_CELL_UNREAD_RE.search(v)
+            or any(len(piece) == 1 for piece in re.findall(r"[a-z]+", v.lower()))):
+        return None
+    cls = _vehicle_use_class(v)
+    return (cls, v) if cls else ("other:" + letters, v)
 
 
 def _vehicle_use_class(value: Any) -> Optional[str]:
@@ -10482,14 +12557,37 @@ def _resolve_vehicle_use_indicator(field_name: str, facts: dict):
     if not m:
         return _SCHED_SKIP
     box, letter = m.group(1), m.group(2)
-    use = _fv(facts, "auto_vehicle_use")
-    if not use:
-        return _SCHED_SKIP
     idx = _ROW_LETTER_TO_IDX.get(letter, 99)
     if idx > 0:
         rows = _fv(facts, "auto_vin_schedule")
         if not isinstance(rows, list) or idx >= len(rows):
             return _SCHED_SKIP
+    use = str(_fv(facts, "auto_vehicle_use") or "").strip()
+    # THE DEC'S OWN USE CELL DECIDES (live run 9, 15 Sep 2026). The auto dec
+    # prints "USE: NA"; extraction returned "service" anyway - a word the
+    # package prints 292 times, so it passed the text check - and the 127
+    # ticked SERVICE. A cell that names a use class or answers with a
+    # non-answer decides over the fact; a person's answer still wins, and the
+    # fact stands alone only where the dec prints no USE cell (review of run 7
+    # read the cell only when the fact was empty).
+    readings: Dict[str, str] = {}
+    for e in _auto_dec_entries(facts):
+        if re.match(r"^\s*(?:vehicle\s+)?use\b", str(e.get("label") or ""), re.I):
+            reading = _use_cell_reading(e.get("value"))
+            if reading:
+                readings.setdefault(reading[0], reading[1])   # one meaning, however printed
+    if readings and not _stated_by_a_person(facts, "auto_vehicle_use"):
+        if len(readings) > 1:
+            return None                   # several meanings, one fact: cannot place
+        use = next(iter(readings.values()))
+    # NO STATED USE IS AN OWNED BLANK (live runs 4-7, 15 Sep 2026). The dec
+    # prints "USE: NA", and extraction v16 reads a stated use class and may not
+    # infer one - so an empty fact means the documents state none. The seven
+    # boxes still went to gap fill, which answered "No" from silence on run 7.
+    # A non-answer ("NA") is the carrier saying no class applies, never an
+    # OTHER use: it used to fall through to the Other = Yes branch below.
+    if not use or use.lower() in _USE_NON_ANSWERS:
+        return None
     winner = _vehicle_use_class(use)
     if winner is None:
         # A use IS stated but this table does not recognise it. ACORD's own
@@ -10497,6 +12595,432 @@ def _resolve_vehicle_use_indicator(field_name: str, facts: dict):
         # field and never reaches this resolver).
         return "Yes" if box == "Other" else "No"
     return "Yes" if box == winner else "No"
+
+
+# ── ACORD 127 VEHICLE TYPE (live run 7, 15 Sep 2026) ─────────────────────────
+# PP / SPEC / COML is one choice per vehicle, and the auto dec prints it on the
+# vehicle's own classification line ("PRIV PASSENGER - COMM CLASS: 7383"). Four
+# runs gave four answers - PP ticked, then refused, SPEC and COML guessed - and
+# BODY TYPE printed "PRIV PASSENGER", which is the type, not a body. The merge
+# reads the type beside the vehicle's own VIN
+# (extraction_service._backfill_vehicle_codes_from_text); this ticks its box
+# and answers No to the other two, on real vehicle rows only. The BODY box is
+# an owned blank while the only descriptor held for it is that type. Nothing
+# known about the type leaves all three to the document, exactly as before.
+_VEHICLE_TYPE_TICK_RE = re.compile(
+    r"^Vehicle_VehicleType_(PrivatePassenger|Special|Commercial)Indicator_([A-Z])$")
+_VEHICLE_TYPE_OF_BOX = {"PrivatePassenger": "private_passenger",
+                        "Special": "special", "Commercial": "commercial"}
+_VEHICLE_BODY_CODE_RE = re.compile(r"^Vehicle_BodyCode_([A-Z])$")
+_BODY_LABEL_RE = re.compile(r"body", re.I)
+
+
+def _dec_prints_a_body(row: dict, facts: dict) -> bool:
+    """The document prints a BODY column: a verified entry LABELLED body
+    ("BODY", "BODY TYPE", "BodyType"), whatever its spelling of the body. Live
+    run 11: "SEDAN" was read off the vehicle line "2012 SUBARU OUTBACK SEDAN" -
+    the model's own name - and the owner ruled BODY stays blank rather than
+    take it from there."""
+    entries = _fv(facts, "dec_page_entries")
+    return any(isinstance(e, dict) and _BODY_LABEL_RE.search(str(e.get("label") or ""))
+               for e in (entries if isinstance(entries, list) else []))
+
+
+def _resolve_vehicle_type_cell(field_name: str, facts: dict):
+    tick = _VEHICLE_TYPE_TICK_RE.match(field_name or "")
+    body = None if tick else _VEHICLE_BODY_CODE_RE.match(field_name or "")
+    if not tick and not body:
+        return _SCHED_SKIP
+    if _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP
+    letter = tick.group(2) if tick else body.group(1)
+    idx = _ROW_LETTER_TO_IDX.get(letter, 99)
+    rows = _fv(facts, "auto_vin_schedule")
+    if not isinstance(rows, list) or idx >= len(rows) or not isinstance(rows[idx], dict):
+        return _SCHED_SKIP                # a phantom row has its own owner
+    row = rows[idx]
+    try:
+        from services.extraction_service import vehicle_type_of
+    except Exception:                                     # noqa: BLE001
+        return _SCHED_SKIP
+    if body:
+        if vehicle_type_of(row.get("body_type")):
+            return None
+        # Carrier documents print a body only under a BODY label; anything else
+        # was read off the vehicle's description (see _dec_prints_a_body). A
+        # body a person typed into the schedule is theirs to keep.
+        typed = (_stated_by_a_person(facts, "auto_vin_schedule")
+                 or str(row.get("source") or row.get("provenance") or "").lower() in _PERSON_SOURCES)
+        if _policy_documents_only(facts) and not typed and not _dec_prints_a_body(row, facts):
+            return None
+        return _SCHED_SKIP
+    vt = vehicle_type_of(row.get("vehicle_type")) or vehicle_type_of(row.get("body_type"))
+    if vt is None:
+        return _SCHED_SKIP
+    return "Yes" if _VEHICLE_TYPE_OF_BOX[tick.group(1)] == vt else "No"
+
+
+# One amount end to end: "$ 3,000,000", "185.00", "26680". Never "100 $ 185.00"
+# (a rate printed before the premium), "0 - 25" (a band) or "INCLUDED".
+_CURRENCY_ONLY_RE = re.compile(r"^\$?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?$")
+
+
+def _auto_dec_entries(facts: dict) -> List[dict]:
+    """The verified declarations entries of the AUTO line, or []."""
+    entries = _fv(facts, "dec_page_entries")
+    if not isinstance(entries, list):
+        return []
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                     # noqa: BLE001
+        return []
+    return [e for e in entries if isinstance(e, dict)
+            and _canon_line(str(e.get("line_of_business") or "")) == "auto"]
+
+
+def _real_vehicle_row(facts: dict, letter: str) -> Optional[dict]:
+    """The scheduled vehicle on this row letter, or None (a phantom row)."""
+    rows = _fv(facts, "auto_vin_schedule")
+    idx = _ROW_LETTER_TO_IDX.get(letter, 99)
+    if not isinstance(rows, list) or idx >= len(rows) or not isinstance(rows[idx], dict):
+        return None
+    return rows[idx]
+
+
+# ── ACORD 127 COST NEW (live runs 4-7, 15 Sep 2026) ──────────────────────────
+# Right on all four runs, and through gap fill every time: the vehicle block
+# prints "COST NEW: 26680" and nothing owned the box. The row's own `cost_new`
+# first; otherwise, on a ONE-vehicle schedule only, the one COST NEW figure the
+# auto declarations print. "NA" there is the dec answering and saying nothing
+# (owned blank). Several vehicles or several figures cannot be tied to a row,
+# so the document decides - never one vehicle's cost on another row (C19).
+_VEHICLE_COST_NEW_RE = re.compile(r"^Vehicle_CostNewAmount_([A-Z])$")
+
+
+def _resolve_vehicle_cost_new(field_name: str, facts: dict):
+    m = _VEHICLE_COST_NEW_RE.match(field_name or "")
+    if not m or _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP
+    row = _real_vehicle_row(facts, m.group(1))
+    if row is None:
+        return _SCHED_SKIP                # a phantom row has its own owner
+    own = str(row.get("cost_new") or "").strip()
+    if _CURRENCY_ONLY_RE.match(own) and _currency_to_int(own) > 0:
+        return f"{_currency_to_int(own):,}"
+    if len(_fv(facts, "auto_vin_schedule")) != 1:
+        return _SCHED_SKIP
+    stated: set = set()
+    for e in _auto_dec_entries(facts):
+        if set(re.findall(r"[a-z]+", str(e.get("label") or "").lower())) >= {"cost", "new"}:
+            v = str(e.get("value") or "").strip()
+            if not (_CURRENCY_ONLY_RE.match(v) and _currency_to_int(v) > 0):
+                return None               # "NA": the dec answered, with nothing
+            stated.add(_currency_to_int(v))
+    if not stated:
+        return _SCHED_SKIP
+    return f"{next(iter(stated)):,}" if len(stated) == 1 else None
+
+
+# ── ACORD 127 garaging address (live runs 4-7, 15 Sep 2026) ──────────────────
+# The vehicle block prints where it is garaged - "LOC: 001 4800 DAHLIA STREET
+# D13 / DENVER CO. 80216-3121" - and the boxes were left to gap fill: right on
+# most runs, refused on two, and COUNTY printed "Denver", which no document
+# states. The address is the premises record the AUTO line itself points to
+# (`auto_garaging_addresses`, or an auto-line LOC / GARAGING entry), matched to
+# exactly ONE `property_locations` record by street number, street name and
+# ZIP. Every garaging statement must land on that same record; anything else
+# leaves the boxes to the document - except COUNTY, which prints only a county
+# the record states and is never inferred from a city.
+_VEHICLE_GARAGING_RE = re.compile(
+    r"^Vehicle_PhysicalAddress_(LineOne|CityName|CountyName|StateOrProvinceCode|PostalCode)_([A-Z])$")
+_GARAGE_STORAGE_FIELD = "CommercialVehicleLineOfBusiness_GarageStorageDescription_A"
+_GARAGING_LABEL_RE = re.compile(r"^\s*(?:loc(?:ation)?|garag\w*)\b", re.I)
+_STREET_TYPE_WORDS = frozenset({
+    "STREET", "ST", "AVENUE", "AVE", "ROAD", "RD", "BOULEVARD", "BLVD", "DRIVE",
+    "DR", "LANE", "LN", "COURT", "CT", "SUITE", "STE", "UNIT", "PARKWAY", "PKWY",
+    "HIGHWAY", "HWY", "PLACE", "PL", "WAY", "NORTH", "SOUTH", "EAST", "WEST",
+})
+
+
+def _address_names_location(text: str, loc: dict) -> bool:
+    s = str(text or "").upper()
+    line1 = str(loc.get("address_line1") or "").upper()
+    num = re.match(r"\s*(\d+)", line1)
+    if not num or not re.search(rf"(?<!\d){num.group(1)}(?!\d)", s):
+        return False
+    zip5 = re.match(r"\s*(\d{5})", str(loc.get("address_zip") or ""))
+    if zip5 and zip5.group(1) not in s:
+        return False
+    words = [w for w in re.findall(r"[A-Z]{3,}", line1) if w not in _STREET_TYPE_WORDS]
+    return bool(words) and all(re.search(rf"\b{w}\b", s) for w in words)
+
+
+def _vehicle_garaging_record(facts: dict) -> Optional[dict]:
+    """The ONE premises record the auto line garages its vehicles at, or None."""
+    held_locs = _fv(facts, "property_locations")
+    locs = [l for l in held_locs if isinstance(l, dict)] if isinstance(held_locs, list) else []
+    if not locs:
+        return None
+    held = _fv(facts, "auto_garaging_addresses")
+    texts = [str(item.get("address") if isinstance(item, dict) else item or "")
+             for item in (held if isinstance(held, list) else [held] if held else [])]
+    texts += [str(e.get("value") or "") for e in _auto_dec_entries(facts)
+              if _GARAGING_LABEL_RE.match(str(e.get("label") or ""))]
+    matched: set = set()
+    for t in texts:
+        if not t.strip():
+            continue
+        hits = [i for i, loc in enumerate(locs) if _address_names_location(t, loc)]
+        if len(hits) != 1:
+            return None                   # a garaging place we cannot pin down
+        matched.add(hits[0])
+    return locs[next(iter(matched))] if len(matched) == 1 else None
+
+
+def _resolve_vehicle_garaging_cell(field_name: str, facts: dict):
+    m = _VEHICLE_GARAGING_RE.match(field_name or "")
+    storage = (not m) and field_name == _GARAGE_STORAGE_FIELD
+    if not m and not storage:
+        return _SCHED_SKIP
+    if _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP
+    if m and _real_vehicle_row(facts, m.group(2)) is None:
+        return _SCHED_SKIP                # a phantom row has its own owner
+    part = m.group(1) if m else None
+    # ONE VEHICLE ONLY (review of run 7). Nothing ties a garaging statement to
+    # a particular vehicle, so on a fleet the one captured address could be
+    # another vehicle's - the document decides there (COUNTY stays an owned
+    # blank: it is never inferred).
+    held_rows = _fv(facts, "auto_vin_schedule")
+    one_vehicle = isinstance(held_rows, list) and sum(isinstance(r, dict) for r in held_rows) == 1
+    rec = _vehicle_garaging_record(facts) if one_vehicle else None
+    if part == "CountyName":
+        county = str((rec or {}).get("address_county") or "").strip()
+        return (county or (_stated_garaging_county(facts) if one_vehicle else "")) or None
+    if rec is None:
+        return _SCHED_SKIP
+    line1 = " ".join(x for x in (str(rec.get("address_line1") or "").strip(),
+                                 str(rec.get("address_line2") or "").strip()) if x)
+    city, state, zip_ = (str(rec.get(k) or "").strip()
+                         for k in ("address_city", "address_state", "address_zip"))
+    if storage:
+        text = ", ".join(x for x in (line1, city, " ".join(y for y in (state, zip_) if y)) if x)
+        return text or _SCHED_SKIP
+    value = {"LineOne": line1, "CityName": city, "StateOrProvinceCode": state,
+             "PostalCode": zip_}[part]
+    return value or _SCHED_SKIP
+
+
+_COUNTY_IN_TEXT_RE = re.compile(r"\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,2})\s+COUNTY\b", re.I)
+
+
+def _stated_garaging_county(facts: dict) -> str:
+    """A county the AUTO line itself states for its garaging - an auto-line
+    entry labelled with "county", or "<Name> County" in a garaging statement.
+    Exactly one distinct, else "" - never derived from a city."""
+    found: set = set()
+    held = _fv(facts, "auto_garaging_addresses")
+    texts = [str(item.get("address") if isinstance(item, dict) else item or "")
+             for item in (held if isinstance(held, list) else [held] if held else [])]
+    for e in _auto_dec_entries(facts):
+        label, value = str(e.get("label") or ""), str(e.get("value") or "").strip()
+        if re.search(r"\bcounty\b", label, re.I) and re.fullmatch(r"[A-Za-z][A-Za-z .'-]{1,40}", value):
+            found.add(value.upper())
+        elif _GARAGING_LABEL_RE.match(label):
+            texts.append(value)
+    for t in texts:
+        for m in _COUNTY_IN_TEXT_RE.finditer(t):
+            found.add(f"{m.group(1)} COUNTY".upper())
+    return next(iter(found)).title() if len(found) == 1 else ""
+
+
+# ── ACORD 127 physical-damage VALUATION (live runs 4-7, 15 Sep 2026) ─────────
+# ACV / AGREED / STATED is one choice, stated by the auto line's own
+# `auto_physical_damage_valuation` - never the package-level `valuation_method`,
+# which an inland marine schedule also sets. Only on a real vehicle row whose
+# symbols give it physical damage; otherwise the document decides.
+_VEHICLE_VALUATION_RE = re.compile(
+    r"^Vehicle_Coverage_Valuation(ActualCashValue|AgreedAmount|StatedAmount)Indicator_([A-Z])$")
+
+
+def _valuation_box(value: Any) -> Optional[str]:
+    """The ONE method a valuation names, or None. The ISO stated / agreed
+    wording caps the amount at "the lesser of ... or actual cash value" - that
+    clause names ACV as a cap, not the method, so it is dropped first."""
+    s = str(value or "").strip().lower()
+    s = re.sub(r"\b(?:the\s+)?(?:lesser|least)\s+of\b.*$", "", s)
+    found = set()
+    if re.search(r"\bacv\b|actual\s+cash|market\s+value", s):
+        found.add("ActualCashValue")
+    if re.search(r"\bagreed\b", s):
+        found.add("AgreedAmount")
+    if re.search(r"\bstated\b", s):
+        found.add("StatedAmount")
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _resolve_vehicle_valuation_tick(field_name: str, facts: dict):
+    m = _VEHICLE_VALUATION_RE.match(field_name or "")
+    if not m or _state_auto_grid_decides(field_name, facts):
+        return _SCHED_SKIP
+    row = _real_vehicle_row(facts, m.group(2))
+    box = _valuation_box(_fv(facts, "auto_physical_damage_valuation"))
+    if row is None or box is None:
+        return _SCHED_SKIP
+    # A policy-level valuation speaks for EVERY vehicle only on a one-vehicle
+    # schedule, or for a row that carries its own PD symbol. A fleet's classic
+    # truck insured at a stated amount must not inherit ACV (review of run 7).
+    own_pd = any(str(row.get(k) or "").strip() for k in ("comp_symbol", "coll_symbol"))
+    if len(_fv(facts, "auto_vin_schedule")) != 1 and not own_pd:
+        return _SCHED_SKIP
+    try:
+        carries_pd = (_vehicle_row_covered("ComprehensiveIndicator", row, facts)
+                      or _vehicle_row_covered("CollisionIndicator", row, facts))
+    except Exception:                                     # noqa: BLE001
+        return _SCHED_SKIP
+    if not carries_pd:
+        return _SCHED_SKIP
+    return "Yes" if m.group(1) == box else "No"
+
+
+# ── ACORD 126 COMMERCIAL GENERAL LIABILITY box (live runs 4-7, 15 Sep 2026) ──
+# The section's master tick came back "Occurrence", "No", a refused "Yes" and
+# "Yes" - four answers for a box two facts decide. Ticked when the package's
+# own coverage census GRANTS a general liability line and its coverage form is
+# occurrence or claims-made (the same `gl_form_type` the OCCURRENCE /
+# CLAIMS-MADE ticks beside it read). OCP has no general_liab canon, so an
+# OCP-only policy never ticks it. A census that explicitly DENIES general
+# liability leaves it empty; anything else stays with the document.
+_GL_MASTER_BOX = "GeneralLiability_CoverageIndicator_A"
+
+
+def _resolve_gl_master_coverage_box(field_name: str, facts: dict):
+    if field_name != _GL_MASTER_BOX or str((facts or {}).get("_form_id") or "") != "ACORD_126":
+        return _SCHED_SKIP
+    lines = _fv(facts, "coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return _SCHED_SKIP
+    try:
+        from services.extraction_service import (
+            _canon_line, _line_entry_grants_coverage as _grants,
+            _line_entry_denies_coverage as _denies)
+    except Exception:                                     # noqa: BLE001
+        return _SCHED_SKIP
+    gl = [e for e in lines if isinstance(e, dict)
+          and _canon_line(str(e.get("line") or "")) == "general_liab"]
+    if any(_grants(e) for e in gl):
+        form = str(_fv(facts, "gl_form_type") or "").lower()
+        return "Yes" if ("occurrence" in form or "claims" in form) else _SCHED_SKIP
+    if gl and all(_denies(e) for e in gl):
+        return None
+    return _SCHED_SKIP
+
+
+# ── ACORD 131 ANNUAL PAYROLL (live runs 4-7, 15 Sep 2026) ────────────────────
+# Three runs printed $39,300 - the GL schedule's PAYROLL rating exposure for ONE
+# class (executive supervisors) - as "the total annual payroll of the
+# business". A class's rating base is not the business's payroll: other classes
+# rate on cost or sales, and ISO payroll bases leave out some pay. Row A takes
+# a stated `total_payroll` or is an owned blank.
+#
+# Its two neighbours are the same class (live run 8, 15 Sep 2026): ANN GROSS
+# SALES was offered $39,300 (the payroll exposure) and FOREIGN GROSS SALES
+# printed $1,305 - class 91580's PREMIUM ("33.211 $1,305"). Gross sales comes
+# from `total_revenue` or nowhere, under the same class-exposure refusal.
+# ACORD 186 prints the same two row-A boxes and gets the same rule (review of
+# run 8); 141 / 160 are frozen. No fact carries foreign sales or a subsidiary's
+# figures (the 131's rows B-F are companies, not premises), and a carrier's
+# documents never print them: on a package of carrier documents only those
+# boxes are owned blanks; with an application uploaded the document decides.
+_BUSINESS_TOTAL_PAYROLL_RE = re.compile(
+    r"^BusinessInformation_(TotalPayroll|AnnualGrossReceipts|ForeignGrossSales)Amount_([A-Z])$")
+_BUSINESS_TOTAL_FACT = {"TotalPayroll": "total_payroll", "AnnualGrossReceipts": "total_revenue"}
+
+
+_BUSINESS_TOTAL_FROZEN_FORMS = frozenset({"ACORD_141", "ACORD_160"})
+
+
+def _policy_documents_only(facts: dict) -> bool:
+    """The package holds only documents a CARRIER issued - declarations, policy
+    forms, endorsements, certificates, loss runs - nothing an applicant wrote.
+    Sessions stored before that flag existed fall back to the dec-page-only /
+    certificate-only flags (the pipeline's flags; callers merge them in)."""
+    if not isinstance(facts, dict):
+        return False
+    carrier_only = facts.get("_carrier_documents_only")
+    if carrier_only is not None:
+        return carrier_only is True
+    return facts.get("_only_dec_page") is True or facts.get("_only_certificate") is True
+
+
+# A value a person supplied or confirmed: an ARQ / producer answer, or a Data
+# Consistency confirmation (review of run 9). The no-loss rule's own set stays
+# as it is.
+_PERSON_SOURCES = _NO_LOSS_HUMAN_SOURCES | {"user_confirmed", "cross_form_conflict"}
+
+
+def _stated_by_a_person(facts: dict, key: str) -> bool:
+    held = facts.get(key) if isinstance(facts, dict) else None
+    return isinstance(held, dict) and str(held.get("source") or "").lower() in _PERSON_SOURCES
+
+
+def _resolve_business_total_payroll(field_name: str, facts: dict):
+    m = _BUSINESS_TOTAL_PAYROLL_RE.match(field_name or "")
+    form_id = str((facts or {}).get("_form_id") or "")
+    if not m or not form_id or form_id in _BUSINESS_TOTAL_FROZEN_FORMS:
+        return _SCHED_SKIP
+    box, row = m.group(1), m.group(2)
+    key = _BUSINESS_TOTAL_FACT.get(box)
+    if key is None or row != "A":
+        return None if _policy_documents_only(facts) else _SCHED_SKIP
+    if _total_is_one_class_exposure(facts, key):
+        return None
+    v = str(_fv(facts, key) or "").strip()
+    if _CURRENCY_ONLY_RE.match(v):
+        amount = _currency_to_int(v)
+        # A $0 a person typed is an answer; one the model or a backfill
+        # produced is not evidence of a zero.
+        if amount > 0 or (amount == 0 and _stated_by_a_person(facts, key)):
+            return v
+    return None
+
+
+def _total_is_one_class_exposure(facts: dict, key: str) -> bool:
+    """True when the package total `key` was BACKFILLED from a dec entry whose
+    amount is one GL class's rating exposure (review of run 7). The index's
+    rule 5 labels "$39,300" with the basis word beside it - "Payroll" - and the
+    backfill then made one class's rating base the business's total. Any basis
+    (run 8): a class's Total Cost is no more the business's payroll than its
+    payroll is its gross sales. A total the extraction itself stated is not
+    second-guessed here. Form boxes only: the fact is left as it is (D6 - see
+    v1-20AUG.md)."""
+    held = facts.get(key) if isinstance(facts, dict) else None
+    if not isinstance(held, dict) or (held.get("derivation") or {}).get("rule") != "dec_entry_backfill":
+        return False
+    amount = _currency_to_int(held.get("value"))
+    return amount > 0 and any(_currency_to_int(r.get("exposure_amount")) == amount
+                              for r in _gl_schedule_rows(facts))
+
+
+
+# ── ACORD 125 premises employee counts: the schedule's count or blank ────────
+# Run 5 printed the auto non-ownership band "0 - 25" as # FULL TIME EMPL. The
+# premises machinery (property_locations, then the stated scalar) answers these
+# boxes whenever a document states a count; when it has nothing, the model can
+# only borrow a figure. The VALUE path is untouched - this claims only the
+# blank, so the box is not asked and the ARQ asks the applicant instead.
+_PREMISES_COUNT_RE = re.compile(r"^BusinessInformation_(?:FullTime|PartTime)EmployeeCount_[A-Z]$")
+
+
+def _resolve_premises_count_blank(field_name: str, facts: dict):
+    if not _PREMISES_COUNT_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    if str((facts or {}).get("_form_id") or "") != "ACORD_125":
+        return _SCHED_SKIP
+    v = _deterministic_map(field_name, facts)
+    if isinstance(v, str) and v.strip() and v != "UNMATCHED":
+        return _SCHED_SKIP                # the premises machinery has a count
+    return None
 
 
 # ── One policy, one printing, everywhere on the form ─────────────────────────
@@ -10609,23 +13133,56 @@ def _join_policy_printings(mapped: dict, facts: dict) -> None:
             mapped[f] = c
 
 
-def _is_package_policy_number(value: Any, facts: dict) -> bool:
-    """True when `value` is one of this package's own policy numbers, under
-    the same alnum prefix-containment the canonical-printing join uses."""
-    n = re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
-    if len(n) < 4:
-        return False
-    entries = _fv(facts, "dec_page_entries")
+def _package_policy_keys(facts: dict) -> List[str]:
+    """This package's own policy numbers - every dec entry's attribution and the
+    `policy_number` fact - kept only when shaped like a policy number. A form
+    number, a date or a class code attributed as a page's policy is not one
+    (review of run 8: `CG 99 09 12 19` sits in live sessions' attributions)."""
+    try:
+        from services.extraction_service import _looks_like_a_policy_number
+    except Exception:                                     # noqa: BLE001
+        return []
+    entries = _fv(facts, "dec_page_entries") if isinstance(facts, dict) else None
     keys = {str(e.get("policy_number") or "").strip()
             for e in entries if isinstance(e, dict)} if isinstance(entries, list) else set()
-    pn = str(_fv(facts, "policy_number") or "").strip()
+    pn = str(_fv(facts, "policy_number") or "").strip() if isinstance(facts, dict) else ""
     if pn:
         keys.add(pn)
-    for k in keys:
-        kn = re.sub(r"[^A-Za-z0-9]", "", k).upper()
-        if len(kn) >= 4 and (kn.startswith(n) or n.startswith(kn)):
-            return True
-    return False
+    return sorted(k for k in keys if k and _looks_like_a_policy_number(k)
+                  and not re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", k)
+                  and len(re.sub(r"[^A-Za-z0-9]", "", k)) >= 5)
+
+
+def _is_package_policy_number(value: Any, facts: dict) -> bool:
+    """True when `value` is a printing of one of this package's own policy
+    numbers - through the one same-contract door, so `6E74002` is the auto
+    policy and `GL123` is not `GL12345` (review of run 8: raw prefix
+    containment matched both ways)."""
+    v = str(value or "").strip()
+    if len(re.sub(r"[^A-Za-z0-9]", "", v)) < 4:
+        return False
+    return any(_norm_policy_no(v) == _norm_policy_no(k) or _same_policy_contract(v, k)
+               for k in _package_policy_keys(facts))
+
+
+def _package_policy_named_in(text: Any, facts: dict) -> Optional[str]:
+    """The package policy a free-text value names, or None. Each key is looked
+    for as a whole token with spaces / dashes optional between its characters
+    ("BBC 7263", "6E7 40 02") and its separated two-digit term marker optional
+    - never as a prefix, so `GL123` never finds `GL12345`."""
+    s = str(text or "")
+    if not s.strip():
+        return None
+    for k in _package_policy_keys(facts):
+        core = re.sub(r"[^A-Za-z0-9]", "", k)
+        forms = {core}
+        if re.search(r"[\s\-]\s*\d{2}\s*$", k) and len(core) >= 7:
+            forms.add(core[:-2])
+        for c in forms:
+            pat = r"(?<![A-Za-z0-9])" + r"[\s\-]*".join(map(re.escape, c)) + r"(?![A-Za-z0-9])"
+            if len(c) >= 5 and re.search(pat, s, re.I):
+                return k
+    return None
 
 
 # ── ACORD 131 Q9: hired / non-owned coverage is PROVABLE from the dec ────────
@@ -10657,8 +13214,10 @@ def _hired_nonowned_premiums(facts: dict) -> Optional[Tuple[str, str]]:
         if _canon_line(str(e.get("line_of_business") or "")) != "auto":
             continue
         blob = f"{e.get('label') or ''} {e.get('section') or ''}".lower()
-        v = str(e.get("value") or "")
-        if not re.search(r"\d", v) or _currency_to_int(v) <= 0:
+        v = str(e.get("value") or "").strip()
+        # ONE amount (audit, 15 Sep 2026): run 6 printed "(100 $ 185.00)" and
+        # "(0 - 25)" as the two premiums - a rate and an employee band.
+        if not _CURRENCY_ONLY_RE.match(v) or _currency_to_int(v) <= 0:
             continue
         if "premium" not in blob:
             continue
@@ -10670,21 +13229,55 @@ def _hired_nonowned_premiums(facts: dict) -> Optional[Tuple[str, str]]:
     return (hired, non_owned) if hired and non_owned else None
 
 
+def _hired_nonowned_symbols(facts: dict) -> Optional[List[int]]:
+    """The liability covered-auto symbols when they designate BOTH hired and
+    non-owned autos (symbol 1, or 8 with 9), else None.
+
+    Live run 7 (15 Sep 2026): Q9 flipped from "Y" to blank because that run's
+    extraction did not index ITEM FOUR / FIVE's premiums, while the dec's
+    covered-auto grid - "COVERED AUTOS LIABILITY 01" - proved the answer on
+    every run. See _liability_symbols_cover for which symbols count."""
+    if not (_liability_symbols_cover(facts, "hired")
+            and _liability_symbols_cover(facts, "nonowned")):
+        return None
+    from services import auto_symbols as _sym
+    return list(_sym.symbols_by_coverage(facts).get(_sym.LIABILITY, []))
+
+
+def _liability_symbols_cover(facts: dict, exposure: str) -> bool:
+    """True when symbols the document ATTRIBUTES to liability designate
+    `exposure` ("hired" / "nonowned"). An unattributed grid never counts - its
+    8 may be the hired PHYSICAL DAMAGE symbol - and an unrecognised symbol
+    means "cannot say", never "no" (auto_symbols.covers)."""
+    try:
+        from services import auto_symbols as _sym
+        nums = list(_sym.symbols_by_coverage(facts).get(_sym.LIABILITY, []))
+        return _sym.covers(nums, exposure) is True
+    except Exception:                                     # noqa: BLE001
+        return False
+
+
 def _resolve_umbrella_hired_nonowned(field_name: str, facts: dict):
     is_q = _UMBRELLA_HNO_QUESTION_RE.match(field_name)
     is_exp = _UMBRELLA_HNO_EXPLANATION_RE.match(field_name)
     if not is_q and not is_exp:
         return _SCHED_SKIP
     proof = _hired_nonowned_premiums(facts)
-    if proof is None:
+    symbols = None if proof else _hired_nonowned_symbols(facts)
+    if proof is None and symbols is None:
         return _SCHED_SKIP           # not provable here - the pass may still be
     if is_q:
         return "Y"
-    hired, non_owned = proof
-    # Every token document-derived: the two verbatim premium figures.
-    return (f"Hired/borrowed auto coverage ({hired}) and non-ownership auto "
-            f"liability coverage ({non_owned}) are provided per the policy "
-            f"premium schedules.")
+    if proof:
+        hired, non_owned = proof
+        # Every token document-derived: the two verbatim premium figures.
+        return (f"Hired/borrowed auto coverage ({hired}) and non-ownership auto "
+                f"liability coverage ({non_owned}) are provided per the policy "
+                f"premium schedules.")
+    from services import auto_symbols as _sym
+    label = "symbol" if len(symbols) == 1 else "symbols"
+    return (f"Covered Autos Liability is written on covered auto {label} "
+            f"{_sym.describe_all(symbols)}, covering hired and non-owned autos.")
 
 
 _WC_RATING_FACTOR_RE = re.compile(
@@ -11034,6 +13627,23 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     if absent_row is not _SCHED_SKIP:
         return absent_row
 
+    # ── ...and a coverage PART it never names at all (Employee Benefits) ────
+    uncarried = _resolve_uncarried_coverage_part(field_name, facts)
+    if uncarried is not _SCHED_SKIP:
+        return uncarried
+
+    # ── A question the form asks only in ANOTHER state ──────────────────────
+    out_of_state = _resolve_out_of_state_box(field_name, facts)
+    if out_of_state is not _SCHED_SKIP:
+        return out_of_state
+
+    # ── ACORD 137: coverage rows and sections, never vehicles ────────────────
+    # Before every vehicle-shaped resolver below. A value, an owned blank, or
+    # "UNMATCHED" (only the document can answer) - see services/state_auto_grid.
+    state_auto = _resolve_state_auto_grid(field_name, facts)
+    if state_auto is not _SCHED_SKIP:
+        return state_auto
+
     # ── 131 Q2: the underlying GL coverage form's edition - own line or blank
     # Before _resolve_underlying_policy_row, which also matches UnderlyingPolicy_*
     gl_edition = _resolve_underlying_gl_form_edition(field_name, facts)
@@ -11051,6 +13661,20 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     members = _resolve_member_manager_count(field_name, facts)
     if members is not _SCHED_SKIP:
         return members
+
+    # ── ACORD 131: property of others held, and the umbrella's OTHER limit ───
+    ccc = _resolve_care_custody_control(field_name, facts)
+    if ccc is not _SCHED_SKIP:
+        return ccc
+    umb_other = _resolve_umbrella_other_limit(field_name, facts)
+    if umb_other is not _SCHED_SKIP:
+        return umb_other
+    gl_other = _resolve_gl_other_limit(field_name, facts)
+    if gl_other is not _SCHED_SKIP:
+        return gl_other
+    umb_kind = _resolve_umbrella_or_excess(field_name, facts)
+    if umb_kind is not _SCHED_SKIP:
+        return umb_kind
 
     # ── Producer-assigned certificate identifiers: never from a document ─────
     cert_id = _resolve_certificate_producer_ids(field_name, facts)
@@ -11079,6 +13703,9 @@ def _deterministic_map_inner(field_name: str, facts: dict):
         return cert_letter
 
     # ── Package-form headers: one true package number, NAIC only as a pair ───
+    page_one = _resolve_page_one_receiving_carrier(field_name, facts)
+    if page_one is not _SCHED_SKIP:
+        return page_one
     pkg_header = _resolve_package_header_identity(field_name, facts)
     if pkg_header is not _SCHED_SKIP:
         return pkg_header
@@ -11108,10 +13735,22 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     if veh_deduct is not _SCHED_SKIP:
         return veh_deduct
 
+    # ── ...and the vehicle's coverage ticks, from the same covered-auto symbols
+    veh_tick = _resolve_vehicle_coverage_tick(field_name, facts)
+    if veh_tick is not _SCHED_SKIP:
+        return veh_tick
+
     # ── 127 vehicle rating cells: the auto dec's own figures or blank ────────
     rating_cell = _resolve_vehicle_rating_cell(field_name, facts)
     if rating_cell is not _SCHED_SKIP:
         return rating_cell
+
+    # ── 127 COST NEW, garaging address, PD valuation: the auto line's own ────
+    for _veh_resolver in (_resolve_vehicle_cost_new, _resolve_vehicle_garaging_cell,
+                          _resolve_vehicle_valuation_tick):
+        _veh = _veh_resolver(field_name, facts)
+        if _veh is not _SCHED_SKIP:
+            return _veh
 
     # ── 131 underlying-coverage grid: the umbrella is not underlying to itself
     uw_cov = _resolve_underlying_coverage_grid(field_name, facts)
@@ -11139,6 +13778,16 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     renewal_period = _resolve_renewal_proposed_period(field_name, facts)
     if renewal_period is not _SCHED_SKIP:
         return renewal_period
+
+    # ── The PRODUCER block belongs to the SUBMITTING agency ─────────────────
+    submitting = _resolve_submitting_producer(field_name, facts)
+    if submitting is not _SCHED_SKIP:
+        return submitting
+
+    # -- A holder / payee / mortgagee the document printed as a placeholder --
+    rejected_party = _resolve_rejected_party_box(field_name, facts)
+    if rejected_party is not _SCHED_SKIP:
+        return rejected_party
 
     # ── Section-form header identity from THIS form's own coverage line ─────
     section_identity = _resolve_section_policy_identity(field_name, facts)
@@ -11269,6 +13918,18 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     exposure_count = _resolve_exposure_count(field_name, facts)
     if exposure_count is not _SCHED_SKIP:
         return exposure_count
+    nonowned_count = _resolve_nonowned_group_count(field_name, facts)
+    if nonowned_count is not _SCHED_SKIP:
+        return nonowned_count
+    subcontracted = _resolve_subcontracted_cost(field_name, facts)
+    if subcontracted is not _SCHED_SKIP:
+        return subcontracted
+    sub_work = _resolve_subcontracted_work_description(field_name, facts)
+    if sub_work is not _SCHED_SKIP:
+        return sub_work
+    total_payroll = _resolve_business_total_payroll(field_name, facts)
+    if total_payroll is not _SCHED_SKIP:
+        return total_payroll
     loss_summary = _resolve_loss_history_summary(field_name, facts)
     if loss_summary is not _SCHED_SKIP:
         return loss_summary
@@ -11282,6 +13943,18 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     no_loss = _resolve_no_loss_indicator(field_name, facts)
     if no_loss is not _SCHED_SKIP:
         return no_loss  # "Yes"/"No", or "UNMATCHED" → gap-fill from raw text
+
+    # ── ACORD 126 COMMERCIAL GENERAL LIABILITY master box ───────────────────
+    gl_master = _resolve_gl_master_coverage_box(field_name, facts)
+    if gl_master is not _SCHED_SKIP:
+        return gl_master
+
+    # ── ACORD 127 vehicle TYPE, and the BODY box that must not take it ───────
+    # Ahead of the schedule row below, which would stamp the type ("PRIV
+    # PASSENGER") into the BODY box.
+    vehicle_type = _resolve_vehicle_type_cell(field_name, facts)
+    if vehicle_type is not _SCHED_SKIP:
+        return vehicle_type
 
     # ── GL schedule-of-hazards structured cells (highest priority) ───────────
     gl_haz = _resolve_gl_hazard_row(field_name, facts)
@@ -11370,8 +14043,7 @@ def _deterministic_map_inner(field_name: str, facts: dict):
     if vehicle_use is not _SCHED_SKIP:
         return vehicle_use
 
-    _row_guard = _SCHED_ROW_RE.match(field_name)
-    if _row_guard and _ROW_LETTER_TO_IDX[_row_guard.group(2)] >= 1:
+    if not scalar_rules_reach(field_name):
         # allow_scalar_rules=False: a _B/_C row must never inherit the PRIMARY
         # record's scalar facts (entity_type, operations_description, ...) —
         # that stamped the 1st insured's LLC tick onto empty 2nd/3rd insured
@@ -11409,6 +14081,14 @@ def _deterministic_map_inner(field_name: str, facts: dict):
                     return "UNMATCHED"
                 return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
             val = _fact_with_fallback(facts, fact_key)   # unwrap envelope + _FACT_FALLBACKS
+            # A CHOICE fact bound to a checkbox answers as a TICK - the tick its
+            # value implies for THIS box's option (`expected_tick_for_box`, the
+            # door Field QA compares with). `gl_form_type` "Occurrence" used to
+            # reach the Occurrence box as the word itself, which the Y/N gate
+            # refused, so the basis boxes were never stamped at all.
+            if _is_declared_choice_box(field_name, fact_key):
+                return (expected_tick_for_box(field_name, fact_key, val)
+                        if val is not None else None)
             if fact_key == "valuation_method" and isinstance(val, str):
                 # `valuation_method` is normalized to the 3-letter industry term
                 # ("RCV"/"ACV") at extraction time, but the real ACORD 140/141
@@ -15557,6 +18237,33 @@ def _is_secondary_row(field_name: str) -> bool:
 
 
 @lru_cache(maxsize=64)
+@lru_cache(maxsize=512)
+def _fact_is_measured(fact_key: str) -> bool:
+    """Does this fact hold a MEASURED value - an amount, date, count or
+    percentage - rather than a choice, a name or free text?
+
+    Read off the fact's OWN declared validator, so it cannot drift from the
+    registry. A fact with no validator, or a bespoke one, answers False and
+    nothing changes for it.
+    """
+    try:
+        from services import fact_registry as _fr
+        fn = (_fr.FACT_REGISTRY.get(fact_key) or {}).get("validate")
+        return fn in (_fr._is_currency, _fr._is_date, _fr._is_percent,
+                      _fr._is_positive_int)
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def _is_checkbox_field(form_id: str, field: str) -> bool:
+    """ACORD's own field type says so - `/Btn`."""
+    try:
+        meta = (_all_form_schemas().get(form_id) or {}).get(field)
+        return isinstance(meta, dict) and meta.get("ft") == "/Btn"
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
     """Map an extraction fact key to the ACORD form fields that DETERMINISTICALLY
     receive its value, grouped by form id.
@@ -15662,7 +18369,36 @@ def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
                 if rf and rf.startswith(_prefix + "_"):
                     result.setdefault(form_id, set()).add(field)
 
+    # ── AN AMOUNT IS NOT A TICK ──────────────────────────────────────────────
+    # Client 2026-09-11 item 5: *"There are SQS comparisons that should never
+    # happen - comparing a $2M limit to a Per Location/Per Project yes/no
+    # field."* `_ACORD_FIELD_RULES` matches by SUBSTRING, and
+    # `...GeneralAggregate_LimitAppliesPerProjectIndicator_A` contains
+    # `GeneralLiability_GeneralAggregate`, so four checkboxes inherited
+    # `gl_aggregate`. The stamper has refused that since the 2 Sep Y/N gate;
+    # this map did not, and `field_qa` reads THIS map to check stamped-vs-source
+    # - so the box read "Yes" and the "source value" read "$2,000,000".
+    #
+    # Narrow on purpose. A CHOICE fact driving a checkbox is how ACORD expresses
+    # a choice (`gl_form_type` -> Occurrence / Claims-Made,
+    # `auto_liability_structure` -> Combined Single Limit) and must keep
+    # working. Only a MEASURED value - an amount, a date, a count, a percentage -
+    # can never be a tick, whatever the box is called. Removes 8 bindings across
+    # ACORD 126 and 25; verified against every fact in the registry.
+    _measured = _fact_is_measured(fact_key)
+    if _measured:
+        for fid in list(result):
+            kept = {f for f in result[fid] if not _is_checkbox_field(fid, f)}
+            if kept:
+                result[fid] = kept
+            else:
+                result.pop(fid)
     return {fid: tuple(sorted(fields)) for fid, fields in result.items()}
+
+
+# An ACORD amount box, by ACORD's own naming convention.
+_AMOUNT_BOX_RE = re.compile(r"(Amount|LimitAmount)(_[A-Z])?$")
+_CURRENCY_IN_TEXT_RE = re.compile(r"\$?\s?\d[\d,]*(?:\.\d{2})?")
 
 
 def expected_value_for_field(field_name: str, fact_key: str, source_value: Any) -> Any:
@@ -15681,10 +18417,198 @@ def expected_value_for_field(field_name: str, fact_key: str, source_value: Any) 
     check compares like-for-like.
     """
     rf = _first_rule_fact(field_name)
-    if not rf or not any(rf.startswith(p + "_") for p in _SPECIAL_PREFIXES):
-        return source_value
-    suffix = rf.split("_")[-1]
-    return _parse_address(str(source_value or "")).get(suffix, "")
+    if rf and any(rf.startswith(p + "_") for p in _SPECIAL_PREFIXES):
+        suffix = rf.split("_")[-1]
+        return _parse_address(str(source_value or "")).get(suffix, "")
+    # ── AN AMOUNT BOX HOLDS THE AMOUNT, NOT THE SENTENCE AROUND IT ──────────
+    # Same principle as the address split above, one fact kind over. Live run
+    # 11 Sep 2026, the only value mismatch left on the cover page:
+    #
+    #     Vehicle CombinedSingleLimit EachAccidentAmount on ACORD 131
+    #     shows "1,000,000" but the source value is
+    #     "$1,000,000 Combined Single Limit"
+    #
+    # Both are right. `auto_liability_limit` carries the amount AND the
+    # STRUCTURE in one string, because that is how a declarations page prints
+    # it; the box takes only the amount, and display canonicalisation strips
+    # the rest. Comparing the box against the whole string manufactures a
+    # mismatch on every split/CSL package there is.
+    #
+    # Acts only when the answer is unambiguous: the source must state EXACTLY
+    # ONE currency amount. "$1,000,000 / $2,000,000" states two and is left
+    # whole, because picking one of them would be a guess.
+    if _AMOUNT_BOX_RE.search(field_name or ""):
+        amounts = _CURRENCY_IN_TEXT_RE.findall(str(source_value or ""))
+        if len(amounts) == 1 and amounts[0].strip() != str(source_value or "").strip():
+            return amounts[0].strip()
+    return source_value
+
+
+def expected_tick_for_box(field_name: str, fact_key: str,
+                          source_value: Any) -> Optional[str]:
+    """"Yes" / "No" - the tick THIS checkbox should show given its source
+    fact - or None when the fact does not say.
+
+    A CHECKBOX HOLDS A TICK, NOT THE FACT'S WORDING. `gl_form_type` drives the
+    Occurrence and Claims-Made boxes, and that binding is right - it is how
+    ACORD prints a choice. But Field QA compared the box's "No" with the fact's
+    raw text, which can never agree: measured on every (tick, value) pair,
+    including the CORRECT "Occurrence". Client 11 Sep (Orbin): "comparing a
+    Claims Made indicator to the words 'Commercial Liability Umbrella Coverage
+    Form'".
+
+    Most certain reading first, and never a guess:
+      * the fact is itself a yes/no          -> the tick IS the fact;
+      * `_INDICATOR_RULES` (the table the stamper derives these ticks from)
+        declares the box's option, and the fact names exactly one option of
+        its own closed list                   -> "Yes" if it is this box's;
+      * anything else                         -> None: nothing to compare.
+    """
+    if isinstance(source_value, bool):
+        return "Yes" if source_value else "No"
+    try:
+        from services.normalization import canonical_yes_no
+        yn = canonical_yes_no(source_value)
+    except Exception:                                         # noqa: BLE001
+        yn = None
+    if yn:
+        return yn
+    word = next((opt for sub, (fk, opt) in _INDICATOR_RULES.items()
+                 if fk == fact_key and sub in (field_name or "")), None)
+    if not word:
+        return None
+    try:
+        from services.answer_options import options_for, option_named_by
+    except Exception:                                         # noqa: BLE001
+        return None
+    chosen = option_named_by(fact_key, source_value)
+    if chosen is None:
+        return None
+    # The box must identify exactly ONE option of the fact's own list, or we
+    # cannot say which answer it stands for.
+    mine = [o for o in (options_for(fact_key) or [])
+            if o != "Other" and word.lower() in str(o).lower()]
+    if len(mine) != 1:
+        return None
+    return "Yes" if chosen == mine[0] else "No"
+
+
+def _is_declared_choice_box(field_name: str, fact_key: str) -> bool:
+    """True when `_INDICATOR_RULES` declares which option of ``fact_key`` this
+    checkbox stands for. Measured 14 Sep: the six GL basis boxes (126/131/25)
+    are the only fields both tables bind to one fact."""
+    return bool(field_name and fact_key) and any(
+        fk == fact_key and sub in field_name
+        for sub, (fk, _opt) in _INDICATOR_RULES.items())
+
+
+def box_expectation(form_id: str, field_name: str, fact_key: str,
+                    source_value: Any, facts: Optional[dict],
+                    schema: Optional[dict] = None):
+    """What a check should compare THIS box with - ``("tick", "Yes"|"No")``
+    for a checkbox, ``("value", x)`` otherwise - or None when nothing about
+    the box is comparable.
+
+    THE ONE DOOR for "does this stamped box agree with its source?". Field QA
+    and the post-generation stamp check both ask here (client 11 Sep, Orbin:
+    "values should only be compared when they represent the same field, same
+    LOB/policy and applicable time period"). Three questions, in order:
+      1. who OWNS the box - a section form's identity boxes are their own
+         line's (`authoritative_expected_value`), never the package scalar the
+         owner declined, and an owned blank has nothing to compare;
+      2. which PIECE of the source the box holds (`expected_value_for_field`:
+         an address part, a bare amount);
+      3. for a checkbox, the TICK that value implies (`expected_tick_for_box`),
+         never the fact's wording.
+    """
+    expected = expected_value_for_field(field_name, fact_key, source_value)
+    try:
+        owned = authoritative_expected_value(form_id, field_name, facts or {}, schema)
+    except Exception:                                         # noqa: BLE001
+        owned = _AUTH_UNOWNED
+    if owned is None:
+        return None                   # an owned blank - the scalar is not its truth
+    if owned is not _AUTH_UNOWNED:
+        expected = expected_value_for_field(field_name, fact_key, owned)
+    if expected is None or str(expected).strip() == "":
+        return None
+    meta = schema.get(field_name) if isinstance(schema, dict) else None
+    if isinstance(meta, dict) and meta.get("ft") == "/Btn":
+        tick = expected_tick_for_box(field_name, fact_key, expected)
+        return ("tick", tick) if tick else None
+    return ("value", expected)
+
+
+# Sentinel: NO deterministic resolver claims this box, so the package-level
+# fact really is its source of truth and an ordinary value check applies.
+_AUTH_UNOWNED = object()
+
+
+def authoritative_expected_value(
+    form_id: str,
+    field_name: str,
+    facts: dict,
+    schema: Optional[dict] = None,
+):
+    """What the OWNER of this box says its value should be - or
+    ``_AUTH_UNOWNED`` when nothing owns it.
+
+    THE DEFECT THIS CLOSES (client 2026-09-11 item 1; live run 1 finding F1).
+    On 11 Sep the section-form identity boxes stopped reading the package
+    scalar: ACORD 127's policy number now comes from the AUTO coverage line,
+    ACORD 131's from the UMBRELLA line, and each carrier/NAIC pair from its own
+    line's evidence. Every consumer still comparing a stamped box against the
+    FLAT `policy_number` / `carrier_naic` fact therefore reports the correct
+    value as a mismatch - and reports MORE of them the more correct the forms
+    get. Measured on run 1: four Field QA failures, all four stamped values
+    right, all four "source values" the package scalar.
+
+    THE RULE. A fact that gained an axis takes every consumer with it. So the
+    question "what should this box hold?" is answered by the same resolver
+    chain that FILLED it, never by a scalar the resolver deliberately declined
+    to use. ``_AUTHORITATIVE_BLANK_RESOLVERS`` is that chain and it is already
+    the contract both ``map_facts_to_form`` and ``compute_form_gaps`` consult,
+    so this door cannot drift from the stamper: a resolver added there is
+    honoured here on the same commit, with no second list to maintain.
+
+    Returns
+    -------
+    ``_AUTH_UNOWNED``   no resolver claims the field - caller compares against
+                        the source fact exactly as before.
+    a non-empty value   the owner's value. THIS is the expected value.
+    ``None``            the owner claims the field and deliberately produced no
+                        value (an owned blank). The package scalar is provably
+                        NOT this box's source of truth, so a value check
+                        against it can only manufacture a false alarm.
+    """
+    if not field_name:
+        return _AUTH_UNOWNED
+    # Same shallow-copy + schema-context contract as map_facts_to_form, so the
+    # form-scoped and tooltip-driven resolvers see exactly what they saw when
+    # the box was stamped. Anything less and this door starts answering a
+    # different question from the one it is standing in for.
+    scoped = {**(facts or {}), "_form_id": str(form_id or "")}
+    prev = getattr(_SCHEMA_CTX, "schema", None)
+    if isinstance(schema, dict):
+        _set_schema_context(schema)
+    try:
+        for name in _AUTHORITATIVE_BLANK_RESOLVERS:
+            fn = globals().get(name)
+            if fn is None:                                # pragma: no cover
+                continue
+            try:
+                out = fn(field_name, scoped)
+            except Exception:                             # noqa: BLE001
+                continue
+            if out is _SCHED_SKIP:
+                continue
+            if _is_empty_llm_value(out) or str(out or "").strip() == "":
+                return None                               # owned blank
+            return out
+    finally:
+        if isinstance(schema, dict):
+            _set_schema_context(prev)
+    return _AUTH_UNOWNED
 
 
 def forms_consuming_fact(fact_key: str) -> List[str]:
@@ -15844,8 +18768,14 @@ def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, di
             # today, so a RATE can still only ever be transcribed from the
             # extracted schedule and is never a question for the gap-fill model.
             _bound = _resolve_schedule_row(field, facts)
+            # ...unless a resolver OWNS this box as a blank. The generic
+            # `Location_ProducerIdentifier` binding also matches ACORD 131's
+            # CARE, CUSTODY, CONTROL LOC column, and this door ran before the
+            # owned-blank rule was ever asked, so live run 6 printed a lone "1"
+            # on a row that is otherwise (correctly) empty.
             if (_bound is not _SCHED_SKIP and _bound is not None
-                    and not _is_empty_llm_value(_bound)):
+                    and not _is_empty_llm_value(_bound)
+                    and not _owned_blank_claim(field, facts)):
                 mapped[field] = _bound
                 deterministic_filled.add(field)
                 continue
@@ -15864,6 +18794,7 @@ def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, di
 
         # Schedule rows resolved against facts["..."] lists.
         sched = _resolve_schedule_row(field, facts)
+        sched = _unless_owned_blank(field, sched, facts)
         if sched is not _SCHED_SKIP:
             if sched is not None and not _is_empty_llm_value(sched):
                 mapped[field] = sched
@@ -16026,7 +18957,166 @@ def _pack_schedule_aware_batches(field_items: List[tuple]) -> List[List[tuple]]:
     return batches or [field_items]
 
 
+# ── LINE-SCOPED READING: a question about one coverage line reads that line ──
+# Measured on the Orbin package (14 Sep 2026, offline recorder): every gap-fill
+# batch walked the whole 700k-char package in 7 chunks, and the page a box needed
+# sat in ONE of them. The ACORD 126 territory question was answered from the only
+# "TERRITORY" in the package - the AUTO Drive Other Car line - and the 127 vehicle
+# class from the GL class schedule in the facts block. Guarding afterwards catches
+# what a witness exists for; not showing another line's pages removes the source.
+#
+# A page belongs to a line when its own header or footer prints that line's
+# policy number (carrier dec and form pages print it in both places); a page that
+# prints two lines' numbers, or none, belongs to NO line and every scope keeps it.
+# So nothing is hidden from a line that could be its own, documents without page
+# markers (a certificate, a narrative) stay in every scope, and questions that are
+# not about one line (ACORD 125's package questions) still read everything.
+# `GAP_FILL_LINE_SCOPE=0` restores whole-document reading exactly.
+_LINE_SCOPE_ENABLED = os.getenv("GAP_FILL_LINE_SCOPE", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+_SCOPE_EDGE_HEAD, _SCOPE_EDGE_FOOT = 8, 3
+
+
+def build_line_page_scopes(docs: Any, facts: dict) -> Dict[str, str]:
+    """{canonical line: the document text a question about that line may read}."""
+    if not _LINE_SCOPE_ENABLED or not isinstance(docs, (list, tuple)):
+        return {}
+    try:
+        from services.extraction_service import (
+            current_numbers_by_line, _page_blocks, _contract_search_keys,
+        )
+    except Exception:                                         # noqa: BLE001
+        return {}
+    by_line = current_numbers_by_line(_fv(facts, "dec_page_entries"), facts) or {}
+    owners: Dict[str, set] = {}
+    for line, numbers in by_line.items():
+        for number in numbers:
+            for key in _contract_search_keys([str(number)]):
+                owners.setdefault(key, set()).add(line)
+    keys = {k: next(iter(v)) for k, v in owners.items() if len(v) == 1}
+    if not keys:
+        return {}
+    segments: List[Tuple[Optional[str], str]] = []
+    claimed: set = set()
+    for d in docs:
+        if not isinstance(d, dict):
+            continue
+        text = str(d.get("text") or "")
+        blocks = _page_blocks(text)
+        if not blocks:
+            segments.append((None, text + "\n"))
+            continue
+        first = text.find("[Document page")
+        if first > 0:
+            segments.append((None, text[:first]))
+        # A package prints each policy as a SECTION - its declarations, then its
+        # own forms and endorsements - so a page that names no policy (an ISO
+        # form page), or names two (an umbrella's schedule of underlying
+        # insurance), belongs to the section it is printed in: the last policy
+        # named above it. Measured on Orbin: page-level attribution alone left
+        # every scope at 94% of the package, because the form pages between
+        # the declarations carry no policy number - and cost MORE calls, not
+        # fewer. Pages before the first policy (common declarations) stay common.
+        current: Optional[str] = None
+        for pno, body in blocks:
+            lines = body.strip().splitlines()
+            edge = re.sub(r"[^a-z0-9]", "", " ".join(
+                lines[:_SCOPE_EDGE_HEAD] + lines[-_SCOPE_EDGE_FOOT:]).lower())
+            found = {line for k, line in keys.items() if k in edge}
+            if len(found) == 1:
+                current = next(iter(found))
+                claimed.add(current)
+            segments.append((current, f"[Document page {pno}]{body}"))
+        segments.append((None, "\n"))
+    return {line: "".join(t for o, t in segments if o in (None, line))
+            for line in claimed}
+
+
+def _field_scope_line(field: str, form_ids: List[str]) -> Optional[str]:
+    """The ONE coverage line a gap-fill question is about, or None.
+
+    The field's own leading segment first (`GeneralLiability_` on ACORD 131 is
+    the underlying GL, not the umbrella); otherwise the line of the section
+    form(s) asking it, when they all agree. ACORD 125/101 questions have no line.
+    """
+    lead = _canon_from_name(str(field or "").split("_", 1)[0])
+    if lead:
+        return lead
+    fams = set()
+    for fid in form_ids or []:
+        phrases = _SECTION_FORM_LINE_PHRASES.get(fid)
+        fams.add(_canon_from_name(phrases[0]) if phrases else None)
+    return next(iter(fams)) if len(fams) == 1 and None not in fams else None
+
+
+def _facts_for_line(facts: dict, line: str) -> dict:
+    """The facts a question about `line` is shown: another line's own facts
+    (`gl_class_code_schedule` on an auto question) and its declarations entries
+    are left out; everything line-neutral stays."""
+    out: dict = {}
+    for k, v in (facts or {}).items():
+        kline = None if str(k).startswith("_") else _canon_from_name(k)
+        if kline and kline != line:
+            continue
+        out[k] = v
+    ents = _fv(out, "dec_page_entries")
+    if isinstance(ents, list):
+        out["dec_page_entries"] = [
+            e for e in ents if not isinstance(e, dict)
+            or (_canon_from_name(e.get("line_of_business"))
+                or _canon_from_name(e.get("section"))) in (None, line)]
+    return out
+
+
 def combined_gap_fill(
+    forms_to_unmatched: Dict[str, dict],
+    facts: dict,
+    raw_text: str,
+    model: str = None,
+    forms_to_mapped: Optional[Dict[str, dict]] = None,
+    line_scopes: Optional[Dict[str, str]] = None,
+) -> Dict[str, dict]:
+    """One shared gap fill over every selected form's gaps (see
+    `_combined_gap_fill_core`). With `line_scopes` from `build_line_page_scopes`,
+    the questions about ONE coverage line run as their own group over that
+    line's pages; everything else runs over the whole document as before."""
+    if not line_scopes:
+        return _combined_gap_fill_core(forms_to_unmatched, facts, raw_text,
+                                       model, forms_to_mapped)
+    field_forms: Dict[str, List[str]] = {}
+    for fid, fields in (forms_to_unmatched or {}).items():
+        for name in (fields or {}):
+            field_forms.setdefault(name, []).append(fid)
+    groups: Dict[Optional[str], Dict[str, dict]] = {}
+    for fid, fields in (forms_to_unmatched or {}).items():
+        for name, meta in (fields or {}).items():
+            line = _field_scope_line(name, field_forms.get(name, []))
+            key = line if line in line_scopes else None
+            groups.setdefault(key, {}).setdefault(fid, {})[name] = meta
+    if set(groups) <= {None}:
+        return _combined_gap_fill_core(forms_to_unmatched, facts, raw_text,
+                                       model, forms_to_mapped)
+    logger.info("combined_gap_fill: line-scoped groups %s",
+                {str(k): sum(len(v) for v in g.values()) for k, g in groups.items()})
+    per_form: Dict[str, dict] = {}
+    for line, sub in groups.items():
+        text = raw_text if line is None else line_scopes[line]
+        sub_facts = facts if line is None else _facts_for_line(facts, line)
+        res = _combined_gap_fill_core(sub, sub_facts, text, model, forms_to_mapped)
+        for fid, r in res.items():
+            dst = per_form.setdefault(fid, {"filled_values": {}, "raw_text_fields": set(),
+                                            "question_grounding": {},
+                                            "model_used": r.get("model_used")})
+            dst["filled_values"].update(r.get("filled_values") or {})
+            dst["raw_text_fields"] |= set(r.get("raw_text_fields") or set())
+            dst["question_grounding"].update(r.get("question_grounding") or {})
+    for fid in forms_to_unmatched or {}:
+        per_form.setdefault(fid, {"filled_values": {}, "raw_text_fields": set(),
+                                  "question_grounding": {}, "model_used": model or GPT_MODEL})
+    return per_form
+
+
+def _combined_gap_fill_core(
     forms_to_unmatched: Dict[str, dict],
     facts: dict,
     raw_text: str,
@@ -16347,6 +19437,10 @@ def _looks_like_declared_number_value(s: str) -> bool:
     return not re.search(r"[A-Za-z]{4,}", s or "")
 
 
+# A range or a bound - "0 - 25", "10 to 15", "25+", "<10" - is not ONE count.
+_COUNT_RANGE_VALUE_RE = re.compile(r"\d\s*(?:-|–|—|to)\s*\d|[+<>]")
+
+
 # ── Tooltip-declared field types (Guard 3b) ──────────────────────────────────
 # ACORD states the expected type of a field IN THE FIELD'S OWN TOOLTIP: "Enter
 # code:", "Enter year:", "Enter identifier:", "Enter amount:", ... Measured across
@@ -16526,6 +19620,39 @@ _MONEY_ONLY_RE = re.compile(
 )
 
 
+_STREET_NUMBER_RE = re.compile(r"^\s*\d{1,6}[A-Za-z]?\s+\S")
+_STREET_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+_LOCALITY_AFTER_COMMA_RE = re.compile(r",\s*[A-Za-z]")
+_TRAILING_ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\s*$")
+
+
+def _looks_like_a_street_address(value: Any) -> bool:
+    """A street number, a street WORD, and a locality - all three.
+
+    Structural on purpose. The one thing this must never do is grow into a list
+    of street-suffix words, because the 2026-08-08 Data Consistency arc is the
+    standing proof that the next spelling always gets through one.
+
+    THE THIRD CONDITION AND THE ANCHORED POSTCODE ARE BOTH MEASURED, not
+    tidiness. A 4,000-value sweep of generated loan / account / policy numbers
+    put 25 through the first draft: `2215 73 133 57140,4289` has a leading
+    number and a five-digit RUN, and an unanchored postcode pattern reads that
+    as a ZIP. A real address always carries a street word, and its postcode is
+    the last thing on the line. Re-swept after: 0 of 4,000.
+
+    ACCEPTED MISS: a bare "8815 Walnut Ave" - no locality, no postcode.
+    Separating that from an identifier needs street-suffix vocabulary, and that
+    is the trade this deliberately refuses to make.
+    """
+    text = str(value or "").strip()
+    if not _STREET_NUMBER_RE.match(text):
+        return False
+    if not _STREET_WORD_RE.search(text):
+        return False
+    return bool(_LOCALITY_AFTER_COMMA_RE.search(text)
+                or _TRAILING_ZIP_RE.search(text))
+
+
 def _rejects_declared_type(field: str, meta: Any, value: str,
                            schema: Optional[dict] = None) -> Optional[str]:
     """Reason string if `value` cannot possibly be valid for this field's
@@ -16581,6 +19708,14 @@ def _rejects_declared_type(field: str, meta: Any, value: str,
         # 607 fields it already covered.
         if not _looks_like_declared_number_value(s):
             return f"declared 'number' but value contains prose: {s[:40]!r}"
+        # A COUNT box (ACORD names every one "...Count") holds one number. Live
+        # 15 Sep 2026: the auto dec's non-owned rating band "0 - 25" printed as
+        # # FULL TIME EMPL on ACORD 125 and as # EMPL down six ACORD 131 rows.
+        # Only a range or bound is refused - never a code like "B-1" (no digit on
+        # both sides of the dash), and never outside a count box.
+        if (re.sub(r"_[A-Z]{1,2}$", "", field or "").endswith("Count")
+                and _COUNT_RANGE_VALUE_RE.search(s)):
+            return f"declared 'number' count but value is a range or bound: {s[:40]!r}"
         return None
 
     if dtype == "rate":
@@ -16614,6 +19749,29 @@ def _rejects_declared_type(field: str, meta: Any, value: str,
             return f"declared '{dtype}' but value looks like a person's name: {s[:40]!r}"
         if is_vin:
             return f"declared '{dtype}' but value is a 17-character VIN: {s[:40]!r}"
+        # ── AN ADDRESS IS NOT AN IDENTIFIER ─────────────────────────────────
+        # Live 11 Sep 2026, on FOUR forms across both runs. ACORD 125's
+        # REFERENCE / LOAN # box - "Enter identifier: The loan number, account
+        # number or other controlling number" - came back holding the interest
+        # holder's own street:
+        #
+        #     Wells Fargo Equipment Finance   REF / LOAN #: 800 Walnut Street, Des...
+        #     Boulder Valley Bank             REF / LOAN #: 1600 Broadway, Boulder...
+        #
+        # The address is already in the address lines two boxes up. Gap fill,
+        # asked for a loan number the document never states, fills the box from
+        # the only other thing it knows about that party. Same shape as the
+        # form-number-in-a-policy-box defect: an empty box beside a populated
+        # record gets the record's nearest value.
+        #
+        # TWO structural conditions, deliberately - a single one is necessary
+        # but not sufficient (H1-F). A leading STREET NUMBER alone would refuse
+        # the perfectly ordinary loan number "800 4471"; a comma alone would
+        # refuse "ACCT 1234, SUB 5". Together they describe a postal address and
+        # essentially nothing else. No street-suffix vocabulary is used, so this
+        # cannot become the next denylist.
+        if _looks_like_a_street_address(s):
+            return f"declared '{dtype}' but value is a street address: {s[:40]!r}"
         if dtype == "code" and len(s) > 64:
             return f"declared 'code' but value is {len(s)} chars of prose"
         return None
@@ -16925,6 +20083,40 @@ def _is_evidence_required_field(field: str) -> bool:
     these are stamped only when the gap-fill LLM copied them from the document,
     never when inferred (client Figure 30)."""
     return any(token in field for token in _EVIDENCE_REQUIRED_TOKENS)
+
+
+def _unanswered_question_fields(schema: dict, mapped: dict, fields) -> set:
+    """Of `fields` (boxes a guard emptied), those that belong to a Yes/No
+    QUESTION the form now leaves unanswered - its own box, its explanation, or
+    an incident date hanging off that explanation.
+
+    Their refusal is not "a value found for that box that could not be true":
+    the documents do not answer the question, and a high-impact one is already
+    listed as "left blank by the AI". Whichever guard emptied them - the
+    evidence gate, or a guard after it (live run 5: one form title in four
+    ACORD 131 explanation boxes, removed as a cross-field duplicate after the
+    gate had kept the Yeses) - they are one unanswered question, not a finding
+    each. Structural only: the pairing, the explanation shape and
+    `_ANCHORED_DETAIL_GROUPS`, never a topic.
+    """
+    def _empty(f: str) -> bool:
+        return str(mapped.get(f) or "").strip() in ("", "null", "None")
+
+    owner = {exp: q for q, exp in _question_explanation_pairs(schema).items()}
+    anchors = {dep: anchor for anchor, deps in _ANCHORED_DETAIL_GROUPS for dep in deps}
+    out: set = set()
+    for f in fields:
+        if _is_yes_no_field(f, schema):
+            out.add(f)
+        elif f in anchors:
+            if _empty(anchors[f]):
+                out.add(f)
+        elif f in owner:
+            if _empty(owner[f]):
+                out.add(f)
+        elif _is_evidence_required_field(f):
+            out.add(f)
+    return out
 
 
 def _question_explanation_pairs(schema: dict) -> Dict[str, str]:
@@ -17958,6 +21150,185 @@ _OTHER_ROW_AMOUNT_RE = re.compile(
     r"^(?P<stem>.*Other(?:Coverage)?)_?(?:Limit|Premium)?Amount(?P<row>_[A-N])?$")
 
 
+# Which tick governs which deductible amount, where ACORD prints both on one
+# row (see map_facts_to_form's orphan sweep). DERIVED from the schema, not
+# listed: a `<stem>DeductibleIndicator` box ("indicates if a <stem> deductible
+# applies") governs the `<stem>DeductibleAmount` beside it on the same row, with
+# ACORD's "Coverage_" wrapper ignored (137 prints
+# `Vehicle_Coverage_ComprehensiveDeductibleIndicator` beside
+# `Vehicle_Comprehensive_DeductibleAmount`). The first version was a hand list
+# of three vehicle rows, and live run 6 (15 Sep 2026) walked straight past it:
+# ACORD 126 printed "PROPERTY DAMAGE $1,000" - the Limited Pollution
+# endorsement's deductible - after the gate refused its tick. Measured over all
+# 17 schemas the rule pairs exactly 126 PROPERTY DAMAGE and BODILY INJURY and
+# 137 COMP and SPEC C OF L (pinned by test). Two deliberate edges:
+#   * an OTHER row is governed by its DESCRIPTION, not its tick - the
+#     description names the deductible, so the amount means something without
+#     the box (`_blank_unnamed_other_rows` owns that rule);
+#   * COLLISION is the one row whose tick is the COVERAGE tick - ACORD prints no
+#     "collision deductible applies" box on 127 or 137 - so it is declared.
+_DECLARED_TICK_GOVERNS_AMOUNT: Tuple[Tuple[str, str], ...] = (
+    ("Vehicle_Coverage_CollisionIndicator", "Vehicle_Collision_DeductibleAmount"),
+)
+_DEDUCTIBLE_TICK_RE = re.compile(r"^(?P<stem>.+?)DeductibleIndicator_(?P<row>[A-Z])$")
+_DEDUCTIBLE_AMOUNT_RE = re.compile(r"^(?P<stem>.+?)DeductibleAmount_(?P<row>[A-Z])$")
+
+
+def _deductible_stem(stem: str) -> str:
+    return stem.replace("Coverage_", "").replace("_", "").lower()
+
+
+def _deductible_tick_amount_pairs(schema: dict) -> List[Tuple[str, str]]:
+    """(tick, amount) for every deductible row on this form - see above."""
+    names = list((schema or {}).keys())
+    amounts: Dict[Tuple[str, str], str] = {}
+    for name in names:
+        m = _DEDUCTIBLE_AMOUNT_RE.match(name)
+        if m:
+            amounts[(_deductible_stem(m.group("stem")), m.group("row"))] = name
+    pairs: List[Tuple[str, str]] = []
+    for name in names:
+        m = _DEDUCTIBLE_TICK_RE.match(name)
+        if not m:
+            continue
+        key = (_deductible_stem(m.group("stem")), m.group("row"))
+        if key[0].endswith("other"):
+            continue                      # an OTHER row: its description governs
+        if key in amounts:
+            pairs.append((name, amounts[key]))
+    for tick_base, amt_base in _DECLARED_TICK_GOVERNS_AMOUNT:
+        for row in _ROW_LETTERS:
+            tick, amt = f"{tick_base}_{row}", f"{amt_base}_{row}"
+            if tick in (schema or {}) and amt in (schema or {}):
+                pairs.append((tick, amt))
+    return pairs
+
+
+def _orphaned_deductible_amounts(mapped: dict, schema: dict,
+                                 ai_filled: set) -> List[Tuple[str, str]]:
+    """(amount, tick) pairs where a GAP-FILLED amount sits beside a tick that is
+    not set. Both boxes must exist on the form's row; a deterministic amount is
+    never returned. An amount with several governing ticks survives if ANY of
+    them is set."""
+    governing: Dict[str, List[str]] = {}
+    for tick, amt in _deductible_tick_amount_pairs(schema):
+        governing.setdefault(amt, []).append(tick)
+    out: List[Tuple[str, str]] = []
+    for amt, ticks in governing.items():
+        if amt not in ai_filled or not str(mapped.get(amt) or "").strip():
+            continue
+        if any(str(mapped.get(t) or "").strip().lower() in _AFFIRMATIVE_VALUES
+               for t in ticks):
+            continue
+        out.append((amt, ticks[0]))
+    return out
+
+
+# ── An OTHER deductible that names a row the form PRINTS (live run 7) ────────
+# ACORD 126 printed "Property Damage Deductible $1,000" in the OTHER row, one
+# line under the PROPERTY DAMAGE row whose own tick the evidence gate had just
+# refused. An OTHER row is for a deductible the form does not print; a
+# description that is only the NAME of a printed row IS that row, so it follows
+# that row's tick. The row names are read off the form (the non-OTHER
+# tick/amount pairs above), never listed.
+_OTHER_DEDUCTIBLE_PART_RE = re.compile(
+    r"^(?P<prefix>.+?)OtherDeductible(?P<part>Indicator|Description|Amount)_(?P<row>[A-Z])$")
+# Words that describe ANY deductible, so they never tell one row from another.
+_DEDUCTIBLE_NAME_FILLER = frozenset({
+    "deductible", "deductibles", "ded", "coverage", "liability", "amount", "per",
+    "each", "claim", "occurrence", "applies", "requested", "the", "a", "an", "of",
+    "for", "only",
+})
+
+
+def _deductible_words(text: Any) -> frozenset:
+    return frozenset(w for w in re.findall(r"[a-z]+", str(text or "").lower())
+                     if w not in _DEDUCTIBLE_NAME_FILLER)
+
+
+def _misfiled_other_deductibles(mapped: dict, schema: dict,
+                                ai_filled: set) -> List[Tuple[str, str, str]]:
+    """(OTHER description, printed tick, printed amount) for each gap-filled
+    OTHER deductible description whose words are exactly a printed row's name.
+    "Limited Pollution - Property Damage" names a different deductible and is
+    kept; "Property Damage Deductible" is the PROPERTY DAMAGE row."""
+    printed: Dict[Tuple[str, str], List[Tuple[frozenset, str, str]]] = {}
+    for tick, amt in _deductible_tick_amount_pairs(schema):
+        m = _DEDUCTIBLE_TICK_RE.match(tick)
+        parts = [p for p in m.group("stem").split("_") if p] if m else []
+        if len(parts) < 2:
+            continue
+        words = _deductible_words(" ".join(re.findall(r"[A-Z][a-z]*|[a-z]+", parts[-1])))
+        if words:
+            printed.setdefault(("_".join(parts[:-1]) + "_", m.group("row")), []).append(
+                (words, tick, amt))
+    out: List[Tuple[str, str, str]] = []
+    for field in (schema or {}):
+        m = _OTHER_DEDUCTIBLE_PART_RE.match(field)
+        if not m or m.group("part") != "Description" or field not in ai_filled:
+            continue
+        words = _deductible_words(mapped.get(field))
+        if not words:
+            continue
+        for row_words, tick, amt in printed.get((m.group("prefix"), m.group("row")), []):
+            if words == row_words:
+                out.append((field, tick, amt))
+                break
+    return out
+
+
+# ── An OTHER tick that names nothing (live run 7, 15 Sep 2026) ───────────────
+# ACORD 126 ticked the aggregate's OTHER basis after a guard refused the
+# $2,000,000 the model wrote in the box that names that basis - an OTHER tick
+# asserting an option nobody can name. `_blank_unnamed_other_rows` is this rule
+# for amounts; this is it for ticks. The pair is READ OFF THE FORM: a checkbox
+# named "...Other[Coverage|Symbol|Deductible]Indicator_<row>" and the text box
+# straight after it, on the same row and under the same stem (pinned over all
+# 17 schemas by test). A deterministic tick is never touched.
+_OTHER_TICK_RE = re.compile(
+    r"^(?P<prefix>.*?)Other(?:Coverage|Symbol|Deductible)?Indicator_(?P<row>[A-Z]{1,2})$")
+
+
+def _other_tick_partners(schema: dict) -> Dict[str, str]:
+    keys = list((schema or {}).keys())
+    out: Dict[str, str] = {}
+    for i, name in enumerate(keys[:-1]):
+        meta = schema.get(name)
+        if not isinstance(meta, dict) or meta.get("ft") != "/Btn":
+            continue
+        m = _OTHER_TICK_RE.match(name)
+        if not m:
+            continue
+        nxt = keys[i + 1]
+        nmeta = schema.get(nxt)
+        if (isinstance(nmeta, dict) and nmeta.get("ft") == "/Tx"
+                and nxt.startswith(m.group("prefix"))
+                and nxt.endswith("_" + m.group("row"))):
+            out[name] = nxt
+    return out
+
+
+def _unnamed_other_ticks(mapped: dict, schema: dict, ai_filled: set,
+                         facts: Optional[dict] = None) -> List[Tuple[str, str]]:
+    """(tick, its naming box) for each gap-filled OTHER tick whose box is empty.
+
+    A naming box a resolver OWNS as blank is empty by design, not because the
+    model named nothing (review of run 7: ACORD 130's payment-plan and audit
+    code boxes are owned until a fact states them) - that tick is kept."""
+    out: List[Tuple[str, str]] = []
+    for t, p in _other_tick_partners(schema).items():
+        if (t not in ai_filled
+                or str(mapped.get(t) or "").strip().lower() not in _AFFIRMATIVE_VALUES
+                or str(mapped.get(p) or "").strip()):
+            continue
+        if facts is not None:
+            with _schema_context(schema):
+                if _owned_blank_claim(p, facts):
+                    continue
+        out.append((t, p))
+    return out
+
+
 def _blank_unnamed_other_rows(mapped: dict) -> None:
     """Blank an "other coverage" amount whose description box is empty."""
     for field in list(mapped.keys()):
@@ -17983,6 +21354,16 @@ def _blank_unnamed_other_rows(mapped: dict) -> None:
             logger.warning(
                 "post_fill_guard unnamed_other blanked=%s - an OTHER coverage "
                 "amount with no description names no coverage", field)
+
+
+# An OTHER-coverage description box (ACORD 126's OTHER COVERAGE and its limit
+# line, 131's umbrella OTHER, 25's excess OTHER, 141's crime OTHER) - not the
+# 137 / 138 symbol descriptions or 160's credit / surcharge descriptions.
+_OTHER_COVERAGE_DESCRIPTION_RE = re.compile(r"OtherCoverage(?:_Coverage|Limit)?Description_[A-Z]$")
+# Whole policy lines (Guard 2g-ii) - not coverage families such as employee
+# benefits, liquor or pollution, which ARE what an OTHER row names.
+_OTHER_ROW_MAIN_LINES = frozenset({"general_liab", "auto", "umbrella", "inland_marine", "property",
+                                   "workers_comp"})
 
 
 _CONTACT_FULLNAME_RE = re.compile(r"^(?P<block>\w+_Contact)_FullName_(?P<row>[A-N])$")
@@ -18022,6 +21403,446 @@ def _strip_role_echoed_from_the_type_box(mapped: dict) -> List[str]:
                 "that row's CONTACT TYPE box", tail, field,
             )
     return dropped
+
+
+@lru_cache(maxsize=1)
+def _acord_interest_roles() -> Tuple[str, ...]:
+    """ACORD's own interest types, HARVESTED from the 17 schemas.
+
+    `AdditionalInterest_Interest_MortgageeIndicator_A` is the form telling us
+    that "mortgagee" is a role it recognises. Reading the roles off the schemas
+    means a form that gains an interest type is covered the day it ships, and
+    there is no hand-written vocabulary to drift - the 2026-08-08 denylist arc
+    is the standing reason that matters.
+    """
+    roles: set = set()
+    for schema in _all_form_schemas().values():
+        for field in (schema or {}):
+            m = re.match(r"^\w*Interest_(\w+?)Indicator_[A-Z]$", field)
+            if not m:
+                continue
+            # CamelCase -> the individual role words ("LendersLossPayable" ->
+            # lenders / loss / payable). A box's tooltip is prose, so single
+            # words are what can actually be matched against it.
+            for word in re.findall(r"[A-Z][a-z]+", m.group(1)):
+                if len(word) > 3:
+                    roles.add(word.lower())
+    return tuple(sorted(roles))
+
+
+def _roles_a_box_asserts(field: str) -> set:
+    """The interest roles this box's own ACORD tooltip names.
+
+    An EMPTY set means the box asserts no particular relationship - ACORD 125's
+    generic "The additional interest's full name." - and the guard below then
+    has nothing to check, which is why an ordinary loss payee row is untouched.
+    ACORD 127's rows C and D carry "As used here, this is the name of the other
+    OWNER of the vehicle", and that word is the whole difference.
+    """
+    tu = str((_field_meta(field) or {}).get("tu") or "").lower()
+    if _PARTY_ROW_MARKER not in tu:
+        # ── ONLY THE SLOT-SPECIFIC CLAUSE COUNTS ────────────────────────────
+        # Every AdditionalInterest_FullName slot shares the same preamble ("The
+        # additional interest's full name."), so reading the WHOLE tooltip made
+        # every row assert "additional" - and a party whose document label
+        # says "Additional Insured" then matched every row, guard defeated.
+        # ACORD marks the per-slot clause itself with "As used here,", which is
+        # the convention this file already relies on elsewhere
+        # (`_PARTY_ROW_MARKER`). No clause means the box asserts no particular
+        # relationship, and an unasserted box is never judged - which is what
+        # leaves an ordinary loss payee row alone.
+        return set()
+    clause = tu.split(_PARTY_ROW_MARKER, 1)[1]
+    # ── MATCH THE STEM, NOT THE EXACT WORD ──────────────────────────────────
+    # THE DEFECT (live run 3, finding N2). `Kestrel Terminal Authority` - an
+    # ADDITIONAL INSURED - printed on ACORD 126 as the company the applicant
+    # LEASES EMPLOYEES TO. The guard was not out of scope: that box IS
+    # `AdditionalInterest_FullName_B`, and its clause reads "this is the
+    # company to whom employees are leased".
+    #
+    # It never fired because the roles are harvested from FIELD NAMES, which
+    # are singular stems (`EmployeeAsLessor` -> "employee", `Lease` ->
+    # "lease"), while ACORD's prose is inflected - "employees", "leased".
+    # Exact word matching found nothing, the box asserted no role, and an
+    # unasserted box is never judged.
+    #
+    # Ordinary English inflection only, and the suffix list is why this is not
+    # a fuzzy match: "contractor" is "contract" + "or" and must NOT assert the
+    # ContractOfSale role, so "or" is absent by construction.
+    words = {r for r in _acord_interest_roles()
+             if re.search(rf"\b{re.escape(r)}(?:s|es|d|ed|ing)?\b", clause)}
+    # "other" is ACORD's catch-all interest box, not a relationship.
+    return words - {"other"}
+
+
+_INTEREST_NAME_ROW_RE = re.compile(r"^(\w*AdditionalInterest)_FullName_([A-N])$")
+
+
+_INTEREST_TICK_RE = re.compile(
+    r"^(\w*AdditionalInterest)_Interest_(\w+?)Indicator_([A-N])$")
+
+
+def _interest_tick_contradicts_its_party(mapped: dict, facts: dict) -> Dict[str, str]:
+    """{field: reason} for an interest-type TICK that contradicts the role the
+    package states for the party named in that very row.
+
+    THE DEFECT (live run 3, finding N1). R5 moved `Kestrel Terminal Authority`
+    out of ACORD 127's other-owner row and it landed in the additional-interest
+    block - which is where an additional insured belongs, so the ROW was right.
+    The TICK was not: LOSS PAYEE, on a party the declarations call an
+    ADDITIONAL INSURED.
+
+    TWO CAUSES, both in `_resolve_additional_interest_type`:
+      * `_INTEREST_TYPE_FACTS` knows exactly two roles - loss payee and
+        mortgagee - so nothing could ever tick ADDITIONAL INSURED;
+      * it owns row A only (`if m.group(2) != "A"`), so row B had no owner at
+        all and inherited the tick above it.
+
+    THE ROLE IS IN ACORD'S OWN FIELD NAME. `AdditionalInterest_Interest_
+    AdditionalInsuredIndicator_B` says what ticking it means, on every form,
+    with no table to maintain - the same derivation `_acord_interest_roles`
+    already uses. So the row's party decides its own tick.
+
+    Positive evidence only, and it acts in BOTH directions:
+      * a tick the party's stated role contradicts is removed;
+      * the tick that MATCHES is set, but only when the package states exactly
+        one role for that party and that role has a box on this form. Two
+        roles, or none, and nothing is ticked - the producer decides.
+    """
+    try:
+        from services.extraction_service import stated_party_roles, _identity_name_key
+    except Exception:                                         # noqa: BLE001
+        return {}
+    roles_by_party = stated_party_roles(facts)
+    if not roles_by_party:
+        return {}
+    known = set(_acord_interest_roles())
+
+    # row letter -> the roles this row's PARTY is given by the package
+    party_roles: Dict[str, set] = {}
+    for field, value in mapped.items():
+        m = _INTEREST_NAME_ROW_RE.match(field or "")
+        if not m:
+            continue
+        text = str(value or "").strip()
+        if not text:
+            continue
+        stated = (roles_by_party.get(_identity_name_key(text)) or set()) & known
+        if stated:
+            party_roles[m.group(2)] = stated
+    if not party_roles:
+        return {}
+
+    # Every tick on this form, with the role its own NAME asserts.
+    ticks: List[Tuple[str, str, set]] = []
+    for field in list(mapped.keys()):
+        m = _INTEREST_TICK_RE.match(field or "")
+        if not m:
+            continue
+        if not party_roles.get(m.group(3)):
+            continue                        # no role stated for this row - no opinion
+        # AdditionalInsured -> {additional, insured}; LendersLossPayable ->
+        # {lenders, loss, payable}. ACORD's own field name, no table.
+        asserts = ({w.lower() for w in re.findall(r"[A-Z][a-z]+", m.group(2))}
+                   & known) - {"other"}
+        if asserts:
+            ticks.append((field, m.group(3), asserts))
+
+    out: Dict[str, str] = {}
+
+    # ── PASS 1: remove every tick the row's party contradicts ───────────────
+    # TWO PASSES, and the first cut had one - which made the result depend on
+    # dict order. Evaluating `AdditionalInsuredIndicator_B` while
+    # `LossPayeeIndicator_B` was still set found a "sibling already claims this
+    # row" and declined, and the sibling was then removed a few iterations
+    # later. Net: the wrong tick gone, the right one never set.
+    for field, row, asserts in ticks:
+        if not str(mapped.get(field) or "").strip():
+            continue
+        stated = party_roles[row]
+        if asserts & stated:
+            continue                        # the document agrees - keep it
+        mapped[field] = None
+        out[field] = (f"row {row}'s party is {'/'.join(sorted(stated))}, "
+                      f"not {'/'.join(sorted(asserts))}")
+
+    # ── PASS 2: set the one the document actually states ────────────────────
+    # Only into a row no tick still claims, so a row the producer has already
+    # marked is left exactly as it is.
+    # ── TICKING NEEDS A STRONGER TEST THAN BLANKING ─────────────────────────
+    # Pass 1 withholds on ZERO overlap, which is the conservative direction: a
+    # tick the document merely does not contradict is left alone. Pass 2 makes
+    # a positive assertion about a relationship on a signed application, so
+    # "some word in common" is nowhere near enough.
+    #
+    # MEASURED: a LOSS PAYEE has roles {loss, payee}. `LendersLossPayable`
+    # asserts {lenders, loss, payable} and shares "loss" - so overlap alone
+    # ticked LENDER'S LOSS PAYABLE on Wells Fargo, a different interest type,
+    # purely because it sorts first. Containment separates them exactly:
+    # {loss, payee} == LossPayee, and neither contains the other for
+    # LendersLossPayable.
+    #
+    # Two qualifying ticks on one row means the document does not say which,
+    # and nothing is ticked - the producer decides.
+    # EVERY tick on the row counts as a claim, not only the ones carrying a
+    # role this code can read. `AdditionalInterest_Interest_OtherIndicator_*`
+    # resolves to {other}, which is stripped as a catch-all rather than a
+    # relationship - so building `claimed` from `ticks` skipped a row the
+    # document had already marked OTHER, and pass 2 added a second tick beside
+    # it. Found by the 4,000-package fuzz, 184 times.
+    claimed = set()
+    for field in mapped:
+        m = _INTEREST_TICK_RE.match(field or "")
+        if m and str(mapped.get(field) or "").strip():
+            claimed.add(m.group(3))
+    by_row: Dict[str, List[Tuple[str, set]]] = {}
+    for field, row, asserts in ticks:
+        if row in claimed or str(mapped.get(field) or "").strip():
+            continue
+        stated = party_roles[row]
+        if asserts == stated or asserts <= stated or stated <= asserts:
+            by_row.setdefault(row, []).append((field, asserts))
+    for row, cands in by_row.items():
+        if len(cands) != 1:
+            logger.info(
+                "interest_tick: row %s matches %d interest types (%s) - the "
+                "document does not say which, so none is ticked",
+                row, len(cands), ", ".join(sorted(c[0] for c in cands)))
+            continue
+        field, asserts = cands[0]
+        mapped[field] = "Yes"
+        out[field] = (f"row {row}'s party is stated "
+                      f"{'/'.join(sorted(party_roles[row]))} by the document")
+    return out
+
+
+def _party_in_the_wrong_role_box(mapped: dict, facts: dict) -> Dict[str, str]:
+    """{field: reason} for a party name sitting in a box that asserts a role the
+    document gives someone else.
+
+    POSITIVE EVIDENCE BOTH WAYS, and every condition is load-bearing:
+      * the box must be a party-name box AND its tooltip must name a role - a
+        generic interest row asserts nothing and is never judged;
+      * the document must state roles for this party - silence is no opinion;
+      * NONE of that party's stated roles may appear in the box's role, and the
+        box's role must not appear among them. A party the document calls an
+        owner keeps its owner row.
+    """
+    try:
+        from services.extraction_service import stated_party_roles, _identity_name_key
+    except Exception:                                         # noqa: BLE001
+        return {}
+    roles_by_party = stated_party_roles(facts)
+    if not roles_by_party:
+        return {}
+    roles = set(_acord_interest_roles())
+    out: Dict[str, str] = {}
+    for field, value in mapped.items():
+        text = str(value or "").strip()
+        if not text or not _is_party_name_box(field):
+            continue
+        asserted = _roles_a_box_asserts(field)
+        if not asserted:
+            continue
+        # ── ONLY AN ACORD ROLE WORD IS A STATED ROLE ────────────────────────
+        # `stated_party_roles` returns every word its source used, and a dec
+        # entry's column heading is one of them: a party recorded under "NAME
+        # OR ORGANIZATION" arrives carrying {name, organization}. Treating that
+        # as "the document gives this party a role" blanks everybody whose
+        # heading is not the box's role - which is every legitimate owner in a
+        # table. Measured on the live kit before this shipped.
+        stated = (roles_by_party.get(_identity_name_key(text)) or set()) & roles
+        if not stated:
+            continue                        # no role stated - no opinion
+        if asserted & stated:
+            continue                        # the document agrees - keep it
+        out[field] = (
+            f"the document calls {text[:32]!r} "
+            f"{'/'.join(sorted(stated))}, not {'/'.join(sorted(asserted))}"
+        )
+    return out
+
+
+def _is_party_name_box(field: str) -> bool:
+    """Delegation to the one door; never raises, and an unavailable door means
+    the guard simply does not fire (today's behaviour)."""
+    try:
+        from services.field_mapping_integrity import is_party_name_field
+        return bool(is_party_name_field(field))
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def _names_a_party(value: Any, field: str = "", gap_filled: bool = False) -> bool:
+    # Every party box except the insured's own is a THIRD party. The insured's
+    # boxes keep the original test, except that a value GAP FILL wrote there is
+    # re-spaced too, so a glued placeholder cannot hide in an insured box. The
+    # applicant's own deterministic name is never re-spaced.
+    # An insured CONTACT box that gap fill wrote holds a person's name, and no
+    # person is called "Proof of Insurance": it is judged as fully as a third
+    # party. The insured's own company-name boxes never are ("Commercial Roofing").
+    try:
+        from services.field_mapping_integrity import names_a_party
+        f = str(field or "")
+        insured = f.startswith("NamedInsured")
+        contact = insured and bool(gap_filled) and "Contact_" in f
+        return bool(names_a_party(value, third_party=(not insured) or contact,
+                                  respace=(not insured) or bool(gap_filled)))
+    except Exception:                                         # noqa: BLE001
+        return True                        # fail OPEN - never blank on a fault
+
+
+_CODE_BOX_RE = re.compile(r"(Code|Identifier)(_[A-Z])?$")
+
+
+def _canon_from_name(text: Any) -> Optional[str]:
+    """Canonical line for a CamelCase field segment or a snake_case fact key."""
+    s = re.sub(r"[_\s]+", " ", str(text or ""))
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)
+    try:
+        from services.lob_canon import canon_line
+        return canon_line(s)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def _line_code_witnesses(facts: dict) -> Dict[str, set]:
+    """{normalised code: {canonical lines whose own schedule prints it}}.
+
+    Derived end to end: a schedule fact whose KEY names a line
+    (`gl_class_code_schedule`, `wc_class_codes`, `auto_vin_schedule`) is that
+    line's witness, and the code-bearing columns are the sub-keys whose name
+    says code / class / territory. Nothing here is curated, so a schedule added
+    tomorrow is a witness the day it is named after its line.
+    """
+    out: Dict[str, set] = {}
+    if not isinstance(facts, dict):
+        return out
+    for key, raw in facts.items():
+        if str(key).startswith("_"):
+            continue
+        line = _canon_from_name(key)
+        if not line:
+            continue
+        rows = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for sub, val in row.items():
+                if not _CODE_SUBKEY_RE.search(str(sub)):
+                    continue
+                tok = re.sub(r"[^a-z0-9]", "", str(val or "").lower())
+                if len(tok) < 3:
+                    continue          # too short to be distinctive; never judge it
+                out.setdefault(tok, set()).add(line)
+    # ── The VERIFIED declarations entries are witnesses too (14 Sep 2026) ──
+    # A schedule fact only witnesses the columns extraction gave it. Orbin's
+    # Drive Other Car line - "DRIVE OTHER CAR - TERRITORY: 104 6679" under the
+    # auto policy - has no schedule column at all (6679 is its CLASS, not a
+    # territory), so nothing attributed either number to Auto and both printed
+    # on the GL hazard grid. Every entry already carries its line and was
+    # checked verbatim against the document; an entry whose LABEL names a code
+    # column (the same `_CODE_SUBKEY_RE`) lends each code-shaped token of its
+    # value to that line. Measured on the four deployed Orbin forms: blanks
+    # 104 and 6679 on ACORD 126 and 91580 on ACORD 127, and nothing else.
+    held = facts.get("dec_page_entries")
+    ents = held.get("value") if isinstance(held, dict) and "value" in held else held
+    for e in ents if isinstance(ents, list) else []:
+        if not isinstance(e, dict) or not _CODE_SUBKEY_RE.search(str(e.get("label") or "")):
+            continue
+        line = _canon_from_name(e.get("line_of_business")) or _canon_from_name(e.get("section"))
+        if not line:
+            continue
+        for tok in re.findall(r"[a-z0-9]+", str(e.get("value") or "").lower()):
+            if len(tok) >= 3 and any(ch.isdigit() for ch in tok):
+                out.setdefault(tok, set()).add(line)
+    return out
+
+
+def _cross_line_code_borrows(mapped: dict, schema: dict,
+                             facts: dict) -> Dict[str, str]:
+    """{field: reason} for code boxes holding another line's code."""
+    witnesses = _line_code_witnesses(facts)
+    if not witnesses:
+        return {}
+    form_line = None
+    for _p in _SECTION_FORM_LINE_PHRASES.get(
+            str((facts or {}).get("_form_id") or ""), ()):
+        form_line = _canon_from_name(_p) or form_line
+    out: Dict[str, str] = {}
+    for field, value in mapped.items():
+        tok = re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+        if len(tok) < 3 or not _CODE_BOX_RE.search(field):
+            continue
+        owners = witnesses.get(tok)
+        if not owners:
+            continue                       # nothing attributes it - no opinion
+        box_line = _canon_from_name(field.split("_", 1)[0]) or form_line
+        if not box_line or box_line in owners:
+            continue                       # cannot place the box, or it is ours
+        out[field] = (
+            f"{str(value)[:24]!r} is printed by this package's "
+            f"{'/'.join(sorted(owners))} schedule, not by {box_line}")
+    return out
+
+
+def _own_address_texts(facts: dict) -> List[str]:
+    """Every address the APPLICANT itself occupies, as printed text: its mailing,
+    physical and garaging address facts, each scheduled premises (the stored
+    string and its composed parts) and each garaging location. Guard 4 reads
+    these as data wherever they repeat."""
+    out: List[str] = []
+    for key in ("mailing_address", "physical_address", "garaging_address"):
+        v = _fv(facts, key)
+        if isinstance(v, str) and v.strip():
+            out.append(v)
+    for list_key in ("property_locations", "auto_garaging_addresses"):
+        rows = _fv(facts, list_key)
+        if not isinstance(rows, list):
+            continue
+        for r in rows:
+            if isinstance(r, str) and r.strip():
+                out.append(r)
+                continue
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("address") or "").strip():
+                out.append(str(r["address"]))
+            parts = [str(r.get(k) or "").strip() for k in
+                     ("address_line1", "address_line2", "address_city",
+                      "address_state", "address_zip")]
+            composed = " ".join(p for p in parts if p)
+            if composed:
+                out.append(composed)
+    return out
+
+
+def _is_own_address_text(norm: str, own_tokens: List[List[str]]) -> bool:
+    """Is this (already `normalize_address`-ed) text the applicant's own
+    address, whole or in part?
+
+    Whole: token-for-token equal to one of them - the original rule, kept
+    unconditional. In part: a CONTIGUOUS run of one of them, at least three
+    tokens long and carrying a number (a street number or a ZIP) - "4800 dahlia
+    st d13" inside "4800 dahlia st d13 denver co 80216". Contiguity is what
+    keeps it strict: boilerplate that merely mentions an address ("mail notices
+    to 4800 dahlia st") carries words no address has, so it is never a run of
+    one, and a bare city or state is too short to qualify."""
+    if not norm:
+        return False
+    toks = norm.split()
+    if any(toks == ot for ot in own_tokens):
+        return True
+    if len(toks) < 3 or not any(ch.isdigit() for ch in norm):
+        return False
+    n = len(toks)
+    for ot in own_tokens:
+        for i in range(len(ot) - n + 1):
+            if ot[i:i + n] == toks:
+                return True
+    return False
 
 
 def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
@@ -18361,6 +22182,75 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                         "post_fill_guard broken_pair blanked=%s (its row's "
                         "other half is empty)", f)
 
+    # ── Guard 2d-ii: a CODE belongs to the line whose schedule prints it ─────
+    # Client 2026-09-11 item 6: *"ACORD 127 populates Auto vehicle class 91580.
+    # That is a GL contractor class. The actual Auto class for the Subaru is
+    # 7383. We need strict separation between GL, Auto, Umbrella, etc."*
+    #
+    # ROOT CAUSE, and why Guard 2e below did not catch it: 2e is a hand-listed
+    # set of six column names on one form, and `Vehicle_RateClassCode` - the
+    # exact box the client reported - is not in the list. It is read there only
+    # as the thing to COMPARE AGAINST, never checked itself. Measured surface:
+    # **1,289 of 1,352 code / identifier boxes across the 17 schemas have no
+    # fact bound at all**, so gap fill decides them, and the numeric meaning
+    # gate covers only "Enter amount" / "Enter number" boxes - a code box is
+    # outside it by construction.
+    #
+    # So this is stated once, by LINE, instead of once per column name:
+    #   * the BOX's line comes from its own leading name segment ("Vehicle_" ->
+    #     auto, "GeneralLiability_" -> general_liab), falling back to the form;
+    #   * the VALUE's line comes from the schedule fact that prints it
+    #     (`gl_class_code_schedule` -> general_liab, `wc_class_codes` ->
+    #     workers_comp) - both DERIVED through `canon_line`, no table;
+    #   * a value every witness attributes to OTHER lines is blanked.
+    #
+    # Positive evidence only: no witness, no opinion. A code printed by this
+    # line's own schedule is never touched, and a code printed by two lines is
+    # never touched either.
+    try:
+        _cross = _cross_line_code_borrows(mapped, schema, facts)
+        for _f, _why in _cross.items():
+            mapped[_f] = None
+            logger.warning("post_fill_guard cross_line_code blanked=%s - %s", _f, _why)
+    except Exception as _ccx:                                 # noqa: BLE001
+        logger.warning("post_fill_guard cross_line_code skipped: %s", _ccx)
+
+    # -- Guard 2d-iii: a party stated under one role is not a party under
+    # another. Live 11 Sep 2026, ACORD 127: `Kestrel Terminal Authority`, an
+    # ADDITIONAL INSURED on the declarations, printed as the NAME OF OTHER
+    # OWNER of the applicant's vehicle. SYS-09's class and F5's class in a
+    # third wording - a party re-homed into a box that asserts a different
+    # relationship. The roles are ACORD's own, harvested from the schemas.
+    try:
+        _wrong_role = _party_in_the_wrong_role_box(mapped, facts)
+        for _f, _why in _wrong_role.items():
+            mapped[_f] = None
+            logger.warning("post_fill_guard party_role blanked=%s - %s", _f, _why)
+    except Exception as _prx:                                 # noqa: BLE001
+        logger.warning("post_fill_guard party_role skipped: %s", _prx)
+
+    # -- Guard 2d-iv: the interest TICK must agree with the row's own party.
+    # Live run 3 (N1): an ADDITIONAL INSURED ticked LOSS PAYEE, because the
+    # tick resolver knew two roles and owned row A only. ACORD's field name
+    # says what each tick means; the row's party says which one is true.
+    try:
+        _ticks = _interest_tick_contradicts_its_party(mapped, facts)
+        for _f, _why in _ticks.items():
+            logger.info("post_fill_guard interest_tick %s - %s", _f, _why)
+    except Exception as _itx:                                 # noqa: BLE001
+        logger.warning("post_fill_guard interest_tick skipped: %s", _itx)
+
+    # -- Guard 2d-v: an address line two that repeats its own block. Live run
+    # 3: `800 Walnut St` under `800 Walnut Street`, and the city `Boulder`, on
+    # every interest block. See _line_two_repeats_its_block.
+    try:
+        _l2 = _line_two_repeats_its_block(mapped)
+        for _f, _why in _l2.items():
+            mapped[_f] = None
+            logger.info("post_fill_guard line_two_copy blanked=%s - %s", _f, _why)
+    except Exception as _l2x:                                 # noqa: BLE001
+        logger.warning("post_fill_guard line_two_copy skipped: %s", _l2x)
+
     # ── Guard 2e: vehicle rating-row borrows ─────────────────────────────────
     # Requirement #3 in a non-currency datatype (audit 2026-08-15 round 9):
     # the 127 rating line kept printing neighbouring tokens - the GL class
@@ -18381,10 +22271,15 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
         return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
 
     for field in list(mapped.keys()):
+        # `RatingTerritoryCode` joined the guarded set on 11 Sep 2026. It
+        # was read here as the thing to compare AGAINST and never checked
+        # itself - the same omission that left `RateClassCode` out and let
+        # the client's 91580 through. Live run 1, ACORD 127 row A: CLASS
+        # 7383 correct, TERR 7383 - the class copied one cell right.
         m_rate = re.match(
             r"^Vehicle_(SpecialIndustryClassCode|PrimaryLiabilityRatingFactor"
             r"|NetRatingFactor|FarthestZoneCode|RadiusOfUse"
-            r"|SeatingCapacityCount)_([A-Z])$", field)
+            r"|SeatingCapacityCount|RatingTerritoryCode)_([A-Z])$", field)
         if not m_rate:
             continue
         val = _norm_tok(mapped.get(field))
@@ -18423,7 +22318,11 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
         else:
             if cls and val == cls:
                 borrowed = "the rate class"
-            elif col != "SpecialIndustryClassCode" and terr and val == terr:
+            # A column is never judged against its own cell: `terr` IS
+            # Vehicle_RatingTerritoryCode, so comparing the territory box
+            # to it is trivially true and would blank every real value.
+            elif (col not in ("SpecialIndustryClassCode", "RatingTerritoryCode")
+                  and terr and val == terr):
                 borrowed = "the territory code"
             elif val in _gl_codes:
                 borrowed = "a GL class code"
@@ -18476,6 +22375,11 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
             r"(?:Description)_(?P<row>[A-Z])$", field)
         if not m_echo:
             continue
+        # An ECHO is a model borrowing a printed label. A description a
+        # resolver read off the policy's own declarations, paired with its own
+        # amount (the 131 umbrella's third limit, 15 Sep 2026), is not one.
+        if gpt_filled_set is not None and field not in gpt_filled_set:
+            continue
         val = str(mapped.get(field) or "").strip()
         if not val:
             continue
@@ -18490,6 +22394,93 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                 logger.info(
                     "post_fill_guard label_echo_row blanked=%s (description "
                     "%r is the form's own limit vocabulary)", f, val[:44])
+
+    # ── Guard 2g: an OTHER-coverage description that names a POLICY (run 8) ──
+    # ACORD 126's OTHER COVERAGE line printed the umbrella's schedule of
+    # underlying insurance - "Commercial General Liability / EMC ... / BBC7263 /
+    # ... / Commercial Auto Liability / ... / 6E74002 / ..." - the package's own
+    # policies described, not a coverage the form does not print. Structural: a
+    # gap-filled description naming one of the package's OWN policy numbers
+    # (any printing - `_package_policy_named_in`) describes a policy. It and its
+    # own OTHER tick are cleared; an amount that loses its name falls to the
+    # unnamed-row sweep - which is what clears run 8's $150 (an endorsement's
+    # PREMIUM) with it. Not on 141 / 160 (frozen).
+    #
+    # A second guard - refuse an OTHER limit the dec entries never call a limit -
+    # was written this round and WITHDRAWN after review: carrier schedules print
+    # limits under a column header the entry never carries ("Medical Payments
+    # $5,000"), so it blanked real limits, and on every live run it changed no
+    # final box.
+    if isinstance(facts, dict) and str(facts.get("_form_id") or "") not in ("ACORD_141", "ACORD_160"):
+        _tick_of = {p: t for t, p in _other_tick_partners(schema).items()}
+        for field in list(mapped.keys()):
+            if not _OTHER_COVERAGE_DESCRIPTION_RE.search(field):
+                continue
+            if gpt_filled_set is not None and field not in gpt_filled_set:
+                continue
+            hit = _package_policy_named_in(mapped.get(field), facts)
+            if not hit:
+                continue
+            mapped[field] = None
+            tick = _tick_of.get(field)
+            if tick and (gpt_filled_set is None or tick in gpt_filled_set):
+                mapped[tick] = None
+            logger.info("post_fill_guard policy_as_other_coverage blanked=%s (it names "
+                        "the package's policy %s)", field, hit)
+
+    # ── Guard 2g-ii: an OTHER coverage that is a list of LINES (run 10) ──────
+    # ACORD 126's OTHER coverage limit line printed "Commercial General
+    # Liability / Commercial Auto Liability" - two whole lines of business, the
+    # package's policies, not a coverage the form does not print. A gap-filled
+    # OTHER description naming two or more different main lines, or nothing but
+    # the form's own line, is cleared with its tick; the unnamed-row sweep then
+    # clears its amount. One named line stays ("Hired and Non-Owned Auto
+    # Liability" and "Liquor Liability" are real other coverages). Certificates
+    # keep their own rule; 141 / 160 are frozen.
+    _fid = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
+    if _fid and _fid not in ("ACORD_141", "ACORD_160") and _fid not in _CERTIFICATE_FORM_IDS:
+        try:
+            from services.lob_canon import canon_line as _canon
+        except Exception:                                 # noqa: BLE001
+            _canon = None
+        if _canon is not None:
+            _own = {_canon(p) for p in _SECTION_FORM_LINE_PHRASES.get(_fid, ())} - {None}
+            _ticks = {p: t for t, p in _other_tick_partners(schema).items()}
+            for field in list(mapped.keys()):
+                if not _OTHER_COVERAGE_DESCRIPTION_RE.search(field):
+                    continue
+                if gpt_filled_set is not None and field not in gpt_filled_set:
+                    continue
+                val = str(mapped.get(field) or "").strip()
+                if not val:
+                    continue
+                # An EXCLUSION is the opposite of an other coverage (run 11:
+                # "Fungi Or Bacteria Exclusion; Limited Pollution Coverage -
+                # Work Sites"). Its title goes; a coverage beside it stays.
+                _kept = _without_exclusion_titles(val)
+                if _kept != val:
+                    logger.info("post_fill_guard exclusion_as_other_coverage %s: %r -> %r",
+                                field, val[:60], _kept[:60])
+                    if not _kept:
+                        mapped[field] = None
+                        tick = _ticks.get(field)
+                        if tick and (gpt_filled_set is None or tick in gpt_filled_set):
+                            mapped[tick] = None
+                        continue
+                    val = _kept
+                    mapped[field] = val
+                parts = [p for p in re.split(r"\s*(?:/|;|,|&|\band\b)\s*", val, flags=re.I) if p.strip()]
+                lines = {_canon(p) for p in parts} & _OTHER_ROW_MAIN_LINES
+                bare_own = (len(parts) == 1 and _canon(val) in _own
+                            and (_names_a_standard_line(val) or _is_line_of_business_name(val)))
+                if len(lines) < 2 and not bare_own:
+                    continue
+                mapped[field] = None
+                tick = _ticks.get(field)
+                if tick and (gpt_filled_set is None or tick in gpt_filled_set):
+                    mapped[tick] = None
+                logger.info("post_fill_guard lines_as_other_coverage blanked=%s (%r names "
+                            "lines of business, not one other coverage)", field, val[:60])
 
     # ── Guard 3: wrong-type value rejection ──────────────────────────────────
     # An LLM sometimes drops a prose description into a field that structurally
@@ -18537,8 +22528,41 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                     "post_fill_guard type_reject blanked=%s — %s", field, _reason,
                 )
                 continue
+            # ── Guard 3b-ii: a FORM number is not a POLICY number ────────────
+            # The merge now refuses to let a form number BECOME a policy-number
+            # fact (11 Sep 2026). That alone is not enough: clearing the fact
+            # hands the box to gap fill, which reads the raw document - where
+            # "IM 7100 06 04" is printed on the page. Guarding the source and
+            # leaving the box open is how this defect came back the first time.
+            #
+            # Keyed on the BOX, not on a fact key, so it holds for every form,
+            # every filling path and every value - including a number nobody has
+            # seen yet, because the test is the ISO/AAIS edition-date SHAPE.
+            if _is_policy_number_box(field) and _looks_like_a_form_number(s):
+                mapped[field] = None
+                logger.warning(
+                    "post_fill_guard form_number blanked=%s (%r is an ISO/AAIS "
+                    "FORM number - it names the coverage wording, not this "
+                    "contract)", field, s[:40],
+                )
+                continue
             # ── Guard 3c: a ROLE is not a party, and an ARRANGEMENT is not a
             #    coverage (2026-09-05) ────────────────────────────────────────
+            # ── Guard 3c-ii: a PARTY box must hold a party ───────────────────
+            # Client 2026-09-11 item 8. Guard 3c catches a party ROLE
+            # ("Certificate Holder") and an arrangement SENTENCE; it does not
+            # catch a disclaimer FRAGMENT, and "For Informational Purposes
+            # Only" - lifted off the COI and stamped as an Additional Interest -
+            # is a fragment. `names_a_party` is structural (a name is a noun
+            # phrase, boilerplate is a clause), so it holds for wording nobody
+            # has seen rather than for the sentence that was reported.
+            if _is_party_name_box(field) and not _names_a_party(
+                    s, field, gap_filled=field in (gpt_filled_set or ())):
+                mapped[field] = None
+                logger.warning(
+                    "post_fill_guard not_a_party blanked=%s (%r names neither a "
+                    "person nor an organisation)", field, s[:48])
+                continue
             _reason = _rejects_role_or_arrangement(field, meta, s)
             if _reason:
                 mapped[field] = None
@@ -18627,15 +22651,21 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
     # Guard 4 was reading that as boilerplate and deleting the address from
     # EVERY box at once (audit 2026-08-15 round 10 #4 - latent, fires when
     # the address arrives via gap fill instead of Pass 1).
-    _own_addresses: set = set()
+    #
+    # A PART of the applicant's own address is data too (15 Sep 2026). The test
+    # was whole-address equality, so ACORD 127's garaging STREET ("4800 DAHLIA
+    # STREET D13" - the street line of the insured's own premises) matched
+    # nothing; when the model also wrote it as the garage description, both
+    # copies were deleted as boilerplate on two live runs running. The
+    # applicant's scheduled premises and garaging addresses count as well as its
+    # mailing address - see `_is_own_address_text` for the shape test.
+    _own_address_tokens: List[List[str]] = []
     try:
         from services.normalization import normalize_address as _norm_addr
-        for _ak in ("mailing_address", "physical_address", "garaging_address"):
-            _av = _fv(facts, _ak)
-            if _av and str(_av).strip():
-                _na = _norm_addr(_av)
-                if _na:
-                    _own_addresses.add(_na)
+        for _av in _own_address_texts(facts):
+            _na = _norm_addr(_av)
+            if _na:
+                _own_address_tokens.append(_na.split())
     except Exception:                                     # noqa: BLE001
         def _norm_addr(_x):                               # type: ignore
             return ""
@@ -18649,9 +22679,9 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
         if len(families) < 2:
             continue  # not a broad enough spread to be confident it's bleed
         for f, s in cluster:
-            if _own_addresses:
+            if _own_address_tokens:
                 try:
-                    if _norm_addr(s) in _own_addresses:
+                    if _is_own_address_text(_norm_addr(s), _own_address_tokens):
                         continue          # the applicant's own address is data
                 except Exception:                         # noqa: BLE001
                     pass
@@ -19732,12 +23762,40 @@ _BOILERPLATE_FACT_KEYS = ("operations_description", "additional_remarks_text")
 # or applicant statement writes that way (the IM schedule's THE MOST "WE" PAY
 # is uppercase and does not match). One quoted lowercase term marks the text
 # as coverage-form language.
-_ISO_QUOTED_TERM_RE = re.compile(r'["“][a-z][a-z ]{0,18}[a-z]["”]')
+#
+# An ACRONYM may lead the term (15 Sep 2026). The cannabis exclusion quotes
+# "CBD products", and its list item - 'f. Offers retail sales of "CBD products"
+# where such products are marketed under your own label' - stood as a "Y" to
+# ACORD 126's "products under label of others?". A lone all-caps word is still
+# not a term (THE MOST "WE" PAY stays unmatched): the acronym must be followed
+# by lowercase words inside the same quotes.
+_ISO_QUOTED_TERM_RE = re.compile(r'["“](?:[A-Z]{2,6}\s)?[a-z][a-z ]{0,18}[a-z]["”]')
 
 
 def _is_policy_wording_fragment(text: Any) -> bool:
     """True when `text` carries ISO's quoted-defined-term drafting signature."""
     return bool(_ISO_QUOTED_TERM_RE.search(str(text or "")))
+
+
+# A COVERAGE FORM'S NAME is not evidence (15 Sep 2026). Live, ACORD 131's "does
+# the applicant own, rent or otherwise use cranes?" stood as "Y" on the
+# explanation "Commercial General Liability Coverage Form" - verbatim in the
+# document, so presence passed. A title names a policy DOCUMENT and states
+# nothing about the applicant. It came off run 5 only because the same title sat
+# in four explanation boxes and tripped the cross-field duplicate guard; used
+# once, it ships. Structural, not vocabulary: the WHOLE text must end in
+# "coverage form" / "coverage part" and carry no finite verb.
+# "Subcontractors are required to carry coverage." - the sentence that sank the
+# measured-and-rejected endorsement-title rule - is a statement and never matches.
+_COVERAGE_FORM_TITLE_RE = re.compile(r"\bcoverage\s+(?:form|part)s?\s*[.:]?\s*$", re.I)
+
+
+def _is_coverage_form_title(text: Any) -> bool:
+    """True when `text` is nothing but a coverage form's (or part's) name."""
+    s = str(text or "").strip().strip('"“”‘’ ')
+    if not s or len(s) > 120 or not _COVERAGE_FORM_TITLE_RE.search(s):
+        return False
+    return not _FINITE_VERB_RE.search(s)
 
 
 def _is_generic_boilerplate_reuse(
@@ -21069,24 +25127,33 @@ def _is_name_only_record_echo(text: Any, facts: dict) -> bool:
     norm = _normalize_for_search(str(text or ""))
     if len(norm) < 6:
         return False
-    rows = (facts or {}).get("auto_drivers")
-    if isinstance(rows, dict) and "value" in rows:
-        rows = rows.get("value")
-    if not isinstance(rows, list):
-        return False
-    for row in rows:
-        if not isinstance(row, dict):
+    # Two homes for the same person (Chat 5, 14 Sep 2026): the merge now moves a
+    # Drive Other Car named individual OUT of `auto_drivers` into
+    # `auto_named_individuals` (services/named_individuals.py), so this guard
+    # reads both. A named individual is a name the document attaches nothing to
+    # by definition, so it substantiates nothing - whatever else its row holds
+    # (its territory is kept only as a cross-line fence witness).
+    for key in ("auto_drivers", "auto_named_individuals"):
+        rows = (facts or {}).get(key)
+        if isinstance(rows, dict) and "value" in rows:
+            rows = rows.get("value")
+        if not isinstance(rows, list):
             continue
-        name = row.get("name")
-        if not name or _normalize_for_search(str(name)) != norm:
-            continue
-        has_substance = any(
-            k not in _SCHEDULE_IDENTITY_ONLY_KEYS
-            and v not in (None, "", [], {}) and str(v).strip()
-            for k, v in row.items()
-        )
-        if not has_substance:
-            return True
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("name")
+            if not name or _normalize_for_search(str(name)) != norm:
+                continue
+            if key == "auto_named_individuals":
+                return True
+            has_substance = any(
+                k not in _SCHEDULE_IDENTITY_ONLY_KEYS
+                and v not in (None, "", [], {}) and str(v).strip()
+                for k, v in row.items()
+            )
+            if not has_substance:
+                return True
     return False
 
 
@@ -21358,6 +25425,84 @@ def _is_line_of_business_name(text: Any) -> bool:
         return False
     s = _LOB_TRAILING_NOISE_RE.sub("", s)
     return s in _LOB_NAMES
+
+
+def _is_line_of_business_list(text: Any, min_lines: int = 1) -> bool:
+    """Every part of a "/ ; , &" (or "and") list is a line-of-business name and
+    the parts name at least `min_lines` different lines. A name that itself
+    holds "and" ("Crime and Fidelity") stays one part."""
+    parts: List[str] = []
+    for chunk in re.split(r"\s*(?:/|;|,|&)\s*", str(text or "")):
+        if not chunk.strip():
+            continue
+        if _is_line_of_business_name(chunk):
+            parts.append(chunk)
+        else:
+            parts.extend(p for p in re.split(r"\s+and\s+", chunk, flags=re.I) if p.strip())
+    if not parts or not all(_is_line_of_business_name(p) for p in parts):
+        return False
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        def _canon(_t):                                   # type: ignore
+            return None
+    return len({_canon(p) or p.strip().lower() for p in parts}) >= min_lines
+
+
+def _explanation_lists_lines(field: str, value: Any, form_id: Any) -> bool:
+    """An EXPLANATION box holding two or more different lines of business.
+
+    Explanations are exempt from the LOB guard only by their section's
+    "LineOfBusiness" prefix. Live run 11, ACORD 131 Q7 ("any units not insured
+    by underlying policies?"): "Y", explained as "Commercial General Liability;
+    Commercial Auto Liability" - the package's own underlying lines, which
+    explain no unit. Two or more lines are an inventory, not an explanation;
+    one line can be ("tail bought on the General Liability"). A question that is
+    itself about insurance - other insurance, prior coverage declined or
+    non-renewed, tail coverage, self-insurance, lower limits, unpaid premium -
+    may be answered with lines (review of run 11), read off ACORD's own field
+    name. The naked Y then goes in _final_yn_coherence. 141 / 160 are frozen."""
+    f = str(field or "")
+    return ("Explanation" in f and not _EXPLANATION_ABOUT_INSURANCE_RE.search(f)
+            and str(form_id or "") not in ("ACORD_141", "ACORD_160")
+            and _is_line_of_business_list(value, min_lines=2))
+
+
+_EXPLANATION_ABOUT_INSURANCE_RE = re.compile(
+    r"Coverage|Covered|Insurance|Insurer|Tail|Declined|Cancel|NonRenew|SelfInsured|Excluded|"
+    r"Uninsured|Limits|Premium|Agency")
+
+
+# An EXCLUSION's title, unless it gives coverage back ("Pollution Exclusion -
+# Limited Exception", "... Exclusion Buyback", "Amendment Of ... Exclusion").
+# NOT `_EXCLUSION_TITLE_RE` - that name is the evidence gate's whole-quote title
+# pattern above; redefining it here broke the gate (review of run 11).
+_EXCLUSION_WORD_RE = re.compile(r"\bexclu(?:sions?|ded|des?)\b", re.I)
+_EXCLUSION_GIVEBACK_RE = re.compile(
+    r"\b(?:buy\s*-?\s*back|exceptions?|delet\w*|remov\w*|amend\w*)\b|\blimited\s+coverage\b", re.I)
+# The pieces of an OTHER coverage description: split on ";", a newline, a comma
+# followed by a space, or a spaced slash - never inside "$1,500" or
+# "Hired/Non-Owned" (review of run 11).
+_OTHER_PIECE_SEP_RE = re.compile(r"(\s*;\s*|\s*\n\s*|,\s+|\s+/\s+)")
+
+
+def _is_exclusion_title(text: Any) -> bool:
+    s = str(text or "")
+    return bool(_EXCLUSION_WORD_RE.search(s)) and not _EXCLUSION_GIVEBACK_RE.search(s)
+
+
+def _without_exclusion_titles(text: Any) -> str:
+    """`text` with its exclusion pieces cut out and every other piece as printed."""
+    s = str(text or "").strip()
+    parts = _OTHER_PIECE_SEP_RE.split(s)
+    pieces, seps = parts[0::2], parts[1::2]
+    keep = [i for i, p in enumerate(pieces) if p.strip() and not _is_exclusion_title(p)]
+    if len(keep) == sum(1 for p in pieces if p.strip()):
+        return s
+    out = pieces[keep[0]].strip() if keep else ""
+    for j in keep[1:]:
+        out += seps[j - 1] + pieces[j].strip()
+    return out.strip(" ;,/")
 
 
 # ── A question's QUALIFIER checkboxes ────────────────────────────────────────
@@ -21948,8 +26093,11 @@ def map_facts_to_form(
             # today, so a RATE can still only ever be transcribed from the
             # extracted schedule and is never a question for the gap-fill model.
             _bound = _resolve_schedule_row(field, facts)
+            # An owned blank wins over the generic binding - see the same
+            # condition in compute_form_gaps (131 CARE, CUSTODY, CONTROL LOC).
             if (_bound is not _SCHED_SKIP and _bound is not None
-                    and not _is_empty_llm_value(_bound)):
+                    and not _is_empty_llm_value(_bound)
+                    and not _owned_blank_claim(field, facts)):
                 mapped[field] = _bound
                 _deterministic_filled.add(field)
                 cnt_deterministic += 1
@@ -21971,7 +26119,12 @@ def map_facts_to_form(
                     cnt_nonfillable += 1
                 continue
             if _is_lob_premium_field(field):
-                _lob_amt = _resolve_lob_premium(field, facts)
+                # ACORD 125 page 1 lists the lines applied for; the current
+                # policy's premiums print in its prior-carrier grid (Brent's 125
+                # answer key, 15 Sep 2026). Premiums never reach gap fill.
+                _lob_amt = (None if _page_one_current_policy(
+                                facts, "premium_is_current_policy", "total_policy_premium")
+                            else _resolve_lob_premium(field, facts))
                 # Presence backstop (2026-08-10): a line premium is stamped from
                 # the `coverage_lines` fact, which is unverified LLM extraction
                 # output - the ONLY deterministic money path with no document
@@ -22024,6 +26177,7 @@ def map_facts_to_form(
         # If the row is out of range, mark as authoritative blank (do NOT send
         # to GPT — we know the row doesn't exist).
         sched = _resolve_schedule_row(field, facts)
+        sched = _unless_owned_blank(field, sched, facts)
         if sched is not _SCHED_SKIP:
             if sched is None and field.endswith("_A")                     and _single_row_schedule(field, facts):
                 # Same mirror as `compute_form_gaps` - see the long note there.
@@ -22077,7 +26231,8 @@ def map_facts_to_form(
             # documents the EXISTING policy, so the expiring term is correct
             # content there (same exemption as _resolve_renewal_proposed_period).
             if (not _fv(facts, "renewal_dates_routed")
-                    or _umbrella_period_is_current(facts)):
+                    or (_umbrella_period_is_current(facts)
+                        and not _umbrella_term_is_the_moved_term(facts))):
                 _umb_key = "umbrella_effective_date" if field == "Policy_EffectiveDate_A" else "umbrella_expiration_date"
                 _umb_val = _fv(facts, _umb_key)
                 if not _is_empty_llm_value(_umb_val):
@@ -22253,6 +26408,11 @@ def map_facts_to_form(
     # the handful that need a human. These fields are still blanked and still
     # logged; they are just not reported as independent findings.
     _cascade_blanked: set = set()
+    # UNANSWERED, not refused. A Yes/No answer (or its explanation) that the
+    # evidence gate below drops was never "a value found for that box" - the
+    # documents do not answer the question. Recorded so the report can tell the
+    # two apart; the box is blanked and logged exactly as before.
+    _gate_refused: set = set()
 
     # ── Evidence-gated fill (opt-in, Figure 30 + Figure 33, generalized) ─────
     # The verified dec-page coverage lines, computed ONCE for this gate: both
@@ -22429,6 +26589,9 @@ def map_facts_to_form(
             # about the applicant - see _is_policy_wording_fragment.
             if _is_policy_wording_fragment(text):
                 return False
+            # ...nor is a coverage form's NAME - see _is_coverage_form_title.
+            if _is_coverage_form_title(text):
+                return False
             return not _is_generic_boilerplate_reuse(field, text, facts, _reserved_companion_values)
 
         def _quote_restates_the_question(quote, field: str) -> bool:
@@ -22585,6 +26748,12 @@ def map_facts_to_form(
                 logger.info("evidence_gate form_citation rejected=%s (%r)",
                             field, str(quote)[:70])
                 return False
+            # ...and a quote that IS a coverage form's name. A title names a
+            # document; it answers neither direction. See _is_coverage_form_title.
+            if _is_coverage_form_title(quote):
+                logger.info("evidence_gate coverage_form_title rejected=%s (%r)",
+                            field, str(quote)[:70])
+                return False
             # ...and an exclusion CLAUSE, not just a form title. "This insurance
             # does not apply to: Asbestos" is the policy declining to cover a
             # thing, never the applicant confirming they do it.
@@ -22671,6 +26840,20 @@ def map_facts_to_form(
                     "fact", form_id or "unknown", field, str(quote)[:120],
                 )
                 return False
+            # ...and a quoted DEFINED TERM, ISO's drafting signature. The
+            # explanation path has refused it since 2026-08-16 (`_present`); the
+            # quote path never did, so a Yes could stand on its quote alone.
+            # Live 15 Sep 2026: ACORD 126 "products under label of others?" = Y
+            # on the cannabis exclusion's list item 'f. Offers retail sales of
+            # "CBD products" where such products are marketed under your own
+            # label;'. Y and N alike - a defined term is the policy describing
+            # itself, in either direction.
+            if _is_policy_wording_fragment(quote):
+                logger.info(
+                    "evidence_gate QUOTE_IS_POLICY_WORDING form=%s field=%s quote=%r",
+                    form_id or "unknown", field, str(quote)[:120],
+                )
+                return False
             # A "Yes" needs evidence that ASSERTS something OR carries a data
             # payload. "ERIN ROYAL" does neither - a bare name predicates
             # nothing and proves nothing happened. "INSURED IS: LLC" and "Date
@@ -22718,6 +26901,13 @@ def map_facts_to_form(
         # Populated during Pass A, resolved in one batched call afterwards so a
         # per-field call is never made.
         _judge_review: List[dict] = []
+
+        # Snapshot for `_gate_refused`: a DIFF across Passes A..B, like
+        # `_pre_guard_values`, so every clearing site below is covered.
+        _pre_gate = {
+            _f for _f in gpt_filled_set
+            if str(mapped.get(_f) or "").strip() not in ("", "null", "None")
+        }
 
         # ── Pass A: validate each answered Yes/No field (see _is_gated_field) ──
         for q_field in list(gpt_filled_set):
@@ -23112,6 +27302,10 @@ def map_facts_to_form(
                 mapped[exp_field] = None
                 _gated += 1
 
+        _gate_refused = {
+            _f for _f in _pre_gate
+            if str(mapped.get(_f) or "").strip() in ("", "null", "None")
+        }
         if _gated:
             logger.info("map_facts EVIDENCE_GATE form=%s | dropped_ungrounded=%d",
                         form_id or "unknown", _gated)
@@ -23192,6 +27386,12 @@ def map_facts_to_form(
         _dropped_ai = _drop_fabricated_interest_rows(mapped, gpt_filled_set, facts)
         for _f in _dropped_ai:
             gpt_filled_set.discard(_f)
+            # The row is ONE decision: its NAME is the finding, the cells that
+            # went with it are not (the client's "131 fields" review screen).
+            # A name refused by the party check leaves the row nameless, and
+            # this is where its address and account number go.
+            if not re.search(r"_FullName_[A-Z]{1,2}$", _f):
+                _cascade_blanked.add(_f)
     except Exception as _ai_ex:                           # noqa: BLE001
         logger.warning("interest-row guard skipped (form=%s): %s", form_id, _ai_ex)
         _dropped_ai = []
@@ -23238,9 +27438,10 @@ def map_facts_to_form(
             _v = mapped.get(_f)
             if not _v or not isinstance(_v, str):
                 continue
-            if _LOB_FIELD_ALLOWED_RE.search(_f):
+            _frozen = (form_id or "") in ("ACORD_141", "ACORD_160")
+            if _LOB_FIELD_ALLOWED_RE.search(_f) and not _explanation_lists_lines(_f, _v, form_id):
                 continue
-            if _is_line_of_business_name(_v):
+            if _is_line_of_business_name(_v) or (not _frozen and _is_line_of_business_list(_v)):
                 logger.info(
                     "guard LOB_NAME_OUT_OF_PLACE form=%s field=%s value=%r - a "
                     "line of business is not a product, party or description",
@@ -23821,6 +28022,100 @@ def map_facts_to_form(
     except Exception as _sc_ex:                           # noqa: BLE001
         logger.warning("single-choice check skipped (form=%s): %s", form_id, _sc_ex)
 
+    # ── LAST GUARD: an "other" amount whose description a LATER guard took ───
+    # `_blank_unnamed_other_rows` runs inside `_enforce_post_fill_guards` (3f)
+    # and again inside the evidence gate - both BEFORE guards that can still
+    # clear a description. Live 15 Sep 2026, ACORD 126: "General Liability Elite
+    # Extension" - a PREMIUM line - was refused out of the OTHER COVERAGE
+    # description after the sweep had passed, and its $500 shipped as a limit
+    # with no coverage named. The sweep is idempotent, so it runs once more
+    # here, after the last guard that can empty a description box.
+    _blank_unnamed_other_rows(mapped)
+
+    # ── A deductible amount without its coverage tick (15 Sep 2026) ──────────
+    # ACORD prints each physical-damage deductible beside the tick that says
+    # which coverage it belongs to (ACORD 137's HIRED PHYSICAL DAMAGE block,
+    # ACORD 127's collision). Run 5 ticked COMP and COLL, a guard removed the
+    # SPEC C OF L tick - COMP and specified causes of loss are alternatives - and
+    # its $1,000 shipped on its own. An AI amount survives only beside its own
+    # tick; a stated (deterministic) amount is never touched. When the tick was
+    # itself refused, the amount is part of that one decision.
+    try:
+        for _amt, _tick in _orphaned_deductible_amounts(mapped, schema, gpt_filled_set):
+            mapped[_amt] = None
+            gpt_filled_set.discard(_amt)
+            _ai_verified_fields.discard(_amt)
+            if _tick in _pre_guard_values:
+                _cascade_blanked.add(_amt)
+            logger.info("post_fill_guard orphan_deductible blanked=%s (tick %s not set)",
+                        _amt, _tick)
+    except Exception as _od_ex:                           # noqa: BLE001
+        logger.warning("orphan-deductible check skipped (form=%s): %s", form_id, _od_ex)
+
+    # ── An OTHER deductible that only names a printed row IS that row ────────
+    # (live run 7, 15 Sep 2026 - see _misfiled_other_deductibles). It follows
+    # that row's tick: with the tick set and the row's amount empty, the amount
+    # moves to its own row; either way the OTHER row is cleared. The description
+    # is the finding; the tick and amount go with it.
+    try:
+        for _desc, _ptick, _pamt in _misfiled_other_deductibles(mapped, schema, gpt_filled_set):
+            _mo = _OTHER_DEDUCTIBLE_PART_RE.match(_desc)
+            _o_tick, _o_amt = (f"{_mo.group('prefix')}OtherDeductible{_p}_{_mo.group('row')}"
+                               for _p in ("Indicator", "Amount"))
+            if (str(mapped.get(_ptick) or "").strip().lower() in _AFFIRMATIVE_VALUES
+                    and not str(mapped.get(_pamt) or "").strip()
+                    and _o_amt in gpt_filled_set and str(mapped.get(_o_amt) or "").strip()):
+                mapped[_pamt] = mapped[_o_amt]
+                gpt_filled_set.add(_pamt)
+                if _o_amt in _ai_verified_fields:
+                    _ai_verified_fields.add(_pamt)
+            for _f in (_desc, _o_tick, _o_amt):
+                if _f in gpt_filled_set and str(mapped.get(_f) or "").strip():
+                    mapped[_f] = None
+                    gpt_filled_set.discard(_f)
+                    _ai_verified_fields.discard(_f)
+                    if _f != _desc and _f in _pre_guard_values:
+                        _cascade_blanked.add(_f)
+            logger.info("post_fill_guard misfiled_other_deductible cleared=%s - it names "
+                        "the printed row of tick %s", _desc, _ptick)
+    except Exception as _mo_ex:                           # noqa: BLE001
+        logger.warning("misfiled-other-deductible check skipped (form=%s): %s", form_id, _mo_ex)
+
+    # ── An OTHER tick whose naming box is empty (live run 7, 15 Sep 2026) ────
+    # After every guard that can empty a naming box, including the one above.
+    # Not on ACORD 141 / 160, which the owner froze on 14 Sep 2026.
+    try:
+        for _tick, _partner in (_unnamed_other_ticks(mapped, schema, gpt_filled_set, facts)
+                                if form_id not in ("ACORD_141", "ACORD_160") else []):
+            mapped[_tick] = None
+            gpt_filled_set.discard(_tick)
+            _ai_verified_fields.discard(_tick)
+            logger.info("post_fill_guard unnamed_other_tick blanked=%s (%s is empty)",
+                        _tick, _partner)
+    except Exception as _ot_ex:                           # noqa: BLE001
+        logger.warning("unnamed-other-tick check skipped (form=%s): %s", form_id, _ot_ex)
+
+    # ── An Additional Interest row that did not survive is ONE decision ──────
+    # Its NAME is the finding. The earlier cascade (see `_cascade_blanked`)
+    # only catches cells `_drop_fabricated_interest_rows` itself removed; on
+    # the live 15 Sep run the row's checkboxes had already gone to the Yes/No
+    # evidence gate, so every one of them was reported as its own finding - the
+    # applicant's own name proposed as an interest came back as a dozen rows of
+    # "a value was found for each but could not be true". A row whose name box
+    # is empty now reports its name decision (if any) and nothing else.
+    try:
+        _dead_ai_rows = {
+            _m.group(2)
+            for _m in (_AI_ROW_RE.match(_f) for _f in _pre_guard_values)
+            if _m and not str(mapped.get(f"AdditionalInterest_FullName_{_m.group(2)}") or "").strip()
+        }
+        for _f in _pre_guard_values:
+            _m = _AI_ROW_RE.match(_f)
+            if _m and _m.group(2) in _dead_ai_rows and _m.group(1) != "FullName":
+                _cascade_blanked.add(_f)
+    except Exception as _dr_ex:                           # noqa: BLE001
+        logger.warning("interest-row cascade skipped (form=%s): %s", form_id, _dr_ex)
+
     # ── Display canonicalization (Beta feedback: stamp clean, standardized
     # values, not raw OCR strings) ───────────────────────────────────────────
     # NON-destructive: standardizes date / currency / address / name / state
@@ -23939,14 +28234,24 @@ def map_facts_to_form(
                 form_id or "unknown", len(_blanked), ", ".join(_blanked[:20]),
             )
         if guard_report is not None:
+            _unanswered = set(_gate_refused)
+            try:
+                _unanswered |= _unanswered_question_fields(
+                    schema, mapped, set(_blanked) - _unanswered)
+            except Exception as _uq_ex:                           # noqa: BLE001
+                logger.warning("unanswered-question classing skipped (form=%s): %s",
+                               form_id, _uq_ex)
             for _f in _blanked:
-                guard_report.append({
+                _row = {
                     "form_id": form_id or "",
                     "field": _f,
                     # The refused value is carried so the reviewer can judge it.
                     # Truncated: some are whole paragraphs of policy wording.
                     "removed_value": str(_pre_guard_values[_f])[:160],
-                })
+                }
+                if _f in _unanswered:
+                    _row["kind"] = "unanswered"          # see `_gate_refused`
+                guard_report.append(_row)
     except Exception as _gr_ex:                                   # noqa: BLE001
         # Advisory reporting must never break a fill.
         logger.warning("guard-blank report skipped (form=%s): %s", form_id, _gr_ex)
@@ -24329,8 +28634,13 @@ def inject_signature_into_pdf(
         # show an empty signature widget on top of the painted image.
         if injected > 0 and "/AcroForm" in pdf.Root:
             acro = pdf.Root["/AcroForm"]
-            # NeedAppearances=false since we've painted directly
-            acro["/NeedAppearances"] = pikepdf.Boolean(False)
+            # NeedAppearances stays TRUE (15 Sep 2026). `fill_pdf` deletes every
+            # text box's /AP so the viewer draws each value at the box's own
+            # (possibly shrunken) /DA. Setting the flag false here left every
+            # value on a signed form with NO appearance - blank in Acrobat. The
+            # signature is painted into the page content, which the flag never
+            # touched.
+            acro["/NeedAppearances"] = pikepdf.Boolean(True)
             fields_arr = acro.get("/Fields")
             if fields_arr is not None:
                 def _remove_sig_fields(arr):

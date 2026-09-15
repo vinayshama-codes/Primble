@@ -138,6 +138,21 @@ def described_lines() -> frozenset:
     return frozenset(_LINE_PROFILES)
 
 
+def line_of_fact_key(key: Any) -> Optional[str]:
+    """The described line a canonical fact key belongs to, or None.
+
+    The same membership `_line_fact_keys` uses - the profile's explicit keys
+    and prefixes - so a caller asking "is this QUESTION about a line?" and this
+    module deciding "is that line present?" read one table.
+    """
+    if not key or not isinstance(key, str) or key.startswith("_"):
+        return None
+    for line, prof in _LINE_PROFILES.items():
+        if key in prof.fact_keys or key.startswith(prof.fact_prefixes):
+            return line
+    return None
+
+
 # ── Signal readers ───────────────────────────────────────────────────────────
 
 def _line_fact_keys(prof: LineProfile, facts: Optional[dict]) -> Tuple[str, ...]:

@@ -3766,3 +3766,298 @@ questionnaire "this form", which is OUR word for the ACORD output. Three words,
 same call count, same call sites, same batching. `PROMPT_VERSION` /
 `SCHEMA_VERSION` do NOT move - see C-UI01 for why this prompt is outside the
 gap-fill cached prefix.
+
+---
+
+## C87 - 2026-09-11 client Orbin round 2: three schema definitions, v18 -> v19
+
+**One prompt change, three defects, no new call site.** The extraction schema block grows
+**15,285 -> 16,449 chars (+1,164, ~+333 tokens)**. It sits inside the cached prefix and the
+call count is unchanged at 14, so the marginal cost is one cache-miss's worth of 333 tokens
+on the first upload after deploy and effectively zero thereafter.
+
+`PROMPT_VERSION` / `SCHEMA_VERSION` **v18 -> v19**. That is mandatory here and not
+bookkeeping: v18 replies carry no `class_code`, no `territory` and the old undefined
+insured lists, so leaving the version alone would serve them out of the extraction cache
+and the new columns would simply never arrive.
+
+### 1. `auto_vin_schedule` gains `class_code` and `territory`
+
+The vehicle's own rating class had **no column at all**, so ACORD 127's CLASS box could
+only ever be answered by gap fill reading the nearest number in the raw text - which is how
+the client's GL contractor class `91580` reached the Subaru. The same gap made the
+cross-line code fence (Guard 2d-ii) **one-directional**: nothing witnessed an auto code, so
+a GL class landing on a vehicle row was caught and a vehicle class landing on the GL hazard
+grid was not. Live run 1 printed `7398` twice on ACORD 126 and the Drive Other Car
+territory `6679` once, on a package whose auto schedule carried neither.
+
+Measured after the change: the fence blanks `7398` and `6679` on the GL form, blanks
+`91580` on the vehicle row, and keeps `7383` on the vehicle row and `91580`/`91585` on the
+GL form. Both directions, from one column pair.
+
+Wording is STATED-ONLY, in the same terms v16's RULE 2c uses for vehicle use / radius /
+garaging: never an ISO class looked up from the body type, never a territory inferred from
+the garaging address, never a number borrowed from another coverage part.
+
+### 1b. `auto_drivers` gains `territory` - the client's ACTUAL reported case
+
+Caught before the verification run, by reading the test kit rather than trusting the fix:
+the client's wording is *"ACORD 126 uses territory 6679, which appears in the Auto **DRIVE
+OTHER CAR** section"*, and a Drive Other Car schedule prints its territory against the
+NAMED INDIVIDUAL, not against a vehicle. `auto_vin_schedule.territory` alone would have
+left 6679 unwitnessed and still free to print on the GL hazard grid.
+
+**EVIDENCE ONLY.** ACORD 127 has no driver territory box (audited: the form's `Driver_*`
+code fields are gender, marital status, licensed state, postal code and two Y/N coverage
+codes), so this fills nothing - it gives the fence a witness, which is the whole job. An
+unbound fact has no other path to a box.
+
+**`class_code` is deliberately NOT added to `auto_drivers`.** A driver schedule that prints
+a class prints an NCCI one - the kit's own trap row carries `8810`, Clerical - and
+attributing that to `auto` would let the fence blank a genuine Workers Compensation class
+on the ACORD 130. A territory has no such twin. Measured: `6679 -> auto`,
+`8810 -> workers_comp`, and 8810 on the ACORD 130 is kept.
+
+### 2. `additional_named_insureds` gets the definition it never had
+
+It was a bare `[string]` with **no rule anywhere** - the same undefined shape
+`lines_of_business` had before v18, and with the same result. "Additional insured" and
+"additional NAMED insured" are one word apart and describe different legal statuses: the
+first is limited status granted by endorsement, the second shares the policy. Live run 1:
+two parties whose INTEREST column read "Additional Insured" verbatim came back in this key
+and printed on ACORD 125 as OTHER NAMED INSURED.
+
+### 3. ...and `risk_transfer.additional_insured_names`, so the name has somewhere to go
+
+Defining one list without the other would have told the model what NOT to do and left it
+nowhere to put the value. Both definitions now cross-reference each other explicitly.
+
+### The prompt is not the guarantee, in all three cases
+
+H1-K's standing lesson applies and was re-proved by this very round: v18 ALREADY told the
+model *"do NOT set `gl_is_claims_made` true when the document states the GL form is written
+on an OCCURRENCE basis"*, in those words, and run 1 set it true on a package whose
+declarations page says OCCURRENCE. So each of the three ships with a deterministic partner
+that does not depend on the model obeying:
+
+| prompt change | deterministic partner |
+|---|---|
+| vehicle `class_code` / `territory` | Guard 2d-ii already refuses a code every witness attributes elsewhere; the columns give it the witness. `Vehicle_RatingTerritoryCode` also joined Guard 2e |
+| `additional_named_insureds` | `_names_the_document_calls_additional_insureds` reads the VERIFIED dec entries - blocked only when they print the name under an ADDITIONAL INSURED label **and never** under a NAMED INSURED one |
+| (no prompt change) `gl_form_type` vs `gl_is_claims_made` | `coverage_evidence.gl_is_claims_made` - one door, four consumers, the STATED basis outranks the detector flag |
+
+### Cache and rollout
+
+Every cached extraction is invalidated by the version bump. The first upload per document
+after deploy pays a full extraction; nothing else changes. `DEC_INDEX_DEDICATED_PASS`,
+`CONTEXT_UTILISATION`, batching and chunking are all untouched.
+
+### Verification
+
+Suite **7,670 passed / 1 failed / 21 skipped** - the failure is the documented `httpx`
+ImportError. Zero regressions.
+
+Two existing tests fired as designed and were updated with the evidence, not around it:
+`test_every_witness_subkey_is_declared_in_the_extraction_schema` asserted that
+`auto_vin_schedule` carries NO code column and printed its own instruction to invert the
+one-directional test if that ever stopped being true - it did, and both were inverted; and
+`test_extraction_schema_carries_the_counts_and_moved_to_v17` is the bare version pin that
+exists so a schema edit cannot pass unacknowledged.
+
+**One regression was introduced and caught by two existing tests.** Registering the two new
+vehicle columns made a RATING code an identity anchor for the ghost-row sweep, so a phantom
+row carrying only a leaked GL class code survived - the 2026-08-13 defect, resurrected by
+its own fix. `_unanchored_schedule_row_fields` now derives its anchors through the same
+`_CODE_SUBKEY_RE` the fence uses (one definition, hoisted): a rating code identifies
+nothing. Measured reach: 10 of 131 registered columns, every root keeping real anchors, and
+the sweep only ever clears GAP-FILLED cells so no extracted row is touched.
+
+### D6 - values move
+
+Vehicle CLASS and TERRITORY start filling deterministically where gap fill previously
+guessed or blanked; cross-line codes on both forms become blank; false claims-made warnings
+disappear on occurrence policies (**scores UP** - a soft warning caps at 85); additional
+insureds leave the ACORD 125 Other Named Insured roster (**fill rate down slightly,
+correctness up**). Brent sees the numbers first.
+
+## C88 - 2026-09-14 Orbin round 3: RULE 16 tightened (v19 -> v20) + line-scoped gap fill
+
+**Two LLM-facing changes, no new call site.** Both were measured offline on the live
+Orbin session's own per-document facts and document text (recorder, zero API calls).
+
+### 1. Extraction prompt RULE 16 - `PROMPT_VERSION` v19 -> v20
+
+Three sentences added to the `coverage_lines` rule (~+110 tokens inside the cached
+prefix; call count unchanged at 14): take rows only from declarations / summary /
+schedule pages; leave carrier / NAIC / policy number null when the row itself does
+not print them (the page-1 premium summary was being given the NEXT page's carrier
+and number); a FORM number ("IM 7100 06 04") is never a policy number and a rating
+bureau (AAIS, ISO) is never the carrier. SCHEMA unchanged. The bump is mandatory:
+v19 replies in the cache still carry the bad rows.
+
+**Not the guarantee.** Each sentence has a deterministic partner that holds without
+the model obeying: `_scrub_non_contract_identifiers` (per document, every row),
+`_bind_carriers_to_contracts` (the carrier printed in each contract's own page
+headers), `_pair_carrier_naic_scalars`, and the Data Consistency card /
+`validate_confirmation` / `apply_confirmations` refusing form numbers.
+
+### 2. Gap fill reads the questioned line's policy SECTION - `build_line_page_scopes`
+
+Before: every gap-fill batch walked the whole 711k-char package in 7 chunks; the page
+a box needed sat in one of them, and the GL territory question was answered from the
+only "TERRITORY" in the package (the AUTO Drive Other Car line). Now a question about
+ONE coverage line (`_field_scope_line`: the field's own leading segment, else its
+section form's line) reads that line's policy section plus every page no policy
+claims (common declarations, the certificate, the narrative). A section = the page
+whose header/footer prints the policy number through to the next policy's page -
+how a package is assembled. ACORD 125's package questions still read everything, so
+every page is still read by some question. Another line's facts and declarations
+entries are left out of the scoped group's facts block and index too.
+
+Measured on Orbin (125/126/127/131, recorder answering nothing - an UPPER bound):
+
+| | calls | input chars | ~tokens |
+|---|---|---|---|
+| whole document (before) | 205 (128 gap fill + 77 compliance) | 27.4M | 6.85M |
+| line-scoped | 114 (80 + 34) | 13.9M | 3.48M |
+
+Scopes: auto 160k (pages 85-142), GL 194k (205-271), umbrella 173k (143-204), inland
+marine 226k (3-84) - exactly the ground truth's sections. Page-level attribution
+alone (first cut) left every scope at 94% of the package and cost MORE calls; the
+section rule is what pays. Prefix caching: each line group has its own constant
+prefix and warm-up, so caching holds within a group. `GAP_FILL_LINE_SCOPE=0`
+restores whole-document reading exactly.
+
+### Verification
+
+`tests/test_line_binding_14sep.py` (34, client's literal values and live data
+shapes) plus the full suite. `py backend/scripts/inspect_gap_fill_prompts.py` is
+unaffected (its fixture has no page markers, so nothing is scoped).
+
+## C89 - 2026-09-14 Orbin: the coverage trigger defined (v20 -> v21)
+
+**Extraction prompt only; no new call, call count unchanged.** Two schema lines, ~+140
+tokens inside the cached prefix (~570 chars; estimated at 4 chars/token, not tokenized -
+the first draft of this entry said ~+90, which was low).
+
+- `gl_form_type` was `string or null` with no definition. Across Orbin runs it held
+  "Business Auto Coverage Form", "Commercial General Liability", the umbrella's
+  "COMMERCIAL LIABILITY UMBRELLA COVERAGE FORM" and "CG 00 01 04 13" - none of them a
+  basis - and Field QA compared the Claims-Made tick with it. Now
+  `"Occurrence"|"Claims-Made"|null`, the GL part only, never a form title or number.
+- `umbrella_form_type` added: the umbrella's own trigger. ACORD 131/25's umbrella
+  Occurrence/Claims-Made boxes read `gl_form_type` until now.
+- **Not the guarantee.** `extraction_service.coverage_basis` runs per document at merge:
+  the caption ("OCCUR"), the words, or the ISO GL form (CG 00 01 / 00 02) become the
+  basis; anything else is dropped. The boxes stamp through
+  `pdf_service.expected_tick_for_box`, the same door Field QA compares with.
+- `PROMPT_VERSION` / `SCHEMA_VERSION` v20 -> v21: v20 replies in the cache carry the
+  undefined value. One fresh extraction per package, once.
+- Verification: `tests/test_remaining_fixes_14sep.py` plus the full suite.
+
+## C90 - 2026-09-15 Orbin live run 4: fewer boxes reach gap fill
+
+**No prompt change, no version bump, no new call.** Deterministic owned blanks for
+questions the documents cannot answer - each one measured on the live run:
+
+- ACORD 137 hired autos: cost of hire, days, vehicles (`state_auto_grid._HIRED_EXPOSURE_BASES`).
+  The model read "EXCESS CO IF ANY 100 $ 185.00" as a $100 cost, 100 days, 1 vehicle.
+- ACORD 131 TRANSACTION TYPE "Other" + its description (`pdf_service._POLICY_STATUS_RE`) -
+  it wrote '"8 Other"', section 8 of the premium summary. The producer's call, like Renew.
+- Boxes under "APPLICABLE ONLY IN <STATE>" on a risk provably elsewhere
+  (`services/state_restricted_boxes`, read off the templates: 4 on ACORD 126).
+- Every ACORD 127 driver-table column once the driver list was emptied by the
+  named-individual move (up to 20 columns x 13 rows; live, the insured's address was
+  copied into all 13 rows).
+- The Yes/No quote check now refuses a quoted defined term on the QUOTE path as well
+  as the explanation path - no call change.
+
+Cost direction DOWN (fewer fields per batch), not measured live. Verification:
+`tests/test_live_run_fixes_15sep.py` plus the full suite.
+
+## C91 - 2026-09-15 Orbin live run 5: 31 more boxes decided or owned
+
+**No prompt change, no version bump, no new call.** Counted on the live session
+(723eb79e) - boxes that no longer reach gap fill:
+
+- ACORD 127, 15 per scheduled vehicle: the row's LIAB / MED PAY / UM / UIM / COMP /
+  COLL ticks now come from `auto_covered_symbols` (`_resolve_vehicle_coverage_tick`);
+  a decided COMP owns the named-peril alternatives; the OTHER coverage box is an owned
+  blank. Live, the model kept LIAB on one run and lost it on the next.
+- ACORD 131, 12: CARE, CUSTODY, CONTROL (10) and the umbrella's OTHER limit row (2).
+  Filled twice with two different wrong values across two runs.
+- ACORD 137 CO, 4: hired / non-owned liability YES-NO, decided when the liability
+  symbols prove the coverage (`state_auto_grid._liability_exposure_cell`).
+
+Zero-token post-processing only otherwise: count facts held to one number at the
+merge, a range refused in a count box, an AI deductible amount dropped when its tick
+is not set, and refused Yes/No answers reported as unanswered questions.
+
+Round 2 (same day): 4 more on ACORD 131 - UMBRELLA / EXCESS from the umbrella
+policy's own printed name (`_resolve_umbrella_or_excess`, also ACORD 25), and CGL -
+OCCURRENCE / CLAIMS MADE from `gl_form_type` (`_INDICATOR_RULES`). The evidence gate
+also refuses a coverage form's NAME as proof (`_is_coverage_form_title`) - no call
+change.
+
+Run 6 (same day): 3 more boxes decided, none asked - ACORD 131's primary-row NAME and
+DESCRIPTION (`_ACORD_FIELD_RULES`, row A; ACORD 160's first-premises description too),
+and 131 Q2's edition whenever the document text prints one CGL coverage-form edition
+(`extraction_pipeline._derive_gl_coverage_form_edition`, a text scan, zero tokens).
+Everything else in run 6 is zero-token post-processing or PDF rendering. No call, no
+prompt change.
+
+Run 7 (same day): 31 fewer boxes asked on the live session (565 -> 534 across 125 /
+126 / 127 / 131 / 137, none added). ACORD 127's vehicle type, BODY, COST NEW, garaging,
+valuation and USE boxes, 131's payroll / Q9 / umbrella third limit, 137's non-owned
+group and 126's CGL tick and subcontract boxes now come from facts or are owned
+blanks; both schedule doors honour an owned blank. No call, no prompt change.
+
+Run 8 (same day): 2 fewer boxes asked per run on all five live sessions (ACORD 131 ANN
+GROSS SALES and FOREIGN GROSS SALES now owned), none added. The line-number index fix
+also changes WHICH PAGES a line's questions read (`build_line_page_scopes`): on runs 5
+and 8 the umbrella had no scope, so the auto questions carried the umbrella's pages
+(auto scope 43% -> 21% of the document) and the umbrella questions the whole package;
+now all five runs scope the same four lines. Input DOWN on those calls; no call added,
+no prompt text change.
+
+Cost direction DOWN, not measured live. Verification:
+`tests/test_live_run5_fixes_15sep.py`, `tests/test_live_run6_fixes_15sep.py`,
+`tests/test_live_run7_fixes_15sep.py`, `tests/test_live_run8_fixes_15sep.py` plus the
+full suite.
+
+## C92 - 2026-09-15 Cover page SQS paragraph: the score's own name and the ranking
+
+**One prompt edited (`cover_service.generate_ai_cover_narrative`); no new call, no
+version bump, same model.** The prompt labelled the package score "Overall Average SQS",
+and the model repeated it on the live Orbin cover ("The overall average SQS of 63/100")
+above five form scores that average 70; the same paragraph called ACORD 126 (74) the best
+form with ACORD 131 (77) in its own input.
+
+- The score line now reads "Package SQS: N/100 (the submission's own score, computed
+  independently - NOT an average of the form scores)", followed by one new line "Form
+  scores, highest first: ACORD 131 77, ...". The sqs_reasoning instruction names the
+  label and says a best / weakest claim must be the first / last form of that list.
+- Zero-token check on the reply (`_checked_sqs_reasoning`): the word "average" on a
+  package score, or a best / worst claim about a form that is not at that end of the
+  ranking, replaces the paragraph with a deterministic sentence built from the same
+  scores. The LLM-failure fallback uses the same sentence (it also said "overall
+  average").
+- Cost: roughly +20 input tokens per cover call. The cache key now includes the ranked
+  form scores, so a package whose form scores changed gets one fresh call instead of a
+  stale paragraph.
+
+## C93 - 2026-09-16 Cover page narrative: told the prior carrier and the current term
+
+**One prompt edited (`cover_service.generate_ai_cover_narrative`); no new call, no
+version bump, same model.** Live run 10's cover summary said "no prior carrier detail was
+included in the source data" while the same page printed the prior carrier: the prompt's
+SUBMISSION DATA never carried it, and the cache key (applicant, forms, score, org,
+ranking) could serve a paragraph written from older data.
+
+- SUBMISSION DATA gains "Prior Carrier: ..." and - only once the merge moved the current
+  term out of the proposed dates - "Current Policy Term: ...". "Effective Date" is now
+  "Proposed Effective Date: ... or To be confirmed".
+- The cache key is the md5 of the prompt itself, so everything the model reads is part of
+  the key.
+- Cost: roughly +15-25 input tokens per cover call. A cover whose data changed gets one
+  fresh call instead of a stale paragraph.

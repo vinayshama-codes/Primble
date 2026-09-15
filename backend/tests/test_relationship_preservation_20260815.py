@@ -151,6 +151,35 @@ class TestSectionPolicyIdentity:
             "Policy_PolicyNumberIdentifier_A", facts) == "GLOB-1"
 
     def test_single_policy_package_still_fills(self):
+        # FIXTURE CORRECTED 2026-09-11. It used to print the one number against
+        # a line called "Liability" - which `canon_line` places on GENERAL
+        # LIABILITY - and assert it onto the UMBRELLA application. That is the
+        # client-reported defect this file exists to prevent (see the 2026-08-15
+        # entry: "ACORD 131's EXPIRING POL # came back BBC7263 - the GENERAL
+        # LIABILITY policy number, on the UMBRELLA application"), written down
+        # as the expected result. An independent invariant fuzz found the same
+        # shape stamping an Umbrella number onto ACORD 126.
+        #
+        # The INTENT - a genuine single-policy package still fills - is right
+        # and is what this now tests: the number is printed against a row that
+        # names no specific line, so nothing contradicts inheriting it.
+        facts = {
+            "coverage_lines": [
+                {"line": "Umbrella", "premium": "$3,418"},
+                {"line": "Commercial Package", "policy_number": "ONE-1",
+                 "premium": "$3,954"},
+            ],
+            "_form_id": "ACORD_131",
+        }
+        assert _deterministic_map("Policy_PolicyNumberIdentifier_A", facts) == "ONE-1"
+
+    def test_a_number_printed_against_another_line_is_never_inherited(self):
+        """The other half of the rule above, and the reason it is a rule.
+
+        "We could only read one policy number" is not the same fact as "this
+        package has one policy". When the only readable number is printed
+        against a DIFFERENT, identifiable line, it belongs to that line.
+        """
         facts = {
             "coverage_lines": [
                 {"line": "Umbrella", "premium": "$3,418"},
@@ -158,9 +187,11 @@ class TestSectionPolicyIdentity:
             ],
             "_form_id": "ACORD_131",
         }
-        # Umbrella line exists but states no number; the whole package carries
-        # exactly one number, so it unambiguously belongs to every line.
-        assert _deterministic_map("Policy_PolicyNumberIdentifier_A", facts) == "ONE-1"
+        assert _deterministic_map("Policy_PolicyNumberIdentifier_A", facts) is None
+        # ...and the GL form it really belongs to still gets it.
+        assert _deterministic_map(
+            "Policy_PolicyNumberIdentifier_A",
+            dict(facts, _form_id="ACORD_126")) == "ONE-1"
 
     def test_package_application_forms_refuse_one_lines_number(self):
         # SUPERSEDED by the 2026-08-15 independent audit (#2): the header

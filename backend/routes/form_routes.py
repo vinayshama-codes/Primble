@@ -1306,11 +1306,24 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                     # what extraction already does.
                     raw_text = active_document_text(session)
                     facts_with_flags = {**session["facts"], **session.get("flags", {})}
+                    # Which pages each coverage line's questions may read - see
+                    # pdf_service.build_line_page_scopes. Same active documents
+                    # as `raw_text`; an empty result keeps today's behaviour.
+                    try:
+                        from services.pdf_service import build_line_page_scopes
+                        _active_docs = [d for d in (session.get("docs") or [])
+                                        if isinstance(d, dict) and not d.get("excluded")] \
+                            or [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+                        line_scopes = build_line_page_scopes(_active_docs, facts_with_flags)
+                    except Exception as _scope_ex:      # noqa: BLE001
+                        logger.warning("combined_gap_fill: line scoping unavailable: %s", _scope_ex)
+                        line_scopes = {}
                     logger.info(
                         "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
-                        "total_mapped_fields=%d",
+                        "total_mapped_fields=%d line_scopes=%s",
                         len(forms_to_unmatched), len(forms_to_mapped),
                         sum(len(v) for v in forms_to_mapped.values()),
+                        {k: len(v) for k, v in (line_scopes or {}).items()},
                     )
                     per_form_pre_filled = await loop.run_in_executor(
                         _FORM_EXECUTOR,
@@ -1318,6 +1331,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                             combined_gap_fill,
                             forms_to_unmatched, facts_with_flags, raw_text,
                             forms_to_mapped=forms_to_mapped,
+                            line_scopes=line_scopes,
                         ),
                     )
                 else:
@@ -1605,6 +1619,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             req.session_id, str(current_user["id"]), results,
             session.get("facts") or {}, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
+            flags=session.get("flags") or {},
         )
 
         # Field-mapping integrity warnings (Figure 33): carrier/policy data in an
@@ -2414,6 +2429,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             req.session_id, str(current_user["id"]), generated,
             updated_facts, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
+            flags=session.get("flags") or {},
         )
 
         # Field-mapping integrity warnings (Figure 33): refresh after the edit so

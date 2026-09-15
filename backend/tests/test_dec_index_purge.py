@@ -154,6 +154,15 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # whole package to add one form - the wrong trade, and it would undo the
         # PII minimisation the purge exists for.
         "form_addition.py",
+        # underwriting_consistency (14 Sep 2026, Orbin). DOES run after
+        # generation - the Data Consistency card is rebuilt on every pipeline
+        # re-run. `_verified_contracts` reads the entries' policy numbers so a
+        # carrier FORM reference (`CU7001A 11-15`) that no verified contract
+        # names is not offered as a policy number. Purge-safe on both counts
+        # the fact_equivalence entry above records: it also reads the
+        # PER-DOCUMENT copies, which the purge never touches, and with no index
+        # it has no opinion - the card behaves exactly as before the filter.
+        "underwriting_consistency.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

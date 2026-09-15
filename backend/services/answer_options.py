@@ -293,6 +293,9 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "period_of_restoration":       (PERIOD_OF_RESTORATION_OPTIONS, False),
     "agreed_value_endorsement":    (AGREED_VALUE_OPTIONS, False),
     "gl_form_type":                (GL_FORM_TYPE_OPTIONS, False),
+    # The umbrella's OWN trigger (extraction v21) - one basis vocabulary, so
+    # the tick door can read the ACORD 131 umbrella Occurrence / Claims-Made boxes.
+    "umbrella_form_type":          (GL_FORM_TYPE_OPTIONS, False),
     "umbrella_follow_form":        (UMBRELLA_FOLLOW_FORM_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
     "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
@@ -333,6 +336,43 @@ def options_for(fact_key: str) -> Optional[List[str]]:
     """The answer choices for this fact, or None when it should stay free text."""
     entry = _lazy_catalogue().get(fact_key)
     return list(entry[0]) if entry else None
+
+
+# A document names an option in its OWN printing, and the commonest one is the
+# checkbox caption: ACORD 25 heads the GL basis column "CLAIMS-MADE | OCCUR".
+# An exact-match reading judged the certificate's correct "OCCUR" illegal for
+# `gl_form_type`, so the Data Consistency card could not drop the declarations
+# page's form number "CG 00 01 04 13" and asked the producer to pick between
+# them (Orbin 5037f1a6, client 11 Sep 2026). A printing names an option when it
+# IS the option, or an UNAMBIGUOUS truncation of it: at least this many letters
+# and digits, and the start of exactly one option. "OCC" names nothing, and
+# "Limited" names three entity types, so it names none of them.
+_OPTION_CAPTION_MIN = 4
+
+
+def option_named_by(fact_key: str, text) -> Optional[str]:
+    """The option label ``text`` names for this fact, or None.
+
+    Never "Other" - that is the escape hatch, not an answer. Never a guess:
+    anything that is not an option or an unambiguous truncation of one returns
+    None, and a fact with no closed list always returns None.
+    """
+    import re
+    key = re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+    if not key:
+        return None
+    labels: Dict[str, str] = {}
+    for opt in options_for(fact_key) or []:
+        k = re.sub(r"[^a-z0-9]", "", str(opt).lower())
+        if k and opt != OTHER:
+            labels[k] = opt
+    if key in labels:
+        return labels[key]
+    if len(key) >= _OPTION_CAPTION_MIN:
+        hits = [label for k, label in labels.items() if k.startswith(key)]
+        if len(hits) == 1:
+            return hits[0]
+    return None
 
 
 def is_multi_select(fact_key: str) -> bool:

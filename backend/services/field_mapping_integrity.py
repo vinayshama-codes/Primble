@@ -663,3 +663,260 @@ def to_recommendation_rows(result: Optional[dict]) -> List[dict]:
             "score_impact": None,
         })
     return rows
+
+
+# ── A PARTY BOX MUST HOLD A PARTY ────────────────────────────────────────────
+# Client 2026-09-11 item 8: *"'For Informational Purposes Only' was populated as
+# an Additional Interest. That phrase came from the COI and is not a person or
+# organization. We need entity validation before text can populate an Additional
+# Interest, Loss Payee, Lienholder, etc."*
+#
+# ROOT CAUSE: there is no entity validation anywhere. Measured - of the six
+# facts that feed the 65 party-name boxes across the 17 schemas,
+# `certificate_holder`, `additional_named_insureds`, `loss_payee_name`,
+# `mortgagee_name` and `dba_name` all carry ``validate = None``. Whatever string
+# extraction grabs becomes a named party on a legal document.
+#
+# WHY THIS IS NOT A PHRASE LIST. The 2026-08-08 Data Consistency defect is the
+# standing lesson: three successive denylists each closed the reported sentence
+# and left the next phrasing free (see `underwriting_consistency._scan_shape`).
+# So the test is STRUCTURAL - a party name is a NOUN PHRASE, and boilerplate is
+# a CLAUSE:
+#
+#   * it opens with a preposition, demonstrative or verb  ("For ...", "This ...")
+#   * it closes on a qualifying adverb                    ("... Only")
+#   * it contains a finite verb                           ("... IS ISSUED ...")
+#
+# Any one of those is disqualifying, and a name must ALSO carry a positive
+# signal (a legal suffix, or proper-noun shape). Two conditions, per the H1-F
+# rule that a necessary test needs a structural second one.
+#
+# Companion to `is_party_role_label` (a ROLE is not a party) and
+# `_rejects_role_or_arrangement`, which already catch "Certificate Holder",
+# "See Attached", "Various" and "N/A". This catches the clause shape they miss.
+
+_PARTY_LEGAL_SUFFIX_RX = re.compile(
+    r"\b(l\.?l\.?c|inc|incorporated|corp|corporation|co|company|companies|ltd|"
+    r"limited|l\.?p|l\.?l\.?p|p\.?l\.?l\.?c|p\.?c|p\.?a|plc|trust|bank|banking|"
+    r"association|assn|authority|district|agency|university|college|academy|"
+    r"hospital|church|foundation|partnership|holdings|group|enterprises|"
+    r"services|properties|leasing|finance|financial|credit\s+union|fcu|n\.?a|"
+    r"municipality|city|county|state|department|dept|board|commission|"
+    r"cooperative|co-?op|institute|society|club|estate|lp)\b", re.I)
+
+# Openers a NOUN PHRASE never begins with. Articles are deliberately absent -
+# "The Bank of New York Mellon" is a party.
+_PARTY_CLAUSE_OPENERS = frozenset({
+    "for", "in", "on", "at", "by", "with", "to", "from", "as", "per", "if",
+    "when", "while", "where", "subject", "see", "refer", "this", "that",
+    "these", "those", "such", "any", "all", "each", "every", "none", "no",
+    "not", "is", "are", "was", "were", "will", "shall", "should", "must",
+    "may", "can", "does", "do", "did", "has", "have", "had", "been", "being",
+    "please", "note", "including", "included", "except", "unless", "pursuant",
+    "regarding", "re", "insured", "coverage", "certificate", "policy",
+})
+
+# Tails a NOUN PHRASE never ends on.
+_PARTY_CLAUSE_TAILS = frozenset({
+    "only", "applicable", "required", "attached", "below", "above", "herein",
+    "thereof", "hereof", "purposes", "needed", "requested", "noted", "shown",
+    "listed", "stated", "provided", "issued", "endorsed", "waived", "apply",
+    "applies", "necessary", "available", "pending", "tbd", "unknown",
+    # A document's own copy marker: "Agency Copy", "Insured Copy", "File Copy".
+    "copy", "copies",
+})
+
+_PARTY_FINITE_VERB_RX = re.compile(
+    r"\b(is|are|was|were|shall|will|would|should|must|may|can|does|do|did|"
+    r"has|have|had|been|being|provides?|applies|apply|includes?|excludes?|"
+    r"covers?|constitutes?|evidences?|confers?|amends?|extends?|remains?)\b",
+    re.I)
+
+_PARTY_WORD_RX = re.compile(r"[A-Za-z][A-Za-z'&./-]*")
+_PARTY_ARTICLES = frozenset({"the", "a", "an"})
+_RUN_TOGETHER_BOUNDARY_RX = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
+# Words a certificate prints ABOUT itself - its status, not a party. With
+# ACORD's own field vocabulary they make the look-alike placeholders: "Proof
+# of Insurance", "Sample Certificate", "Holder of Record", "Evidence Only".
+_DOCUMENT_STATUS_WORDS = frozenset({
+    "proof", "evidence", "sample", "specimen", "copy", "copies", "record",
+    "records", "informational", "information", "purposes", "purpose",
+    "reference", "void", "draft", "file", "ongoing",
+})
+_VOCAB_CONNECTORS = frozenset({
+    "the", "of", "and", "a", "an", "for", "to", "in", "on", "at", "by", "or"})
+_ACORD_VOCAB_CACHE: List[frozenset] = []
+
+
+def _acord_vocabulary():
+    """(field-name words, tooltip words) of the 17 ACORD schemas - ACORD's own
+    vocabulary, read once. Empty sets when the schemas cannot be read, which
+    simply switches both vocabulary rules off."""
+    if not _ACORD_VOCAB_CACHE:
+        import json as _json
+        import os as _os
+        field_words, tip_words = set(), set()
+        try:
+            folder = _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.abspath(__file__))), "forms_schemas")
+            for name in sorted(_os.listdir(folder)):
+                if not name.endswith("_schema.json"):
+                    continue
+                with open(_os.path.join(folder, name), encoding="utf-8") as fh:
+                    schema = _json.load(fh)
+                for field, meta in (schema.items() if isinstance(schema, dict) else []):
+                    field_words.update(
+                        w.lower() for w in re.findall(r"[A-Z][a-z]+", str(field)))
+                    if isinstance(meta, dict):
+                        tip_words.update(w for w in re.findall(
+                            r"[a-z]+", str(meta.get("tu") or "").lower()) if len(w) >= 2)
+        except Exception:                                     # noqa: BLE001
+            field_words, tip_words = set(), set()
+        _ACORD_VOCAB_CACHE.extend([frozenset(field_words), frozenset(tip_words)])
+    return _ACORD_VOCAB_CACHE[0], _ACORD_VOCAB_CACHE[1]
+
+
+def _segment_glued_caps(token: str) -> Optional[List[str]]:
+    """Split an ALL-CAPS (or all-lower) glued token into ACORD vocabulary words,
+    or None when it does not split cleanly: FORINFORMATIONALPURPOSESONLY ->
+    for / informational / purposes / only; KESTRELTERMINALAUTHORITY -> None."""
+    _fields, tips = _acord_vocabulary()
+    if not tips:
+        return None
+    vocab = tips | _DOCUMENT_STATUS_WORDS | _VOCAB_CONNECTORS
+    t = token.lower()
+    best: List[Optional[List[str]]] = [None] * (len(t) + 1)
+    best[0] = []
+    for i in range(2, len(t) + 1):
+        for j in range(max(0, i - 24), i - 1):       # every piece >= 2 letters
+            if best[j] is None:
+                continue
+            piece = t[j:i]
+            if piece in vocab or (len(piece) > 3 and piece.endswith("s")
+                                  and piece[:-1] in vocab):
+                if best[i] is None or len(best[j]) + 1 < len(best[i]):
+                    best[i] = best[j] + [piece]
+    return best[len(t)]
+
+
+def _respace_run_together(head: str) -> str:
+    """Re-space ONE token that OCR glued together from several words.
+
+    The Orbin certificate's OCR prints its holder box as
+    ``ForInformationalPurposesOnly`` - one token, so the clause test saw a
+    single capitalised word and called it a name. A mixed-case token splits at
+    its capitals; an ALL-CAPS one (``FORINFORMATIONALPURPOSESONLY``) splits into
+    ACORD's own vocabulary or not at all - a real name such as
+    ``KESTRELTERMINALAUTHORITY`` does not split. Only a split into THREE or more
+    words is used, so ``OrbinContracting`` or ``CRSInsurance`` are judged
+    exactly as before. A glued LEGAL name (``InTownSuitesLLC``) stays one token
+    - re-spaced it would open on "In" and read as a clause.
+    """
+    if not head or any(ch.isspace() for ch in head):
+        return head
+    if _RUN_TOGETHER_BOUNDARY_RX.search(head):
+        spaced = _RUN_TOGETHER_BOUNDARY_RX.sub(" ", head)
+    elif len(head) >= 12 and head.isalpha() and (head.isupper() or head.islower()):
+        pieces = _segment_glued_caps(head)
+        spaced = " ".join(p.capitalize() for p in pieces) if pieces else head
+    else:
+        return head
+    if len(spaced.split()) < 3 or _PARTY_LEGAL_SUFFIX_RX.search(spaced):
+        return head
+    return spaced
+
+
+def _made_only_of_form_words(head: str) -> bool:
+    """A third-party "name" built ONLY from ACORD's own field vocabulary and a
+    certificate's status words names nobody: "Proof of Insurance", "Sample
+    Certificate", "Holder of Record", "Commercial General Liability".
+
+    Measured before shipping: 0 of the 547 real party names stored in the
+    database are refused. A suffix-less "Commercial Credit" would be - a blank
+    box the producer fills, never a wrong party on the form.
+    """
+    field_words, _tips = _acord_vocabulary()
+    if not field_words:
+        return False
+    toks = [w for w in re.findall(r"[a-z]+", head.lower())
+            if w not in _VOCAB_CONNECTORS and w != "s"]
+    if not toks:
+        return False
+    vocab = field_words | _DOCUMENT_STATUS_WORDS
+    return all(w in vocab or (w.endswith("s") and w[:-1] in vocab) for w in toks)
+
+
+def names_a_party(value: Any, third_party: bool = False,
+                  respace: Optional[bool] = None) -> bool:
+    """Does ``value`` name a person or an organisation?
+
+    Structural, not a phrase list. Returns False for a clause, a disclaimer or
+    a fragment; True for a name. An address may ride along after the name (the
+    questionnaire asks for "name and address" in one box), so only the part
+    before the first comma is judged for shape.
+
+    ``third_party`` (14 Sep 2026) is for a box or fact that names someone OTHER
+    than the insured - certificate holder, additional interest, loss payee,
+    mortgagee, lienholder. There a glued OCR token is re-spaced before the
+    shape test (see `_respace_run_together`), and a "name" made only of ACORD's
+    own form vocabulary is refused (see `_made_only_of_form_words`). Off by
+    default, so the insured's own name boxes are judged exactly as before.
+
+    ``respace`` defaults to ``third_party``. A GAP-FILLED insured box asks for
+    the re-spacing alone: an insured's own name is often ordinary words
+    ("Commercial Roofing"), so the vocabulary rule never judges it.
+    """
+    s = str(value or "").strip().strip('"\u201c\u201d')
+    if len(s) < 2:
+        return False
+    head = s.split(",")[0].strip()
+    do_respace = third_party if respace is None else bool(respace)
+    if do_respace:
+        head = _respace_run_together(head)
+    words = _PARTY_WORD_RX.findall(head)
+    if not words:
+        return False
+
+    lead = [w for w in words if w.lower() not in _PARTY_ARTICLES]
+    if not lead:
+        return False
+    if lead[0].lower().strip(".") in _PARTY_CLAUSE_OPENERS:
+        return False
+    if words[-1].lower().strip(".") in _PARTY_CLAUSE_TAILS:
+        return False
+    if _PARTY_FINITE_VERB_RX.search(head):
+        return False
+    if third_party:
+        try:
+            from services.normalization import is_party_role_label
+            if is_party_role_label(head):
+                return False               # "Landlord", "Owner" - a role, not a party
+        except Exception:                                     # noqa: BLE001
+            pass
+    if third_party and not _PARTY_LEGAL_SUFFIX_RX.search(head) \
+            and _made_only_of_form_words(head):
+        return False
+
+    # Positive signal required - a necessary test needs a sufficient one.
+    if _PARTY_LEGAL_SUFFIX_RX.search(head):
+        return True
+    proper = [w for w in lead if w[:1].isupper() or w.isupper()]
+    if len(proper) >= 2:
+        return True
+    return len(lead) == 1 and len(lead[0]) >= 3 and lead[0][:1].isupper()
+
+
+def is_party_name_field(field_name: Optional[str]) -> bool:
+    """Does this ACORD box hold a party's NAME?
+
+    Derived from ACORD's own naming: a party subject segment
+    (AdditionalInterest, CertificateHolder, LossPayee, Mortgagee, NamedInsured,
+    AdditionalInsured, Lienholder) followed by a name box.
+    """
+    f = str(field_name or "")
+    if not re.search(r"(FullName|_Name)(_[A-Z])?$", f):
+        return False
+    return bool(re.match(
+        r"^(AdditionalInterest|CertificateHolder|LossPayee|Mortgagee|"
+        r"NamedInsured|AdditionalInsured|Lienholder|ThirdParty)", f))

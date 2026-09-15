@@ -212,6 +212,19 @@ def _format_tables_as_text(tables: list) -> str:
 # end is legitimate, so this must never block or flag the session.
 _TABLE_EXPECTED_DOC_TYPES = frozenset({"loss_run", "dec_page"})
 
+# Documents a CARRIER issues. A package of these alone states no applicant
+# figure a carrier never prints - foreign sales, a subsidiary's payroll (review
+# of live run 8: a dec page plus a loss run is the common upload, and the
+# dec-page-only flag missed it). Any other or unknown type is not assumed.
+_CARRIER_DOC_TYPES = frozenset({"dec_page", "declarations", "policy", "binder", "endorsement",
+                                "certificate", "loss_run"})
+
+
+def carrier_documents_only(doc_types) -> bool:
+    """True when every active document is carrier-issued; an empty list is not."""
+    types = [str(t or "").strip().lower() for t in (doc_types or [])]
+    return bool(types) and all(t in _CARRIER_DOC_TYPES for t in types)
+
 
 async def run_extraction_pipeline(
     file_paths: list[str],
@@ -373,6 +386,72 @@ def _carry_human_flags(mflags: dict, merged_facts: dict,
     return carried
 
 
+def _derive_gl_coverage_form_edition(merged_facts: dict, docs: list) -> Optional[str]:
+    """Write `gl_coverage_form_edition` from the documents' own text.
+
+    Live run 6 (15 Sep 2026): ACORD 131 Q2 printed "04 13" on run 5 and was
+    blank on run 6 - same policy, same code - because its resolver read ONLY
+    the dec index, and this time extraction did not record the forms-schedule
+    line. The edition is printed on every page of the coverage form itself
+    ("CG 00 01 04 13 (c) Insurance Services Office"), so it is read from the
+    text: exactly one distinct edition across the ACTIVE documents, or nothing
+    (`pdf_service.cgl_coverage_form_edition_in_text`). A value a human supplied
+    is never overwritten. Unlike the dec index it also survives
+    PURGE_DEC_INDEX_AFTER_GENERATION. Returns the edition written, if any."""
+    try:
+        from services.pdf_service import cgl_coverage_form_edition_in_text
+        from services.fact_state import human_provenance_facts
+        if "gl_coverage_form_edition" in human_provenance_facts(merged_facts):
+            return None
+        edition = cgl_coverage_form_edition_in_text("\n".join(
+            str(d.get("text") or "") for d in (docs or [])
+            if isinstance(d, dict) and not d.get("excluded")))
+        if edition:
+            merged_facts["gl_coverage_form_edition"] = {
+                "value": edition, "confidence": "filled", "source": "policy_doc_text",
+            }
+        else:
+            merged_facts.pop("gl_coverage_form_edition", None)
+        return edition
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("GL coverage-form edition scan skipped: %s", ex)
+        return None
+
+
+async def _submitting_account_for(user_id):
+    """The logged-in agency, for producer routing - or the reason it is absent.
+
+      * no user (offline / legacy callers)      -> None: the documents alone;
+      * the account row names an agency         -> {organization_name, full_name};
+      * a user, but the agency cannot be read   -> {"unreadable": True}.
+
+    The third case used to collapse into the first, and on the client's own
+    package that printed the EXPIRING broker (Commercial Risk Solutions / Terri
+    Wroblewski) as the producer of the new application (15 Sep 2026). With the
+    marker, `extraction_service._route_producer_identity` records that agency
+    as the expiring one and leaves the producer block blank instead.
+    """
+    if not user_id:
+        return None
+    try:
+        from repositories.user_repository import get_user_by_id
+        row = await get_user_by_id(str(user_id))
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("submitting account unavailable for user %s - an agency "
+                       "named only by expiring documents will not be printed as "
+                       "the producer: %s", user_id, exc)
+        return {"unreadable": True}
+    if isinstance(row, dict) and str(row.get("organization_name") or "").strip():
+        return {
+            "organization_name": str(row.get("organization_name")).strip(),
+            "full_name": str(row.get("full_name") or "").strip(),
+        }
+    logger.warning("submitting account unavailable for user %s (no agency on the "
+                   "account) - an agency named only by expiring documents will not "
+                   "be printed as the producer", user_id)
+    return {"unreadable": True}
+
+
 async def _finalize_pipeline(
     processed_docs: list[dict],
     user_id: Any,
@@ -450,7 +529,25 @@ async def _finalize_pipeline(
     # docs when every doc is supporting-only so we never score an empty package.
     _primary_candidates  = [d for d in active_docs if not d.get("supporting_only")] or active_docs
     primary              = select_primary_truth(_primary_candidates)
-    merged_facts, mflags = merge_facts(active_docs, primary)
+    # The logged-in agency is the SUBMITTING producer's only source when no
+    # uploaded document names one (14 Sep 2026, Orbin: ThinkSmith Agency /
+    # Michelle Smith appear in no document). Read fresh on the first upload and
+    # on every re-run, so a renamed agency is never stale. Fail-open: no
+    # account row means today's documents-only behaviour.
+    _submitting_account = await _submitting_account_for(user_id)
+    merged_facts, mflags = merge_facts(active_docs, primary,
+                                       submitting_account=_submitting_account)
+    # ── One person, one role (Chat 5, 14 Sep 2026) ───────────────────────────
+    # A Drive Other Car named individual is not a driver. Decided HERE, once,
+    # before any consumer reads `auto_drivers` - the stamper, the scorer and the
+    # questionnaire each used to take their own view of the same row (Orbin:
+    # ERIN ROYAL). See services/named_individuals.py for the two conditions.
+    _named_moved: list = []
+    try:
+        from services.named_individuals import separate_named_individuals
+        _named_moved = separate_named_individuals(merged_facts, active_docs)
+    except Exception as _nix:                                  # noqa: BLE001
+        logger.warning("named-individual separation skipped: %s", _nix)
     _held_client = {
         k: v for k, v in (client_answer_conflicts or {}).items()
         if isinstance(v, dict) and k not in (confirmations or {})
@@ -537,6 +634,7 @@ async def _finalize_pipeline(
     mflags["_only_certificate"] = bool(_active_types) and all(
         t == "certificate" for t in _active_types
     )
+    mflags["_carrier_documents_only"] = carrier_documents_only(_active_types)
     await reporter.package_phase("normalized", "Normalizing data across documents…")
 
     # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
@@ -801,6 +899,9 @@ async def _finalize_pipeline(
                     _need_follow_form = False
                 if not _need_schedule and not _need_follow_form:
                     break
+
+    # ── ACORD 131 Q2: the CGL coverage form's edition, read off the documents ─
+    _derive_gl_coverage_form_edition(merged_facts, active_docs)
 
     # ── Core Underwriting Data Consistency (Beta Report §4.3) ───────────────
     # Apply any user-confirmed reconcilable values (e.g. Gross Sales) to the
@@ -1366,7 +1467,16 @@ async def _finalize_pipeline(
     }
 
     if session_id:
-        await upd_processing_session(session_id, session_payload)
+        # The facts merge is additive and SKIPS an empty list, so a re-run that
+        # moved the only "driver" out as a named individual (Chat 5) would leave
+        # the stale row stored under `auto_drivers`. Retract it explicitly - the
+        # re-merged documents say there are no drivers, which is exactly what a
+        # non-empty re-merge would have written over the stored list anyway.
+        _named_deletes = (["auto_drivers"]
+                          if _named_moved and not _fv(merged_facts, "auto_drivers")
+                          else None)
+        await upd_processing_session(session_id, session_payload,
+                                     delete_facts=_named_deletes)
         sid = session_id
     else:
         sid = await new_processing_session(session_payload)

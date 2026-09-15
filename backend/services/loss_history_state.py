@@ -588,6 +588,20 @@ def claims_are_corroborated(facts: Any, has_loss_run_doc: bool = False) -> bool:
     return False
 
 
+# The rule `extraction_service._derive_prior_carrier` labels its value with -
+# one name, read by both sides (15 Sep 2026).
+PRIOR_CARRIER_DERIVATION_RULE = "carrier_of_the_expiring_policies"
+
+
+def _is_derived_prior_carrier(raw: Any) -> bool:
+    """Is `prior_carrier` the carrier of the uploaded policy in force, which
+    the merge filled in so the client is not asked it? That value is the
+    CURRENT carrier, not a person naming a prior one, so it is no evidence
+    against a New Venture confirmation."""
+    return (isinstance(raw, dict)
+            and (raw.get("derivation") or {}).get("rule") == PRIOR_CARRIER_DERIVATION_RULE)
+
+
 def prior_operations_evidence(facts: dict, flags: dict,
                               has_loss_run_doc: bool = False) -> List[str]:
     """POSITIVE evidence that prior operations existed (client 2.10's
@@ -599,7 +613,7 @@ def prior_operations_evidence(facts: dict, flags: dict,
     out: List[str] = []
     if has_loss_run_doc:
         out.append("loss runs uploaded")
-    if _fv(facts, "prior_carrier"):
+    if _fv(facts, "prior_carrier") and not _is_derived_prior_carrier(facts.get("prior_carrier")):
         out.append("a prior carrier is named")
     # Through the one door (2026-08-28) so a claim TYPED into the client's own
     # claims table contradicts a New Venture confirmation exactly as a claim

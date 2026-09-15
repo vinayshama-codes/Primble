@@ -747,10 +747,11 @@ def _cluster_words_into_lines(words: list, y_tol: float = 4) -> List[str]:
     return [" ".join(x["text"] for x in sorted(ln, key=lambda w: w["x0"])) for ln in lines]
 
 
-def _reflow_two_column_words(words: list) -> Optional[str]:
+def _reflow_two_column_words(words: list, stats: Optional[dict] = None) -> Optional[str]:
     """Split words into two x-clusters at the single largest horizontal gap
     and pair lines by ordinal position within each column. Returns None when
-    no gap wide enough to be a real column boundary is found."""
+    no gap wide enough to be a real column boundary is found. `stats`, when
+    given, receives the two column line counts and the split x - logging only."""
     if not words:
         return None
     xs = sorted(w["x0"] for w in words)
@@ -763,6 +764,8 @@ def _reflow_two_column_words(words: list) -> Optional[str]:
     split_x = (gaps[0][1] + gaps[0][2]) / 2
     left  = _cluster_words_into_lines([w for w in words if w["x0"] < split_x])
     right = _cluster_words_into_lines([w for w in words if w["x0"] >= split_x])
+    if stats is not None:
+        stats.update(left=len(left), right=len(right), split_x=round(split_x, 1))
     n = max(len(left), len(right))
     out = []
     for i in range(n):
@@ -836,7 +839,8 @@ def _extract_page_text_smart(page, pw=None) -> str:
     except Exception:
         return default
 
-    reflowed_zone = _reflow_two_column_words(zone_words)
+    _reflow_stats: dict = {}
+    reflowed_zone = _reflow_two_column_words(zone_words, _reflow_stats)
     if reflowed_zone is None:
         return default
 
@@ -852,7 +856,38 @@ def _extract_page_text_smart(page, pw=None) -> str:
         return default
 
     parts = [p for p in (before_text, reflowed_zone, after_text) if p.strip()]
+    _log_reflow_accept(page, bare_before, bare_after, reflowed_zone, _reflow_stats,
+                       zone_top, zone_bottom)
     return "\n".join(parts)
+
+
+def _log_reflow_accept(page, bare_before: int, bare_after: int, reflowed_zone: str,
+                       stats: dict, zone_top: float, zone_bottom: float) -> None:
+    """The two-column reflow was ACCEPTED - say so. Logging only; never raises.
+
+    Pairing is by ordinal line position, so left/right line counts that differ
+    mean at least one pair in the zone is offset - and the acceptance test
+    (fewer bare labels than before) cannot see that. Equal counts are NOT proof
+    of correct pairing. Counts go to INFO/WARNING; the pairs are applicant text,
+    so they go to DEBUG (the same split improving-ll.md C16 made for
+    DIAG_RESPONSE)."""
+    try:
+        pairs = reflowed_zone.splitlines()
+        mismatch = stats.get("left") != stats.get("right")
+        page_no = getattr(page, "page_number", "?")
+        logger.log(
+            logging.WARNING if mismatch else logging.INFO,
+            "ocr_service: TWO_COLUMN_REFLOW_ACCEPT page=%s bare_before=%d bare_after=%d "
+            "left_lines=%s right_lines=%s pairs=%d split_x=%s zone_y=[%.1f,%.1f]%s",
+            page_no, bare_before, bare_after, stats.get("left", "?"),
+            stats.get("right", "?"), len(pairs), stats.get("split_x", "?"),
+            zone_top, zone_bottom,
+            " - LEFT/RIGHT LINE COUNTS DIFFER, ordinal pairing is offset in this zone"
+            if mismatch else "",
+        )
+        logger.debug("ocr_service: TWO_COLUMN_REFLOW_PAIRS page=%s pairs=%r", page_no, pairs)
+    except Exception:                                    # noqa: BLE001 - logging must never cost a page
+        pass
 
 
 # Lines-mode pdfplumber tables (ruled grids) are kept as a per-page FALLBACK for
@@ -908,6 +943,11 @@ def _pdfplumber_extract_pages_structured(pdf_path: str) -> List[Tuple[str, str]]
                     tables = detect_tables(pw[0]) if pw else []
                     if not tables and idx < _RULED_TABLE_PAGE_LIMIT:
                         tables = _ruled_tables(page)
+                        if tables:
+                            logger.info(
+                                "ocr_service: RULED_TABLE_FALLBACK page=%d tables=%d "
+                                "(section=None, top/bottom placeholders) file=%s",
+                                idx + 1, len(tables), os.path.basename(pdf_path))
                     if tables:
                         tables_block = render_tables(tables, idx + 1)
                 except Exception as ex:                      # noqa: BLE001
@@ -1752,6 +1792,7 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
     parts: List[str] = []
     markers = _PAGE_MARKERS_ON and total_pages > 1
     tables_emitted = 0
+    tables_unsectioned: Dict[int, int] = {}      # page -> tables with no section heading
     for idx in range(total_pages):
         native = page_texts[idx]
         chosen = page_ocr_text.get(idx) or native
@@ -1767,11 +1808,21 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
         if table_block:
             parts.append(table_block)
             tables_emitted += table_block.count("[Table - page ")
+            # TABLE_OPEN renders a missing section as exactly "[Table - page N]".
+            _unsectioned = table_block.count(f"[Table - page {idx + 1}]")
+            if _unsectioned:
+                tables_unsectioned[idx + 1] = _unsectioned
         for block in blocks:
             parts.append(block)
     if tables_emitted:
         logger.info("ocr_service: %s - %d table(s) emitted inline across %d page(s)",
                     os.path.basename(pdf_path), tables_emitted, total_pages)
+    if tables_unsectioned:
+        logger.info(
+            "ocr_service: %s - %d of %d emitted table(s) carry no section heading "
+            "(page:count %s)", os.path.basename(pdf_path),
+            sum(tables_unsectioned.values()), tables_emitted,
+            ", ".join(f"{p}:{n}" for p, n in sorted(tables_unsectioned.items())))
 
     text = "".join(p + "\n" for p in parts)
 

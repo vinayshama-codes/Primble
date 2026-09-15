@@ -278,13 +278,19 @@ def test_verification_still_reads_the_complete_document():
     """
     import inspect
     import services.pdf_service as ps
-    src = inspect.getsource(ps.combined_gap_fill)
+    # The body moved into `_combined_gap_fill_core` on 2026-09-14, when
+    # `combined_gap_fill` became the line-scoping wrapper around it. Both are
+    # held to the rule: neither may rebind `raw_text`.
+    src = inspect.getsource(ps._combined_gap_fill_core)
     assert "_prompt_text" in src, "the filtered copy must have its own name"
     assert not re.search(r"^\s*raw_text\s*=", src, re.M), (
         "combined_gap_fill reassigns raw_text - verification would start "
         "reading the filtered document")
     assert "raw_text=_prompt_text" in src, (
         "the model must be given the filtered copy")
+    wrapper = inspect.getsource(ps.combined_gap_fill)
+    assert not re.search(r"^\s*raw_text\s*=", wrapper, re.M), (
+        "the line-scoping wrapper reassigns raw_text")
 
 
 # ── The adaptive cut ─────────────────────────────────────────────────────────

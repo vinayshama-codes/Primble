@@ -87,11 +87,11 @@ Metadata lives in `backend/forms_database/`.
 - ACORD 130 — Workers Compensation Application
 - ACORD 131 — Umbrella / Excess Section
 - ACORD 133 — Workers Compensation Insurance Plan / Assigned Risk Section (its template's own title; corrected 2026-09-05 - it was labelled Builders Risk, which shipped a WC form to construction projects)
-- ACORD 137_CA / 137_CO — Contractors / Subcontractors (state variants)
-- ACORD 138_CA / 138_CO — Contractors Equipment (state variants)
+- ACORD 137_CA / 137_CO — Commercial Auto Coverages / Limits Section (state variants; the templates' own titles, corrected 2026-09-14 - it was labelled Contractors, which put a GL fact on the 137 recommendation card)
+- ACORD 138_CA / 138_CO — Garage and Dealers Coverages / Limits Section (state variants; template titles, corrected 2026-09-14 - it was labelled Contractors Equipment)
 - ACORD 140 — Property Section
-- ACORD 141 — Inland Marine Section
-- ACORD 160 — Cyber Liability Section
+- ACORD 141 — Crime Section (template title, corrected 2026-09-14. OPEN: the recommender still offers it as "Property Schedule" on property packages)
+- ACORD 160 — Business Owners Section (template title, corrected 2026-09-14. OPEN: the recommender still offers it as "Inland Marine Application" on inland marine exposure)
 - ACORD 186 — Contractors Supplemental Application
 
 ---
@@ -412,6 +412,63 @@ was broken, because each called `_harvest_dec_index` directly and read its retur
 value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
+
+### Don't Ask The Client For What We Already Have (Orbin Chat 5) - SHIPPED 2026-09-14
+**Read `v1-20AUG.md`'s "Chat 5" entry before touching schedule questions, confirm
+items or `auto_drivers`.** Client: the Subaru the policy prints was re-asked, driver
+questions ran "through Driver 25", and nothing let the insured confirm or correct
+source-verified data.
+- **"Driver 25"** was the pre-8-Sep running count of QUESTIONS (`group_counts`),
+  fixed by BUG-07 (11e1969). Re-pinned on the live 13-driver-row ACORD 127.
+- **Subaru re-asked = a rule.** `_partition_schedule_fields` raised a table from
+  BLANK BOXES (35 on Orbin, 33 of them rows B-D the form deliberately leaves blank
+  for a one-vehicle fleet) under fixed "Please list" wording. The ROWS decide now:
+  none held -> list mode; held -> the same table in **confirm mode** ("We found 1
+  vehicle in your policy declarations. Please check it..."). A confirmed,
+  unchanged table is not asked again (`_client_confirmations`, row fingerprint).
+- **ERIN ROYAL** (Drive Other Car named individual) sat in `auto_drivers`: the
+  stamper refused her, the scorer counted her, the questionnaire seeded her.
+  `services/named_individuals.py` moves her to `auto_named_individuals` once, after
+  the merge (no driver details AND printed under a named-individual heading, never
+  a driver heading). **D6: Orbin package 78 -> 75, ACORD 127 82 -> 77, plus the
+  client's "Driver schedule not provided" warning - the policy schedules no
+  drivers. Tell Brent.**
+- **Confirm-or-correct (`services/confirm_known.py`):** source-verified, uncontested
+  core facts (Tier 1 / contact / Tier 2, client audience, never insurance judgment,
+  never FEIN / DOB / licence) become optional `confirm` items showing the value and
+  the document TYPE it came from. `__CONFIRMED__` records `evidence_state:
+  user_confirmed` and touches no value and no box; a correction is an ordinary
+  answer (the F7 hold applies); a document row a client removes or alters is
+  flagged on `review_fields`. The producer adds them with "Add confirmations".
+- Also: garaging the form already shows is not asked; an attested no-loss state
+  retires an EMPTY claims table. Tests: `tests/test_known_data_not_reasked_14sep.py`.
+- **Not changed:** the extraction prompt still points Drive Other Car at
+  `auto_drivers` - the merge rule makes it harmless, and a PROMPT_VERSION bump
+  re-extracts every cached package (owner's call).
+
+### ACORD 125 Page 1 Is The Policy Being Applied For - SHIPPED 2026-09-15
+**Read `v1-20AUG.md` "ORBIN remaining items" before touching the 125 header,
+the proposed dates, the page-one premiums or the prior-carrier grid.** Source:
+Brent's own answer key (`125_reference/_extracted.txt`) - CARRIER is the carrier
+receiving the submission, NAIC only if verified, POLICY NUMBER blank unless an
+existing policy applies, PROPOSED dates are the next term, POLICY PREMIUM blank
+unless known, STATUS is QUOTE; the current policies go in PRIOR CARRIER
+INFORMATION ("populate only the year it can substantiate").
+- The merge marks what only the CURRENT policy states
+  (`extraction_service._mark_page_one_current_policy`: `carrier_is_current_policy`,
+  `premium_is_current_policy`, `current_term_rows_ok`); `pdf_service.
+  _page_one_current_policy` owns those 125 boxes as blanks. A quote /
+  application, a person, or a one-carrier renewal prints.
+- `_route_renewal_dates(mf, docs)`: a term only expiring-programme documents
+  print moves to prior_* once started - in force -> next term (derived), ended
+  on a non-renewal -> asked. Without `docs` only the old renewal rule runs.
+- Prior-carrier grid year one = the current policies once their term moved
+  (`_prior_rows_from_current_policies`); "the current policy is not prior
+  coverage" still holds everywhere else.
+- **Do not "fix" a blank 125 carrier or premium on a dec-only package back to
+  the dec's value - that blank is the rule.** Section forms (126-137) keep the
+  current policy's identity per line (Brent's point 1). D6: an ended term loses
+  the Tier 1 proposed date (Orbin package 63 -> 59).
 
 ### BUG-05: A Card Must Only Offer What The Server Accepts - SHIPPED 2026-09-08
 

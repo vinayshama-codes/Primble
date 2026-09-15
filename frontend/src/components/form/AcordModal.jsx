@@ -844,8 +844,15 @@ function IssueLine({ message, className }) {
   if (fixIdx === -1) {
     return <div className={className}>{_issueBullet} {message}</div>;
   }
-  const before = message.slice(0, fixIdx).trimEnd();
-  const afterLabel = message.slice(fixIdx + "Fix: ".length);
+  let before = message.slice(0, fixIdx).trimEnd();
+  let afterLabel = message.slice(fixIdx + "Fix: ".length);
+  // A hint written INSIDE brackets - "...missing: Contact information (Fix:
+  // Provide this value manually...)" - splits into a dangling "(" on the first
+  // line and a stray ")" on the second. Take the pair off together.
+  if (before.endsWith("(") && afterLabel.trimEnd().endsWith(")")) {
+    before = before.slice(0, -1).trimEnd();
+    afterLabel = afterLabel.trimEnd().slice(0, -1);
+  }
   const isGeneric = afterLabel.trim() === _GENERIC_FIX_TEXT;
   return (
     <div className={className}>
@@ -1491,6 +1498,15 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
   const selectRecommended  = () => applySelection(q => isClientFacing(q) && (q.priority === "critical" || q.priority === "important"));
   const selectAllClient    = () => applySelection(q => isClientFacing(q));
   const deselectAll        = () => applySelection(() => false);
+  // Chat 5: confirm-or-correct items (values and tables we already hold from the
+  // documents) are offered, never pre-ticked. One click adds all of them on top
+  // of whatever is already selected.
+  const confirmQuestions   = questions.filter(q => q.confirm && isClientFacing(q));
+  const addConfirmations   = () => setSelectedQuestions(prev => {
+    const next = { ...prev };
+    confirmQuestions.forEach(q => { next[q.field_name] = true; });
+    return next;
+  });
 
   const sanitizeEmail = val => val.trim().toLowerCase().slice(0, 254);
   const selectedCount = Object.values(selectedQuestions).filter(Boolean).length;
@@ -1606,6 +1622,19 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             </p>
           )}
           {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
+          {/* Chat 5: a confirm item shows the client what we already hold, from
+              the documents, to confirm or correct - it asks for nothing new. */}
+          {q.confirm && (
+            <p style={{ margin: "3px 0 0", fontSize: 11, color: "#047857" }}>
+              Confirm with client
+              {q.field_type === "schedule" && Array.isArray(q.current_rows) && q.current_rows.length > 0
+                ? ` - ${q.current_rows.length} ${q.current_rows.length === 1 ? (q.schedule_singular || "row") : `${q.schedule_singular || "row"}s`} on file`
+                : ""}
+              {Array.isArray(q.source_labels) && q.source_labels.length > 0
+                ? ` (from ${q.source_labels.map(l => String(l).replace(/^your /, "the ")).join(" and ")})`
+                : ""}
+            </p>
+          )}
           <ScoreImpactBadges q={q} />
         </div>
       </div>
@@ -1682,6 +1711,12 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             {hasTaxonomy && <button onClick={selectCriticalOnly} style={qsBtn}>Critical only</button>}
             {hasTaxonomy && <button onClick={selectRecommended}  style={qsBtn}>Recommended</button>}
             <button onClick={selectAllClient} style={qsBtn}>All client-facing</button>
+            {confirmQuestions.length > 0 && (
+              <button onClick={addConfirmations} style={qsBtn}
+                title="Add every item that shows the client what we already found in their documents, to confirm or correct">
+                Add confirmations ({confirmQuestions.length})
+              </button>
+            )}
             <button onClick={deselectAll}     style={qsBtn}>Clear all</button>
           </div>
         </div>
@@ -5478,6 +5513,7 @@ const AcordModal = forwardRef(function AcordModal({
     policy_doc_text: "Extracted from policy document text",
     derived: "Derived from other captured values",
     user_confirmed: "Confirmed by producer (Data Consistency)",
+    account: "Producer's own agency, from their Primble account",
     cross_form_conflict: "Producer resolution of a cross-form conflict",
     manual: "Entered manually",
   };
@@ -7051,7 +7087,7 @@ const AcordModal = forwardRef(function AcordModal({
                 Sales plus identity/policy fields (name, FEIN, dates, entity type,
                 address, carrier) — with each document's value as a choice plus a
                 custom-value option. Consistent fields are silent (no action). */}
-            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped") && (
+            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped" || f.status === "changed") && (
               <div ref={dcSectionRef} className="doc-summary review-section" style={{ marginTop: 12 }}>
                 <CollapsibleSection
                   title="Data Consistency"
@@ -7102,8 +7138,21 @@ const AcordModal = forwardRef(function AcordModal({
                                   <td style={td}>{r.carrier_name || "-"}</td>
                                   <td style={td}>{r.carrier_naic || "-"}</td>
                                   <td style={td}>{r.policy_number || "-"}</td>
-                                  <td style={td}>{r.effective_date || r.expiration_date ? `${r.effective_date || "?"} - ${r.expiration_date || "?"}` : "-"}</td>
-                                  <td style={{ ...td, whiteSpace: "normal", color: "#64748b" }}>{(r.sources || []).join(", ") || "-"}</td>
+                                  <td style={td}>{(() => {
+                                    // One date format per table: a dec page prints "07/15/25", a schedule "07/15/2025".
+                                    const d = (s) => {
+                                      const t = String(s || "").trim();
+                                      let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
+                                      if (m) {
+                                        const y = m[3].length === 2 ? `${Number(m[3]) > 69 ? "19" : "20"}${m[3]}` : m[3];
+                                        return `${m[1].padStart(2, "0")}/${m[2].padStart(2, "0")}/${y}`;
+                                      }
+                                      m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+                                      return m ? `${m[2]}/${m[3]}/${m[1]}` : s;
+                                    };
+                                    return r.effective_date || r.expiration_date ? `${d(r.effective_date) || "?"} - ${d(r.expiration_date) || "?"}` : "-";
+                                  })()}</td>
+                                  <td style={{ ...td, whiteSpace: "normal", color: "#64748b" }}>{[...new Set(r.sources || [])].join(", ") || "-"}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -7122,7 +7171,22 @@ const AcordModal = forwardRef(function AcordModal({
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                         <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                          {f.values?.length} policies, {f.values?.length} values - not a conflict
+                          {(() => {
+                            // Policies = the distinct contracts behind the lines the values are
+                            // scoped to (one carrier can write three policies; one package policy
+                            // can cover three lines), plus any value not matched to a line.
+                            const vals = f.values || [];
+                            const lines = new Set(vals.flatMap(v => (Array.isArray(v.scope) ? v.scope : [])));
+                            const allRecs = (underwriting.fields || []).map(x => x.line_records)
+                              .find(r => (r || []).length) || [];
+                            const recs = allRecs.filter(r => lines.has(r.line));
+                            const contracts = recs.length
+                              ? new Set(recs.map(r => r.policy_number || r.id || r.line)).size
+                              : lines.size;
+                            const policies = contracts
+                              + vals.filter(v => !(Array.isArray(v.scope) && v.scope.length)).length;
+                            return `${policies} ${policies === 1 ? "policy" : "policies"}, ${vals.length} ${vals.length === 1 ? "value" : "values"} - not a conflict`;
+                          })()}
                         </span>
                         {Object.keys(f.confirmed_scopes || {}).length > 0 && (
                           <span style={{ fontSize: 10.5, fontWeight: 600, color: "#16a34a" }}>
@@ -7149,11 +7213,47 @@ const AcordModal = forwardRef(function AcordModal({
                               </span>
                             )}
                             <span style={{ fontSize: 10.5, color: "#94a3b8", minWidth: 0, overflowWrap: "anywhere" }}>
-                              {(v.sources || []).map(sr => sr.filename).filter(Boolean).join(", ")}
+                              {[...new Set((v.sources || []).map(sr => sr.filename).filter(Boolean))].join(", ")}
                             </span>
                           </div>
                         ))}
                       </div>
+                    </div>
+                  ))}
+                  {/* Client 11 Sep (Orbin): a value the documents say CHANGED
+                      on a stated date is not a conflict - the certificate
+                      records the umbrella limit reduced from $3,000,000 to
+                      $1,000,000 effective 7/25/25. Read-only: the current value
+                      applies, the earlier one is kept as history, and there is
+                      nothing to confirm. A later document stating anything else
+                      turns it back into a conflict. */}
+                  {underwriting.fields.filter(f => f.status === "changed").map((f) => (
+                    <div key={`changed-${f.fact_key}`} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                          Changed during the policy term - not a conflict
+                        </span>
+                      </div>
+                      {f.change && (
+                        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#475569" }}>
+                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                            <span style={{ fontWeight: 600, color: "#0f172a" }}>Now: {f.change.current}</span>
+                            {f.change.as_of ? ` - effective ${f.change.as_of}` : ""}
+                            {f.change.document ? <span style={{ color: "#94a3b8" }}>{` (${f.change.document})`}</span> : null}
+                          </div>
+                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                            Before: {f.change.prior}
+                            {(f.change.prior_documents || []).length > 0 ? <span style={{ color: "#94a3b8" }}>{` (${f.change.prior_documents.join(", ")})`}</span> : null}
+                          </div>
+                        </div>
+                      )}
+                      {f.narrative_note && (
+                        <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, background: "#f0f9ff", border: "1px solid #bae6fd", fontSize: 11.5, color: "#0c4a6e", lineHeight: 1.45 }}>
+                          <span style={{ fontWeight: 700 }}>From the submission: </span>
+                          {f.narrative_note}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {

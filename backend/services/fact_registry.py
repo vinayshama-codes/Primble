@@ -564,6 +564,10 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $100,000)",
+        # The key is ISO's pre-2001 name ("fire damage legal liability"); every
+        # current CGL declarations page prints the coverage under this one.
+        # Read by extraction_service._backfill_empty_facts_from_entries.
+        "dec_labels":  ("Damage to Premises Rented to You",),
     },
     "gl_medical_expense": {
         "forms":       {"ACORD_126"},
@@ -1431,7 +1435,7 @@ FACT_REGISTRY: dict[str, dict] = {
     # ── Evidence of Property Insurance — ACORD 28 ────────────────────────────
     "loss_payee_name": {
         "forms":       {"ACORD_28"},
-        "question":    "Who is the loss payee on the property policy (lender, leasing company, or other interested party)?",
+        "question":    "Does a lender, leasing company or other party have a financial interest in anything you are insuring - a vehicle, equipment or a building? If so, what is their name? (If none, write 'None')",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,

@@ -560,6 +560,8 @@ _PARTY_ROLE_LABELS: FrozenSet[str] = frozenset({
     "as their interests may appear", "atima", "various", "as required",
     "as per written contract", "where required by written contract",
     "to whom it may concern", "n a", "same as above", "see attached",
+    # The lease-side roles a certificate prints in place of a name (14 Sep 2026).
+    "landlord", "lessor", "lessee", "tenant", "building owner", "property owner",
 })
 
 

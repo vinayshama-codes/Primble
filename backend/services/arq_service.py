@@ -15,7 +15,9 @@ from config.settings import (
     ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING, ENABLE_SCHEDULE_CAPTURE, FRONTEND_URL,
     LLM_MODEL,
 )
+from services import confirm_known
 from services import schedule_capture
+from services.confirm_known import CONFIRMED_SENTINEL, is_confirmed_value  # noqa: F401
 from services.question_classifier import (
     AUDIENCE_CLIENT,
     AUDIENCE_INTERNAL,
@@ -26,6 +28,7 @@ from services.question_classifier import (
     BUCKET_UNDERWRITING,
     PRIORITY_CRITICAL,
     PRIORITY_IMPORTANT,
+    PRIORITY_OPTIONAL,
     PRIORITY_SUPPRESSED,
     apply_default_selection,
     classify_question,
@@ -1649,6 +1652,17 @@ def _canonical_key(field_name: str) -> Optional[str]:
     base = re.sub(r'[_\s]+\d+$', '', base)
     if base in canon:
         return base
+    # A non-primary row never takes a policy-level scalar - the stamper's
+    # own row-variant rule, read from its one definition. 15 Sep 2026: ACORD
+    # 131's SUBSIDIARY row B was asked as the applicant's "full legal name"
+    # and "what does your business do", and an answer would have been
+    # restamped into that row. See pdf_service.scalar_rules_reach.
+    try:
+        from services.pdf_service import scalar_rules_reach
+        if not scalar_rules_reach(field_name):
+            return None
+    except Exception:                                  # pragma: no cover
+        pass
     for pattern, fact_key in _acord_field_rules():
         if fact_key and not str(fact_key).startswith("_") and pattern in field_name:
             return fact_key
@@ -1734,6 +1748,15 @@ def _merge_form_ids_into_question(questions: List[dict], canon: str, new_form_id
         return
 
 
+def _guard_blanked_fields(form_data: dict) -> set:
+    """Boxes a post-fill guard emptied at generation - judged impossible for
+    that box, so no later deterministic pass may reopen them."""
+    return {
+        str(g.get("field")) for g in ((form_data or {}).get("guard_blanks") or [])
+        if isinstance(g, dict) and g.get("field")
+    }
+
+
 def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bool]:
     """Close the "known fact, blank box" mapping gap before ARQ generation.
 
@@ -1761,13 +1784,20 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
     """
     from services.sqs_service import _fact_is_filled
     try:
-        from services.pdf_service import _deterministic_map, _is_nonfillable_field
+        from services.pdf_service import (
+            _deterministic_map, _is_nonfillable_field, _schema_context,
+        )
     except Exception as ex:  # pragma: no cover - defensive
         logger.warning(f"_backfill_and_resolve_present: pdf_service import failed: {ex}")
         _deterministic_map = None
 
         def _is_nonfillable_field(_f):        # noqa: D103 - fail closed
             return True
+
+        from contextlib import nullcontext as _nullcontext
+
+        def _schema_context(_s):              # noqa: D103
+            return _nullcontext()
 
     generated = generated or {}
     facts = facts or {}
@@ -1808,12 +1838,26 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
                 blanks.append((fid, sf))
 
         # Best-effort deterministic late-stamp into every blank box for this fact.
+        #
+        # THROUGH THE FORM'S OWN DOOR (14 Sep 2026). This called
+        # `_deterministic_map(sf, facts)` with no `_form_id`, so every form-scoped
+        # resolver - section identity, package header, renewal period - fell
+        # back to the flat package scalars, and a box a resolver had DELIBERATELY
+        # left blank at generation was the definition of "blank box" here.
+        # Reproduced on the Orbin session: this put Employers Mutual + 25186 on
+        # ACORD 126 and 25186 on 127/131 (a pair no document prints), and an
+        # AAIS form number in ACORD 125's policy-number box - after generation
+        # had refused all four. A box a post-fill guard emptied is not reopened
+        # either: generation already judged that value impossible for it.
         if _deterministic_map is not None:
             for fid, sf in blanks:
                 form_data = generated[fid]
+                if sf in _guard_blanked_fields(form_data):
+                    continue
                 fs = form_data.get("field_state") or form_data.get("mapped", {})
                 try:
-                    mapped_val = _deterministic_map(sf, facts)
+                    with _schema_context(form_data.get("schema") or None):
+                        mapped_val = _deterministic_map(sf, {**facts, "_form_id": fid})
                 except Exception:
                     mapped_val = None
                 if mapped_val is None or str(mapped_val).strip() == "":
@@ -1856,6 +1900,36 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
             fs = form_data.get("field_state") or form_data.get("mapped", {})
             if str(fs.get(sf) or "").strip() != "":
                 present.add(canon)
+                break
+
+    # ── Third pass: a list fact whose boxes no fact rule maps (Chat 5) ───────
+    # The second pass can only see a box that `_canonical_keys_for` resolves.
+    # ACORD 127 prints the garaging location as `Vehicle_PhysicalAddress_*`
+    # ("The vehicle's physical address"), and nothing maps those boxes to
+    # `auto_garaging_addresses` - so on Orbin the client was asked "Where are
+    # your business vehicles primarily kept overnight?" while the policy prints
+    # "LOC: 001 4800 DAHLIA STREET D13 DENVER CO" on the vehicle's own schedule
+    # line and row A of the form already shows Denver / 80216-3121.
+    #
+    # Deliberately NOT every `_SCHEDULE_REGISTRY` binding: `NamedInsured_A` is
+    # the applicant while `NamedInsured_B..` are additional insureds, so a
+    # blanket "any bound box is filled" rule would suppress the additional-
+    # insured question off the applicant's own name. Only the parts that locate
+    # a place count (street, city, postal code) - a lone state code or county
+    # does not tell anyone where the vehicle sleeps.
+    for _list_key, _prefixes in (
+        ("auto_garaging_addresses", ("Vehicle_PhysicalAddress_LineOne_",
+                                     "Vehicle_PhysicalAddress_CityName_",
+                                     "Vehicle_PhysicalAddress_PostalCode_",
+                                     "Vehicle_GaragingAddress_")),
+    ):
+        if _list_key in present:
+            continue
+        for form_data in generated.values():
+            fs = (form_data or {}).get("field_state") or (form_data or {}).get("mapped", {}) or {}
+            if any(str(v or "").strip() for f, v in fs.items()
+                   if isinstance(f, str) and f.startswith(_prefixes)):
+                present.add(_list_key)
                 break
 
     return present, changed
@@ -2268,13 +2342,13 @@ def _apply_loss_state_question_gate(questions: List[dict], facts: dict,
     - the questions return exactly when the evidence says they matter."""
     try:
         from services.loss_history_state import (
-            STATE_NEW_VENTURE, resolve_loss_history_state,
-            suppressed_question_fields)
+            STATE_NEW_VENTURE, STATE_NO_KNOWN_LOSSES_ATTESTED,
+            resolve_loss_history_state, suppressed_question_fields)
         suppressed = suppressed_question_fields(facts or {}, flags or {},
                                                 has_loss_run_doc)
-        if not suppressed:
-            return questions
         state = resolve_loss_history_state(facts or {}, flags or {}, has_loss_run_doc)
+        if not suppressed and state != STATE_NO_KNOWN_LOSSES_ATTESTED:
+            return questions
         kept: List[dict] = []
         dropped: List[str] = []
         for q in questions:
@@ -2286,6 +2360,18 @@ def _apply_loss_state_question_gate(questions: List[dict], facts: dict,
             # The loss-history schedule table presumes prior operations too.
             if (state == STATE_NEW_VENTURE and fname.startswith("schedule::")
                     and "loss" in fname):
+                dropped.append(fname)
+                continue
+            # "Please list any insurance claims or losses from the past 5 years"
+            # is already ANSWERED when the no-loss state is attested (Chat 5,
+            # 14 Sep 2026: Orbin's producer answered "No - no claims or losses
+            # in the past 5 years" on 10 Sep and the claims table was still
+            # offered to the client). Only an EMPTY table goes - a table holding
+            # claim rows contradicts the attestation, and that disagreement is
+            # exactly what the client should see and the producer resolve.
+            if (state == STATE_NO_KNOWN_LOSSES_ATTESTED
+                    and fname == schedule_capture.answer_key("loss_history")
+                    and not q.get("current_rows")):
                 dropped.append(fname)
                 continue
             kept.append(q)
@@ -2654,13 +2740,32 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict,
     # no capturable schedule column at all, so `schedules_on_form` returns an
     # empty set for them and neither can ever raise a fleet table.
     carried_empty: dict = {}
+    # PASS 1c - A FORM THAT CARRIES A SCHEDULE WE ALREADY HOLD ROWS FOR OFFERS
+    # THE TABLE TOO, AS A CONFIRMATION (Chat 5, 14 Sep 2026).
+    #
+    # Until now a held table was raised only when rule (a) found a blank
+    # capturable box, which is the SAME inference PASS 1b exists to escape, run
+    # in the other direction. On Orbin it fired on 35 boxes: row A's body type
+    # (removed by a post-fill guard) and GVW (not printed), then 11 each on
+    # rows B-D - rows the form deliberately leaves blank because only one
+    # vehicle exists (`pdf_service._resolve_phantom_schedule_row`). The form's
+    # own refusal to invent vehicles was read as "the fleet is missing", and the
+    # client was asked to "list the vehicles to be insured" with the Subaru the
+    # policy prints already in the grid. The inverse was wrong too: a complete
+    # fleet raised nothing, so the client was never shown what we held.
+    #
+    # The decision is now the ROWS, not the boxes: no rows held -> the table
+    # asks for a list (PASS 1b); rows held -> the same table is offered for
+    # confirm-or-correct (`_build_schedule_questions` words it).
+    carried_held: dict = {}
     for _fid, _schema in (form_schemas or {}).items():
         try:
             for _lk in schedule_capture.schedules_on_form(_fid, _schema):
-                if schedule_capture.rows_from_facts(_lk, facts or {}):
-                    continue                  # we already hold rows - rule (a)
                 real_forms.setdefault(_lk, set()).add(_fid)
-                carried_empty.setdefault(_lk, set()).add(_fid)
+                if schedule_capture.rows_from_facts(_lk, facts or {}):
+                    carried_held.setdefault(_lk, set()).add(_fid)   # PASS 1c
+                else:
+                    carried_empty.setdefault(_lk, set()).add(_fid)  # PASS 1b
         except Exception as exc:                              # noqa: BLE001
             # Never let schedule discovery break question generation.
             logger.warning("arq: schedule discovery skipped for %s - %s", _fid, exc)
@@ -2685,7 +2790,7 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict,
     # so PASS 2 never records it. Seed it here or the table is discovered and
     # then dropped, which is the exact silent-loss shape PASS 2's own guard
     # comment warns about.
-    for _lk, _fids in carried_empty.items():
+    for _lk, _fids in list(carried_empty.items()) + list(carried_held.items()):
         if schedule_capture.get_def(_lk) is not None:
             schedule_forms.setdefault(_lk, set()).update(_fids)
     return schedule_forms
@@ -2717,13 +2822,23 @@ def _derive_wc_row_facts(facts: dict, list_key: str) -> None:
         logger.warning("wc row derivations skipped on save: %s", exc)
 
 
-def _build_schedule_questions(schedule_forms: dict, facts: dict) -> List[dict]:
+def _build_schedule_questions(schedule_forms: dict, facts: dict,
+                              session_docs: Optional[list] = None) -> List[dict]:
     """One table-style question per schedule, pre-loaded with known rows.
 
     `current_rows` carries whatever extraction (or a producer pre-load) already
     established, so the client edits/completes a partially-known fleet instead of
     re-typing it. The column spec travels with the question so the questionnaire
     renderer stays generic across all schedule types.
+
+    TWO MODES, decided by the rows (Chat 5, 14 Sep 2026):
+      * no rows held  -> "list" - the table asks for the schedule;
+      * rows held     -> "confirm" - the same table, worded "we found N in your
+        policy declarations, check them, correct anything wrong, add any we
+        missed", naming the documents the rows came from. The client asked for
+        exactly this: prepopulate what we hold and ask them to confirm it.
+    A held table the client has already confirmed, unchanged since and with no
+    required cell still blank, is not asked a second time.
     """
     out: List[dict] = []
     for list_key, form_ids in sorted(schedule_forms.items()):
@@ -2733,13 +2848,23 @@ def _build_schedule_questions(schedule_forms: dict, facts: dict) -> List[dict]:
         rows, _report = schedule_capture.validate_rows(
             list_key, schedule_capture.rows_from_facts(list_key, facts),
         )
+        confirm_mode = bool(rows)
+        if (confirm_mode and not _report.get("errors")
+                and confirm_known.schedule_is_confirmed(facts, list_key, rows)):
+            continue
+        source_labels = (confirm_known.source_labels_for_list(list_key, session_docs)
+                         if confirm_mode else [])
         nums = sorted({
             str(f).replace("ACORD_", "").replace("ACORD ", "") for f in form_ids
         })
         out.append({
             "field_name":        schedule_capture.answer_key(list_key),
-            "question":          schedule_capture.question_text(list_key),
-            "hint":              schedule_capture.hint_text(list_key),
+            "question":          schedule_capture.question_text(
+                list_key, rows=rows, source_labels=source_labels),
+            "hint":              schedule_capture.hint_text(list_key, confirm=confirm_mode),
+            "schedule_mode":     "confirm" if confirm_mode else "list",
+            "confirm":           confirm_mode,
+            "source_labels":     source_labels,
             "forms":             ", ".join(nums),
             "form_ids":          sorted(form_ids),
             "field_type":        "schedule",
@@ -2803,6 +2928,99 @@ def _finalize_schedule_taxonomy(questions: List[dict]) -> None:
             q["priority"]      = PRIORITY_IMPORTANT
         q["suppressed"]        = False
         q["suppressed_reason"] = ""
+
+
+def _build_confirm_questions(facts: dict, form_ids, questions: List[dict],
+                             session_docs: Optional[list] = None) -> List[dict]:
+    """Confirm-or-correct items for the CORE facts we already hold (Chat 5).
+
+    Client, verbatim: "Primble should prepopulate source-verified information
+    and ask the client to confirm or correct it, then only ask for what is
+    actually missing." Until now a known fact had one fate - suppressed as
+    "already provided" and never shown to anyone - so the client could neither
+    confirm nor correct it.
+
+    WHICH FACTS, every gate derived from a rule the codebase already keeps:
+      * the facts SQS itself calls core (Tier 1, Tier 1 contact, Tier 2 -
+        `confirm_known.core_confirm_candidates`), restricted to the ones a
+        selected form actually carries (FORM_FIELD_INVENTORY);
+      * with curated client wording, routed to the CLIENT by the classifier and
+        not an insurance judgment (principle 5 - a limit or a policy date is
+        never put to the insured, not even to confirm);
+      * SOURCE VERIFIED, PRESENT and uncontested (`confirmable_display_value`)
+        - a value the model only suggested is never shown as ours;
+      * not a tax ID / date of birth / licence number, which stay ask-only;
+      * not already a question in this list (a conflicted or re-admitted fact
+        is the producer's to resolve first).
+
+    Offered, never forced: Optional priority, so none is pre-ticked and the
+    producer adds them in one click ("Add confirmations"). Runs AFTER
+    `decorate_questions`, whose "already provided" overlay would otherwise
+    suppress every one of them - the same placement `_finalize_schedule_
+    taxonomy` needs for the same reason.
+    """
+    out: List[dict] = []
+    if not isinstance(facts, dict):
+        return out
+    form_ids = [str(f) for f in (form_ids or []) if f]
+    if not form_ids:
+        return out
+    try:
+        from services.sqs_service import FORM_FIELD_INVENTORY
+        from services.question_eligibility import is_insurance_judgment
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("arq: confirm questions skipped - %s", exc)
+        return out
+    taken: set = set()
+    for q in questions or []:
+        for k in (q.get("_canonical_key"), q.get("field_name")):
+            if k:
+                taken.add(k)
+    for key in confirm_known.core_confirm_candidates():
+        try:
+            if key in taken or is_insurance_judgment(key) or confirm_known.is_sensitive(key):
+                continue
+            fids = sorted(f for f in form_ids if key in (FORM_FIELD_INVENTORY.get(f) or []))
+            if not fids or not _curated_question_for(key):
+                continue
+            shown = confirm_known.confirmable_display_value(facts, key)
+            if shown is None:
+                continue
+            tax = classify_question(key, fids, is_curated_client=True, canonical_key=key)
+            if tax.get("audience") != AUDIENCE_CLIENT:
+                continue
+            tax.update({
+                "priority":          PRIORITY_OPTIONAL,
+                "suppressed":        False,
+                "suppressed_reason": "",
+                # Confirming moves no score and closes no gap - say so, rather
+                # than inherit the badges of the missing-fact version.
+                "score_impact": {"sqs": False, "form_completion": False,
+                                 "submission_readiness": False,
+                                 "hard_stop_resolution": False,
+                                 "points": 0, "labels": []},
+            })
+            nums = sorted({f.replace("ACORD_", "").replace("ACORD ", "") for f in fids})
+            q = {
+                "field_name":         key,
+                "question":           _resolve_question(key)[0],
+                "hint":               "",
+                "forms":              ", ".join(nums),
+                "form_ids":           fids,
+                "field_type":         "text",
+                "current_value":      shown,
+                "confirm":            True,
+                "source_labels":      confirm_known.source_labels_for_fact(
+                    key, shown, session_docs),
+                "_group_label":       None,
+                "_is_curated_client": True,
+                "_canonical_key":     key,
+            }
+            q.update(tax)
+            out.append(q)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning("arq: confirm question for %s skipped - %s", key, exc)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2885,8 +3103,67 @@ def _drop_scalar_duplicates_of_schedule_questions(questions: List[dict]) -> int:
     return dropped
 
 
+def _asks_about_an_absent_line(facts: dict, flags: Optional[dict], form_ids):
+    """A predicate: does this question ask about a coverage line the package
+    decisively does NOT carry? Client Orbin audit 2026-09-11, item 9.
+
+    `coverage_lines` rarely denies a line in words - Orbin's declarations print
+    "Workers' Compensation - No Coverage" in the premium table and the extracted
+    row carries no denial - so `denied_lines` stayed empty and the producer was
+    asked for Employers Liability limits on a Workers Compensation policy that
+    does not exist. Two doors that ALREADY decide absence elsewhere decide it
+    here too; nothing new is inferred:
+
+      * an ACORD box: the stamper's own absent-coverage owner
+        (`pdf_service._resolve_declared_absent_line_row`) - a box it leaves
+        blank because the coverage is absent is not a question. Its field
+        families are explicit (`WorkersCompensationEmployersLiability_`,
+        `UnderlyingPolicy_EmployersLiability_`, ...), so a box that merely
+        MENTIONS workers comp - "does the additional interest carry workers
+        comp?", "any drivers not covered by workers comp?" - is never touched;
+      * a canonical fact: `line_presence`, the SYS-04 door, for every line it
+        describes.
+
+    Both honour the selected forms: ACORD 130 selected means the producer is
+    applying for WC, and it is asked.
+    """
+    try:
+        from services.line_presence import (
+            ABSENT, described_lines, line_in_submission, line_of_fact_key,
+        )
+        from services.lob_canon import canon_line
+        from services.pdf_service import (
+            _DECLARED_ABSENT_LINE_FAMILIES, _resolve_declared_absent_line_row,
+        )
+    except Exception:                                         # noqa: BLE001
+        return None
+    form_ids = [str(f) for f in (form_ids or ()) if f]
+    absent = {ln for ln in described_lines()
+              if line_in_submission(ln, facts, flags, form_ids) == ABSENT}
+    applying = _lines_the_producer_is_applying_for(form_ids)
+
+    def _asks(q: dict) -> bool:
+        name = str(q.get("field_name") or "")
+        key = str(q.get("_canonical_key") or _canonical_key(name) or "")
+        bare = name[len("schedule::"):] if name.startswith("schedule::") else name
+        if absent and any(line_of_fact_key(k) in absent for k in (key, bare) if k):
+            return True
+        family = next((phrases for family_re, phrases, _ex, _pp in _DECLARED_ABSENT_LINE_FAMILIES
+                       if family_re.match(name)), None)
+        if family is None:
+            return False                  # not a coverage-family box
+        if family and canon_line(family[0]) in applying:
+            return False                  # the producer is applying for that line
+        forms = [str(f) for f in (q.get("form_ids") or ()) if f] or form_ids
+        return bool(forms) and all(
+            _resolve_declared_absent_line_row(name, {**facts, "_form_id": f}) is None
+            for f in forms)
+
+    return _asks
+
+
 def _drop_not_applicable_questions(questions: List[dict], facts: dict,
-                                   form_ids=None) -> List[dict]:
+                                   form_ids=None, flags: Optional[dict] = None) -> List[dict]:
     """Remove questions about a coverage this package's documents rule out.
 
     `fact_state.is_not_applicable` answers from POSITIVE evidence only - a
@@ -2918,9 +3195,10 @@ def _drop_not_applicable_questions(questions: List[dict], facts: dict,
         return questions
     try:
         from services.fact_state import is_not_applicable_for, denied_lines
+        form_ids = list(form_ids)
         denied = denied_lines(facts) - _lines_the_producer_is_applying_for(form_ids)
-        if not denied:
-            return questions              # nothing declined, or all of it re-applied for
+        # The second witness - see `_asks_about_an_absent_line`. Built once.
+        absent_line = _asks_about_an_absent_line(facts, flags, form_ids)
         kept, dropped = [], []
         for q in questions:
             key = q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
@@ -2929,8 +3207,11 @@ def _drop_not_applicable_questions(questions: List[dict], facts: dict,
             # applied. Before 2026-08-26 it did not, and selecting ACORD 140 on
             # a property-declining package still suppressed every property
             # question - form blank AND unaskable (C4 test S7 run B).
-            if key and is_not_applicable_for(facts, key, form_ids):
+            if denied and key and is_not_applicable_for(facts, key, form_ids):
                 dropped.append(key)
+                continue
+            if absent_line is not None and absent_line(q):
+                dropped.append(key or str(q.get("field_name") or ""))
                 continue
             kept.append(q)
         if dropped:
@@ -2944,6 +3225,39 @@ def _drop_not_applicable_questions(questions: List[dict], facts: dict,
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("arq: not-applicable filter skipped - %s", exc)
         return questions
+
+
+def _merge_business_age_questions(questions: List[dict],
+                                  stats: Optional[dict] = None) -> List[dict]:
+    """One business-age question, not two (15 Sep 2026).
+
+    "On what date did your business start operating?" (ACORD 125's box) and
+    "How many years has your business been open?" (the scorer's fact) were both
+    put to the client. The merge derives the years from the date
+    (`extraction_service._derive_years_in_business`) and the answer paths now
+    re-derive it from an answered date (`_rederive_answer_dependent_facts`), so
+    the date question answers both. Only CLIENT questions merge; a producer or
+    internal row is left exactly where it was.
+    """
+    def _key(q: dict):
+        return (q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
+                or q.get("field_name"))
+
+    start = next((q for q in questions if _key(q) == "business_start_date"
+                  and q.get("audience") == AUDIENCE_CLIENT), None)
+    if start is None:
+        return questions
+    kept: List[dict] = []
+    for q in questions:
+        if (q is not start and _key(q) == "years_in_business"
+                and q.get("audience") == AUDIENCE_CLIENT):
+            start["form_ids"] = list(dict.fromkeys(
+                list(start.get("form_ids") or []) + list(q.get("form_ids") or [])))
+            if stats is not None:
+                stats["merged_removed"] = stats.get("merged_removed", 0) + 1
+            continue
+        kept.append(q)
+    return kept
 
 
 async def generate_arq_questions(
@@ -3354,8 +3668,10 @@ async def generate_arq_questions(
     _maybe_inject_generic_client_questions(questions, facts, flags)
 
     # Figure 15: ONE table question per repeating schedule, replacing the
-    # per-field cards removed by _partition_schedule_fields above.
-    questions.extend(_build_schedule_questions(schedule_forms, facts))
+    # per-field cards removed by _partition_schedule_fields above. The session's
+    # documents name where held rows came from (Chat 5 confirm mode).
+    questions.extend(_build_schedule_questions(schedule_forms, facts,
+                                                session_docs=session_docs))
     # ONE question per schedule-backed fact - the table, never also a scalar.
     _drop_scalar_duplicates_of_schedule_questions(questions)
 
@@ -3379,6 +3695,12 @@ async def generate_arq_questions(
     # Schedules own their taxonomy explicitly (see docstring): must run after
     # decoration and before the default-selection pass reads priority/suppressed.
     _finalize_schedule_taxonomy(questions)
+    # Chat 5: confirm-or-correct items for the core facts we already hold. After
+    # decoration for the same reason as the line above - its "already provided"
+    # overlay would suppress every one of them.
+    questions.extend(_build_confirm_questions(
+        facts, list((generated_forms or {}).keys()), questions,
+        session_docs=session_docs))
 
     # Stamp the measured SQS gain onto every question the scorer priced, from
     # whichever of the three append sites produced it (form scan, coverage
@@ -3391,6 +3713,7 @@ async def generate_arq_questions(
         if _key in _rec_points:
             _q["sqs_points"] = _rec_points[_key]
 
+    questions = _merge_business_age_questions(questions, stats)
     _hide_machine_worded_questions(questions)
     apply_default_selection(questions)
 
@@ -3412,7 +3735,7 @@ async def generate_arq_questions(
     questions = _apply_loss_state_question_gate(
         questions, facts, flags, has_loss_run_doc=_lh_has_loss_run)
     questions = _drop_not_applicable_questions(
-        questions, facts, (generated_forms or {}).keys())
+        questions, facts, (generated_forms or {}).keys(), flags=flags)
 
     for q in questions:
         q.pop("_group_label", None)
@@ -3547,6 +3870,10 @@ def generate_arq_questions_from_facts(
         flags=flags,          # SYS-01 core-requirement promotion - see path A
     )  # session_docs not available on this path; uses the stored profile + facts
     _finalize_schedule_taxonomy(questions)
+    # Chat 5 - same confirm-or-correct items as the form-aware path, so both
+    # generators offer the same step. No document list here, so the wording
+    # says "on file" instead of naming a document.
+    questions.extend(_build_confirm_questions(facts, selected_form_ids, questions))
     apply_default_selection(questions)
 
     # Engineering note (Figure 14): give the producer a rule-oriented label while
@@ -3567,7 +3894,7 @@ def generate_arq_questions_from_facts(
     questions = _apply_loss_state_question_gate(
         questions, facts, flags, has_loss_run_doc=False)
     questions = _drop_not_applicable_questions(
-        questions, facts, selected_form_ids)
+        questions, facts, selected_form_ids, flags=flags)
 
     for q in questions:
         q.pop("_group_label", None)
@@ -3829,7 +4156,7 @@ def generate_cross_form_arq_questions(
     # about a coverage the documents decline (and no selected form applies for)
     # was still asked. Same arguments, same fail-open behaviour as path A.
     questions = _drop_not_applicable_questions(
-        questions, facts or {}, (generated_forms or {}).keys())
+        questions, facts or {}, (generated_forms or {}).keys(), flags=flags)
 
     for q in questions:
         q.pop("_is_cross_form", None)
@@ -4059,6 +4386,16 @@ async def submit_arq_answers(
             })
             continue
 
+        # Chat 5 - "This is correct" on a value or a table we already held and
+        # showed. Recorded, never read as a value. Only a question SENT as a
+        # confirmation can be confirmed: on anything else the sentinel is
+        # dropped, so a crafted payload cannot confirm a value nobody was shown.
+        if is_confirmed_value(raw_val):
+            if q.get("confirm"):
+                cleaned[field_name] = CONFIRMED_SENTINEL
+                updated_fields.append(field_name)
+            continue
+
         if schedule_capture.is_schedule_answer_key(field_name):
             # A schedule answer is a JSON list of rows, not a scalar string, so
             # it must bypass `_clean_answer` (which would reject/truncate it).
@@ -4080,6 +4417,22 @@ async def submit_arq_answers(
             # would leave the form printing vehicles the insured has just told us
             # they do not own.
             cleaned_val = schedule_capture.encode_answer(_rows)
+            # Chat 5 - a CORRECTION to a table we pre-filled from the documents.
+            # It applies (the insured knows their own fleet), but a row the
+            # documents printed that the client removed or altered is flagged
+            # for the producer on the same review list format oddities use, so
+            # it is seen before binding rather than discovered after.
+            if q.get("confirm"):
+                _changed = confirm_known.schedule_row_changes(
+                    _list_key, schedule_capture.seed_rows(q), _rows)
+                if _changed:
+                    review.append({
+                        "field_name": field_name,
+                        "question":   str(q.get("question", ""))[:300],
+                        "value":      f"{len(_rows)} row(s) submitted",
+                        "reason":     (f"{_changed} row(s) from the documents were "
+                                       "changed or removed - check before binding"),
+                    })
             if _report["errors"] or _report["duplicates"]:
                 logger.info(
                     "ARQ submit: schedule %s accepted with %d row error(s), %d duplicate(s)",
@@ -4245,7 +4598,16 @@ def _restamp_canonical_into_forms(
             # see _canonical_keys_for.
             if canon not in _canonical_keys_for(schema_field):
                 continue
-            mapped_val = _deterministic_map(schema_field, facts)
+            # The form's own door, as at generation: without `_form_id` every
+            # form-scoped resolver fell back to the package scalar, so one
+            # confirmed `policy_number` was stamped on EVERY section header -
+            # reproduced on the Orbin session, all four forms.
+            try:
+                from services.pdf_service import _schema_context
+            except Exception:                                 # noqa: BLE001
+                from contextlib import nullcontext as _schema_context
+            with _schema_context(schema):
+                mapped_val = _deterministic_map(schema_field, {**facts, "_form_id": fid})
             if mapped_val is None or str(mapped_val).strip() == "":
                 continue
             if str(field_state.get(schema_field) or "").strip() == str(mapped_val).strip():
@@ -4334,10 +4696,11 @@ def _restamp_schedule_into_forms(
         cff = set(form_data.get("client_filled_fields", []))
         form_touched = False
 
+        _ctx = {**(facts or {}), "_form_id": fid}   # same door as generation
         for schema_field in schema.keys():
             if schedule_capture.schedule_list_key_for_field(schema_field) != list_key:
                 continue
-            val = _resolve_schedule_row(schema_field, facts)
+            val = _resolve_schedule_row(schema_field, _ctx)
             if val is _SCHED_SKIP:
                 continue
             val = "" if (val is None or str(val).strip() == "") else val
@@ -4470,6 +4833,28 @@ def _clear_orphaned_schedule_rows(
 
 
 # ASYNC-SAFE
+def _rederive_answer_dependent_facts(facts: dict) -> None:
+    """Facts the merge derives from other facts, re-derived once an answer
+    lands (15 Sep 2026). The client is now asked only for the business start
+    date, so the years in business must follow the answered date instead of
+    staying a gap. A years figure WE derived follows a changed date too (a
+    producer correcting the start date left it stale); a stated one is never
+    touched, and a date that derives nothing keeps the old figure."""
+    try:
+        from services.extraction_service import _derive_years_in_business
+        held = facts.get("years_in_business")
+        if (isinstance(held, dict)
+                and (held.get("derivation") or {}).get("rule") == "years_since_business_start_date"):
+            probe = {"business_start_date": facts.get("business_start_date")}
+            _derive_years_in_business(probe)
+            if probe.get("years_in_business"):
+                facts["years_in_business"] = probe["years_in_business"]
+            return
+        _derive_years_in_business(facts)
+    except Exception as exc:                                 # noqa: BLE001
+        logger.warning("answer re-derivation skipped: %s", exc)
+
+
 async def apply_arq_answers_to_session(
     arq_id: str,
     processing_session_id: str,
@@ -4519,9 +4904,34 @@ async def apply_arq_answers_to_session(
     # Fact keys whose DERIVATION no longer holds and must be retracted with
     # delete_facts rather than popped (D18). See _apply_new_venture_derivations.
     _nv_delete_keys: List[str] = []
+    # Chat 5 - confirmations recorded this run (fact keys / schedule answer keys).
+    confirmed_this_run: List[str] = []
+    _questions_by_field = {q.get("field_name"): q for q in questions if isinstance(q, dict)}
 
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
+
+        # Chat 5 - "This is correct". A confirmation writes PROVENANCE and
+        # nothing else: no box is stamped, no value changes, nothing is held. The
+        # fact envelope gains `evidence_state: user_confirmed` (which every
+        # consumer already understands and `human_provenance_facts` carries
+        # across a pipeline re-run), and a confirmed table is remembered by the
+        # fingerprint of the rows the client actually saw, so the next
+        # questionnaire does not put the same unchanged list to them again.
+        if is_confirmed_value(new_val):
+            _q = _questions_by_field.get(field_name) or {}
+            _at = datetime.now(timezone.utc).isoformat()
+            if schedule_capture.is_schedule_answer_key(field_name):
+                confirm_known.record_schedule_confirmation(
+                    facts, schedule_capture.list_key_from_answer_key(field_name),
+                    schedule_capture.seed_rows(_q), arq_id, _at)
+                confirmed_this_run.append(field_name)
+            else:
+                _canon_c = _canonical_key(field_name) or field_name
+                if confirm_known.record_fact_confirmation(
+                        facts, _canon_c, _q.get("current_value"), arq_id, _at):
+                    confirmed_this_run.append(_canon_c)
+            continue
 
         # Decide BEFORE any form is stamped: a held answer must not reach the
         # PDF either, or the form would show a value the fact does not carry.
@@ -4774,6 +5184,7 @@ async def apply_arq_answers_to_session(
         facts["_client_answer_conflicts"] = held_conflicts
     else:
         facts.pop("_client_answer_conflicts", None)
+    _rederive_answer_dependent_facts(facts)
     _update_payload = {"generated_forms": generated, "facts": facts,
                        "client_answer_conflicts": held_conflicts}
     if flags_changed:
@@ -4826,7 +5237,8 @@ async def apply_arq_answers_to_session(
                     "client_email": arq.get("email") or arq.get("client_email") or "",
                     "fields_changed": len(_c5_change_log),
                     "answers_received": len(answers),
-                    "held_for_producer": len(held_this_run)},
+                    "held_for_producer": len(held_this_run),
+                    "confirmed_by_client": len(confirmed_this_run)},
         )
     except Exception as _c5_ex:                               # noqa: BLE001
         logger.warning("ARQ %s: client-answer audit logging failed: %s",
@@ -5163,6 +5575,7 @@ async def apply_producer_answer_to_session(
     if field_name not in updated:
         updated.append(field_name)
 
+    _rederive_answer_dependent_facts(facts)
     _update_payload = {"generated_forms": generated, "facts": facts}
     if flags_changed:
         _update_payload["flags"] = flags

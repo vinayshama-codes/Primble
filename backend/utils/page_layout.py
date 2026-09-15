@@ -508,7 +508,8 @@ def _horizontal_bands(lines: Sequence[Sequence[Word]]) -> List[Tuple[int, int]]:
     return [(a, b) for a, b in zip(cuts, cuts[1:]) if b > a]
 
 
-def column_bands(words: Sequence[Word]) -> List[Tuple[int, int, float]]:
+def column_bands(words: Sequence[Word], *, log: bool = False, page_no: Any = None,
+                 scope: str = "page") -> List[Tuple[int, int, float]]:
     """Runs of consecutive lines that are two columns of RUNNING PROSE, as
     ``(first_line, last_line_exclusive, gutter_x)`` over ``_cluster_lines(words)``.
 
@@ -525,6 +526,10 @@ def column_bands(words: Sequence[Word]) -> List[Tuple[int, int, float]]:
     is NOT repaired here. That is deliberate: splitting a label/value row would
     orphan values on every declarations page in the book, and blank-over-wrong
     applies to reading order too.
+
+    ``log=True`` (``page_text`` passes it; ``_emit_lines`` does not, so each band
+    is logged once) writes one COLUMN_BAND_ACCEPT line per accepted band. Logging
+    only - the return value is identical either way.
     """
     if not _COLUMNS_ON or len(words) < _COLUMN_MIN_WORDS:
         return []
@@ -578,6 +583,8 @@ def column_bands(words: Sequence[Word]) -> List[Tuple[int, int, float]]:
             # is not a column layout, and reordering it scrambles a paragraph.
             if prose and (e - s) >= _PROSE_MIN_LINES:
                 out.append((h0 + s, h0 + e, gx))
+                if log:
+                    _log_band_accept(page_no, scope, "prose", h0 + s, h0 + e, gx)
                 continue
             # Not prose. It may still CONTAIN two side-by-side identity blocks
             # (`Named Insured` over its address, `Producer` over its own) sitting
@@ -586,7 +593,19 @@ def column_bands(words: Sequence[Word]) -> List[Tuple[int, int, float]]:
             if region:
                 rs, re_ = region
                 out.append((h0 + s + rs, h0 + s + re_, gx))
+                if log:
+                    _log_band_accept(page_no, scope, "identity",
+                                     h0 + s + rs, h0 + s + re_, gx)
     return out
+
+
+def _log_band_accept(page_no: Any, scope: str, route: str, start: int, end: int,
+                     gx: float) -> None:
+    """One line per band ``column_bands`` accepted. ``lines`` indexes
+    ``_cluster_lines(words)`` of the page (or crop) that was read, half-open."""
+    logger.info("page_layout: COLUMN_BAND_ACCEPT page=%s scope=%s route=%s lines=[%d,%d) "
+                "count=%d gutter_x=%.1f", page_no if page_no is not None else "?", scope,
+                route, start, end, end - start, gx)
 
 
 def _parallel_region(band: Sequence[Sequence[Word]], gx: float) -> Optional[Tuple[int, int]]:
@@ -810,8 +829,17 @@ def page_text(page, pw: Optional[Tuple[List[Word], int]] = None) -> Tuple[str, i
     words, repaired = pw if pw is not None else page_words(page)
     if not words:
         return (page.extract_text() or ""), repaired
+    # Logging only: which page (or crop of one) the transforms below touched.
     try:
-        bands = column_bands(words)
+        page_no = getattr(page, "page_number", None)
+        scope = "crop" if getattr(page, "root_page", page) is not page else "page"
+    except Exception:                                    # noqa: BLE001 - logging must never cost a page
+        page_no, scope = None, "?"
+    if repaired:
+        logger.info("page_layout: LINE_REPAIR_ACCEPT page=%s scope=%s repaired_lines=%d",
+                    page_no if page_no is not None else "?", scope, repaired)
+    try:
+        bands = column_bands(words, log=True, page_no=page_no, scope=scope)
     except Exception as ex:                              # noqa: BLE001 - never cost a page its text
         logger.debug("page_layout: column scan failed: %s", ex)
         bands = []

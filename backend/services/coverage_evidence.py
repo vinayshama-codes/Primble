@@ -376,6 +376,64 @@ HNOA_INAPPLICABLE_FACTS: Tuple[str, ...] = OWNED_VEHICLE_FACTS + (
 _XMOD_QUESTION_ALIASES: Tuple[str, ...] = ("wc_xmod", "narrative_target_markets")
 
 
+# -- IS THE GENERAL LIABILITY WRITTEN CLAIMS-MADE? ---------------------------
+#
+# TWO CHANNELS, NO RECONCILIATION - the D2 shape one layer over (11 Sep 2026,
+# live run 1 finding F4). The package carries the coverage BASIS twice:
+#
+#   `gl_form_type`       the STATED value, read off what the document prints
+#                        ("OCCURRENCE" on the declarations page)
+#   `gl_is_claims_made`  a boolean DETECTOR over the whole document text
+#
+# Nothing compared them, and the detector alone gated everything downstream:
+# the retroactive-date resolver, the cross-form rule, and two SQS deductions.
+# On run 1 a single narrative sentence set the flag true on a package whose
+# declarations page says OCCURRENCE, and ACORD 126 printed PROPOSED
+# RETROACTIVE DATE 07/15/2026 - a date no document states, for a concept an
+# occurrence policy does not have - while neither basis box was ticked.
+#
+# THE PROMPT ALREADY FORBIDS IT, in terms ("do NOT set true when the document
+# states the GL form is written on an OCCURRENCE basis"), and the model did it
+# anyway. That is H1-K's standing lesson: a prompt is not a guarantee, so the
+# rule needs a deterministic home.
+#
+# THE STATED VALUE OUTRANKS THE DETECTOR, and only in the direction where the
+# document has actually spoken. A declarations page printing OCCURRENCE is the
+# policy telling us its own basis; a flag raised somewhere in 271 pages is a
+# mention, and a mention has never been proof of anything else in this
+# pipeline either. Silence on `gl_form_type` leaves the flag exactly as it is.
+_GL_OCCURRENCE_RE = re.compile(r"\boccurrence\b", re.I)
+_GL_CLAIMS_MADE_RE = re.compile(r"claims[\s-]?made", re.I)
+
+
+def gl_form_basis(facts: Optional[dict]) -> Optional[str]:
+    """"occurrence" / "claims_made" / None - the basis the document STATES.
+
+    None means the document did not say, which is different from saying no.
+    A value naming both (a dec page that prints the GL form as occurrence and
+    an EBL endorsement as claims-made in one cell) settles nothing and is
+    returned as None rather than resolved by word order.
+    """
+    raw = str(_fv(facts, "gl_form_type") or "").strip()
+    if not raw:
+        return None
+    occ = bool(_GL_OCCURRENCE_RE.search(raw))
+    cm = bool(_GL_CLAIMS_MADE_RE.search(raw))
+    if occ == cm:
+        return None                       # both, or neither - no verdict
+    return "occurrence" if occ else "claims_made"
+
+
+def gl_is_claims_made(facts: Optional[dict],
+                      flags: Optional[dict] = None) -> bool:
+    """THE door. The stated basis wins where it exists; the detector flag
+    answers only where the document never stated one."""
+    basis = gl_form_basis(facts)
+    if basis is not None:
+        return basis == "claims_made"
+    return _flag(_flags_of(facts, flags), "gl_is_claims_made")
+
+
 def auto_liability_stated(facts: Optional[dict]) -> bool:
     """Is the auto liability limit STATED - as a combined single limit OR as
     split limits? LIVE RUN P5 (2026-08-26): a split-limit policy ($250K /

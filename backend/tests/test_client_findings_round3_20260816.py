@@ -123,9 +123,15 @@ def test_the_schedule_still_fills_where_the_dec_is_silent():
 # ── K3: count / percent boxes - a fact or an owned blank ─────────────────────
 
 def test_the_131_employee_count_stamps_the_documents_own_statement():
-    facts = {"num_employees": "0 - 25"}
+    # CORRECTED 15 Sep 2026 (live run 7 audit). This pinned "0 - 25" as the
+    # document's statement; it is the auto non-ownership RATING BAND, which the
+    # merge's count gate and Guard 3b already refuse. The box takes one whole
+    # number; the band is an owned blank.
     assert ps._resolve_exposure_count(
-        "BusinessInformation_EmployeeCount_A", facts) == "0 - 25"
+        "BusinessInformation_EmployeeCount_A", {"num_employees": "12"}) == "12"
+    facts = {"num_employees": "0 - 25"}
+    assert ps._resolve_exposure_count("BusinessInformation_EmployeeCount_A", facts) is None
+    assert ps._is_authoritative_blank_field("BusinessInformation_EmployeeCount_A", facts)
 
 
 def test_the_131_employee_count_is_an_owned_blank_without_a_fact():

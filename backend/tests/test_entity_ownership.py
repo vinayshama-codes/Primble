@@ -116,8 +116,17 @@ def test_no_live_rule_stamps_across_parties():
 
 
 def test_every_owned_fact_exists_in_the_registry():
-    """A typo in _FACT_ENTITY would silently disable the guard for that fact."""
-    missing = [f for f in ps._FACT_ENTITY if f not in FACT_REGISTRY]
+    """A typo in _FACT_ENTITY would silently disable the guard for that fact.
+
+    The expiring-agency twins are not registry facts: `_route_producer_party`
+    writes one per `_PRODUCER_IDENTITY_KEYS` entry. A twin counts as real only
+    when that router writes it and its base fact is registered.
+    """
+    from services.extraction_service import _PRODUCER_IDENTITY_KEYS
+    routed = {k.replace("producer_", "expiring_producer_", 1): k
+              for k in _PRODUCER_IDENTITY_KEYS}
+    missing = [f for f in ps._FACT_ENTITY
+               if f not in FACT_REGISTRY and routed.get(f) not in FACT_REGISTRY]
     assert not missing, f"_FACT_ENTITY names facts that do not exist: {missing}"
 
 

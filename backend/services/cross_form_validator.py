@@ -1120,10 +1120,16 @@ def _check_auto_symbol_to_exposure_alignment(
     # satisfies it. When the whole submission has no symbols at all,
     # _check_auto_symbols_captured says so once instead of this firing too.
     if flags.get("auto_has_physical_damage") and sym.all_numbers(facts):
+        # Specified Causes of Loss is the named-peril alternative to
+        # Comprehensive: its symbol answers the comprehensive half, never
+        # collision (15 Sep 2026 - before its own key it read as generic
+        # physical damage and answered both).
+        _answers = {sym.COMPREHENSIVE: (sym.PHYSICAL_DAMAGE, sym.SPECIFIED_CAUSES),
+                    sym.COLLISION: (sym.PHYSICAL_DAMAGE,)}
         missing = [
             sym.COVERAGE_LABEL[cov].lower()
             for cov in (sym.COMPREHENSIVE, sym.COLLISION)
-            if not sym.symbols_for(facts, cov, sym.PHYSICAL_DAMAGE)
+            if not sym.symbols_for(facts, cov, *_answers[cov])
         ]
         if missing:
             issues.append(_issue(
@@ -1396,7 +1402,12 @@ def _check_claims_made_prior_acts(
     """
     issues: List[dict] = []
 
-    if not flags.get("gl_is_claims_made"):
+    # ONE DOOR (11 Sep 2026, finding F4). The raw flag let one narrative
+    # sentence declare a package claims-made against a declarations page
+    # that says OCCURRENCE, and this rule then demanded a retroactive date
+    # the policy cannot have. See coverage_evidence.gl_is_claims_made.
+    from services.coverage_evidence import gl_is_claims_made as _cm
+    if not _cm(facts, flags):
         return issues
 
     retro_date  = _fv(facts, "retro_date")
@@ -2532,8 +2543,14 @@ def _check_certificate_requested_but_missing(
     """
     issues: List[dict] = []
 
+    # An uploaded certificate sets `has_certificate_request` merely by being one
+    # (the prompt fires on "lists a certificate holder" - even "For
+    # Informational Purposes Only"). A certificate is not a request for a
+    # certificate: with one in the package the request needs a NAMED holder,
+    # and after the merge's party check that is always a real party (Orbin,
+    # 14 Sep 2026).
     cert_requested = (
-        flags.get("has_certificate_request")
+        (flags.get("has_certificate_request") and not flags.get("is_certificate_doc"))
         or bool(_fv(facts, "certificate_holder"))
         or bool(_fv(facts, "certificate_holder_address"))
     )

@@ -37,6 +37,13 @@ const FALLBACK_REPLY = "Sorry, I couldn't reach the assistant just now. Please t
 // answer. MUST stay identical to NOT_SURE_SENTINEL in backend/services/arq_service.py.
 const NOT_SURE = '__NOT_SURE__';
 
+// Chat 5 (14 Sep 2026) - confirm-or-correct. A question marked `confirm` shows a
+// value (or a table) we already hold from the client's own documents. Tapping
+// "This is correct" stores this sentinel: recorded as a confirmation, never
+// written into an ACORD box, never read as a value. MUST stay identical to
+// CONFIRMED_SENTINEL in backend/services/confirm_known.py.
+const CONFIRMED = '__CONFIRMED__';
+
 // Chat bubbles render plain text, so any Markdown the assistant emits would be
 // shown to the client literally ("**238160**"). The system prompt already asks
 // for plain text; this is the belt-and-braces strip for when the model does it
@@ -179,6 +186,9 @@ export default function ClientQuestionnaire({ token }) {
   // touch flag cannot tell a typed-then-cleared box from an untouched one.
   const seedRef = useRef({});
   const [touched, setTouched] = useState(() => new Set());
+  // Chat 5: confirm questions whose "Change it" the client tapped - the normal
+  // input replaces the read-only value until they keep what we had.
+  const [changingConfirm, setChangingConfirm] = useState(() => new Set());
   // Refs mirror both maps SYNCHRONOUSLY. `setAnswers` has to diff against the
   // previous answers and union into the previous touch set in the same tick,
   // and two edits inside one tick (tapping a NAICS chip, then typing) would
@@ -270,7 +280,7 @@ export default function ClientQuestionnaire({ token }) {
       const val = (answers[q.field_name] || '').trim();
       // "I'm not sure" is a valid, deliberate response - never validate it as if
       // it were a typed answer (it would fail every format rule below).
-      if (val === NOT_SURE) return;
+      if (val === NOT_SURE || val === CONFIRMED) return;
       // Schedules validate per cell inside the table itself, and a partly-filled
       // fleet is deliberately still submittable - so they are never blocked here.
       if (q.field_type === 'schedule') return;
@@ -421,9 +431,15 @@ export default function ClientQuestionnaire({ token }) {
             // A schedule seeds from the rows already known (extracted from the
             // documents, or pre-loaded by the agent) so the client edits a
             // populated table instead of re-typing a fleet from scratch.
+            //
+            // A CONFIRM question (Chat 5) is the one exception: its known value
+            // is SHOWN, read-only, from `q.current_value`, and the answer slot
+            // starts EMPTY. The slot only ever holds what the client supplies -
+            // the confirmation sentinel or a typed correction - so "is this the
+            // client's answer?" never has to compare against our own value.
             init[q.field_name] = q.field_type === 'schedule'
               ? encodeRows(q.current_rows || [])
-              : (q.current_value || '');
+              : (q.confirm ? '' : (q.current_value || ''));
           });
           // Freeze what the SERVER supplied before the draft is layered on. This
           // is the baseline every "did the client provide this?" question is
@@ -525,6 +541,20 @@ export default function ClientQuestionnaire({ token }) {
       // the receipt can never credit the client for a table we pre-filled and
       // they never opened.
       if (!hasResponded(q)) return;
+
+      // Chat 5: "This is correct" on a value or table we already held.
+      if (raw === CONFIRMED) {
+        answeredItems += 1;
+        items.push({
+          key:   q.field_name,
+          label: q.question,
+          value: q.field_type === 'schedule' || !q.current_value
+            ? 'Confirmed as correct'
+            : `${q.current_value} - confirmed as correct`,
+          kind:  'answer',
+        });
+        return;
+      }
 
       if (q.field_type === 'schedule') {
         const rows = decodeRows(raw).filter((r) => !isBlankRow(r, q.columns || []));
@@ -906,6 +936,16 @@ export default function ClientQuestionnaire({ token }) {
               const isSelect   = fieldType === 'select';
               const isSchedule = fieldType === 'schedule';
               const notSure    = isNotSure(q.field_name);
+              // Chat 5 - confirm-or-correct. A confirm scalar shows the value we
+              // hold read-only until the client taps "Change it" (or reloads a
+              // draft already holding their correction); a confirm table offers
+              // "Everything here is correct" while it still matches what we sent.
+              const rawAnswer      = answers[q.field_name] ?? '';
+              const isConfirmedAns = rawAnswer === CONFIRMED;
+              const isConfirmScalar = !!q.confirm && !isSchedule && !!q.current_value;
+              const changingThis   = isConfirmScalar && !isConfirmedAns
+                && (changingConfirm.has(q.field_name) || String(rawAnswer).trim() !== '');
+              const tableUntouched = isSchedule && rawAnswer === seedRef.current[q.field_name];
               // "Not sure" is a response but not an answer - it gets its own
               // amber treatment rather than the green "answered" styling.
               // Same rule as the progress bar (see `hasResponded`), so a card can
@@ -977,6 +1017,15 @@ export default function ClientQuestionnaire({ token }) {
                           {hint}
                         </div>
                       )}
+                      {/* Chat 5: where a value we already hold came from. A table
+                          says so in its own question text, so only scalars need it. */}
+                      {isConfirmScalar && (
+                        <div style={{ marginTop: 5, fontSize: 11, color: '#047857', lineHeight: 1.5 }}>
+                          {Array.isArray(q.source_labels) && q.source_labels.length > 0
+                            ? `We found this in ${q.source_labels.join(' and ')}. Please confirm it or correct it.`
+                            : 'We have this on file. Please confirm it or correct it.'}
+                        </div>
+                      )}
                       {/* Figure 20: industry-classification candidates derived from
                           the business's own operations text. These are SUGGESTIONS,
                           never answers - nothing is pre-filled, the client has to tap
@@ -1037,17 +1086,118 @@ export default function ClientQuestionnaire({ token }) {
                     </div>
 
                     <div>
-                      {isSchedule ? (
-                        <ScheduleTable
-                          columns={q.columns || []}
-                          rows={decodeRows(answers[q.field_name])}
-                          onChange={(rows) => setAnswers({ [q.field_name]: encodeRows(rows) })}
-                          label={q.schedule_label || 'Schedule'}
-                          singular={q.schedule_singular || 'row'}
-                          dedupKeys={q.dedup_keys || []}
-                          vinDecode={!!q.vin_decode}
-                          rowCapacity={q.row_capacity || 0}
-                        />
+                      {isSchedule && isConfirmedAns ? (
+                        // Chat 5: the client confirmed the list we sent.
+                        <div style={{
+                          padding: '10px 12px', borderRadius: 7, background: '#f0fdf4',
+                          border: '1px solid #bbf7d0', color: '#065f46', fontSize: 12.5, lineHeight: 1.5,
+                        }}>
+                          <strong>Confirmed as correct.</strong>{' '}
+                          {(q.current_rows || [])
+                            .map((r) => Object.values(r || {}).filter(Boolean).join(' '))
+                            .filter(Boolean)
+                            .join('; ')}
+                          <div style={{ marginTop: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => setAnswers({
+                                [q.field_name]: seedRef.current[q.field_name] ?? encodeRows(q.current_rows || []),
+                              })}
+                              style={{
+                                padding: '5px 12px', borderRadius: 20, border: '1px solid #cbd5e1',
+                                background: '#fff', color: '#475569', fontSize: 12, fontWeight: 600,
+                                cursor: 'pointer', fontFamily: 'inherit', minHeight: 32,
+                              }}
+                            >
+                              Undo - let me edit the list
+                            </button>
+                          </div>
+                        </div>
+                      ) : isSchedule ? (
+                        <>
+                          {/* Offered only while the table still matches what we
+                              sent - after an edit, the edit IS the answer. */}
+                          {q.confirm && tableUntouched && (q.current_rows || []).length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setAnswers({ [q.field_name]: CONFIRMED })}
+                              style={{
+                                marginBottom: 8, padding: '7px 14px', borderRadius: 20,
+                                border: '1px solid #16a34a', background: '#f0fdf4', color: '#166534',
+                                fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                                fontFamily: 'inherit', minHeight: 36,
+                              }}
+                            >
+                              ✓ Everything here is correct
+                            </button>
+                          )}
+                          <ScheduleTable
+                            columns={q.columns || []}
+                            rows={decodeRows(answers[q.field_name])}
+                            onChange={(rows) => setAnswers({ [q.field_name]: encodeRows(rows) })}
+                            label={q.schedule_label || 'Schedule'}
+                            singular={q.schedule_singular || 'row'}
+                            dedupKeys={q.dedup_keys || []}
+                            vinDecode={!!q.vin_decode}
+                            rowCapacity={q.row_capacity || 0}
+                          />
+                        </>
+                      ) : isConfirmScalar && !changingThis ? (
+                        // Chat 5: the value we hold, read-only, with the two
+                        // answers the client can give - "correct" or "change it".
+                        <div>
+                          <div style={{
+                            padding: '9px 12px', borderRadius: 7, fontSize: 13, fontWeight: 600,
+                            color: '#0f172a', wordBreak: 'break-word', lineHeight: 1.45,
+                            background: isConfirmedAns ? '#f0fdf4' : '#f8fafc',
+                            border: `1px solid ${isConfirmedAns ? '#bbf7d0' : '#e2e8f0'}`,
+                          }}>
+                            {q.current_value}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                            {isConfirmedAns ? (
+                              <>
+                                <span style={{ fontSize: 12, color: '#065f46', fontWeight: 600 }}>✓ Confirmed as correct</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAnswers({ [q.field_name]: '' })}
+                                  style={{
+                                    padding: '5px 12px', borderRadius: 20, border: '1px solid #cbd5e1',
+                                    background: '#fff', color: '#475569', fontSize: 12, fontWeight: 600,
+                                    cursor: 'pointer', fontFamily: 'inherit', minHeight: 32,
+                                  }}
+                                >
+                                  Undo
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setAnswers({ [q.field_name]: CONFIRMED })}
+                                  style={{
+                                    padding: '7px 14px', borderRadius: 20, border: '1px solid #16a34a',
+                                    background: '#f0fdf4', color: '#166534', fontSize: 12.5, fontWeight: 700,
+                                    cursor: 'pointer', fontFamily: 'inherit', minHeight: 36,
+                                  }}
+                                >
+                                  ✓ This is correct
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setChangingConfirm((prev) => new Set([...prev, q.field_name]))}
+                                  style={{
+                                    padding: '7px 14px', borderRadius: 20, border: '1px solid #cbd5e1',
+                                    background: '#fff', color: '#475569', fontSize: 12.5, fontWeight: 600,
+                                    cursor: 'pointer', fontFamily: 'inherit', minHeight: 36,
+                                  }}
+                                >
+                                  Change it
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       ) : notSure ? (
                         <div style={{
                           padding: '10px 12px', borderRadius: 7, background: '#fef3c7',
@@ -1236,7 +1386,31 @@ export default function ClientQuestionnaire({ token }) {
                           all-optional (any number of rows, blanks allowed), so
                           "I'm not sure" would replace real rows with a sentinel
                           string and lose the client's work. */}
-                      {!isSchedule && (
+                      {/* Chat 5: back out of a correction and keep the value we hold. */}
+                      {isConfirmScalar && changingThis && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAnswers({ [q.field_name]: '' });
+                            setChangingConfirm((prev) => {
+                              const n = new Set(prev);
+                              n.delete(q.field_name);
+                              return n;
+                            });
+                          }}
+                          style={{
+                            marginTop: 8, marginRight: 8, padding: '5px 12px', borderRadius: 20,
+                            border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534',
+                            fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            fontFamily: 'inherit', minHeight: 32,
+                          }}
+                        >
+                          Keep what we have
+                        </button>
+                      )}
+                      {/* Not offered on a confirm item either: its escape hatch is
+                          simply leaving it - nothing is lost, we keep what we hold. */}
+                      {!isSchedule && !q.confirm && (
                         <button
                           type="button"
                           onClick={() => toggleNotSure(q.field_name)}

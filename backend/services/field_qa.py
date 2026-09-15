@@ -36,7 +36,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from services.normalization import normalize_value
+from services.normalization import normalize_value, canonical_yes_no, yes_no_token
 from services.fact_registry import FACT_REGISTRY, SCHEDULE_ROW_RULES, validate_schedule_rows
 from services.field_mapping_integrity import is_high_impact_field
 from services.placeholder_detector import is_placeholder_value
@@ -101,6 +101,55 @@ def _value_matches(fact_key: str, stamped: Any, expected: Any) -> bool:
     return sv == ev
 
 
+# ── "Is this refused value already printed on the form?" ─────────────────────
+_COPY_KEY_RE = re.compile(r"[^a-z0-9]")
+
+
+def _copy_key(value: Any) -> str:
+    return _COPY_KEY_RE.sub("", str(value if value is not None else "").lower())
+
+
+def _printed_value_keys(fr: Optional[dict]) -> Dict[str, str]:
+    """{field: comparison key} for every box the generated form prints. Tick
+    answers are left out (the shared `yes_no_token` reader decides what one
+    is): a refused "No" matching every unticked box is coincidence, not a copy."""
+    fr = fr or {}
+    mapped = fr.get("field_state") or fr.get("mapped") or {}
+    out: Dict[str, str] = {}
+    if isinstance(mapped, dict):
+        for f, v in mapped.items():
+            if yes_no_token(v) is not None:
+                continue
+            k = _copy_key(v)
+            if k:
+                out[f] = k
+    return out
+
+
+def _is_printed_copy(removed: Any, field: Any, printed: Dict[str, str]) -> bool:
+    """True when a refused value is text another box on the SAME form prints.
+
+    Equal after formatting ("DENVER" / "Denver", "Employers Mutual Casualty
+    Company" / "EMPLOYERS MUTUAL CASUALTY COMPANY"), or - for a value long
+    enough that containment cannot be coincidence (12+ significant characters)
+    - contained in one ("Contrctrs-sub work-in connection ... - NOC" inside the
+    printed operations description). Short values must carry a letter, or be
+    at least four digits, so a refused "1" never matches a printed LOC # "1"."""
+    if yes_no_token(removed) is not None:
+        return False
+    k = _copy_key(removed)
+    if not k:
+        return False
+    if len(k) < 2 or (len(k) < 4 and not any(c.isalpha() for c in k)):
+        return False
+    for f2, k2 in printed.items():
+        if f2 == field:
+            continue
+        if k2 == k or (len(k) >= 12 and k in k2):
+            return True
+    return False
+
+
 def _humanize_field(field: str) -> str:
     """Light humanization of an ACORD field name for a review message."""
     base = field
@@ -110,12 +159,26 @@ def _humanize_field(field: str) -> str:
     return base.replace("_", " ").strip()
 
 
+_SPARE_ROW_RE = re.compile(r"^(?P<base>.+)_(?P<row>[B-N])$")
+
+
+def _spare_row_of_an_answered_group(field: str, mapped: dict) -> bool:
+    """A row B..N box whose row A carries a value (live run 10, 15 Sep 2026).
+    ACORD 125 listed "NamedInsured FullName" as left blank by the AI - the OTHER
+    named insured rows, empty because there are none, beside the applicant in
+    row A. A repeating section whose first row is filled has been answered; its
+    spare rows say nothing, and the list read as if the applicant were missing."""
+    m = _SPARE_ROW_RE.match(field or "")
+    return bool(m) and _has_value((mapped or {}).get(f"{m.group('base')}_A"))
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def run_field_qa(
     generated_forms: Optional[dict],
     merged_facts: Optional[dict] = None,
     confirmations: Optional[dict] = None,
+    flags: Optional[dict] = None,
 ) -> dict:
     """Run field QA across all generated forms.
 
@@ -144,7 +207,13 @@ def run_field_qa(
     """
     generated_forms = generated_forms or {}
     merged_facts = merged_facts or {}
-    confirmations = confirmations or {}
+    # A form number confirmed as a policy number is never a source value - the
+    # client's "policy number vs form number" rows. See usable_confirmations.
+    try:
+        from services.underwriting_consistency import usable_confirmations
+        confirmations = usable_confirmations(confirmations)
+    except Exception:                                     # pragma: no cover
+        confirmations = confirmations or {}
 
     results: List[dict] = []
     fail = review = passed = checked = 0
@@ -152,8 +221,10 @@ def run_field_qa(
     try:
         from services.pdf_service import (
             fact_to_form_fields,
-            expected_value_for_field,
+            box_expectation,
             _is_nonfillable_field,
+            _owned_blank_claim,
+            _schema_context,
         )
     except Exception as exc:                              # pragma: no cover
         logger.warning("field_qa: pdf_service unavailable - %s", exc)
@@ -196,6 +267,20 @@ def run_field_qa(
         # Every schema field carries a confidence label; the mapped dict holds the
         # values. Union so empty required fields (missing_required) are included.
         all_fields = set(confidence.keys()) | set(mapped.keys())
+
+        # AN OWNED BLANK IS NOT A NON-ANSWER (live run 7, 15 Sep 2026). The
+        # cover page listed boxes such as ACORD 131's # EMPL and ACORD 137's
+        # HIRED COST as "left blank by the AI" - boxes a resolver decided are
+        # empty and never asked the model about. Asked the same way the stamper
+        # asked: facts plus flags, this form's id and schema.
+        _owned_facts = {**merged_facts, **(flags or {}), "_form_id": form_id}
+
+        def _owned(field: str, _schema=schema, _facts=_owned_facts) -> bool:
+            try:
+                with _schema_context(_schema):
+                    return bool(_owned_blank_claim(field, _facts))
+            except Exception:                             # noqa: BLE001
+                return False
 
         for field in all_fields:
             val = mapped.get(field)
@@ -243,17 +328,38 @@ def run_field_qa(
                     continue
 
             # (1) Value-vs-source: a stamped value that materially disagrees with
-            # its source fact is a fail regardless of confidence label. Address
-            # sub-fields (LineOne/City/State/Zip) only ever hold ONE piece of the
-            # full address - expected_value_for_field() extracts the matching
-            # piece so e.g. a stamped city isn't compared against the whole
-            # street+city+state+zip fact string (which would never match).
+            # its source fact is a fail regardless of confidence label.
+            #
+            # ONE DOOR - `pdf_service.box_expectation` (client 11 Sep, Orbin:
+            # "values should only be compared when they represent the same
+            # field, same LOB/policy and applicable time period"). What a box is
+            # compared WITH is decided there, once: its OWNER's value on a
+            # section form (never the package scalar the owner declined), the
+            # piece of the source the box holds (an address part, a bare
+            # amount), and for a checkbox the TICK its fact implies. The
+            # post-generation stamp check asks the same door, so the two can
+            # never again disagree about which boxes are comparable.
             fact_key = field_fact.get((form_id, field))
             if has_val and fact_key and fact_key in fact_expected:
-                expected = expected_value_for_field(field, fact_key, fact_expected[fact_key])
-                if not expected:
-                    pass  # this field's piece has no signal - fall through to (2)
-                elif not _value_matches(fact_key, val, expected):
+                expected = None
+                _mismatch = False
+                try:
+                    _exp = box_expectation(form_id, field, fact_key,
+                                           fact_expected[fact_key], merged_facts, schema)
+                except Exception as _exc:                 # pragma: no cover
+                    logger.debug("field_qa: box expectation failed for %s/%s - %s",
+                                 form_id, field, _exc)
+                    _exp = None
+                if _exp:
+                    _kind, expected = _exp
+                    if _kind == "tick":
+                        _have = canonical_yes_no(val)
+                        _mismatch = _have is not None and _have != expected
+                    else:
+                        _mismatch = not _value_matches(fact_key, val, expected)
+                if not _mismatch:
+                    pass  # nothing comparable, or it agrees - fall through to (2)
+                else:
                     checked += 1
                     fail += 1
                     results.append({
@@ -330,6 +436,10 @@ def run_field_qa(
                     "expected": None,
                 })
             elif verdict == "review" and not has_val and not _is_nonfillable_field(field):
+                if _owned(field):
+                    continue                  # decided empty - the AI was never asked
+                if _spare_row_of_an_answered_group(field, mapped):
+                    continue                  # an empty extra row, not a question
                 # NOT-ANSWERED: the field was a fillable gap-fill candidate (no
                 # deterministic rule) that the AI returned null/omitted for. It is
                 # not required, so it produces NO signal anywhere else: pink needs
@@ -447,8 +557,30 @@ def run_field_qa(
     # wrong), so it never fails the run and never blocks a download. It is
     # reported because the producer is the one who can go and look the value up.
     for form_id, fr in (generated_forms or {}).items():
+        _printed = _printed_value_keys(fr)
+        _copies = 0
         for gb in ((fr or {}).get("guard_blanks") or []):
             if not isinstance(gb, dict) or not gb.get("field"):
+                continue
+            # A Yes/No answer the evidence gate refused is an UNANSWERED
+            # question, not "a value found that could not be true for that box".
+            # It stays in `guard_blanks` (arq reads that list so no later pass
+            # reopens the box), and a high-impact one is already surfaced as
+            # "left blank by the AI". Live 15 Sep 2026: these were most of
+            # ACORD 131's 107-row list.
+            if gb.get("kind") == "unanswered":
+                continue
+            # A COPY OF A VALUE THE FORM ALREADY PRINTS is not a finding (live
+            # run 6, 15 Sep 2026). Twenty of ACORD 125's 32 entries were the
+            # model copying the first named insured's name, address and codes
+            # into the other-named-insured rows, or the carrier's name into an
+            # Additional Interest box - each refused correctly, and each
+            # telling the producer to "enter the correct value" for a box whose
+            # refused text is already on the page. Nothing was lost, so there is
+            # nothing to look up. The entry stays in `guard_blanks` (arq reads
+            # it) and the count is logged; only this advisory list skips it.
+            if _is_printed_copy(gb.get("removed_value"), gb.get("field"), _printed):
+                _copies += 1
                 continue
             review += 1
             results.append({
@@ -470,6 +602,10 @@ def run_field_qa(
                 "stamped":     None,
                 "expected":    None,
             })
+        if _copies:
+            logger.info(
+                "field_qa: %s - %d refused value(s) not listed: each is a copy "
+                "of a value the form already prints", form_id, _copies)
 
     if fail or review:
         logger.info(
@@ -621,9 +757,18 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     # decision rather than an absence.
     for form_id, items in sorted(guard_by_form.items()):
         form_label = (form_id or "").replace("ACORD_", "ACORD ")
-        labels = [it.get("field_label") or it.get("field") or "" for it in items]
-        shown = ", ".join(labels[:3]) + (
-            f", +{len(labels) - 3} more" if len(labels) > 3 else ""
+        # One entry per BOX NAME, with its count. ACORD repeats a box across
+        # rows (_A, _B, ...) and the humanized label drops the row letter, so
+        # live run 6's cover page read "AdditionalInterest FullName,
+        # AdditionalInterest FullName, AdditionalInterest FullName".
+        label_counts: Dict[str, int] = {}
+        for it in items:
+            lab = it.get("field_label") or it.get("field") or ""
+            label_counts[lab] = label_counts.get(lab, 0) + 1
+        distinct = [f"{lab} (x{c})" if c > 1 else lab
+                    for lab, c in label_counts.items()]
+        shown = ", ".join(distinct[:3]) + (
+            f", +{len(distinct) - 3} more" if len(distinct) > 3 else ""
         )
         n = len(items)
         rows.append({

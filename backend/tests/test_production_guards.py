@@ -28,11 +28,23 @@ def _stub_module(name, **attrs):
     sys.modules[name] = mod
     return mod
 
+def _importable(name):
+    """A real module wins (15 Sep 2026). A stub registered in sys.modules at
+    collection time stays there for every later test module: the ReportLab
+    stub silently sent every cover-page test after this file to the plain-text
+    fallback. Only a module that genuinely cannot be imported is stubbed."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec(name) is not None
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
 for _pkg in ("stripe", "easyocr", "cv2", "camelot",
              "google.auth", "google.oauth2", "google_auth_oauthlib",
              "reportlab", "reportlab.lib", "reportlab.lib.pagesizes",
              "reportlab.platypus", "pikepdf", "pdfplumber"):
-    if _pkg not in sys.modules:
+    if _pkg not in sys.modules and not _importable(_pkg):
         _stub_module(_pkg)
 
 # groq stub needs Groq class

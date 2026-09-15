@@ -56,10 +56,15 @@ _MAX_QUESTION_LEN = 300
 _MAX_SCHEDULE_ROWS = 200
 
 # Item kinds, mirroring how the producer panel already talks about these.
-KIND_ANSWER   = "answer"      # a real value the client provided
-KIND_SCHEDULE = "schedule"    # a table of rows
-KIND_NOT_SURE = "not_sure"    # explicitly "I'm not sure" - needs follow-up
-KIND_BLANK    = "blank"       # asked, left empty
+KIND_ANSWER    = "answer"      # a real value the client provided
+KIND_SCHEDULE  = "schedule"    # a table of rows
+KIND_NOT_SURE  = "not_sure"    # explicitly "I'm not sure" - needs follow-up
+KIND_BLANK     = "blank"       # asked, left empty
+# Chat 5 (14 Sep 2026): the client looked at a value (or table) we already held
+# from the documents and said it is right. Recorded as its own kind - it is a
+# response, but it supplied nothing new, and the producer needs to tell the two
+# apart on the record.
+KIND_CONFIRMED = "confirmed"
 
 
 def _clip(val, limit: int) -> str:
@@ -114,6 +119,20 @@ def build_receipt_payload(arq: dict) -> dict:
 
         raw = answers.get(field_name)
 
+        # Confirmed as correct - a table or a value we already held and showed.
+        # Checked BEFORE the schedule branch: the sentinel is not rows, and
+        # decoding it would file a confirmation as "cleared the table".
+        from services.confirm_known import is_confirmed_value
+        if is_confirmed_value(raw):
+            item["kind"] = KIND_CONFIRMED
+            if schedule_capture.is_schedule_answer_key(field_name):
+                item["row_count"] = len(schedule_capture.seed_rows(q))
+            else:
+                item["value"] = _clip(q.get("current_value"), _MAX_VALUE_LEN)
+            answered += 1
+            items.append(item)
+            continue
+
         if schedule_capture.is_schedule_answer_key(field_name):
             rows = schedule_capture.decode_answer(raw) if raw else []
             # Two conditions, and both are needed.
@@ -161,6 +180,7 @@ def build_receipt_payload(arq: dict) -> dict:
         "question_count": len(items),
         "answered_count": answered,
         "not_sure_count": len([i for i in items if i["kind"] == KIND_NOT_SURE]),
+        "confirmed_count": len([i for i in items if i["kind"] == KIND_CONFIRMED]),
         "review_count":   len(review_by_field),
         "items":          items,
     }

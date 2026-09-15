@@ -1150,7 +1150,12 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         )
 
     # ── GL ────────────────────────────────────────────────────────────────────
-    if flags.get("gl_is_claims_made") and not _fv(facts, "retro_date"):
+    # ONE DOOR (11 Sep 2026, finding F4). The raw flag let one narrative
+    # sentence declare a package claims-made against a declarations page
+    # that says OCCURRENCE, and this rule then demanded a retroactive date
+    # the policy cannot have. See coverage_evidence.gl_is_claims_made.
+    from services.coverage_evidence import gl_is_claims_made as _gl_cm
+    if _gl_cm(facts, flags) and not _fv(facts, "retro_date"):
         soft.append("GL policy is claims-made - retro date is required")
     if (flags.get("has_general_liability") and not _fv(facts, "total_revenue")
             and not _fv(facts, "total_payroll")
@@ -1365,7 +1370,8 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 
     # ── ACORD 131: Umbrella stack integrity ───────────────────────────────────
     if flags.get("has_umbrella"):
-        if flags.get("gl_is_claims_made") and not _fv(facts, "retro_date"):
+        from services.coverage_evidence import gl_is_claims_made as _gl_cm2
+        if _gl_cm2(facts, flags) and not _fv(facts, "retro_date"):
             if "GL policy is claims-made - retro date is required" not in soft:
                 soft.append("Claims-made GL policy requires retro date for umbrella attachment.")
 
@@ -1607,13 +1613,16 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
             "message": f"Loss payee clause required for: {payee_str}" if payee_str else "Loss payee clause required",
         })
 
-    if flags.get("has_certificate_holder_requirement"):
-        cert_holder = _fv(facts, "certificate_holder")
+    # This read `has_certificate_holder_requirement`, which nothing ever wrote,
+    # so the item never appeared. A NAMED holder is the requirement - after the
+    # merge's party check `certificate_holder` only ever holds a real party.
+    cert_holder = _fv(facts, "certificate_holder")
+    if cert_holder:
         checklist.append({
             "check":   "certificate_of_insurance",
             "label":   "Certificate of Insurance",
             "status":  "required",
-            "message": f"Certificate of Insurance required for: {cert_holder}" if cert_holder else "Certificate of Insurance required",
+            "message": f"Certificate of Insurance required for: {cert_holder}",
         })
 
     return checklist
@@ -4538,6 +4547,20 @@ def _compute_category_breakdown(
     def _ok(key: str) -> bool:
         # ANSWERED, not "has a value": an explicit "there is none" is an
         # answer and must not read as an incomplete category.
+        #
+        # `lines_of_business` is the one key where "has a value" was never the
+        # same question (client 2026-09-11 item 2). It is a MENTION list with
+        # no definition in the extraction prompt, so an ISO endorsement's
+        # "modifies insurance provided under the following" menu filled it -
+        # and a package carrying NO coverage at all still scored this category
+        # as answered. Read the evidenced inventory instead; a package with
+        # real lines is unaffected, because a real line corroborates itself.
+        if key == "lines_of_business":
+            try:
+                from services.lob_canon import carried_lines_of_business
+                return bool(carried_lines_of_business(facts, flags))
+            except Exception:                                 # noqa: BLE001
+                pass
         return _answered(facts, key)
 
     def _conflict_in(field: str) -> bool:
@@ -7120,8 +7143,13 @@ def calculate_sqs(
             bool(_fv(facts, "umbrella_sir") or _fv(facts, "umbrella_attachment_point")),
             bool(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence")),
             bool(_fv(facts, "auto_liability_limit")),
-            bool(_fv(facts, "employers_liability_limits")),
         ]
+        # Employers Liability sits under an umbrella only where Workers
+        # Compensation is carried (15 Sep 2026, held since 14 Sep): a no-WC
+        # package lost a fifth of this score for a limit it cannot have. A
+        # stated EL limit still counts wherever it appears.
+        if (flags or {}).get("has_workers_comp") is True or _fv(facts, "employers_liability_limits"):
+            chks.append(bool(_fv(facts, "employers_liability_limits")))
         struct = int(sum(chks) / len(chks) * 100)
         if not _fv(facts, "umbrella_limit"):
             recommendations.append({

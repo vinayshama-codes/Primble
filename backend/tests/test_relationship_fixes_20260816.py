@@ -370,7 +370,17 @@ class TestValueShapeGuards:
         "4800 DAHLIA STREET D13, DENVER CO. 80216-3121",
     ])
     def test_an_address_never_lands_in_a_name_box(self, bad):
+        """The 131 primary row's NAME is the applicant - `_ACORD_FIELD_RULES`
+        owns it since live run 6 (15 Sep 2026), where the model put the address
+        here and the row printed no name. So the injected address never lands:
+        the applicant's name prints. With no applicant name on file the box is
+        gap-filled again, and the address guard still refuses the address."""
         mapped = _fill("ACORD_131", _run_facts(),
+                       {"CommercialStructure_Location_FullName_A": bad})
+        assert mapped.get("CommercialStructure_Location_FullName_A") == "Orbin Contracting LLC"
+        nameless = _run_facts()
+        nameless.pop("applicant_name")
+        mapped = _fill("ACORD_131", nameless,
                        {"CommercialStructure_Location_FullName_A": bad})
         assert not mapped.get("CommercialStructure_Location_FullName_A")
 
@@ -382,8 +392,9 @@ class TestValueShapeGuards:
     ])
     def test_a_real_company_name_is_never_seen_as_an_address(self, good):
         """Asserted on the predicate, not end to end: the 131 location-name box
-        is already owned by a resolver, so an injected value never reaches the
-        guard there and an end-to-end assertion would pass vacuously."""
+        is owned by the `applicant_name` rule whenever the name is known, so an
+        injected value never reaches the guard there and an end-to-end assertion
+        would pass vacuously."""
         assert not P._looks_like_street_address(good)
 
     def test_the_comp_symbol_is_not_a_net_vehicle_credit(self):

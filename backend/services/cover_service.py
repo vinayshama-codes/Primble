@@ -3,15 +3,157 @@
 import hashlib
 import io
 import json
+import re
 import logging
 import textwrap
 from datetime import datetime, timezone
-from typing import List
+from typing import Dict, List, Optional
 
 from config.settings import groq_chat, LLM_MODEL
 from services.extraction_service import _fv, _cache_get, _cache_set
 
 logger = logging.getLogger(__name__)
+
+
+# ── The cover page must report COVERAGE, not mentions ────────────────────────
+# Client 2026-09-11 item 2: the cover listed Property, Crime, WC, Farm, Liquor,
+# EPLI and OCP on a package whose declarations deny the first three and never
+# mention the rest except inside an ISO endorsement's "modifies insurance
+# provided under the following" menu. `lines_of_business` is a MENTION list
+# with no definition in the extraction prompt; `carried_lines_of_business` is
+# the evidenced inventory. Fails open to the raw list, i.e. today's behaviour.
+def _cover_lines_of_business(facts, flags=None) -> list:
+    # An empty result is a REAL answer - "nothing here is evidenced" - and the
+    # cover prints "---" rather than a list of coverages the applicant does not
+    # hold. The door itself returns the raw list untouched when the package
+    # carries no per-line evidence either way, so a legacy session is unchanged.
+    #
+    # THE FLAGS ARE PASSED IN (14 Sep). This read `facts.get("flags")`, a key a
+    # session's facts never carry - flags live beside facts - so the cover
+    # never saw them, while the scorer, reading the same door, did. The cover
+    # and the score could then disagree about which lines the package carries.
+    if flags is None:
+        flags = (facts or {}).get("flags") if isinstance(facts, dict) else None
+    try:
+        from services.lob_canon import carried_lines_of_business
+        return list(carried_lines_of_business(facts, flags))
+    except Exception:                                         # noqa: BLE001
+        return list((facts or {}).get("lines_of_business") or [])
+
+
+# ── The SQS paragraph must agree with the table it sits above (15 Sep 2026) ──
+# Live Orbin cover page: "The overall average SQS of 63/100 ..." above five form
+# scores that average 70 - 63 is the PACKAGE score, and the prompt itself
+# labelled it "Overall Average SQS". The same paragraph said "ACORD 126
+# performed best at 74" with ACORD 131 at 77 in its own input. The prompt now
+# names the score and hands over the ranking; `_checked_sqs_reasoning` refuses a
+# paragraph that still contradicts either and prints the deterministic sentence
+# instead. Structural only: the word "average" on a package score, and a best /
+# worst claim about a form that is not at that end of the ranking.
+_COVER_FORM_RE = re.compile(r"ACORD[\s_]*(\d{2,3})(?:[\s_]*(CA|CO)\b)?", re.I)
+_COVER_HIGH_RE = re.compile(r"\b(?:best|highest|strongest|top)\b", re.I)
+_COVER_LOW_RE = re.compile(r"\b(?:worst|lowest|weakest)\b", re.I)
+
+
+def _cover_form_label(form_id) -> str:
+    return str(form_id or "").replace("ACORD_", "ACORD ").replace("_", " ").strip()
+
+
+def _cover_form_key(text) -> str:
+    m = _COVER_FORM_RE.search(str(text or "").replace("_", " "))
+    return f"{m.group(1)}{(m.group(2) or '').upper()}" if m else ""
+
+
+def _ranked_form_scores(sqs_results) -> list:
+    """[(form_id, score)] highest first; a form without a numeric score is left out."""
+    ranked = []
+    for fid, sqs in (sqs_results or {}).items():
+        sc = sqs.get("sqs_score") if isinstance(sqs, dict) else None
+        if isinstance(sc, (int, float)) and not isinstance(sc, bool):
+            ranked.append((fid, int(sc)))
+    return sorted(ranked, key=lambda t: (-t[1], str(t[0])))
+
+
+def _deterministic_sqs_reasoning(ranked, score, is_package: bool) -> str:
+    label = "package SQS" if is_package else "average form SQS"
+    if not ranked:
+        return f"The {label} is {score}/100. Scores below 75 indicate fields requiring manual review."
+    hi, lo = ranked[0], ranked[-1]
+    if hi[1] == lo[1]:
+        spread = f"Every form scored {hi[1]}"
+    else:
+        spread = (f"Form scores run from {lo[1]} ({_cover_form_label(lo[0])}) "
+                  f"to {hi[1]} ({_cover_form_label(hi[0])})")
+    return (f"The {label} is {score}/100. {spread}. "
+            f"Scores below 75 indicate fields requiring manual review.")
+
+
+def _checked_sqs_reasoning(text, ranked, score, is_package: bool) -> str:
+    """The model's paragraph, or the deterministic one when it contradicts the
+    scores it was handed."""
+    t = str(text or "").strip()
+    if not t:
+        return _deterministic_sqs_reasoning(ranked, score, is_package)
+    if is_package and re.search(r"\baverage\b", t, re.I):
+        return _deterministic_sqs_reasoning(ranked, score, is_package)
+    if ranked:
+        top = {_cover_form_key(f) for f, sc in ranked if sc == ranked[0][1]}
+        bottom = {_cover_form_key(f) for f, sc in ranked if sc == ranked[-1][1]}
+        for sentence in re.split(r"(?<=[.!?])\s+", t):
+            named = {f"{n}{(st or '').upper()}"
+                     for n, st in _COVER_FORM_RE.findall(sentence.replace("_", " "))}
+            if len(named) != 1:
+                continue
+            form = next(iter(named))
+            if _COVER_HIGH_RE.search(sentence) and form not in top:
+                return _deterministic_sqs_reasoning(ranked, score, is_package)
+            if _COVER_LOW_RE.search(sentence) and form not in bottom:
+                return _deterministic_sqs_reasoning(ranked, score, is_package)
+    return t
+
+
+def _moved_current_term(facts: dict) -> Optional[str]:
+    """The current policy's own term, once the merge moved it out of the
+    proposed dates (`routed_from: current_term`, 15 Sep 2026) - or None."""
+    held = (facts or {}).get("prior_expiration_date")
+    if not (isinstance(held, dict) and held.get("routed_from") == "current_term"):
+        return None
+    eff = _fv(facts, "prior_effective_date")
+    exp = _fv(facts, "prior_expiration_date")
+    return f"{eff} - {exp}" if eff else f"ending {exp}"
+
+
+_COVER_UNKNOWN = "Not provided"
+
+
+def _cover_info_values(facts: dict, flags: dict, user: Optional[dict], org_name: str) -> Dict[str, str]:
+    """The cover's submission table, as printed (live run 10, 15 Sep 2026).
+    POLICY PERIOD printed "\u2014 - \u2014" once the proposed term became
+    unknown; it now says the term is to be confirmed and names the current
+    one. Every unknown reads "Not provided" - no em dash in client copy."""
+    def _v(key: str) -> str:
+        v = _fv(facts, key)
+        return str(v) if v else _COVER_UNKNOWN
+
+    eff, exp = _fv(facts, "effective_date"), _fv(facts, "expiration_date")
+    if eff:
+        period = f"{eff} - {exp}" if exp else f"{eff} - to be confirmed"
+    else:
+        moved = _moved_current_term(facts)
+        period = f"To be confirmed (current term {moved})" if moved else "To be confirmed"
+    lobs = _cover_lines_of_business(facts, flags)
+    return {
+        "agent":           (user.get("full_name", "") if user else "") or _COVER_UNKNOWN,
+        "org":             org_name or _COVER_UNKNOWN,
+        "period":          period,
+        "entity_type":     _v("entity_type"),
+        "applicant":       _v("applicant_name"),
+        "revenue":         _v("total_revenue"),
+        "lines":           ", ".join(lobs) if lobs else _COVER_UNKNOWN,
+        "employees":       _v("num_employees"),
+        "prior_carrier":   _v("prior_carrier"),
+        "mailing_address": _v("mailing_address"),
+    }
 
 
 async def generate_ai_cover_narrative(
@@ -45,13 +187,18 @@ async def generate_ai_cover_narrative(
         avg_sqs = int(package_score)
     else:
         avg_sqs = int(sum(s.get("sqs_score", 0) for s in sqs_results.values()) / max(len(sqs_results), 1)) if sqs_results else 0
+    # The score's real name and the ranking, handed to the model and used by
+    # the check below - see `_checked_sqs_reasoning`.
+    _ranked = _ranked_form_scores(sqs_results)
+    _ranked_line = ", ".join(f"{_cover_form_label(fid)} {sc}" for fid, sc in _ranked) or "none"
+    _is_package = package_score is not None
+    _score_label = "Package SQS" if _is_package else "Average form SQS"
+    _score_note = ("the submission's own score, computed independently - NOT an "
+                   "average of the form scores" if _is_package
+                   else "the average of the form scores")
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
-    _cover_cache_key = "cover_ai:" + hashlib.md5(
-        f"{applicant}|{','.join(sorted(form_ids))}|{avg_sqs}|{org_name}".encode()
-    ).hexdigest()
-    _cached_cover = await _cache_get(_cover_cache_key)
-    if _cached_cover:
-        return _cached_cover
+    _moved_term = _moved_current_term(facts)
+    _term_line = f"\nCurrent Policy Term: {_moved_term}" if _moved_term else ""
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
 Generate a professional cover page summary for this ACORD submission package.
 
@@ -59,17 +206,19 @@ SUBMISSION DATA:
 Agent/User: {user.get('full_name', '') if user else ''}
 Agency/Org: {org_name}
 Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
-Lines of Business: {facts.get('lines_of_business', [])}
-Effective Date: {_fv(facts, 'effective_date') or 'Not specified'}
+Lines of Business: {_cover_lines_of_business(facts, flags)}
+Proposed Effective Date: {_fv(facts, 'effective_date') or 'To be confirmed'}{_term_line}
+Prior Carrier: {_fv(facts, 'prior_carrier') or 'Not provided'}
 Operations: {_fv(facts, 'operations_description') or 'Not provided'}
 Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
 Forms Generated: {', '.join(form_ids)}
-Overall Average SQS: {avg_sqs}/100
+{_score_label}: {avg_sqs}/100 ({_score_note})
+Form scores, highest first: {_ranked_line}
 SQS Results: {json.dumps(sqs_summary)}
 
 Respond with ONLY a valid JSON object with exactly three keys:
 "narrative": A 3-4 paragraph professional narrative (plain text, no markdown)
-"sqs_reasoning": A single paragraph explaining the SQS score
+"sqs_reasoning": A single paragraph explaining the SQS score. Call the submission's score the "{_score_label}" and never an average unless it is one. If you name the strongest or weakest form, it must be the first or last form in the "Form scores, highest first" list.
 "ai_block": A machine-readable structured JSON object with: submission_id, generated_at,
   agent_name, applicant_name, org_name, lines_of_business, effective_date, expiration_date,
   total_revenue, total_payroll, num_employees, entity_type, fein, naics_code, prior_carrier,
@@ -78,6 +227,14 @@ Respond with ONLY a valid JSON object with exactly three keys:
   primble_version: "12.4.0", a2a_schema_version: "1.0"
 
 Return ONLY the JSON object."""
+    # Cached on the PROMPT ITSELF (live run 10, 15 Sep 2026). The key held only
+    # applicant / forms / score / org / ranking, so a paragraph written from
+    # other data - no prior carrier, the old term - was served back after the
+    # data changed. Anything the model reads is now part of the key.
+    _cover_cache_key = "cover_ai:" + hashlib.md5(prompt.encode()).hexdigest()
+    _cached_cover = await _cache_get(_cover_cache_key)
+    if _cached_cover:
+        return _cached_cover
     try:
         raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         if raw.startswith("```"):
@@ -87,7 +244,8 @@ Return ONLY the JSON object."""
             result = json.loads(raw[s : e + 1])
             result = {
                 "narrative":     result.get("narrative", ""),
-                "sqs_reasoning": result.get("sqs_reasoning", ""),
+                "sqs_reasoning": _checked_sqs_reasoning(
+                    result.get("sqs_reasoning", ""), _ranked, avg_sqs, _is_package),
                 "ai_block":      result.get("ai_block", {}),
             }
             await _cache_set(_cover_cache_key, result)
@@ -96,7 +254,8 @@ Return ONLY the JSON object."""
         logger.error(f"Cover page AI generation failed: {ex}")
 
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
-    lobs      = ", ".join(facts.get("lines_of_business", [])) if facts.get("lines_of_business") else "commercial insurance"
+    _lobs_ev  = _cover_lines_of_business(facts, flags)
+    lobs      = ", ".join(_lobs_ev) if _lobs_ev else "commercial insurance"
     return {
         "narrative": (
             f"This ACORD submission package was prepared by {org_name} on behalf of {applicant}. "
@@ -104,10 +263,7 @@ Return ONLY the JSON object."""
             f"All forms have been populated using AI-extracted data from the uploaded source documents. "
             f"The submission has been reviewed for completeness and quality using the Submission Quality Score (SQS) system."
         ),
-        "sqs_reasoning": (
-            f"The overall average SQS of {avg_sqs}/100 reflects the completeness and quality of the extracted data "
-            f"across {len(form_ids)} generated form(s). Scores below 75 indicate fields requiring manual review."
-        ),
+        "sqs_reasoning": _deterministic_sqs_reasoning(_ranked, avg_sqs, _is_package),
         "ai_block": {
             "agent_name": (user.get("full_name", "") if user else ""),
             "org_name": org_name,
@@ -148,7 +304,7 @@ SUBMISSION DATA:
 Agent/User: {user.get('full_name', '') if user else ''}
 Agency/Org: {org_name}
 Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
-Lines of Business: {facts.get('lines_of_business', [])}
+Lines of Business: {_cover_lines_of_business(facts, flags)}
 Effective Date: {_fv(facts, 'effective_date') or 'Not specified'}
 Operations: {_fv(facts, 'operations_description') or 'Not provided'}
 Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
@@ -185,7 +341,8 @@ Return ONLY the JSON object."""
         logger.error(f"Lite cover narrative generation failed: {ex}")
 
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
-    lobs      = ", ".join(facts.get("lines_of_business", [])) if facts.get("lines_of_business") else "commercial insurance"
+    _lobs_ev  = _cover_lines_of_business(facts, flags)
+    lobs      = ", ".join(_lobs_ev) if _lobs_ev else "commercial insurance"
     return {
         "narrative": (
             f"This pre-submission SQS analysis was prepared by {org_name} for {applicant} covering {lobs}. "
@@ -327,29 +484,21 @@ def build_cover_page_pdf(
         story.append(Spacer(1, 0.14*inch))
 
         # ── SUBMISSION INFO TABLE ────────────────────────────────────────────
-        agent_name = (user.get("full_name", "") if user else "") or "—"
-        eff_date   = _fv(facts, "effective_date") or "—"
-        exp_date   = _fv(facts, "expiration_date") or "—"
-        lobs_raw   = facts.get("lines_of_business", [])
-        lobs       = ", ".join(lobs_raw) if lobs_raw else "—"
+        _info      = _cover_info_values(facts, flags, user, org_name)
         forms_list = ", ".join(form_ids) if form_ids else "Pre-Submission SQS Analysis (Lite)"
 
-        def _v(key, default="—"):
-            v = _fv(facts, key)
-            return str(v) if v else default
-
         info_rows = [
-            [Paragraph("AGENT / USER",      label_s), Paragraph(agent_name,              val_s),
-             Paragraph("POLICY PERIOD",     label_s), Paragraph(f"{eff_date} - {exp_date}", val_s)],
-            [Paragraph("AGENCY",            label_s), Paragraph(org_name or "—",          val_s),
-             Paragraph("ENTITY TYPE",       label_s), Paragraph(_v("entity_type"),        val_s)],
-            [Paragraph("APPLICANT",         label_s), Paragraph(_v("applicant_name"),     val_s),
-             Paragraph("ANNUAL REVENUE",    label_s), Paragraph(_v("total_revenue"),      val_s)],
-            [Paragraph("LINES OF BUSINESS", label_s), Paragraph(lobs,                     val_s),
-             Paragraph("EMPLOYEES",         label_s), Paragraph(_v("num_employees"),      val_s)],
+            [Paragraph("AGENT / USER",      label_s), Paragraph(_info["agent"],           val_s),
+             Paragraph("POLICY PERIOD",     label_s), Paragraph(_info["period"],          val_s)],
+            [Paragraph("AGENCY",            label_s), Paragraph(_info["org"],             val_s),
+             Paragraph("ENTITY TYPE",       label_s), Paragraph(_info["entity_type"],     val_s)],
+            [Paragraph("APPLICANT",         label_s), Paragraph(_info["applicant"],       val_s),
+             Paragraph("ANNUAL REVENUE",    label_s), Paragraph(_info["revenue"],         val_s)],
+            [Paragraph("LINES OF BUSINESS", label_s), Paragraph(_info["lines"],           val_s),
+             Paragraph("EMPLOYEES",         label_s), Paragraph(_info["employees"],       val_s)],
             [Paragraph("FORMS INCLUDED",    label_s), Paragraph(forms_list,               val_s),
-             Paragraph("PRIOR CARRIER",     label_s), Paragraph(_v("prior_carrier"),      val_s)],
-            [Paragraph("MAILING ADDRESS",   label_s), Paragraph(_v("mailing_address"),    val_s),
+             Paragraph("PRIOR CARRIER",     label_s), Paragraph(_info["prior_carrier"],   val_s)],
+            [Paragraph("MAILING ADDRESS",   label_s), Paragraph(_info["mailing_address"], val_s),
              Paragraph("PREPARED BY",       label_s), Paragraph(f"primble.com · {generated_at}", small_s)],
         ]
         info_tbl = Table(info_rows, colWidths=[1.2*inch, 2.25*inch, 1.3*inch, 2.25*inch])
@@ -601,13 +750,13 @@ def build_cover_page_pdf(
 
     except ImportError as ie:
         logger.error(f"ReportLab not installed: {ie}")
-        return _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at)
+        return _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at, flags=flags)
     except Exception as ex:
         logger.error(f"Cover page build error: {ex}", exc_info=True)
-        return _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at)
+        return _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at, flags=flags)
 
 
-def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at) -> bytes:
+def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative, ai_block, generated_at, flags=None) -> bytes:
     """Plain-text PDF fallback when ReportLab fails."""
     try:
         lines = [
@@ -617,7 +766,7 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
             f"Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}",
             f"Agency: {org_name}",
             f"Effective Date: {_fv(facts, 'effective_date') or '---'}",
-            f"Lines of Business: {', '.join(facts.get('lines_of_business', [])) or '---'}",
+            f"Lines of Business: {', '.join(_cover_lines_of_business(facts, flags)) or '---'}",
             f"Forms: {', '.join(form_ids)}",
             "",
             "SQS SCORES:",

@@ -270,20 +270,46 @@ def canonicalize_date(value: Any) -> str:
     return s
 
 
+# One money amount, with an optional scale word: "$1,000,000", "1000000.00",
+# "$1M", "$1.5 million", "$500K". A digit run glued to letters ("6E7", "07A")
+# is not an amount, and a scale word must end the token - "1,000 MED" is a
+# thousand, not a thousand million.
+_CURRENCY_TOKEN_RE = re.compile(
+    r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?"
+    r"(?:\s*(k|m|mm|mil|million|thousand|b|bn|billion))?(?!\w)",
+    re.IGNORECASE,
+)
+_CURRENCY_SCALE = {
+    "k": 1_000, "thousand": 1_000,
+    "m": 1_000_000, "mm": 1_000_000, "mil": 1_000_000, "million": 1_000_000,
+    "b": 1_000_000_000, "bn": 1_000_000_000, "billion": 1_000_000_000,
+}
+
+
 def canonicalize_currency(value: Any) -> str:
-    """Return a money amount as $X,XXX[.CC]. Non-numeric input returned unchanged."""
+    """Return ONE money amount as $X,XXX[.CC]; anything else unchanged.
+
+    Reads the AMOUNT, not the digits (15 Sep 2026). The previous version kept
+    every digit in the string, so "$1M" printed "$1", "$5K" printed "$5" and
+    "$1,000,000 / $2,000,000" printed one glued "$10,000,002,000,000" - a
+    wrong amount in any of 911 money boxes on 16 forms. A shorthand scale is
+    expanded. Text stating NO amount, or MORE THAN ONE, comes back exactly as
+    written: choosing one of two figures, or joining them, would print a number
+    the document never stated.
+    """
     s = _s(value)
     if not s:
         return s
-    cleaned = re.sub(r"[^\d.]", "", s)
-    if cleaned.count(".") > 1:
-        cleaned = cleaned.replace(".", "")
-    if not cleaned or cleaned == ".":
+    tokens = list(_CURRENCY_TOKEN_RE.finditer(s))
+    if len(tokens) != 1:
         return s
+    whole, frac, scale = tokens[0].groups()
     try:
-        dec = Decimal(cleaned)
+        dec = Decimal(whole.replace(",", "") + (f".{frac}" if frac else ""))
     except (InvalidOperation, ValueError):
         return s
+    if scale:
+        dec *= _CURRENCY_SCALE[scale.lower()]
     if dec == dec.to_integral_value():
         return "${:,}".format(int(dec))
     return "${:,.2f}".format(dec)

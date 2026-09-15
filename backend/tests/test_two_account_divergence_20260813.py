@@ -133,7 +133,10 @@ def test_the_whole_family_is_deterministic_across_runs():
                             "raw_text_fields": set(), "question_grounding": {}})
         outs.append(tuple(mapped.get(f) for f in _STATUS_FAMILY))
     assert len(set(outs)) == 1, f"the family diverged across runs: {outs}"
-    assert outs[0] == (None,) * len(_STATUS_FAMILY)
+    # QUOTE is ticked on a submission's ACORD 125 (owner, 15 Sep 2026, Brent's
+    # 125 answer key) - deterministically; every other status stays empty.
+    assert outs[0] == tuple("Yes" if f == "Policy_Status_QuoteIndicator_A" else None
+                            for f in _STATUS_FAMILY)
 
 
 # ── 3. A priced line item, with no dec index to lean on ──────────────────────

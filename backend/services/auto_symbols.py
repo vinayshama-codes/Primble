@@ -236,6 +236,12 @@ MEDICAL        = "medical"
 PIP            = "pip"
 TOWING         = "towing"
 DRIVE_OTHER_CAR = "drive_other_car"
+# Named-peril physical damage - ISO's alternative to Comprehensive (15 Sep
+# 2026). Without its own key "Physical Damage Specified Causes of Loss 7" read
+# as generic physical damage, whose symbols tick the Comprehensive AND the
+# Collision rows (`state_auto_grid._designated`) on a policy that may carry
+# neither.
+SPECIFIED_CAUSES = "specified_causes"
 UNSPECIFIED    = "unspecified"
 
 COVERAGE_LABEL: Dict[str, str] = {
@@ -248,12 +254,15 @@ COVERAGE_LABEL: Dict[str, str] = {
     PIP:             "Personal Injury Protection",
     TOWING:          "Towing and Labor",
     DRIVE_OTHER_CAR: "Drive Other Car",
+    SPECIFIED_CAUSES: "Specified Causes of Loss",
     UNSPECIFIED:     "Covered Autos",
 }
 
 # Ordered longest/most specific first - first hit wins.
 _COVERAGE_PATTERNS = [
     (DRIVE_OTHER_CAR, ("drive other car", "driveothercar", "doc ")),
+    (SPECIFIED_CAUSES, ("specified causes", "specified cause", "specified perils",
+                        "spec c of l", "spec. c of l", "scol", "named perils")),
     (COMPREHENSIVE,   ("comprehensive", "other than collision", "otc", "comp")),
     (COLLISION,       ("collision", "coll")),
     (PHYSICAL_DAMAGE, ("physical damage", "physicaldamage", "phys dam", "phys. dam", "pd coverage")),
@@ -266,8 +275,8 @@ _COVERAGE_PATTERNS = [
 
 # Coverages whose symbol answers "which autos does the LIABILITY part protect".
 _LIABILITY_KEYS = (LIABILITY, UNSPECIFIED)
-# Coverages that are physical damage.
-PHYSICAL_DAMAGE_KEYS = (COMPREHENSIVE, COLLISION, PHYSICAL_DAMAGE)
+# Coverages that are physical damage (named perils included).
+PHYSICAL_DAMAGE_KEYS = (COMPREHENSIVE, SPECIFIED_CAUSES, COLLISION, PHYSICAL_DAMAGE)
 
 
 def normalize_coverages(label) -> List[str]:
@@ -298,7 +307,8 @@ def normalize_coverages(label) -> List[str]:
     # "Physical Damage (Comprehensive and Collision)" names the two specific
     # parts; keeping the umbrella term as well would make symbols_for count it
     # twice under a third key that no ACORD box uses.
-    if PHYSICAL_DAMAGE in found and (COMPREHENSIVE in found or COLLISION in found):
+    if PHYSICAL_DAMAGE in found and (COMPREHENSIVE in found or COLLISION in found
+                                     or SPECIFIED_CAUSES in found):
         found.remove(PHYSICAL_DAMAGE)
     return found or [UNSPECIFIED]
 
@@ -467,6 +477,37 @@ def symbols_for(facts: dict, *coverages: str) -> List[int]:
 
 def liability_symbols(facts: dict) -> List[int]:
     return symbols_for(facts, *_LIABILITY_KEYS)
+
+
+def symbols_labelled(facts: dict, label_re) -> List[int]:
+    """Symbol numbers whose OWN printed coverage label matches `label_re`.
+
+    `parse_symbols` folds "uninsured" and "underinsured" into the one UM_UIM
+    key - right for the ACORD 137 grid, which prints one row for both, and too
+    coarse for ACORD 127, which prints separate UNINS MOTOR and UNDRINS MOTOR
+    boxes per vehicle. A policy carrying UM alone must not tick UIM. Reads the
+    label the document printed; an unlabelled number is never attributed.
+    """
+    raw = _fact_value(facts, "auto_covered_symbols")
+    pairs: List[tuple] = []
+    if isinstance(raw, dict):
+        pairs = list(raw.items())
+    elif isinstance(raw, (list, tuple)):
+        for item in raw:
+            if isinstance(item, dict):
+                label = item.get("coverage") or item.get("cov") or item.get("line")
+                nums = item.get("symbols") if item.get("symbols") is not None else item.get("symbol")
+                pairs.append((label, nums))
+    elif isinstance(raw, str):
+        pairs = [(m.group("label"), m.group("nums")) for m in _LABELLED_RE.finditer(raw)]
+    out: List[int] = []
+    for label, nums in pairs:
+        if label is None or not label_re.search(str(label)):
+            continue
+        for n in _clean_numbers(nums):
+            if n not in out:
+                out.append(n)
+    return out
 
 
 # ── Reasoning ─────────────────────────────────────────────────────────────────

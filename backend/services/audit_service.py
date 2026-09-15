@@ -167,6 +167,7 @@ async def run_and_log_field_qa(
     merged_facts: dict,
     confirmations: Optional[dict],
     enabled: bool,
+    flags: Optional[dict] = None,
 ) -> None:
     """Run form-level field QA and refresh its pre-download advisory rows.
 
@@ -181,10 +182,17 @@ async def run_and_log_field_qa(
         from services.field_qa import (
             run_field_qa, to_recommendation_rows, FIELD_QA_MODEL_VERSION,
         )
-        qa = run_field_qa(
+        # Off the event loop: field QA is plain synchronous work (~2 s on a
+        # five-form package, plus the owned-blank check), awaited after
+        # generation and after every saved edit. The schema context it uses
+        # is thread-local, so a worker thread is safe.
+        import asyncio
+        qa = await asyncio.to_thread(
+            run_field_qa,
             generated_forms,
             merged_facts=merged_facts or {},
             confirmations=confirmations or {},
+            flags=flags or {},
         )
         await sync_field_qa_findings(
             session_id, user_id, to_recommendation_rows(qa), FIELD_QA_MODEL_VERSION,

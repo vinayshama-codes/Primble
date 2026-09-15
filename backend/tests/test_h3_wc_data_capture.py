@@ -390,12 +390,17 @@ def test_count_columns_are_never_read_as_money():
 # ── extraction: the row schema and the chunk-union identity ──────────────────
 
 def test_extraction_schema_carries_the_counts_and_moved_to_v17():
-    """v18 since 2026-09-05 - RULE 12b (claim evidence) and the hardened
-    `has_workers_comp` definition. The H3 assertions below are what this test
-    is actually for and are unchanged; the version is pinned only so a schema
-    edit cannot slip through without someone bumping it."""
+    """v19 since 2026-09-11 - `auto_vin_schedule.class_code` / `.territory`
+    (client item 6, the cross-line code fence) and the additional-NAMED-insured
+    definition (client item 8's neighbour, live finding F5). The H3 assertions
+    below are what this test is actually for and are unchanged; the version is
+    pinned only so a schema edit cannot slip through without someone bumping
+    it - which is exactly what it did on 11 Sep. v20 since 2026-09-14: RULE 16
+    (coverage_lines from declarations pages only; a form number is never a
+    policy number) - improving-ll.md C88. v21 since 2026-09-14: `gl_form_type`
+    defined and `umbrella_form_type` added - improving-ll.md C89."""
     from services import extraction_service as es
-    assert es.PROMPT_VERSION == "v18" and es.SCHEMA_VERSION == "v18"
+    assert es.PROMPT_VERSION == "v21" and es.SCHEMA_VERSION == "v21"
     assert '"full_time_employees": string or null' in es._EXTRACT_SCHEMA
     assert '"part_time_employees": string or null' in es._EXTRACT_SCHEMA
 

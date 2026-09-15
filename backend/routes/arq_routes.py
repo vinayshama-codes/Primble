@@ -32,6 +32,7 @@ from services.arq_service import (
 )
 from services.arq_service import recalculate_session_scores
 from services.arq_receipt_service import create_receipt, get_receipt_for_arq
+from services import confirm_known
 from services import schedule_capture
 from services.question_classifier import (
     AUDIENCE_CLIENT,
@@ -128,6 +129,13 @@ def _sanitize_answers(raw_answers: dict) -> dict:
             list_key = schedule_capture.list_key_from_answer_key(key)
             if schedule_capture.get_def(list_key) is None:
                 continue  # unknown schedule key - drop rather than store junk
+            # "Everything here is correct" (Chat 5) is not rows. Decoding it
+            # would turn a confirmation into an EMPTY table - on the draft it
+            # would reload as a cleared fleet, and at submit it would read as
+            # "we do not own any of these".
+            if confirm_known.is_confirmed_value(v):
+                out[key] = confirm_known.CONFIRMED_SENTINEL
+                continue
             rows, _report = schedule_capture.validate_rows(
                 list_key, schedule_capture.decode_answer(v),
             )
@@ -320,6 +328,24 @@ async def send_arq(
         if _clean_sugg:
             q_entry["suggestions"] = _clean_sugg
 
+        # Chat 5 - confirm-or-correct. A confirm question carries the value we
+        # already hold so the client can say "that is right" or fix it. The
+        # value is REBUILT from the session's own facts, never trusted from the
+        # request body, and only while it is still source verified: if it
+        # changed or lost its verification since generation, this is sent as an
+        # ordinary question with nothing pre-filled.
+        _session_facts = proc_session.get("facts") or {}
+        _session_docs = proc_session.get("docs") or []
+        if q.get("confirm") and q.get("field_type") != "schedule":
+            _shown = confirm_known.confirmable_display_value(
+                _session_facts, q_entry["field_name"])
+            if _shown is not None:
+                q_entry["confirm"] = True
+                q_entry["current_value"] = _shown
+                q_entry["source_labels"] = confirm_known.sanitize_source_labels(
+                    confirm_known.source_labels_for_fact(
+                        q_entry["field_name"], _shown, _session_docs))
+
         # Preserve the schedule spec (Figure 15) so the client questionnaire can
         # render the table. The column spec and any pre-loaded rows are rebuilt
         # from the server-side definition rather than trusted from the request,
@@ -330,6 +356,19 @@ async def send_arq(
             if _sdef is None:
                 continue
             _rows, _ = schedule_capture.validate_rows(_lk, q.get("current_rows") or [])
+            # Chat 5: the wording follows the rows that actually go out - the
+            # producer may have pre-loaded or cleared the table after the list
+            # was generated. Rows -> "we found these, check them"; none ->
+            # "please list".
+            _confirm_mode = bool(_rows)
+            _labels = (confirm_known.source_labels_for_list(_lk, _session_docs)
+                       if _confirm_mode else [])
+            q_entry["question"]      = schedule_capture.question_text(
+                _lk, rows=_rows, source_labels=_labels)
+            q_entry["hint"]          = schedule_capture.hint_text(_lk, confirm=_confirm_mode)
+            q_entry["confirm"]       = _confirm_mode
+            q_entry["schedule_mode"] = "confirm" if _confirm_mode else "list"
+            q_entry["source_labels"] = _labels
             q_entry["schedule_key"]      = _lk
             q_entry["schedule_label"]    = _sdef["label"]
             q_entry["schedule_singular"] = _sdef["singular"]
@@ -450,6 +489,17 @@ async def client_view(token: str, request: Request):
             "code_digits":   q.get("code_digits") or 0,
             "current_value": "",
         }
+        # Chat 5 - confirm-or-correct. Only a stored confirm question may show a
+        # value, and only the value `send_arq` rebuilt from the session's facts.
+        # Every other question still arrives with nothing pre-filled.
+        if q.get("confirm"):
+            q_item["confirm"] = True
+            q_item["source_labels"] = confirm_known.sanitize_source_labels(q.get("source_labels"))
+            if q.get("field_type") != "schedule":
+                q_item["current_value"] = _sanitize_str(str(q.get("current_value") or ""), 300)
+                if not q_item["current_value"]:
+                    q_item.pop("confirm", None)          # nothing to confirm
+                    q_item.pop("source_labels", None)
         if q.get("field_type") == "select" and isinstance(q.get("options"), list):
             q_item["options"] = q["options"]
         # Figure 20: unconfirmed NAICS / SIC candidates for the chip row. Kept
@@ -478,6 +528,7 @@ async def client_view(token: str, request: Request):
             # keep every column, so nothing the agency fills is lost.
             _client_cols = [c for c in _sdef["columns"]
                             if not (isinstance(c, dict) and c.get("producer_only"))]
+            _confirm_tbl = bool(q.get("confirm")) and bool(_rows)
             q_item.update({
                 "schedule_key":      _lk,
                 "schedule_label":    _sdef["label"],
@@ -487,7 +538,11 @@ async def client_view(token: str, request: Request):
                 "vin_decode":        bool(_sdef["vin_decode"]),
                 "row_capacity":      schedule_capture.capacity_for(_lk),
                 "current_rows":      _rows,
+                "confirm":           _confirm_tbl,
+                "schedule_mode":     "confirm" if _confirm_tbl else "list",
             })
+            if not _confirm_tbl:
+                q_item.pop("source_labels", None)
         questions_for_client.append(q_item)
 
     return JSONResponse({

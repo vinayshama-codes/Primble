@@ -54,8 +54,16 @@ def schema125():
 def test_the_premise_of_the_old_comment_is_false():
     """Row A answers None with a NON-EMPTY list whenever row 1 has no value for
     that column. Pinned because the wrong belief is what scoped the fallback
-    too narrowly to be reached."""
-    assert ps._resolve_schedule_row(_F, _FACTS) is None
+    too narrowly to be reached.
+
+    15 Sep 2026: shown without the account description, and on a second
+    column. For the operations description, one location WITH an account
+    description now answers that description at the schedule door itself
+    (test_live_run5_fixes_15sep) - the fallback below still owns every other
+    schedule column."""
+    no_account_fact = {"property_locations": _FACTS["property_locations"]}
+    assert ps._resolve_schedule_row(_F, no_account_fact) is None
+    assert ps._resolve_schedule_row("BusinessInformation_FullTimeEmployeeCount_A", _FACTS) is None
     assert len(_FACTS["property_locations"]) == 1
 
 

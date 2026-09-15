@@ -445,6 +445,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             session_id, user_id, results,
             session.get("facts") or {}, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
+            flags=session.get("flags") or {},
         )
 
         # Field-mapping integrity warnings (Figure 33): parity with the sync

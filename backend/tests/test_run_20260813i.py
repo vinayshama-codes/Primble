@@ -122,12 +122,29 @@ def test_hazard_rows_within_the_schedule_are_not_suppressed():
         assert got is not None, row
 
 
-def test_no_schedule_at_all_still_reaches_the_model():
-    """Acts only on POSITIVE evidence, exactly like the vehicle version:
-    suppressing on no evidence would delete a schedule extraction merely
-    missed."""
+def test_no_schedule_at_all_is_an_owned_blank_since_11_sep():
+    """REVERSED 11 Sep 2026 - see the companion test in
+    `test_form_value_qualifiers_20260905.py` for the three live measurements
+    that falsified the prediction this used to assert.
+
+    Short version: "reaches the model" was never recovery. On every measured
+    run the model, asked about a General Liability schedule the package does
+    not contain, answered from the AUTO schedule instead.
+    """
     assert ps._resolve_gl_hazard_row(
-        "GeneralLiability_Hazard_ClassCode_C", {}) == "UNMATCHED"
+        "GeneralLiability_Hazard_ClassCode_C", {}) is None
+    # ...and the real-schedule path is untouched, which is what makes the
+    # reversal safe rather than merely quieter.
+    # ...and the real-schedule path is untouched, which is what makes the
+    # reversal safe rather than merely quieter. "UNMATCHED" here is correct and
+    # is the distinction that matters: the ROW exists, so the cell stays OPEN to
+    # gap fill even though `gl_class_codes` spells its column differently. Only
+    # a package with no GL evidence at all is blanked.
+    for row in ("A", "B"):
+        assert ps._resolve_gl_hazard_row(
+            f"GeneralLiability_Hazard_ClassCode_{row}", _TWO_CLASSES) is not None, row
+        assert ps._is_authoritative_blank_field(
+            f"GeneralLiability_Hazard_ClassCode_{row}", _TWO_CLASSES) is False, row
 
 
 # ── 3. Maximum exposure is arithmetic over the vehicle schedule ──────────────

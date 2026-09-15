@@ -1,0 +1,393 @@
+{
+  "_meta": {
+    "purpose": "Human-verified ground truth for the 271-page / 699,844-char Orbin Contracting package - the same fixture referenced throughout CLAUDE.md (C19, C20, C22, C23, C29/C30, C46, C48, RC1/RC1b/RC2/RC3, H1 series). Built by reading all 271 pages (direct read or structural full-document grep verification - no page skipped unchecked). Use to diff against real extraction/gap-fill/stamped-PDF output: bucket every field as Correct / Missed / Wrong / Invented.",
+    "source_file": "271page-testdec.txt (repo root) - a saved raw-OCR debug dump from ocr_service.py",
+    "origin_pdf": "backend/tmp/bede02c75b3f4464a72d0c30f5c52311_2526 Package Policy (Complete Copy) (4).pdf",
+    "session_id_in_dump": "76c5b64f-65e7-4dd1-a843-84890dc1e8b6",
+    "doc_type_in_dump": "dec_page",
+    "total_pages": 271,
+    "total_chars_per_dump_header": 699844,
+    "insured": "ORBIN CONTRACTING LLC",
+    "extraction_status": "COMPLETE - all 271 pages covered",
+    "footer_stamp_warning": "Every page footer carries a '2601' batch/print code appended after the policy number (e.g. '6C74002 2601', 'BBC7263 2601'). This is NOT part of any policy number - do not let it get concatenated in."
+  },
+
+  "package_declarations": {
+    "page": 1,
+    "account_number": "0482854",
+    "named_insured": "ORBIN CONTRACTING LLC",
+    "mailing_address": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+    "entity_type": "LLC",
+    "business_description_truncated_in_source": "COMMERCIAL GENERAL CONTRA",
+    "producer_name": "COMMERCIAL RISK SOLUTIONS, INC.",
+    "producer_address": "9780 S MERIDIAN BLVD STE 400, ENGLEWOOD, CO 80112-6072",
+    "agent_number_variants": ["W6258-0001 (page 1)", "AW 6258 (pages 3, 85, 143)", "W6258 (page 205)"],
+    "agent_phone_variants": ["303-996-7800 (page 1)", "(303)996-7800 (pages 3, 85, 143, 205)"],
+    "claim_reporting_phone_variants": ["888-362-2255 (page 1)", "(888)362-2255 (pages 3, 85, 143, 205)"],
+    "servicing_carrier_phone": "720-200-3700",
+    "servicing_company": "EMC Insurance Companies, 5445 DTC Parkway Suite 320, Greenwood Village, CO 80111-3048 (page 2)",
+    "package_term": "07/15/2025 to 07/15/2026",
+    "date_of_issue": "07/16/2025",
+    "place_of_issue": "Des Moines, IA",
+    "form": "IL 7000A Ed. 9-02",
+    "coverage_summary_by_section": [
+      {"section": 1, "line": "Property", "premium": "No Coverage"},
+      {"section": 2, "line": "Liability", "premium": "$3,954.00"},
+      {"section": 3, "line": "Crime and Fidelity", "premium": "No Coverage"},
+      {"section": 4, "line": "Inland Marine", "premium": "$300.00"},
+      {"section": 5, "line": "Automobile", "premium": "$2,991.00"},
+      {"section": 6, "line": "Workers' Compensation", "premium": "No Coverage"},
+      {"section": 7, "line": "Umbrella", "premium": "$3,418.00"},
+      {"section": 8, "line": "Other", "premium": null}
+    ],
+    "estimated_total_policy_premium": "$10,663.00",
+    "arithmetic_check": "3954 + 300 + 2991 + 3418 = 10663 (verified)",
+    "confirmed_no_coverage_lines": {
+      "note": "Property, Crime & Fidelity, and Workers' Compensation are all 'No Coverage' per this summary AND have zero dedicated declarations pages anywhere in the 271-page document - confirmed by a full-document structural grep for their section headers. Test assertion: has_property_coverage / has_workers_comp flags must be FALSE; no field belonging to those lines should be filled.",
+      "lines": ["Property", "Crime and Fidelity", "Workers' Compensation"]
+    }
+  },
+
+  "lines_of_business": {
+
+    "inland_marine": {
+      "pages_dense": "1-9",
+      "pages_boilerplate": "10-84 (confirmed zero insured-specific facts beyond the endorsement schedule below)",
+      "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+      "policy_number": "6C7-40-02---26",
+      "effective_date": "07/15/25",
+      "expiration_date": "07/15/26",
+      "total_premium": "$300.00",
+      "terrorism_premium": "Waived (page 5: 'Terrorism Premium (Certified Acts) Waived')",
+      "coverage_breakdown": [
+        {"item": "870 Contractors' Essential Industry Extension", "annual_premium": "$300"},
+        {"item": "801 Contractors Equipment", "premium": "Included", "deductible": "$500/occurrence", "coinsurance": "80%", "catastrophe_limit": "$10,000", "additional_debris_removal": "$25,000", "employee_tools_acv": "$7,500", "newly_purchased_equipment": "30% of catastrophe limit", "pollutant_cleanup": "$25,000", "rental_reimbursement": "$7,500 (72hr waiting period)", "spare_parts_and_fuel_acv": "$7,500", "unscheduled_equipment": "$10,000/item, $10,000/occurrence"},
+        {"item": "840 Contr. Equip. Leased/Rented From Others", "premium": "Included", "limit_per_item": "$50,000", "limit_per_occurrence": "$50,000", "valuation": "ACV", "deductible": "$500"},
+        {"item": "999 Installation Floater", "premium": "Included", "deductible": "$500 (except Flood/EQ/Sewer Backup)", "earthquake": "NOT COVERED", "flood": "NOT COVERED", "sewer_backup_deductible": "$500", "catastrophe_limit": "$50,000", "jobsite_limit": "$50,000", "coinsurance": "80%", "debris_removal": "$5,000", "emergency_removal": "10 days", "fungus": "$15,000", "contract_penalty": "$5,000", "pollutant_cleanup": "$10,000", "sewer_backup_coverage": "$5,000", "storage_locations": "$5,000", "testing": "$5,000", "transit": "$5,000", "business_personal_property": "NOT COVERED"}
+      ],
+      "location_001": {
+        "address": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+        "data_processing": {"deductible_general": "$500", "deductible_earthquake_volcanic": "$500", "deductible_flood": "NOT COVERED", "deductible_mechanical_electrical": "$500", "coinsurance": "80%", "earthquake_agg_occ_cat_limit": "$15,000 each", "flood_agg_occ_cat_limit": "NOT COVERED", "sewer_backup_agg_occ_cat_limit": "$15,000 each"},
+        "computer_coverage_item_847": {"hardware_acv": "$10,000", "programs_applications_media_acv": "$5,000", "income_coverage": "NOT COVERED"},
+        "extensions": {"debris_removal": "$5,000", "emergency_removal_days": 365, "emergency_removal_expenses": "$1,000", "electrical_power_disturbance": "COVERED (500ft limitation NOT WAIVED)", "fraud_and_deceit": "$1,000", "mechanical_breakdown": "COVERED", "acquired_locations": "$250,000", "earthquake": "COVERED", "flood": "NOT COVERED", "newly_purchased_leased_hardware": "$250,000", "off_site_computers": "$2,500", "pollutant_cleanup": "$10,000", "property_in_transit": "$5,000", "proprietary_programs_data": "$5,000", "sewer_backup": "COVERED", "rewards": "$1,000", "software_storage": "$25,000", "virus_hacking": "$5,000/occurrence, $10,000/12mo", "foreign_transit_location": "NOT COVERED", "accounts_receivable": "NOT COVERED", "power_protection_equipment": "NOT COVERED", "reproduction_equipment": "NOT COVERED", "telecommunications_equipment": "NOT COVERED", "valuable_papers_additional_property_line": "NOT COVERED (distinct from CM7507's generic $5,000 valuable-papers supplemental coverage)"}
+      },
+      "endorsement_schedule": [
+        {"form": "CL0100", "edition": "03-99", "description": "COMMON POLICY CONDITIONS"},
+        {"form": "CL0182", "edition": "01-01", "description": "AMENDATORY ENDORSEMENT COLORADO"},
+        {"form": "CL0600", "edition": "01-15", "description": "CERTIFIED TERRORISM LOSS"},
+        {"form": "CL0700", "edition": "10-06", "description": "VIRUS OR BACTERIA EXCLUSION"},
+        {"form": "CL0811", "edition": "09-18", "description": "CANNABIS ITEMS AND ACTIVITIES EXCLUSION"},
+        {"form": "CM7001A", "edition": "09-97", "description": "COMMERCIAL INLAND MARINE SCHEDULE"},
+        {"form": "CM7004", "edition": "09-06", "description": "QUICK REFERENCE"},
+        {"form": "CM7507", "edition": "06-18", "description": "CONTRACTORS ESSENTIAL INDUSTRY EXT"},
+        {"form": "CM8068", "edition": "12-19", "description": "ADVISORY NOTICE TO POLICYHOLDERS"},
+        {"form": "CM9905", "edition": "12-19", "description": "CANNABIS EXCLUSION"},
+        {"form": "IL0017", "edition": "11-98", "description": "COMMON POLICY CONDITIONS"},
+        {"form": "IL7004", "edition": "03-20", "description": "MUTUAL POLICY PROVISIONS"},
+        {"form": "IL7131A", "edition": "04-01", "description": "COMM'L POLICY ENDORSEMENT SCHEDULE"},
+        {"form": "IL7306", "edition": "08-98", "description": "EXCLUSION OF CERTAIN COMPUTER LOSSES"},
+        {"form": "IL7602", "edition": "04-16", "description": "COLORADO COMPANY ELIMINATION"},
+        {"form": "IL8383.2A", "edition": "12-20", "description": "DISCL PURSUANT TERRSM RISK INS. ACT WAIVED"},
+        {"form": "IL8491", "edition": "04-19", "description": "DISCLOSURE NOTICE CANNABIS EXCLUSION"},
+        {"form": "IM7000", "edition": "04-04", "description": "CONTRACTOR'S EQUIPMENT COVERAGE"},
+        {"form": "IM7017", "edition": "06-04", "description": "WEIGHT OF LOAD ENDORSEMENT"},
+        {"form": "IM7100", "edition": "06-04", "description": "INSTALLATION FLOATER COVERAGE"},
+        {"form": "IM7201", "edition": "10-02", "description": "COMPUTER COVERAGE"},
+        {"form": "IM7238", "edition": "10-02", "description": "EARTHQUAKE, FLOOD AND SEWER BACKUP"}
+      ]
+    },
+
+    "business_auto": {
+      "pages_dense": "85-93",
+      "pages_boilerplate": "94-142 (confirmed zero new insured-specific facts beyond the endorsement schedule below)",
+      "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+      "policy_number": "6E7-40-02---26",
+      "policy_number_alt_renderings_seen_in_doc": ["6E7-40-02---26 (primary, pages 85/87/96/100/etc.)", "6E7-40-02 (no trailing -26, page 90 line 6068)", "6E74002 (compact, Umbrella's underlying schedule page 148, and every page-footer stamp)"],
+      "effective_date": "07/15/25",
+      "expiration_date": "07/15/26",
+      "coverage_table": [
+        {"coverage": "Covered Autos Liability", "symbol": "01", "limit": "$1,000,000", "premium": "$1,496.00"},
+        {"coverage": "Auto Medical Payments", "symbol": "02", "limit": "$5,000 each insured", "premium": "$35.00"},
+        {"coverage": "Uninsured/Underinsured Motorists", "symbol": "02", "limit": "See endorsement CA7093A", "premium": "$258.00"},
+        {"coverage": "Comprehensive (Physical Damage)", "symbol": "07", "limit": "See Item Six", "premium": "$134.00"},
+        {"coverage": "Collision", "symbol": "07", "limit": "See schedule for deductible", "premium": "$289.00"}
+      ],
+      "premium_for_attached_items_4_5_6": "$322.00",
+      "premium_for_endorsements": "$457.00",
+      "estimated_total_policy_premium": "$2,991.00",
+      "arithmetic_check": "1496+35+258+134+289 = 2212 (base); 2212+322+457 = 2991 (verified). Attached items 4+5 = 185+137 = 322 (verified). Endorsements = 204 (Drive Other Car) + 250 (Auto Elite Ext) + 3 (terrorism, incl in main form) = 457 (verified).",
+      "um_uim_supplemental_schedule_ca7093a": {"state": "CO", "limit": "$1,000,000 combined single limit"},
+      "vehicle_schedule_item_3": [
+        {
+          "location": "001, 4800 Dahlia Street D13, Denver CO 80216-3121",
+          "vehicle_no": 1,
+          "territory": "111",
+          "year_make_model_body": "2012 SUBARU OUTBACK SEDAN",
+          "vin": "4S4BRCGC9C3217772",
+          "cost_new": "$26,680",
+          "radius": "NA",
+          "use": "NA",
+          "age_liab_phys": "Liab-I Phys-I",
+          "class_priv_passenger_comm": "7383",
+          "premiums": {"liability": "$1,496.00", "auto_medical_payments": "$35.00", "uninsured_motorists": "Included", "underinsured_motorists": "Included", "comprehensive": "$134.00 (ACV, $1,000 ded)", "collision": "$289.00 (ACV, $1,000 ded)"},
+          "total_vehicle_premium": "$2,212.00",
+          "TEST_TARGET": "This is the ONLY real vehicle in the whole package. C22/C46 history: VIN 4S4BRCGC9C3217772 was observed stamped into a tax-identifier field, and GL class-code exposures ($39,300/$350,000, see general_liability.class_codes below) were observed stamped as a second/third vehicle's Cost New. Assert: exactly ONE vehicle row on ACORD 127, and no GL class-code figure ever lands on a Vehicle_* field."
+        }
+      ],
+      "item_4_hired_autos": {"state": "CO", "rate_basis": "Excess, IF ANY", "rate": "100", "total_premium": "$185.00"},
+      "item_5_non_ownership": {"basis": "Other than a social service agency", "number_of_employees": "0-25", "total_premium": "$137.00"},
+      "endorsement_premium_detail": [
+        {"endorsement": "Drive Other Car", "territory": "104", "class": "6679", "premium": "$204.00"},
+        {"endorsement": "Auto Elite Extension", "class": "8556", "premium": "$250.00"}
+      ],
+      "drive_other_car_coverage_ca9910a": {
+        "named_individual": "ERIN ROYAL",
+        "TEST_TARGET": "C22 history: 'ERIN ROYAL' was observed stamped into a Driver_GenderCode field and a Driver_TaxIdentifier field. This is the literal source - a named individual on a Drive Other Car endorsement, not a driver-schedule row. Assert it never lands on a gender/tax-ID field.",
+        "coverages": [
+          {"coverage": "Liability", "limit": "$1,000,000", "premium": "$174.00"},
+          {"coverage": "Auto Medical Payments", "limit": "$5,000", "premium": "$4.00"},
+          {"coverage": "Uninsured Motorists", "limit": "$1,000,000", "premium": "$26.00"},
+          {"coverage": "Underinsured Motorists", "limit": "Included", "premium": null}
+        ]
+      },
+      "endorsement_schedule": [
+        {"form": "CA0001", "edition": "11-20", "description": "BUSINESS AUTO COVERAGE FORM", "note": "Terrorism covg incl in main cov form $3"},
+        {"form": "CA0113", "edition": "10-13", "description": "COLORADO CHANGES"},
+        {"form": "CA0440", "edition": "10-13", "description": "COLORADO AUTO MEDICAL PAYMENTS COV"},
+        {"form": "CA2150", "edition": "07-17", "description": "CO UNINSURED MOTORISTS COVERAGE BI"},
+        {"form": "CA7001A", "edition": "02-22", "description": "COMM AUTO DECLARATIONS/ADDIT'L ITEMS"},
+        {"form": "CA7002A", "edition": "02-22", "description": "COMM AUTO DECLARATIONS - ITEMS 4 & 5"},
+        {"form": "CA7007", "edition": "11-20", "description": "QUICK REFERENCE BUSINESS AUTO FORM"},
+        {"form": "CA7093A", "edition": "02-22", "description": "UM/UIM SUPPLEMENTAL SCHEDULE"},
+        {"form": "CA7313", "edition": "11-15", "description": "PREJUDGMENT INTEREST"},
+        {"form": "CA7450", "edition": "09-24", "description": "COMMERCIAL AUTO ELITE EXTENSION"},
+        {"form": "CA8112.2", "edition": "11-15", "description": "IMPT NOTICE - PAYMENT FOR AFTERMARKET"},
+        {"form": "CA8214", "edition": "05-12", "description": "COLORADO POLICYHOLDER NOTICE"},
+        {"form": "CA8214.1", "edition": "05-12", "description": "COLORADO POLICYHOLDER NOTICE"},
+        {"form": "CA8282", "edition": "08-18", "description": "CO BODILY INJURY UNINSURED SEL/REJ"},
+        {"form": "CA8336", "edition": "11-19", "description": "IMPORTANT NOTICE TO POLICYHOLDERS"},
+        {"form": "CA8338", "edition": "11-19", "description": "ADVISORY NOTICE TO POLICYHOLDERS"},
+        {"form": "CA9910A", "edition": "10-13", "description": "DRIVE OTHER CAR COV FOR NAMED INDIV"},
+        {"form": "IL0017", "edition": "11-98", "description": "COMMON POLICY CONDITIONS"},
+        {"form": "IL0021", "edition": "09-08", "description": "NUCLEAR ENERGY LIAB EXCL/BROAD FORM"},
+        {"form": "IL0125", "edition": "11-13", "description": "COLORADO CHANGES - CIVIL UNION"},
+        {"form": "IL0169", "edition": "09-07", "description": "CO CHGS/CONCEALMENT,MISREPRSNT,FRAUD"},
+        {"form": "IL0228", "edition": "09-07", "description": "CO CHANGES - CANCELLATION/NONRENEWAL"},
+        {"form": "IL7004", "edition": "03-20", "description": "MUTUAL POLICY PROVISIONS"},
+        {"form": "IL7131A", "edition": "04-01", "description": "COMM'L POLICY ENDORSEMENT SCHEDULE"},
+        {"form": "IL7447", "edition": "05-15", "description": "NOTICE OF CANC W/WRITTEN CONTRACT"},
+        {"form": "IL7602", "edition": "04-16", "description": "COLORADO COMPANY ELIMINATION"},
+        {"form": "IL8576", "edition": "10-17", "description": "MEDICARE IMPT NOTICE TO POLICYHOLDER"}
+      ],
+      "auto_covered_symbols_present": {"01": "Any Auto (satisfies hired/non-owned per auto_symbols.py logic)", "02": "Owned Autos Subject To Compulsory UM (used for UM/UIM)", "07": "Specifically Described Autos (used for Comprehensive/Collision)", "TEST_TARGET": "System must not fire 'hired/non-owned symbol undefined' or 'physical damage symbol undefined' warnings on this package - Symbol 01 covers hired/non-owned per the documented auto_symbols.py fix, and Symbol 07 covers comp/collision for the one scheduled vehicle."}
+    },
+
+    "commercial_umbrella": {
+      "pages_dense": "143-148",
+      "pages_boilerplate": "149-194 (confirmed zero new insured-specific facts beyond the endorsement schedule below)",
+      "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+      "policy_number": "6J7-40-02---26",
+      "policy_number_compact_footer_form": "6J74002",
+      "effective_date": "07/15/25",
+      "expiration_date": "07/15/26",
+      "limits_of_insurance": {
+        "each_occurrence": "$3,000,000",
+        "personal_and_advertising_injury": "$3,000,000 (any one person or organization)",
+        "aggregate": "$3,000,000 (except with respect to covered autos)"
+      },
+      "premium_not_subject_to_audit": "$3,418.00",
+      "minimum_policy_premium_if_cancelled": "$100",
+      "self_insured_retention": "$0",
+      "schedule_of_underlying_insurance": [
+        {
+          "coverage": "Commercial General Liability",
+          "company": "EMC Property & Casualty Company",
+          "policy_number": "BBC7263",
+          "policy_period": "07/15/25 to 07/15/26",
+          "basis": "Occurrence",
+          "minimum_applicable_limits": {"general_aggregate": "$2,000,000", "products_completed_operations_aggregate": "$2,000,000", "personal_and_advertising_injury": "$1,000,000", "each_occurrence": "$1,000,000"}
+        },
+        {
+          "coverage": "Commercial Auto Liability",
+          "company": "Employers Mutual Casualty Company",
+          "policy_number": "6E74002",
+          "policy_period": "07/15/25 to 07/15/26",
+          "minimum_applicable_limits": {"covered_auto_liability": "$1,000,000 Each Accident"}
+        }
+      ],
+      "TEST_TARGET_C23": "This Schedule of Underlying Insurance is the ground truth behind the C23/C23-Round-2 currency-tiebreak bug. Assert: gl_each_occurrence resolves to $1,000,000 (NOT $3,000,000), gl_aggregate resolves to $2,000,000 (NOT $3,000,000), gl_personal_advertising_injury resolves to $1,000,000, gl_products_aggregate resolves to $2,000,000. The umbrella's own limits ($3,000,000 each occurrence/agg/PI) must stay on umbrella_* facts only.",
+      "TEST_TARGET_umbrella_adequacy": "Both GL and Auto underlying are fully present and stated here. Assert `_umbrella_has_underlying(facts)` is True and no umbrella hard-stop / -25 missing-limit cap fires on this package (see 'A 60 Cap' and 'OPEN - Three Score-Moving Defects' sections of CLAUDE.md).",
+      "terrorism_premium": "$34.00",
+      "notable_exclusion_cu2103_designated_work": "Excludes work arising out of design/development/site prep/construction/marketing/sales of multi-family or tract housing (as defined in the primary GL policy). Does NOT apply to remodeling/renovation/maintenance/service of an EXISTING building that was not the insured's own work.",
+      "endorsement_schedule": [
+        {"form": "CU0001", "edition": "04-13", "description": "COMM LIABILITY UMBRELLA COV FORM"},
+        {"form": "CU0005", "edition": "12-23", "description": "EXCL-VIOLATION/LAW ADDRESSING DATA"},
+        {"form": "CU0146", "edition": "09-00", "description": "CO CHANGES-REPRESENTATIONS OR FRAUD"},
+        {"form": "CU2103", "edition": "09-00", "description": "EXCL - DESIGNATED WORK (multi-family/tract housing - see notable_exclusion above)"},
+        {"form": "CU2123", "edition": "02-02", "description": "NUCLEAR ENERGY LIAB EXCL BROAD FORM"},
+        {"form": "CU2127", "edition": "12-04", "description": "FUNGI OR BACTERIA EXCLUSION"},
+        {"form": "CU2130", "edition": "01-15", "description": "CAP OF LOSSES FROM CERT ACTS OF TERR"},
+        {"form": "CU2136", "edition": "01-15", "description": "EXCL PUNITIVE DMG CERT ACTS OF TERR"},
+        {"form": "CU2150", "edition": "03-05", "description": "SILICA OR SILICA RELATED DUST EXCL"},
+        {"form": "CU2171", "edition": "06-15", "description": "EXCLUSION-UNMANNED AIRCRAFT"},
+        {"form": "CU2186", "edition": "12-23", "description": "EXCL-ACCESS/DISCL OF CONFID/PERSONAL"},
+        {"form": "CU3454", "edition": "05-23", "description": "EXCL PERFLUOROALKYL/POLYFLUROALKYL"},
+        {"form": "CU3456", "edition": "12-23", "description": "CYBER INCIDENT"},
+        {"form": "CU7001A", "edition": "11-15", "description": "SCHED OF PRIMARY INS - AUTOMATED"},
+        {"form": "CU7269", "edition": "08-06", "description": "AGG LIMIT - PER LOC AGG FOR PREM OPS"},
+        {"form": "CU7270", "edition": "08-06", "description": "AGG LIMIT-PER PROJ AGG FOR PREM OPS"},
+        {"form": "CU7276", "edition": "03-21", "description": "COMMERCIAL UMBRELLA AMENDMENT OF COV"},
+        {"form": "CU7293", "edition": "08-06", "description": "FOREIGN EXPOSURE FOLLOWING FORM"},
+        {"form": "CU7346", "edition": "11-20", "description": "COMMUNICABLE DISEASE EXCLUSION"},
+        {"form": "CU7404.1", "edition": "10-08", "description": "UMBRELLA LIAB AMEND - FOLLOW FORM"},
+        {"form": "CU7460", "edition": "12-15", "description": "BLANKET WAIVER OF SUBROG WHEN REQUIR"},
+        {"form": "CU7468", "edition": "01-17", "description": "PRIMARY/NONCONT-OTHER INS-AUTOMATIC"},
+        {"form": "CU7484", "edition": "01-22", "description": "EXCL-ALL OPS COV/CONTROLLED WRAP UP"},
+        {"form": "CU7486", "edition": "10-22", "description": "CANNABIS EXCL/EXCP RETAIL SALES CBD"},
+        {"form": "CU8160", "edition": "12-23", "description": "CYBER INCIDENT/DATA PRIVACY EXCL PH"},
+        {"form": "IL0017", "edition": "11-98", "description": "COMMON POLICY CONDITIONS"},
+        {"form": "IL0125", "edition": "11-13", "description": "COLORADO CHANGES - CIVIL UNION"},
+        {"form": "IL0228", "edition": "09-07", "description": "CO CHANGES - CANCELLATION/NONRENEWAL"},
+        {"form": "IL7004", "edition": "03-20", "description": "MUTUAL POLICY PROVISIONS"},
+        {"form": "IL7131A", "edition": "04-01", "description": "COMM'L POLICY ENDORSEMENT SCHEDULE"},
+        {"form": "IL7168", "edition": "01-22", "description": "ASBESTOS EXCLUSION"},
+        {"form": "IL7447", "edition": "05-15", "description": "NOTICE OF CANCEL W/WRITTEN CONTRACT"},
+        {"form": "IL7451", "edition": "03-17", "description": "EXCL-SNOW/ICE PLOWING,RMVL OR TRTMNT"},
+        {"form": "IL7602", "edition": "04-16", "description": "COLORADO COMPANY ELIMINATION"},
+        {"form": "IL8383.2A", "edition": "12-20", "description": "DISCL PURSUANT TERRSM RISK INS. ACT $34"},
+        {"form": "IL8384A", "edition": "01-08", "description": "TERRORISM NOTICE"}
+      ]
+    },
+
+    "general_liability": {
+      "pages_dense": "205-212",
+      "pages_boilerplate": "213-257 (confirmed zero new insured-specific facts beyond the endorsement schedule and class codes below)",
+      "carrier": "EMC Property & Casualty Company",
+      "carrier_note": "DISTINCT legal entity from 'Employers Mutual Casualty Company' used on Inland Marine/Auto/Umbrella - same corporate family (EMC Insurance Companies), different NAIC entity. RC1-class test: assert this line's carrier field never gets overwritten by the other lines' carrier name.",
+      "policy_number": "BBC7263",
+      "policy_number_renderings_seen": ["BBC7263 (page 211/212 body)", "BBC7263 - 26 (page 205/206 header)", "BBC7263-26 (page 207-211 header)", "BBC7263 2601 (footer stamp - '2601' is a print batch code, not part of the number)"],
+      "policy_term": "07/15/2025 to 07/15/2026",
+      "named_insured": "ORBIN CONTRACTING LLC (DIRECT BILL)",
+      "mailing_address": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+      "producer": "COMMERCIAL RISK SOLUTIONS, INC., 9780 S MERIDIAN BLVD STE 400, ENGLEWOOD, CO 80112-6072",
+      "organization_type": "LLC",
+      "limits_of_insurance": {
+        "each_occurrence": "$1,000,000",
+        "damage_to_premises_rented_to_you": "$500,000 (any one premises)",
+        "medical_expense": "$10,000 (any one person)",
+        "personal_and_advertising_injury": "$1,000,000 (any one person or organization)",
+        "general_aggregate": "$2,000,000",
+        "products_completed_operations_aggregate": "$2,000,000"
+      },
+      "coverages_provided": {"products_completed_operations": "$1,198.00", "other_than_products_completed_operations": "$2,756.00"},
+      "total_estimated_policy_premium": "$3,954.00",
+      "audit_period": "Annual",
+      "rated_locations": [{"location": "1", "address": "4800 Dahlia St # D13, Denver, CO 80216-3121"}],
+      "class_codes_general_liability_schedule": {
+        "page": 211,
+        "location_000_policy_level": [
+          {"item": "Fungi Or Bacteria Exclusion", "premium": "-$33 (credit)"},
+          {"item": "Limited Pollution Coverage - Work Sites", "premium": "$150"}
+        ],
+        "location_001_4800_dahlia_st": [
+          {
+            "code": "91580",
+            "classification": "Contractors - Executive Supervisors or Executive Superintendents",
+            "premium_basis": "Payroll",
+            "exposure": "$39,300",
+            "products_completed_ops_rate": "33.211",
+            "products_completed_ops_premium": "$1,305",
+            "note": "Products/Completed Operations are subject to the General Aggregate Limit",
+            "TEST_TARGET": "C46 history: this $39,300 payroll exposure was observed stamped as a Vehicle Cost New value on ACORD 127. It belongs ONLY to the ACORD 126/125 GL class-code schedule."
+          },
+          {
+            "code": "91585",
+            "classification": "Contrctrs-sub work-in connection w/constrctn,recon,repr,erctn of buildings - NOC",
+            "premium_basis": "Total Cost",
+            "exposure": "$350,000",
+            "products_completed_ops_rate": "3.4240",
+            "products_completed_ops_premium": "$1,198",
+            "all_other_rate": "2.293",
+            "all_other_premium": "$803",
+            "TEST_TARGET": "C46 history: this $350,000 subcontract-cost exposure was observed stamped as a second phantom vehicle's Cost New. It belongs ONLY to the ACORD 126/125 GL class-code schedule."
+          }
+        ],
+        "policy_level_coverages": [
+          {"coverage": "General Liability Elite Extension", "limit_of_insurance": null, "premium": "$500"},
+          {"coverage": "Premium For Certified Acts of Terrorism", "premium": "$31.00"}
+        ],
+        "total_estimated_policy_premium": "$3,954.00",
+        "arithmetic_check": "1305 + 1198 + 803 + 150 + 500 + 31 - 33 = 3954 (verified)"
+      },
+      "endorsement_schedule": [
+        {"form": "CG 00 01", "edition": "04 13", "description": "Commercial General Liability Coverage Form"},
+        {"form": "CG 00 69", "edition": "12 23", "description": "Exclusion - Violation of Law Addressing Data Privacy"},
+        {"form": "CG 21 06", "edition": "12 23", "description": "Exclusion - Access or Disclosure of Confidential or Personal Material or Information"},
+        {"form": "CG 21 47", "edition": "12 07", "description": "Employment-Related Practices Exclusion"},
+        {"form": "CG 21 67", "edition": "12 04", "description": "Fungi Or Bacteria Exclusion"},
+        {"form": "CG 21 70", "edition": "01 15", "description": "Cap On Losses From Certified Acts Of Terrorism"},
+        {"form": "CG 21 76", "edition": "01 15", "description": "Exclusion Of Punitive Damages Related To A Certified Act Of Terrorism"},
+        {"form": "CG 21 96", "edition": "03 05", "description": "Silica Or Silica-Related Dust Exclusion"},
+        {"form": "CG 22 79", "edition": "04 13", "description": "Exclusion - Contractors - Professional Liability"},
+        {"form": "CG 40 28", "edition": "09 22", "description": "Broad Abuse Or Molestation Exclusion"},
+        {"form": "CG 40 32", "edition": "05 23", "description": "Exclusion - Perfluoroalkyl and Polyfluoroalkyl Substances"},
+        {"form": "CG 40 35", "edition": "12 23", "description": "Exclusion - Cyber Incident"},
+        {"form": "CG 70 01A", "edition": "10 12", "description": "General Liability Schedule"},
+        {"form": "CG 70 03", "edition": "10 13", "description": "GL Quick Reference (Occurrence)"},
+        {"form": "CG 72 76", "edition": "11 16", "description": "Limited Pollution Coverage - Work Sites", "sublimits": {"each_pollution_incident_limit": "$1,000,000", "pollution_liability_aggregate_limit": "$1,000,000", "property_damage_deductible": "$1,000 each pollution incident"}},
+        {"form": "CG 77 40", "edition": "11 20", "description": "Communicable Disease Exclusion - Pandemic, Epidemic or Public Health Emergency"},
+        {"form": "CG 77 43", "edition": "01 22", "description": "Exclusion - All Operations Covered by a Controlled (Wrap-Up) Insurance Program"},
+        {"form": "CG 77 48", "edition": "10 22", "description": "Cannabis Exclusion With Limited Exception For Retail Sales Of CBD Products And Hemp Exception"},
+        {"form": "CG 77 59", "edition": "05 23", "description": "Contractors General Liability Elite Extensions (blanket additional insured, newly formed orgs, damage to premises rented to you, med pay increase, electronic data sublimit $25,000, aggregate per project/location, etc.)"},
+        {"form": "CG 77 62", "edition": "05 23", "description": "Exclusion Multi Family and Tract Housings (>20 buildings threshold)"},
+        {"form": "CG 83 18", "edition": "12 23", "description": "Cyber Incident and Data Privacy Exclusion Endorsement Advisory Notice to Policyholders"},
+        {"form": "CG 99 09", "edition": "12 19", "description": "Premium Audit Noncompliance Charge", "schedule": {"audit_noncompliance_charge_factor": "1", "number_of_written_attempts": "2", "reassessment_charge": "0"}},
+        {"form": "IL 00 17", "edition": "11 98", "description": "Common Policy Conditions"},
+        {"form": "IL 00 21", "edition": "09 08", "description": "Nuclear Energy Liability Exclusion Endorsement"},
+        {"form": "IL 01 25", "edition": "11 13", "description": "Colorado Changes - Civil Union"},
+        {"form": "IL 02 28", "edition": "09 07", "description": "Colorado Changes - Cancellation And Nonrenewal"},
+        {"form": "IL 70 04", "edition": "03 20", "description": "Mutual Policy Provisions"},
+        {"form": "IL 71 31A", "edition": "04 01", "description": "Commercial Policy Endorsement Schedule"},
+        {"form": "IL 71 68", "edition": "01 22", "description": "Asbestos Exclusion"},
+        {"form": "IL 74 47", "edition": "05 15", "description": "Notice Of Cancellation Provided By Us To Person(s) Or Organization(s) With Whom You Have Agreed In A Written Contract Or Agreement"},
+        {"form": "IL 74 51", "edition": "03 17", "description": "Exclusion - Snow And Ice Plowing, Removal Or Treatment"},
+        {"form": "IL 76 02", "edition": "04 16", "description": "Colorado Company Elimination Endorsement"},
+        {"form": "IL 83 83.2A", "edition": "12 20", "description": "Disclosure Pursuant To Terrorism Risk Insurance Act $31.00"},
+        {"form": "IL 83 84A", "edition": "01 08", "description": "Notice"},
+        {"form": "IL 85 76", "edition": "10 17", "description": "Important Notice To Policyholders"},
+        {"form": "IL 87 42", "edition": "03 17", "description": "Important Notice To Policyholders"}
+      ]
+    }
+  },
+
+  "shared_cross_line_endorsements": {
+    "note": "These forms recur verbatim across multiple coverage parts (Inland Marine / Auto / Umbrella / GL), each time as pure boilerplate with no insured-specific data beyond what's captured above. Pages listed are the first verified occurrence; most repeat 2-4 times across the document (e.g. IL0017 appears at pages 24, 131[inferred], 195, 258).",
+    "forms": ["IL0017 Common Policy Conditions", "IL0021 Nuclear Energy Liability Exclusion (Broad Form)", "IL0125 Colorado Changes - Civil Union", "IL0228 Colorado Changes - Cancellation and Nonrenewal", "IL7004 Mutual Policy Provisions", "IL7131A Endorsement Schedule generator form", "IL7168 Asbestos Exclusion", "IL7306 Exclusion of Certain Computer-Related Losses", "IL7447 Notice of Cancellation to 3rd Party", "IL7451 Exclusion - Snow and Ice Plowing/Removal/Treatment", "IL7602 Colorado Company Elimination Endorsement", "IL8383.2A Disclosure Pursuant to Terrorism Risk Insurance Act", "IL8384A Terrorism Notice", "IL8491 Disclosure Notice - Cannabis Items and Activities Exclusion", "IL8576 Medicare/MMSEA Important Notice to Policyholders"]
+  },
+
+  "known_ocr_identity_variances": {
+    "note": "Same real-world value printed multiple ways across the document. Good test cases for normalization/reconciliation logic - the SYSTEM should treat these as one value, not flag them as conflicts.",
+    "agent_number": ["W6258-0001", "AW 6258", "W6258"],
+    "agent_phone": ["303-996-7800", "(303)996-7800"],
+    "claim_reporting_phone": ["888-362-2255", "(888)362-2255"],
+    "auto_policy_number": ["6E7-40-02---26", "6E7-40-02", "6E74002"],
+    "gl_policy_number": ["BBC7263", "BBC7263 - 26", "BBC7263-26"],
+    "umbrella_policy_number": ["6J7-40-02---26", "6J74002"],
+    "inland_marine_policy_number": ["6C7-40-02---26", "6C74002"]
+  },
+
+  "validation_checklist": {
+    "note": "Concrete pass/fail assertions to run the real extraction + gap-fill + stamped PDF output against. Each ties to a specific documented bug in CLAUDE.md.",
+    "items": [
+      "C23/C23-R2 currency tiebreak: gl_each_occurrence=$1,000,000 and gl_aggregate=$2,000,000 (never the umbrella's $3,000,000).",
+      "C22 type-aware rejection: VIN 4S4BRCGC9C3217772 never appears in any tax-identifier field; 'ERIN ROYAL' never appears in a gender-code or tax-identifier field.",
+      "C46 phantom schedule rows: exactly ONE vehicle row on ACORD 127 (the 2012 Subaru Outback); GL class-code exposures ($39,300 / $350,000) never land on a Vehicle_CostNewAmount or any vehicle field.",
+      "RC1 per-line identity: each of the 4 forms (Inland Marine/Auto/Umbrella/GL) carries its OWN policy number and OWN carrier name; 'EMC Property & Casualty Company' (GL) is never conflated with 'Employers Mutual Casualty Company' (the other 3 lines).",
+      "C48 total premium: package Estimated Total Policy Premium resolves to $10,663.00, never a single line's premium.",
+      "Umbrella adequacy: `_umbrella_has_underlying` is True (both GL and Auto underlying limits are fully stated in the Schedule of Underlying Insurance) - no umbrella hard-stop or -25 missing-limit cap should fire.",
+      "Auto symbols: no false 'hired/non-owned symbol undefined' or 'physical damage symbol undefined' warning - Symbol 01 and Symbol 07 are both present and cover those exposures.",
+      "No-coverage lines: has_property_coverage, has_workers_comp, has_crime_coverage (or equivalent flags) are all False; no field belonging to those lines is filled from this document.",
+      "Renewal/date handling: effective 07/15/2025, expiration 07/15/2026 on every line - not misread as a renewal or prior-term date (RC1b class check, even though this package is not itself a renewal artifact)."
+    ]
+  }
+}

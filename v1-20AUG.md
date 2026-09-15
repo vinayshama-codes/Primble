@@ -10462,3 +10462,779 @@ grepped for one literal line of one implementation; it now asserts the BEHAVIOUR
 The cap gates became visible to producers on 2026-08-31 through a path the 2026-08-08
 harvester did not know about, and four unfixable blockers shipped with a green build.
 When you add a new way to SURFACE something, extend the harvester in the same commit.
+
+## ORBIN ROUND 3 - which value lands in which box (2026-09-14)
+
+Client review of the real Orbin package (e7084347). Root causes found by offline replay of the
+live session on deployed + current code; not the model.
+- **Post-generation late-stamp** (`arq_service._backfill_and_resolve_present`, run on
+  questionnaire open) filled blank boxes from flat scalars with no form context: wrote
+  Employers Mutual + 25186 on 126, 25186 on 127/131, `IM 7100 06 04` on 125 after generation
+  had refused all four. Now form-scoped and never reopens a guard blank; same for
+  `_restamp_canonical_into_forms` / `_restamp_schedule_into_forms`.
+- **Form numbers** stay out of per-document rows (`_scrub_non_contract_identifiers`), the Data
+  Consistency card, confirmation and apply (stored bad confirmations ignored).
+- **Carrier per contract** from each policy's own page headers (`_bind_carriers_to_contracts`);
+  NAIC only from a printed pair (`_pair_carrier_naic_scalars`, `_naic_printed_with` - IM gets
+  21415 through its entity).
+- **131 underlying** rows compare through the same-contract / entity doors (were blanking).
+- **Renewal** no longer read off ISO cancellation wording; Orbin prints its real term
+  07/15/2025-07/15/2026 (owner ruling 14 Sep: printed term + "confirm new term" warning).
+- **Codes**: GL TERR is an owned blank on a row that prints none; fence also reads code-labelled
+  verified dec entries; vehicle CLASS/TERR read beside the vehicle's own VIN (7383 / 111);
+  EBL block owned blank without EBL evidence.
+- **Gap fill** reads the questioned line's policy section (`build_line_page_scopes`): offline
+  205 -> 114 calls, ~6.85M -> ~3.48M input tokens on Orbin. Extraction prompt v19 -> v20.
+  Detail: improving-ll.md C88.
+- Tests: `tests/test_line_binding_14sep.py` (34).
+- **D6 - values move:** 126 carrier/NAIC, 127/131 NAIC, 131 underlying numbers, dates back to
+  the printed term, TERR/EBL blanks, vehicle class/territory fill. Scores may shift (the
+  renewal-term item is replaced by the ended-term soft warning). Brent sees it first.
+- Open: not live-verified (owner will run); card still lists an unplaced "EMC Insurance"
+  carrier candidate (scoped status, no conflict) - conflict-card area.
+
+## ORBIN - comparisons that should never happen, safe half (2026-09-14)
+
+Client items 5/6/10. Diagnosed by offline replay of e7084347 / 5037f1a6 plus the literal
+rows the producer saw (`sqs_recommendation_audit`). Not the model.
+- **Field QA compared a tick with text.** A checkbox bound to a choice fact (`gl_form_type`
+  -> Occurrence / Claims-Made) was compared with the fact's raw wording and could never
+  agree, not even with "Occurrence". `pdf_service.expected_tick_for_box` now gives the tick
+  the fact implies (`_INDICATOR_RULES` + the fact's option list); no declared option -> no
+  comparison. Scope measured: 10 bindings (6 GL basis, 4 CSL on 137/138).
+- **Dead rule.** `..._LimitApplies -> None` sat below `GeneralLiability_GeneralAggregate ->
+  gl_aggregate` (first match wins), so the four basis ticks read as `gl_aggregate` boxes.
+  Specific None rules now come first. Stamping unchanged (the Y/N gate already sent them to
+  gap fill). The text "other" box `..._LimitAppliesToCode` keeps its route on purpose.
+- **"OCCUR" is Occurrence.** `answer_options.option_named_by`: an option or an unambiguous
+  4+ character truncation. The card's allowed-values filter uses it and folds two printings
+  of one option. 5037f1a6's "CG 00 01 04 13 vs OCCUR" conflict is gone.
+- **A confirmed form number is never an answer.** `underwriting_consistency.
+  usable_confirmations` - one door for the card, both conflict-key lists,
+  `apply_confirmations` and Field QA. e7084347's stored `IM 7100 06 04` stays as the record,
+  never read; its card now shows policy_number scoped.
+- Tests: `tests/test_comparison_guards_14sep.py` (40). Suite 7914 passed / 1 failed (httpx);
+  baseline 7874 / 1.
+- **D6, small:** where the gl_form_type conflict was the only soft stop, its 85 cap and its
+  "conflicted" fill-rate weight go. Field QA is advisory - no score moves from it.
+- **Left, owner's call:** umbrella $3M -> $1M as a dated change (parked: change rule, a UI
+  row state, 7 test files, D6); `gl_form_type` prompt definition (stamping chat);
+  policy-number-must-be-a-known-contract filter; one comparison gate for the other sites.
+  Seen, not this area: 131 umbrella Occurrence/Claims-Made ticks derived from the GL basis
+  fact; ACORD 160 liquor aggregate bound to `gl_aggregate`.
+
+## ORBIN - which lines and forms the package has, safe half (2026-09-14)
+
+Client items 9/10. Offline replay of e7084347 on current code. Not the model.
+- **Phantom lines on the cover.** `lob_canon._row_identifies_policy` took a carrier NAME as
+  proof of a policy. Live extraction puts "Employers Mutual Casualty Company" on all 13
+  endorsement-menu rows and the 3 denied rows (no premium, no number), so the 11 Sep door
+  still reported 9 lines incl. Property / Crime / WC / Liquor / Pollution. Now a NAIC or the
+  row's own policy number only. `_flag_families` reads `has_<line>` flags only
+  (`property_has_bi_coverage` was evidencing Property). Live shape: 17 mentioned -> 4 carried.
+  The 11 Sep "11 -> 4" was measured on a synthetic fixture.
+- **ACORD 130 offered on a WC denial.** `form_service._dec_line_present` read the NEXT row's
+  premium ("6 Workers' Compensation No Coverage" / "7 Umbrella $3,418.00"). A row that prints
+  its own denial before any $ no longer counts - every line phrase set, not just WC.
+- **Card evidence.** `_FORM_EVIDENCE_FACTS` had 137 = contractor facts, 138 = equipment,
+  133 = builders risk. Now auto limits / garage limits / WC payroll; a test anchors each to
+  the template's printed title. CLAUDE.md form list corrected (137, 138, 141, 160).
+- Tests: `tests/test_coverage_presence_14sep.py` (85). Suite 7999 passed / 1 failed (httpx);
+  baseline 7914 / 1.
+- **D6, small:** SQS `_ok("lines_of_business")` can only go DOWN, and only where a package's
+  sole line evidence was a carrier-only row or a sub-flag. Orbin unchanged.
+- **Left, owner's call:** 137 tier (Brent's ruling, untouched). 137 stamping: $1M CSL forced
+  blank (137 shares one "CSL / BI EA PER" box), Med Pay / UM / comp unbound, symbol rows
+  B/C/F/H blanked as phantom vehicles (rows are decidable from template geometry). Cover never
+  receives flags (`facts.get("flags")`). Line status not persisted before the dec-index purge.
+  Wrong forms, same class as 133: ACORD 141 is a Crime section offered as "Property Schedule";
+  ACORD 160 is a Business Owners section offered as "Inland Marine Application".
+
+## ORBIN - comparisons that should never happen, remaining half (2026-09-14)
+
+Client items 6/7/8, second pass (owner: "fix all the remaining issues"; the live run is his).
+- **Umbrella $3M -> $1M is a change, not a conflict.** The one door gained a time axis:
+  `fact_comparison.dated_change` (+ `fact_term`, `document_as_of`). "Changed" only when a
+  document states the change for THAT fact, dated inside the term, the two amounts are exactly
+  its from/to, the stating document prints the new one, and every old printing is another
+  document dated on or before the change. Anything else stays a conflict. Picker row
+  `changed` (no review); merge takes the new value (`source: document_amendment`); the
+  intra-document withhold no longer reads the COI remark's pair as rivals. `narrative_facts`
+  now finds a subject after the verb. Replay: `changed`, 131 / 25 print $1,000,000.
+- **Coverage trigger defined (v20 -> v21, improving-ll C89).** `gl_form_type` = the GL part
+  only; new `umbrella_form_type`. `extraction_service.coverage_basis` canonicalises
+  (CG 00 01 -> Occurrence, CG 00 02 -> Claims-made), never a limit label. 131 ExcessUmbrella
+  ticks read `umbrella_form_type` (they were reading the GL fact).
+- **A form reference is not a policy number.** `underwriting_consistency.
+  _drop_unknown_form_references`: policy-number keys only, only with a verified dec index,
+  only when a kept candidate is a known contract, never empties the field.
+- **One box door.** `pdf_service.box_expectation`: owner first (`authoritative_expected_value`;
+  an owned blank is not compared), then tick or value. Field QA and
+  `verify_stamped_consistency` both call it; the stamper ticks choice boxes by the same rule.
+- **UI.** Data Consistency shows a read-only "Changed during the policy term - not a
+  conflict" row: now / before / the document's sentence.
+- Tests: `tests/test_remaining_fixes_14sep.py` (65); v21 pins in `test_h3_wc_data_capture` /
+  `test_line_binding_14sep`; `test_dec_index_purge` records the new purge-safe consumer.
+  Suite 8064 passed / 1 failed (httpx). Frontend build clean.
+- **D6, mostly UP:** the umbrella withhold and its 85 cap go where it was the only soft stop;
+  131 fills its umbrella limit; GL basis ticks become deterministic; fewer policy-number
+  conflicts. One small DOWN until re-extraction: 131's two umbrella trigger ticks go to gap
+  fill on v20 sessions (they were stamped from the GL fact).
+- **Cost:** v21 busts the extraction cache - one fresh extraction per package, no new call.
+- **Left:** ACORD 160 liquor aggregate bound to `gl_aggregate` (owner memory: leave 160
+  alone); the `..._LimitAppliesToCode` text box; producer_name conflict (party chat); stale
+  09-10 values on 127/131 (renewal dates, GL NAIC) belong to line identity.
+
+## ORBIN - break-it pass on the remaining half (2026-09-14)
+
+Owner: "tested with all the values that can break them?" Not yet - 75 hostile inputs through
+merge -> card found 23 breaks. All fixed, same day.
+- **A sentence that does not assert a change settled the conflict.** "was not / never /
+  wasn't reduced", "requests the limit be reduced", "if approved ... will be reduced",
+  "proposed to be reduced", a question - each stamped $1M silently. `narrative_facts.
+  _asserts_the_change` marks them `asserted: False`; `dated_change` and `explain_conflict`
+  skip them; the endorsement-date reader still sees their date.
+- **Two different changes to one fact** (a reduction then a reversal, two reductions) stay a
+  conflict - `dated_change` counts distinct amount pairs.
+- **"$3M" was read as $3.** The miner keeps the K / M / MM / B multiplier.
+- **Coverage trigger:** "CLAIMS-MADE OCCUR" (both captions, tick lost) and "Per Occurrence"
+  no longer read as a basis; words that contradict the ISO number give none.
+- **Real policy numbers read as form references** (`BOP 7654321 01 26`). A form series never
+  runs 5 digits together; `_FORM_REFERENCE_RE` now requires that.
+- **The checker could not read the 131 umbrella ticks** - `umbrella_form_type` joined the
+  answer-option catalogue (the GL basis vocabulary).
+- Real data unchanged: e7084347 / 5037f1a6 replay - umbrella `changed`, 131 / 25 print
+  $1,000,000; the one amendment sentence in either package stays asserted.
+- Tests: +44 in `test_remaining_fixes_14sep.py` (`TestBreakValues`). Suite 8301 passed / 6
+  failed; 5 were `test_screen_level_coverage_14sep` rewritten by another chat mid-run and pass
+  on re-run (14 + 2 xfail) - only httpx left. No score or prompt change.
+
+## ORBIN - who is this party, and in what role (2026-09-14)
+
+Client items 11/12 (party chat). Offline replay of e7084347 + the owner's account row. Not the model, not the prompt.
+- **Old producer on the new application.** No uploaded document names ThinkSmith / Michelle Smith - they are the LOGIN
+  (`users.organization_name` / `full_name`). The merge never received it, so the 11 Sep routing could only RECORD the old
+  agency and all five forms still printed CRS / Terri. 11 Sep's "live-verified" used HALVORSEN, whose narrative names the
+  new agency; the real Orbin narrative names none.
+- **Fix:** `_finalize_pipeline` reads the owner's account on every run -> `merge_facts(submitting_account=)` ->
+  `_route_producer_party`. Submitting agency = a submission document's single agency, else the account. The producer
+  block moves WHOLE (key by key was measured stitching ThinkSmith's name onto CRS's address/phone/email); keys the
+  submitting side never stated are cleared. Acts only when an expiring document is a DIFFERENT agency by
+  `fact_comparison.same_agency` (documents clustered first; "cannot tell" never moves; an incumbent re-marketing is untouched).
+- `_resolve_submitting_producer` owns every `Producer_*` box once separated (the old `\w+` swallowed the row letter, so
+  ContactPerson boxes read `producer_name`). No submitting value = owned blank, never gap fill.
+- Picker: producer card not offered once separated (closes 11 Sep L3). A stored confirmation of the old agency goes to
+  `expiring_producer_*` - e7084347's `producer_name = CRS` would have put it back.
+- **FIO:** the placeholder lived in `certificate_holder`, `risk_transfer.certificate_holder_name` AND
+  `certificate_description_of_operations`. `drop_non_party_names` clears it per document at the merge (holder / payee /
+  mortgagee; the additional-insured list is not judged). `names_a_party(third_party=True)` re-spaces run-together OCR -
+  the COI prints `ForInformationalPurposesOnly`, which the box guard accepted.
+- Replay, ThinkSmith login: 125/126/127/131/25 print ThinkSmith Agency LLC / Michelle Smith, zero CRS values, no producer
+  box to gap fill, no card. No account / CRS login: unchanged.
+- **Fuzzing found three more stitches, all fixed:** a submission document naming NO agency lent its contact to
+  the new block; an unidentifiable agency ("Insurance Agency") joined or blocked the move; the old per-key swap
+  stitched agencies whenever the whole-block move declined. Now only a document that NAMES the agency speaks for
+  it (both paths), unidentifiable names are ignored, and the per-key swap runs only when every named agency is
+  the one the submission names. A glued LEGAL name (`InTownSuitesLLC`) is never re-spaced.
+- Tests: `tests/test_party_role_14sep.py` (132). Adversarial, offline: 20,000 fuzzed packages (no finished block
+  holds a provably different agency's value; no swap away from the filed agency); 49 party boxes x 20
+  placeholders / look-alikes x 15 real names; the door over all 2,426 stored documents (clears only placeholders);
+  100 real-session replays (0 crashes); the pipeline's own account read against the real DB. Final suite: 8367
+  passed / 1 failed (httpx). (One mid-run attempt showed 16 more failures while another session edited arq / pdf /
+  pipeline files; all 16 pass on rerun.)
+- **D6:** producer address / phone / fax / email go BLANK where the login's agency differs from the documents' (fill rate
+  down slightly, correctness up). One fewer conflict card on those packages.
+- **Before the live run:** the producer follows the LOGIN. Orbin under a tester's account prints the tester's agency. To
+  see the client's view, upload as an account whose profile reads ThinkSmith Agency LLC / Michelle Smith.
+- **Round 3, same day (owner: "fix all the issues") - the open list closed, each rule measured before shipping:**
+  third-party look-alikes refused when every word is ACORD field-name vocabulary or a certificate status word ("Proof
+  of Insurance", "Holder of Record", "Commercial General Liability") - 0 of 547 stored real names refused (the
+  tooltip vocabulary was tried first and blanked "United Rentals"); all-caps glued text re-spaced through the
+  tooltip vocabulary (KESTRELTERMINALAUTHORITY does not split); "Landlord" / "Lessor" / "Tenant" are role labels; a
+  GAP-FILLED insured box is re-spaced (the applicant's own name never is); an account that IS the applicant is not
+  the producer; with no usable login the block keeps ONE agency (`_keep_one_agency_per_block`, replaces only on
+  proof); the incumbent's two spellings fold into one answer (`_fold_one_agency_printings`); an uploaded COI alone
+  no longer triggers "add ACORD 25"; the certificate checklist reads the real holder (phantom
+  `has_certificate_holder_requirement` gone); a placeholder holder / payee / mortgagee is an owned blank on its
+  boxes (`_resolve_rejected_party_box` + the `_rejected_facts` ledger). Row cells cleared with a refused name are
+  cascade, not findings (`test_two_account_divergence` caught it).
+- **D6, round 3:** packages whose only "certificate requested" evidence was an uploaded COI lose that soft stop, and
+  packages whose producer card was two spellings of one agency lose that conflict - both UP. A suffix-less
+  "Commercial Credit" / "National General" third party would now be blanked.
+- **Left:** a 3-letter acronym placeholder ("FIO"); a look-alike gap fill writes into an INSURED company-name box
+  (the vocabulary rule is off there on purpose - an insured's name is often ordinary words; insured CONTACT boxes
+  take it); an account org typed as "Test" or a person's name is printed;
+  values from a document naming NO agency are kept (whose they are cannot be told); the COI's umbrella note is the
+  umbrella chat's.
+
+## ORBIN - which lines and forms the package has, full pass (2026-09-14)
+
+Items 9/10, round 2 (owner: "fix all the issues properly"). Offline replay of e7084347, no paid calls.
+- **ACORD 137 (item 10) - root cause is form filling, not the model.** Every 127-shaped resolver read the 137's row
+  letters as vehicles. New `services/state_auto_grid.py` owns every 137 `Vehicle_*` box: the section comes from the
+  template's own widgets + page heading; the symbol-row and CSL-tick tables are pinned by a test against both templates'
+  printed labels. The vehicle deductible, phantom-row and CSL-or-split resolvers step aside for those boxes. Orbin 137 CO:
+  CSL + $1,000,000 in "CSL / BI EA PER", Med Pay $5,000 + sym 2, UM CSL $1,000,000 + sym 2, sym 7 on comp and collision;
+  264 Truckers / Motor Carrier boxes blank and never asked; gap-fill questions 327 -> 25.
+- **Hired physical damage** (the 137 page-1 COMP / COLL deductible boxes) is asked of the document, no longer stamped
+  through the 127 binding. Orbin's $1,000 comes from the Auto Elite Extension (CA7450 M), which no fact carries. Latent
+  bug closed: on a fleet of three the owned collision deductible landed in the Truckers and Motor Carrier sections.
+- **Cover / scorer door (item 9):** an explicitly false `has_<line>` flag outranks an identity-only row (a borrowed
+  policy number cannot revive Property / Crime / WC); the no-rows legacy branch drops flag-denied lines (found by the
+  fuzz); the cover now receives the session flags (it read `facts["flags"]`, a key facts never carry).
+- **Questionnaire (item 9):** `_drop_not_applicable_questions` gained a second witness - the stamper's absent-coverage
+  owner for ACORD boxes, `line_presence` for facts (`line_of_fact_key` added). Selecting ACORD 130 still asks. The live
+  generator stopped asking Orbin's producer four WC / Employers Liability questions.
+- Tests: `tests/test_state_auto_grid_14sep.py` + `tests/test_coverage_presence_14sep.py` (184, fuzz included). Suite
+  8238 passed / 1 failed (httpx).
+- **D6:** a generated 137 fills more boxes. `_ok("lines_of_business")` can only go DOWN, and only where a package's line
+  evidence was identity rows its own false flags deny. Orbin unchanged.
+- **Asked, not done (prompt):** a `lines_of_business` definition; a hired-auto physical damage fact (would make the 137
+  hired PD boxes deterministic). Both can ride v21 if no package has run on it yet.
+- **Left:** 141 / 160 wrong forms (owner: do not touch); ACORD 131 per-form Structural still counts EL on a no-WC package
+  (score - Brent); the questionnaire still offers some owned-blank boxes (127 PD per accident on a CSL policy); the
+  loss-payee question says "property policy".
+
+## ORBIN - items 9/10 checked through what the client sees (2026-09-14)
+
+Owner: "confirm ... tested with all the values that can break them". Asserted on the rendered output, not the primitives.
+- **Cover PDF, narrative fallback, scorer Applicant Info:** read off the ReportLab PDF (pdfplumber), the plain-text
+  fallback and `_compute_category_breakdown`. Orbin prints Liability, Inland Marine, Automobile, Umbrella on all three.
+- **137 fuzz through `map_facts_to_form`:** what prints must equal what the grid decided. Found: a split part holding
+  several amounts passed straight through and printed `25,000,050,000,010,000,050,000`. Fixed: a box printed for one
+  amount only takes a fact stating exactly one (`state_auto_grid._one_amount`), else the document is asked.
+- **HELD, pre-existing, every form:** `display_canonicalizer.canonicalize_currency` keeps only the digits. `$1M` -> `1`,
+  `$5K` -> `5`, `$1,000,000 / $2,000,000` -> `10,000,002,000,000`, `25/50/25` -> `255,025`. 911 money boxes, 16 forms.
+  Orbin's literal values print right (full digits), but extraction keeps amounts "as-is", so shorthand reaches facts
+  whenever a document prints it. Pinned by two strict xfails; fix waits for the owner's go-ahead.
+- **Questionnaire filter fuzz (480 packages):** never drops a non-WC or mention-only question; ACORD 130 keeps every WC
+  question; a decisive ABSENT drops, PRESENT / UNKNOWN keep.
+- **Noted, blank direction:** a Truckers / Motor Carrier deductible written "$2,500 each auto" is removed by a post-fill
+  guard; every other deductible shape prints.
+- **Noted, test isolation (pre-existing, not touched):** `tests/test_production_guards.py:31` stubs
+  `reportlab.platypus` (and more) in `sys.modules` at import and never restores it, so in a full run every later cover
+  test silently gets the plain-text fallback, never ReportLab. The new cover test reads either renderer.
+- Tests: `tests/test_screen_level_coverage_14sep.py` (14 + 2 xfail), `test_state_auto_grid_14sep.py` 73 (+8). Suite
+  8314 passed / 1 failed (httpx) / 21 skipped / 2 xfailed. 9 extra failures in that run were phantoms: another chat
+  rewrote `extraction_service.py` mid-run, breaking `inspect.getsource`; all 9 pass alone.
+
+## ORBIN Chat 5 - do not ask the client for what we already have (2026-09-14)
+
+Items 13/14/15. Owner: "fix all the pointed out issues ... do not break anything". Offline replay of e7084347
+(merged facts rebuilt from the plaintext per-doc facts), no paid calls, nothing sent.
+- **14 "Driver 25":** already fixed by BUG-07 (11e1969, 8 Sep) - the number was the old `group_counts` over
+  QUESTIONS. Live replay: 0 numbered questions, all 156 raw `Driver_*` boxes internal. Re-pinned on the real 127.
+- **13 Subaru re-asked - a rule:** the table was raised from BLANK BOXES (35 on Orbin: GVW, a guard-blanked body
+  type, 33 on rows B-D the form leaves blank for one vehicle) under fixed "Please list" wording. Now the ROWS decide:
+  list mode vs confirm mode ("We found 1 vehicle in your policy declarations..."); a complete fleet also gets its
+  confirm table (PASS 1c); confirmed + unchanged + no required blank = not asked again (`_client_confirmations`).
+- **Disagree with 11sep-form-improvement.md item 11** ("with rows present we ask nothing"): measured on an empty
+  synthetic 127. On the real session the table was still raised.
+- **ERIN ROYAL:** the Drive Other Car named individual sat in `auto_drivers` (the extraction schema has nowhere
+  else; its territory note even names a DOC schedule). Stamper refused her, scorer counted her, questionnaire seeded
+  her. `named_individuals.separate_named_individuals` runs once after `merge_facts` in `_finalize_pipeline` (no
+  driver details AND printed under a named-individual heading, never a driver heading); re-runs retract the stale row
+  via `delete_facts`. `_is_name_only_record_echo` reads the new key; the fence keeps the territory (`auto_` prefix).
+- **15 confirm-or-correct:** `confirm_known` + `_build_confirm_questions` (core facts, client audience, source
+  verified, no judgment, no FEIN/DOB/licence, optional). send/client_view carry `confirm`, `current_value` (rebuilt
+  from session facts) and `source_labels` (doc TYPE, never the file name). `__CONFIRMED__` -> `evidence_state:
+  user_confirmed`, value and boxes untouched, carried across re-runs. Receipt kind `confirmed`. Questionnaire: "This
+  is correct" / "Change it", table "Everything here is correct"; ARQ modal "Add confirmations".
+- **Also:** garaging the form shows is not asked (`Vehicle_PhysicalAddress_*` street/city/zip); an attested no-loss
+  state retires an EMPTY claims table (one with rows stays - it contradicts the attestation).
+- **Orbin after:** client list = vehicle table (confirm, 1 row), location table (confirm), driver table (list,
+  empty), applicant name + mailing address (confirm). Claims table and garaging question gone.
+- **D6:** Orbin package 78 -> 75, ACORD 127 82 -> 77, new warning "Driver schedule not provided" (client 6.3; the
+  policy schedules no drivers). Every package whose only "driver" is a DOC individual moves the same way. Brent first.
+- **Not done:** the extraction prompt still points DOC at `auto_drivers` (the merge rule makes it harmless; a
+  PROMPT_VERSION bump re-extracts every cached package - owner's call). Table corrections still apply and are flagged
+  on `review_fields`, not held - no producer surface resolves a held table yet.
+- Tests: `tests/test_known_data_not_reasked_14sep.py` (36). Suite 8403 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped / 2 xfailed. Frontend build clean.
+
+## ORBIN live run 4 - fixes from the 15 Sep run (2026-09-15)
+
+Live session 136e3c11 (policy only), traced against the 10 Sep run. Owner: "fix them all one by one ... do not
+commit anything". No prompt change, no version bump (`improving-ll.md` C90).
+- **Applicant phone = old agency's phone (regression):** Chat 4 moved the old agency to `expiring_producer_*`, which
+  `_FACT_ENTITY` did not know, so every ownership guard lost it. Twins now derived from
+  `extraction_service._PRODUCER_IDENTITY_KEYS`; the email-party and contact-twin checks read both axes.
+- **Premises $500,000 blank (126/131):** 10 Sep got it from the COI. The policy's label never matched the key, and
+  "$500,000 Any One Premises" failed `_is_currency`. Backfill now also matches the fact's FACT_REGISTRY `dec_labels`,
+  and a currency cell holding exactly one number backfills that number (`_backfill_value_for`).
+- **CBD "Y" (126 Q8):** the policy-wording check missed an acronym-led quoted term ("CBD products"), and the quote
+  path never ran it. Both fixed; applies to Y and N.
+- **$500 OTHER limit with no coverage name (126):** a later guard removed the name after the orphan sweep. The sweep
+  runs once more, last.
+- **131 transaction "Other":** `_POLICY_STATUS_RE` now covers `ExcessUmbrella_Transactiontype_*`.
+- **137 CO hired cost / days / vehicles:** exposure figures the policy does not state; owned blanks
+  (`_HIRED_EXPOSURE_BASES`). The hired / non-owned YES-NO boxes are still decided by the document.
+- **State-only boxes:** new `services/state_restricted_boxes.py` reads "APPLICABLE ONLY IN <STATE>" off the templates
+  (126: 4 Wisconsin UM/UIM + Med Pay boxes; 131: Montana initials). Blank when the risk's known states exclude it.
+- **EBL box:** `_OPTIONAL_COVERAGE_PART_BOXES` now scoped to ACORD 126.
+- **Cover page:** one name per line (`lob_canon._one_name_per_line`); premium subtotals no longer listed as unmapped
+  coverages (`is_charge_label`).
+- **Currency display:** "$1M" printed "1". `canonicalize_currency` now scales k / M / B and leaves text with more than
+  one number untouched.
+- **Report noise:** an emptied driver table (every row moved to named individuals) makes its table columns owned
+  blanks - 0 driver boxes reach gap fill on 127. An interest row whose name was removed now reports its other boxes
+  as one cascade, not separate blanks.
+- **7c changed approach:** did NOT stop asking about Additional Interest when no party is named (breaks the
+  prose-party contract). Fixed the reporting cascade instead.
+- **UI:** `AcordModal` IssueLine - a "Fix:" hint written inside brackets no longer leaves a dangling "(" and ")".
+- **Tests that pinned the old behaviour, updated (test was wrong):** two strict xfails and the digit fuzz in
+  `test_screen_level_coverage_14sep.py` (formatter fixed); the legacy-branch fuzz in `test_coverage_presence_14sep.py`
+  (one name per line); `test_entity_ownership` (assumed FACT_REGISTRY is the only home of a real fact - it now also
+  accepts the routed expiring twins).
+- **D6 for Brent:** fills change - premises prints on 126/131; state-only boxes, driver columns, hired figures, CBD
+  and 131 "Other" go blank. No score rule changed; fill-rate scores can move slightly (not measured live).
+- **Still reported, not fixed:** guard blanks on 126 GeneralLiabilityLineOfBusiness and 131 UnderlyingCoverage.
+- **Next:** re-run live with all 3 documents (policy + COI + narrative).
+- Tests: `tests/test_live_run_fixes_15sep.py` (81). Offline replay of 136e3c11: 13 / 13 checks pass. Suite 8486 passed /
+  1 failed (the documented httpx `test_arq_acord125_missing_only`) / 21 skipped. Frontend build clean.
+
+## ORBIN live run 5 - fixes from the policy-only re-run (2026-09-15)
+
+Live session 723eb79e (policy only), field by field against 136e3c11. Extraction re-read the policy (294 dec entries
+vs 276), so each difference was split into a code effect or extraction jitter. Owner: "fix all 1-10 in one pass". No
+prompt change, no version bump (`improving-ll.md` C91).
+- **137 Non-owned YES blank beside a printed CO - caused by the run-4 CBD fix:** the only "non-owned" text is the
+  Symbol 9 DEFINITION, now correctly refused as proof. `state_auto_grid` decides the hired / non-owned liability YES-NO
+  from the liability symbols when they PROVE coverage (Symbol 1); otherwise the document decides, as before.
+- **127 LIAB lost:** the model quoted a dec line an older rule refuses. The vehicle row's LIAB / MED PAY / UM / UIM /
+  COMP / COLL ticks now come from the covered-auto symbols (policy-level inheritance, as the symbol and deductible
+  columns already do); UM and UIM split by their own printed labels (`auto_symbols.symbols_labelled`). A decided COMP
+  rules out SPEC C OF L / fire / FT / FTW / LSP. "Yes" only - never "No" from absence.
+- **127 "Drive O":** the vehicle's OTHER coverage box is an owned blank - no fact carries a per-vehicle other coverage.
+- **131 CARE, CUSTODY, CONTROL (PERSONAL + "COMMERCIAL GENERAL CONTRA"):** owned blank - no policy states what
+  property of others the insured holds.
+- **131 umbrella OTHER limit "$3,000,000 Commercial Auto Liability":** owned blank on 131 only; ACORD 25's use of the
+  same field name keeps its tested contract.
+- **137 SPEC C OF L $1,000 without its tick:** an AI deductible amount survives only beside its own tick
+  (`_orphaned_deductible_amounts`); a stated amount is never touched.
+- **Employees "0 - 25" (the auto policy's non-owned rating band):** a count fact holds one whole number - which facts
+  are counts is derived from their own validators (`_normalize_count_facts`, merge tail); count boxes refuse a range
+  (Guard 3b). Human and derived values untouched.
+- **125 premises "COMMERCIAL GENERAL CONTRA" - client PART 19 #16 regressed:** extraction put the policy header's
+  BUSINESS DESC on the location, which bypasses the row-A fallback. One location now takes the full
+  `operations_description` at the schedule door; two or more keep their own text.
+- **"Coverage part not recognised: Drive Other Car":** added to the auto coverage-part vocabulary (SYS-05); still not
+  a line.
+- **"Left blank on purpose" lists:** a refused Y/N answer, its explanation and its incident dates are an UNANSWERED
+  question, not "a value found that could not be true". Tagged `kind: unanswered` (gate diff +
+  `_unanswered_question_fields`, structural only), kept in `guard_blanks` for arq, skipped by the field-QA advisory;
+  high-impact ones still show as "left blank by the AI". Replay: 125 96 -> 27, 126 70 -> 15, 127 44 -> 12,
+  131 107 -> 20, 137 9 -> 3.
+- **Decision:** the 13 Aug design listed "a policy definition offered as evidence for a Yes" as a finding to show. The
+  client's noise complaints outrank it; those are now unanswered questions (still logged).
+- **Tests that pinned the old behaviour, updated (test was wrong):** `test_run_20260813g` pinned the report entry's
+  exact keys (`kind` is additive); `test_schedule_row_a_fallback_parity` pinned None at the schedule door for the
+  premises column (still true without the account fact, now also shown on a second column).
+- **D6 for Brent:** only item 6 moves a score - the band no longer counts as "number of employees": Orbin package
+  66 -> ~63, ACORD 125 67 -> ~62 (the 15 Sep values). Fills: 127 LIAB and 137 non-owned YES print; care-custody,
+  umbrella OTHER, the SPEC C OF L amount, "Drive O" and "0 - 25" go blank.
+- **Found in the same run, fixed in round 2 (next entry):** 131 UMBRELLA / EXCESS, 131 "CGL - OCCURRENCE", and a Yes
+  carried by a form title (first written here as "131 explanations do not pair" - wrong, see round 2).
+- Tests: `tests/test_live_run5_fixes_15sep.py` (60). Offline replay of 723eb79e: every item check passes; run 4's 13
+  checks on 136e3c11 still pass. Suite 8546 passed / 1 failed (the documented httpx `test_arq_acord125_missing_only`)
+  / 21 skipped. No frontend change.
+
+## ORBIN live run 5, round 2 - what round 1 found and left (2026-09-15)
+
+Owner: "fix all the things properly". No prompt change (`improving-ll.md` C91, round 2).
+- **131 UMBRELLA / EXCESS - neither ticked:** the model ticked both and the single-choice guard cleared both.
+  `_resolve_umbrella_or_excess` ticks from the umbrella-family `coverage_lines` rows' own printed words; both words,
+  neither, or a row marked not carried stays with the document. Same boxes, same rule, on ACORD 25.
+- **131 CGL - OCCURRENCE missing beside a printed OCCUR:** the grid twins of the GL row's boxes are one underscore off
+  the `_INDICATOR_RULES` keys, so nothing matched them. Both now read `gl_form_type`; no stated basis still asks.
+- **A form title carried a Yes - correction to round 1:** 131's explanations DO pair with their questions. The gate
+  kept "uses cranes? = Y" on the explanation "Commercial General Liability Coverage Form" - present text, so presence
+  passed; it came off only because the same title sat in four boxes (cross-field duplicate guard). Used once, it
+  ships. `_is_coverage_form_title` (whole text ends "coverage form / part", no finite verb) is refused as an
+  explanation and as a quote. The measured-and-rejected endorsement-title rule judged vocabulary; this judges shape,
+  and "Subcontractors are required to carry coverage." never matches.
+- **Held for Brent, not changed:** on a non-renewal package ACORD 125 prints an already-ended policy term as the
+  PROPOSED dates while the warning calls it the expiring term. Blanking it extends the RC1b renewal rule and moves a
+  Tier 1 item (proposed effective date) - D6.
+- **D6:** no score rule changed. Fills: 131 UMBRELLA and CGL - OCCURRENCE print; a Yes explained only by a form name
+  goes blank.
+- Tests: `tests/test_live_run5_fixes_15sep.py` now 82. Live replay of 723eb79e: all round-2 checks pass. Suite 8568
+  passed / 1 failed (the documented httpx `test_arq_acord125_missing_only`) / 21 skipped.
+
+## ORBIN live run 6 - the seven things round 2 left (2026-09-15)
+
+Live session 2748fcbf (policy only). Owner: "fix all 7 in one pass ... properly and completely". No prompt change
+(`improving-ll.md` C91, run 6).
+- **126 hazard row 3 = row 1:** extraction read the class rows again under "Location 000" (the carrier's policy-level
+  heading); the de-dup key needs a territory and this policy prints none, so nothing merged. Rows with no territory
+  now match on class code + exposure (`_SCHEDULE_WEAK_IDENTITY`); a territory row absorbs such a copy only when it is
+  the only match; a different basis or a figure-less exposure never merges; a zero location yields to a real one.
+- **126 LOC # blank - found while fixing row 3:** the number box refused the label "Location 001". It prints ACORD
+  125's own number for that premises ("1") when one premises carries it, else the document's ("001"); "Location 000"
+  is an owned blank.
+- **126 "PROPERTY DAMAGE $1,000":** the pollution endorsement's deductible (already right on the OTHER row). Tick /
+  amount pairs are derived from the schemas (126 PD / BI, 137 COMP / SCOL; collision declared); OTHER rows stay
+  governed by their description.
+- **Guard 4 deleted real data:** 127 garaging street + garage description - a PART of the applicant's own address
+  never matched the whole-address test; a contiguous 3+-token run carrying a number now counts, and premises and
+  garaging addresses count. 131 primary DESCRIPTION had no owner, so both copies went; `_ACORD_FIELD_RULES` now owns it
+  (row A; also 160's first premises) and 131's primary NAME (`applicant_name`).
+- **131 CARE, CUSTODY, CONTROL LOC "1":** the non-fillable schedule door stamped it before any owned blank was asked.
+  Both doors skip a box an owning resolver answers None (`_owned_blank_claim`); swept over 17 schemas, that box only.
+- **Clipped text (5 boxes):** every template's /DA is a fixed 8pt. `fill_pdf` shrinks a one-line box's own /DA to fit
+  (Helvetica metrics = Arial's, floor 3.5pt); multi-line and comb boxes untouched.
+- **131 Q2 edition vanished:** its only witness was the dec index. `_derive_gl_coverage_form_edition` reads it off the
+  document text (one distinct CG 00 01 / 00 02 edition, never over a human value); dec index and text must agree.
+- **Cover lists:** each box once with a count; a refused value the same form already prints is not listed (still in
+  `guard_blanks`, logged). Live 125: 32 -> 16.
+- **Proof:** fixes-off vs fixes-on replay of the live session - exactly 14 boxes change, all intended.
+- **Tests that disagreed, decided one by one:** `test_3b_the_loc_number_reaches_the_hazard_grid` pins "001" for a bare
+  "001" - the first cut stripped zeros; test right, code changed. `test_no_module_declares_its_own_yes_no_vocabulary`
+  caught a private Yes/No set in field_qa - test right, now `normalization.yes_no_token`.
+  `test_an_address_never_lands_in_a_name_box` asserted the 131 NAME box EMPTY - written when the box had no rule; its
+  intent (no address) holds, so it now asserts the applicant's name, and a nameless package still refuses the address.
+- **Known limits, not fixed:** a PD tick the gate ACCEPTS would still land a scoped deductible on the general PD row
+  (topic matching, deliberately not built); a one-line value too long even at 3.5pt still clips; the signed-PDF path
+  sets NeedAppearances=false after `fill_pdf` removed text appearances (pre-existing, not verified in Acrobat).
+- **D6:** no score rule changed. Fills: 131 description / name / edition, 126 LOC #, 127 street print; 126 row 3, the
+  PD amount and 131's CCC LOC go blank.
+- Tests: `tests/test_live_run6_fixes_15sep.py` (81). Suite 8649 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped.
+
+## ORBIN live run 7 - the 8 items and the root cause behind them (2026-09-15)
+
+Live session 3872ec28 (policy only). Owner: "find the root cause and fix it properly ... do not leave anything". No
+prompt change (`improving-ll.md` C91, run 7).
+- **Root cause:** boxes the facts already decide were still asked of the gap-fill model, so their answers changed run
+  to run - and they were being fixed one at a time. A 69-box audit of runs 4-7 (two classifiers per form plus an
+  adversarial verifier) sorted every unstable box into derive / owned blank / document read. Every verified derive and
+  owned blank now has an owner. Three of the 8 were report / screen defects.
+- **137 PARTNERS "104" (the Drive Other Car territory):** a count only from a whole number the auto dec prints for that
+  group, else an owned blank. EMPLOYEES tick = liability symbols prove non-owned AND the schedule is rated on employees.
+- **126 OTHER deductible "Property Damage Deductible $1,000":** an OTHER description that is only a printed row's name
+  follows that row's tick (`_misfiled_other_deductibles`); that tick was refused, so the row goes blank.
+- **126 aggregate OTHER ticked, nothing named:** an AI OTHER tick whose naming box is empty is removed. 145 tick -> box
+  pairs read off the 17 schemas and pinned (`_other_tick_partners`). Not on 141 / 160 (frozen).
+- **126 $ PAID TO SUBCONTRACTORS:** the sum of the GL schedule's ISO (C) Total Cost exposures; a "Location 000" copy
+  is not counted twice; "IF ANY" or two figures for one class -> blank. TYPE OF WORK SUBCONTRACTED = those classes' words.
+- **131 Q9 hired / non-owned:** Y from symbols attributed to liability (1, or 8 + 9) when the premiums are not indexed.
+  A premium must be one amount - run 6 explained Q9 with "100 $ 185.00" and "0 - 25".
+- **127 VEHICLE TYPE:** read beside the vehicle's own VIN on its CLASS line, or from a BODY TYPE that is really a type
+  -> PP Yes, SPEC / COML No; BODY stays blank. Found on the way: both schedule doors stamped `body_type` past the owner;
+  an owned blank now wins there (`_unless_owned_blank`; swept runs 4-7 x 17 schemas: BODY and 131 CCC LOC only).
+- **Cover page "left blank by the AI" listed owned blanks:** field QA skips a box an owner decided empty, asked with
+  facts + flags like the stamper. Live run 7 high-impact lists: 137 89 -> 3, 131 27 -> 6, 125 12 -> 7.
+- **"Policies in this submission" listed "No Coverage" lines:** a line with no number and no premium is not a policy
+  when it carries nothing else (run 7) or only the package header's carrier and term (run 4's shape). A different
+  carrier keeps its scope. Build and read side (`policy_line_records`); all four live runs now list 4 policies.
+- **Audit extras, now owned:** 126 CGL tick; 127 COST NEW, garaging address (COUNTY only when printed - runs 5/6
+  printed an unstated "Denver"), PD valuation, the USE set (no stated use -> blank; "NA" no longer ticks OTHER),
+  named-peril ticks when the grid is captured; 131 ANNUAL PAYROLL (run 7 printed one class's $39,300), # EMPL one whole
+  number, umbrella third limit (P&AI $3,000,000 as a pair from the umbrella dec; Guard 2f now judges AI descriptions
+  only), underlying EBL tick; 125 premises counts' blank.
+- **Left with the document (audit: document read):** 125 insured phone, 127 registration state / towing / rental, 131
+  underlying information, 137 hired / non-owned states. **Not done:** 127 BODY "SEDAN" from the model name (owner:
+  BODY stays blank).
+- **Tests that pinned the old behaviour, updated (test was wrong):** 131 # EMPL pinned "0 - 25" (a rating band); the
+  run-5 SCOL test (named perils are not carried when the grid names none). `test_both_call_sites_still_carry_the_
+  fallback` was right - the code was shortened to keep the fallback in its window.
+- **Adversarial review of this round (4 lenses, every finding verified: 19 confirmed, 11 refuted) - all fixed:**
+  umbrella third limit is never a retention, the umbrella's own name, an underlying or a primary-schedule figure; a
+  vehicle's code lines go to their own VIN by the layout's side (a VIN-first schedule handed a PRIV PASSENGER line to
+  the next truck - class and territory get the same rule); the 137 tick reads the value (0 / NONE / N/A = not rated ->
+  blank) and a count prints only a stated use-own-auto number (ISO's figure is the total headcount); garaging and PD
+  valuation only on a one-vehicle schedule (or a row's own symbol); subcontract cost keys on territory, drops a
+  Location 000 copy or class total, blanks any other unplaced figure, a "$"-less figure or an unread basis, reads
+  "(C) Total Cost" wording and excludes OCP; named-peril blanks leave ACORD's codes (SCOL, SPEC C OF L) and any
+  unparsed label with the document; ACORD 130's payment / audit OTHER ticks survive beside their owned code boxes; a
+  backfilled total_payroll equal to one GL class's payroll exposure never prints on 131 or 125; the auto dec's USE cell
+  is read when the fact is empty; field QA runs off the event loop.
+- **Held for Brent (D6):** stop the dec-entry backfill making one class's payroll exposure the `total_payroll` FACT
+  (scores read it). **Not changed:** `auto_symbols` has no named-peril key, so a grid row "Physical Damage Specified
+  Causes of Loss" still reads as physical damage (pre-existing; moving it touches the PD warnings - D6).
+- **Proof:** changes-off vs on replay of runs 4, 5, 6 and 7 - the same boxes move the same way on all four; run 7 asks
+  the gap-fill model 565 -> 534 questions, none added.
+- **D6 for Brent:** no score rule changed. More boxes filled from facts (fill rate / confidence can move slightly up);
+  131 payroll, 137 partners, 127 county and the misfiled 126 OTHER row go blank.
+- Tests: `tests/test_live_run7_fixes_15sep.py` (265). Suite 8914 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped.
+
+## ORBIN live run 8 - one polluted index behind four symptoms (2026-09-15)
+
+Live session 3d7b49b6 (policy only). No prompt change (`improving-ll.md` C91, run 8).
+- **Root cause:** the per-line policy-number index (`current_numbers_by_line`) counted the umbrella's SCHEDULE OF
+  UNDERLYING INSURANCE entries - line "General Liability" / "Commercial Auto", number = the umbrella's own 6J7 - under
+  GL and auto. Both lines looked like two contracts, so every consumer needing ONE number refused: "Policies in this
+  submission" listed GL and auto with a dash, the GL rows were never re-bound to EMC Property & Casualty, the 126
+  header carrier went blank, and (runs 5 and 8) the umbrella lost its page scope, so the auto questions read its 62
+  pages. Fix (`_entry_line`): an entry whose section names another line counts under the section's line when the
+  number is that line's own and not the entry line's. A number home on both lines (a package policy) stays; no home
+  = old behaviour.
+- **Unnumbered coverage rows** take their line's one verified number (`_fill_missing_line_numbers`, merge tail,
+  before carrier binding): empty numbers only, one candidate only, never a denial row or a form number.
+- **126 OTHER COVERAGE printed the umbrella's schedule of underlying insurance:** a gap-filled OTHER description
+  naming one of the package's own policy numbers describes a policy - blanked with its tick (Guard 2g). Any printing
+  counts ("6E74002", "BBC 7263"); never a prefix stub (GL123 is not GL12345), a form number, a date or a class code;
+  not on 141 / 160. `_is_package_policy_number` (also the loan-reference guard) now uses the same-contract door.
+- **126 OTHER limit $150 (a premium):** cleared by the existing unnamed-row sweep once 2g empties the row. A "never
+  called a limit" guard (2h) was written and WITHDRAWN after review: carrier schedules print limits under a column
+  header ("Medical Payments $5,000"), so it blanked real limits (~199 such printings in 360 stored sessions), and it
+  changed no final box on any live run.
+- **131 FOREIGN GROSS SALES $1,305 (class 91580's premium), ANN GROSS SALES offered $39,300 (the payroll exposure):**
+  the payroll owner now owns both, on 131 and 186 (141 / 160 frozen). Row A = the stated `total_payroll` /
+  `total_revenue` (a $0 only when a person typed it) or blank; a backfilled total equal to ANY one GL class exposure
+  (any basis) never prints. Foreign sales and the 131's rows B-F (subsidiaries, not premises) = owned blank on a
+  carrier-documents-only package (new flag `_carrier_documents_only`: dec page, policy, binder, endorsement,
+  certificate, loss run), else the document decides.
+- **Checked, not changed:** 127 VEHICLE TYPE is PP Yes / SPEC, COML No on all five runs once the merge tail runs.
+  126 LIMIT DESCRIPTION is blanked by the existing truncated-copy guard (the full wording sits in remarks), so the
+  OTHER row ships fully blank. 125 other-policy grid: row order and the umbrella's label follow extraction order -
+  every label is one the document prints; pre-existing, not changed. 126 per-location tick: document read.
+- **Removed:** `_payroll_is_one_class_exposure` (no callers left) and `_resolve_annual_payroll_box` - its 125 box
+  exists on no schema, so run 7's "125 annual payroll" belt was dead. **Tests updated (stale):** the run-7 ownership
+  pin (widened families); run 7's two-premises case (two premises are one business - the value prints now).
+- **Not fixed - held with the D6 fact item:** a refused backfilled payroll is not re-asked in the ARQ (the fact counts
+  as present). It closes with the held `total_payroll` source fix.
+- **Adversarial review (3 lenses) - fixed:** a number moves to the section's line only when the entry's own line
+  has a DIFFERENT number of its own (an umbrella part of a package policy on its GL pages, hired auto on a GL policy
+  kept their one number); a section-only entry counts as home; the fill never takes a prior-term number, folds two
+  printings of one contract (`BBC7263` / `BBC7263 - 26`) and leaves a row that prints its own NAIC (a certificate's)
+  alone - so does carrier binding by line; ACORD 25: a row whose line canonicalises to another line cannot fill a
+  column (`_row_names_another_line`) - run 8's bare "Liability" row had taken the Excess and Auto columns and blanked
+  the umbrella number and two INSR LTRs. **Left (fact-level, no box moves):** a "Hired Auto Liability" row on a GL
+  policy can take the auto number; row order / label on the 125 other-policy grid.
+- **Proof:** fixes-off vs on replay of runs 4-8, merge-tail steps re-run in both arms: 5 boxes move - 126 carrier
+  prints, 126 OTHER description and $150 blank, 131 $1,305 blank, run 6's 125 umbrella label. Run 8's policies: GL
+  and auto numbered, GL carrier EMC P&C. Page scopes now identical on all five runs. Gap fill asks 2 fewer boxes per
+  run (131 gross / foreign sales), none added.
+- **D6 for Brent:** no score rule changed. Three wrong AI values go blank and the 126 carrier prints, so per-form fill
+  rate can move slightly. **Still held:** 125 expired proposed dates; the `total_payroll` FACT backfill;
+  `auto_symbols` named-peril key.
+- Tests: `tests/test_live_run8_fixes_15sep.py` (100). Suite 9017 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped.
+
+## ORBIN live run 9 - run 8 held; two fixes, the rest verified (2026-09-15)
+
+Live session 07bb6d10 (policy only). No prompt change.
+- **Run 8's fixes held live:** 126 carrier EMC P&C; all four policies numbered with their carriers; the 126 OTHER
+  coverage row and 131 foreign sales blank.
+- **127 USE ticked SERVICE:** extraction returned `auto_vehicle_use = "service"` while the dec's own cell prints
+  "USE: NA" ("service" is printed 292 times, so it passed the text check); runs 5 and 6 did the same with
+  "commercial". The dec's USE cell now decides the boxes; a person's answer still wins; several cells -> blank.
+  Replay of runs 4-9: no USE box ticked on any run. **Held for Brent (D6):** the inferred `auto_vehicle_use` FACT
+  itself (the auto-completeness score reads it).
+- **Pre-form screen:** "2 policies, 2 values" counted values twice (now 4 policies, 2 values); a source listed twice;
+  the auto policy titled "COVERED AUTOS LIABILITY" (now the line's own name, the 125 grid's rule -
+  `_names_a_standard_line`); 2- and 4-digit years mixed (the table shows 4).
+- **Checked, not changed:** 126 OTHER deductible "Limited Pollution Coverage - Work Sites $1,000" is the
+  endorsement's own "Property Damage Deductible $1,000 Each Pollution Incident" (tick blank: the model cited
+  nothing); 126 LIMIT APPLIES PER project + location are both stated by the GL extension (X / Y; per location only
+  when a contract requires it) - document read; 137 hired PD $1,000 / $1,000 matches the auto extension, 5 of 6
+  runs; 127 SYM/AGE "7" follows the documented symbol mapping (`docs/AUTO_SYMBOLS_BRIEF.md`); 126 products Q7 / Q8
+  "N" - the evidence gate's known borrowed-N residual (no quote is stored to check it).
+- **Adversarial review - fixed:** a producer's Data Consistency confirmation counts as a person's answer
+  (`_PERSON_SOURCES`; the no-loss set untouched); one USE cell printed twice is one answer; "N/A.", "NONE.", "-" are
+  non-answers; a worded use the table does not know ticks OTHER; a reference, a code ("7383", "LIAB-I") or a
+  negation ("NOT FOR HIRE") leaves the fact to decide (`_use_cell_reading`); the screen counts distinct policies
+  (a package policy over three lines is one) and reads 2-digit years with a century pivot. **Held (D6):** with the
+  box blank, the inferred use still stops the -5 and the ARQ question - closes with the held fact gate.
+- Tests: `tests/test_live_run9_fixes_15sep.py` (42). Suite 9059 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped. Frontend build clean.
+
+## 11sep rounds 4-5 (11-14 Sep) - pointer, never logged here
+
+Full detail in `11sep-form-improvement.md` ROUND 4 / ROUND 5.
+- Interest ticks: inflection-aware role match + `_interest_tick_contradicts_its_party` (Guard 2d-iv).
+- Producer card: `_suggest_for_field` prefers the ONE submission-backed agency (was string length - CRS beat
+  ThinkSmith).
+- Address line two repeating line one / the city: Guard 2d-v `_line_two_repeats_its_block` (LineTwo only).
+- The agent in the applicant's contact boxes: `separate_contact_twins` at the fact, per document, before the merge.
+- **D6, scores DOWN:** Run A 70 -> 68 (Needs Work -> Major Gaps), Run B 37 -> 35 - Tier 1 contact had been
+  "answered" by the agent's own name.
+- Tests: round4 (21), producer picker (29), round5 (34), contact twins (24).
+
+## ORBIN pre-Brent round - seven fixes from the run-9 audit (2026-09-15)
+
+Owner: "Do it" on the seven items the run-9 honest audit left. One prompt change (the cover page SQS paragraph,
+`improving-ll.md` C92). No extraction prompt change, no version bump.
+- **131 P&AI third limit printed the umbrella's $3M after the dated cut to $1M** (item 9's last leak).
+  `_umbrella_other_limit_superseded`: an amount equal to the dated change's `prior_value`, or above the current
+  limit, is blanked with its label. A real sub-limit ($500,000) still prints.
+- **Rows B..N never take a scalar rule - one door, `pdf_service.scalar_rules_reach`.** The stamper had the guard;
+  `arq_service._canonical_key` did not, so 131 location row B's name box mapped to `applicant_name`.
+- **Producer when the account can't be read (item 4):** `_submitting_account_for` returns `{"unreadable": True}` on a
+  DB error, a missing row or no organisation; the merge then leaves the producer blank (owned blank, not sent to
+  AI) instead of printing the expiring agency. No account concept (offline tools) keeps the legacy behaviour.
+- **Prior carrier from the expiring policies:** `_derive_prior_carrier` (merge tail) - carriers on expiring
+  `coverage_lines` rows that carry a number or premium, one per legal entity (`strict_entity_key`), max 3,
+  labelled derived. Never over a stated value or an explicit no; quotes and loss runs ignored.
+- **Questions (item 11):** loss-payee question now covers vehicles, equipment and buildings (was property-only);
+  "years in business" dropped when "start date" is asked (`_merge_business_age_questions`); years re-derived after
+  an answer. Legal name and mailing address reach the client only as optional confirm items showing the value.
+- **Cover page:** the paragraph called the package score an "average" and named a best form that was not the top.
+  The prompt gets the score's own name and the ranked list; `_checked_sqs_reasoning` rejects either claim and falls
+  back to a deterministic sentence.
+- **Proof, offline replay (live 07bb6d10, client e708):** full package - exactly 2 deterministic boxes change (131
+  OTHER P&AI description / amount -> blank); live policy-only run - 0. Client questions 32 -> 29, no plain
+  legal-name question. FIPO planted: 0 survive. Field QA: 0 bad comparisons.
+- **D6:** the derived prior carrier moved no score (live 65 -> 65, full package 74 -> 74). Still a new value on the
+  125 - tell Brent.
+- **Not done:** 126 Q7 / Q8 unsupported "N" (evidence-gate residual); a fresh three-document live run; 125 package
+  carrier box and proposed dates (held for Brent).
+- **Own-diff review, fixed:** the derived prior carrier counted as "a prior carrier is named" against a New Venture
+  confirmation - it is the CURRENT carrier, nobody named it (`loss_history_state._is_derived_prior_carrier`, one rule
+  name for both sides); a New Venture's Not Applicable years could be overwritten by the years derivation (now
+  respected in `_derive_years_in_business`, the one door); a derived years value now follows a corrected start date.
+  `test_party_role_14sep` pinned WHERE the account lookup lived - test updated, the seam is unchanged.
+- **Checked, not changed:** the umbrella "bigger than the umbrella" test cannot blank an aggregate (aggregate and
+  occurrence labels never reach the pick); `prior_carrier` lands on no ACORD box (no schema field or alias); every
+  re-run path passes the user through, so the account survives a Data Consistency confirm.
+- **D6 addendum:** account unreadable (DB error, or no agency on the account - required at signup, so legacy or
+  cleared accounts only): client package 74 -> 72, Tier 1 producer missing. The derived prior carrier feeds Loss
+  History's "prior carrier identified" - it can raise scores on other renewals; 0 on both Orbin packages.
+- Tests: `tests/test_brent_prep_fixes_15sep.py` (62). Suite 9121 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 21 skipped.
+
+## ORBIN remaining items - fixed before the next run (2026-09-15)
+
+Owner: "fix all the remaining things before next run". Asked and decided: follow Brent's own ACORD 125 answer key on
+page 1; fix the four score-moving items now (testing phase, no real users); leave the 126 borrowed-N residual; no
+prompt change (v21 stays).
+- **Signed PDFs showed blank values in Acrobat:** `fill_pdf` deletes each text box's /AP and
+  `inject_signature_into_pdf` then set NeedAppearances false. It stays true now. Confirmed on the real 125 template.
+- **ACORD 125 page 1 = the policy being applied for** (Brent's key, `125_reference/_extracted.txt`):
+  - CARRIER / NAIC / POLICY NUMBER: owned blank when only the current policy's documents name the carrier
+    (`carrier_is_current_policy`). A quote / application naming it, a person's entry or a one-carrier renewal prints.
+  - POLICY PREMIUM and the line-of-business premiums: blank unless a quote / application prices it or a person
+    enters it (`premium_is_current_policy`). Reverses the 12 Aug "dec values must reach the form" for these boxes -
+    the figures now print in the prior-carrier grid.
+  - QUOTE ticked on a non-renewal 125.
+  - Proposed dates: a term only expiring-programme documents print moves to prior_* once started - in force -> the
+    next term, derived (low confidence); ended on a non-renewal -> both asked of the producer. A quote /
+    application's term never moves; a renewal in force from a dec now also proposes the next term
+    (`_route_renewal_dates(mf, docs)`; without docs only the old renewal rule runs).
+  - Prior-carrier grid year one = the current policies (`_line_records`, the review screen's list): own carrier,
+    number, line premium (the LOB picker - auto $2,991, never the $1,496 part) and dates, only once the term moved and
+    no quote added policies. "The current policy is not prior coverage" still holds everywhere else. One box, one
+    policy: two OTHER lines leave OTHER blank (it kept the last one).
+- **Vehicle use:** the fact follows the auto dec's USE cell (`_gate_inferred_vehicle_use`). "USE: NA" drops the
+  inferred "service" / "commercial", so the client is asked.
+- **Payroll:** the dec-entry backfill refuses a total equal to one GL class exposure (`_is_one_gl_class_exposure`), so
+  the ARQ asks.
+- **ACORD 131:** Employers Liability counts in the per-form checklist only when WC is carried or an EL limit is stated.
+- **Specified Causes of Loss:** its own symbol key (`auto_symbols.SPECIFIED_CAUSES`) - its symbol no longer ticks the
+  137 Comprehensive and Collision rows, and answers the comprehensive half of the PD symbol check, never collision.
+- **Test hygiene:** `test_production_guards` stubs a module only when it cannot be imported (it left ReportLab
+  stubbed for every later cover test).
+- **Proof, offline fixes-off vs on (live 07bb6d10, client e708):** the same 24 / 25 boxes move on both - 125 page
+  one, the prior-grid year, the section headers' ended effective date. Nothing newly sent to gap fill. A fresh run
+  asks the producer both proposed dates and the client the vehicle use.
+- **D6 - scores DOWN, Brent first:** live package 63 -> 59 (Major Gaps -> Not Ready), client 72 -> 68 (Needs Work ->
+  Major Gaps): about -2 for the unknown proposed term (Tier 1), -1 for the vehicle use, -4 together. ACORD 131 +5
+  (73 -> 78 / 58 -> 63); ACORD 125 -4 (fill rate).
+- **Tests updated (the decision changed, the test was right before):** `test_line_binding_14sep` (the printed term is
+  kept as the prior term), `test_two_account_divergence` (QUOTE ticks, deterministically).
+- **Not done:** 126 Q7 / Q8 borrowed "N" (owner: leave); the three prompt items (owner: skip); the section forms keep
+  the current policy's identity (Brent point 1) with the ended date blank.
+- **Own-diff review, fixed:** a certificate (ACORD 25 / 28) documents the EXISTING policy - once the term moved, its
+  dates print the moved term (`_moved_current_term`), never the derived next term an in-force package now holds in
+  `effective_date`; the 131 header's umbrella-date override skips an umbrella whose own term IS the moved term. No box
+  moves on Orbin (0 differences); pinned by a sweep of every 25 / 28 date box.
+- Tests: `tests/test_remaining_items_15sep.py` (93). Suite 9217 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 18 skipped (21 before: cover tests the ReportLab stub used to skip now run).
+
+## ORBIN live run 10 - five fixes (2026-09-16)
+
+Live session ed191e49 (policy only). Held live: 125 page 1 (carrier / NAIC / policy number / dates / premiums blank,
+QUOTE), the prior-carrier grid (GL and Auto, 2025), each section's own carrier and number, 127 USE blank, no borrowed
+126 "N". Package 61 (Major Gaps). Owner: "fix them cleanly". One prompt change (`improving-ll.md` C93).
+- **Cover summary said "no prior carrier detail"** while the cover printed it: the AI was never given it, and the cache
+  key ignored the data. The prompt now carries Prior Carrier, the moved Current Policy Term and "Proposed Effective
+  Date: To be confirmed"; the cache key is the prompt's own hash.
+- **125 Q4 listed four EMC policies under a blank CARRIER.** "This company" is the receiving carrier: the list and its
+  Y/N are owned blanks while `carrier_is_current_policy`; a person-named carrier lists only that company's policies.
+- **126 OTHER limit "Commercial General Liability / Commercial Auto Liability $1,000"** (runs 4, 8, 9 each printed
+  other junk there): nothing owned the row - gap fill, plus a substring rule sending the amount to `gl_deductible`
+  (ACORD's tooltip: a LIMIT; the 126 has its own deductible boxes). `_resolve_gl_other_limit` (126 only): the GL
+  declarations' one printed limit with no box of its own, as a pair; none or two -> owned blank. ACORD 25 unchanged.
+- **Cover POLICY PERIOD printed an em-dash pair**: now "To be confirmed (current term 07/15/25 - 07/15/26)"; unknowns
+  read "Not provided" (`_cover_info_values`).
+- **Cover warnings listed "NamedInsured FullName"** as left blank by the AI - the other-named-insured rows. An empty
+  row B..N whose row A is filled is not listed (`field_qa._spare_row_of_an_answered_group`).
+- **Proof, fixes-off vs on (run 10):** 8 boxes move (125 Q4), 3 leave gap fill (Q4 Y/N, the 126 OTHER pair), 2 cover
+  warnings go, 3 prompt lines added - nothing else. No score rule changed; the 125 fill rate can move slightly.
+- **Tests updated (the decision changed):** `test_live_run_fixes_15sep` - the orphan-sweep pair moved to ACORD 25 (still
+  gap-filled there); a 126 test proves a declared other limit keeps its amount.
+- Tests: `tests/test_run10_fixes_16sep.py` (44). Suite 9281 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 18 skipped.
+
+## ORBIN live run 10 - the remaining-items change held; one 126 row fixed (2026-09-15)
+
+Live session ed191e49 (policy only). No prompt change.
+- **Held live (the entry above):** ACORD 125 page 1 is the policy applied for - proposed dates asked, CARRIER /
+  premiums blank, QUOTE ticked, the 2025 GL / auto policies in the prior-carrier grid; section headers keep the
+  current policy with the ended date blank; 127 USE blank; the pre-form screen shows 4 policies, 2 carriers, the
+  line names ("Commercial Auto") and one date format.
+- **126 OTHER coverage limit line "Commercial General Liability / Commercial Auto Liability" $1,000:** two faults.
+  The $1,000 came from a Pass-1 rule `GeneralLiability_OtherCoverageLimitAmount -> gl_deductible` (this run's
+  `gl_deductible` was the pollution endorsement's "$1,000 Each Pollution Incidents") - a deductible in a box whose
+  ACORD tooltip is "Enter limit", on 126 and 25 alike. Rule removed. The description named two whole lines: new
+  Guard 2g-ii clears a gap-filled OTHER description naming two or more different main lines (GL, auto, umbrella,
+  inland marine, property, WC), or only the form's own line, with its tick; one coverage stays ("Hired and Non-Owned
+  Auto Liability", "Liquor Liability", "Employee Benefits Liability"). Not on 141 / 160 or certificates.
+- **Proof:** replay of runs 4-10 - the 126 OTHER limit line is blank on every run (was $500 / $150 / the line list
+  + $1,000); the OTHER deductible row keeps the document's "Limited Pollution Coverage - Work Sites $1,000" on runs
+  4, 6, 9.
+- **Test updated (test was wrong):** `test_acord25_final_three_20260906` pinned the deductible -> limit rule; the
+  box is a limit by ACORD's own tooltip.
+- Tests: `tests/test_live_run10_fixes_15sep.py` (19). Suite 9236 passed / 1 failed (the documented httpx
+  `test_arq_acord125_missing_only`) / 18 skipped.
+
+## ORBIN live run 11 - a phantom WC policy and six boxes (2026-09-16)
+
+Live session 2ac7c1b7 (policy only). No prompt change.
+- **Phantom Workers' Compensation policy - a regression from the run-8 number fill.** The premium table's "Section 6
+  Coverage Premium: No Coverage" came back tied to WC and to 6C7 (the Inland Marine policy). The per-line number
+  index took 6C7 as WC's number, so the WC row was numbered: the pre-form screen listed 5 policies and ACORD 131
+  printed an Employers Liability underlying row (EMPLOYERS / 6C7 / dates) plus $1,000,000 E.L. limits. Now a denial
+  entry never names a number (`_entry_denies_its_line`); the fill skips a denied line and numbers a row that grants
+  nothing only when the number's own pages name its line; the WC census ignores a row whose only "grant" is another
+  line's number (`row_is_a_denied_line`, one door for the merge and the form).
+- **126 hazard row C = "Fungi Or Bacteria Exclusion ($33)"**, and $ PAID TO SUBCONTRACTORS / TYPE OF WORK blank: a GL
+  schedule line with no class code and no basis (the policy-level exclusion / endorsement lines) is not a
+  classification (`_is_rated_class_row`). Row C is an owned blank; the two boxes print again ($350,000, the 91585
+  wording).
+- **126 OTHER coverage "Fungi Or Bacteria Exclusion; Limited Pollution Coverage - Work Sites":** an exclusion title is
+  removed (give-back wording such as "Exception" / "Buyback" is kept); the real coverage stays.
+- **131 Q7 "Y", explained by "Commercial General Liability; Commercial Auto Liability":** an explanation listing 2+
+  lines is blanked (not the "other insurance" questions, not 141 / 160); the naked Y then goes.
+- **125 CYBER AND PRIVACY ticked** off `has_cyber`, read from a GL "Exclusion - Cyber Incident": a flag-only tick now
+  needs the line in the package's own inventory once 3+ policies are listed (`_census_omits_box_line`).
+- **127 BODY "SEDAN"** read off "2012 SUBARU OUTBACK SEDAN": owned blank on carrier-only packages unless a BODY label
+  prints it (owner decision).
+- **127 comp deductible blank:** "$ 1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO" -> 1,000 (one figure plus
+  deductible words only; "$1,000 Each Pollution Incident" is left alone).
+- **Own-diff review (two reviewers), 11 confirmed, all fixed:** a denial now takes nothing it should not - only a
+  BARE denial (no figure) leaves the index; only a LINE-level denial counts ("Towing: No Coverage" / "Hired Auto
+  Physical Damage: Not Covered" are parts); an unnumbered row is denied only when no un-denied number exists for its
+  line (a real WC policy beside the package's "WC: No Coverage" stays); the home check applies only when the number
+  has home pages; printings match raw ("6C74002"). Form side: exclusion stripping keeps the rest exactly as printed
+  ("$1,500", "Hired/Non-Owned"); the cyber census abstains when a policy name cannot be placed ("Commercial Package
+  Policy", "Data Compromise"); only Location-000 / credit lines stop being GL classes (a half-read class still blocks
+  a partial sum); a typed body or any BODY label keeps the body; "1%" is not a deductible amount; explanations to
+  questions about insurance itself (prior coverage, tail, lower limits, premium) may list lines.
+- **Proof, fixes-off vs on, each arm in its own process, evidence judge off (runs 4-11, real schema files):** run 11 -
+  5 -> 4 policies, 21 boxes, all of the above; runs 4-10 - one box (run 6 BODY). Replay lessons: stored schemas are
+  jsonb-reordered (Q/explanation pairing reads order); one process running both arms leaks caches; and the evidence
+  judge is an LLM call - its verdict flips borrowed 126 Ys run to run (INSTALLATION FLOATER, "insured contract",
+  parking), which is the live jitter on those questions, not a code order bug.
+- **D6:** the phantom WC policy leaves the screen, 131 E.L. and 125 cyber boxes leave, the 126 subcontract boxes
+  return. No score rule changed; fill rates can move a little. Tell Brent.
+- **Not done:** 126 Products Q1 "Y - INSTALLATION FLOATER INCLUDED" (a borrowed Y, gate residual).
+- **Caught by the suite:** my new `_EXCLUSION_TITLE_RE` redefined the evidence gate's pattern of the same name, so an
+  exclusion title could ground a "Yes" again (5 gate tests red). Renamed `_EXCLUSION_WORD_RE`; new
+  `tests/test_no_module_name_redefined.py` fails the build on any top-level name defined twice in pdf_service /
+  extraction_service.
+- Tests: `tests/test_live_run11_fixes_15sep.py` (95), `tests/test_no_module_name_redefined.py` (2). Suite 9376 passed /
+  1 failed (the documented httpx `test_arq_acord125_missing_only`) / 18 skipped, plus the new guard file (2 passed,
+  written after the suite started).

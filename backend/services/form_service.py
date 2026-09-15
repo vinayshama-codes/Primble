@@ -8,6 +8,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
+from services.lob_canon import COVERAGE_DENIAL_RE
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf, _OVERFLOW_CHAR_THRESHOLD
 from services.sqs_service import cross_validate, calculate_sqs, _check_loss_run_insured_match, _extract_narrative_doc_text
 from utils.validators import US_STATES, run_field_validations
@@ -59,8 +60,10 @@ _FORM_EVIDENCE_FACTS: Dict[str, dict] = {
     "ACORD_141": {"combine": False, "facts": [("inland_marine_total_value", "Inland marine value")]},
     # ── Additional Remarks - loss count when losses drove the narrative ──────
     "ACORD_101": {"combine": False, "facts": [("num_claims", "Prior claims")]},
-    # ── Builders Risk - project cost ─────────────────────────────────────────
-    "ACORD_133": {"combine": False, "facts": [("builders_risk_project_cost", "Project cost")]},
+    # ── Workers Comp Assigned Risk - the template's own title (see the ACORD
+    #    133 block in match_forms_deterministic). Same payroll evidence as 130 ─
+    "ACORD_133": {"combine": False, "facts": [("total_payroll", "Total payroll"),
+                                              ("wc_payroll", "WC payroll")]},
     # ── Cyber - coverage limit ───────────────────────────────────────────────
     "ACORD_160": {"combine": False, "facts": [("cyber_limit", "Cyber limit")]},
     # ── Contractors Supplemental - subcontracting exposure ───────────────────
@@ -68,18 +71,21 @@ _FORM_EVIDENCE_FACTS: Dict[str, dict] = {
     # ── Evidence of Property - the property value being evidenced ────────────
     "ACORD_28":  {"combine": False, "facts": [("property_building_value", "Building value"),
                                               ("property_bpp_value", "Business property value")]},
-    # ── Contractors (state variants) - contractor profile ────────────────────
-    "ACORD_137_CA": {"combine": False, "facts": [("contractor_type", "Contractor type"),
-                                                 ("percent_subcontracted", "% subcontracted")]},
-    "ACORD_137_CO": {"combine": False, "facts": [("contractor_type", "Contractor type"),
-                                                 ("percent_subcontracted", "% subcontracted")]},
-    # ── Contractors Equipment (state variants) - equipment/contents value ────
-    # Proxy: no dedicated equipment-schedule fact exists, so use business
-    # personal-property value, then inland-marine scheduled value.
-    "ACORD_138_CA": {"combine": False, "facts": [("property_bpp_value", "Equipment value"),
-                                                 ("inland_marine_total_value", "Scheduled value")]},
-    "ACORD_138_CO": {"combine": False, "facts": [("property_bpp_value", "Equipment value"),
-                                                 ("inland_marine_total_value", "Scheduled value")]},
+    # ── Commercial Auto Coverages / Limits (state variants) ──────────────────
+    # The templates print "CALIFORNIA / COLORADO COMMERCIAL AUTO - COVERAGES /
+    # LIMITS SECTION". These entries used to show "Contractor type", a GL fact,
+    # on an auto form (client Orbin audit 2026-09-11, item 10).
+    "ACORD_137_CA": {"combine": False, "facts": [("auto_liability_limit", "Auto liability limit"),
+                                                 ("auto_um_uim_limit", "UM/UIM limit")]},
+    "ACORD_137_CO": {"combine": False, "facts": [("auto_liability_limit", "Auto liability limit"),
+                                                 ("auto_um_uim_limit", "UM/UIM limit")]},
+    # ── Garage and Dealers Coverages / Limits (state variants) ───────────────
+    # The templates print "... GARAGE AND DEALERS - COVERAGES / LIMITS
+    # SECTION" - not contractors equipment, which these entries used to assume.
+    "ACORD_138_CA": {"combine": False, "facts": [("garage_liability_limit", "Garage liability limit"),
+                                                 ("garagekeeper_liability_limit", "Garagekeepers limit")]},
+    "ACORD_138_CO": {"combine": False, "facts": [("garage_liability_limit", "Garage liability limit"),
+                                                 ("garagekeeper_liability_limit", "Garagekeepers limit")]},
 }
 
 
@@ -914,11 +920,37 @@ _PROP_VALUE_RE = re.compile(
 )
 
 
+_ROW_DOLLAR_RE = re.compile(r"\$\s*[\d,]")
+
+
+def _row_denies_line(window: str) -> bool:
+    """True when the phrase's OWN row prints a denial ("No Coverage") before
+    any dollar amount.
+
+    Client Orbin audit 2026-09-11, item 9. The declarations' premium table
+    prints "6 Workers' Compensation No Coverage" directly above
+    "7 Umbrella $3,418.00". The 90-char window below crosses into the next row,
+    read the UMBRELLA's premium as the WC line's money signal, and offered
+    ACORD 130 on a package whose declarations deny WC. Same shape for every line
+    phrase set, e.g. "COMMERCIAL PROPERTY - NO COVERAGE" above a priced row.
+
+    Only the phrase's own row is read (up to the first newline), so a wrapped
+    row whose amount sits on the next line still counts, and a denial counts
+    only when no dollar amount comes first - "$12,400 ... flood not covered" is
+    a priced line with a denied sub-item. `COVERAGE_DENIAL_RE` is the one
+    definition of a denial phrase (lob_canon).
+    """
+    row = window.split("\n", 1)[0]
+    m = COVERAGE_DENIAL_RE.search(row)
+    return bool(m) and not _ROW_DOLLAR_RE.search(row[:m.start()])
+
+
 def _dec_line_present(text: str, phrases) -> bool:
     """True if any phrase appears on what looks like a dec-page LINE ITEM - the
     phrase followed within ~90 chars by a money / premium / limit / statutory
     signal. High precision: "general liability ... $1,000,000 premium" matches;
-    "general liability concerns" does not."""
+    "general liability concerns" does not, and neither does a row that denies
+    the line ("workers' compensation no coverage"), whatever the next row costs."""
     if not text:
         return False
     # Collapse dotted leaders ("GENERAL LIABILITY ....... $1,000,000") and long
@@ -931,7 +963,8 @@ def _dec_line_present(text: str, phrases) -> bool:
             i = text.find(ph, start)
             if i < 0:
                 break
-            if _COVERAGE_LINE_SIGNAL.search(text[i:i + 90]):
+            window = text[i:i + 90]
+            if _COVERAGE_LINE_SIGNAL.search(window) and not _row_denies_line(window):
                 return True
             start = i + 1
     return False

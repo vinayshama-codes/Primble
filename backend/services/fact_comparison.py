@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SAME", "DIFFERENT", "INCOMPARABLE", "PackageContext",
     "ComparisonResult", "compare", "conflict", "values_agree", "verdict",
-    "identifiers_match", "feins_match", "carriers_same_family", "build_context",
+    "identifiers_match", "feins_match", "carriers_same_family", "same_agency",
+    "build_context",
     "document_witnesses", "entities_materially_differ",
     "same_policy_contract", "policy_contract_groups",
 ]
@@ -515,6 +516,64 @@ def carriers_same_family(a: Any, b: Any) -> bool:
     return False
 
 
+# ── ONE AGENCY, SEVERAL PRINTINGS (14 Sep 2026) ─────────────────────────────
+_AGENCY_LEGAL_WORDS = frozenset({
+    "llc", "inc", "incorporated", "corp", "corporation", "company", "co",
+    "ltd", "limited", "lp", "llp", "plc", "pc", "pa", "pllc"})
+# Words an agency name wraps around its identity. Never part of an initialism.
+_AGENCY_SUFFIX_WORDS = frozenset({
+    "the", "and", "of", "insurance", "ins", "agency", "agencies", "brokerage",
+    "brokers", "broker", "services", "service", "group", "holdings"})
+# Words many agencies share. Part of an initialism ("Commercial RISK
+# SOLUTIONS" -> CRS), never an identity on their own - "Cascade Risk Partners"
+# and "Commercial Risk Solutions" share "risk" and nothing else.
+_AGENCY_COMMON_WORDS = frozenset({
+    "risk", "solutions", "partners", "management", "advisors", "advisory",
+    "associates", "consulting", "consultants", "financial", "benefits",
+    "underwriters", "underwriting", "specialty"})
+
+
+def same_agency(a: Any, b: Any) -> Optional[bool]:
+    """Do two producer names name the same AGENCY? True / False / None.
+
+    A clustering question, like ``carriers_same_family`` and for the same
+    reason: one agency prints itself several ways. The Orbin package prints
+    "COMMERCIAL RISK SOLUTIONS, INC." on every declarations page and "CRS
+    Insurance Brokerage" on its own certificate - same address, same phone.
+    Suffix words (Inc, Agency, Insurance, Brokerage ...) carry no identity, and
+    a short token that spells the initials of the other name's distinctive
+    words is that name.
+
+    None means CANNOT TELL - an empty name, one made only of suffix words
+    ("Insurance Agency"), or two names sharing SOME distinctive words but not
+    all ("Marsh" / "Marsh & McLennan Agency", "Smith Agency" / "Smith & Jones
+    Insurance"). A caller must read None as "not shown to differ", never as a
+    difference: False is reserved for names with no distinctive word in common.
+    Never used to decide a document conflict.
+    """
+    def _body(name: Any) -> List[str]:
+        # Single letters are noise, not identity: "N/A" names no agency.
+        return [w for w in re.findall(r"[a-z0-9]+", str(name or "").lower())
+                if len(w) > 1 and w not in _AGENCY_LEGAL_WORDS
+                and w not in _AGENCY_SUFFIX_WORDS]
+
+    ba, bb = _body(a), _body(b)
+    da = [w for w in ba if w not in _AGENCY_COMMON_WORDS]
+    db = [w for w in bb if w not in _AGENCY_COMMON_WORDS]
+    if not da or not db:
+        return None
+    if set(da) == set(db) or "".join(da) == "".join(db):
+        return True
+    for short, other in ((da, bb), (db, ba)):
+        if len(short) != 1 or not short[0].isalpha() or not 2 <= len(short[0]) <= 6:
+            continue
+        if len(other) >= 2 and "".join(w[0] for w in other) == short[0]:
+            return True                   # "CRS" = Commercial Risk Solutions
+    if set(da) & set(db):
+        return None                       # a shortened or extended printing
+    return False
+
+
 def is_declared_trade_name(value, docs, ctx=None) -> bool:
     """Is ``value`` a trade name the APPLICANT declared, rather than a rival
     identity?
@@ -554,3 +613,154 @@ def is_declared_trade_name(value, docs, ctx=None) -> bool:
         return False
     except Exception:                                         # noqa: BLE001
         return False
+
+
+# ── A VALUE THAT CHANGED IS NOT A VALUE IN CONFLICT (client, 11 Sep 2026) ───
+# *"Umbrella needs effective-date logic. The original declarations show a $3M
+# Umbrella, but the COI specifically states it was reduced from $3M to $1M
+# effective 7/25/25 ... Primble should understand that as a policy change over
+# time, not simply a $3M versus $1M conflict."* And: *"Values should only be
+# compared when they represent the same field, same LOB/policy and applicable
+# time period."*
+#
+# Every comparison behind this door answered SAME or DIFFERENT with no clock,
+# so two printings of one policy's limit made on different dates could only
+# ever be a conflict. This is the time axis - and it is deliberately narrow,
+# because the same client asked that a genuinely unresolved conflict stay
+# unresolved. A difference is a CHANGE only when the documents themselves say
+# so, in words, with a date (see `dated_change`'s gates). Anything less stays a
+# conflict for the producer.
+
+# Documents that speak as of their policy's INCEPTION: a declarations page, the
+# policy, a binder. A certificate, a narrative or an application carries no
+# such date, so it can never be the proven-OLDER side of a change.
+_INCEPTION_DATED_DOC_TYPES = frozenset({"dec_page", "policy", "binder"})
+
+
+def fact_term(fact_key: str, merged_facts: Optional[dict]) -> Optional[tuple]:
+    """``(start, end)`` ISO dates of the policy term ``fact_key`` belongs to.
+
+    Read from the fact's own coverage line where the facts carry one (the
+    umbrella's own dates for an umbrella fact), else the package term. None
+    when no complete term is stated - and then no change can be proven.
+    """
+    from services.normalization import normalize_date
+    f = merged_facts if isinstance(merged_facts, dict) else {}
+
+    def _v(key):
+        x = f.get(key)
+        return x.get("value") if isinstance(x, dict) and "value" in x else x
+
+    line = _fe.fact_line(fact_key)
+    pairs = []
+    if line:
+        pairs.append((_v(f"{line}_effective_date"), _v(f"{line}_expiration_date")))
+        for rec in (f.get("_line_records") or []):
+            if isinstance(rec, dict) and rec.get("line") == line:
+                pairs.append((rec.get("effective_date"), rec.get("expiration_date")))
+    pairs.append((_v("effective_date"), _v("expiration_date")))
+    for a, b in pairs:
+        s, e = normalize_date(a), normalize_date(b)
+        if s and e and s < e:
+            return s, e
+    return None
+
+
+def document_as_of(doc: Optional[dict], fact_key: str) -> Optional[str]:
+    """The ISO date a document's printing of ``fact_key`` speaks as of, or None.
+
+    Only a document dated by its policy's inception can answer - a
+    declarations page states the limits as issued, so its printing speaks as
+    of the start of the fact's term. Every other role returns None: an undated
+    printing is never proof that it came BEFORE a change.
+    """
+    if not isinstance(doc, dict):
+        return None
+    if str(doc.get("doc_type") or "").strip().lower() not in _INCEPTION_DATED_DOC_TYPES:
+        return None
+    term = fact_term(fact_key, doc.get("facts") or {})
+    return term[0] if term else None
+
+
+def dated_change(fact_key: str, printings: Sequence[tuple],
+                 statements: Optional[Sequence[dict]],
+                 term: Optional[tuple]) -> Optional[dict]:
+    """The documents' OWN account of ``fact_key`` changing, or None.
+
+    ``printings``  - ``(value, as_of_iso_or_None, doc_index)``: every
+                     document's printing of the fact.
+    ``statements`` - `narrative_facts` statements, each carrying the index of
+                     the document that prints it (``source_doc_index``).
+    ``term``       - ``(start, end)`` of the fact's policy (`fact_term`).
+
+    A CHANGE, not a conflict, only when every gate holds:
+      1. an AMENDMENT statement names THIS fact, with a date inside the term;
+      2. the printings carry exactly two amounts, and they are its from / to;
+      3. the document that states the change also prints the NEW value as the
+         fact itself;
+      4. every printing of the OLD value is another document's, dated on or
+         before the change.
+    Money only, by construction: every printing must read as ONE amount.
+    Returns ``{"current", "prior", "as_of", "as_of_iso", "quote",
+    "source_doc_index", "prior_doc_indices"}``.
+    """
+    from services.normalization import normalize_date
+    if not printings or not statements or not term:
+        return None
+    start, end = term
+
+    def _one(value):
+        got = _fe.money_amounts(value)
+        return got[0] if len(got) == 1 else None
+
+    by_amount: Dict[str, List[tuple]] = {}
+    shown: Dict[str, str] = {}
+    for value, as_of, doc_index in printings:
+        amount = _one(value)
+        if amount is None:
+            return None                  # a printing that is not ONE amount
+        by_amount.setdefault(amount, []).append((as_of, doc_index))
+        shown.setdefault(amount, str(value).strip())
+    if len(by_amount) != 2:
+        return None
+    # Only a change the sentence ASSERTS ("was reduced"), never one it negates,
+    # requests or makes conditional (`narrative_facts._asserts_the_change`).
+    mine = [st for st in statements if isinstance(st, dict)
+            and st.get("kind") == "amendment" and st.get("subject") == fact_key
+            and st.get("asserted") is not False]
+
+    def _may_apply(st):
+        d = normalize_date(st.get("as_of"))
+        return d is None or start <= d <= end
+
+    # TWO DIFFERENT CHANGES to one fact - a reduction and a later reversal, or
+    # two reductions - leave the current value unsaid: the producer's question.
+    # Counted by amounts, so one change printed twice is still one; a change
+    # dated in another term is that term's history, and an undated one cannot
+    # be placed, so it counts.
+    if len({(_one(st.get("from")), _one(st.get("to")))
+            for st in mine if _may_apply(st)}) > 1:
+        return None
+    for st in mine:
+        when = normalize_date(st.get("as_of"))
+        if not when or not (start <= when <= end):
+            continue
+        a_from, a_to = _one(st.get("from")), _one(st.get("to"))
+        if not a_from or not a_to or a_from == a_to \
+                or {a_from, a_to} != set(by_amount):
+            continue
+        src = st.get("source_doc_index")
+        if src is None or not any(di == src for _, di in by_amount[a_to]):
+            continue
+        old = by_amount[a_from]
+        if any(di == src for _, di in old):
+            continue
+        if not all(as_of and as_of <= when for as_of, _ in old):
+            continue
+        return {
+            "current": shown[a_to], "prior": shown[a_from],
+            "as_of": st.get("as_of"), "as_of_iso": when,
+            "quote": st.get("quote"), "source_doc_index": src,
+            "prior_doc_indices": sorted({di for _, di in old if di is not None}),
+        }
+    return None

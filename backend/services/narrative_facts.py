@@ -73,8 +73,11 @@ NARRATIVE_FACT_KEYS = (
 )
 
 # A money amount as a document prints one. Shared with fact_equivalence's
-# reader so "$ 3,000,000" and "$3,000,000.00" are the same amount to both.
-_AMOUNT_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b")
+# reader so "$ 3,000,000" and "$3,000,000.00" are the same amount to both. The
+# broker's shorthand "$3M" / "$2MM" / "$500K" keeps its multiplier: without it
+# "$3M" was read as three dollars (14 Sep break-it pass).
+_AMOUNT_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?(?:\s?(?:MM|[KMB])\b)?"
+                        r"|\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b")
 _DATE_RE = re.compile(
     r"\b(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}"
     r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b",
@@ -107,6 +110,31 @@ _OF_AMOUNT_RE = re.compile(
 
 _MIN_LABEL_WORDS = 1
 _MAX_SUBJECT_DISTANCE = 60      # chars between the label and its amount
+
+# A change verb STATES a change only when the sentence asserts it. "was not
+# reduced", "requests the limit be reduced", "will be reduced if approved",
+# "can the limit be reduced?" name the same amounts as the Orbin certificate
+# and assert nothing - read as a change, each silently settled a real conflict
+# and stamped the wrong limit (14 Sep break-it pass). Such a sentence is still
+# mined, marked ``asserted: False``: its date remains an endorsement date to
+# `extraction_service`, but no rule may treat it as a change that happened.
+_NEGATION_RE = re.compile(r"\b(?:not|never|no longer)\b|n['’]t\b", re.I)
+_UNREALISED_RE = re.compile(
+    r"\b(?:be|will|would|shall|should|may|might|can|could|must)\b", re.I)
+_CONDITION_RE = re.compile(r"\b(?:if|unless|whether)\b", re.I)
+_ASSERTION_WINDOW_WORDS = 4     # words before the verb, inside its own clause
+
+
+def _asserts_the_change(sentence: str, verb_at: int) -> bool:
+    """False when the change verb at ``verb_at`` is negated, unrealised
+    (modal / "be" + participle), conditional, or asked as a question."""
+    if str(sentence).rstrip().endswith("?"):
+        return False
+    head = sentence[:verb_at]
+    if _CONDITION_RE.search(head):
+        return False
+    near = " ".join(re.split(r"[,;:]", head)[-1].split()[-_ASSERTION_WINDOW_WORDS:])
+    return not (_NEGATION_RE.search(near) or _UNREALISED_RE.search(near))
 
 
 def _sentences(text: str) -> List[str]:
@@ -212,6 +240,26 @@ def _subject_for(sentence: str, at: int) -> Optional[tuple]:
     return (best[1], best[2]) if best else None
 
 
+def _subject_inside(sentence: str, start: int, end: int) -> Optional[tuple]:
+    """(fact_key, phrase) for the longest label printed INSIDE ``[start, end)``.
+
+    A change sentence may name its subject AFTER the verb. The Orbin
+    certificate prints *"Reduced Umbrella Limit from $3,000,000 to $1,000,000
+    Limit Effective 7/25/25"*, and `_subject_for` only looks BEFORE the verb,
+    so the client's literal remark produced no statement at all and the
+    umbrella card shipped with no explanation - while the test fixture, a
+    paraphrase that put the subject first, stayed green (D22). The span is the
+    verb-to-"from" gap of ONE amendment match, so the label found there can
+    only be the thing that changed.
+    """
+    low = re.sub(r"[^a-z0-9 ]", " ", sentence.lower())
+    for phrase, key in _vocab():                          # longest first
+        i = low.find(phrase, start)
+        if i >= 0 and i + len(phrase) <= end:
+            return key, phrase
+    return None
+
+
 # A coordinating conjunction or a comma ENDS the clause, and therefore ends the
 # label's reach. Without this, "...a general aggregate of $2,000,000 and a total
 # premium of $6,720" attached the PREMIUM to gl_aggregate, because "total
@@ -265,7 +313,11 @@ def mine_statements(text: Any, context=None) -> List[dict]:
             # 1. AMENDMENT - the highest-value shape, and the client's own
             #    example. "reduced from $3,000,000 to $1,000,000".
             for m in _AMENDMENT_RE.finditer(sentence):
-                subj = _subject_for(sentence, m.start())
+                # The subject may sit between the verb and "from" ("Reduced
+                # Umbrella Limit from ...") - the most specific place a subject
+                # can be, so it is read first; then the label before the verb.
+                subj = (_subject_inside(sentence, m.start(), m.start("from"))
+                        or _subject_for(sentence, m.start()))
                 if not subj:
                     continue
                 out.append({
@@ -275,6 +327,7 @@ def mine_statements(text: Any, context=None) -> List[dict]:
                     "to": m.group("to").strip(),
                     "as_of": as_of, "policy_number": policy,
                     "quote": sentence,
+                    "asserted": _asserts_the_change(sentence, m.start()),
                 })
 
             # 2. ATTRIBUTION - "a general aggregate of $2,000,000". Skipped
@@ -314,9 +367,16 @@ def statements_for_facts(facts: Optional[dict], context=None,
     documents does not read as two separate assertions.
     """
     from services.extraction_service import _fv
-    sources = [facts or {}] + [(d.get("facts") or {}) for d in (docs or [])]
+    # DOCUMENTS FIRST, then the merged facts: a statement is credited to the
+    # document that prints it (`source_doc_index`), which is what lets the
+    # dated-change rule check that the SAME document also states the new value
+    # (fact_comparison.dated_change). The merged copy of one document's remark
+    # then adds no second, unattributed statement.
+    docs = list(docs or [])
+    sources = [(i, (d.get("facts") or {}) if isinstance(d, dict) else {})
+               for i, d in enumerate(docs)] + [(None, facts or {})]
     seen, out = set(), []
-    for src in sources:
+    for doc_index, src in sources:
         if not isinstance(src, dict):
             continue
         for key in NARRATIVE_FACT_KEYS:
@@ -328,6 +388,7 @@ def statements_for_facts(facts: Optional[dict], context=None,
                 if sig not in seen:
                     seen.add(sig)
                     st["source_fact"] = key
+                    st["source_doc_index"] = doc_index
                     out.append(st)
     return out
 
@@ -353,6 +414,10 @@ def explain_conflict(fact_key: str, displays: List[str],
             return None
         for st in statements or []:
             if st.get("subject") != fact_key:
+                continue
+            # "was not reduced from X to Y" must never read back as "the
+            # remarks state this was reduced from X to Y".
+            if st.get("asserted") is False:
                 continue
             named = set(money_amounts(st.get("from") or "")) | \
                 set(money_amounts(st.get("to") or ""))

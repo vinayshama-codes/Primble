@@ -8,10 +8,13 @@ import { useEffect, useState } from "react";
 import { getArqReceipt } from "../../api/arqApi";
 
 const KIND_STYLE = {
-  answer:   { label: "",                  color: "#0f172a", bg: "transparent" },
-  schedule: { label: "Table",             color: "#0f172a", bg: "transparent" },
-  not_sure: { label: "Not sure",          color: "#92400e", bg: "#fffbeb" },
-  blank:    { label: "Not answered",      color: "#94a3b8", bg: "transparent" },
+  answer:    { label: "",                     color: "#0f172a", bg: "transparent" },
+  schedule:  { label: "Table",                color: "#0f172a", bg: "transparent" },
+  not_sure:  { label: "Not sure",             color: "#92400e", bg: "#fffbeb" },
+  blank:     { label: "Not answered",         color: "#94a3b8", bg: "transparent" },
+  // A value or table we already held from the documents, which the client
+  // looked at and confirmed. Kept apart from "answer": nothing new was supplied.
+  confirmed: { label: "Confirmed as correct", color: "#065f46", bg: "#f0fdf4" },
 };
 
 const formatDate = (iso) => {
@@ -132,6 +135,9 @@ export default function ARQReceiptModal({ arqId, clientLabel, onClose }) {
                 {receipt.not_sure_count > 0 && (
                   <span style={{ color: "#92400e" }}><strong>{receipt.not_sure_count}</strong> not sure</span>
                 )}
+                {receipt.confirmed_count > 0 && (
+                  <span style={{ color: "#065f46" }}><strong>{receipt.confirmed_count}</strong> confirmed as correct</span>
+                )}
                 {receipt.review_count > 0 && (
                   <span style={{ color: "#9a3412" }}><strong>{receipt.review_count}</strong> worth confirming</span>
                 )}
@@ -151,7 +157,13 @@ export default function ARQReceiptModal({ arqId, clientLabel, onClose }) {
                       {it.question || it.field_name}
                     </div>
 
-                    {it.kind === "schedule" ? (
+                    {it.kind === "confirmed" ? (
+                      <div style={{ fontSize: 12.5, color: st.color, fontWeight: 600, wordBreak: "break-word", lineHeight: 1.45 }}>
+                        {it.value
+                          ? `${it.value} - ${st.label}`
+                          : `${it.row_count || 0} row${it.row_count === 1 ? "" : "s"} - ${st.label}`}
+                      </div>
+                    ) : it.kind === "schedule" ? (
                       <div style={{ fontSize: 12.5, color: "#0f172a", fontWeight: 600 }}>
                         {it.row_count === 0
                           ? "Confirmed none - the pre-filled rows were removed"

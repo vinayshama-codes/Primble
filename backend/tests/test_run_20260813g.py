@@ -270,7 +270,12 @@ def test_map_facts_to_form_reports_what_a_guard_removed():
     assert report, "a value was blanked and nothing was reported"
     assert q in {e["field"] for e in report}
     entry = next(e for e in report if e["field"] == q)
-    assert set(entry) == {"form_id", "field", "removed_value"}
+    # 15 Sep 2026: an entry may also carry `kind`. An ungrounded Yes is an
+    # UNANSWERED question - still in this list (arq reads it so no later pass
+    # reopens the box), but not shown to the producer as "a value found that
+    # could not be true for that box" (test_live_run5_fixes_15sep).
+    assert {"form_id", "field", "removed_value"} <= set(entry)
+    assert entry.get("kind") == "unanswered"
     assert entry["form_id"] == "ACORD_127"
     assert entry["removed_value"] == "Y"
 

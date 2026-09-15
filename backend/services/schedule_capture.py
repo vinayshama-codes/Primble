@@ -850,10 +850,59 @@ _HINT_OVERRIDES = {
 }
 
 
-def question_text(list_key: str) -> str:
+# Confirm mode (Chat 5, 14 Sep 2026). A table that already holds rows is not a
+# request for a list - the client was offered "Please list the vehicles to be
+# insured" with the Subaru the policy prints already in the grid, and read it,
+# correctly, as being asked again. With rows held the SAME table is offered as
+# "we found these - check them, fix anything wrong, add what we missed", and the
+# document the rows came from is named. Nouns are per table because a location
+# is a "business location" to the insured and "owner or officer" pluralises
+# irregularly.
+_CONFIRM_NOUNS = {
+    "auto_vin_schedule":  ("vehicle", "vehicles"),
+    "auto_drivers":       ("driver", "drivers"),
+    "property_locations": ("business location", "business locations"),
+    "loss_history":       ("claim", "claims"),
+    "wc_class_codes":     ("employee group", "employee groups"),
+    "wc_officers":        ("owner or officer", "owners or officers"),
+}
+
+_CONFIRM_HINT = (
+    "Change any cell that is wrong, remove a row that should not be there, or "
+    "add a row for anything we missed. If everything is right, tap "
+    "\"Everything here is correct\"."
+)
+
+
+def confirm_question_text(list_key: str, row_count: int,
+                          source_labels: Optional[List[str]] = None) -> str:
+    """The confirm-mode wording for a table already holding `row_count` rows."""
     defn = SCHEDULE_DEFS.get(list_key)
     if defn is None:
         return ""
+    if row_count <= 0:
+        return question_text(list_key)
+    singular = defn["singular"]
+    one, many = _CONFIRM_NOUNS.get(list_key, (singular, f"{singular}s"))
+    noun = one if row_count == 1 else many
+    try:
+        from services.confirm_known import sources_phrase
+        where = sources_phrase(source_labels)
+    except Exception:                                         # noqa: BLE001
+        where = ""
+    found = (f"We found {row_count} {noun} in {where}." if where
+             else f"We have {row_count} {noun} on file for you.")
+    check = "Please check it" if row_count == 1 else "Please check them"
+    return f"{found} {check}, correct anything that is wrong, and add any we missed."
+
+
+def question_text(list_key: str, rows: Optional[List[dict]] = None,
+                  source_labels: Optional[List[str]] = None) -> str:
+    defn = SCHEDULE_DEFS.get(list_key)
+    if defn is None:
+        return ""
+    if rows:
+        return confirm_question_text(list_key, len(rows), source_labels)
     if list_key in _QUESTION_OVERRIDES:
         return _QUESTION_OVERRIDES[list_key]
     # "Please list your ..." and NOT "Please provide your ...", which is
@@ -872,10 +921,12 @@ def question_text(list_key: str) -> str:
     )
 
 
-def hint_text(list_key: str) -> str:
+def hint_text(list_key: str, confirm: bool = False) -> str:
     defn = SCHEDULE_DEFS.get(list_key)
     if defn is None:
         return ""
+    if confirm:
+        return _CONFIRM_HINT
     if list_key in _HINT_OVERRIDES:
         return _HINT_OVERRIDES[list_key]
     return f"Add as many {defn['singular']}s as you need. Blank rows are ignored."

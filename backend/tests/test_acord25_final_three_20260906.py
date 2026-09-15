@@ -108,12 +108,16 @@ def test_a_genuine_other_coverage_survives(field, value):
     assert _guard({field: value})[field] == value
 
 
-def test_the_GL_deductible_box_is_never_touched():
-    """`GeneralLiability_OtherCoverageLimitAmount` has a live Pass-1 rule to
-    `gl_deductible`; the first cut stopped it printing on certificates."""
+def test_a_deductible_never_fills_the_other_coverage_limit():
+    """This pinned a Pass-1 rule `GeneralLiability_OtherCoverageLimitAmount` ->
+    `gl_deductible`. The box's own tooltip on ACORD 25 and 126 is "Enter limit:
+    the general liability, other coverage limit amount", and nothing labels the
+    row a deductible - live run 10 (15 Sep 2026) printed the pollution
+    endorsement's "$1,000 Each Pollution Incidents" there as a limit. The rule is
+    gone; the test was pinning the defect."""
     assert ps._deterministic_map(
         "GeneralLiability_OtherCoverageLimitAmount_A",
-        {"_form_id": "ACORD_25", "gl_deductible": "$1,000"}) == "$1,000"
+        {"_form_id": "ACORD_25", "gl_deductible": "$1,000"}) != "$1,000"
 
 
 @pytest.mark.parametrize("tick", [

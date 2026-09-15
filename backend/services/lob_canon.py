@@ -36,8 +36,11 @@ requires the same.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Canonical family tokens. Strings, not an Enum, because every existing
 # consumer compares against these literals and they are persisted nowhere.
@@ -250,10 +253,15 @@ GL_GENERIC_TOKENS = frozenset({
 # takes ("Uninsured Motorists", "UNINSURED AND UNDERINSURED MOTORISTS",
 # "UM/UIM Motorist Coverage") and there is no non-auto motorist coverage.
 _PART_UNAMBIGUOUS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    # "drive other car" (CA 99 10, Broadened Coverage For Named Individuals),
+    # 15 Sep 2026: the Orbin auto dec prints it as a premium row on the auto
+    # policy and it reached the producer as unrecognised terminology. It is a
+    # Business Auto endorsement and nothing else - the same SYS-05 class.
     (AUTO,         ("motorist", "um uim", "uninsured", "underinsured",
                     "collision", "towing", "rental reimbursement",
                     "personal injury protection", "pip coverage",
-                    "loss of use", "hired car")),
+                    "loss of use", "hired car", "drive other car",
+                    "broadened coverage for named individuals")),
     (GENERAL_LIAB, ("personal and advertising injury",
                     "personal advertising injury", "advertising injury",
                     "damage to premises rented", "premises rented to you",
@@ -541,6 +549,23 @@ def denied_families(coverage_lines: Any) -> frozenset:
     return frozenset(denied - granted)
 
 
+# A premium SUBTOTAL is a charge, not a coverage part. Live 15 Sep 2026, the
+# Orbin auto declarations: "Premium for Attached Items 4, 5, and/or 6" and
+# "Premium for Endorsements" came back as coverage rows carrying their $322 and
+# $457, and reached the producer as "Coverage part not recognised" - asking
+# someone which LINE a subtotal belongs to. A line NAME that names money names a
+# charge; the extraction prompt's own RULE 16 draws the same line for the
+# premium column (fees, surcharges, taxes). No line of business is called
+# "premium" or "total".
+_CHARGE_LABEL_RE = re.compile(
+    r"\b(?:premiums?|fees?|surcharges?|tax(?:es)?|subtotal)\b|^\s*total\b", re.I)
+
+
+def is_charge_label(text: Any) -> bool:
+    """True when a coverage-row NAME is a charge (a premium, fee, tax or total)."""
+    return bool(_CHARGE_LABEL_RE.search(str(text or "")))
+
+
 def unmapped_material_lines(coverage_lines: Any) -> list:
     """Line names this module cannot place that the package actually CARRIES.
 
@@ -578,6 +603,8 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
         raw = str(entry.get("line") or "").strip()
         if not raw:
             continue
+        if is_charge_label(raw):
+            continue                      # a premium subtotal, not a coverage
         if canon_line(raw) or canon_part(raw, present, by_policy.get(_policy_key(entry))):
             continue                      # we can place it
         if not _grants_coverage(entry):
@@ -617,5 +644,228 @@ def _grants_coverage(entry: dict) -> bool:
         if not text or COVERAGE_DENIAL_RE.search(text):
             continue
         if any(ch.isdigit() for ch in text):
+            return True
+    return False
+
+
+# ── WHICH LINES DOES THIS SUBMISSION ACTUALLY CARRY? ─────────────────────────
+# Client audit 2026-09-11, item 2: *"Primble is identifying coverages that
+# Orbin does not actually have (this is coming from language in the policy
+# booklet). The cover page lists Property, Crime, WC, Farm, Liquor, EPLI, OCP
+# ... Coverage should require affirmative evidence."*
+#
+# ROOT CAUSE. The package carries TWO coverage facts and only one of them has
+# ever had a definition:
+#
+#   `coverage_lines`      structured, and gated - a line counts when it carries
+#                         a premium or a limit (`_line_entry_grants_coverage`).
+#   `lines_of_business`   a bare `[string]` in the extraction schema with NO
+#                         rule in the prompt at all, unioned across every
+#                         document chunk, so one mention anywhere in 271 pages
+#                         sticks for good.
+#
+# The standard ISO endorsement header is a MENU of what the endorsement could
+# attach to -
+#
+#   "THIS ENDORSEMENT MODIFIES INSURANCE PROVIDED UNDER THE FOLLOWING:
+#    COMMERCIAL PROPERTY ... CRIME AND FIDELITY ... FARM ... LIQUOR LIABILITY
+#    ... EMPLOYMENT-RELATED PRACTICES ... OWNERS AND CONTRACTORS PROTECTIVE"
+#
+# - and we read it as an inventory of what the applicant owns. The client's
+# list is that boilerplate word for word.
+#
+# The corroboration rule already existed, INLINE, inside the ACORD 125
+# checkbox resolver (`pdf_service._derive_indicator`, 2026-08-10). It was never
+# available to the cover page, the scorer or the recommender, so the same
+# phantom line was refused on the form and printed on the cover of the same
+# package. This is that rule, extracted, canonical rather than substring, and
+# with three more sources of evidence.
+#
+# WHAT THIS IS NOT: a filter on the fact. `lines_of_business` keeps every name
+# the documents printed - it is the MENTION record, and the questionnaire, the
+# unmapped-line advisory and the conflict picker all still read it. This
+# answers the different question that display and scoring should have been
+# asking all along.
+
+def _flag_families(flags: Any) -> frozenset:
+    """Canonical line families whose coverage flag is TRUE.
+
+    The mapping is DERIVED from the flag's own name (`has_property_coverage`
+    -> "property coverage" -> ``property``), not from a table that would have
+    to be maintained beside the flags themselves. A flag whose name names no
+    line simply contributes nothing.
+    """
+    out: set = set()
+    if not isinstance(flags, dict):
+        return frozenset()
+    for name, value in flags.items():
+        if value is not True:
+            continue
+        # Only a LINE flag (`has_<line>`) names a line. A SUB-flag describes a
+        # feature of a line - `property_has_bi_coverage`, `auto_has_um_uim` -
+        # and was read as the line itself: on the live Orbin package business-
+        # income wording "evidenced" a Property line its declarations deny
+        # (client 2026-09-11 item 9). No `is_*` flag names a line either.
+        m = re.match(r"^has[_\s]+(.+)$", str(name or ""))
+        if not m:
+            continue
+        fam = canon_line(m.group(1).replace("_", " "))
+        if fam:
+            out.add(fam)
+    return frozenset(out)
+
+
+def _flag_denied_families(flags: Any) -> frozenset:
+    """Canonical line families whose `has_<line>` flags are explicitly FALSE,
+    with none of them true.
+
+    A false line flag is the strong half of a coverage flag (`line_presence`
+    reads it the same way): extraction saw no evidence of the line anywhere,
+    or the declarations deny it and `apply_declared_absent_downgrades` turned
+    it off. On the live Orbin package all three denied lines - Property, Crime
+    and Workers' Compensation - are false here, and the verdict survives the
+    dec-index purge because flags are never purged.
+    """
+    if not isinstance(flags, dict):
+        return frozenset()
+    said: dict = {}
+    for name, value in flags.items():
+        m = re.match(r"^has[_\s]+(.+)$", str(name or ""))
+        if not m:
+            continue
+        fam = canon_line(m.group(1).replace("_", " "))
+        if not fam:
+            continue
+        if value is True:
+            said[fam] = True
+        elif value is False and said.get(fam) is not True:
+            said[fam] = False
+    return frozenset(f for f, v in said.items() if v is False)
+
+
+def carried_lines_of_business(facts: Any, flags: Any = None) -> list:
+    """The lines of business the submission has AFFIRMATIVE evidence for, as
+    the documents printed them.
+
+    Evidence, any one of which is enough (deliberately permissive - this can
+    only ever DROP a line nothing corroborates):
+
+      1. a `coverage_lines` row that GRANTS the same canonical line
+         (a premium or a limit);
+      2. a `coverage_lines` row that IDENTIFIES a policy on it - a NAIC or its
+         own policy number. Added 2026-09-11 for the same reason the
+         stamping layer needed it: a declarations page showing ONE package
+         total leaves every row unpriced, and a line with its own policy
+         number is plainly carried. A carrier NAME alone is a mention (14 Sep,
+         live Orbin shape - see `_row_identifies_policy`);
+      3. a `has_<line>` coverage FLAG set true by extraction (never a
+         sub-flag such as `property_has_bi_coverage`);
+      4. the family is named by a granting row under a DIFFERENT spelling -
+         covered by (1), since both sides canonicalise.
+
+    NO PER-LINE EVIDENCE AT ALL -> the raw list is returned unchanged. That is
+    the legacy branch and it is load-bearing: a package whose `coverage_lines`
+    never arrived must not have its whole coverage inventory blanked. Positive
+    evidence only, in both directions.
+
+    A name this module cannot place (`Farm`, `Owners and Contractors
+    Protective`) can never be corroborated, so it is dropped from the CARRIED
+    list - and `unmapped_material_lines` still routes it to the producer, which
+    is where an unrecognised coverage part belongs (Principle 7).
+    """
+    raw = facts.get("lines_of_business") if isinstance(facts, dict) else None
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw.get("value")
+    if not isinstance(raw, list) or not raw:
+        return []
+    names = [str(x).strip() for x in raw if str(x or "").strip()]
+
+    lines = facts.get("coverage_lines") if isinstance(facts, dict) else None
+    if isinstance(lines, dict) and "value" in lines:
+        lines = lines.get("value")
+    rows = [e for e in lines if isinstance(e, dict)] if isinstance(lines, list) else []
+    evidenced: set = set(_flag_families(flags))
+    granted: set = set()
+    identified: set = set()
+    for entry in rows:
+        fam = canon_line(entry.get("line"))
+        if not fam or denies_coverage(entry):
+            continue
+        if _grants_coverage(entry):
+            granted.add(fam)
+        elif _row_identifies_policy(entry):
+            identified.add(fam)
+    # A premium or a limit is money changing hands and outranks a false flag.
+    # A policy number only IDENTIFIES a contract, and the live extraction put
+    # the Inland Marine number on the Property, Crime and Workers' Compensation
+    # rows the declarations deny - so identity alone never overrides an
+    # explicitly false `has_<line>` flag.
+    evidenced |= granted
+    evidenced |= (identified - _flag_denied_families(flags))
+
+    if not rows and not evidenced:
+        # No per-line evidence FOR anything - the legacy raw list, less any line
+        # an explicitly false `has_<line>` flag denies. A false flag is positive
+        # evidence of absence, not silence; the fuzz found this branch printing
+        # a line its own flag had turned off.
+        denied = _flag_denied_families(flags)
+        return _one_name_per_line([n for n in names if canon_line(n) not in denied])
+
+    kept, dropped = [], []
+    for name in names:
+        fam = canon_line(name)
+        (kept if (fam and fam in evidenced) else dropped).append(name)
+    if dropped:
+        logger.info(
+            "carried_lines_of_business: %d mentioned line(s) have no coverage "
+            "evidence and are not reported as carried - %s",
+            len(dropped), ", ".join(dropped[:6]))
+    return _one_name_per_line(kept)
+
+
+def _one_name_per_line(names: list) -> list:
+    """One entry per line of business: its FIRST printing, in document order.
+
+    Live 15 Sep 2026, the client's own Orbin policy: the cover page listed TEN
+    names for four lines - "Automobile", then "Commercial Auto"; "Umbrella",
+    "Commercial Umbrella" and "Commercial Liability Umbrella"; "Inland Marine",
+    "Commercial Inland Marine" and "Computer Coverage" (an inland marine
+    coverage part). Every one was correctly evidenced; nothing asked whether two
+    names were the same line. The canonical family is that question's one door.
+    A name no rule places is its own line, de-duplicated by spelling only.
+    """
+    out: list = []
+    seen: set = set()
+    for name in names:
+        key = canon_line(name) or ("unplaced", _dedupe_key(name))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+# Placeholder text a model writes into an identity box when the row has none.
+_IDENTITY_PLACEHOLDERS = frozenset({"n/a", "na", "none", "null", "unknown", "-", "--"})
+
+
+def _row_identifies_policy(entry: dict) -> bool:
+    """A NAIC code or the row's OWN policy number - the contract behind the line.
+
+    A carrier NAME alone is a mention, not a policy (client 2026-09-11 item 9,
+    measured on the live Orbin package). Extraction attached "Employers Mutual
+    Casualty Company" to all 13 rows it lifted from ISO endorsement menus and to
+    the three lines the declarations deny, none with a premium or a number, and
+    this test kept every one - Property, Crime, Workers' Compensation, Liquor
+    and Pollution stayed on the cover page. A real line that prints no premium
+    still names its contract: a certificate row carries a NAIC and a number, a
+    narrative row a number. Kept local for the leaf rule (see `_grants_coverage`
+    for why). Reading it narrowly can only drop a line nothing else
+    corroborates, and the scorer also reads the `has_<line>` flags.
+    """
+    for key in ("naic", "policy_number"):
+        text = str(entry.get(key) or "").strip()
+        if (text and text.lower() not in _IDENTITY_PLACEHOLDERS
+                and not COVERAGE_DENIAL_RE.search(text)):
             return True
     return False

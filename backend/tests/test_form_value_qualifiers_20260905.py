@@ -273,13 +273,55 @@ def test_the_real_row_still_fills():
         _ONE_CLASS) == "Food products distributors"
 
 
-def test_no_schedule_at_all_still_reaches_gap_fill():
-    """Suppressing on NO evidence would delete a schedule the extractor merely
-    missed. Positive evidence only, exactly like the vehicle version."""
+def test_no_schedule_at_all_is_an_OWNED_BLANK_since_11_sep():
+    """REVERSED 11 Sep 2026, on measurement rather than reasoning.
+
+    This test used to assert the opposite, for a stated reason: "suppressing on
+    NO evidence would delete a schedule the extractor merely missed". That was a
+    PREDICTION about what gap fill would do with an unowned grid, and it was
+    never measured. Three live runs have now measured it, and not one recovered
+    a schedule:
+
+      2026-08-13   auto_vin_schedule missing -> gap fill printed GL class 91585
+                   as a vehicle's RATE CLASS and $10,000 as its COST NEW
+      11 Sep r1    no GL schedule -> the 126 hazard grid printed the VEHICLE
+                   class 7398 twice, plus TERR 7398 and TERR CO
+      11 Sep r2    no GL schedule -> the same grid printed "Symbol 07", "CO",
+                   "NO", "F-250" and "2019" - a whole auto row on a GL form
+
+    Gap fill cannot attribute what it reads to a line (D1/D5), so asked for
+    General Liability classifications a package does not have it reaches for
+    the nearest table. The grid now follows the same rule as this form's
+    identity boxes: THIS line's evidence or blank.
+
+    The intent the old test protected - do not delete real data - is not lost.
+    It is carried by `test_a_real_schedule_still_fills_every_cell` below and by
+    the package's own "GL coverage detected but no class codes found" warning,
+    which is where a gap belongs.
+    """
     assert ps._resolve_gl_hazard_row(
-        "GeneralLiability_Hazard_ClassCode_B", {}) == "UNMATCHED"
+        "GeneralLiability_Hazard_ClassCode_B", {}) is None
     assert ps._is_authoritative_blank_field(
-        "GeneralLiability_Hazard_ClassCode_B", {}) is False
+        "GeneralLiability_Hazard_ClassCode_B", {}) is True
+
+
+def test_a_real_schedule_still_fills_every_cell():
+    """The half that must never move: evidence present, grid filled."""
+    assert ps._resolve_gl_hazard_row(
+        "GeneralLiability_Hazard_ClassCode_A", _ONE_CLASS) == "11288"
+    assert ps._is_authoritative_blank_field(
+        "GeneralLiability_Hazard_ClassCode_A", _ONE_CLASS) is False
+
+
+def test_the_grid_is_only_blanked_when_THIS_line_is_silent():
+    """A GL schedule under any of its fact spellings keeps the grid open - the
+    evidence test is derived from the fact KEY's line, not a hard-coded name."""
+    for key in ("gl_class_code_schedule", "gl_class_codes_by_location"):
+        facts = {key: [{"class_code": "91580"}]}
+        assert ps._gl_schedule_evidence(facts) is True, key
+    # ...and an AUTO schedule is not GL evidence, which is the whole point.
+    assert ps._gl_schedule_evidence(
+        {"auto_vin_schedule": [{"vin": "X", "class_code": "7398"}]}) is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
