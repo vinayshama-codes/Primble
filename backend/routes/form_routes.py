@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from typing import List, Optional
 
 from config.database import get_pool
-from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL
+from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL, FREE_PACKAGE_LIMIT
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
 from utils.helpers import safe_join, check_payment_access
@@ -379,11 +379,11 @@ async def upload_declaration(
         if ps == "suspended":   raise HTTPException(403, "Account suspended due to non-payment.")
         if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@primble.ai.")
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
-        if r.get("subscription_tier", "free") == "free" and int(r.get("downloads_used", 0) or 0) >= 3:
+        if r.get("subscription_tier", "free") == "free" and int(r.get("downloads_used", 0) or 0) >= FREE_PACKAGE_LIMIT:
             from fastapi.responses import JSONResponse as _JSONResponse
             return _JSONResponse(
                 {"success": False, "upgrade_required": True,
-                 "message": "You've used all 3 free submissions. Upgrade to continue."},
+                 "message": f"You've used all {FREE_PACKAGE_LIMIT} free submission{'' if FREE_PACKAGE_LIMIT == 1 else 's'}. Upgrade to continue."},
                 status_code=403,
             )
 
@@ -1180,7 +1180,7 @@ async def client_answer_resolve(
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
         used = int(current_user.get("downloads_used", 0) or 0)
-        if used >= 3:
+        if used >= FREE_PACKAGE_LIMIT:
             raise HTTPException(403, "Upgrade required to access form generation.")
 
     if current_user.get("subscription_tier") == "essentials":
@@ -1663,7 +1663,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     """Silently generate forms for scoring/ARQ — forms are never exposed or downloadable."""
     if current_user.get("subscription_tier") == "free":
         used = int(current_user.get("downloads_used", 0) or 0)
-        if used >= 3:
+        if used >= FREE_PACKAGE_LIMIT:
             raise HTTPException(403, "Upgrade required.")
 
     session = await get_processing_session(session_id)

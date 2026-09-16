@@ -30,6 +30,11 @@ OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "google").lower()
 ENABLE_ASYNC_PROCESSING   = os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true"
 SESSION_TTL_H             = int(os.getenv("SESSION_TTL_H", "8"))  # session lifetime in hours
 
+# How many packages a brand-new (subscription_tier == "free") account may generate
+# and download before the upgrade wall. ONE door - every gate, every remaining-count
+# and every message reads this. Client direction 2026-09-16: 3 -> 1.
+FREE_PACKAGE_LIMIT        = max(0, int(os.getenv("FREE_PACKAGE_LIMIT", "1")))
+
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 _env         = os.getenv("ENVIRONMENT", "development").lower()
 
@@ -65,15 +70,26 @@ SOFT_BUFFER_PCT    = 0.05
 STRIPE_CURRENCY    = "usd"
 STRIPE_YEARLY_AMOUNT = 30000
 
+# Single source of truth for what Stripe charges. Checkout builds its price
+# inline from `amount`, so a price change reaches NEW subscriptions only - Stripe
+# keeps renewing an existing one at the price it was created with. `packages` /
+# `overage_rate` are copied onto the user row when a subscription is synced
+# (checkout webhook, plan change, verify-upgrade, portal restore); the monthly
+# renewal does not rewrite them. Annual `amount` is the displayed per-month
+# price x 12.
+# Keep in step with frontend/src/components/billing/plans.js.
 PLANS = {
     "essentials": {
-        "monthly": {"amount": 5900,   "interval": "month", "packages": 50,   "overage_rate": 175},
-        "annual":  {"amount": 47400,  "interval": "year",  "packages": 600,  "overage_rate": 175},
+        "monthly": {"amount": 19900,  "interval": "month", "packages": 100,  "overage_rate": 200},
+        "annual":  {"amount": 190800, "interval": "year",  "packages": 1200, "overage_rate": 200},
     },
     "professional": {
-        "monthly": {"amount": 12900,  "interval": "month", "packages": 100,  "overage_rate": 150},
-        "annual":  {"amount": 95400,  "interval": "year",  "packages": 1200, "overage_rate": 150},
+        "monthly": {"amount": 29900,  "interval": "month", "packages": 100,  "overage_rate": 300},
+        "annual":  {"amount": 286800, "interval": "year",  "packages": 1200, "overage_rate": 300},
     },
+    # RETIRED 2026-09-16 - no longer sold (see SELLABLE_PLANS). Kept so a
+    # subscription bought before retirement still syncs through the webhook,
+    # verify-upgrade and the billing portal instead of falling back to Essentials.
     "business": {
         "monthly": {"amount": 44900,  "interval": "month", "packages": 400,  "overage_rate": 125},
         "annual":  {"amount": 399000, "interval": "year",  "packages": 4800, "overage_rate": 125},
@@ -83,6 +99,25 @@ PLANS = {
         "annual":  {"amount": 0, "interval": "year",  "packages": 0, "overage_rate": 0},
     },
 }
+
+# Plans a customer can buy through self-serve checkout. Enterprise is sales-led.
+SELLABLE_PLANS = ("essentials", "professional")
+
+# Fallback overage rate for a legacy row with no stored rate and a tier PLANS
+# does not price (the pre-2026-09-16 hardcoded default for that case).
+_FALLBACK_OVERAGE_RATE_CENTS = 125
+
+
+def plan_usage_unit(tier: str) -> str:
+    """Essentials meters scores; every package tier meters packages."""
+    return "score" if tier == "essentials" else "package"
+
+
+def default_overage_rate_cents(tier: str) -> int:
+    """Overage rate for a user row that has no stored `overage_rate`."""
+    rate = (PLANS.get(tier) or {}).get("monthly", {}).get("overage_rate")
+    return int(rate) if rate else _FALLBACK_OVERAGE_RATE_CENTS
+
 
 BASE_DIR          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPLOAD_DIR        = os.path.join(BASE_DIR, "tmp")

@@ -1380,7 +1380,7 @@ async def resolve_issue(
         # BILLING, deliberately: this is an ADDITION to a package whose credit
         # is already spent. `usage_service.count_session_usage` is guarded per
         # session by `package_counted_at`, and `select_forms_bulk`'s free-tier
-        # `downloads_used >= 3` gate is a GENERATION gate - re-applying it here
+        # `downloads_used >= FREE_PACKAGE_LIMIT` gate is a GENERATION gate - re-applying it here
         # would lock a free user out of finishing a package they had already
         # paid for. So only the account-level lock is re-checked.
         from utils.helpers import check_payment_access

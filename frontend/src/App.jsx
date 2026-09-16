@@ -8,6 +8,7 @@ import { useAuth }            from "./hooks/useAuth";
 import { useSignature }       from "./hooks/useSignature";
 import { useUpgradePolling, useBillingReturnPolling } from "./hooks/useUpgradePolling";
 import { useToasts }         from "./hooks/useToasts";
+import { usePageRestore }    from "./hooks/usePageRestore";
 import { applyOverage }       from "./api/stripeApi";
 
 import UpgradeStageOverlay    from "./components/overlays/UpgradeStageOverlay";
@@ -130,6 +131,10 @@ function AppContent() {
   const [marketingPage,       setMarketingPage]       = useState(null);
   const [portalRedirecting,   setPortalRedirecting]   = useState(false);
   const acordModalRef = useRef(null);
+
+  // Back from Stripe (checkout or billing portal) restores the page frozen with
+  // the full-screen "Redirecting to Stripe…" overlay still up - take it down.
+  usePageRestore(() => setPortalRedirecting(false));
 
   // Detect platform-admin (email in ADMIN_EMAILS) to gate admin-only UI.
   // Server-side _require_admin is the real gate; this only shows/hides controls.

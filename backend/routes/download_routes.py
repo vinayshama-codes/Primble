@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from datetime import datetime, timezone
 
 from config.database import get_pool
-from config.settings import ACORD_LICENSE_VERSION
+from config.settings import ACORD_LICENSE_VERSION, FREE_PACKAGE_LIMIT
 from repositories.session_repository import get_processing_session, upd_processing_session
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user, is_acord_license_current
@@ -247,7 +247,7 @@ async def download_pdf(
     used = int(fresh.get("downloads_used", 0) or 0)
 
     check_payment_access(fresh.get("payment_status", "ok"), "form")
-    if sub == "free" and used >= 3:
+    if sub == "free" and used >= FREE_PACKAGE_LIMIT:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)
@@ -447,7 +447,7 @@ async def download_all(
     used = int(fresh.get("downloads_used", 0) or 0)
 
     check_payment_access(fresh.get("payment_status", "ok"), "form")
-    if sub == "free" and used >= 3:
+    if sub == "free" and used >= FREE_PACKAGE_LIMIT:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)

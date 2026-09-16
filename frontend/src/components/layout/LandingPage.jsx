@@ -8,7 +8,7 @@ export default function LandingPage({ user, onGetStarted, token, onError, openBi
           <p className="hero-eyebrow-label">INTELLIGENT SUBMISSIONS</p>
           <h1 className="hero-h1-main">Submission Quality Control for Commercial Insurance</h1>
           {!user && (
-            <p className="hero-free-copy">Build and validate your first few packages on us. No credit card required.</p>
+            <p className="hero-free-copy">Build and validate your first package on us. No credit card required.</p>
           )}
           <div className="hero-actions">
             <button className="btn-primary" onClick={() => onGetStarted(null, null, "signup")}>

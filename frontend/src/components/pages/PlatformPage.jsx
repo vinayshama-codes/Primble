@@ -122,7 +122,7 @@ export default function PlatformPage({ onGetStarted, onNavigate }) {
                 <li>Every SQS decision logged</li>
                 <li>Override reason captured at time of action</li>
                 <li>Timestamped and tied to session</li>
-                <li>Exportable on Business plan</li>
+                <li>Exportable on Professional plan</li>
               </ul>
             </div>
           </div>

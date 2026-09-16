@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
-import { PLANS } from "../billing/plans";
+import { PLANS, ANNUAL_SAVINGS_PCT } from "../billing/plans";
+import { usePageRestore } from "../../hooks/usePageRestore";
 import ContactModal from "../account/ContactModal";
 
+// "business" is retired (no card) but keeps its rank so a legacy Business
+// subscriber keeps the same button labels on the remaining cards.
 const PLAN_ORDER = ["essentials", "professional", "business", "enterprise"];
 
 export default function PricingPage({ onGetStarted, token, user, onError, openBillingPortal }) {
@@ -10,6 +13,9 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [showContactSales, setShowContactSales] = useState(false);
+
+  // Back from Stripe restores this page frozen mid-redirect - clear the spinners.
+  usePageRestore(() => { setLoadingPlan(null); setPortalLoading(false); });
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -106,7 +112,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
               className={`mkt-toggle-btn ${annual ? "mkt-toggle-active" : ""}`}
               onClick={() => setAnnual(true)}
             >
-              Annual <span className="mkt-toggle-save">Save ~23%</span>
+              Annual <span className="mkt-toggle-save">Save ~{ANNUAL_SAVINGS_PCT}%</span>
             </button>
           </div>
 

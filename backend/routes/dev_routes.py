@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from config.database import get_pool
+from config.settings import FREE_PACKAGE_LIMIT
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user
 from services.email_service import _send_payment_failed_email
@@ -201,7 +202,7 @@ async def simulate_payment_failure(
 # ASYNC-SAFE
 @router.post("/api/stripe/reconcile-overage")
 async def reconcile_overage(current_user: dict = Depends(get_current_user)):
-    from config.settings import SOFT_BUFFER_PCT
+    from config.settings import SOFT_BUFFER_PCT, default_overage_rate_cents
     from services.stripe_service import create_overage_invoice_item
 
     async with get_pool().acquire() as conn:
@@ -219,7 +220,7 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
     pkgs_used          = int(user.get("packages_used", 0) or 0)
     pkgs_limit         = int(user.get("packages_limit", 0) or 0)
     already_invoiced   = int(user.get("overage_packages_invoiced", 0) or 0)
-    overage_rate_cents = int(user.get("overage_rate") or (150 if sub == "essentials" else 125))
+    overage_rate_cents = int(user.get("overage_rate") or default_overage_rate_cents(sub))
     soft_buffer        = int(pkgs_limit * SOFT_BUFFER_PCT)
 
     billable_overages = max(0, pkgs_used - pkgs_limit - soft_buffer)
@@ -284,7 +285,7 @@ async def count_download(current_user: dict = Depends(get_current_user)):
         sub  = row.get("subscription_tier", "free") or "free"
         used = int(row.get("downloads_used", 0) or 0)
 
-        if sub == "free" and used >= 3:
+        if sub == "free" and used >= FREE_PACKAGE_LIMIT:
             return {"success": False, "upgrade_required": True}
 
         if sub == "free":

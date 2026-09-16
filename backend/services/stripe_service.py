@@ -4,7 +4,7 @@ from typing import Optional
 import stripe
 
 from config.database import get_pool
-from config.settings import SOFT_BUFFER_PCT
+from config.settings import PLANS, SOFT_BUFFER_PCT, default_overage_rate_cents, plan_usage_unit
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +46,15 @@ def create_overage_invoice_item(user: dict, overage_rate_cents: int) -> bool:
     if not user.get("stripe_customer_id"):
         logger.warning(f"No stripe_customer_id for user={user['id']} — overage not billed")
         return False
-    sub        = user.get("subscription_tier", "")
-    tier_label = "Essentials" if sub == "essentials" else "Professional"
+    sub        = user.get("subscription_tier", "") or ""
+    tier_label = sub.title() if sub in PLANS else "Professional"
+    unit_label = plan_usage_unit(sub)
     try:
         stripe.InvoiceItem.create(
             customer=user.get("stripe_customer_id"),
             amount=overage_rate_cents,
             currency="usd",
-            description=f"Primble {tier_label} — 1 overage ACORD package (@ ${overage_rate_cents/100:.2f})",
+            description=f"Primble {tier_label} — 1 overage ACORD {unit_label} (@ ${overage_rate_cents/100:.2f})",
             metadata={"user_id": user["id"], "user_email": user.get("email", ""), "plan": sub, "type": "overage_package"},
         )
         logger.info(f"Overage invoice item queued: user={user['id']} amount={overage_rate_cents}¢")
@@ -68,11 +69,12 @@ async def evaluate_package_limit(fresh: dict) -> dict:
     sub                = fresh.get("subscription_tier", "free") or "free"
     pkgs_used          = int(fresh.get("packages_used", 0) or 0)
     pkgs_limit         = int(fresh.get("packages_limit", 0) or 0)
-    _default_rate = 175 if sub == "essentials" else (150 if sub == "professional" else 125)
-    overage_rate_cents = int(fresh.get("overage_rate") or _default_rate)
+    overage_rate_cents = int(fresh.get("overage_rate") or default_overage_rate_cents(sub))
 
     if pkgs_limit == 0:
-        pkgs_limit = 50 if sub == "essentials" else (100 if sub == "professional" else 400)
+        _cycle     = fresh.get("billing_cycle") or "monthly"
+        _plan      = PLANS.get(sub) or {}
+        pkgs_limit = int((_plan.get(_cycle) or _plan.get("monthly") or {}).get("packages") or 400)
         async with get_pool().acquire() as conn:
             await conn.execute(
                 "UPDATE users SET packages_limit=$1 WHERE id=$2",

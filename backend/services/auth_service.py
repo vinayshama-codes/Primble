@@ -133,10 +133,23 @@ async def revoke_all_sessions(user_id: str) -> None:
                 logger.warning(f"auth_service: Redis bulk-revoke failed for hash: {ex}")
 
 
+def me_cache_key(user_id: str) -> str:
+    """Redis key of the cached /api/auth/me payload. One definition, so the route
+    that writes it and invalidate_user_cache can never disagree."""
+    return f"me:{hashlib.sha256(str(user_id).encode()).hexdigest()[:16]}"
+
+
 async def invalidate_user_cache(user_id: str) -> None:
     """Delete all Redis auth cache entries for a user so DB changes are reflected immediately."""
     if _auth_redis is None:
         return
+    # The /me payload carries tier, limits and payment_status. Left cached, a
+    # change made seconds earlier (cancel, plan sync, payment failure) reads as
+    # the old value on the next reload for up to its 30s TTL.
+    try:
+        await _auth_redis.delete(me_cache_key(user_id))
+    except Exception as ex:
+        logger.warning(f"auth_service: /me cache invalidation failed for user={user_id}: {ex}")
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(

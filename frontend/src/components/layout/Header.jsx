@@ -49,7 +49,7 @@ const TIER_LABELS = {
   free: "Free",
 };
 
-function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
+function InlinePlanPanel({ user, onChangePlan, onBillingPortal, onCanceled }) {
   const [canceling, setCanceling] = useState(false);
   const [cancelDone, setCancelDone] = useState(false);
   const [cancelError, setCancelError] = useState("");
@@ -64,6 +64,10 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
   const noPackages = isFree;
   const pct = (!isFree && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const barColor = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
+  // Cancelled here, or on an earlier visit (the server records "canceling"). This
+  // panel unmounts whenever the dropdown closes, so local state alone would bring
+  // the Cancel button back on the next open.
+  const isCanceling = cancelDone || user?.payment_status === "canceling";
 
   const handleCancel = async () => {
     setCanceling(true); setCancelError("");
@@ -74,6 +78,7 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
       const data = await res.json();
       if (!res.ok) { setCancelError(data.detail || data.message || "Failed to cancel."); return; }
       setCancelDone(true); setConfirmCancel(false);
+      onCanceled?.();
     } catch { setCancelError("Network error. Please try again."); }
     finally { setCanceling(false); }
   };
@@ -117,9 +122,7 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
       <div className="udrop-plan-divider" />
 
       {/* Actions */}
-      {cancelDone ? (
-        <div className="udrop-plan-cancel-done">✓ Subscription will cancel at end of billing period.</div>
-      ) : confirmCancel ? (
+      {confirmCancel && !isCanceling ? (
         <div>
           <div className="udrop-plan-confirm-text">
             Are you sure? You'll keep access until the end of your current billing period.
@@ -141,13 +144,12 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
           <button onClick={onChangePlan} className="udrop-plan-btn udrop-plan-btn--primary">
             Change Plan
           </button>
-          {!isFree && tier !== "enterprise" && !cancelDone && user?.payment_status !== "canceling" && (
+          {isCanceling ? (
+            <div className="udrop-plan-cancel-done">✓ Subscription will cancel at end of billing period.</div>
+          ) : !isFree && tier !== "enterprise" && (
             <button onClick={() => setConfirmCancel(true)} className="udrop-plan-btn udrop-plan-btn--secondary">
               Cancel Subscription
             </button>
-          )}
-          {user?.payment_status === "canceling" && (
-            <div className="udrop-plan-canceling-note">Subscription cancels at end of billing period.</div>
           )}
         </div>
       )}
@@ -346,6 +348,7 @@ function UserDropdown({
                     user={user}
                     onChangePlan={() => { setShowPlan(false); setOpen(false); onUpgradeClick(); }}
                     onBillingPortal={openBillingPortal}
+                    onCanceled={() => setUser?.(u => (u ? { ...u, payment_status: "canceling" } : u))}
                   />
                 )}
               </>

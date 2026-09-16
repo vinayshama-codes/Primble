@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
-import { PLANS } from "./plans";
+import { PLANS, ANNUAL_SAVINGS_PCT } from "./plans";
+import { usePageRestore } from "../../hooks/usePageRestore";
 import ContactModal from "../account/ContactModal";
 
 const CheckIcon = () => (
@@ -20,6 +21,9 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [showContactSales, setShowContactSales] = useState(false);
+
+  // Back from Stripe restores this page frozen mid-redirect - clear the spinners.
+  usePageRestore(() => { setLoadingPlan(null); setPortalLoading(false); });
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -109,12 +113,12 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                 style={{ padding: "9px 26px", borderRadius: 999, border: "none", fontSize: 14, fontWeight: 600, cursor: anyLoading ? "not-allowed" : "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 8, background: billing === "annual" ? "#fff" : "transparent", color: billing === "annual" ? "var(--text-primary)" : "var(--text-secondary)", boxShadow: billing === "annual" ? "0 2px 8px rgba(0,0,0,0.08)" : "none" }}
               >
                 Annual
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "rgba(16,185,129,0.1)", padding: "2px 7px", borderRadius: 999 }}>Save ~23%</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "rgba(16,185,129,0.1)", padding: "2px 7px", borderRadius: 999 }}>Save ~{ANNUAL_SAVINGS_PCT}%</span>
               </button>
             </div>
           </div>
 
-          {/* Plan cards — 4 in one row */}
+          {/* Plan cards - 3 in one row */}
           <div className="upgrade-plan-grid">
             {PLANS.map((plan) => {
               const isLoading = loadingPlan === plan.id;

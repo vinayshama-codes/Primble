@@ -271,7 +271,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "6px" }}>
               <img src="/primble-logo.webp" alt="Primble" style={{ height: "32px", width: "auto" }} />
             </div>
-            <p className="step-subtitle">{mode === "signin" ? "Sign in to access your packages" : "Get started with three free packages"}</p>
+            <p className="step-subtitle">{mode === "signin" ? "Sign in to access your packages" : "Get started with a free package"}</p>
           </div>
           {error    && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           {resetMsg && <div className="alert alert-success"><span>{resetMsg}</span></div>}

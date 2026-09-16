@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from config.database import get_pool
-from config.settings import PLANS, FRONTEND_URL, STRIPE_WEBHOOK_SECRET
+from config.settings import (
+    PLANS, SELLABLE_PLANS, FRONTEND_URL, STRIPE_WEBHOOK_SECRET,
+    default_overage_rate_cents, plan_usage_unit,
+)
 from models.schemas import ApplyOverageRequest, CheckoutRequest, OverageCheckoutRequest
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user, invalidate_user_cache
@@ -31,7 +34,9 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     cycle = req.billing_cycle.lower()
     if plan == "enterprise":
         raise HTTPException(400, "Enterprise requires contacting sales.")
-    if plan not in PLANS:
+    if plan == "business":
+        raise HTTPException(400, "The Business plan is no longer offered. Please choose another plan.")
+    if plan not in SELLABLE_PLANS:
         raise HTTPException(400, f"Unknown plan '{plan}'")
     if cycle not in ("monthly", "annual"):
         raise HTTPException(400, "billing_cycle must be 'monthly' or 'annual'")
@@ -39,12 +44,14 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     plan_cfg   = PLANS[plan][cycle]
     plan_label = f"Primble {plan.title()} — {'Annual' if cycle == 'annual' else 'Monthly'}"
 
-    _overage_descriptions = {
-        "essentials":    "Includes 50 scores/month. Overages billed at $1.75/score.",
-        "professional":  "Includes 100 packages/month. Overages billed at $1.50/package.",
-        "business":      "Includes 400 packages/month. Overages billed at $1.25/package.",
-    }
-    plan_description = _overage_descriptions.get(plan)
+    # Derived from PLANS so the text on the Stripe checkout page cannot drift
+    # from what the subscription actually meters and bills.
+    _monthly         = PLANS[plan]["monthly"]
+    _unit            = plan_usage_unit(plan)
+    plan_description = (
+        f"Includes {_monthly['packages']} {_unit}s/month. "
+        f"Overages billed at ${_monthly['overage_rate'] / 100:.2f}/{_unit}."
+    )
 
     customer_id = current_user.get("stripe_customer_id")
 
@@ -697,12 +704,11 @@ async def create_overage_checkout(
         raise HTTPException(500, "Stripe not configured")
 
     tier = current_user.get("subscription_tier", "free")
-    _default_rate = 175 if tier == "essentials" else (150 if tier == "professional" else 125)
-    overage_rate_cents  = int(current_user.get("overage_rate") or _default_rate)
+    overage_rate_cents  = int(current_user.get("overage_rate") or default_overage_rate_cents(tier))
     overage_rate_dollars = overage_rate_cents / 100
     qty        = max(1, min(req.quantity, 10000))
     tier_label = {"essentials": "Essentials", "professional": "Professional", "business": "Business"}.get(tier, tier.title())
-    unit_label = "score" if tier == "essentials" else "package"
+    unit_label = plan_usage_unit(tier)
     description = (
         f"Primble {tier_label} — {qty} additional ACORD {unit_label}s "
         f"@ ${overage_rate_dollars:.2f}/{unit_label}"
@@ -933,6 +939,13 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
                     )
                     return {"url": setup_session.url}
 
+            # A NEW subscription may only be opened for a plan still on sale. The
+            # restore branch above keeps syncing a live retired-plan subscription;
+            # this stops the fallback selling a retired (business) or sales-led
+            # (enterprise) plan that create_checkout refuses.
+            if plan not in SELLABLE_PLANS:
+                raise HTTPException(400, "This plan is no longer offered. Please choose a plan on the Pricing page.")
+
             checkout = await asyncio.to_thread(
                 stripe.checkout.Session.create,
                 customer=customer.id,
@@ -959,6 +972,8 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
             )
             return {"url": checkout.url}
 
+        except HTTPException:
+            raise
         except Exception as ex:
             logger.error(f"Portal checkout fallback failed: {ex}")
             raise HTTPException(500, "Could not open billing. Please contact support.")

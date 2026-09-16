@@ -13,6 +13,8 @@ from google.auth.transport import requests as google_requests
 
 from config.database import get_pool
 from config.settings import GOOGLE_CLIENT_ID, SESSION_TTL_H as _SESSION_TTL_H
+from config.settings import FREE_PACKAGE_LIMIT
+
 from models.schemas import (
     SignupRequest, LoginRequest, VerifyEmailRequest,
     GoogleAuthRequest, CompleteProfileRequest, UpdateProfileRequest,
@@ -21,6 +23,7 @@ from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
     revoke_token, rotate_session, revoke_all_sessions,
     is_acord_license_current,
+    me_cache_key,
     _auth_redis,
 )
 from services.email_service import send_verification_email, _send_generic_email
@@ -344,7 +347,7 @@ async def verify_email(req: VerifyEmailRequest, request: Request):
             "id": user_id, "email": pending["email"],
             "full_name": pending.get("full_name", ""),
             "organization_name": pending.get("organization_name", ""),
-            "subscription_tier": "free", "downloads_remaining": 3,
+            "subscription_tier": "free", "downloads_remaining": FREE_PACKAGE_LIMIT,
             "acord_license_confirmed": False,
         },
     })
@@ -440,7 +443,7 @@ async def login(req: LoginRequest, request: Request):
             "id": user["id"], "email": user["email"],
             "full_name": user.get("full_name", ""),
             "subscription_tier": sub,
-            "downloads_remaining": 3 - used if sub == "free" else -1,
+            "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
         },
     })
     _set_session_cookie(resp, token)
@@ -635,7 +638,7 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
                 "organization_name": org_name, "subscription_tier": sub,
-                "downloads_remaining": 3 - used if sub == "free" else -1,
+                "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
                 "acord_license_confirmed": is_acord_license_current(user),
                 "acord_disclaimer_accepted": bool(disclaimer),
             },
@@ -689,7 +692,7 @@ async def complete_profile(
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
                 "organization_name": req.organization_name.strip(),
-                "subscription_tier": "free", "downloads_remaining": 3,
+                "subscription_tier": "free", "downloads_remaining": FREE_PACKAGE_LIMIT,
                 "acord_license_confirmed": False, "acord_disclaimer_accepted": True,
             },
         })
@@ -721,7 +724,6 @@ async def complete_profile(
 async def get_me(current_user: dict = Depends(get_current_user)):
     import asyncio as _asyncio
     import json as _json
-    import hashlib as _hashlib
     import stripe as stripe_lib
     sub         = current_user.get("subscription_tier", "free") or "free"
     used        = int(current_user.get("downloads_used", 0) or 0)
@@ -734,7 +736,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     if customer_id and sub not in ("free", None):
         # 30-second Redis cache keyed by a short hash of the user ID to avoid
         # blocking the event loop with a synchronous Stripe HTTP call on every request.
-        _me_cache_key = f"me:{_hashlib.sha256(current_user['id'].encode()).hexdigest()[:16]}"
+        _me_cache_key = me_cache_key(current_user["id"])
         if _auth_redis is not None:
             try:
                 _cached = await _auth_redis.get(_me_cache_key)
@@ -786,7 +788,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "organization_name": current_user.get("organization_name", ""),
         "subscription_tier": sub,
         "billing_cycle": current_user.get("billing_cycle", "monthly") or "monthly",
-        "downloads_remaining": 3 - used if sub == "free" else -1,
+        "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
         "packages_used": pkgs_used, "packages_limit": pkgs_limit,
         "packages_soft_buffer": soft_buffer,
         "overage_packages_pending": int(current_user.get("overage_packages_pending", 0) or 0),
@@ -800,7 +802,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
     if customer_id and sub not in ("free", None) and _auth_redis is not None:
         try:
-            _me_cache_key_store = f"me:{_hashlib.sha256(current_user['id'].encode()).hexdigest()[:16]}"
+            _me_cache_key_store = me_cache_key(current_user["id"])
             await _auth_redis.setex(_me_cache_key_store, 30, _json.dumps(response, default=str))
         except Exception:
             pass

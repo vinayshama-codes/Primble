@@ -1,20 +1,22 @@
+// Display copy for the plan cards. What Stripe actually charges lives in
+// backend/config/settings.py PLANS - keep the two in step.
 export const PLANS = [
   {
     id: "essentials",
     name: "Essentials",
-    monthlyPrice: 59,
-    annualPrice: 49,
-    packageCount: "50 scores/mo",
-    overage: "$1.75/score",
+    monthlyPrice: 199,
+    annualPrice: 159,
+    packageCount: "100 scores/mo",
+    overage: "$2/score",
     featured: false,
     badge: null,
     cta: "Upgrade",
     features: [
-      "50 scores / month",
+      "100 scores / month",
       "Submission Quality Scoring (SQS)",
       "Cross-form validation",
       "Client-in-the-Loop™ remediation",
-      "Coversheet",
+      "Submission brief",
       "Unlimited users",
     ],
     missing: [],
@@ -22,39 +24,20 @@ export const PLANS = [
   {
     id: "professional",
     name: "Professional",
-    monthlyPrice: 129,
-    annualPrice: 99,
+    monthlyPrice: 299,
+    annualPrice: 239,
     packageCount: "100 packages/mo",
-    overage: "$1.50/package",
-    featured: false,
-    badge: null,
-    cta: "Upgrade",
-    features: [
-      "100 packages / month",
-      "All Essentials features",
-      "800+ ACORD forms",
-      "Guided form completion",
-      "E&O defense",
-      "Email support",
-    ],
-    missing: [],
-  },
-  {
-    id: "business",
-    name: "Business",
-    monthlyPrice: 449,
-    annualPrice: 399,
-    packageCount: "400 packages/mo",
-    overage: "$1.25/package",
+    overage: "$3/package",
     featured: true,
     badge: "Most popular",
     cta: "Upgrade",
     features: [
-      "400 packages / month",
-      "All Professional features",
-      "Supplemental forms",
+      "100 packages / month",
+      "All Essentials features",
+      "ACORD forms",
+      "Guided form completion",
       "Advanced client questionnaires",
-      "Renewal workspace",
+      "E&O audit defense",
       "Priority support",
     ],
     missing: [],
@@ -70,9 +53,9 @@ export const PLANS = [
     badge: null,
     cta: "Contact sales",
     features: [
-      "All Business features",
+      "ACORD and Supplemental forms",
       "Custom integrations",
-      "Unlimited users",
+      "Renewal workspace",
       "Team analytics & reporting",
       "On-prem deployment",
       "Dedicated account manager",
@@ -80,3 +63,12 @@ export const PLANS = [
     missing: [],
   },
 ];
+
+// Largest annual discount across the priced plans, rounded to a whole percent,
+// so the "Save ~N%" badge on the billing toggle can never drift from the prices.
+export const ANNUAL_SAVINGS_PCT = Math.max(
+  0,
+  ...PLANS
+    .filter((p) => p.monthlyPrice && p.annualPrice)
+    .map((p) => Math.round((1 - p.annualPrice / p.monthlyPrice) * 100)),
+);
