@@ -11,6 +11,8 @@ import ResolutionModal from "./ResolutionModal";
 import ContactModal from "../account/ContactModal";
 import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 import { useToasts } from "../../hooks/useToasts";
+import { getReviewLayout } from "../../utils/reviewLayout";
+import ReviewRailLayout from "./review/ReviewRailLayout";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -2811,6 +2813,13 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   );
 }
 
+// Module-level helpers the rail layout of the Review step reuses. Passed as a
+// prop because ReviewRailLayout cannot import from this file without a cycle.
+const REVIEW_RAIL_HELPERS = Object.freeze({
+  IssueLine, BareStopRow, HoverTip, ScoreNeutralNote, RemediationDiffBand, IntegritySeverityChip,
+  CONFIDENCE_META, DOC_ACTION_TIPS, clusterIdOf, issueIdOf,
+});
+
 // ── Main AcordModal ────────────────────────────────────────────────────────
 const AcordModal = forwardRef(function AcordModal({
   onClose, user, token, onUserUpdate, onShowUpgrade,
@@ -2956,7 +2965,22 @@ const AcordModal = forwardRef(function AcordModal({
   }, [sessionId, clientAnswerBusy]);
   const [dcOpenTick, setDcOpenTick] = useState(0);
   const [dcHighlight, setDcHighlight] = useState(null); // fact_key being highlighted
+  // Review step layout (utils/reviewLayout): "classic" or the sectioned "rail".
+  // Read once per mount so a layout never changes under the broker mid-review.
+  const [reviewLayout] = useState(getReviewLayout);
+  const reviewRail = reviewLayout === "rail";
+  // Rail section, remembered per session: a new submission starts on Overview,
+  // while "Back to review" returns to the section the broker left.
+  const [reviewNav, setReviewNav] = useState({ sessionId: null, section: "overview" });
+  const reviewSection = reviewNav.sessionId === sessionId ? reviewNav.section : "overview";
+  const showReviewSection = (section, { scrollToTop = true } = {}) => {
+    setReviewNav({ sessionId, section });
+    if (scrollToTop) window.scrollTo({ top: 0, behavior: "auto" });
+  };
   const jumpToDataConsistency = (factKey) => {
+    // Rail layout: the target row lives in the Data Consistency section, which
+    // must be the visible one before the scroll below looks it up.
+    if (reviewRail) showReviewSection("consistency", { scrollToTop: false });
     setDcOpenTick(t => t + 1);          // re-applies defaultOpen (true when conflicts exist)
     setDcHighlight(factKey || null);
     // Let the section render/expand before scrolling to the field row.
@@ -4717,6 +4741,7 @@ const AcordModal = forwardRef(function AcordModal({
         if (detail.error === "building_value_review_required") {
           if (detail.underwriting_consistency) setUnderwriting(detail.underwriting_consistency);
           setUnderwritingPicks({});
+          if (reviewRail) showReviewSection("consistency");
           setStep("review");
           setError(detail.message || "Building values differ across the submitted documents. Confirm the correct value before generating forms.");
           return;
@@ -5935,7 +5960,7 @@ const AcordModal = forwardRef(function AcordModal({
           side padding before .modal-step's own 8px. Moved to .acord-step-shell so
           it can step down with the viewport. Desktop values are unchanged. */}
       <div
-        className={step === "editor" ? undefined : "acord-step-shell"}
+        className={step === "editor" ? undefined : (step === "review" && reviewRail ? "acord-step-shell rr-shell" : "acord-step-shell")}
         style={step === "editor"
           ? { padding: 0, flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }
           : undefined}
@@ -6044,7 +6069,7 @@ const AcordModal = forwardRef(function AcordModal({
           // iOS and Windows without a media query.
           left: "max(16px, env(safe-area-inset-left))",
           right: "max(16px, env(safe-area-inset-right))",
-          bottom: "max(16px, env(safe-area-inset-bottom))",
+          bottom: "calc(max(16px, env(safe-area-inset-bottom)) + var(--rr-footer-h, 0px))",
           zIndex: 10000,
           display: "flex",
           flexDirection: "column",
@@ -6140,6 +6165,66 @@ const AcordModal = forwardRef(function AcordModal({
     );
   }
 
+  // Account, billing and error banners shown above every non-editor step. The
+  // classic layouts render them where they always were; the Review step's rail
+  // layout renders them at the top of its content column instead, so they stay
+  // inside the page gutter rather than running under the dark rail.
+  function renderStatusBanners() {
+    return (
+      <>
+        {user && user.subscription_tier === "free" && user.downloads_remaining === 0 && step !== "upload" && step !== "dashboard" && (
+          <div className="freemium-banner freemium-depleted">
+            <span className="freemium-text">Free limit reached - upgrade to continue</span>
+            <button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button>
+          </div>
+        )}
+
+        {inOverage && (
+          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>You're in overage territory - each additional download will be billed on your next invoice.</span>
+          </div>
+        )}
+
+        {user && user.subscription_tier !== "free" && (() => {
+          const ps = user.payment_status;
+          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived - <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
+          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
+          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled - Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
+          if (ps === "failed") {
+            const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
+            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue - account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
+            return <div className="payment-status-banner payment-status-failed">Payment overdue -{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+          }
+          return null;
+        })()}
+
+        {pkgStatusMsg && (
+          <div className="overage-inline-notice" style={{ background: pkgStatusType === "overage" ? "#fefce8" : "#f0fdf4", borderColor: pkgStatusType === "overage" ? "#fde047" : "#86efac", color: pkgStatusType === "overage" ? "#713f12" : "#14532d" }}>
+            <span></span>
+            <span>{pkgStatusMsg}{" "}<button onClick={() => setPkgStatusMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700, fontSize: 12, textDecoration: "underline" }}>Dismiss</button></span>
+          </div>
+        )}
+
+        {error && (
+          <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <span style={{ flex: 1 }}>{error}</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {step === "form_selection" && checkedFormIds.size > 0 && (
+                <button
+                  onClick={() => { setError(null); handleGenerateAll(); }}
+                  style={{ padding: "5px 14px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Retry Generation
+                </button>
+              )}
+              <button className="alert-close" onClick={() => setError(null)}>✕</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   function renderContent() {
     return (
       <>
@@ -6223,55 +6308,7 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="loading-overlay"><div className="loading-spinner" /><p className="loading-text">{processingStage || "Processing..."}</p></div>
         )}
 
-        {user && user.subscription_tier === "free" && user.downloads_remaining === 0 && step !== "upload" && step !== "dashboard" && (
-          <div className="freemium-banner freemium-depleted">
-            <span className="freemium-text">Free limit reached - upgrade to continue</span>
-            <button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button>
-          </div>
-        )}
-
-        {inOverage && (
-          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>You're in overage territory - each additional download will be billed on your next invoice.</span>
-          </div>
-        )}
-
-        {user && user.subscription_tier !== "free" && (() => {
-          const ps = user.payment_status;
-          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived - <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
-          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
-          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled - Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
-          if (ps === "failed") {
-            const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
-            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue - account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
-            return <div className="payment-status-banner payment-status-failed">Payment overdue -{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
-          }
-          return null;
-        })()}
-
-        {pkgStatusMsg && (
-          <div className="overage-inline-notice" style={{ background: pkgStatusType === "overage" ? "#fefce8" : "#f0fdf4", borderColor: pkgStatusType === "overage" ? "#fde047" : "#86efac", color: pkgStatusType === "overage" ? "#713f12" : "#14532d" }}>
-            <span></span>
-            <span>{pkgStatusMsg}{" "}<button onClick={() => setPkgStatusMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700, fontSize: 12, textDecoration: "underline" }}>Dismiss</button></span>
-          </div>
-        )}
-
-        {error && (
-          <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-            <span style={{ flex: 1 }}>{error}</span>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {step === "form_selection" && checkedFormIds.size > 0 && (
-                <button
-                  onClick={() => { setError(null); handleGenerateAll(); }}
-                  style={{ padding: "5px 14px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  Retry Generation
-                </button>
-              )}
-              <button className="alert-close" onClick={() => setError(null)}>✕</button>
-            </div>
-          </div>
-        )}
+        {!(step === "review" && reviewRail) && renderStatusBanners()}
 
         {step === "dashboard" && <DashboardStep token={token} onResume={handleResumeSession} onNewPackage={handleNewPackage} />}
 
@@ -6867,7 +6904,54 @@ const AcordModal = forwardRef(function AcordModal({
             met 23 warnings and a form picker at the same time and neither read as
             a coherent task. It is now one theme - understand and fix the
             submission - and form selection is its own step below. */}
-        {step === "review" && (
+        {/* Rail layout of the same step (the default; VITE_REVIEW_LAYOUT=classic
+            switches back to the classic markup below). Same state,
+            handlers and render closures as the classic markup below; only the
+            arrangement differs. */}
+        {step === "review" && reviewRail && (
+          <ReviewRailLayout
+            section={reviewSection}
+            onSectionChange={(section) => showReviewSection(section)}
+            banners={renderStatusBanners()}
+            helpers={REVIEW_RAIL_HELPERS}
+            packageSqs={packageSqs}
+            keyDetails={keyDetails}
+            integrity={integrity}
+            renderIntegrityStatus={renderIntegrityStatus}
+            docSummary={docSummary}
+            docsNeedingReview={docsNeedingReview}
+            availableDocTypes={availableDocTypes}
+            reclassDocId={reclassDocId}
+            reclassBusyBtn={reclassBusyBtn}
+            reviewLoadingId={reviewLoadingId}
+            onReclassify={handleReclassify}
+            onReviewData={handleReviewData}
+            underwriting={underwriting}
+            openConflicts={openConflicts}
+            underwritingPicks={underwritingPicks}
+            setUnderwritingPicks={setUnderwritingPicks}
+            underwritingBusy={underwritingBusy}
+            onConfirmUnderwriting={handleConfirmUnderwriting}
+            dcHighlight={dcHighlight}
+            dcSectionRef={dcSectionRef}
+            groupedIssues={groupedIssues}
+            hardStops={hardStops}
+            softStops={softStops}
+            issueStatuses={issueStatuses}
+            reviewIssueCounts={reviewIssueCounts}
+            hasHardStops={hasHardStops}
+            hasWarnings={hasWarnings}
+            renderItemActions={itemResolveAndStatus}
+            renderClusterRollup={clusterRollup}
+            issueDiff={issueDiff}
+            canProceedWithWarning={canProceedWithWarning}
+            warningStops={warningStops}
+            openItemCount={openItemCount}
+            onContinue={() => setStep("form_selection")}
+          />
+        )}
+
+        {step === "review" && !reviewRail && (
           <div className="modal-step modal-step-wide">
             <div className="step-header">
               <h2 className="step-title" style={{ color: "#1e293b" }}>Review Your Submission</h2>

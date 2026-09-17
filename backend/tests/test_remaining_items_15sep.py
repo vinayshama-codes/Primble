@@ -110,7 +110,20 @@ class TestProposedTerm:
         assert mf["effective_date"]["source"] == "derived"
         assert mf["effective_date"]["confidence"] == "low_confidence"
         assert mf["effective_date"]["derivation"]["rule"] == "next_term_after_current_policy"
-        nxt = (datetime.strptime(exp, "%m/%d/%Y") + timedelta(days=365)).strftime("%m/%d/%Y")
+        # A calendar-year term renews for a calendar year (17 Sep 2026). This
+        # used to expect `exp + 365 days`, which is one day short whenever the
+        # next term crosses 29 Feb - exactly the 07/31/2028 the live kit printed
+        # for an 08/01/2027 renewal. A term that is not whole calendar months
+        # keeps the day count.
+        exp_d = datetime.strptime(exp, "%m/%d/%Y")
+        eff_d = datetime.strptime(eff, "%m/%d/%Y")
+        if eff_d.day == exp_d.day:
+            try:
+                nxt = exp_d.replace(year=exp_d.year + 1).strftime("%m/%d/%Y")
+            except ValueError:                         # 29 Feb -> 28 Feb
+                nxt = exp_d.replace(year=exp_d.year + 1, day=28).strftime("%m/%d/%Y")
+        else:
+            nxt = (exp_d + timedelta(days=365)).strftime("%m/%d/%Y")
         assert _v(mf["expiration_date"]) == nxt
 
     @pytest.mark.parametrize("role", ["quote", "application", "acord_form", "supplemental_application"])

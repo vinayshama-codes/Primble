@@ -425,6 +425,9 @@ export default function Header({
 
     const handleScroll = (e) => {
       const t = e.target;
+      // A region that scrolls on its own (the Review step's section rail) must
+      // not hide the header or collapse its space.
+      if (t && t.nodeType === 1 && t.closest && t.closest('[data-header-autohide="off"]')) return;
       const isWindowScroll = t === document || t === document.documentElement || t === document.body;
       const el = isWindowScroll ? (document.scrollingElement || document.documentElement) : t;
       if (!el || typeof el.scrollTop !== "number") return;
@@ -454,6 +457,27 @@ export default function Header({
     window.addEventListener("scroll", handleScroll, { passive: true, capture: true });
     return () => window.removeEventListener("scroll", handleScroll, { capture: true });
   }, []);
+
+  // Announce the header's live height and whether it is on screen, so sticky page
+  // chrome (the Review step's section rail) can sit directly under it. An event,
+  // not a style change: nothing on the page restyles unless a listener applies it.
+  // A listener that mounts later asks for the current state with
+  // "app-header:request".
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const announce = () => {
+      window.dispatchEvent(new CustomEvent("app-header:change", { detail: { height: el.offsetHeight, hidden } }));
+    };
+    announce();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(announce) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener("app-header:request", announce);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("app-header:request", announce);
+    };
+  }, [hidden]);
 
   useLayoutEffect(() => {
     document.body.classList.toggle("app-header-collapsed", collapse);

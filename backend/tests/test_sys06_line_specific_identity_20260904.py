@@ -499,9 +499,19 @@ def test_a_scoped_confirmation_edits_only_its_own_line():
     out = uc.apply_confirmations({"coverage_lines": copy.deepcopy(RIVAL_GL)}, conf)
     by_line = {}
     for r in out["coverage_lines"]:
+        if r.get("_set_aside"):
+            continue                       # the rival policy, not relabelled
         by_line.setdefault(es._canon_line(r["line"]), set()).add(r["carrier"])
     assert by_line["general_liab"] == {"EMC Property & Casualty Company"}
     assert by_line["auto"] == {"Employers Mutual Casualty Company"}
+    # 17 Sep 2026: the Travelers policy is SET ASIDE, never rewritten as EMC's.
+    # Rewriting it printed EMC and EMC's NAIC beside Travelers' GL-4471102-26 -
+    # a contract no document states.
+    rival = next(r for r in out["coverage_lines"] if r.get("_set_aside"))
+    assert rival["premium"] == "$5,200"
+    assert rival["carrier"] is None and rival["naic"] is None and rival["policy_number"] is None
+    assert not any(r.get("carrier") == "EMC Property & Casualty Company"
+                   and r.get("policy_number") == "GL-4471102-26" for r in out["coverage_lines"])
 
 
 def test_a_scoped_confirmation_never_becomes_the_package_scalar():

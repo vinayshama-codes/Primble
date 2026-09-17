@@ -2570,6 +2570,19 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     "_resolve_wc_premium_cell",
     "_resolve_prior_coverage_cell",
     "_resolve_current_policy_line_cell",
+    # Renewal proposed-term boxes: blank until a human supplies the real
+    # renewal term; the raw text prints the EXPIRING term, so gap fill is
+    # excluded by construction.
+    #
+    # ORDER MATTERS HERE, and only here: `authoritative_expected_value` takes
+    # the FIRST owner's answer as what a box should hold, and this resolver and
+    # the section-identity one below both answer `Policy_EffectiveDate_A`.
+    # `_deterministic_map` asks this one first ("MUST run before the
+    # section-identity resolver"); this tuple asked it second, so on every
+    # routed renewal Field QA expected the line's current date, the form held
+    # the proposed one, and the pre-download review printed a FAIL the
+    # producer could never clear (live kit, 17 Sep 2026).
+    "_resolve_renewal_proposed_period",
     # Section-form header identity: a policy number / carrier+NAIC pair /
     # per-line date belongs to THIS form's line or to nobody - a blank here
     # must never be re-filled by gap fill reading a neighbouring policy's
@@ -2578,10 +2591,6 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     # EXPIRING policy number/dates on a section form: this line's own prior
     # policy or blank - never a CURRENT policy number, never another line's.
     "_resolve_section_prior_policy",
-    # Renewal proposed-term boxes: blank until a human supplies the real
-    # renewal term; the raw text prints the EXPIRING term, so gap fill is
-    # excluded by construction.
-    "_resolve_renewal_proposed_period",
     # Fields fed by a fact whose cross-document conflict is unresolved: the
     # picker owns the decision, the box stays blank until it is made.
     "_resolve_conflicted_fact_blank",
@@ -6689,6 +6698,17 @@ def _resolve_current_policy_line_cell(field_name: str, facts: dict):
                 "%r; a term marker is not a second policy",
                 field_name, len(values), kept)
             values = {kept}
+    # ── ONE DATE PRINTED TWO WAYS IS NOT TWO DATES (17 Sep 2026) ────────────
+    # Same defect, the next column over: the live kit's dec page printed the
+    # auto term as `01/01/26` and the certificate as `01/01/2026`, and the
+    # certificate's own Auto row shipped with its policy number and NO dates.
+    # Dates fold on their calendar value; the 4-digit-year printing is kept.
+    if len(values) > 1 and sub_key in ("effective_date", "expiration_date"):
+        by_day: Dict[str, str] = {}
+        for v in sorted(values, key=lambda s: (-len(s), s)):
+            by_day.setdefault(_normalized_date_key(v) or v.lower(), v)
+        if len(by_day) == 1:
+            values = {next(iter(by_day.values()))}
     if len(values) == 1:
         return values.pop()                     # rule 1
     if len(values) > 1:
@@ -6772,7 +6792,12 @@ def _granted_coverage_lines(facts: dict) -> List[dict]:
     except Exception:                                         # noqa: BLE001
         def _line_entry_grants_coverage(_e):                  # type: ignore
             return isinstance(_e, dict)
-    return [e for e in lines if isinstance(e, dict) and _line_entry_grants_coverage(e)]
+    # A policy the PRODUCER confirmed for its line is as much a grant as a
+    # printed premium (17 Sep 2026): a certificate row never prints a premium,
+    # so confirming the certificate's project GL policy otherwise left its
+    # company off the roster and lettered the GL row to the rival insurer.
+    return [e for e in lines if isinstance(e, dict)
+            and (_line_entry_grants_coverage(e) or e.get("_confirmed"))]
 
 
 def _line_carrier(entry: dict) -> str:
@@ -6855,6 +6880,29 @@ def _certificate_insurer_roster(facts: dict) -> List[dict]:
         naic = _line_naic(entry)
         if _NAIC_SHAPE_RE.match(naic):
             row["_naics"].add(naic)
+    # ── A NAIC IS A PROPERTY OF THE COMPANY, WHEREVER IT IS PRINTED ─────────
+    # Live kit, 17 Sep 2026: the certificate printed "INSURER B Quillon Mutual
+    # Casualty Co. 91872", but a certificate row states no premium, so only the
+    # dec page's rows - which print no NAIC - reached the roster and Quillon
+    # Mutual was seated with a blank NAIC. A company already seated from a
+    # grant takes the one NAIC any non-denied row prints beside ITS name; this
+    # never seats a company, and two different NAICs still seat none.
+    if order:
+        try:
+            from services.extraction_service import _line_entry_denies_coverage as _denies
+        except Exception:                                     # noqa: BLE001
+            def _denies(_e):                                  # type: ignore
+                return False
+        all_rows = _fv(facts, "coverage_lines")
+        for entry in all_rows if isinstance(all_rows, list) else []:
+            if not isinstance(entry, dict) or _denies(entry):
+                continue
+            name, naic = _line_carrier(entry), _line_naic(entry)
+            if not name or not _NAIC_SHAPE_RE.match(naic):
+                continue
+            key = _carrier_identity_key(name)
+            if key in seen:
+                order[seen[key]]["_naics"].add(naic)
     if len(order) > len(_CERT_ROSTER_ROWS):
         logger.warning(
             "cert-roster: %d distinct carriers but ACORD 25 prints %d insurer "
@@ -6957,12 +7005,36 @@ def _resolve_certificate_insurer_letter(field_name: str, facts: dict):
         if column is None:
             return None                   # an INSR LTR we cannot place: blank
         col_tokens = _lob_tokens(re.sub(r"(?<!^)(?=[A-Z])", " ", column))
-        matched = [
-            e for e in granted
-            if _tokens_describe_same_line(
-                _lob_tokens(str(e.get("line") or "")), col_tokens)
-            and not _row_names_another_line(e.get("line"), column)
-        ]
+
+        def _this_line(e: dict) -> bool:
+            return (_tokens_describe_same_line(
+                        _lob_tokens(str(e.get("line") or "")), col_tokens)
+                    and not _row_names_another_line(e.get("line"), column))
+
+        matched = [e for e in granted if _this_line(e)]
+        # A SECOND POLICY on the line is a claim too, priced or not (17 Sep
+        # 2026). The live kit's General Liability had the package's priced row
+        # (Quillon P&C, QPC5519 - 26) and a certificate row for a second GL
+        # policy (Larchmont, LSG-4471102-26, no premium). The row's policy-number
+        # cell - which reads every row - correctly refused to choose, while this
+        # letter read only the priced row and pointed the GL row at Quillon P&C.
+        # Only a DIFFERENT contract counts: the same policy printed under a
+        # group name on a certificate is not a rival company.
+        try:
+            from services.extraction_service import _line_entry_denies_coverage as _denies
+        except Exception:                                     # noqa: BLE001
+            def _denies(_e):                                  # type: ignore
+                return False
+        _numbers = [str(e.get("policy_number") or "").strip() for e in matched]
+        _numbers = [n for n in _numbers if n]
+        _all_rows = _fv(facts, "coverage_lines")
+        matched = matched + [
+            e for e in (_all_rows if isinstance(_all_rows, list) else [])
+            if isinstance(e, dict) and e not in matched and _line_carrier(e)
+            and not _denies(e) and _this_line(e)
+            and _numbers and str(e.get("policy_number") or "").strip()
+            and not any(_same_policy_contract(str(e["policy_number"]).strip(), n)
+                        for n in _numbers)]
 
     keys = {_carrier_identity_key(_line_carrier(e)) for e in matched
             if _line_carrier(e)}
@@ -7593,6 +7665,21 @@ def _section_carrier_pair(identified: List[dict], matched: List[dict]) -> Tuple[
     return fb_name, fb_naic
 
 
+def _confirmed_line_value(rows: Any, column: str) -> Optional[str]:
+    """The ONE policy number the producer confirmed on these line rows, or None.
+
+    `underwriting_consistency._apply_scoped_confirmations` marks each row it
+    writes a confirmed answer onto (`_confirmed`). Printings of one contract
+    fold; two different confirmed numbers on one line is no answer at all."""
+    vals = [str(r.get(column) or "").strip() for r in rows or []
+            if isinstance(r, dict) and column in (r.get("_confirmed") or [])
+            and str(r.get(column) or "").strip()]
+    if not vals:
+        return None
+    folded = _fold_policy_printings(set(vals))
+    return next(iter(folded)) if len(folded) == 1 else None
+
+
 def _resolve_section_policy_identity(field_name: str, facts: dict):
     """One section-form header identity box, or _SCHED_SKIP. See block comment."""
     m = _SECTION_IDENTITY_RE.match(field_name)
@@ -7601,6 +7688,17 @@ def _resolve_section_policy_identity(field_name: str, facts: dict):
     form_id = str((facts or {}).get("_form_id") or "")
     attr = m.group(1) or m.group(2)                 # Policy_* attr or Insurer_* attr
     identified, matched = _section_matched_lines(facts, form_id)
+
+    # A PRODUCER'S LINE-SCOPED CONFIRMATION OUTRANKS THE INDEX (17 Sep 2026).
+    # The dec entries below are consulted first because they are verified
+    # document evidence - but when two policies sit on this line the producer
+    # was asked which applies, and the index can still name only ONE of them
+    # (the certificate's number often carries no entry attribution). Asking the
+    # index first then printed the policy the producer had just rejected.
+    if attr == "PolicyNumberIdentifier" and matched:
+        confirmed = _confirmed_line_value(matched, "policy_number")
+        if confirmed:
+            return confirmed
 
     # THE VERIFIED DEC ENTRIES ARE INDEPENDENT EVIDENCE, so they are consulted
     # even when `coverage_lines` yields nothing usable. It yields nothing in two
@@ -7962,6 +8060,45 @@ def _umbrella_period_is_current(facts: dict) -> bool:
         return datetime.strptime(iso, "%Y-%m-%d") >= datetime.now()
     except Exception:                                     # noqa: BLE001
         return False
+
+
+def _umbrella_period_override(form_id: str, field: str, facts: dict) -> Optional[str]:
+    """The umbrella's OWN date for an umbrella header box, or None (no override).
+
+    ACORD 131's header and ACORD 25's Excess row describe the umbrella policy,
+    which commonly runs its own term - see the block comment in
+    `map_facts_to_form`. ONE implementation, called by the stamper AND by
+    `authoritative_expected_value`: when only the stamper applied it, Field QA
+    compared the box against a date the form was never going to print.
+
+    RENEWAL GATE (client 2026-08-15, found by end-to-end replay): on a routed
+    renewal the umbrella's own probed dates ARE the expiring term, and this
+    override was re-stamping 07/15/2025 over the derived proposed date the
+    renewal resolver had just produced - the exact defect the client reported,
+    back through a third door. The ACORD 131 override yields to the derived term
+    unless the umbrella's own period verifiably has not ended (a real renewal
+    umbrella dec). ACORD 25's is deliberately NOT gated: a certificate documents
+    the EXISTING policy, so the expiring term is correct content there (same
+    exemption as _resolve_renewal_proposed_period).
+    """
+    if form_id == "ACORD_131" and field in ("Policy_EffectiveDate_A", "Policy_ExpirationDate_A"):
+        if (_fv(facts, "renewal_dates_routed")
+                and not (_umbrella_period_is_current(facts)
+                         and not _umbrella_term_is_the_moved_term(facts))):
+            logger.info(
+                "map_facts UMBRELLA_PERIOD form=%s field=%s: override skipped - "
+                "renewal dates routed and the umbrella's own term has ended (it "
+                "is the EXPIRING term)", form_id, field)
+            return None
+        key = "umbrella_effective_date" if field == "Policy_EffectiveDate_A" else "umbrella_expiration_date"
+    elif form_id == "ACORD_25" and field in ("Policy_ExcessLiability_EffectiveDate_A",
+                                             "Policy_ExcessLiability_ExpirationDate_A"):
+        key = ("umbrella_effective_date" if field == "Policy_ExcessLiability_EffectiveDate_A"
+               else "umbrella_expiration_date")
+    else:
+        return None
+    val = _fv(facts, key)
+    return None if _is_empty_llm_value(val) else str(val)
 
 
 # ── Unresolved cross-document conflicts stamp BLANK (client 2026-08-15) ──────
@@ -10401,7 +10538,13 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
         pdf = pikepdf.open(template_path)
         if "/AcroForm" in pdf.Root:
             acro = pdf.Root["/AcroForm"]
-            acro["/NeedAppearances"] = pikepdf.Boolean(True)
+            # A plain Python bool, never `pikepdf.Boolean` (17 Sep 2026): that
+            # class does not exist in pikepdf 9.x, which is what a macOS 12
+            # venv installs, and the AttributeError landed in the except below
+            # - every download on that machine was the BLANK template, with a
+            # log line nobody reads. pikepdf converts a bool to a PDF boolean
+            # on every version.
+            acro["/NeedAppearances"] = True
             counter = [0]
             _fill_and_highlight(acro.get("/Fields", []), data, confidence or {}, counter, pdf)
             logger.info(f"fill_pdf: wrote {counter[0]} field values")
@@ -18588,6 +18731,11 @@ def authoritative_expected_value(
     # the box was stamped. Anything less and this door starts answering a
     # different question from the one it is standing in for.
     scoped = {**(facts or {}), "_form_id": str(form_id or "")}
+    # The umbrella header boxes take a date AFTER every resolver has spoken
+    # (`map_facts_to_form`), so the owner's answer is not what the form holds.
+    _override = _umbrella_period_override(str(form_id or ""), field_name, scoped)
+    if _override is not None:
+        return _override
     prev = getattr(_SCHEMA_CTX, "schema", None)
     if isinstance(schema, dict):
         _set_schema_context(schema)
@@ -22112,6 +22260,12 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
     # carriers per line, the (name, NAIC) pair must be attested by an
     # evidenced entry - the same rule the _A resolver applies, applied to the
     # rows the resolver cannot see at Pass-1 time.
+    # Keyed by COMPANY, not by spelling (17 Sep 2026): the live kit's
+    # certificate printed "Quillon Mutual Casualty Co. 91872", the roster
+    # seated the fuller "Quillon Mutual Casualty Company", and this guard
+    # blanked the NAIC as unattested - on ACORD 25 and on ACORD 131. One
+    # company printed two ways is one attestation; `_carrier_identity_key` is
+    # the door the roster itself folds with.
     _naic_pairs: Dict[str, set] = {}
     if isinstance(_att_lines, list):
         for _e in _att_lines:
@@ -22120,7 +22274,7 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
             _c = str(_e.get("carrier") or "").strip()
             _n = str(_e.get("naic") or "").strip()
             if _c and _NAIC_SHAPE_RE.match(_n):
-                _naic_pairs.setdefault(_same_value_key(_c), set()).add(_n)
+                _naic_pairs.setdefault(_carrier_identity_key(_c), set()).add(_n)
     for field, val in list(mapped.items()):
         m_naic = re.match(r"^Insurer_NAICCode_([A-Z])$", field)
         if not m_naic or val is None or not str(val).strip():
@@ -22137,7 +22291,7 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                 "post_fill_guard naic_unpaired blanked=%s (no carrier in its row)", field)
             continue
         if _attested_carriers:
-            _allowed = _naic_pairs.get(_same_value_key(_row_name)) or set()
+            _allowed = _naic_pairs.get(_carrier_identity_key(_row_name)) or set()
             if _v not in _allowed:
                 mapped[field] = None
                 logger.info(
@@ -26219,30 +26373,7 @@ def map_facts_to_form(
         # _deterministic_map already computed when the document never states a
         # distinct umbrella date (the common case) - never regresses below
         # today's behavior, only improves on it.
-        if form_id == "ACORD_131" and field in ("Policy_EffectiveDate_A", "Policy_ExpirationDate_A"):
-            # RENEWAL GATE (client 2026-08-15, found by end-to-end replay): on a
-            # routed renewal the umbrella's own probed dates ARE the expiring
-            # term, and this override was re-stamping 07/15/2025 over the
-            # derived proposed date the renewal resolver had just produced -
-            # the exact defect the client reported, back through a third door.
-            # The override now yields to the derived term unless the umbrella's
-            # own period verifiably has not ended (a real renewal umbrella dec).
-            # ACORD 25's twin below is deliberately NOT gated: a certificate
-            # documents the EXISTING policy, so the expiring term is correct
-            # content there (same exemption as _resolve_renewal_proposed_period).
-            if (not _fv(facts, "renewal_dates_routed")
-                    or (_umbrella_period_is_current(facts)
-                        and not _umbrella_term_is_the_moved_term(facts))):
-                _umb_key = "umbrella_effective_date" if field == "Policy_EffectiveDate_A" else "umbrella_expiration_date"
-                _umb_val = _fv(facts, _umb_key)
-                if not _is_empty_llm_value(_umb_val):
-                    result = str(_umb_val)
-            else:
-                logger.info(
-                    "map_facts UMBRELLA_PERIOD form=%s field=%s: override "
-                    "skipped - renewal dates routed and the umbrella's own "
-                    "term has ended (it is the EXPIRING term)", form_id, field)
-
+        #
         # ACORD 25 override: same bug, different field name. Policy_
         # ExcessLiability_EffectiveDate_A/ExpirationDate_A are matched by a
         # DEDICATED _ACORD_FIELD_RULES entry (not a generic fallback) that maps
@@ -26255,11 +26386,12 @@ def map_facts_to_form(
         # same fact keys, same safety guarantee as the ACORD 131 override above:
         # prefer the umbrella-specific fact when present, fall through to the
         # generic result when the document states no distinct excess period.
-        if form_id == "ACORD_25" and field in ("Policy_ExcessLiability_EffectiveDate_A", "Policy_ExcessLiability_ExpirationDate_A"):
-            _umb_key = "umbrella_effective_date" if field == "Policy_ExcessLiability_EffectiveDate_A" else "umbrella_expiration_date"
-            _umb_val = _fv(facts, _umb_key)
-            if not _is_empty_llm_value(_umb_val):
-                result = str(_umb_val)
+        #
+        # Both live in `_umbrella_period_override` (17 Sep 2026) so Field QA's
+        # expected value applies them too - see `authoritative_expected_value`.
+        _override = _umbrella_period_override(form_id, field, facts)
+        if _override is not None:
+            result = _override
 
         if result == "UNMATCHED" or _is_empty_llm_value(result):
             # An OWNING resolver that produced no value means the box must stay
@@ -28639,8 +28771,9 @@ def inject_signature_into_pdf(
             # (possibly shrunken) /DA. Setting the flag false here left every
             # value on a signed form with NO appearance - blank in Acrobat. The
             # signature is painted into the page content, which the flag never
-            # touched.
-            acro["/NeedAppearances"] = pikepdf.Boolean(True)
+            # touched. A plain bool, as in `fill_pdf` - `pikepdf.Boolean` does
+            # not exist in pikepdf 9.x and silently returned the UNSIGNED form.
+            acro["/NeedAppearances"] = True
             fields_arr = acro.get("/Fields")
             if fields_arr is not None:
                 def _remove_sig_fields(arr):

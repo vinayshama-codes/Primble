@@ -3226,28 +3226,103 @@ def _apply_scoped_confirmations(out: dict, scoped: List[Tuple[str, str, str]]) -
         from services.extraction_service import _canon_line
     except Exception:                                         # noqa: BLE001
         return False
+    try:
+        from services.fact_comparison import same_policy_contract as _same_contract
+    except Exception:                                         # noqa: BLE001
+        def _same_contract(a, b):                             # type: ignore
+            return re.sub(r"[^a-z0-9]", "", str(a or "").lower()) == \
+                re.sub(r"[^a-z0-9]", "", str(b or "").lower())
     column = _LINE_SCOPED_FACT_COLUMN
     scoped = _pair_naic_with_its_carrier(rows, scoped)
+    edits: Dict[str, Dict[str, str]] = {}
+    for fk, sc, val in scoped:
+        if sc and fk in column:
+            edits.setdefault(sc, {})[fk] = val
     changed = False
-    new_rows: List[Any] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            new_rows.append(row)
+    new_rows: List[Any] = list(rows)
+    for line, edit in edits.items():
+        idx = [i for i, r in enumerate(new_rows)
+               if isinstance(r, dict) and _canon_line(r.get("line")) == line]
+        if not idx:
             continue
-        canon = _canon_line(row.get("line"))
-        edit = {fk: val for fk, sc, val in scoped
-                if canon and sc == canon and fk in column}
-        if not edit:
-            new_rows.append(row)
-            continue
-        copy = dict(row)
-        for fk, val in edit.items():
-            copy[column[fk]] = val
-        new_rows.append(copy)
-        changed = True
+        # ── THE ANSWER CHOOSES A CONTRACT, IT DOES NOT OVERWRITE THE LINE ────
+        # Live kit, 17 Sep 2026: General Liability carried two real policies -
+        # the package's (Quillon P&C, 91880, `QPC5519 - 26`) and a project policy
+        # from the certificate (Larchmont, 93518, `LSG-4471102-26`). Writing the
+        # confirmed number onto BOTH rows left each row's own company beside it,
+        # so the section form refused (two carriers) and the certificate row
+        # lettered LSG to Quillon P&C - a policy number beside the other
+        # company's name and NAIC. The rows that PRINT the answer are the
+        # policy the producer chose; a rival contract on the same line is set
+        # aside for identity (its number, company, NAIC and term), not deleted.
+        chosen: List[int] = []
+        answer_no = str(edit.get("policy_number") or "").strip()
+        if answer_no:
+            chosen = [i for i in idx
+                      if str(new_rows[i].get("policy_number") or "").strip()
+                      and _same_contract(new_rows[i]["policy_number"], answer_no)]
+        if not chosen and edit.get("carrier_name"):
+            chosen = [i for i in idx
+                      if str(new_rows[i].get("carrier") or "").strip()
+                      and _door_values_agree("carrier_name", new_rows[i]["carrier"],
+                                             edit["carrier_name"])]
+        if not chosen and str(edit.get("carrier_naic") or "").strip():
+            # The NAIC card is the third door to the same question (retest, 17
+            # Sep 2026): answered alone it used to write 93518 onto BOTH GL rows,
+            # pairing Quillon P&C with Larchmont's NAIC.
+            want = re.sub(r"\D", "", str(edit["carrier_naic"]))
+            chosen = [i for i in idx
+                      if want and re.sub(r"\D", "", str(new_rows[i].get("naic") or "")) == want]
+        if chosen:
+            numbers = [str(new_rows[i].get("policy_number") or "").strip() for i in chosen]
+            numbers = [n for n in numbers if n]
+            companies = [str(new_rows[i].get("carrier") or "").strip() for i in chosen]
+            companies = [c for c in companies if c]
+            for i in idx:
+                if i in chosen:
+                    continue
+                r = new_rows[i]
+                r_no = str(r.get("policy_number") or "").strip()
+                r_co = str(r.get("carrier") or "").strip()
+                if r_no and numbers:
+                    rival = not any(_same_contract(r_no, n) for n in numbers)
+                else:
+                    rival = bool(r_co) and bool(companies) and not any(
+                        _door_values_agree("carrier_name", r_co, c) for c in companies)
+                if rival:
+                    new_rows[i] = {**r, "policy_number": None, "carrier": None,
+                                   "naic": None, "effective_date": None,
+                                   "expiration_date": None,
+                                   "_set_aside": "producer confirmed another policy "
+                                                 "for this line"}
+                    changed = True
+        for i in (chosen or idx):
+            copy = dict(new_rows[i])
+            for fk, val in edit.items():
+                copy[column[fk]] = val
+            copy["_confirmed"] = sorted(set(copy.get("_confirmed") or []) | set(edit))
+            new_rows[i] = copy
+            changed = True
+        if not chosen and "carrier_name" not in edit:
+            # A value the documents print on no row of this line: which company
+            # stands behind it is unknown. With two companies on the line,
+            # neither may be printed beside it.
+            try:
+                from services.normalization import strict_entity_key as _ek
+            except Exception:                                 # noqa: BLE001
+                def _ek(v):                                   # type: ignore
+                    return str(v or "").strip().lower()
+            keys = {_ek(new_rows[i].get("carrier")) for i in idx
+                    if str(new_rows[i].get("carrier") or "").strip()}
+            if len(keys) > 1:
+                for i in idx:
+                    new_rows[i] = {**new_rows[i], "carrier": None, "naic": None}
         logger.info(
-            "underwriting: line-scoped confirmation applied to the %s row - %s",
-            canon, {column[k]: v for k, v in edit.items()})
+            "underwriting: line-scoped confirmation applied to %s - %s (%d row(s) "
+            "carry the confirmed policy, %d set aside)", line,
+            {column[k]: v for k, v in edit.items()}, len(chosen or idx),
+            sum(1 for i in idx if isinstance(new_rows[i], dict)
+                and new_rows[i].get("_set_aside")))
     if changed:
         # Rewriting two rival rows of one line to the producer's answer can
         # leave two rows that are now byte-identical. Only an EXACT duplicate

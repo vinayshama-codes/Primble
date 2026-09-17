@@ -11238,3 +11238,97 @@ Live session 2ac7c1b7 (policy only). No prompt change.
 - Tests: `tests/test_live_run11_fixes_15sep.py` (95), `tests/test_no_module_name_redefined.py` (2). Suite 9376 passed /
   1 failed (the documented httpx `test_arq_acord125_missing_only`) / 18 skipped, plus the new guard file (2 passed,
   written after the suite started).
+
+## Policy number by line - the live kit run and its fixes (2026-09-17)
+
+Brent: *"a single policy number is still trying to be represented across all. Please let me know if this was corrected
+and it's just a misunderstanding."* Answered with a 3-file live kit (`backend/scripts/make_policy_by_line_test_pdfs.py`
+-> `policy_by_line_test_data/`, README section 0 is the retest). **Verdict of the live run: not a misunderstanding.**
+Fixed where each policy has its own declarations; NOT fixed where one document prints one number for several policies.
+Read from the stored session data (the PDFs were blank - item 8) and replayed through HEAD: identical.
+
+- **1. One printed number on every line (the complaint, live).** A renewal summary printed POLICY NUMBER SRC-4410982
+  once and said "Each coverage above is issued as a separate policy"; extraction put it on GL, Auto and Umbrella, and
+  so did every dec entry (an entry's `policy_number` is the page it was read from), so the repair's evidence agreed
+  with the corruption: 126, 131 + both underlying rows, all three 25 rows. New merge step
+  `_withhold_page_header_numbers` (after the repair, before `_fill_missing_line_numbers`): a number several lines share
+  is withdrawn from them - row AND entry attribution - when the page that prints it says its coverages are separate
+  policies (`_page_states_separate_policies`, negation-aware, same page only) or when the lines cannot be one contract
+  (an umbrella/excess line, or a row naming Workers Compensation - bare "Employers Liability" is not counted, stop gap
+  EL sits on a GL policy). A line whose OWN declarations section prints the number keeps it.
+- **2. A package number was "corruption".** `_coverage_lines_are_self_contradictory` flagged QPC5519 - 26 on GL +
+  Property; the repair asked the index for GL, found the package policy AND the certificate's project policy
+  (LSG-4471102-26), and blanked both - 126, the 25 GL row and the policies table lost the number, and the card, seeing
+  no GL number, never asked. With entries in hand the test is now "does the document CONTRADICT the pairing" (a line
+  printing other numbers and not this one, or a DENIED line carrying it - run 11); a package is not contradicted.
+  In repair mode a row keeps a number its own line prints, a certificate row naming its own insurer keeps its number,
+  and a row the contradiction never touched is left alone. The card now asks "two policies on the same coverage line
+  (general liab)" with a scoped Confirm.
+- **3. The PRIOR carrier became the current one.** The umbrella dec printed "PRIOR UMBRELLA CARRIER: Birchline ... -
+  BSX-44120-24 - 03/15/2024 to 03/15/2025" inside the CURRENT umbrella section; it was the only carrier entry for the
+  line, the repair wrote the sentence onto both umbrella rows (131 CARRIER, 25 INSURER D) and kept the old row's NAIC.
+  `_carriers_by_line` now ignores a carrier entry whose LABEL says prior / previous / preceding / former / expiring /
+  expired / replaced; the repair clears the NAIC when it replaces a company. The header binder that should have
+  corrected it refused because the page's RENEWAL OF number split the contract group - unchanged, recorded.
+- **4. Header carrier truncation (FOUND-6).** `_HEADER_CARRIER_RE` is lazy and stopped at the first suffix word:
+  "QUILLON SPECIALTY INSURANCE" - a different entity, so the binder replaced the row's full name and dropped its NAIC.
+  `_header_carrier_name` continues through legal-form words (Company, Co., Inc., Corporation, Exchange, ...) and an
+  "of <place>" tail ("... Company of North America"), stopping at header label words.
+- **5. Confirming one of two GL policies recombined identity.** `_apply_scoped_confirmations` wrote the number onto BOTH
+  GL rows; each kept its own company, so 126 refused and 25 lettered LSG to Quillon P&C. The answer now CHOOSES the rows
+  that print it (number, else carrier); a rival contract on the line is set aside for identity (number, company, NAIC,
+  term cleared; premium kept; `_set_aside`) and the chosen rows are marked `_confirmed`. A typed number no row prints
+  stands beside no company when the line names two. `_resolve_section_policy_identity` reads a confirmed number before
+  the dec index (the index can name only the rejected policy); the certificate grant pool admits confirmed rows.
+- **6. The certificate.** Auto row lost its dates (dec `01/01/26`, certificate `01/01/2026` - two printings refused;
+  now folded on the calendar value, 4-digit year printed). Quillon Mutual's NAIC was blank twice over: the roster read
+  only priced rows (a certificate row prints none) and the naic_pair guard keyed by spelling ("Co." vs "Company") - the
+  roster now takes the one NAIC any non-denied row prints beside a seated company, and the guard keys by
+  `_carrier_identity_key`. The GL INSR LTR pointed at one of two companies claiming the line - a second, DIFFERENT
+  policy on the line now blanks it (the same policy under a group name does not).
+- **7. Field QA and dates.** `authoritative_expected_value` walked `_AUTHORITATIVE_BLANK_RESOLVERS` with section identity
+  before the renewal resolver - the stamper's opposite order - and never saw the ACORD 131 / 25 umbrella-date overrides,
+  so every routed renewal's section effective date was a review FAIL "Re-confirm" could not clear. Tuple reordered; the
+  overrides are one function (`_umbrella_period_override`) both call. ACORD 125's derived proposed expiration added the
+  term's DAY count (08/01/2027 + 365 = 07/31/2028 across 29 Feb): `_renewed_term_end` renews a whole-calendar-month term
+  by months.
+- **8. Blank PDFs.** `pikepdf.Boolean` does not exist in pikepdf 9.x (this Mac's venv, macOS 12 wheel; requirements
+  pin 10.5.1): `fill_pdf` and `inject_signature_into_pdf` caught the AttributeError and returned the blank template /
+  unsigned form. Plain `True`. Three suite tests had been red on it.
+- **Tests that changed, and why the TEST was wrong:** `test_form_fill_1sep::test_r3_...` proved the section filter's
+  fail-open on an entry labelled EXPIRING INSURER, which the label rule now excludes on its own - proved on a neutral
+  label instead, label rule pinned. `test_sys06...::test_a_scoped_confirmation_edits_only_its_own_line` asserted the
+  rival Travelers row was relabelled EMC (EMC + 25186 beside Travelers' number - the recombination); now asserts it is
+  set aside. `test_remaining_items_15sep::test_an_in_force_current_term_proposes_the_next_one` computed `exp + 365
+  days` - the leap-year bug itself.
+- **D6 - scores and screens move, tell Brent:** packages with two policies on one line now get a real Data Consistency
+  question (review-required) instead of silence; one-number summaries print fewer policy-number boxes; packages the
+  repair used to blank keep their numbers (fill rate up); the review list loses the false date rows.
+- **Not done (named):** the questionnaire's "Policy number" / "carrier" / "NAIC" answers write package-level facts that
+  land on no per-line box (126 carrier answers land on 125 page 1) - needs line-scoped questions; the Inland Marine
+  Total Value card ($235,000 is the LLM's sum of two floaters); "Umbrella effective date ... 03/15/2024" and "Builders
+  Risk requires a project value" warnings; "Lines of business differ" listing No Coverage lines; the header binder
+  still refuses a RENEWAL OF page whose prior number is not bridged; the policies table leaves the umbrella NAIC blank
+  (the forms print 91872); 131's underlying GL row stays blank while two GL policies are listed as underlying.
+- Tests: `tests/test_policy_by_line_live_kit_17sep.py` (54, integration tests replay the LIVE extraction in
+  `tests/fixtures/policy_by_line_live_17sep.json`; all 54 fail on a8e6407).
+- Suite (clean run, `-p no:randomly`): **9443 passed / 2 failed / 18 skipped** - the documented httpx
+  `test_arq_acord125_missing_only` and the OPEN `confidence_fill_rate` truncation (84 vs 85, held for Brent). Baseline
+  before this work was 9386 / 5: the three pikepdf failures now pass, +54 new tests. (A run with source files edited
+  mid-run showed 11 extra failures - source-inspection tests reading the new file against the old code objects; all 11
+  pass in a fresh process and in the clean run.)
+- **Retest 1 (same day, pre-form review before generating).** Upload 1 matched the retest README (GL-scoped cards,
+  six-row policies table, no Birchline). **Upload 2 did NOT:** the session's merged facts still carried SRC-4410982 on
+  Commercial Auto and Umbrella. Reproduced by replaying the session's own documents: this extraction numbered at most
+  one row, so `_withhold_page_header_numbers` - which read ROWS only - saw nothing shared, and
+  `_fill_missing_line_numbers`, running next, copied the number onto both lines from the page-context entries. The
+  withhold now decides sharing over the rows AND `current_numbers_by_line`, and withdraws the entries' claim, so the
+  fill has nothing to copy back (all four row shapes - both, one, the other, none numbered - pinned). Also closed on
+  the same review: confirming through the NAIC card wrote 93518 onto BOTH GL rows; the NAIC answer now chooses the
+  contract like the number and carrier answers do. Upload 1's session is unchanged by either fix (replayed equal).
+- **Found, not fixed (pre-existing):** `merge_facts` mutates the primary document's own `coverage_lines` rows in place
+  (the fill / repair write through to `docs[].facts`), so a session's stored per-document facts can show what the
+  MERGE decided, not what the document said - which is why the retest's document rows looked as if the LLM had put
+  SRC-4410982 on two lines. Worth a copy at the union before anything relies on per-document rows as evidence.
+- Suite after retest 1 (clean run): **9447 passed / 2 failed / 18 skipped** - the same two pre-existing failures;
+  +4 tests (`test_policy_by_line_live_kit_17sep.py` now 58).

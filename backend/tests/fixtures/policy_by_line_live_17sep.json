@@ -1,0 +1,3193 @@
+{
+ "_about": "LIVE extraction output (gpt-5.4-mini) for the policy-by-line kit, 17 Sep 2026 - backend/scripts/make_policy_by_line_test_pdfs.py. Synthetic kit data. docs[].facts and text exactly as the pipeline stored them; upload/user metadata stripped.",
+ "upload_1_package_and_project_certificate": [
+  {
+   "doc_id": "b445aad654064c0590f88fb8ad150478",
+   "doc_type": "dec_page",
+   "doc_type_confidence": "high",
+   "doc_type_source": "content",
+   "facts": {
+    "account_description": null,
+    "additional_named_insureds": [],
+    "additional_remarks_text": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Please reference policy 4A8 21 07 26 in all correspondence about this account.",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "agreed_value_endorsement": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "applicant_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "BRAMBLE & STONE CONSTRUCTION LLC",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "applicant_website": null,
+    "audit_period": null,
+    "auto_bi_per_accident": null,
+    "auto_bi_per_person": null,
+    "auto_covered_symbols": [
+     {
+      "coverage": "liability",
+      "symbols": [
+       1
+      ]
+     },
+     {
+      "coverage": "medical payments",
+      "symbols": [
+       2
+      ]
+     },
+     {
+      "coverage": "uninsured motorists",
+      "symbols": [
+       2
+      ]
+     },
+     {
+      "coverage": "comprehensive",
+      "symbols": [
+       7
+      ]
+     },
+     {
+      "coverage": "collision",
+      "symbols": [
+       7
+      ]
+     }
+    ],
+    "auto_dealers_inventory_value": null,
+    "auto_deductible_collision": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000 Deductible",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_deductible_comp": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000 Deductible",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_drivers": [],
+    "auto_garaging_addresses": [],
+    "auto_hired_nonowned": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "Yes",
+     "value_state": "present"
+    },
+    "auto_liability_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000 Combined Single Limit",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_liability_structure": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Combined Single Limit",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_med_pay_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$5,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_pd_per_accident": null,
+    "auto_physical_damage_valuation": null,
+    "auto_radius_of_operation": null,
+    "auto_um_uim_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_vehicle_use": null,
+    "auto_vin_schedule": [
+     {
+      "body_type": null,
+      "class_code": "01499",
+      "coll_symbol": "07",
+      "comp_symbol": "07",
+      "gvw": null,
+      "make": "Ford",
+      "model": "F-150",
+      "territory": "111",
+      "vin": "1FTFW1E58MFA23417",
+      "year": "2021"
+     },
+     {
+      "body_type": null,
+      "class_code": "21499",
+      "coll_symbol": "07",
+      "comp_symbol": "07",
+      "gvw": null,
+      "make": "Ram",
+      "model": "2500",
+      "territory": "111",
+      "vin": "3C6UR5DL4LG190275",
+      "year": "2020"
+     }
+    ],
+    "billing_plan": null,
+    "builders_risk_completion_date": null,
+    "builders_risk_construction_type": null,
+    "builders_risk_contractor_name": null,
+    "builders_risk_insured_interest": null,
+    "builders_risk_owner_name": null,
+    "builders_risk_project_address": null,
+    "builders_risk_project_cost": null,
+    "building_ITV_percentage": null,
+    "business_income_limit": null,
+    "business_start_date": null,
+    "carrier_naic": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "91880",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "carrier_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Quillon Property & Casualty Company",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "carrier_website": null,
+    "certificate_description_of_operations": null,
+    "certificate_holder": null,
+    "certificate_holder_address": null,
+    "coinsurance_percentage": null,
+    "construction_type": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Masonry Non-Combustible",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "contact_email": null,
+    "contractor_commercial_pct": null,
+    "contractor_high_hazard_ops": [],
+    "contractor_license_number": null,
+    "contractor_residential_pct": null,
+    "contractor_type": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Commercial concrete and masonry contractor",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "coverage_lines": [
+     {
+      "carrier": "Quillon Property & Casualty Company",
+      "effective_date": "01/01/2026",
+      "expiration_date": "01/01/2027",
+      "line": "Property",
+      "naic": "91880",
+      "policy_number": "QPC5519 - 26",
+      "premium": "$3,480.00"
+     },
+     {
+      "carrier": "Quillon Property & Casualty Company",
+      "effective_date": "01/01/2026",
+      "expiration_date": "01/01/2027",
+      "line": "Liability",
+      "naic": "91880",
+      "policy_number": "QPC5519 - 26",
+      "premium": "$4,812.00"
+     },
+     {
+      "carrier": "Quillon Specialty Insurance Company",
+      "effective_date": "01/01/26",
+      "expiration_date": "01/01/27",
+      "line": "Inland Marine",
+      "naic": null,
+      "policy_number": "SIM-7730418",
+      "premium": "$415.00"
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Company",
+      "effective_date": "01/01/26",
+      "expiration_date": "01/01/27",
+      "line": "Automobile",
+      "naic": null,
+      "policy_number": "4A8-21-07---26",
+      "premium": "$3,264.00"
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Company",
+      "effective_date": "03/15/26",
+      "expiration_date": "03/15/27",
+      "line": "Umbrella",
+      "naic": null,
+      "policy_number": "4U8-21-07---26",
+      "premium": "$2,977.00"
+     }
+    ],
+    "crime_deductible": null,
+    "crime_employee_count": null,
+    "crime_limit": null,
+    "crime_locations_count": null,
+    "cyber_controls_backups": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "cyber_controls_mfa": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "cyber_limit": null,
+    "cyber_pii_records_count": null,
+    "cyber_prior_incidents": null,
+    "cyber_retention": null,
+    "cyber_third_party_vendors": null,
+    "dba_name": null,
+    "dec_page_entries": [
+     {
+      "label": "NAMED INSURED",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "BRAMBLE & STONE CONSTRUCTION LLC"
+     },
+     {
+      "label": "MAILING ADDRESS",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "2250 W Larkspur Ave, Denver, CO 80223"
+     },
+     {
+      "label": "FEIN",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "84-7730214"
+     },
+     {
+      "label": "ACCOUNT NUMBER",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "0482917"
+     },
+     {
+      "label": "AGENT",
+      "line_of_business": null,
+      "owner": "producer",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "Front Range Risk Advisors - Priya Natarajan - (303) 555-0176"
+     },
+     {
+      "label": "BUSINESS DESCRIPTION",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "Commercial concrete and masonry contractor"
+     },
+     {
+      "label": "FORM OF BUSINESS",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "Limited Liability Company"
+     },
+     {
+      "label": "POLICY PERIOD",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "Shown on each policy's declarations"
+     },
+     {
+      "label": "1 Property",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$3,480.00"
+     },
+     {
+      "label": "2 Liability",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$4,812.00"
+     },
+     {
+      "label": "3 Crime",
+      "line_of_business": "Crime",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "No Coverage"
+     },
+     {
+      "label": "4 Inland Marine",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$415.00"
+     },
+     {
+      "label": "5 Automobile",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$3,264.00"
+     },
+     {
+      "label": "6 Workers Compensation",
+      "line_of_business": "Workers Compensation",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "No Coverage"
+     },
+     {
+      "label": "7 Umbrella",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$2,977.00"
+     },
+     {
+      "label": "ESTIMATED TOTAL POLICY PREMIUM",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COMMON POLICY DECLARATIONS",
+      "value": "$14,948.00"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+      "value": "SIM-7730418"
+     },
+     {
+      "label": "POLICY PERIOD",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+      "value": "FROM 01/01/26 TO 01/01/27"
+     },
+     {
+      "label": "ISSUING COMPANY",
+      "line_of_business": "Inland Marine",
+      "owner": "carrier",
+      "policy_number": "SIM-7730418",
+      "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+      "value": "Quillon Specialty Insurance Company"
+     },
+     {
+      "label": "Contractors Equipment Floater - Scheduled",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "COVERAGE SCHEDULE",
+      "value": "CM7000A 03-20 $185,000 $325.00"
+     },
+     {
+      "label": "Installation Floater",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "COVERAGE SCHEDULE",
+      "value": "IM 7100 06 04 $50,000 $90.00"
+     },
+     {
+      "label": "TOTAL INLAND MARINE PREMIUM",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+      "value": "$415.00"
+     },
+     {
+      "label": "1",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "SCHEDULE OF EQUIPMENT",
+      "value": "2019 Bobcat S650 Skid Steer B3NM11482 $38,000"
+     },
+     {
+      "label": "2",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "SCHEDULE OF EQUIPMENT",
+      "value": "2018 Genie GS-3246 Scissor Lift GS4618A-51207 $22,000"
+     },
+     {
+      "label": "3",
+      "line_of_business": "Inland Marine",
+      "owner": "policy",
+      "policy_number": "SIM-7730418",
+      "section": "SCHEDULE OF EQUIPMENT",
+      "value": "Blanket unscheduled tools - $25,000"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PACKAGE POLICY DECLARATIONS",
+      "value": "QPC5519 - 26"
+     },
+     {
+      "label": "POLICY PERIOD",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PACKAGE POLICY DECLARATIONS",
+      "value": "01/01/2026 TO 01/01/2027"
+     },
+     {
+      "label": "RENEWAL OF",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PACKAGE POLICY DECLARATIONS",
+      "value": "QPC5519 - 25"
+     },
+     {
+      "label": "NAMED INSURED",
+      "line_of_business": "Liability",
+      "owner": "applicant",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PACKAGE POLICY DECLARATIONS",
+      "value": "BRAMBLE & STONE CONSTRUCTION LLC"
+     },
+     {
+      "label": "Commercial General Liability Coverage Part",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COVERAGE PARTS INCLUDED IN THIS POLICY",
+      "value": "QPC5519 - 26 $4,812.00"
+     },
+     {
+      "label": "Commercial Property Coverage Part",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COVERAGE PARTS INCLUDED IN THIS POLICY",
+      "value": "QPC5519 - 26 $3,480.00"
+     },
+     {
+      "label": "PACKAGE POLICY PREMIUM",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PACKAGE POLICY DECLARATIONS",
+      "value": "$8,292.00"
+     },
+     {
+      "label": "Each Occurrence",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "$1,000,000"
+     },
+     {
+      "label": "General Aggregate",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "$2,000,000"
+     },
+     {
+      "label": "Products-Completed Operations Aggregate",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "$2,000,000"
+     },
+     {
+      "label": "Personal and Advertising Injury",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "$1,000,000"
+     },
+     {
+      "label": "Medical Expense - Any One Person",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "$5,000"
+     },
+     {
+      "label": "COVERAGE FORM",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY LIMITS OF INSURANCE",
+      "value": "CG 00 01 04 13 Commercial General Liability Coverage Form - Occurrence"
+     },
+     {
+      "label": "GENERAL LIABILITY SCHEDULE - Location 001",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY SCHEDULE - Location 001",
+      "value": "97447 Masonry Payroll $412,000 $3,406.00"
+     },
+     {
+      "label": "GENERAL LIABILITY SCHEDULE - Location 001",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "GENERAL LIABILITY SCHEDULE - Location 001",
+      "value": "91585 Contractors - subcontracted work Total Cost $180,000 $1,258.00"
+     },
+     {
+      "label": "Hired and Non-Owned Auto Liability",
+      "line_of_business": "Liability",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "ADDITIONAL COVERAGES ON THIS POLICY",
+      "value": "CG 70 22A 04 17 $148.00"
+     },
+     {
+      "label": "PREMISES - LOCATION 001",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "2250 W Larkspur Ave, Denver, CO 80223"
+     },
+     {
+      "label": "BUILDING LIMIT",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "$1,250,000"
+     },
+     {
+      "label": "BUSINESS PERSONAL PROPERTY",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "$260,000"
+     },
+     {
+      "label": "YEAR BUILT",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "2006"
+     },
+     {
+      "label": "CONSTRUCTION",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "Masonry Non-Combustible"
+     },
+     {
+      "label": "SPRINKLERED",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "Yes"
+     },
+     {
+      "label": "PROTECTION CLASS",
+      "line_of_business": "Property",
+      "owner": "policy",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "3"
+     },
+     {
+      "label": "ADDITIONAL INSURED - OWNERS, LESSEES OR CONTRACTORS - SCHEDULED PERSON",
+      "line_of_business": "Property",
+      "owner": "other",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "Larkspur Commons Owners Association"
+     },
+     {
+      "label": "PROJECT CONTRACT NUMBER",
+      "line_of_business": "Property",
+      "owner": "other",
+      "policy_number": "QPC5519 - 26",
+      "section": "COMMERCIAL PROPERTY COVERAGE PART",
+      "value": "LCOA-2026-114"
+     },
+     {
+      "label": "POLICY NO",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+      "value": "4A8-21-07---26"
+     },
+     {
+      "label": "EFF DATE",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+      "value": "01/01/26"
+     },
+     {
+      "label": "EXP DATE",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+      "value": "01/01/27"
+     },
+     {
+      "label": "BRAMBLE & STONE CONSTRUCTION LLC",
+      "line_of_business": "Automobile",
+      "owner": "applicant",
+      "policy_number": "4A8-21-07---26",
+      "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+      "value": "EFF DATE: 01/01/26 EXP DATE: 01/01/27"
+     },
+     {
+      "label": "Covered Autos Liability",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS",
+      "value": "01 $1,000,000 Combined Single Limit $2,410.00"
+     },
+     {
+      "label": "Medical Payments",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS",
+      "value": "02 $5,000 $62.00"
+     },
+     {
+      "label": "Uninsured Motorists",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS",
+      "value": "02 $1,000,000 $148.00"
+     },
+     {
+      "label": "Comprehensive",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS",
+      "value": "07 $1,000 Deductible $286.00"
+     },
+     {
+      "label": "Collision",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS",
+      "value": "07 $1,000 Deductible $358.00"
+     },
+     {
+      "label": "TOTAL AUTO PREMIUM",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+      "value": "$3,264.00"
+     },
+     {
+      "label": "1",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM THREE - SCHEDULE OF COVERED AUTOS YOU OWN",
+      "value": "2021 Ford F-150 1FTFW1E58MFA23417 01499 111 $48,600"
+     },
+     {
+      "label": "2",
+      "line_of_business": "Automobile",
+      "owner": "policy",
+      "policy_number": "4A8-21-07---26",
+      "section": "ITEM THREE - SCHEDULE OF COVERED AUTOS YOU OWN",
+      "value": "2020 Ram 2500 3C6UR5DL4LG190275 21499 111 $52,300"
+     },
+     {
+      "label": "LOSS PAYEE - VEH 2",
+      "line_of_business": "Automobile",
+      "owner": "other",
+      "policy_number": "4A8-21-07---26",
+      "section": "LOSS PAYEE SCHEDULE",
+      "value": "First Front Range Bank, 1700 Broadway, Denver, CO 80290"
+     },
+     {
+      "label": "LOAN NUMBER",
+      "line_of_business": "Automobile",
+      "owner": "other",
+      "policy_number": "4A8-21-07---26",
+      "section": "LOSS PAYEE SCHEDULE",
+      "value": "LN-00917733"
+     },
+     {
+      "label": "POLICY NO",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "4U8-21-07---26"
+     },
+     {
+      "label": "BRAMBLE & STONE CONSTRUCTION LLC",
+      "line_of_business": "Umbrella",
+      "owner": "applicant",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "EFF DATE: 03/15/26 EXP DATE: 03/15/27"
+     },
+     {
+      "label": "EACH OCCURRENCE LIMIT",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "$2,000,000"
+     },
+     {
+      "label": "AGGREGATE LIMIT",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "$2,000,000"
+     },
+     {
+      "label": "SELF-INSURED RETENTION",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "$0"
+     },
+     {
+      "label": "COVERAGE FORM",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "Commercial Umbrella Liability Coverage Form CU7000 11-15 - Occurrence"
+     },
+     {
+      "label": "UMBRELLA PREMIUM",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "$2,977.00"
+     },
+     {
+      "label": "PRIOR UMBRELLA CARRIER",
+      "line_of_business": "Umbrella",
+      "owner": "carrier",
+      "policy_number": "4U8-21-07---26",
+      "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+      "value": "Birchline Specialty Casualty Company - BSX-44120-24 - 03/15/2024 to 03/15/2025"
+     },
+     {
+      "label": "Commercial General Liability",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "SCHEDULE OF UNDERLYING INSURANCE",
+      "value": "Quillon P&C Co. QPC5519 $1,000,000 occ / $2,000,000 agg"
+     },
+     {
+      "label": "Commercial Auto Liability",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "SCHEDULE OF UNDERLYING INSURANCE",
+      "value": "Quillon Mutual Casualty Co. 4A82107 $1,000,000 CSL"
+     },
+     {
+      "label": "Employers Liability",
+      "line_of_business": "Umbrella",
+      "owner": "policy",
+      "policy_number": "4U8-21-07---26",
+      "section": "SCHEDULE OF UNDERLYING INSURANCE",
+      "value": "Not Scheduled - -"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "SIM-7730418 CM7000A 03-20 Inland Marine Declarations"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "SIM-7730418 IM 7100 06 04 Installation Floater Coverage"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "QPC5519 - 26 CG 00 01 04 13 Commercial General Liability Coverage Form"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "QPC5519 - 26 CG 70 22A 04 17 Hired and Non-Owned Auto Liability"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "QPC5519 - 26 CP 00 10 10 12 Building and Personal Property Coverage Form"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "4A8-21-07---26 CA7001A 02-22 Business Auto Declarations"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "4A8-21-07---26 CA 00 01 11 20 Business Auto Coverage Form"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "4U8-21-07---26 CU7000 11-15 Commercial Umbrella Declarations"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "4U8-21-07---26 CU7001A 11-15 Schedule of Underlying Insurance"
+     },
+     {
+      "label": "POLICY FORM TITLE",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "SCHEDULE OF FORMS AND ENDORSEMENTS",
+      "value": "ALL IL 00 17 11 98 Common Policy Conditions"
+     },
+     {
+      "label": "NAMED INSURED",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "LOSS RUN REPORT",
+      "value": "BRAMBLE & STONE CONSTRUCTION LLC"
+     },
+     {
+      "label": "ACCOUNT NUMBER",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "LOSS RUN REPORT",
+      "value": "0482917"
+     },
+     {
+      "label": "Valued as of",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "LOSS RUN REPORT",
+      "value": "02/01/2026"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Commercial Auto",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "POLICY SUMMARY",
+      "value": "4A8-21-07---26 Commercial Auto Quillon Mutual Casualty Company 01/01/2026-01/01/2027 0 $0"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Commercial Auto",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "POLICY SUMMARY",
+      "value": "4A8-21-07---25 Commercial Auto Quillon Mutual Casualty Company 01/01/2025-01/01/2026 1 $7,420"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "General Liability",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "POLICY SUMMARY",
+      "value": "QPC5519 - 25 General Liability Quillon Property & Casualty Company 01/01/2025-01/01/2026 0 $0"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "General Liability",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "POLICY SUMMARY",
+      "value": "QPC5519 - 24 General Liability Quillon Property & Casualty Company 01/01/2024-01/01/2025 1 $12,950"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Commercial Umbrella",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "POLICY SUMMARY",
+      "value": "4U8-21-07---25 Commercial Umbrella Quillon Mutual Casualty Company 03/15/2025-03/15/2026 0 $0"
+     },
+     {
+      "label": "CLAIM NUMBER",
+      "line_of_business": "Auto",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "CLAIM DETAIL",
+      "value": "AU-25-11873 4A8-21-07---25 06/14/2025 Rear-end collision, vehicle 1 Closed $7,420"
+     },
+     {
+      "label": "CLAIM NUMBER",
+      "line_of_business": "GL",
+      "owner": "policy",
+      "policy_number": null,
+      "section": "CLAIM DETAIL",
+      "value": "GL-24-00419 QPC5519 - 24 09/03/2024 Property damage at job site Closed $12,950"
+     }
+    ],
+    "deductible_application": null,
+    "deductible_basis": null,
+    "distance_to_hydrant": null,
+    "effective_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "01/01/2026"
+    },
+    "employers_liability_limits": null,
+    "entity_type": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Limited Liability Company",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "expiration_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "01/01/2027"
+    },
+    "extra_expense_limit": null,
+    "fein": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "84-7730214",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "fire_department_type": null,
+    "fire_protection_class": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "3",
+     "value_state": "present"
+    },
+    "garage_deductible": null,
+    "garage_liability_limit": null,
+    "garage_operations_type": null,
+    "garagekeeper_coll_deductible": null,
+    "garagekeeper_comp_deductible": null,
+    "garagekeeper_liability_limit": null,
+    "gl_aggregate": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_class_code_schedule": [
+     {
+      "class_code": "97447",
+      "classification": "Masonry",
+      "exposure_amount": "$412,000",
+      "location": "Location 001",
+      "premium_basis": "Payroll",
+      "subcontractor_pct": null,
+      "territory": null
+     },
+     {
+      "class_code": "91585",
+      "classification": "Contractors - subcontracted work",
+      "exposure_amount": "$180,000",
+      "location": "Location 001",
+      "premium_basis": "Total Cost",
+      "subcontractor_pct": null,
+      "territory": null
+     }
+    ],
+    "gl_class_codes_by_location": [
+     {
+      "codes": [
+       "97447",
+       "91585"
+      ],
+      "location": "Location 001"
+     }
+    ],
+    "gl_deductible": null,
+    "gl_each_occurrence": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_fire_damage_limit": null,
+    "gl_form_type": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Occurrence",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_limits": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_medical_expense": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$5,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_personal_advertising_injury": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_products_aggregate": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "hired_auto_indicator": null,
+    "inland_marine_items": [
+     {
+      "description": "2019 Bobcat S650 Skid Steer",
+      "serial_number": "B3NM11482",
+      "value": "$38,000"
+     },
+     {
+      "description": "2018 Genie GS-3246 Scissor Lift",
+      "serial_number": "GS4618A-51207",
+      "value": "$22,000"
+     },
+     {
+      "description": "Blanket unscheduled tools",
+      "serial_number": null,
+      "value": "$25,000"
+     }
+    ],
+    "inland_marine_total_value": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "$235,000",
+     "value_state": "conflicting"
+    },
+    "inland_marine_transit_limit": null,
+    "is_renewal": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "Yes",
+     "value_state": "present"
+    },
+    "lines_of_business": [
+     "Property",
+     "Liability",
+     "Crime",
+     "Inland Marine",
+     "Automobile",
+     "Workers Compensation",
+     "Umbrella"
+    ],
+    "locations": [
+     "2250 W Larkspur Ave, Denver, CO 80223"
+    ],
+    "loss_history": [
+     {
+      "amount": "$7,420",
+      "claim_date": null,
+      "claim_number": "AU-25-11873",
+      "date": "06/14/2025",
+      "description": "Rear-end collision, vehicle 1",
+      "line_of_business": "Auto",
+      "open": false,
+      "open_code": "C",
+      "paid": "$7,420",
+      "reserved_amount": null,
+      "subrogation_code": "N"
+     },
+     {
+      "amount": "$12,950",
+      "claim_date": null,
+      "claim_number": "GL-24-00419",
+      "date": "09/03/2024",
+      "description": "Property damage at job site",
+      "line_of_business": "GL",
+      "open": false,
+      "open_code": "C",
+      "paid": "$12,950",
+      "reserved_amount": null,
+      "subrogation_code": "N"
+     }
+    ],
+    "loss_history_years": null,
+    "loss_payee_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "First Front Range Bank",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "loss_run_age_days": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "228",
+     "value_state": "present"
+    },
+    "loss_run_period_end": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "03/15/2026",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "loss_run_period_start": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "01/01/2025",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "loss_run_status": null,
+    "loss_run_valuation_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "02/01/2026",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "mailing_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "2250 W Larkspur Ave, Denver, CO 80223",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "mortgagee_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "First Front Range Bank",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "naics_code": null,
+    "non_owned_auto_indicator": null,
+    "num_claims": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "2",
+     "value_state": "present"
+    },
+    "num_employees": null,
+    "num_employees_full_time": null,
+    "num_employees_part_time": null,
+    "occupancy_type": null,
+    "open_claims_count": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "0",
+     "value_state": "present"
+    },
+    "operations_description": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Commercial concrete and masonry contractor",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "payment_plan": null,
+    "percent_subcontracted": null,
+    "period_of_restoration": null,
+    "physical_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "2250 W Larkspur Ave, Denver, CO 80223",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "policy_number": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "QPC5519 - 26",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "prior_carrier": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Birchline Specialty Casualty Company",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "prior_carrier_naic": null,
+    "prior_coverage_by_line": [
+     {
+      "carrier": "Quillon Mutual Casualty Company",
+      "effective": "01/01/2025",
+      "expiration": "01/01/2026",
+      "line": "Commercial Auto",
+      "policy_no": "4A8-21-07---25",
+      "premium": null
+     },
+     {
+      "carrier": "Quillon Property & Casualty Company",
+      "effective": "01/01/2025",
+      "expiration": "01/01/2026",
+      "line": "General Liability",
+      "policy_no": "QPC5519 - 25",
+      "premium": null
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Company",
+      "effective": "03/15/2025",
+      "expiration": "03/15/2026",
+      "line": "Commercial Umbrella",
+      "policy_no": "4U8-21-07---25",
+      "premium": null
+     }
+    ],
+    "prior_effective_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "03/15/2024",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "prior_expiration_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "03/15/2025",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "prior_policy_number": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "BSX-44120-24",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "producer_address": null,
+    "producer_contact_email": null,
+    "producer_contact_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Priya Natarajan",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "producer_contact_phone": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "(303) 555-0176",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "producer_fax": null,
+    "producer_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Front Range Risk Advisors",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "property_bpp_value": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$260,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "property_building_value": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,250,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "property_deductible_aop": null,
+    "property_deductible_earthquake": null,
+    "property_deductible_flood": null,
+    "property_deductible_wind": null,
+    "property_locations": [
+     {
+      "address": "2250 W Larkspur Ave, Denver, CO 80223",
+      "annual_revenue": null,
+      "bpp_value": "$260,000",
+      "building_value": "$1,250,000",
+      "construction_type": "Masonry Non-Combustible",
+      "county": null,
+      "full_time_employees": null,
+      "inside_city_limits": null,
+      "occupied_area": null,
+      "open_to_public_area": null,
+      "operations_description": null,
+      "ownership": null,
+      "part_time_employees": null,
+      "total_building_area": null,
+      "year_built": "2006"
+     }
+    ],
+    "retro_date": null,
+    "risk_transfer": {
+     "additional_insured_names": [
+      "Larkspur Commons Owners Association"
+     ],
+     "additional_insured_required": true,
+     "certificate_holder_name": null,
+     "loss_payee_name": "First Front Range Bank",
+     "mortgagee_name": "First Front Range Bank",
+     "primary_noncontributory_required": null,
+     "specific_wording_requirements": "ADDITIONAL INSURED - OWNERS, LESSEES OR CONTRACTORS - SCHEDULED PERSON",
+     "waiver_of_subrogation_required": null
+    },
+    "roof_year": null,
+    "schedule_of_underlying_insurance": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Commercial General Liability Quillon P&C Co. QPC5519 $1,000,000 occ / $2,000,000 agg; Commercial Auto Liability Quillon Mutual Casualty Co. 4A82107 $1,000,000 CSL; Employers Liability Not Scheduled - -",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "sic_code": null,
+    "sprinkler_system": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "Yes",
+     "value_state": "present"
+    },
+    "state_of_operations": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "CO",
+     "value_state": "present"
+    },
+    "total_incurred": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$20,370",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "total_paid": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$20,370",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "total_payroll": null,
+    "total_policy_premium": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$14,948.00",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "total_revenue": null,
+    "umbrella_attachment_point": null,
+    "umbrella_effective_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "03/15/26",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_expiration_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "03/15/27",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_follow_form": null,
+    "umbrella_form_type": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Occurrence",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_medical_payments_limit": null,
+    "umbrella_sir": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "$0",
+     "value_state": "present"
+    },
+    "umbrella_uim_limit": null,
+    "umbrella_um_limit": null,
+    "underlying_policies": [
+     {
+      "carrier": "Quillon P&C Co.",
+      "limit": "$1,000,000 occ / $2,000,000 agg",
+      "line": "Commercial General Liability",
+      "policy_no": "QPC5519"
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Co.",
+      "limit": "$1,000,000 CSL",
+      "line": "Commercial Auto Liability",
+      "policy_no": "4A82107"
+     }
+    ],
+    "valuation_method": null,
+    "wc_class_codes": [],
+    "wc_description_of_operations": null,
+    "wc_el_disease_each_employee": null,
+    "wc_el_disease_policy_limit": null,
+    "wc_el_each_accident": null,
+    "wc_monopolistic_payroll": {},
+    "wc_officer_exclusions": null,
+    "wc_officers": [],
+    "wc_payroll": null,
+    "wc_payroll_by_state": {},
+    "wc_payroll_period": null,
+    "wc_prior_carrier": null,
+    "wc_xmod": null,
+    "wc_xmod_effective_date": null,
+    "year_built": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "2006",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "years_in_business": null
+   },
+   "filename": "1_renewal_package_policy.pdf",
+   "flags": {
+    "asserts_no_known_losses": false,
+    "asserts_no_subcontractors": false,
+    "auto_has_hired_nonowned": true,
+    "auto_has_physical_damage": true,
+    "auto_has_um_uim": true,
+    "auto_split_limits": false,
+    "gl_is_claims_made": false,
+    "has_additional_insured_requirement": true,
+    "has_auto_coverage": true,
+    "has_auto_dealer_exposure": false,
+    "has_auto_liability": true,
+    "has_builders_risk": false,
+    "has_certificate_request": false,
+    "has_commercial_auto": true,
+    "has_crime": false,
+    "has_cyber": false,
+    "has_dealers_coverage": false,
+    "has_garage_coverage": false,
+    "has_garage_keepers": false,
+    "has_garage_liability": false,
+    "has_garage_operations": false,
+    "has_garagekeepers_coverage": false,
+    "has_general_liability": true,
+    "has_inland_marine": true,
+    "has_loss_history": true,
+    "has_motor_carrier_coverage": false,
+    "has_multiple_locations": false,
+    "has_open_cargo": false,
+    "has_primary_noncontributory": false,
+    "has_property_coverage": true,
+    "has_truckers_coverage": false,
+    "has_umbrella": true,
+    "has_waiver_of_subrogation": false,
+    "has_workers_comp": false,
+    "is_certificate_doc": false,
+    "is_commercial_policy": true,
+    "is_contractor": true,
+    "narrative_components": {
+     "account_overview": {
+      "evidence": null,
+      "present": false
+     },
+     "carrier_market": {
+      "evidence": "Coverages are issued as separate policies by the member companies",
+      "present": true
+     },
+     "coverage_discussion": {
+      "evidence": "COVERAGES AND PREMIUM",
+      "present": true
+     },
+     "employee_practices": {
+      "evidence": null,
+      "present": false
+     },
+     "growth_trends": {
+      "evidence": "97447 Masonry Payroll $412,000",
+      "present": true
+     },
+     "location_exposure": {
+      "evidence": "PREMISES - LOCATION 001: 2250 W Larkspur Ave, Denver, CO 80223",
+      "present": true
+     },
+     "loss_history": {
+      "evidence": "LOSS RUN REPORT",
+      "present": true
+     },
+     "management": {
+      "evidence": null,
+      "present": false
+     },
+     "operations": {
+      "evidence": "Commercial concrete and masonry contractor",
+      "present": true
+     },
+     "risk_controls": {
+      "evidence": null,
+      "present": false
+     },
+     "target_markets": {
+      "evidence": null,
+      "present": false
+     },
+     "years_in_business": {
+      "evidence": null,
+      "present": false
+     }
+    },
+    "property_has_bi_coverage": false,
+    "property_has_peril_deductibles": false,
+    "wc_has_monopolistic_state": false,
+    "wc_multi_state": false
+   },
+   "text": "[Document page 1]\nQUILLON INSURANCE GROUP\nHome Office: 1400 Harbor View Pkwy, Omaha, NE 68102\nCOMMON POLICY DECLARATIONS\nPackage Renewal - Coverage Summary\nNAMED INSURED: BRAMBLE & STONE CONSTRUCTION LLC\nMAILING ADDRESS: 2250 W Larkspur Ave, Denver, CO 80223\nFEIN: 84-7730214\nACCOUNT NUMBER: 0482917\nAGENT: Front Range Risk Advisors - Priya Natarajan - (303) 555-0176\nBUSINESS DESCRIPTION: Commercial concrete and masonry contractor\nFORM OF BUSINESS: Limited Liability Company\nPOLICY PERIOD: Shown on each policy's declarations\nCOVERAGES AND PREMIUM\nSECTION COVERAGE PREMIUM\n1 Property $3,480.00\n2 Liability $4,812.00\n3 Crime No Coverage\n4 Inland Marine $415.00\n5 Automobile $3,264.00\n6 Workers Compensation No Coverage\n7 Umbrella $2,977.00\nESTIMATED TOTAL POLICY PREMIUM: $14,948.00\nCoverages are issued as separate policies by the member companies of the Quillon Insurance Group. Property and Liability\nare written together under one package policy. See each declarations page for the issuing company, policy number and policy\nperiod.\nPlease reference policy 4A8 21 07 26 in all correspondence about this account.\n[Table - page 1 - COVERAGES AND PREMIUM]\nSECTION | COVERAGE | PREMIUM\n1 | Property | $3,480.00\n2 | Liability | $4,812.00\n3 | Crime | No Coverage\n4 | Inland Marine | $415.00\n5 | Automobile | $3,264.00\n6 | Workers Compensation | No Coverage\n7 | Umbrella | $2,977.00\n[End table]\n[Document page 2]\nQUILLON SPECIALTY INSURANCE COMPANY POLICY NUMBER: SIM-7730418\nPOLICY PERIOD: FROM 01/01/26 TO 01/01/27\nBRAMBLE & STONE CONSTRUCTION LLC\nCOMMERCIAL INLAND MARINE DECLARATIONS\nISSUING COMPANY: Quillon Specialty Insurance Company\nCOVERAGE SCHEDULE\nCOVERAGE FORM LIMIT PREMIUM\nContractors Equipment Floater - Scheduled CM7000A 03-20 $185,000 $325.00\nInstallation Floater IM 7100 06 04 $50,000 $90.00\nTOTAL INLAND MARINE PREMIUM: $415.00\nSCHEDULE OF EQUIPMENT\nITEM DESCRIPTION SERIAL NUMBER LIMIT\n1 2019 Bobcat S650 Skid Steer B3NM11482 $38,000\n2 2018 Genie GS-3246 Scissor Lift GS4618A-51207 $22,000\n3 Blanket unscheduled tools - $25,000\nCM7000A ED. 3-20 BPP 01/01/26 031 SB SIM7730418 2601\n[Table - page 2 - COVERAGE SCHEDULE]\nCOVERAGE | FORM | LIMIT | PREMIUM\nContractors Equipment Floater - Scheduled | CM7000A 03-20 | $185,000 | $325.00\nInstallation Floater | IM 7100 06 04 | $50,000 | $90.00\n[End table]\n[Table - page 2 - SCHEDULE OF EQUIPMENT]\nITEM | DESCRIPTION | SERIAL NUMBER | LIMIT\n1 | 2019 Bobcat S650 Skid Steer | B3NM11482 | $38,000\n2 | 2018 Genie GS-3246 Scissor Lift | GS4618A-51207 | $22,000\n3 | Blanket unscheduled tools | - | $25,000\nCM7000A | ED. 3-20 BPP 01/01/26 031 SB SIM7730418 | 2601 | \n[End table]\n[Document page 3]\nINSTALLATION FLOATER COVERAGE\nAAIS IM 7100 06 04\nThis coverage applies to materials, supplies and equipment that the insured has purchased to be installed, erected or\nfabricated at a job site.\nCancellation - After this policy has been in effect 60 days or more, or if it is a renewal of a policy issued by \"us\", effective\nimmediately, \"we\" may cancel this policy by giving the named insured notice.\nThis form must be attached to a policy that includes form IM 7100 06 04.\nIM 7100 06 04 \n[Document page 4]\nQUILLON PROPERTY & CASUALTY COMPANY NAIC 91880\nPOLICY NUMBER: QPC5519 - 26 POLICY PERIOD: 01/01/2026 TO 01/01/2027\nRENEWAL OF: QPC5519 - 25\nCOMMERCIAL PACKAGE POLICY DECLARATIONS\nNAMED INSURED: BRAMBLE & STONE CONSTRUCTION LLC\nCOVERAGE PARTS INCLUDED IN THIS POLICY\nCOVERAGE PART POLICY NUMBER PREMIUM\nCommercial General Liability Coverage Part QPC5519 - 26 $4,812.00\nCommercial Property Coverage Part QPC5519 - 26 $3,480.00\nPACKAGE POLICY PREMIUM: $8,292.00\nGENERAL LIABILITY LIMITS OF INSURANCE\nCOVERAGE LIMIT\nEach Occurrence $1,000,000\nGeneral Aggregate $2,000,000\nProducts-Completed Operations Aggregate $2,000,000\nPersonal and Advertising Injury $1,000,000\nMedical Expense - Any One Person $5,000\nCOVERAGE FORM: CG 00 01 04 13 Commercial General Liability Coverage Form - Occurrence\nGENERAL LIABILITY SCHEDULE - Location 001\nCLASS CLASSIFICATION PREMIUM BASIS EXPOSURE PREMIUM\n97447 Masonry Payroll $412,000 $3,406.00\n91585 Contractors - subcontracted work Total Cost $180,000 $1,258.00\nADDITIONAL COVERAGES ON THIS POLICY\nCOVERAGE FORM PREMIUM\nHired and Non-Owned Auto Liability CG 70 22A 04 17 $148.00\nForm CG7001A Ed. 10-12 01/01/2026 QPC5519 2601\n[Table - page 4 - COVERAGE PARTS INCLUDED IN THIS POLICY]\nCOVERAGE PART | POLICY NUMBER | PREMIUM\nCommercial General Liability Coverage Part | QPC5519 - 26 | $4,812.00\nCommercial Property Coverage Part | QPC5519 - 26 | $3,480.00\n[End table]\n[Table - page 4 - GENERAL LIABILITY SCHEDULE - Location 001]\nCLASS | CLASSIFICATION | PREMIUM BASIS | EXPOSURE | PREMIUM\n97447 | Masonry | Payroll | $412,000 | $3,406.00\n91585 | Contractors - subcontracted work | Total Cost | $180,000 | $1,258.00\n[End table]\n[Table - page 4 - ADDITIONAL COVERAGES ON THIS POLICY]\nCOVERAGE | FORM | PREMIUM\nHired and Non-Owned Auto Liability | CG 70 22A 04 17 | $148.00\nForm CG7001A Ed. 10-12 01/01/2026 | QPC5519 2601 | \n[End table]\n[Document page 5]\nQUILLON PROPERTY & CASUALTY COMPANY NAIC 91880\nPOLICY NUMBER: QPC5519 - 26 POLICY PERIOD: 01/01/2026 TO 01/01/2027\nRENEWAL OF: QPC5519 - 25\nCOMMERCIAL PROPERTY COVERAGE PART\nPREMISES - LOCATION 001: 2250 W Larkspur Ave, Denver, CO 80223\nBUILDING LIMIT: $1,250,000\nBUSINESS PERSONAL PROPERTY: $260,000\nYEAR BUILT: 2006\nCONSTRUCTION: Masonry Non-Combustible\nSPRINKLERED: Yes\nPROTECTION CLASS: 3\nADDITIONAL INSURED - OWNERS, LESSEES OR CONTRACTORS - SCHEDULED PERSON\nSCHEDULED ORGANIZATION: Larkspur Commons Owners Association\nPROJECT CONTRACT NUMBER: LCOA-2026-114\nTHIS ENDORSEMENT MODIFIES INSURANCE PROVIDED UNDER THE FOLLOWING:\nCOMMERCIAL GENERAL LIABILITY COVERAGE PART\nCOMMERCIAL AUTO COVERAGE PART\nCOMMERCIAL UMBRELLA LIABILITY COVERAGE PART\nForm CG7001A Ed. 10-12 01/01/2026 QPC5519 2601\n[Document page 6]\nQUILLON MUTUAL CASUALTY COMPANY POLICY NO: 4A8-21-07---26\nBRAMBLE & STONE CONSTRUCTION LLC EFF DATE: 01/01/26 EXP DATE: 01/01/27\nRENEWAL OF: 4A8-21-07---25\nCOMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO\nITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS\nCOVERAGE SYMBOL LIMIT PREMIUM\nCovered Autos Liability 01 $1,000,000 Combined Single Limit $2,410.00\nMedical Payments 02 $5,000 $62.00\nUninsured Motorists 02 $1,000,000 $148.00\nComprehensive 07 $1,000 Deductible $286.00\nCollision 07 $1,000 Deductible $358.00\nTOTAL AUTO PREMIUM: $3,264.00\nITEM THREE - SCHEDULE OF COVERED AUTOS YOU OWN\nVEH YEAR MAKE MODEL VIN CLASS TERR COST NEW\n1 2021 Ford F-150 1FTFW1E58MFA23417 01499 111 $48,600\n2 2020 Ram 2500 3C6UR5DL4LG190275 21499 111 $52,300\nLOSS PAYEE SCHEDULE\nLOSS PAYEE - VEH 2: First Front Range Bank, 1700 Broadway, Denver, CO 80290\nLOAN NUMBER: LN-00917733\nThis business auto policy is issued separately and is not part of package policy QPC5519 - 26.\nCA7001A 02-22 BPP 01/01/26 031 SB 4A82107 2601\n[Table - page 6 - ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS]\nCOVERAGE | SYMBOL | LIMIT | PREMIUM\nCovered Autos Liability | 01 | $1,000,000 Combined Single Limit | $2,410.00\nMedical Payments | 02 | $5,000 | $62.00\nUninsured Motorists | 02 | $1,000,000 | $148.00\nComprehensive | 07 | $1,000 Deductible | $286.00\nCollision | 07 | $1,000 Deductible | $358.00\n[End table]\n[Table - page 6 - ITEM THREE - SCHEDULE OF COVERED AUTOS YOU OWN]\nVEH | YEAR MAKE MODEL | VIN | CLASS | TERR | COST NEW\n1 | 2021 Ford F-150 | 1FTFW1E58MFA23417 | 01499 | 111 | $48,600\n2 | 2020 Ram 2500 | 3C6UR5DL4LG190275 | 21499 | 111 | $52,300\n[End table]\n[Document page 7]\nQUILLON MUTUAL CASUALTY COMPANY POLICY NO: 4U8-21-07---26\nBRAMBLE & STONE CONSTRUCTION LLC EFF DATE: 03/15/26 EXP DATE: 03/15/27\nRENEWAL OF: 4U8-21-07---25\nCOMMERCIAL UMBRELLA DECLARATIONS\nEACH OCCURRENCE LIMIT: $2,000,000\nAGGREGATE LIMIT: $2,000,000\nSELF-INSURED RETENTION: $0\nCOVERAGE FORM: Commercial Umbrella Liability Coverage Form CU7000 11-15 - Occurrence\nUMBRELLA PREMIUM: $2,977.00\nPRIOR UMBRELLA CARRIER: Birchline Specialty Casualty Company - BSX-44120-24 - 03/15/2024 to 03/15/2025\nSCHEDULE OF UNDERLYING INSURANCE\nUNDERLYING COVERAGE COMPANY POLICY NUMBER LIMITS\nCommercial General Liability Quillon P&C Co. QPC5519 $1,000,000 occ / $2,000,000 agg\nCommercial Auto Liability Quillon Mutual Casualty Co. 4A82107 $1,000,000 CSL\nEmployers Liability Not Scheduled - -\nEmployers Liability is not scheduled: the named insured carries no workers compensation policy.\nCU7001A 11-15 031 SB 4U82107 2601\n[Table - page 7 - SCHEDULE OF UNDERLYING INSURANCE]\nUNDERLYING COVERAGE | COMPANY | POLICY NUMBER | LIMITS\nCommercial General Liability | Quillon P&C Co. | QPC5519 | $1,000,000 occ / $2,000,000 agg\nCommercial Auto Liability | Quillon Mutual Casualty Co. | 4A82107 | $1,000,000 CSL\nEmployers Liability | Not Scheduled | - | -\n[End table]\n[Document page 8]\nSCHEDULE OF FORMS AND ENDORSEMENTS\nAll policies in this package\nPOLICY FORM TITLE\nSIM-7730418 CM7000A 03-20 Inland Marine Declarations\nSIM-7730418 IM 7100 06 04 Installation Floater Coverage\nQPC5519 - 26 CG 00 01 04 13 Commercial General Liability Coverage Form\nQPC5519 - 26 CG 70 22A 04 17 Hired and Non-Owned Auto Liability\nQPC5519 - 26 CP 00 10 10 12 Building and Personal Property Coverage Form\n4A8-21-07---26 CA7001A 02-22 Business Auto Declarations\n4A8-21-07---26 CA 00 01 11 20 Business Auto Coverage Form\n4U8-21-07---26 CU7000 11-15 Commercial Umbrella Declarations\n4U8-21-07---26 CU7001A 11-15 Schedule of Underlying Insurance\nALL IL 00 17 11 98 Common Policy Conditions\n[Table - page 8 - SCHEDULE OF FORMS AND ENDORSEMENTS]\nPOLICY | FORM | TITLE\nSIM-7730418 | CM7000A 03-20 | Inland Marine Declarations\nSIM-7730418 | IM 7100 06 04 | Installation Floater Coverage\nQPC5519 - 26 | CG 00 01 04 13 | Commercial General Liability Coverage Form\nQPC5519 - 26 | CG 70 22A 04 17 | Hired and Non-Owned Auto Liability\nQPC5519 - 26 | CP 00 10 10 12 | Building and Personal Property Coverage Form\n4A8-21-07---26 | CA7001A 02-22 | Business Auto Declarations\n4A8-21-07---26 | CA 00 01 11 20 | Business Auto Coverage Form\n4U8-21-07---26 | CU7000 11-15 | Commercial Umbrella Declarations\n4U8-21-07---26 | CU7001A 11-15 | Schedule of Underlying Insurance\nALL | IL 00 17 11 98 | Common Policy Conditions\n[End table]\n[Document page 9]\nQUILLON INSURANCE GROUP\nLOSS RUN REPORT\nValued as of 02/01/2026\nNAMED INSURED: BRAMBLE & STONE CONSTRUCTION LLC\nACCOUNT NUMBER: 0482917\nPOLICY SUMMARY\nPOLICY NUMBER LINE COMPANY TERM CLAIMS PAID\n4A8-21-07---26 Commercial Auto Quillon Mutual Casualty Company 01/01/2026-01/01/2027 0 $0\n4A8-21-07---25 Commercial Auto Quillon Mutual Casualty Company 01/01/2025-01/01/2026 1 $7,420\nQPC5519 - 25 General Liability Quillon Property & Casualty Company 01/01/2025-01/01/2026 0 $0\nQPC5519 - 24 General Liability Quillon Property & Casualty Company 01/01/2024-01/01/2025 1 $12,950\n4U8-21-07---25 Commercial Umbrella Quillon Mutual Casualty Company 03/15/2025-03/15/2026 0 $0\nCLAIM DETAIL\nCLAIM NUMBER POLICY NUMBER DATE OF LOSS DESCRIPTION STATUS PAID\nAU-25-11873 4A8-21-07---25 06/14/2025 Rear-end collision, vehicle 1 Closed $7,420\nGL-24-00419 QPC5519 - 24 09/03/2024 Property damage at job site Closed $12,950\nTOTAL PAID: $20,370\nTOTAL OPEN RESERVES: $0\n[Table - page 9 - POLICY SUMMARY]\nPOLICY NUMBER | LINE | COMPANY | TERM | CLAIMS | PAID\n4A8-21-07---26 | Commercial Auto | Quillon Mutual Casualty Company | 01/01/2026-01/01/2027 | 0 | $0\n4A8-21-07---25 | Commercial Auto | Quillon Mutual Casualty Company | 01/01/2025-01/01/2026 | 1 | $7,420\nQPC5519 - 25 | General Liability | Quillon Property & Casualty Company | 01/01/2025-01/01/2026 | 0 | $0\nQPC5519 - 24 | General Liability | Quillon Property & Casualty Company | 01/01/2024-01/01/2025 | 1 | $12,950\n4U8-21-07---25 | Commercial Umbrella | Quillon Mutual Casualty Company | 03/15/2025-03/15/2026 | 0 | $0\n[End table]\n[Table - page 9 - CLAIM DETAIL]\nCLAIM NUMBER | POLICY NUMBER | DATE OF LOSS | DESCRIPTION | STATUS | PAID\nAU-25-11873 | 4A8-21-07---25 | 06/14/2025 | Rear-end collision, vehicle 1 | Closed | $7,420\nGL-24-00419 | QPC5519 - 24 | 09/03/2024 | Property damage at job site | Closed | $12,950\n[End table]"
+  },
+  {
+   "doc_id": "3f02c09797cf4385a1c65715cfeed33e",
+   "doc_type": "certificate",
+   "doc_type_confidence": "medium",
+   "doc_type_source": "content+filename",
+   "facts": {
+    "account_description": null,
+    "additional_named_insureds": [],
+    "additional_remarks_text": null,
+    "agreed_value_endorsement": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "False"
+    },
+    "applicant_name": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Bramble & Stone Construction LLC"
+    },
+    "applicant_website": null,
+    "audit_period": null,
+    "auto_bi_per_accident": null,
+    "auto_bi_per_person": null,
+    "auto_covered_symbols": [],
+    "auto_dealers_inventory_value": null,
+    "auto_deductible_collision": null,
+    "auto_deductible_comp": null,
+    "auto_drivers": [],
+    "auto_garaging_addresses": [],
+    "auto_hired_nonowned": null,
+    "auto_liability_limit": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "$1,000,000"
+    },
+    "auto_liability_structure": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "CSL"
+    },
+    "auto_med_pay_limit": null,
+    "auto_pd_per_accident": null,
+    "auto_physical_damage_valuation": null,
+    "auto_radius_of_operation": null,
+    "auto_um_uim_limit": null,
+    "auto_vehicle_use": null,
+    "auto_vin_schedule": [],
+    "billing_plan": null,
+    "builders_risk_completion_date": null,
+    "builders_risk_construction_type": null,
+    "builders_risk_contractor_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Bramble & Stone Construction LLC",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "builders_risk_insured_interest": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "Project policy for work on Larkspur Commons Owners Association parking structure",
+     "value_state": "present"
+    },
+    "builders_risk_owner_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Larkspur Commons Owners Association",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "builders_risk_project_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Larkspur Commons Owners Association parking structure",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "builders_risk_project_cost": null,
+    "building_ITV_percentage": null,
+    "business_income_limit": null,
+    "business_start_date": null,
+    "carrier_naic": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "93518"
+    },
+    "carrier_name": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Larchmont Specialty Insurance Co."
+    },
+    "carrier_website": null,
+    "certificate_description_of_operations": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Project: Larkspur Commons Owners Association parking structure. General liability for work on this project is provided under project policy LSG-4471102-26. Umbrella policy 4U82107 follows form over the policies above.",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "certificate_holder": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Larkspur Commons Owners Association, 900 Larkspur Ct, Denver, CO 80223",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "certificate_holder_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "900 Larkspur Ct, Denver, CO 80223",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "coinsurance_percentage": null,
+    "construction_type": null,
+    "contact_email": null,
+    "contractor_commercial_pct": null,
+    "contractor_high_hazard_ops": [],
+    "contractor_license_number": null,
+    "contractor_residential_pct": null,
+    "contractor_type": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Construction"
+    },
+    "coverage_lines": [
+     {
+      "carrier": "Larchmont Specialty Insurance Co.",
+      "effective_date": "01/01/2026",
+      "expiration_date": "01/01/2027",
+      "line": "Commercial General Liability",
+      "naic": "93518",
+      "policy_number": "LSG-4471102-26",
+      "premium": null
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Co.",
+      "effective_date": "01/01/2026",
+      "expiration_date": "01/01/2027",
+      "line": "Automobile Liability",
+      "naic": "91872",
+      "policy_number": "4A82107",
+      "premium": null
+     },
+     {
+      "carrier": "Quillon Specialty Insurance Co.",
+      "effective_date": "03/15/2026",
+      "expiration_date": "03/15/2027",
+      "line": "Umbrella Liability",
+      "naic": "91895",
+      "policy_number": "4U82107",
+      "premium": null
+     },
+     {
+      "carrier": null,
+      "effective_date": null,
+      "expiration_date": null,
+      "line": "Workers Compensation",
+      "naic": null,
+      "policy_number": null,
+      "premium": null
+     },
+     {
+      "carrier": "Quillon Specialty Insurance Co.",
+      "effective_date": "01/01/2026",
+      "expiration_date": "01/01/2027",
+      "line": "Contractors Equipment",
+      "naic": "91895",
+      "policy_number": "SIM7730418",
+      "premium": null
+     }
+    ],
+    "crime_deductible": null,
+    "crime_employee_count": null,
+    "crime_limit": null,
+    "crime_locations_count": null,
+    "cyber_controls_backups": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "False"
+    },
+    "cyber_controls_mfa": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "False"
+    },
+    "cyber_limit": null,
+    "cyber_pii_records_count": null,
+    "cyber_prior_incidents": null,
+    "cyber_retention": null,
+    "cyber_third_party_vendors": null,
+    "dba_name": null,
+    "dec_page_entries": [
+     {
+      "label": "DATE (MM/DD/YYYY)",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "02/10/2026"
+     },
+     {
+      "label": "PRODUCER",
+      "line_of_business": null,
+      "owner": "producer",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "Front Range Risk Advisors, 1550 Wewatta St, Denver, CO 80202"
+     },
+     {
+      "label": "CONTACT",
+      "line_of_business": null,
+      "owner": "producer",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "Priya Natarajan"
+     },
+     {
+      "label": "PHONE",
+      "line_of_business": null,
+      "owner": "producer",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "(303) 555-0176"
+     },
+     {
+      "label": "INSURED",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "Bramble & Stone Construction LLC, 2250 W Larkspur Ave, Denver, CO 80223"
+     },
+     {
+      "label": "INSURER A",
+      "line_of_business": null,
+      "owner": "carrier",
+      "policy_number": null,
+      "section": "INSURER(S) AFFORDING COVERAGE",
+      "value": "Larchmont Specialty Insurance Co. 93518"
+     },
+     {
+      "label": "INSURER B",
+      "line_of_business": null,
+      "owner": "carrier",
+      "policy_number": null,
+      "section": "INSURER(S) AFFORDING COVERAGE",
+      "value": "Quillon Mutual Casualty Co. 91872"
+     },
+     {
+      "label": "INSURER C",
+      "line_of_business": null,
+      "owner": "carrier",
+      "policy_number": null,
+      "section": "INSURER(S) AFFORDING COVERAGE",
+      "value": "Quillon Specialty Insurance Co. 91895"
+     },
+     {
+      "label": "CERTIFICATE NUMBER",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "2026-00731"
+     },
+     {
+      "label": "REVISION NUMBER",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "1"
+     },
+     {
+      "label": "INSR LTR",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COVERAGES",
+      "value": "A"
+     },
+     {
+      "label": "TYPE OF INSURANCE",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "LSG-4471102-26",
+      "section": "COVERAGES",
+      "value": "COMMERCIAL GENERAL LIABILITY - OCCUR"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "LSG-4471102-26",
+      "section": "COVERAGES",
+      "value": "LSG-4471102-26"
+     },
+     {
+      "label": "POLICY EFF",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "LSG-4471102-26",
+      "section": "COVERAGES",
+      "value": "01/01/2026"
+     },
+     {
+      "label": "POLICY EXP",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "LSG-4471102-26",
+      "section": "COVERAGES",
+      "value": "01/01/2027"
+     },
+     {
+      "label": "LIMITS",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "LSG-4471102-26",
+      "section": "COVERAGES",
+      "value": "EACH OCC $1,000,000"
+     },
+     {
+      "label": "INSR LTR",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COVERAGES",
+      "value": "B"
+     },
+     {
+      "label": "TYPE OF INSURANCE",
+      "line_of_business": "Automobile Liability",
+      "owner": "policy",
+      "policy_number": "4A82107",
+      "section": "COVERAGES",
+      "value": "AUTOMOBILE LIABILITY - ANY AUTO"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Automobile Liability",
+      "owner": "policy",
+      "policy_number": "4A82107",
+      "section": "COVERAGES",
+      "value": "4A82107"
+     },
+     {
+      "label": "POLICY EFF",
+      "line_of_business": "Automobile Liability",
+      "owner": "policy",
+      "policy_number": "4A82107",
+      "section": "COVERAGES",
+      "value": "01/01/2026"
+     },
+     {
+      "label": "POLICY EXP",
+      "line_of_business": "Automobile Liability",
+      "owner": "policy",
+      "policy_number": "4A82107",
+      "section": "COVERAGES",
+      "value": "01/01/2027"
+     },
+     {
+      "label": "LIMITS",
+      "line_of_business": "Automobile Liability",
+      "owner": "policy",
+      "policy_number": "4A82107",
+      "section": "COVERAGES",
+      "value": "CSL $1,000,000"
+     },
+     {
+      "label": "INSR LTR",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COVERAGES",
+      "value": "B"
+     },
+     {
+      "label": "TYPE OF INSURANCE",
+      "line_of_business": "Umbrella Liability",
+      "owner": "policy",
+      "policy_number": "4U82107",
+      "section": "COVERAGES",
+      "value": "UMBRELLA LIAB - OCCUR"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Umbrella Liability",
+      "owner": "policy",
+      "policy_number": "4U82107",
+      "section": "COVERAGES",
+      "value": "4U82107"
+     },
+     {
+      "label": "POLICY EFF",
+      "line_of_business": "Umbrella Liability",
+      "owner": "policy",
+      "policy_number": "4U82107",
+      "section": "COVERAGES",
+      "value": "03/15/2026"
+     },
+     {
+      "label": "POLICY EXP",
+      "line_of_business": "Umbrella Liability",
+      "owner": "policy",
+      "policy_number": "4U82107",
+      "section": "COVERAGES",
+      "value": "03/15/2027"
+     },
+     {
+      "label": "LIMITS",
+      "line_of_business": "Umbrella Liability",
+      "owner": "policy",
+      "policy_number": "4U82107",
+      "section": "COVERAGES",
+      "value": "EACH OCC $2,000,000"
+     },
+     {
+      "label": "INSR LTR",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": null,
+      "section": "COVERAGES",
+      "value": "C"
+     },
+     {
+      "label": "TYPE OF INSURANCE",
+      "line_of_business": "Contractors Equipment",
+      "owner": "policy",
+      "policy_number": "SIM7730418",
+      "section": "COVERAGES",
+      "value": "CONTRACTORS EQUIPMENT"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": "Contractors Equipment",
+      "owner": "policy",
+      "policy_number": "SIM7730418",
+      "section": "COVERAGES",
+      "value": "SIM7730418"
+     },
+     {
+      "label": "POLICY EFF",
+      "line_of_business": "Contractors Equipment",
+      "owner": "policy",
+      "policy_number": "SIM7730418",
+      "section": "COVERAGES",
+      "value": "01/01/2026"
+     },
+     {
+      "label": "POLICY EXP",
+      "line_of_business": "Contractors Equipment",
+      "owner": "policy",
+      "policy_number": "SIM7730418",
+      "section": "COVERAGES",
+      "value": "01/01/2027"
+     },
+     {
+      "label": "LIMITS",
+      "line_of_business": "Contractors Equipment",
+      "owner": "policy",
+      "policy_number": "SIM7730418",
+      "section": "COVERAGES",
+      "value": "SCHEDULED $185,000"
+     },
+     {
+      "label": "DESCRIPTION OF OPERATIONS / LOCATIONS / VEHICLES",
+      "line_of_business": null,
+      "owner": "other",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "Project: Larkspur Commons Owners Association parking structure. General liability for work on this project is provided under project policy LSG-4471102-26. Umbrella policy 4U82107 follows form over the policies above."
+     },
+     {
+      "label": "CERTIFICATE HOLDER",
+      "line_of_business": null,
+      "owner": "other",
+      "policy_number": null,
+      "section": "CERTIFICATE OF LIABILITY INSURANCE",
+      "value": "Larkspur Commons Owners Association, 900 Larkspur Ct, Denver, CO 80223"
+     }
+    ],
+    "deductible_application": null,
+    "deductible_basis": null,
+    "distance_to_hydrant": null,
+    "effective_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "01/01/2026"
+    },
+    "employers_liability_limits": null,
+    "entity_type": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "LLC"
+    },
+    "expiration_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "01/01/2027"
+    },
+    "extra_expense_limit": null,
+    "fein": null,
+    "fire_department_type": null,
+    "fire_protection_class": null,
+    "garage_deductible": null,
+    "garage_liability_limit": null,
+    "garage_operations_type": null,
+    "garagekeeper_coll_deductible": null,
+    "garagekeeper_comp_deductible": null,
+    "garagekeeper_liability_limit": null,
+    "gl_aggregate": null,
+    "gl_class_code_schedule": [],
+    "gl_class_codes_by_location": [],
+    "gl_deductible": null,
+    "gl_each_occurrence": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "$1,000,000"
+    },
+    "gl_fire_damage_limit": null,
+    "gl_form_type": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Occurrence"
+    },
+    "gl_limits": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "$1,000,000"
+    },
+    "gl_medical_expense": null,
+    "gl_personal_advertising_injury": null,
+    "gl_products_aggregate": null,
+    "hired_auto_indicator": null,
+    "inland_marine_items": [],
+    "inland_marine_total_value": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "$185,000"
+    },
+    "inland_marine_transit_limit": null,
+    "is_renewal": null,
+    "lines_of_business": [
+     "Commercial General Liability",
+     "Automobile Liability",
+     "Umbrella Liability",
+     "Workers Compensation",
+     "Contractors Equipment"
+    ],
+    "locations": [
+     "2250 W Larkspur Ave, Denver, CO 80223",
+     "900 Larkspur Ct, Denver, CO 80223"
+    ],
+    "loss_history": [],
+    "loss_history_years": null,
+    "loss_payee_name": null,
+    "loss_run_age_days": null,
+    "loss_run_period_end": null,
+    "loss_run_period_start": null,
+    "loss_run_status": null,
+    "loss_run_valuation_date": null,
+    "mailing_address": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "2250 W Larkspur Ave, Denver, CO 80223"
+    },
+    "mortgagee_name": null,
+    "naics_code": null,
+    "non_owned_auto_indicator": null,
+    "num_claims": null,
+    "num_employees": null,
+    "num_employees_full_time": null,
+    "num_employees_part_time": null,
+    "occupancy_type": null,
+    "open_claims_count": null,
+    "operations_description": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Project: Larkspur Commons Owners Association parking structure. General liability for work on this project is provided under project policy LSG-4471102-26. Umbrella policy 4U82107 follows form over the policies above."
+    },
+    "payment_plan": null,
+    "percent_subcontracted": null,
+    "period_of_restoration": null,
+    "physical_address": null,
+    "policy_number": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "LSG-4471102-26"
+    },
+    "prior_carrier": null,
+    "prior_carrier_naic": null,
+    "prior_coverage_by_line": [],
+    "prior_effective_date": null,
+    "prior_expiration_date": null,
+    "prior_policy_number": null,
+    "producer_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "1550 Wewatta St, Denver, CO 80202",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "producer_contact_email": null,
+    "producer_contact_name": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Priya Natarajan"
+    },
+    "producer_contact_phone": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "(303) 555-0176"
+    },
+    "producer_fax": null,
+    "producer_name": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Front Range Risk Advisors"
+    },
+    "property_bpp_value": null,
+    "property_building_value": null,
+    "property_deductible_aop": null,
+    "property_deductible_earthquake": null,
+    "property_deductible_flood": null,
+    "property_deductible_wind": null,
+    "property_locations": [],
+    "retro_date": null,
+    "risk_transfer": {
+     "additional_insured_names": [],
+     "additional_insured_required": null,
+     "certificate_holder_name": "Larkspur Commons Owners Association",
+     "loss_payee_name": null,
+     "mortgagee_name": null,
+     "primary_noncontributory_required": null,
+     "specific_wording_requirements": "Umbrella policy 4U82107 follows form over the policies above.",
+     "waiver_of_subrogation_required": null
+    },
+    "roof_year": null,
+    "schedule_of_underlying_insurance": null,
+    "sic_code": null,
+    "sprinkler_system": null,
+    "state_of_operations": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "CO"
+    },
+    "total_incurred": null,
+    "total_paid": null,
+    "total_payroll": null,
+    "total_policy_premium": null,
+    "total_revenue": null,
+    "umbrella_attachment_point": null,
+    "umbrella_effective_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "03/15/2026"
+    },
+    "umbrella_expiration_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "03/15/2027"
+    },
+    "umbrella_follow_form": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Umbrella policy 4U82107 follows form over the policies above.",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_form_type": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "Occurrence"
+    },
+    "umbrella_limit": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "$2,000,000"
+    },
+    "umbrella_medical_payments_limit": null,
+    "umbrella_sir": null,
+    "umbrella_uim_limit": null,
+    "umbrella_um_limit": null,
+    "underlying_policies": [
+     {
+      "carrier": "Larchmont Specialty Insurance Co.",
+      "limit": "$1,000,000",
+      "line": "Commercial General Liability",
+      "policy_no": "LSG-4471102-26"
+     },
+     {
+      "carrier": "Quillon Mutual Casualty Co.",
+      "limit": "$1,000,000",
+      "line": "Automobile Liability",
+      "policy_no": "4A82107"
+     }
+    ],
+    "valuation_method": null,
+    "wc_class_codes": [],
+    "wc_description_of_operations": null,
+    "wc_el_disease_each_employee": null,
+    "wc_el_disease_policy_limit": null,
+    "wc_el_each_accident": null,
+    "wc_monopolistic_payroll": {},
+    "wc_officer_exclusions": null,
+    "wc_officers": [],
+    "wc_payroll": null,
+    "wc_payroll_by_state": {},
+    "wc_payroll_period": null,
+    "wc_prior_carrier": null,
+    "wc_xmod": null,
+    "wc_xmod_effective_date": null,
+    "year_built": null,
+    "years_in_business": null
+   },
+   "filename": "2_certificate_project_gl.pdf",
+   "flags": {
+    "_carrier_documents_only": true,
+    "_doc_type": "dec_page",
+    "_narrative_fact_keys": [
+     "loss_history_no_prior_losses_indicator",
+     "prior_carrier",
+     "operations_description"
+    ],
+    "_only_certificate": false,
+    "_only_dec_page": false,
+    "asserts_no_known_losses": false,
+    "asserts_no_subcontractors": false,
+    "auto_has_hired_nonowned": true,
+    "auto_has_physical_damage": true,
+    "auto_has_um_uim": true,
+    "auto_split_limits": false,
+    "gl_is_claims_made": false,
+    "has_additional_insured_requirement": true,
+    "has_auto_coverage": true,
+    "has_auto_dealer_exposure": false,
+    "has_auto_liability": true,
+    "has_builders_risk": true,
+    "has_certificate_request": true,
+    "has_commercial_auto": true,
+    "has_crime": false,
+    "has_cyber": false,
+    "has_dealers_coverage": false,
+    "has_garage_coverage": false,
+    "has_garage_keepers": false,
+    "has_garage_liability": false,
+    "has_garage_operations": false,
+    "has_garagekeepers_coverage": false,
+    "has_general_liability": true,
+    "has_inland_marine": true,
+    "has_loss_history": true,
+    "has_motor_carrier_coverage": false,
+    "has_multiple_locations": true,
+    "has_open_cargo": false,
+    "has_primary_noncontributory": false,
+    "has_property_coverage": true,
+    "has_truckers_coverage": false,
+    "has_umbrella": true,
+    "has_waiver_of_subrogation": false,
+    "has_workers_comp": false,
+    "is_certificate_doc": true,
+    "is_commercial_policy": true,
+    "is_contractor": true,
+    "narrative_components": {
+     "account_overview": {
+      "evidence": null,
+      "present": false
+     },
+     "carrier_market": {
+      "evidence": "Coverages are issued as separate policies by the member companies",
+      "present": true
+     },
+     "coverage_discussion": {
+      "evidence": "\u201cGeneral liability for work on this project is provided under project policy LSG-4471102-26.\u201d",
+      "present": true
+     },
+     "employee_practices": {
+      "evidence": null,
+      "present": false
+     },
+     "growth_trends": {
+      "evidence": "97447 Masonry Payroll $412,000",
+      "present": true
+     },
+     "location_exposure": {
+      "evidence": "\u201cLarkspur Commons Owners Association, 900 Larkspur Ct, Denver, CO 80223\u201d",
+      "present": true
+     },
+     "loss_history": {
+      "evidence": "LOSS RUN REPORT",
+      "present": true
+     },
+     "management": {
+      "evidence": null,
+      "present": false
+     },
+     "operations": {
+      "evidence": "\u201cProject: Larkspur Commons Owners Association parking structure.\u201d",
+      "present": true
+     },
+     "risk_controls": {
+      "evidence": null,
+      "present": false
+     },
+     "target_markets": {
+      "evidence": null,
+      "present": false
+     },
+     "years_in_business": {
+      "evidence": null,
+      "present": false
+     }
+    },
+    "narrative_profile": {
+     "account_overview": {
+      "evidence": null,
+      "present": false
+     },
+     "carrier_market": {
+      "evidence": "Coverages are issued as separate policies by the member companies",
+      "present": true
+     },
+     "coverage_discussion": {
+      "evidence": "\u201cGeneral liability for work on this project is provided under project policy LSG-4471102-26.\u201d",
+      "present": true
+     },
+     "employee_practices": {
+      "evidence": null,
+      "present": false
+     },
+     "growth_trends": {
+      "evidence": "97447 Masonry Payroll $412,000",
+      "present": true
+     },
+     "location_exposure": {
+      "evidence": "\u201cLarkspur Commons Owners Association, 900 Larkspur Ct, Denver, CO 80223\u201d",
+      "present": true
+     },
+     "loss_history": {
+      "evidence": "LOSS RUN REPORT",
+      "present": true
+     },
+     "management": {
+      "evidence": null,
+      "present": false
+     },
+     "operations": {
+      "evidence": "\u201cProject: Larkspur Commons Owners Association parking structure.\u201d",
+      "present": true
+     },
+     "risk_controls": {
+      "evidence": null,
+      "present": false
+     },
+     "target_markets": {
+      "evidence": null,
+      "present": false
+     },
+     "years_in_business": {
+      "evidence": null,
+      "present": false
+     }
+    },
+    "property_has_bi_coverage": false,
+    "property_has_peril_deductibles": false,
+    "wc_has_monopolistic_state": false,
+    "wc_multi_state": false
+   },
+   "text": "CERTIFICATE OF LIABILITY INSURANCE\nDATE (MM/DD/YYYY): 02/10/2026\nTHIS CERTIFICATE IS ISSUED AS A MATTER OF INFORMATION ONLY AND CONFERS NO RIGHTS UPON THE CERTIFICATE\nHOLDER.\nPRODUCER: Front Range Risk Advisors, 1550 Wewatta St, Denver, CO 80202\nCONTACT: Priya Natarajan PHONE: (303) 555-0176\nINSURED: Bramble & Stone Construction LLC, 2250 W Larkspur Ave, Denver, CO 80223\nINSURER(S) AFFORDING COVERAGE\nINSURER NAME NAIC #\nINSURER A Larchmont Specialty Insurance Co. 93518\nINSURER B Quillon Mutual Casualty Co. 91872\nINSURER C Quillon Specialty Insurance Co. 91895\nCERTIFICATE NUMBER: 2026-00731\nREVISION NUMBER: 1\nCOVERAGES\nINSR LTR TYPE OF INSURANCE POLICY NUMBER POLICY EFF POLICY EXP LIMITS\nA COMMERCIAL GENERAL LIABILITY - OCCUR LSG-4471102-26 01/01/2026 01/01/2027 EACH OCC $1,000,000\nB AUTOMOBILE LIABILITY - ANY AUTO 4A82107 01/01/2026 01/01/2027 CSL $1,000,000\nB UMBRELLA LIAB - OCCUR 4U82107 03/15/2026 03/15/2027 EACH OCC $2,000,000\nWORKERS COMPENSATION NONE\nC CONTRACTORS EQUIPMENT SIM7730418 01/01/2026 01/01/2027 SCHEDULED $185,000\nDESCRIPTION OF OPERATIONS / LOCATIONS / VEHICLES\nProject: Larkspur Commons Owners Association parking structure. General liability for work on this project is provided under\nproject policy LSG-4471102-26. Umbrella policy 4U82107 follows form over the policies above.\nCERTIFICATE HOLDER\nLarkspur Commons Owners Association, 900 Larkspur Ct, Denver, CO 80223\nCANCELLATION\nShould any of the above described policies be cancelled before the expiration date thereof, notice will be delivered in accordance with the\npolicy provisions.\n[Table - page 1 - INSURER(S) AFFORDING COVERAGE]\nINSURER | NAME | NAIC #\nINSURER A | Larchmont Specialty Insurance Co. | 93518\nINSURER B | Quillon Mutual Casualty Co. | 91872\nINSURER C | Quillon Specialty Insurance Co. | 91895\n[End table]\n[Table - page 1 - COVERAGES]\nB | AUTOMOBILE LIABILITY - ANY AUTO | 4A82107 | 01/01/2026 | 01/01/2027 | CSL $1,000,000\nB | UMBRELLA LIAB - OCCUR WORKERS COMPENSATION | 4U82107 NONE | 03/15/2026 | 03/15/2027 | EACH OCC $2,000,000\nC | CONTRACTORS EQUIPMENT | SIM7730418 | 01/01/2026 | 01/01/2027 | SCHEDULED $185,000\n[End table]"
+  }
+ ],
+ "upload_2_one_number_summary": [
+  {
+   "doc_id": "fad23b6923ce42a7859f4fb6b4dbc322",
+   "doc_type": "dec_page",
+   "doc_type_confidence": "high",
+   "doc_type_source": "content",
+   "facts": {
+    "account_description": null,
+    "additional_named_insureds": [],
+    "additional_remarks_text": null,
+    "agreed_value_endorsement": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "applicant_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "CINDERHOLT LANDSCAPE GROUP INC",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "applicant_website": null,
+    "audit_period": null,
+    "auto_bi_per_accident": null,
+    "auto_bi_per_person": null,
+    "auto_covered_symbols": [],
+    "auto_dealers_inventory_value": null,
+    "auto_deductible_collision": null,
+    "auto_deductible_comp": null,
+    "auto_drivers": [],
+    "auto_garaging_addresses": [],
+    "auto_hired_nonowned": null,
+    "auto_liability_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000 CSL",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "auto_liability_structure": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "CSL",
+     "value_state": "present"
+    },
+    "auto_med_pay_limit": null,
+    "auto_pd_per_accident": null,
+    "auto_physical_damage_valuation": null,
+    "auto_radius_of_operation": null,
+    "auto_um_uim_limit": null,
+    "auto_vehicle_use": null,
+    "auto_vin_schedule": [],
+    "billing_plan": null,
+    "builders_risk_completion_date": null,
+    "builders_risk_construction_type": null,
+    "builders_risk_contractor_name": null,
+    "builders_risk_insured_interest": null,
+    "builders_risk_owner_name": null,
+    "builders_risk_project_address": null,
+    "builders_risk_project_cost": null,
+    "building_ITV_percentage": null,
+    "business_income_limit": null,
+    "business_start_date": null,
+    "carrier_naic": null,
+    "carrier_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "SAGEBRUSH RIDGE CASUALTY COMPANY",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "carrier_website": null,
+    "certificate_description_of_operations": null,
+    "certificate_holder": null,
+    "certificate_holder_address": null,
+    "coinsurance_percentage": null,
+    "construction_type": null,
+    "contact_email": null,
+    "contact_name": null,
+    "contact_phone": null,
+    "contractor_commercial_pct": null,
+    "contractor_high_hazard_ops": [],
+    "contractor_license_number": null,
+    "contractor_residential_pct": null,
+    "contractor_type": null,
+    "coverage_lines": [
+     {
+      "carrier": "SAGEBRUSH RIDGE CASUALTY COMPANY",
+      "effective_date": "08/01/2026",
+      "expiration_date": "08/01/2027",
+      "line": "Commercial General Liability",
+      "naic": null,
+      "policy_number": "SRC-4410982",
+      "premium": "$5,210.00"
+     },
+     {
+      "carrier": "SAGEBRUSH RIDGE CASUALTY COMPANY",
+      "effective_date": "08/01/2026",
+      "expiration_date": "08/01/2027",
+      "line": "Commercial Auto",
+      "naic": null,
+      "policy_number": "SRC-4410982",
+      "premium": "$3,880.00"
+     },
+     {
+      "carrier": "SAGEBRUSH RIDGE CASUALTY COMPANY",
+      "effective_date": "08/01/2026",
+      "expiration_date": "08/01/2027",
+      "line": "Commercial Umbrella",
+      "naic": null,
+      "policy_number": "SRC-4410982",
+      "premium": "$2,150.00"
+     }
+    ],
+    "crime_deductible": null,
+    "crime_employee_count": null,
+    "crime_limit": null,
+    "crime_locations_count": null,
+    "cyber_controls_backups": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "cyber_controls_mfa": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "False",
+     "value_state": "explicit_no"
+    },
+    "cyber_limit": null,
+    "cyber_pii_records_count": null,
+    "cyber_prior_incidents": null,
+    "cyber_retention": null,
+    "cyber_third_party_vendors": null,
+    "dba_name": null,
+    "dec_page_entries": [
+     {
+      "label": "NAMED INSURED",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "CINDERHOLT LANDSCAPE GROUP INC"
+     },
+     {
+      "label": "MAILING ADDRESS",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "5120 Tejon St, Denver, CO 80221"
+     },
+     {
+      "label": "POLICY NUMBER",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "SRC-4410982"
+     },
+     {
+      "label": "POLICY PERIOD",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "08/01/2026 to 08/01/2027"
+     },
+     {
+      "label": "BUSINESS DESCRIPTION",
+      "line_of_business": null,
+      "owner": "applicant",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "Commercial landscape installation and maintenance"
+     },
+     {
+      "label": "AGENT",
+      "line_of_business": null,
+      "owner": "producer",
+      "policy_number": "SRC-4410982",
+      "section": "Policy Declarations Summary - Renewal",
+      "value": "Clear Creek Insurance Services"
+     },
+     {
+      "label": "Commercial General Liability",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$1,000,000 / $2,000,000"
+     },
+     {
+      "label": "Commercial General Liability",
+      "line_of_business": "Commercial General Liability",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$5,210.00"
+     },
+     {
+      "label": "Commercial Auto",
+      "line_of_business": "Commercial Auto",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$1,000,000 CSL"
+     },
+     {
+      "label": "Commercial Auto",
+      "line_of_business": "Commercial Auto",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$3,880.00"
+     },
+     {
+      "label": "Commercial Umbrella",
+      "line_of_business": "Commercial Umbrella",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$2,000,000"
+     },
+     {
+      "label": "Commercial Umbrella",
+      "line_of_business": "Commercial Umbrella",
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$2,150.00"
+     },
+     {
+      "label": "TOTAL RENEWAL PREMIUM",
+      "line_of_business": null,
+      "owner": "policy",
+      "policy_number": "SRC-4410982",
+      "section": "COVERAGES ON THIS RENEWAL",
+      "value": "$11,240.00"
+     }
+    ],
+    "deductible_application": null,
+    "deductible_basis": null,
+    "distance_to_hydrant": null,
+    "effective_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "08/01/2026"
+    },
+    "employers_liability_limits": null,
+    "entity_type": null,
+    "expiration_date": {
+     "confidence": "ai_high",
+     "source": "ai",
+     "value": "08/01/2027"
+    },
+    "extra_expense_limit": null,
+    "fein": null,
+    "fire_department_type": null,
+    "fire_protection_class": null,
+    "garage_deductible": null,
+    "garage_liability_limit": null,
+    "garage_operations_type": null,
+    "garagekeeper_coll_deductible": null,
+    "garagekeeper_comp_deductible": null,
+    "garagekeeper_liability_limit": null,
+    "gl_aggregate": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_class_code_schedule": [],
+    "gl_class_codes_by_location": [],
+    "gl_deductible": null,
+    "gl_each_occurrence": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_fire_damage_limit": null,
+    "gl_form_type": null,
+    "gl_limits": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$1,000,000 / $2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "gl_medical_expense": null,
+    "gl_personal_advertising_injury": null,
+    "gl_products_aggregate": null,
+    "hired_auto_indicator": null,
+    "inland_marine_items": [],
+    "inland_marine_total_value": null,
+    "inland_marine_transit_limit": null,
+    "is_renewal": null,
+    "lines_of_business": [
+     "Commercial General Liability",
+     "Commercial Auto",
+     "Commercial Umbrella"
+    ],
+    "locations": [
+     "5120 Tejon St, Denver, CO 80221"
+    ],
+    "loss_history": [],
+    "loss_history_years": null,
+    "loss_payee_name": null,
+    "loss_run_age_days": null,
+    "loss_run_period_end": null,
+    "loss_run_period_start": null,
+    "loss_run_status": null,
+    "loss_run_valuation_date": null,
+    "mailing_address": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "5120 Tejon St, Denver, CO 80221",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "mortgagee_name": null,
+    "naics_code": null,
+    "non_owned_auto_indicator": null,
+    "num_claims": null,
+    "num_employees": null,
+    "num_employees_full_time": null,
+    "num_employees_part_time": null,
+    "occupancy_type": null,
+    "open_claims_count": null,
+    "operations_description": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Commercial landscape installation and maintenance",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "payment_plan": null,
+    "percent_subcontracted": null,
+    "period_of_restoration": null,
+    "physical_address": null,
+    "policy_number": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "SRC-4410982",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "prior_carrier": null,
+    "prior_carrier_naic": null,
+    "prior_coverage_by_line": [],
+    "prior_effective_date": null,
+    "prior_expiration_date": null,
+    "prior_policy_number": null,
+    "producer_address": null,
+    "producer_contact_email": null,
+    "producer_contact_name": null,
+    "producer_contact_phone": null,
+    "producer_fax": null,
+    "producer_name": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "Clear Creek Insurance Services",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "property_bpp_value": null,
+    "property_building_value": null,
+    "property_deductible_aop": null,
+    "property_deductible_earthquake": null,
+    "property_deductible_flood": null,
+    "property_deductible_wind": null,
+    "property_locations": [
+     {
+      "address": "5120 Tejon St, Denver, CO 80221",
+      "annual_revenue": null,
+      "bpp_value": null,
+      "building_value": null,
+      "construction_type": null,
+      "county": null,
+      "full_time_employees": null,
+      "inside_city_limits": null,
+      "occupied_area": null,
+      "open_to_public_area": null,
+      "operations_description": "Commercial landscape installation and maintenance",
+      "ownership": null,
+      "part_time_employees": null,
+      "total_building_area": null,
+      "year_built": null
+     }
+    ],
+    "retro_date": null,
+    "risk_transfer": {
+     "additional_insured_names": [],
+     "additional_insured_required": null,
+     "certificate_holder_name": null,
+     "loss_payee_name": null,
+     "mortgagee_name": null,
+     "primary_noncontributory_required": null,
+     "specific_wording_requirements": null,
+     "waiver_of_subrogation_required": null
+    },
+    "roof_year": null,
+    "schedule_of_underlying_insurance": null,
+    "sic_code": null,
+    "sprinkler_system": null,
+    "state_of_operations": {
+     "confidence": "ai_high",
+     "evidence_state": "suggested",
+     "source": "ai",
+     "value": "CO",
+     "value_state": "present"
+    },
+    "total_incurred": null,
+    "total_paid": null,
+    "total_payroll": null,
+    "total_policy_premium": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$11,240.00",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "total_revenue": null,
+    "umbrella_attachment_point": null,
+    "umbrella_effective_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "08/01/2026",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_expiration_date": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "08/01/2027",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_follow_form": null,
+    "umbrella_form_type": null,
+    "umbrella_limit": {
+     "confidence": "ai_high",
+     "evidence_state": "source_verified",
+     "source": "ai",
+     "value": "$2,000,000",
+     "value_state": "present",
+     "verified_in_text": true
+    },
+    "umbrella_medical_payments_limit": null,
+    "umbrella_sir": null,
+    "umbrella_uim_limit": null,
+    "umbrella_um_limit": null,
+    "underlying_policies": [],
+    "valuation_method": null,
+    "wc_class_codes": [],
+    "wc_description_of_operations": null,
+    "wc_el_disease_each_employee": null,
+    "wc_el_disease_policy_limit": null,
+    "wc_el_each_accident": null,
+    "wc_monopolistic_payroll": {},
+    "wc_officer_exclusions": null,
+    "wc_officers": [],
+    "wc_payroll": null,
+    "wc_payroll_by_state": {},
+    "wc_payroll_period": null,
+    "wc_prior_carrier": null,
+    "wc_xmod": null,
+    "wc_xmod_effective_date": null,
+    "year_built": null,
+    "years_in_business": null
+   },
+   "filename": "3_renewal_summary_one_number.pdf",
+   "flags": {
+    "asserts_no_known_losses": false,
+    "asserts_no_subcontractors": false,
+    "auto_has_hired_nonowned": false,
+    "auto_has_physical_damage": false,
+    "auto_has_um_uim": false,
+    "auto_split_limits": false,
+    "gl_is_claims_made": false,
+    "has_additional_insured_requirement": false,
+    "has_auto_coverage": true,
+    "has_auto_dealer_exposure": false,
+    "has_auto_liability": true,
+    "has_builders_risk": false,
+    "has_certificate_request": false,
+    "has_commercial_auto": true,
+    "has_crime": false,
+    "has_cyber": false,
+    "has_dealers_coverage": false,
+    "has_garage_coverage": false,
+    "has_garage_keepers": false,
+    "has_garage_liability": false,
+    "has_garage_operations": false,
+    "has_garagekeepers_coverage": false,
+    "has_general_liability": true,
+    "has_inland_marine": false,
+    "has_loss_history": false,
+    "has_motor_carrier_coverage": false,
+    "has_multiple_locations": false,
+    "has_open_cargo": false,
+    "has_primary_noncontributory": false,
+    "has_property_coverage": false,
+    "has_truckers_coverage": false,
+    "has_umbrella": true,
+    "has_waiver_of_subrogation": false,
+    "has_workers_comp": false,
+    "is_certificate_doc": false,
+    "is_commercial_policy": true,
+    "is_contractor": false,
+    "narrative_components": {
+     "account_overview": {
+      "evidence": null,
+      "present": false
+     },
+     "carrier_market": {
+      "evidence": null,
+      "present": false
+     },
+     "coverage_discussion": {
+      "evidence": "COVERAGES ON THIS RENEWAL",
+      "present": true
+     },
+     "employee_practices": {
+      "evidence": null,
+      "present": false
+     },
+     "growth_trends": {
+      "evidence": null,
+      "present": false
+     },
+     "location_exposure": {
+      "evidence": null,
+      "present": false
+     },
+     "loss_history": {
+      "evidence": null,
+      "present": false
+     },
+     "management": {
+      "evidence": null,
+      "present": false
+     },
+     "operations": {
+      "evidence": "Commercial landscape installation and maintenance",
+      "present": true
+     },
+     "risk_controls": {
+      "evidence": null,
+      "present": false
+     },
+     "target_markets": {
+      "evidence": null,
+      "present": false
+     },
+     "years_in_business": {
+      "evidence": null,
+      "present": false
+     }
+    },
+    "property_has_bi_coverage": false,
+    "property_has_peril_deductibles": false,
+    "wc_has_monopolistic_state": false,
+    "wc_multi_state": false
+   },
+   "text": "SAGEBRUSH RIDGE CASUALTY COMPANY\nRENEWAL PREMIUM SUMMARY\nPolicy Declarations Summary - Renewal\nNAMED INSURED: CINDERHOLT LANDSCAPE GROUP INC\nMAILING ADDRESS: 5120 Tejon St, Denver, CO 80221\nPOLICY NUMBER: SRC-4410982\nPOLICY PERIOD: 08/01/2026 to 08/01/2027\nBUSINESS DESCRIPTION: Commercial landscape installation and maintenance\nAGENT: Clear Creek Insurance Services\nCOVERAGES ON THIS RENEWAL\nCOVERAGE LIMIT PREMIUM\nCommercial General Liability $1,000,000 / $2,000,000 $5,210.00\nCommercial Auto $1,000,000 CSL $3,880.00\nCommercial Umbrella $2,000,000 $2,150.00\nTOTAL RENEWAL PREMIUM: $11,240.00\nEach coverage above is issued as a separate policy. Individual policy numbers are shown on each policy's own declarations,\nwhich are not included in this summary.\n[Table - page 1 - COVERAGES ON THIS RENEWAL]\nCOVERAGE | LIMIT | PREMIUM\nCommercial General Liability | $1,000,000 / $2,000,000 | $5,210.00\nCommercial Auto | $1,000,000 CSL | $3,880.00\nCommercial Umbrella | $2,000,000 | $2,150.00\n[End table]"
+  }
+ ]
+}

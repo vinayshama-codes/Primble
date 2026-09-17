@@ -413,6 +413,37 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### Policy Number By Line - Live Kit Fixes - SHIPPED 2026-09-17
+**Read `v1-20AUG.md` "Policy number by line - the live kit run" before touching
+`_repair_coverage_lines_from_entries`, `_withhold_page_header_numbers`, the header
+carrier binder, `_apply_scoped_confirmations` or the ACORD 25 roster.** Brent asked
+whether "a single policy number is still represented across all" was fixed. The live
+kit (`policy_by_line_test_data/`, README section 0 = the retest) said: fixed where each
+policy has its own declarations, NOT where one page prints one number for several
+policies - and found identity defects on the way. Now:
+- **One number shared by lines is not corruption by itself.** The repair runs only when
+  the verified entries CONTRADICT the pairing (or a denied line carries it); a package
+  number on GL + Property stays, and two policies on one line become a GL-scoped card.
+- **A number a page gives several lines is withdrawn** when that page says the coverages
+  are separate policies, or the lines cannot be one contract (umbrella, Workers
+  Compensation). A line whose own declarations print it keeps it. Sharing is read over
+  the rows AND the per-line index, and the entries' claim is withdrawn too - reading rows
+  alone let `_fill_missing_line_numbers` copy the number back (retest 1).
+- **A carrier entry labelled PRIOR / EXPIRING / PREVIOUS / FORMER is never a line's
+  carrier;** replacing a company clears its NAIC; header names keep "Company" and
+  "of America" (`_header_carrier_name`).
+- **A scoped confirmation CHOOSES a contract** (number, carrier or NAIC card alike) - the
+  rival policy on the line is set aside (`_set_aside`), confirmed rows are `_confirmed`
+  and outrank the dec index.
+- Field QA walks the resolvers in the stamper's order and applies the umbrella date
+  override (`_umbrella_period_override`); a whole-month term renews by months (29 Feb).
+- **`pikepdf.Boolean` is gone** - it does not exist in pikepdf 9.x, and on this Mac's
+  venv every download was the blank template and every signature silently dropped.
+- D6: two-policy lines now ask; one-number summaries print fewer boxes. **Open:** the
+  questionnaire's policy number / carrier answers still land on no per-line box.
+Tests: `tests/test_policy_by_line_live_kit_17sep.py` (58, replaying the live extraction in
+`tests/fixtures/policy_by_line_live_17sep.json`).
+
 ### Don't Ask The Client For What We Already Have (Orbin Chat 5) - SHIPPED 2026-09-14
 **Read `v1-20AUG.md`'s "Chat 5" entry before touching schedule questions, confirm
 items or `auto_drivers`.** Client: the Subaru the policy prints was re-asked, driver

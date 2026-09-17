@@ -296,7 +296,7 @@ function AppContent() {
             // not shrink, so a long message overhung the viewport on a phone.
             left: "max(16px, env(safe-area-inset-left))",
             right: "max(16px, env(safe-area-inset-right))",
-            bottom: "max(24px, env(safe-area-inset-bottom))",
+            bottom: "calc(max(24px, env(safe-area-inset-bottom)) + var(--rr-footer-h, 0px))",
             zIndex: 9999,
             display: "flex",
             flexDirection: "column",

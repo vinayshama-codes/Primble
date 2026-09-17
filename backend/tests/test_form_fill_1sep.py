@@ -1766,9 +1766,17 @@ def test_r3_the_expiring_carrier_never_enters_the_carrier_index():
     with_facts = _carriers_by_line(_R3_ENTRIES, _R3_FACTS)
     for line, names in with_facts.items():
         assert "Sentinel Prairie Casualty Company" not in names, (line, names)
-    # Fail-open: without facts the index behaves exactly as before.
-    without = _carriers_by_line(_R3_ENTRIES)
+    # Fail-open: without facts the SECTION filter cannot run, so a carrier
+    # entry the label does not qualify is indexed exactly as before.
+    # (17 Sep 2026: the label "EXPIRING INSURER" now excludes the entry on its
+    # own - `_NOT_CURRENT_PARTY_LABEL_RE` - so the fail-open half is proved on
+    # the same entry with a neutral label, and the label rule is pinned too.)
+    neutral = [dict(e, label="INSURER") if e.get("label") == "EXPIRING INSURER" else e
+               for e in _R3_ENTRIES]
+    without = _carriers_by_line(neutral)
     assert any("Sentinel Prairie Casualty Company" in v for v in without.values())
+    labelled = _carriers_by_line(_R3_ENTRIES)
+    assert not any("Sentinel Prairie Casualty Company" in v for v in labelled.values())
 
 
 def test_r3_anchored_rows_name_their_own_entity_in_the_prompt():

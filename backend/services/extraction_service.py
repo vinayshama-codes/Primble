@@ -8784,6 +8784,148 @@ def drop_prior_term_numbers(by_line: Dict[str, set], facts: Any) -> Dict[str, se
     return out
 
 
+# ── ONE PRINTED NUMBER IS NOT EVERY LINE'S NUMBER (17 Sep 2026) ─────────────
+# Brent's report, verbatim: "a single policy number is still trying to be
+# represented across all." The live kit's renewal summary printed POLICY NUMBER
+# SRC-4410982 once, listed General Liability, Commercial Auto and Umbrella
+# beneath it, and said "Each coverage above is issued as a separate policy.
+# Individual policy numbers are shown on each policy's own declarations, which
+# are not included in this summary." Extraction attached the number to all three
+# lines - and so did every dec entry, because an entry's `policy_number` is the
+# page it was read from - so the repair's evidence agreed with the corruption and
+# SRC-4410982 printed on ACORD 126, 131 (both underlying rows) and all three
+# ACORD 25 rows.
+#
+# A package policy looks the same on the page (one header number, several
+# coverage parts), so the shape alone decides nothing. Two kinds of POSITIVE
+# evidence do:
+#   1. the page that prints the number SAYS its coverages are separate policies;
+#   2. the lines sharing it cannot be one contract - an umbrella / excess policy
+#      sits OVER other policies, and a workers compensation policy is always
+#      its own. (Bare "Employers Liability" is not counted: stop-gap employers
+#      liability is written on the GL policy in the monopolistic states.)
+# A line whose OWN declarations section prints the number keeps it - that is the
+# number being printed for that line, not borrowed from a page header.
+_SEPARATE_POLICIES_RE = re.compile(
+    r"\beach\b[^.;:]{0,80}?\b(?:is|are)\s+(?:issued|written|provided|placed)\s+"
+    r"(?:as|on|under)\s+(?:(?:a\s+|its\s+own\s+|their\s+own\s+)?separate\s+polic(?:y|ies)"
+    r"|(?:its|their)\s+own\s+polic(?:y|ies))\b"
+    r"|\bseparate\s+polic(?:y|ies)\s+(?:is|are|will\s+be|have\s+been)\s+"
+    r"(?:issued|written|provided)\s+for\s+each\b"
+    r"|\b(?:coverages|lines(?:\s+of\s+(?:business|coverage))?|policies)\s+"
+    r"(?:are|were|will\s+be)\s+(?:issued|written|provided|placed)\s+(?:as|on|under)\s+"
+    r"separate\s+polic(?:y|ies)\b"
+    r"|\bindividual\s+policy\s+numbers\b"
+    r"|\bpolicy\s+numbers\s+(?:are|will\s+be)\s+(?:shown|listed|printed|stated|provided)\s+"
+    r"on\s+(?:each|the\s+individual|the\s+respective|the\s+separate)\b",
+    re.I)
+_STATEMENT_NEGATION_RE = re.compile(r"\b(?:not|no|never|nor|isn't|aren't)\b", re.I)
+
+
+def _page_states_separate_policies(body: str) -> bool:
+    """True when this page text says its coverages are separately issued
+    policies. A negated statement ("no separate policy is issued") is not."""
+    text = re.sub(r"\s+", " ", str(body or ""))
+    for m in _SEPARATE_POLICIES_RE.finditer(text):
+        start = max(text.rfind(".", 0, m.start()), text.rfind("\n", 0, m.start())) + 1
+        if not _STATEMENT_NEGATION_RE.search(text[start:m.end()]):
+            return True
+    return False
+
+
+def _pages_printing(docs: Any, raw_number: str) -> List[str]:
+    """Every page body (across the uploaded documents) that prints this number."""
+    want = _norm_policy_number(raw_number)
+    if len(want) < 5:
+        return []                          # too short to find unambiguously
+    out: List[str] = []
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        if not isinstance(d, dict):
+            continue
+        text = str(d.get("text") or "")
+        pages = [body for _n, body in _page_blocks(text)] or [text]
+        out.extend(body for body in pages if want in _norm_policy_number(body))
+    return out
+
+
+def _cannot_share_a_contract(rows: List[dict]) -> bool:
+    """True when these rows (one number, several lines) cannot be ONE policy."""
+    lines = {_canon_line(r.get("line")) for r in rows}
+    lines.discard(None)
+    if len(lines) < 2:
+        return False
+    return any(
+        _canon_line(r.get("line")) == "umbrella"
+        or re.search(r"\bcompensation\b", str(r.get("line") or ""), re.I)
+        for r in rows)
+
+
+def _withhold_page_header_numbers(mf: dict, docs: Any) -> List[str]:
+    """Take a number off the lines it was only BORROWED by (see block comment).
+
+    Clears the row's `policy_number` and the matching dec entries' attribution,
+    so neither the per-line fill below nor a stamping resolver asking the index
+    can put it back. The printed values are untouched - only the claim that this
+    number identifies those lines is withdrawn. Returns what changed.
+    """
+    lines = mf.get("coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return []
+    entries = mf.get("dec_page_entries")
+    entries = entries if isinstance(entries, list) else []
+    # ── SHARED ACROSS THE ROWS *OR* THE INDEX (retest, 17 Sep 2026) ─────────
+    # The first cut read the rows alone. On the retest the extraction numbered
+    # at most one row, so no number was shared yet - and `_fill_missing_line_
+    # numbers`, running next, copied SRC-4410982 onto Commercial Auto AND
+    # Commercial Umbrella from the page-context entries. Decided over both, and
+    # the entries' claim withdrawn, the fill has nothing to copy back.
+    shared: Dict[str, Tuple[str, set]] = {}
+    for e in lines:
+        if isinstance(e, dict):
+            raw = str(e.get("policy_number") or "").strip()
+            canon = _canon_line(e.get("line"))
+            if raw and canon:
+                shared.setdefault(_norm_policy_number(raw), (raw, set()))[1].add(canon)
+    for line, numbers in current_numbers_by_line(entries, mf).items():
+        for raw in numbers:
+            shared.setdefault(_norm_policy_number(raw), (raw, set()))[1].add(line)
+    shared = {pn: v for pn, v in shared.items() if pn and len(v[1]) > 1}
+    if not shared:
+        return []
+    same = _contract_matcher()
+    home_map = _entry_home_lines(entries)
+    changed: List[str] = []
+    for norm, (raw, line_set) in shared.items():
+        rows = [e for e in lines if isinstance(e, dict)
+                and _norm_policy_number(e.get("policy_number")) == norm]
+        # The contract test reads the LINES the number reaches, whether a row
+        # or only an entry carries it there.
+        reach = rows + [{"line": ln} for ln in sorted(line_set)
+                        if not any(_canon_line(r.get("line")) == ln for r in rows)]
+        stated = any(_page_states_separate_policies(p) for p in _pages_printing(docs, raw))
+        if not (stated or _cannot_share_a_contract(reach)):
+            continue
+        homes = {sec for pn, sec in _home_printings(entries) if same(pn, raw)}
+        withdraw = set(line_set) - homes
+        if not withdraw:
+            continue
+        for e in lines:
+            if (isinstance(e, dict) and _canon_line(e.get("line")) in withdraw
+                    and str(e.get("policy_number") or "").strip()
+                    and same(str(e.get("policy_number")), raw)):
+                e["policy_number"] = None
+        for ent in entries:
+            if not isinstance(ent, dict) or not str(ent.get("policy_number") or "").strip():
+                continue
+            if not same(str(ent.get("policy_number")), raw):
+                continue
+            if _entry_line(ent, home_map) in withdraw:
+                ent["policy_number"] = None
+        changed.append(f"{raw} withheld from {sorted(withdraw)} ("
+                       f"{'the page says the coverages are separate policies' if stated else 'those lines cannot be one contract'})")
+    return changed
+
+
 def _fill_missing_line_numbers(mf: dict) -> List[str]:
     """Give a `coverage_lines` row with NO policy number its line's one
     verified number.
@@ -8840,20 +8982,88 @@ def _fill_missing_line_numbers(mf: dict) -> List[str]:
     return filled
 
 
-def _coverage_lines_are_self_contradictory(lines: Any) -> bool:
-    """True when one policy number is attached to two or more DIFFERENT lines of
-    business - it cannot be identifying a policy, so the pairing is corrupt."""
-    if not isinstance(lines, list):
-        return False
-    by_number: Dict[str, set] = {}
-    for e in lines:
+def _shared_line_numbers(lines: Any) -> Dict[str, Tuple[str, set]]:
+    """{normalised number: (a printing, {canonical lines})} for every policy
+    number `coverage_lines` attaches to two or more DIFFERENT lines."""
+    by_number: Dict[str, Tuple[str, set]] = {}
+    for e in lines if isinstance(lines, list) else []:
         if not isinstance(e, dict):
             continue
-        pn = re.sub(r"[^a-z0-9]", "", str(e.get("policy_number") or "").lower())
+        raw = str(e.get("policy_number") or "").strip()
+        pn = _norm_policy_number(raw)
         line = _canon_line(e.get("line"))
         if pn and line:
-            by_number.setdefault(pn, set()).add(line)
-    return any(len(v) > 1 for v in by_number.values())
+            by_number.setdefault(pn, (raw, set()))[1].add(line)
+    return {pn: v for pn, v in by_number.items() if len(v[1]) > 1}
+
+
+def _contradicted_shared_numbers(lines: Any, entries: Any, facts: Any = None) -> set:
+    """The shared numbers (see `_shared_line_numbers`) that the verified dec
+    entries CONTRADICT on at least one of their lines: that line has current
+    numbers of its own and none of them is this contract.
+
+    A line the entries say nothing about is no evidence either way (Principle
+    3), so it never condemns a number."""
+    shared = _shared_line_numbers(lines)
+    if not shared:
+        return set()
+    by_line = current_numbers_by_line(entries, facts)
+    same = _contract_matcher()
+    out: set = set()
+    for pn, (raw, line_set) in shared.items():
+        for line in line_set:
+            cands = by_line.get(line) or set()
+            if cands and not any(same(raw, c) for c in cands):
+                out.add(pn)
+                break
+        else:
+            # A line the document DENIES carrying the number is a denial
+            # restated as a policy (live run 11: "Workers' Compensation - No
+            # Coverage" wearing the inland marine number) - positive evidence
+            # too, though the denied line has no number of its own to compare.
+            if any(isinstance(r, dict) and _norm_policy_number(r.get("policy_number")) == pn
+                   and row_is_a_denied_line(r, lines, entries) for r in lines):
+                out.add(pn)
+    return out
+
+
+def _coverage_lines_are_self_contradictory(lines: Any, entries: Any = None,
+                                           facts: Any = None) -> bool:
+    """True when one policy number is attached to two or more DIFFERENT lines of
+    business AND nothing shows that pairing is real.
+
+    ONE NUMBER ON SEVERAL LINES IS NOT, BY ITSELF, CORRUPTION (17 Sep 2026). A
+    commercial package policy IS one number across several coverage parts. The
+    live kit's package printed `QPC5519 - 26` for General Liability and Property;
+    the extraction read both correctly, this test called the list corrupt, and
+    the repair then asked the dec index for GL's number, found the package's
+    AND a project policy's (`LSG-4471102-26`, from the certificate), and blanked
+    BOTH - so ACORD 126, the ACORD 25 GL row and the policies table lost a
+    number the documents print twice, and the Data Consistency card, seeing no
+    GL number at all, never asked which GL policy applies.
+
+    So with the verified entries in hand the question is the real one: does the
+    document CONTRADICT the pairing? Orbin's corruption did - the inland marine
+    number sat on the Umbrella row while the entries print `6J7-40-02---26` for
+    the Umbrella. A package does not - the entries print `QPC5519 - 26` for both
+    of its lines. Without entries there is no evidence either way and the old
+    reading stands, so a caller that passes none behaves exactly as before.
+    """
+    if not isinstance(lines, list):
+        return False
+    if not _shared_line_numbers(lines):
+        return False
+    if not isinstance(entries, list) or not entries:
+        return True
+    return bool(_contradicted_shared_numbers(lines, entries, facts))
+
+
+# The words a label uses to say a party is NOT the current policy's: "PRIOR
+# CARRIER", "EXPIRING INSURER", "PREVIOUS COMPANY", "FORMER WRITING COMPANY".
+# Deliberately the qualifier alone - which party it qualifies (carrier, insurer,
+# company, underwriter) varies by carrier, the time word does not.
+_NOT_CURRENT_PARTY_LABEL_RE = re.compile(
+    r"\b(?:prior|previous|preceding|former|expiring|expired|replaced)\b", re.I)
 
 
 def _carriers_by_line(entries: Any, facts: Any = None) -> Dict[str, set]:
@@ -8887,6 +9097,16 @@ def _carriers_by_line(entries: Any, facts: Any = None) -> Dict[str, set]:
         if str(e.get("owner") or "").strip().lower() != "carrier":
             continue
         if str(e.get("section") or "").strip().lower() in _prior_secs:
+            continue
+        # ── ...and neither is a carrier the LABEL says is not this policy's ──
+        # Live kit, 17 Sep 2026: the umbrella's own declarations printed ONE line
+        # "PRIOR UMBRELLA CARRIER: Birchline Specialty Casualty Company -
+        # BSX-44120-24 - 03/15/2024 to 03/15/2025" inside the CURRENT umbrella
+        # section, attributed to the current umbrella number. No section test
+        # can see a single line, it was the only carrier entry on the line, and
+        # the repair wrote the whole sentence onto ACORD 131's CARRIER box and
+        # ACORD 25's INSURER D. The label states the relationship outright.
+        if _NOT_CURRENT_PARTY_LABEL_RE.search(str(e.get("label") or "")):
             continue
         name = str(e.get("value") or "").strip()
         if len(name) < 4:
@@ -9606,6 +9826,56 @@ _HEADER_CARRIER_RE = re.compile(
     r"(?:COMPANY|Company|CORPORATION|Corporation|CO\.|Co\.|INSURANCE|Insurance))\b")
 _NOT_A_CARRIER_RE = re.compile(
     r"\b(agency|agent|brokerage|broker|services|solutions|producer)\b", re.I)
+# ── THE MATCH ABOVE IS LAZY, SO IT STOPS AT THE FIRST SUFFIX WORD ───────────
+# Live kit, 17 Sep 2026: "QUILLON SPECIALTY INSURANCE COMPANY POLICY NUMBER:
+# SIM-7730418" bound as "QUILLON SPECIALTY INSURANCE" - a company that does not
+# exist - and because that is a different entity from the row's "Quillon
+# Specialty Insurance Company", the binder replaced the row's name AND dropped
+# its NAIC. Laziness is right (a greedy match would run on into the page's other
+# words); the name simply continues through the legal-form words that follow
+# the first one, and through an "OF <place>" tail, which on "Travelers Casualty
+# Insurance Company of America" names a DIFFERENT company from the one without
+# it. Header label words end the tail.
+_CARRIER_SUFFIX_TAIL_RE = re.compile(
+    r"^,?\s+(?:COMPANY|CO\.|CORPORATION|CORP\.?|INCORPORATED|INC\.?|EXCHANGE|"
+    r"ASSOCIATION|LIMITED|LTD\.?|LLC)(?=\s|,|$)", re.I)
+_CARRIER_OF_RE = re.compile(r"^\s+of(?:\s+the)?(?=\s)", re.I)
+_CARRIER_NAME_WORD_RE = re.compile(r"^\s+([A-Z][A-Za-z.&']*)")
+_HEADER_LABEL_WORDS = frozenset({
+    "policy", "pol", "no", "number", "naic", "period", "named", "insured",
+    "declarations", "effective", "expiration", "from", "to", "term", "account",
+    "page", "date", "and", "or", "of"})
+
+
+def _header_carrier_name(line: str) -> Optional[str]:
+    """The carrier legal name a header line starts with, or None."""
+    m = _HEADER_CARRIER_RE.match(line)
+    if not m:
+        return None
+    name = m.group(1)
+    rest = line[m.end(1):]
+    while True:
+        t = _CARRIER_SUFFIX_TAIL_RE.match(rest)
+        if t:
+            name += rest[:t.end()]
+            rest = rest[t.end():]
+            continue
+        o = _CARRIER_OF_RE.match(rest)
+        if o:
+            pos = o.end()
+            took = False
+            while True:
+                w = _CARRIER_NAME_WORD_RE.match(rest[pos:])
+                if not w or w.group(1).lower().strip(".") in _HEADER_LABEL_WORDS:
+                    break
+                pos += w.end()
+                took = True
+            if took:                       # "of America", "of the State"
+                name += rest[:pos]
+                rest = rest[pos:]
+                continue
+        break
+    return name
 
 
 def _page_blocks(text: Any) -> List[Tuple[int, str]]:
@@ -9680,10 +9950,10 @@ def _contract_carriers_from_page_headers(docs: Any, mf: dict) -> Dict[str, str]:
             if len(hit) != 1:
                 continue                 # no contract, or two: this page binds nothing
             for ln in head:
-                m = _HEADER_CARRIER_RE.match(ln)
-                if not m:
+                full = _header_carrier_name(ln)
+                if not full:
                     continue
-                name = m.group(1).strip(" ,*")
+                name = full.strip(" ,*")
                 if _NOT_A_CARRIER_RE.search(name) or is_insurance_bureau(name):
                     continue
                 key = strict_entity_key(name)
@@ -9953,26 +10223,69 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
     lines = mf.get("coverage_lines")
     if not isinstance(lines, list) or not lines:
         return
-    if not _coverage_lines_are_self_contradictory(lines):
+    entries = mf.get("dec_page_entries")
+    if not _coverage_lines_are_self_contradictory(lines, entries, mf):
         return
-    by_line = current_numbers_by_line(mf.get("dec_page_entries"), mf)
-    by_carrier = _carriers_by_line(mf.get("dec_page_entries"), mf)
+    by_line = current_numbers_by_line(entries, mf)
+    by_carrier = _carriers_by_line(entries, mf)
+    tainted = _contradicted_shared_numbers(lines, entries, mf) \
+        if isinstance(entries, list) and entries else set(_shared_line_numbers(lines))
+    same = _contract_matcher()
+    try:
+        from services.normalization import strict_entity_key as _entity
+    except Exception:                                        # noqa: BLE001
+        def _entity(v):                                      # type: ignore
+            return _norm_policy_number(v)
     for e in lines:
         if not isinstance(e, dict):
             continue
         canon = _canon_line(e.get("line"))
         names = by_carrier.get(canon) if canon else None
         if names and len(names) == 1:
-            e["carrier"] = next(iter(names))
-    repaired = cleared = 0
+            name = next(iter(names))
+            current = str(e.get("carrier") or "").strip()
+            # A NAIC belongs to the ENTITY. Replacing the company and keeping
+            # the old one's NAIC builds a pair no document prints - the live
+            # kit's certificate umbrella row came out as Birchline beside
+            # Quillon Specialty's 91895. Same rule the header binder applies.
+            if current and _entity(current) != _entity(name) and e.get("naic"):
+                e["naic"] = None
+            e["carrier"] = name
+    repaired = cleared = kept = 0
     for e in lines:
         if not isinstance(e, dict):
             continue
         canon = _canon_line(e.get("line"))
         candidates = by_line.get(canon) if canon else None
+        raw = str(e.get("policy_number") or "").strip()
+        norm = _norm_policy_number(raw)
+        if raw and candidates and any(same(raw, c) for c in candidates):
+            # The document prints THIS contract for this line. Two contracts on
+            # one line (a package GL policy and a project GL policy) is a
+            # question for the producer, not corruption - each row keeps its
+            # own number, and the Data Consistency card asks which applies.
+            if len(candidates) == 1:
+                new_pn = next(iter(candidates))
+                if raw != new_pn:
+                    e["policy_number"] = new_pn          # its fullest printing
+                    repaired += 1
+            else:
+                kept += 1
+            continue
+        belongs_elsewhere = bool(raw) and any(
+            same(raw, c) for other, cands in by_line.items() if other != canon
+            for c in cands)
+        suspect = bool(raw) and (norm in tainted or belongs_elsewhere)
+        if raw and not suspect and (not candidates or str(e.get("naic") or "").strip()):
+            # Untouched by the contradiction: the entries name no number for
+            # this line, or the row names its OWN insurer (a certificate row -
+            # another company's contract, same rule `_fill_missing_line_numbers`
+            # applies). There is nothing to repair here.
+            kept += 1
+            continue
         if candidates and len(candidates) == 1:
             new_pn = next(iter(candidates))
-            if str(e.get("policy_number") or "").strip() != new_pn:
+            if raw != new_pn:
                 e["policy_number"] = new_pn
                 repaired += 1
         else:
@@ -9984,8 +10297,9 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
     logger.warning(
         "coverage_lines REPAIRED from verified dec entries: one policy number "
         "was attached to several different lines of business - %d line(s) "
-        "re-paired to their own policy number, %d cleared as unresolvable",
-        repaired, cleared,
+        "re-paired to their own policy number, %d cleared as unresolvable, "
+        "%d kept (the document prints them for their own line)",
+        repaired, cleared, kept,
     )
 
 
@@ -11499,6 +11813,16 @@ def merge_facts(docs: List[dict], primary: dict,
         _repair_coverage_lines_from_entries(mf)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: coverage_lines repair failed: %s", exc)
+    # A number only a page header gave several lines is none of theirs. BEFORE
+    # the fill below, which would otherwise read it straight back out of the
+    # entries. See _withhold_page_header_numbers.
+    try:
+        _withheld = _withhold_page_header_numbers(mf, docs)
+        if _withheld:
+            logger.warning("merge_facts: policy number withheld from lines that "
+                           "only borrowed it - %s", "; ".join(_withheld[:4]))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: page-header number check failed: %s", exc)
     # Before carrier binding, which needs each row's contract. See
     # _fill_missing_line_numbers.
     try:
@@ -12396,6 +12720,31 @@ def _park_ended_current_term(mf: dict, iso: str) -> None:
         "asked", iso)
 
 
+def _renewed_term_end(prev_eff: Any, prev_exp: Any) -> Optional[Any]:
+    """When the term that starts at `prev_exp` ends, if it repeats the expiring
+    term `prev_eff` -> `prev_exp`. None when that term is not an ordinary annual
+    one (300-400 days), which is not a length to repeat on faith.
+
+    A term of whole CALENDAR months renews by the same months, not by the same
+    day count (17 Sep 2026): 08/01/2026-08/01/2027 is 365 days, 365 days after
+    08/01/2027 is 07/31/2028 because the next term crosses 29 Feb, and ACORD
+    125 printed a proposed expiration one day short. A term that is not whole
+    months (29 Feb -> 28 Feb) keeps its day count.
+    """
+    from datetime import timedelta
+    import calendar
+    term_days = (prev_exp - prev_eff).days
+    if not 300 <= term_days <= 400:
+        return None
+    months = (prev_exp.year - prev_eff.year) * 12 + (prev_exp.month - prev_eff.month)
+    if prev_exp.day == prev_eff.day and 10 <= months <= 14:
+        y, m = divmod(prev_exp.month - 1 + months, 12)
+        y, m = prev_exp.year + y, m + 1
+        return prev_exp.replace(year=y, month=m,
+                                day=min(prev_exp.day, calendar.monthrange(y, m)[1]))
+    return prev_exp + timedelta(days=term_days)
+
+
 def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     """On a Renewal, an already-ENDED extracted term is the EXPIRING policy's
     term, not the term being applied for - route it to the prior_* namespace.
@@ -12481,9 +12830,7 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     eff_prev = normalize_date(_fv(mf, "effective_date") or "")
     if eff_prev:
         try:
-            _term_days = (exp_d - datetime.strptime(eff_prev, "%Y-%m-%d")).days
-            if 300 <= _term_days <= 400:          # an ordinary annual term
-                prop_exp = exp_d + timedelta(days=_term_days)
+            prop_exp = _renewed_term_end(datetime.strptime(eff_prev, "%Y-%m-%d"), exp_d)
         except ValueError:
             pass
     # E&O 5.7's own worked example is exactly this value: "Proposed Effective
