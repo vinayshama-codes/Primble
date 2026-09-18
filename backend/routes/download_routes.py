@@ -229,6 +229,21 @@ async def _refresh_user(user_id: str) -> dict:
 
 
 # ASYNC-SAFE
+def _free_limit_blocks(sub: str, used: int, proc_session: dict) -> bool:
+    """True when a free account has spent its allowance on OTHER packages.
+
+    A free package is counted when its forms are GENERATED (usage_service), so by
+    the time the user downloads it `downloads_used` already includes it. Gating on
+    the counter alone refused the very package the credit paid for - at a limit of
+    1, the only one. A session stamped `package_counted_at` is already paid for and
+    always downloads; an uncounted session would spend a new credit, so it is
+    refused once the allowance is gone.
+    """
+    if sub != "free" or used < FREE_PACKAGE_LIMIT:
+        return False
+    return not proc_session.get("package_counted_at")
+
+
 @router.get("/api/download-pdf/{session_id}/{form_id}")
 async def download_pdf(
     session_id: str,
@@ -247,8 +262,6 @@ async def download_pdf(
     used = int(fresh.get("downloads_used", 0) or 0)
 
     check_payment_access(fresh.get("payment_status", "ok"), "form")
-    if sub == "free" and used >= FREE_PACKAGE_LIMIT:
-        return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)
 
@@ -259,6 +272,8 @@ async def download_pdf(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    if _free_limit_blocks(sub, used, proc_session):
+        return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     # Submission Integrity gate (Beta Report §4.1): never serve a generated form for
     # a package still pending multi-insured review. Explicit server-side enforcement,
     # not just reliance on "forms can't have been generated while paused".
@@ -447,8 +462,6 @@ async def download_all(
     used = int(fresh.get("downloads_used", 0) or 0)
 
     check_payment_access(fresh.get("payment_status", "ok"), "form")
-    if sub == "free" and used >= FREE_PACKAGE_LIMIT:
-        return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)
 
@@ -459,6 +472,8 @@ async def download_all(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    if _free_limit_blocks(sub, used, proc_session):
+        return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     # Submission Integrity gate (Beta Report §4.1): never serve the package bundle
     # for a flagged, unresolved multi-insured submission.
     _enforce_integrity_gate(proc_session)

@@ -245,24 +245,42 @@ export default function ReviewRailLayout(props) {
     const layout = layoutRef.current;
     const footer = footerRef.current;
     const phone = window.matchMedia("(max-width: 900px)");
-    let headerOffset = 0;
+    const header = { height: 0, hidden: false };
+    let headerOffset = -1;
+    let frame = 0;
     const applyScrollPadding = () => {
-      root.style.scrollPaddingTop = `${headerOffset + (phone.matches ? 68 : 12)}px`;
+      root.style.scrollPaddingTop = `${Math.max(0, headerOffset) + (phone.matches ? 68 : 12)}px`;
       root.style.scrollPaddingBottom = `${(footer ? footer.offsetHeight : 0) + 12}px`;
+    };
+    // Where the header's bottom edge actually is. A hidden header still takes its
+    // space at the top of the page, so near the top the rail must start below it
+    // even while the header is flagged hidden.
+    const applyHeaderOffset = () => {
+      frame = 0;
+      if (!layout) return;
+      const next = header.hidden ? Math.max(0, header.height - window.scrollY) : header.height;
+      if (next === headerOffset) return;
+      headerOffset = next;
+      layout.style.setProperty("--rr-header-offset", `${next}px`);
+      applyScrollPadding();
     };
     const onHeader = (e) => {
       const { height, hidden } = e.detail || {};
       if (!layout || typeof height !== "number") return;
-      headerOffset = hidden ? 0 : height;
+      header.height = height;
+      header.hidden = !!hidden;
       layout.style.setProperty("--rr-header-h", `${height}px`);
-      layout.style.setProperty("--rr-header-offset", `${headerOffset}px`);
-      applyScrollPadding();
+      applyHeaderOffset();
+    };
+    const onScroll = () => {
+      if (header.hidden && !frame) frame = window.requestAnimationFrame(applyHeaderOffset);
     };
     const onFooter = () => {
       if (footer) root.style.setProperty("--rr-footer-h", `${footer.offsetHeight}px`);
       applyScrollPadding();
     };
     window.addEventListener("app-header:change", onHeader);
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.dispatchEvent(new Event("app-header:request"));
     onFooter();
     const ro = typeof ResizeObserver !== "undefined" && footer ? new ResizeObserver(onFooter) : null;
@@ -270,6 +288,8 @@ export default function ReviewRailLayout(props) {
     phone.addEventListener("change", applyScrollPadding);
     return () => {
       window.removeEventListener("app-header:change", onHeader);
+      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
       if (ro) ro.disconnect();
       phone.removeEventListener("change", applyScrollPadding);
       root.style.removeProperty("--rr-footer-h");
@@ -279,12 +299,20 @@ export default function ReviewRailLayout(props) {
   }, []);
 
   // On the phone tab bar, bring the active section into view by scrolling the
-  // bar only (scrollIntoView would also move the page).
+  // bar only (scrollIntoView would also move the page) - when the section changes
+  // and when the layout switches into the tab bar (a tablet rotating, a resize).
   useEffect(() => {
-    const bar = navRef.current;
-    if (!bar || bar.scrollWidth <= bar.clientWidth) return;
-    const active = bar.querySelector('[aria-current="page"]');
-    if (active) bar.scrollLeft = Math.max(0, active.offsetLeft - (bar.clientWidth - active.offsetWidth) / 2);
+    const centreActive = () => {
+      const bar = navRef.current;
+      if (!bar || bar.scrollWidth <= bar.clientWidth) return;
+      const active = bar.querySelector('[aria-current="page"]');
+      if (active) bar.scrollLeft = Math.max(0, active.offsetLeft - (bar.clientWidth - active.offsetWidth) / 2);
+    };
+    centreActive();
+    const phone = window.matchMedia("(max-width: 900px)");
+    const onChange = () => window.requestAnimationFrame(centreActive);
+    phone.addEventListener("change", onChange);
+    return () => phone.removeEventListener("change", onChange);
   }, [section]);
 
   // ── Derived numbers (one place, used by the rail, the Overview and the footer) ─

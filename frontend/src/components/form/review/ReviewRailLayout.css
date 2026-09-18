@@ -34,14 +34,11 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  /* The rail itself never scrolls; if the items cannot fit, only the list does. */
+  overflow: hidden;
   background: #0b0b0f;
   color: #a1a1aa;
   z-index: 30;
-  transition: top 0.3s ease, height 0.3s ease;
-  scrollbar-width: thin;
-  scrollbar-color: #27272a transparent;
 }
 
 .rr-main {
@@ -81,6 +78,7 @@
 
 /* ---------- Rail: package card ---------- */
 .rr-package {
+  flex-shrink: 0;
   margin: 16px 14px 2px;
   padding: 12px 14px;
   border: 1px solid rgba(230, 27, 132, 0.34);
@@ -116,15 +114,23 @@
 }
 
 /* ---------- Rail: navigation ---------- */
+/* Items take their size from the rail's own height: they grow to 72px when the
+   rail is tall, shrink to their content when it is short, and only then does the
+   list scroll - the package and readiness cards stay whole. */
 .rr-nav {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: clamp(4px, 1.1vh, 14px);
+  gap: 4px;
   padding: 2px 0 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #27272a transparent;
 }
 .rr-nav__group {
-  padding: clamp(12px, 2.8vh, 34px) 22px 2px;
+  flex: 0 0 auto;
+  padding: 16px 22px 4px;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.09em;
@@ -137,8 +143,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 60px;
+  max-height: 72px;
   width: calc(100% - 16px);
-  min-height: clamp(50px, 7.2vh, 76px);
   margin: 0 8px;
   padding: 9px 12px 9px 16px;
   border: 0;
@@ -194,6 +201,7 @@
 
 /* ---------- Rail: readiness card ---------- */
 .rr-rail-foot {
+  flex-shrink: 0;
   margin: 8px 14px 16px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -217,10 +225,12 @@
   .rr-rail-foot__label { display: none; }
   .rr-rail-foot { padding: 11px 14px 12px; }
 }
-@media (max-height: 720px) {
-  .rr-nav-item { min-height: 46px; }
-  .rr-nav-item__sub { display: none; }
+@media (max-height: 760px) {
   .rr-package__meta { display: none; }
+  .rr-nav__group { padding-top: 10px; }
+}
+@media (max-height: 680px) {
+  .rr-nav-item__sub { display: none; }
 }
 
 /* ---------- Section frame ---------- */
@@ -665,10 +675,11 @@
     min-width: 0;
     padding: 8px;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
   }
   .rr-nav::-webkit-scrollbar { display: none; }
-  .rr-nav-item { width: auto; min-height: 0; height: 40px; margin: 0; padding: 0 12px; gap: 8px; flex-shrink: 0; }
+  .rr-nav-item { flex: 0 0 auto; width: auto; max-height: none; height: 40px; margin: 0; padding: 0 12px; gap: 8px; }
   .rr-nav-item.is-active::before { top: auto; bottom: -8px; left: 12px; right: 12px; width: auto; height: 3px; border-radius: 3px 3px 0 0; }
   .rr-nav-item__sub { display: none; }
   .rr-main { min-height: 0; }

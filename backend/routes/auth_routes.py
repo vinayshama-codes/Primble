@@ -443,7 +443,7 @@ async def login(req: LoginRequest, request: Request):
             "id": user["id"], "email": user["email"],
             "full_name": user.get("full_name", ""),
             "subscription_tier": sub,
-            "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
+            "downloads_remaining": max(0, FREE_PACKAGE_LIMIT - used) if sub == "free" else -1,
         },
     })
     _set_session_cookie(resp, token)
@@ -638,7 +638,7 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
                 "organization_name": org_name, "subscription_tier": sub,
-                "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
+                "downloads_remaining": max(0, FREE_PACKAGE_LIMIT - used) if sub == "free" else -1,
                 "acord_license_confirmed": is_acord_license_current(user),
                 "acord_disclaimer_accepted": bool(disclaimer),
             },
@@ -788,7 +788,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "organization_name": current_user.get("organization_name", ""),
         "subscription_tier": sub,
         "billing_cycle": current_user.get("billing_cycle", "monthly") or "monthly",
-        "downloads_remaining": FREE_PACKAGE_LIMIT - used if sub == "free" else -1,
+        "downloads_remaining": max(0, FREE_PACKAGE_LIMIT - used) if sub == "free" else -1,
         "packages_used": pkgs_used, "packages_limit": pkgs_limit,
         "packages_soft_buffer": soft_buffer,
         "overage_packages_pending": int(current_user.get("overage_packages_pending", 0) or 0),
