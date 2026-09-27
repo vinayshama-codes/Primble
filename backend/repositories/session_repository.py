@@ -487,7 +487,7 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                     data->'facts'->'applicant_name'->>'value',
                     data->'facts'->>'applicant_name'
                 )                                                    AS applicant_name,
-                data->'facts'->'lines_of_business'                   AS lines_of_business,
+                COALESCE(data->'carried_lines', data->'facts'->'lines_of_business') AS lines_of_business,
                 data->'clarity_result'->'sqs_combined'               AS clarity_sqs,
                 -- The submission's OWN score. The list used to average the
                 -- per-form scores client-side and label the result "Quote

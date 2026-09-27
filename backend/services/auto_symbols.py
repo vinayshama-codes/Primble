@@ -279,6 +279,22 @@ _LIABILITY_KEYS = (LIABILITY, UNSPECIFIED)
 PHYSICAL_DAMAGE_KEYS = (COMPREHENSIVE, SPECIFIED_CAUSES, COLLISION, PHYSICAL_DAMAGE)
 
 
+def _names(needle: str, text: str) -> bool:
+    """Does `text` name the coverage `needle` stands for?
+
+    A short abbreviation ("um", "uim", "otc", "comp", "coll", "pip", "liab",
+    "csl", "doc") counts only as a WHOLE word. As a bare substring "um" named
+    every "UMbrella", "preMIUM" and "maxiMUM": on the 24 Sep 2026 live run the
+    certificate's "umbrella liability" row carried symbol 1 onto the
+    uninsured-motorists row of ACORD 137 CO as "other symbol 1". Longer needles
+    stay substrings, so a glued "physicaldamage" still reads.
+    """
+    n = needle.strip()
+    if len(n) <= 4:
+        return re.search(r"(?<![a-z])" + re.escape(n) + r"(?![a-z])", text) is not None
+    return needle in text
+
+
 def normalize_coverages(label) -> List[str]:
     """EVERY canonical coverage a free-text label names, in table order.
 
@@ -302,7 +318,7 @@ def normalize_coverages(label) -> List[str]:
         return [s]
     found: List[str] = []
     for key, needles in _COVERAGE_PATTERNS:
-        if any(n in s for n in needles) and key not in found:
+        if any(_names(n, s) for n in needles) and key not in found:
             found.append(key)
     # "Physical Damage (Comprehensive and Collision)" names the two specific
     # parts; keeping the umbrella term as well would make symbols_for count it
@@ -328,7 +344,7 @@ def normalize_coverage(label) -> str:
         return s
     for key, needles in _COVERAGE_PATTERNS:
         for n in needles:
-            if n in s:
+            if _names(n, s):
                 return key
     return UNSPECIFIED
 
@@ -344,6 +360,15 @@ _LABELLED_RE = re.compile(
     r"(?P<nums>\d{1,3}(?:\s*(?:,|/|and|&)\s*\d{1,3})*)",
     re.IGNORECASE,
 )
+
+
+# Lines of business that are not an auto coverage. "Property damage" is an
+# auto liability component and is deliberately not matched.
+_NON_AUTO_LINE_RE = re.compile(
+    r"\b(?:(?:commercial\s+)?general\s+liability|cgl|umbrella|excess|"
+    r"workers['\u2019]?\s*comp(?:ensation)?|employers['\u2019]?\s*liability|"
+    r"inland\s+marine|commercial\s+property|business\s*owners?|crime|"
+    r"professional|liquor|cyber)\b", re.I)
 
 
 def _clean_numbers(raw) -> List[int]:
@@ -405,6 +430,14 @@ def parse_symbols(raw) -> Dict[str, List[int]]:
     if isinstance(raw, (list, tuple)):
         for item in raw:
             if isinstance(item, dict):
+                label = item.get("coverage") or item.get("cov") or item.get("line")
+                if label is not None and _NON_AUTO_LINE_RE.search(str(label)):
+                    # A covered-auto symbol designates which AUTOS an auto
+                    # coverage applies to; a general liability or umbrella
+                    # line has none. The certificate's extraction attached
+                    # the ANY AUTO tick to "commercial general liability" and
+                    # "umbrella liability" rows (24 Sep 2026 live run).
+                    continue
                 nums = _clean_numbers(
                     item.get("symbols") if item.get("symbols") is not None
                     else item.get("symbol")

@@ -318,7 +318,15 @@ export default function ReviewRailLayout(props) {
   // ── Derived numbers (one place, used by the rail, the Overview and the footer) ─
   const fields = underwriting?.fields || [];
   const confirmedCount = fields.filter((f) => f.status === "confirmed").length;
-  const dcHasContent = fields.some((f) => ["conflict", "confirmed", "scoped", "changed"].includes(f.status));
+  // Line-scoped values (one carrier / policy number / NAIC per policy) are NOT
+  // shown here (owner, 27 Sep 2026): the client's rule is that different
+  // policies on different lines must not be flagged, and listing them under
+  // "Data Consistency" read as flagging. The backend still keeps the full
+  // line -> carrier -> NAIC -> policy -> term -> source relationship
+  // (`line_records`, `_line_records`) and still raises a real conflict - two
+  // policies on ONE line - as a "conflict" row, which renders below.
+  const dcHasContent = fields.some((f) => ["conflict", "confirmed", "changed"].includes(f.status));
+  const dcNeedsConfirm = fields.some((f) => ["conflict", "confirmed"].includes(f.status));
 
   const groupedHard = groupedIssues?.hard_stops?.length > 0 ? groupedIssues.hard_stops : null;
   const hardTally = groupedHard ? tallyClusters(groupedHard, issueStatuses, issueIdOf) : tallyBare(hardStops, issueStatuses, issueIdOf);
@@ -363,7 +371,7 @@ export default function ReviewRailLayout(props) {
     },
     {
       id: "consistency",
-      sub: openConflicts.length > 0 ? `${plural(openConflicts.length, "value")} to confirm` : dcHasContent ? "All confirmed" : "Nothing to confirm",
+      sub: openConflicts.length > 0 ? `${plural(openConflicts.length, "value")} to confirm` : dcNeedsConfirm ? "All confirmed" : "Nothing to confirm",
       badge: openConflicts.length > 0 ? openConflicts.length : "done",
     },
     {
@@ -628,8 +636,13 @@ export default function ReviewRailLayout(props) {
   const consistency = (
     <>
       <PageHead id="consistency" title="Data Consistency"
-        description="Your documents disagree on these values. Confirm the correct one and it is used on every form."
-        right={openConflicts.length > 0 ? <Badge tone="pink">{openConflicts.length} to fix</Badge> : <Badge tone="green">All confirmed</Badge>} />
+        description={openConflicts.length > 0
+          ? "Your documents disagree on these values. Confirm the correct one and it is used on every form."
+          : dcNeedsConfirm
+            ? "Every value your documents disagreed on has been confirmed."
+            : "Your documents agree - there is nothing to confirm."}
+        right={openConflicts.length > 0 ? <Badge tone="pink">{openConflicts.length} to fix</Badge>
+          : <Badge tone="green">{dcNeedsConfirm ? "All confirmed" : "Nothing to confirm"}</Badge>} />
       <div className="rr-stack" ref={dcSectionRef}>
         {!dcHasContent && <EmptyState title="Your documents agree." sub="There are no values to confirm." />}
         {underwritingBusy !== null && (
@@ -717,59 +730,6 @@ export default function ReviewRailLayout(props) {
             })}
           </Panel>
         )}
-        {(() => {
-          const recs = fields.map((f) => f.line_records).find((r) => (r || []).length > 1) || [];
-          if (recs.length < 2) return null;
-          return (
-            <Panel title="Policies in this submission"
-              meta="Each coverage line keeps its own carrier and policy number. Different numbers across different lines are expected and are not a conflict."
-              bodyClassName="rr-table-wrap">
-              <table className="rr-table">
-                <thead>
-                  <tr><th>Line</th><th>Carrier</th><th>NAIC</th><th>Policy number</th><th>Term</th><th>Source</th></tr>
-                </thead>
-                <tbody>
-                  {recs.map((r, i) => (
-                    <tr key={i}>
-                      <td>{r.line_printed || (r.line || "").replace(/_/g, " ")}</td>
-                      <td>{r.carrier_name || "-"}</td>
-                      <td>{r.carrier_naic || "-"}</td>
-                      <td>{r.policy_number || "-"}</td>
-                      <td>{r.effective_date || r.expiration_date ? `${normaliseDate(r.effective_date) || "?"} - ${normaliseDate(r.expiration_date) || "?"}` : "-"}</td>
-                      <td className="rr-table__source">{[...new Set(r.sources || [])].join(", ") || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Panel>
-          );
-        })()}
-        {fields.filter((f) => f.status === "scoped").map((f) => {
-          const vals = f.values || [];
-          const lines = new Set(vals.flatMap((v) => (Array.isArray(v.scope) ? v.scope : [])));
-          const allRecs = fields.map((x) => x.line_records).find((r) => (r || []).length) || [];
-          const recs = allRecs.filter((r) => lines.has(r.line));
-          const contracts = recs.length ? new Set(recs.map((r) => r.policy_number || r.id || r.line)).size : lines.size;
-          const policies = contracts + vals.filter((v) => !(Array.isArray(v.scope) && v.scope.length)).length;
-          return (
-            <Panel key={`scoped-${f.fact_key}`}
-              title={<>{f.label}<span className="rr-scope-tag">{`${policies} ${policies === 1 ? "policy" : "policies"}, ${vals.length} ${vals.length === 1 ? "value" : "values"} - not a conflict`}</span></>}
-              meta={Object.keys(f.confirmed_scopes || {}).length > 0
-                ? <span className="rr-scope-confirmed">Confirmed: {Object.entries(f.confirmed_scopes).map(([ln, val]) => `${ln.replace(/_/g, " ")} - ${val}`).join("; ")}</span>
-                : null}
-              bodyClassName="rr-rows">
-              {vals.map((v, vi) => (
-                <div key={vi} className="rr-scoped">
-                  <span className="rr-scoped__value">{v.display}</span>
-                  {(v.scope || []).length > 0
-                    ? <span className="rr-scope-chip">{v.scope.join(" / ").replace(/_/g, " ")}</span>
-                    : <span className="rr-scope-chip rr-scope-chip--unmatched">not matched to a coverage line</span>}
-                  <span className="rr-scoped__source">{[...new Set((v.sources || []).map((sr) => sr.filename).filter(Boolean))].join(", ")}</span>
-                </div>
-              ))}
-            </Panel>
-          );
-        })}
         {fields.filter((f) => f.status === "changed").map((f) => (
           <Panel key={`changed-${f.fact_key}`}
             title={<>{f.label}<span className="rr-scope-tag">Changed during the policy term - not a conflict</span></>}>

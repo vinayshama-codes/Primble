@@ -52,12 +52,21 @@ def test_resolved_hard_stop_stops_rendering_as_a_blocker():
 
 
 def test_refresh_preserves_sources_the_recalculation_does_not_rerun():
-    """Doc conflicts / OCR / Tier-1 entries must survive: nothing in the
-    recalculation re-runs those detectors, so it cannot know they cleared."""
+    """Doc conflicts and OCR entries must survive: nothing in the recalculation
+    re-runs those detectors, so it cannot know they cleared.
+
+    TIER 1 LEFT THIS TEST ON 2026-09-23, because the premise stopped being true
+    for it. The ACORD 125 baseline warnings used to be emitted once, by
+    `routes/form_routes` on the upload response, and were never re-derived - so
+    preserving them was the only way they could survive at all. They now come
+    from `sqs_service.evaluate_stops`, which every recalculation re-runs, so a
+    persisted copy is a STALE copy. Keeping it produced the live defect this
+    change fixed: "Contact information" rendered twice, and a Tier 1 item the
+    producer had actually fixed could never leave the list. The opposite
+    assertion is now the correct one, and it is directly below."""
     persisted = [
         make_issue("doc_conflict_hard_carrier", "hard_stop", "Carrier name conflict between documents"),
         make_issue("ocr_low_confidence_fein", "soft_warning", "Low OCR confidence on FEIN"),
-        make_issue("tier1_missing_applicant_name", "soft_warning", "Applicant name is missing"),
     ] + _legacy(hard=[COPE_HARD])
 
     refreshed = replace_recomputed_issues(persisted, _legacy(hard=[]))
@@ -65,8 +74,26 @@ def test_refresh_preserves_sources_the_recalculation_does_not_rerun():
     codes = [i["code"] for i in refreshed]
     assert "doc_conflict_hard_carrier" in codes
     assert "ocr_low_confidence_fein" in codes
-    assert "tier1_missing_applicant_name" in codes
     assert not any(c.startswith("legacy_") for c in codes)
+
+
+def test_a_tier1_entry_is_rebuilt_not_preserved():
+    """The other half of the rule above, and the live 2026-09-23 defect.
+
+    `evaluate_stops` re-derives the ACORD 125 baseline warnings from the current
+    facts on every recalculation, so the persisted copy must be discarded first.
+    Preserving it duplicated the row when the gap was still open, and kept it on
+    screen forever once the producer had filled the field."""
+    persisted = [
+        make_issue("tier1_missing_Contact information", "soft_warning",
+                   "ACORD 125 minimum field missing: Contact information (Fix: x)"),
+    ]
+    # Still open: the rebuild produces it again - exactly one row, not two.
+    again = replace_recomputed_issues(persisted, list(persisted))
+    assert [i["code"] for i in again] == ["tier1_missing_Contact information"]
+
+    # Now fixed: the rebuild produces nothing, so it must disappear.
+    assert replace_recomputed_issues(persisted, []) == []
 
 
 # ── OCR "confirm this field" warnings ────────────────────────────────────────

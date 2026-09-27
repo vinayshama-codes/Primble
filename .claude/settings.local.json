@@ -281,7 +281,9 @@
       "Bash(cat >> *)",
       "Bash(awk 'NR>=4300 && NR<=4330' services/extraction_service.py)",
       "Bash(awk -F: '$1>4300 && $1<4820')",
-      "Bash(awk 'NR>=4800 && NR<=4875' services/extraction_service.py)"
+      "Bash(awk 'NR>=4800 && NR<=4875' services/extraction_service.py)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(awk -F: '{print $1}')"
     ],
     "additionalDirectories": [
       "\\tmp",

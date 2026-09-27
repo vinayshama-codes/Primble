@@ -462,6 +462,22 @@ def canonicalize_for_field(field_name: str, value: Any) -> Any:
     if _is_machine_token(raw):
         return value                      # a URL / email / domain is not prose
     category = category_for_field(field_name)
+    fl = (field_name or "").lower()
+    if category in (None, "name") and ("insurer" in fl or "carrier" in fl
+                                       or category == "name"):
+        # A name OCR printed with its spaces lost ("EMCProperty&Casualty
+        # Company", "CommercialRiskSolutions,Inc.") is not the document's
+        # printing - it is damage to it. Re-space it before anything else, and
+        # ONLY when a piece is a descriptive business word, so a real glued
+        # brand ("InTownSuitesLLC", "ThinkSmith") is never rewritten. Insurer
+        # names keep their casing exactly (see `category_for_field`).
+        try:
+            from services.normalization import deglue_entity_text
+            spaced = deglue_entity_text(raw, for_display=True)
+        except Exception:                                 # noqa: BLE001
+            spaced = raw
+        if spaced != raw:
+            value = raw = spaced
     if not category:
         return value
     fn = _DISPATCH.get(category)

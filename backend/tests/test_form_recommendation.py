@@ -551,10 +551,17 @@ def test_account_profile_manufacturer_monoline():
 
 
 def test_account_profile_has_display_labels():
+    """24 Sep 2026: the transaction chip follows the is_renewal FACT. With no
+    fact (this call) there is no chip - the old answer came from the word
+    "renew" in the text, which every policy's boilerplate contains."""
     p = derive_account_profile({}, {})
     assert p["business_class_label"]
     assert p["account_type_label"] in ("Commercial Package", "Monoline")
-    assert p["transaction_type"] in ("new_business", "renewal")
+    assert p["transaction_type"] is None
+    assert derive_account_profile({}, {"is_renewal": True})["transaction_type"] == "renewal"
+    assert derive_account_profile({}, {"is_renewal": False})["transaction_type"] == "new_business"
+    boiler = "This policy may be renewed. If it is a renewal of a policy issued by us ..."
+    assert derive_account_profile({}, {}, text=boiler)["transaction_type"] is None
 
 
 # ── Sorting / shape sanity ───────────────────────────────────────────────────

@@ -1,0 +1,149 @@
+{
+ "_about": "Owner's second live run of orbin_retest_kit, session 5ca5cff5 (24 Sep 2026): what the forms printed after round 2, and the evidence the round-3 fixes read. Subset only.",
+ "selected_form_ids": [
+  "ACORD_127",
+  "ACORD_137_CO",
+  "ACORD_125",
+  "ACORD_126",
+  "ACORD_131",
+  "ACORD_186"
+ ],
+ "merged_facts": {
+  "auto_vin_schedule": [
+   {
+    "year": "2012",
+    "make": "SUBARU",
+    "model": "OUTBACK SEDAN",
+    "vin": "4S4BRCGC9C3217772",
+    "body_type": null,
+    "gvw": null,
+    "comp_symbol": "07",
+    "coll_symbol": "07",
+    "class_code": "7383",
+    "territory": "111",
+    "vehicle_type": "private_passenger",
+    "cost_new": "26680"
+   }
+  ],
+  "operations_description": {
+   "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects for building owners and property managers in the Denver metro area, working from its office at 4800 Dahlia St # D13.",
+   "confidence": "ai_high",
+   "source": "ai",
+   "value_state": "present",
+   "evidence_state": "suggested"
+  }
+ },
+ "stored": {
+  "ACORD_127": {
+   "Vehicle_Use_OtherIndicator_A": {
+    "value": "Y",
+    "confidence": "filled"
+   },
+   "Vehicle_Use_OtherDescription_A": {
+    "value": "PRIVATE PASSENGER",
+    "confidence": "ai_verified"
+   },
+   "Vehicle_Use_CommercialIndicator_A": {
+    "value": null,
+    "confidence": "low_confidence"
+   },
+   "Vehicle_Use_ServiceIndicator_A": {
+    "value": null,
+    "confidence": "low_confidence"
+   }
+  },
+  "ACORD_186": {
+   "Contractors_Question_AADCode_A": {
+    "value": "N",
+    "confidence": "low_confidence"
+   }
+  },
+  "ACORD_126": {
+   "Contractors_Question_AADCode_A": {
+    "value": "N",
+    "confidence": "low_confidence"
+   },
+   "GeneralLiabilityLineOfBusiness_Question_ABHCode_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   },
+   "GeneralLiabilityLineOfBusiness_VendorCoverageRequiredExplanation_A": {
+    "value": "Subcontractors are required to carry their own general liability insurance and to provide certificates of insurance before they start work.",
+    "confidence": "ai_verified"
+   }
+  },
+  "ACORD_131": {
+   "CommercialUmbrellaLineOfBusiness_Question_ABBCode_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   },
+   "CommercialUmbrellaLineOfBusiness_SubcontractorsCarryCoveragesLessThanApplicantExplanation_A": {
+    "value": "Subcontractors are required to carry their own general liability insurance and to provide certificates of insurance before they start work.",
+    "confidence": "ai_verified"
+   },
+   "BusinessInformation_OperationsDescription_A": {
+    "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects for building owners and property managers in the Denver metro area, working from its office at 4800 Dahlia St # D13.",
+    "confidence": "filled"
+   }
+  },
+  "ACORD_125": {
+   "CommercialPolicy_Question_ABCCode_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   },
+   "CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A": {
+    "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects.",
+    "confidence": "ai_verified"
+   },
+   "BuildingOccupancy_OperationsDescription_A": {
+    "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects for building owners and property managers in the Denver metro area, working from its office at 4800 Dahlia St # D13.",
+    "confidence": "filled"
+   },
+   "CommercialPolicy_OperationsDescription_A": {
+    "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects for building owners and property managers in the Denver metro area, working from its office at 4800 Dahlia St # D13.",
+    "confidence": "filled"
+   },
+   "Policy_SectionAttached_VehicleScheduleIndicator_A": {
+    "value": "Yes",
+    "confidence": "filled"
+   }
+  },
+  "ACORD_137_CO": {
+   "Vehicle_NonOwnedGroup_EmployeeIndicator_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   }
+  }
+ },
+ "text": {
+  "vehicle_block": [
+   "LOC: 001 4800 DAHLIA STREET D13",
+   "DENVER CO. 80216-3121",
+   "VEH NO 1 TERR: 111 .",
+   "2012 SUBARU OUTBACK SEDAN ID NO 4S4BRCGC9C3217772.",
+   "ADDITIONAL INFORMATION:",
+   "COST NEW: 26680 RADIUS: NA USE: NA .",
+   "AGE: LIAB-I PHYS-I .",
+   "PRIV PASSENGER - COMM CLASS: 7383 .",
+   "COVERED AUTOS LIABILITY .$ 1,496.00",
+   "AUTO MEDICAL PAYMENTS . 35.00",
+   "UNINSURED MOTORISTS . INCLUDED",
+   "UNDERINSURED MOTORISTS . INCLUDED",
+   "COMPREHENSIVE ACV 1000 DED . 134.00",
+   "$ 1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO",
+   "(A MAXIMUM DEDUCTIBLE MAY ALSO APPLY REFER TO COVERAGE FORM",
+   "FOR DETAILS.)"
+  ],
+  "subcontracting": [
+   "SUBCONTRACTING",
+   "Subcontractors are required to carry their own general liability insurance and to provide certificates of insurance before",
+   "they start work. Orbin keeps the certificates on file for every project."
+  ],
+  "non_ownership": [
+   "ITEM FIVE: SCHEDULE FOR NON-OWNERSHIP COVERED AUTOS LIABILITY",
+   "PREMIUM",
+   "OTHER THAN A SOCIAL SERVICE AGENCY",
+   "NUMBER OF EMPLOYEES 0 - 25 $ 137.00"
+  ]
+ }
+}

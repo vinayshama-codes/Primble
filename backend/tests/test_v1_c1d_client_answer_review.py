@@ -241,7 +241,6 @@ class TestWiring:
         "/api/client-answer/resolve",         # resolver
         "Needs your decision",                # the new section
         "loss_run_match_detail?.notes",       # F4 notes
-        'f.status === "scoped"',              # F2b rows
         "f.conflict_reason",                  # F10 reason
     ])
     def test_the_frontend_renders_it(self, needle):
@@ -250,3 +249,18 @@ class TestWiring:
                / "frontend" / "src" / "components" / "form" / "AcordModal.jsx"
                ).read_text(encoding="utf-8")
         assert needle in src, needle
+
+    def test_line_scoped_values_are_kept_but_not_shown(self):
+        """F2b used to RENDER the scoped rows ("N policies, N values - not a
+        conflict"). Owner, 27 Sep 2026: remove them from the screen and keep
+        them on the backend - listed under "Data Consistency" they read as the
+        very flag client 1.5 asked us not to raise. 1.5 ("retain each under its
+        correct scope. Do not create a conflict") is still met: the scope is
+        retained server-side (test_sys06_line_specific_identity_20260904) and
+        no conflict is raised. Both layouts must stay in step."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "components" / "form"
+        for name in ("AcordModal.jsx", "review/ReviewRailLayout.jsx"):
+            src = (root / name).read_text(encoding="utf-8")
+            assert 'f.status === "scoped"' not in src, name
+            assert "Policies in this submission" not in src, name

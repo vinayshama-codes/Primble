@@ -915,7 +915,11 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "Do the submitted documents explicitly state the umbrella follows form over the underlying coverages? Leave blank if it is not explicitly stated - coverage is never assumed.",
         "tier": None, "required": False,
         "validate":    None,
-        "format_hint": None,
+        # Declared 24 Sep 2026: the question IS a Yes/No, and without the hint
+        # the comparison door read this fact as free text - so a certificate's
+        # form reference was offered as a rival to a declarations page's "Yes"
+        # (client item 10, "boolean vs ...").
+        "format_hint": "Yes or No",
     },
     "employers_liability_limits": {
         "forms":       {"ACORD_131"},

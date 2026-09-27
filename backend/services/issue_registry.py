@@ -102,6 +102,7 @@ CLUSTER_MAP: Dict[str, str] = {
     "gl_codes_no_operations": "GL class code alignment",
     # Contractor / subcontracting
     "contractor_missing_acord186": "Contractor exposure (ACORD 186)",
+    "acord127_missing_state_137": "Auto state section (ACORD 137)",
     "acord186_high_sub_high_wc_payroll": "Contractor exposure (ACORD 186)",
     "high_subcontracting_no_wc_payroll": "Subcontracting vs. WC payroll",
     # Umbrella
@@ -174,6 +175,7 @@ TIER_MAP: Dict[str, str] = {
     "wc_payroll_vs_revenue": "recommended",
     "wc_subcontracting_payroll_conflict": "recommended",
     "contractor_missing_acord186": "recommended",
+    "acord127_missing_state_137": "recommended",
     "acord186_high_sub_high_wc_payroll": "recommended",
     "umbrella_gl_attachment_failure": "recommended",
     "umbrella_gl_limits_not_found": "recommended",
@@ -388,6 +390,10 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # `none` + `add_forms=["ACORD_186"]` (declared at the emit site). No typed
     # value closes it; the form itself is the fix.
     "contractor_missing_acord186": _R_NONE,
+    # `none` + `add_forms=["ACORD_137_<state>"]` (declared at the emit site):
+    # ACORD 127 itself prints "USE ACORD 137 FOR YOUR STATE TO PROVIDE
+    # COVERAGES / LIMITS INFORMATION" - the form is the fix.
+    "acord127_missing_state_137": _R_NONE,
     "acord186_high_sub_high_wc_payroll": _r_field("percent_subcontracted", "wc_payroll"),
     "high_subcontracting_no_wc_payroll": _r_field("wc_payroll"),
     # ── Umbrella ──
@@ -651,6 +657,27 @@ def _tier1_label_to_facts() -> Dict[str, tuple]:
     return _tier1_label_to_facts_cache
 
 
+_TIER1_MSG_PREFIX = "ACORD 125 minimum field missing: "
+
+
+def _tier1_code_from_message(message: Optional[str]) -> Optional[str]:
+    """`tier1_missing_<label>` for a Tier 1 baseline sentence, else None.
+
+    The label is matched against `check_tier1`'s OWN labels rather than split on
+    punctuation, so a label that ever contains a bracket or a colon cannot break
+    the parse, and a sentence naming something that is not a real Tier 1 item
+    returns None instead of minting a code no resolution can satisfy.
+    """
+    text = (message or "").strip()
+    if not text.startswith(_TIER1_MSG_PREFIX):
+        return None
+    tail = text[len(_TIER1_MSG_PREFIX):]
+    for label in _tier1_label_to_facts():
+        if tail.startswith(label):
+            return f"tier1_missing_{label}"
+    return None
+
+
 def _tier1_resolution(label: str) -> Optional[dict]:
     facts = _tier1_label_to_facts().get(label)
     # Through _copy_resolution so a tier-1 fix gets the same answer choices
@@ -784,6 +811,19 @@ def _lookup(code: str) -> tuple:
 # matches no row, matches the WRONG row, or carries a resolution naming a fact
 # the producer-answer path cannot write.
 _LEGACY_MESSAGE_RULES: List[tuple] = [
+    # ── ACORD 125 baseline (Tier 1) - BACKSTOP ONLY ─────────────────────────
+    # A REAL Tier 1 sentence never reaches this table: `classify_legacy` parses
+    # its label first and returns `tier1_missing_<label>`, whose fix names the
+    # exact fact(s) that clear it. This row catches only a sentence whose label
+    # is not one `check_tier1` emits - a shape that should be impossible, and
+    # which previously fell into the "Other validations" bucket with no fix
+    # control at all. An honest note beats a dead button; there is genuinely no
+    # way to know which field an unrecognised label meant.
+    ("ACORD 125 minimum field missing", "Missing baseline ACORD 125 fields", "required",
+     "legacy_tier1_unrecognised_field", _r_review(
+         "This ACORD 125 baseline field could not be matched to a known item. "
+         "Open the ACORD 125 form, fill the field the message names, then mark "
+         "this resolved.")),
     # ── Property COPE / deductibles / valuation / BI ─────────────────────────
     ("Minimum Viable COPE incomplete", "Property COPE completeness", "required",
      "legacy_minimum_viable_cope", _r_field(
@@ -877,13 +917,36 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # ── GL / claims-made ─────────────────────────────────────────────────────
     ("GL policy is claims-made - retro date is required", "Claims-made continuity", "recommended",
      "legacy_gl_claims_made_retro_date", _r_field("retro_date")),
-    # GL class codes are a per-location SCHEDULE with no live capture table
-    # (schedule_capture.SCHEDULE_DEFS has none), so there is nothing to type
-    # into and nothing to open - an honest note beats a dead button.
+    # THE ONE DOOR DECIDES, NOT THIS TABLE (2026-09-22).
+    # This row was `_r_review()` - mode `none` - on the stated grounds that GL
+    # class codes are "a per-location SCHEDULE with no live capture table, so
+    # there is nothing to type into". That was TRUE when it was written and
+    # FALSE since `services/answer_routing.py` shipped (BUG-05, 2026-09-08):
+    # that module is the one door for "can a human answer this?", and it
+    # returns `{"mode": "field"}` for `gl_class_codes_by_location` whenever the
+    # fact is empty - which is exactly when this rule fires. The ARQ producer
+    # questionnaire has been asking for the same fact as a text question all
+    # along (`question_eligibility.INSURANCE_JUDGMENT_FACTS`), so the card was
+    # the ONLY surface in the product claiming it could not be answered.
+    #
+    # WHY IT MATTERED: this is the `evaluate_stops` rule for "is the fact
+    # empty?", so the note's own instruction ("add them on ACORD 126, then mark
+    # this resolved") could never clear it - NO ACORD field writes back to
+    # either GL class-code fact (`_ACORD_FIELD_RULES` / `_FORM_FIELD_WRITEBACK`,
+    # verified). "Mark resolved" is work-tracking only and never touches a
+    # score; Dismiss earns a credit that `final_score_with_credits` adds to the
+    # RAW score and then clamps back under the same 85 ceiling. So a GL package
+    # whose documents do not print class codes was pinned at SOFT_STOP_CAP
+    # permanently, with a Resolve button that refused and a note that
+    # misdirected. Reported live on the Orbin package ("cannot get over 85").
+    #
+    # `gl_class_codes_by_location` ONLY, deliberately. `gl_class_code_schedule`
+    # is the full rating table (code / basis / exposure / territory /
+    # subcontracted %); offering it as a single text box is the scalar-over-a-
+    # table shape BUG-05 exists to prevent. The rule reads BOTH facts, so
+    # filling either one clears it - and this is the one a producer can state.
     ("GL coverage detected but no class codes found", "GL class code alignment", "recommended",
-     "legacy_gl_no_class_codes", _r_review(
-         "GL class codes are captured per location on ACORD 126. Add them there, "
-         "then mark this resolved - there is no single value to enter here.")),
+     "legacy_gl_no_class_codes", _r_field("gl_class_codes_by_location")),
     ("GL coverage detected but no revenue or payroll found", "GL exposure basis", "recommended",
      "legacy_gl_no_exposure_basis", _r_field("total_revenue", "total_payroll")),
     ("GL each occurrence limit", "GL exposure basis", "recommended",
@@ -1034,7 +1097,12 @@ _LEGACY_CODE_RESOLUTIONS: Dict[str, dict] = {
 # hard_stops list that caps SQS is never altered by this.
 _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
     "minimum_viable_cope_missing":               "Minimum Viable COPE incomplete",
-    "peril_deductible_referenced_but_undefined": "Peril-specific deductibles referenced but not defined",
+    # `peril_deductible_referenced_but_undefined` REMOVED 2026-09-23. Its
+    # cross-form rule was retired as a false positive by construction (it
+    # demanded all three peril deductibles from a flag that means "at least
+    # one"), so there is no coded twin left to defer to. Leaving the entry here
+    # would hide the surviving legacy warning behind a card that can never be
+    # drawn - the silent-ceiling shape this whole map exists to avoid.
     "property_valuation_method_missing":         "Property valuation method not specified",
     "umbrella_no_underlying_coverage":           "Umbrella detected but no underlying",
     # REMOVED 2026-08-14: `umbrella_sir_below_gl_deductible` was deleted from
@@ -1154,6 +1222,18 @@ def classify_legacy(message: str, severity: str) -> tuple:
     resolution_for() find the rule's fix mode and render "Open to fix". Before
     2026-08-08 they passed a throwaway `legacy_soft_<index>` instead and every
     legacy stop rendered as a dead Resolve/Dismiss row."""
+    # ── Tier 1 carries its LABEL in the sentence (2026-09-23) ───────────────
+    # `sqs_service.evaluate_stops` owns these since the rule moved out of
+    # `form_routes`. Its code is per-item (`tier1_missing_<label>`), so the
+    # static table below cannot hold one row per message - the label is parsed
+    # back out instead and `resolution_for` turns it into the right fact(s).
+    # Without this the six ACORD 125 baseline warnings would land in the
+    # "Other validations" default bucket with no fix control, which is the
+    # dead-Resolve-button defect the whole table exists to prevent.
+    _t1_code = _tier1_code_from_message(message)
+    if _t1_code:
+        return _t1_code, "Missing baseline ACORD 125 fields", "required"
+
     for phrase, cluster, tier, code, _res in _LEGACY_MESSAGE_RULES:
         if phrase in (message or ""):
             return code, cluster, (tier if severity != "hard_stop" else "required")
@@ -1184,8 +1264,15 @@ def _legacy_message_resolution(message: str) -> Optional[dict]:
     if not message:
         return None
     code, _cluster, _tier = classify_legacy(message, "soft_warning")
-    res = _LEGACY_CODE_RESOLUTIONS.get(code) if code else None
-    return _copy_resolution(res) if res else None
+    if not code:
+        return None
+    res = _LEGACY_CODE_RESOLUTIONS.get(code)
+    if res:
+        return _copy_resolution(res)
+    # A DYNAMIC code (today: `tier1_missing_<label>`) has no row in the static
+    # table by construction - its fix is computed from the label. `resolution_for`
+    # is where that lives, and it already returns a copy.
+    return resolution_for(code)
 
 
 def _fallback_resolution(code: Optional[str], message: str) -> Optional[dict]:
@@ -1439,6 +1526,23 @@ def build_grouped_view(
             # hard_stop wins if the same fact somehow carries two rows
             if _picker_severity.get(_fk) != "hard_stop":
                 _picker_severity[_fk] = _sev
+    # ── WHY THIS STILL SUPERSEDES, EVEN THOUGH UI-13 THEN HIDES THE ROW ─────
+    # Considered and rejected 2026-09-23: making supersession conditional on the
+    # picker row surviving block 3 below. It does close a real hole - a fact
+    # carrying both rows emits TWO capping warnings and renders ZERO, so the
+    # screen printed "0 warnings" beside a score those messages held at 85 (the
+    # live Orbin DBA / trade-name conflict) - but it closes it by putting the
+    # LEGACY row back on screen, and that row is strictly worse: it reprints
+    # every raw address spelling, including the equivalent ones the picker
+    # correctly folded, which is the exact defect the client reported and this
+    # supersession was written to fix (tests/test_doc_conflict_supersession.py).
+    #
+    # Trading a client-reported quality fix for visibility was the wrong trade,
+    # because visibility has a cleaner home: `hidden_warnings` /
+    # `hidden_warning_messages` in the return below now account for every row
+    # this view deliberately does not draw, so a ceiling can be explained
+    # without reprinting a worse card. One conflicted fact counts ONCE there -
+    # it is one problem with one fix, not two.
     if _picker_severity:
         def _superseded_by_picker(issue: dict) -> bool:
             fk = doc_conflict_fact_key(issue.get("code"))
@@ -1667,6 +1771,31 @@ def build_grouped_view(
     # which is exactly what each tier header badge sums. `important` is
     # deliberately NOT counted: it is an echo of the top 3 clusters that are
     # already counted in `warnings` below, so adding it would double-count.
+    #
+    # ── AND ONE THING THAT RENDERS NOTHING MUST STILL BE COUNTED ────────────
+    # UI-13 removes a Data Consistency row from the CLUSTERS because the picker
+    # shows it with a control that actually fixes it. It does NOT stop capping:
+    # the caller's `soft_stops` still carries the sentence, `_resolve_cap` still
+    # reads it, and `final_score_with_credits` clamps any dismissal credit back
+    # under the same 85. Counting only what rendered therefore printed
+    # "0 warnings" beside a score those warnings were holding down - the exact
+    # complaint that opened this investigation ("we cannot get over 85", with
+    # nothing on screen to act on). The row belongs in the HEADLINE even when it
+    # does not belong in the warning list, so the count is honest and the
+    # producer is sent to the one place that clears it.
+    #
+    # `hidden_warnings` is reported separately as well, so a surface that wants
+    # to say WHERE to fix them can, without re-deriving the set.
+    # `counts` STAYS exactly the two rendered buckets. Its contract - "the
+    # counts equal what this view drew" - is what fixed the 2026-08-12 toast
+    # ("1 warning found" beneath three cards) and is pinned by
+    # tests/test_grouped_view_counts.py. Adding a third key here, or folding the
+    # hidden rows into `warnings`, would reopen the defect it closed: a headline
+    # promising more cards than the list contains.
+    #
+    # The hidden rows ride ALONGSIDE it instead, so a surface that reports a
+    # CEILING can be honest ("1 warning, plus 1 item in Data Consistency")
+    # without the warnings list and its badge ever disagreeing again.
     counts = {
         "hard_stops": sum(c["count"] for c in hard_clusters),
         "warnings":   sum(c["count"] for tier_clusters in warnings.values()
@@ -1679,7 +1808,72 @@ def build_grouped_view(
         "warnings": warnings,
         "tier_labels": TIER_LABELS,
         "counts": counts,
+        # ── STILL CAPPING, DELIBERATELY NOT DRAWN (2026-09-23) ──────────────
+        # UI-13 removes a Data Consistency row from the warning clusters because
+        # the picker shows it with a control that actually clears it. It does
+        # NOT stop capping: the CALLER's soft_stops still carries the sentence,
+        # `_resolve_cap` still reads it, and `final_score_with_credits` clamps
+        # any dismissal credit back under the same 85. Counting only what
+        # rendered therefore let the screen print "0 warnings" beside a score
+        # those very rows were holding down - the complaint that opened this
+        # investigation ("we cannot get the package over 85"), with nothing on
+        # screen to act on.
+        #
+        # Reported separately from `counts` so the warnings BADGE keeps matching
+        # the warnings LIST, while anything that shows the ceiling can say where
+        # the remaining items actually live.
+        "hidden_warnings": len(_picker_hidden_msgs),
+        "hidden_warning_messages": sorted(_picker_hidden_msgs),
     }
+
+
+def grouped_with_package_caps(
+    structured_issues,
+    hard_stops,
+    soft_stops,
+    pkg,
+    cross_issues=None,
+):
+    """`build_grouped_view` plus any 60-cap the PACKAGE scorer holds privately.
+
+    OWNER RULE, 2026-08-31: the card must match the cap. `calculate_package_sqs`
+    can hold a score at 60 through a stop that never becomes a structured issue -
+    the `property_building_value` conflict it MANUFACTURES internally is the live
+    case, and a `hard_cross` entry is the other. Both survive only as
+    `cap_reason`, a sentence the pre-form Review screen never prints.
+
+    Two shapes, both from the scorer:
+      * `cap_hard_stop_codes` names a card that ALREADY EXISTS for the same
+        fact - promoted to hard-stop severity rather than duplicated, so the row
+        keeps its wording and its Resolve control (for a cross-document conflict
+        that control opens Data Consistency, the only place it can be cleared);
+      * `cap_hard_stops` carries the message for a cap with no card at all -
+        appended to the DISPLAY copy of the hard-stop list, where the safety net
+        renders it and `_covered_by` keeps it from doubling an existing row.
+
+    LIVES HERE, NOT IN A ROUTE (2026-09-23). It was a private helper in
+    `form_routes`, so the five form_routes responses folded the package cap in
+    and `audit_routes._form_selection_view` - which rebuilds the SAME Review
+    screen after resolve-issue and reopen-issue - called bare
+    `build_grouped_view` instead. Resolving any unrelated issue therefore
+    redrew the screen with the 60-cap's only card deleted, score unchanged.
+    One door, in the module that owns the view, so a third caller inherits it.
+
+    Display only. The caller's own arrays - which drive capping, dismiss credit
+    and issue_id hashing - are never touched, and no score moves.
+    """
+    pkg = pkg or {}
+    codes = [c for c in (pkg.get("cap_hard_stop_codes") or []) if c]
+    # A message whose card is being promoted must NOT also be appended, or the
+    # same problem prints twice under two different wordings.
+    extra = [] if codes else [m for m in (pkg.get("cap_hard_stops") or []) if m]
+    return build_grouped_view(
+        structured_issues or [],
+        list(hard_stops or []) + extra,
+        soft_stops or [],
+        cross_issues=cross_issues,
+        promote_codes=codes,
+    )
 
 
 def normalize_issue_type(issue_type: Optional[str]) -> str:
@@ -1828,7 +2022,19 @@ def count_distinct_issues(
 # matches the old index codes, so sessions persisted before that change keep
 # recalculating correctly. No cross-form / doc-conflict / OCR / tier-1 code
 # begins with "legacy_" (guarded by test_legacy_rules.py).
-_RECOMPUTED_CODE_PREFIXES = ("legacy_",)
+# Codes a recalculation REGENERATES from the current facts, and must therefore
+# throw away first. Anything not listed here is PRESERVED across a recompute.
+#
+# `tier1_missing_` added 2026-09-23, and its absence was a live defect. The
+# ACORD 125 baseline warnings moved into `evaluate_stops` that day, so they are
+# now rebuilt on every recalculation - but they are coded `tier1_missing_<label>`,
+# not `legacy_*`, so the stale copy was kept AND the fresh one appended.
+# Reported immediately: "Contact information" rendered TWICE, and a resolved
+# Tier 1 item could never leave the list. Exactly the shape this constant was
+# widened for once before (2026-08-08, `legacy_hard_`/`legacy_soft_` ->
+# `legacy_`): a recomputed issue whose prefix nobody added here outlives its own
+# fix. Adding an emitter means adding its prefix in the SAME change.
+_RECOMPUTED_CODE_PREFIXES = ("legacy_", "tier1_missing_")
 
 
 def replace_recomputed_issues(

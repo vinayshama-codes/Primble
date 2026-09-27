@@ -1,0 +1,629 @@
+{
+ "_about": "Owner's live run of orbin_retest_kit, session ed46dede (24 Sep 2026): the values the forms printed before the round-2 fixes, and the evidence the fixes read. Subset only.",
+ "merged_facts": {
+  "auto_covered_symbols": [
+   {
+    "coverage": "liability",
+    "symbols": [
+     1
+    ]
+   },
+   {
+    "coverage": "medical payments",
+    "symbols": [
+     2
+    ]
+   },
+   {
+    "coverage": "uninsured and underinsured motorists",
+    "symbols": [
+     2
+    ]
+   },
+   {
+    "coverage": "comprehensive",
+    "symbols": [
+     7
+    ]
+   },
+   {
+    "coverage": "collision",
+    "symbols": [
+     7
+    ]
+   },
+   {
+    "coverage": "commercial general liability",
+    "symbols": [
+     1
+    ]
+   },
+   {
+    "coverage": "automobile liability",
+    "symbols": [
+     1
+    ]
+   },
+   {
+    "coverage": "umbrella liability",
+    "symbols": [
+     1
+    ]
+   }
+  ],
+  "auto_vin_schedule": [
+   {
+    "year": "2012",
+    "make": "SUBARU",
+    "model": "OUTBACK SEDAN",
+    "vin": "4S4BRCGC9C3217772",
+    "body_type": null,
+    "gvw": null,
+    "comp_symbol": "07",
+    "coll_symbol": "07",
+    "class_code": "7383",
+    "territory": "111",
+    "vehicle_type": "private_passenger"
+   }
+  ],
+  "gl_deductible": {
+   "value": "$1,000",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "operations_description": {
+   "value": "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "auto_vehicle_use": {
+   "value": "commercial",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_name": {
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_contact_name": {
+   "value": "AW 6258",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_contact_phone": {
+   "value": "303-996-7800",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_contact_email": {
+   "value": "twroblewski@crsdenver.com",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_address": {
+   "value": "9780 S MERIDIAN BLVD STE 400, ENGLEWOOD, CO 80112-6072",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "expiring_producer_fax": {
+   "value": "(303) 757-7719",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "producer_name": {
+   "value": "Astrea It services",
+   "source": "account",
+   "confidence": "deterministic",
+   "value_state": "present",
+   "evidence_state": "user_confirmed",
+   "evidence_actor": "producer"
+  },
+  "producer_contact_name": {
+   "value": "vinay sharma",
+   "source": "account",
+   "confidence": "deterministic",
+   "value_state": "present",
+   "evidence_state": "user_confirmed",
+   "evidence_actor": "producer"
+  },
+  "producer_contact_email": {
+   "value": "vinaysharma@astreait.com",
+   "source": "account",
+   "confidence": "deterministic",
+   "value_state": "present",
+   "evidence_state": "user_confirmed",
+   "evidence_actor": "producer"
+  },
+  "prior_effective_date": {
+   "value": "07/15/25",
+   "confidence": "ai_high",
+   "source": "ai",
+   "routed_from": "current_term",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "prior_expiration_date": {
+   "value": "07/15/26",
+   "confidence": "ai_high",
+   "source": "ai",
+   "routed_from": "current_term",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "applicant_name": {
+   "value": "ORBIN CONTRACTING LLC",
+   "confidence": "ai_high",
+   "source": "ai",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  },
+  "mailing_address": {
+   "value": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+   "confidence": "ai_high",
+   "source": "ai",
+   "reconciled": true,
+   "reconcile_method": "llm",
+   "verified_in_text": true,
+   "value_state": "present",
+   "evidence_state": "source_verified"
+  }
+ },
+ "flags": {
+  "has_auto_coverage": true,
+  "has_general_liability": true,
+  "has_umbrella": true,
+  "is_renewal": null
+ },
+ "dec_page_entries": [
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "section": "Common Declarations",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "Producer Address",
+   "value": "9780 S MERIDIAN BLVD STE 400 ENGLEWOOD, CO 80112-6072",
+   "section": "Common Declarations",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "AGENT NO.",
+   "value": "W6258-0001",
+   "section": "Common Declarations",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "AGENT PHONE",
+   "value": "303-996-7800",
+   "section": "Common Declarations",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6C7-40-02---26",
+   "line_of_business": "Inland Marine"
+  },
+  {
+   "label": "Agent",
+   "value": "AW 6258",
+   "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6C7-40-02---26",
+   "line_of_business": "Inland Marine"
+  },
+  {
+   "label": "Direct Bill Agent Phone",
+   "value": "(303)996-7800",
+   "section": "COMMERCIAL INLAND MARINE DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6C7-40-02---26",
+   "line_of_business": "Inland Marine"
+  },
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "section": "COMMERCIAL AUTO DECLARATIONS - BUSINESS AUTO",
+   "owner": "producer",
+   "policy_number": "6E7-40-02---26",
+   "line_of_business": "Commercial Auto"
+  },
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6J7-40-02---26",
+   "line_of_business": "Commercial Umbrella"
+  },
+  {
+   "label": "Producer Address",
+   "value": "9780 S MERIDIAN BLVD STE 400 ENGLEWOOD CO 80112-6072",
+   "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6J7-40-02---26",
+   "line_of_business": "Commercial Umbrella"
+  },
+  {
+   "label": "Agent",
+   "value": "AW 6258",
+   "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6J7-40-02---26",
+   "line_of_business": "Commercial Umbrella"
+  },
+  {
+   "label": "Direct Bill Agent Phone",
+   "value": "(303)996-7800",
+   "section": "COMMERCIAL UMBRELLA DECLARATIONS",
+   "owner": "producer",
+   "policy_number": "6J7-40-02---26",
+   "line_of_business": "Commercial Umbrella"
+  },
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC.",
+   "section": "General Liability Declarations",
+   "owner": "producer",
+   "policy_number": "BBC7263-26",
+   "line_of_business": "General Liability"
+  },
+  {
+   "label": "Producer Address",
+   "value": "9780 S MERIDIAN BLVD STE 400 ENGLEWOOD, CO 80112-6072",
+   "section": "General Liability Declarations",
+   "owner": "producer",
+   "policy_number": "BBC7263-26",
+   "line_of_business": "General Liability"
+  },
+  {
+   "label": "Agent No.",
+   "value": "W6258",
+   "section": "General Liability Declarations",
+   "owner": "producer",
+   "policy_number": "BBC7263-26",
+   "line_of_business": "General Liability"
+  },
+  {
+   "label": "Agent Phone",
+   "value": "303-996-7800",
+   "section": "General Liability Declarations",
+   "owner": "producer",
+   "policy_number": "BBC7263-26",
+   "line_of_business": "General Liability"
+  },
+  {
+   "label": "Producer",
+   "value": "COMMERCIAL RISK SOLUTIONS, INC. Agent No. W6258",
+   "section": "Commercial General Liability Policy Declarations",
+   "owner": "producer",
+   "policy_number": "BBC7263-26",
+   "line_of_business": "General Liability"
+  },
+  {
+   "label": "PRODUCER CONTACT NAME",
+   "value": "Terri Wroblewski",
+   "section": "ACORD CERTIFICATE OF LIABILITY INSURANCE",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "PRODUCER",
+   "value": "Commercial Risk Solutions, Inc.",
+   "section": "ACORD CERTIFICATE OF LIABILITY INSURANCE",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "PHONE (A/C, No, Ext)",
+   "value": "(303) 996-7800",
+   "section": "ACORD CERTIFICATE OF LIABILITY INSURANCE",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "FAX (A/C, No)",
+   "value": "(303) 757-7719",
+   "section": "ACORD CERTIFICATE OF LIABILITY INSURANCE",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  },
+  {
+   "label": "E-MAIL ADDRESS",
+   "value": "twroblewski@crsdenver.com",
+   "section": "ACORD CERTIFICATE OF LIABILITY INSURANCE",
+   "owner": "producer",
+   "policy_number": null,
+   "line_of_business": null
+  }
+ ],
+ "documents": [
+  {
+   "doc_type": "dec_page",
+   "filename": "1_policy_package.pdf",
+   "facts": {
+    "operations_description": {
+     "value": "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+     "source": "ai",
+     "confidence": "ai_high",
+     "value_state": "present",
+     "evidence_state": "source_verified",
+     "verified_in_text": true
+    },
+    "auto_covered_symbols": [
+     {
+      "symbols": [
+       1
+      ],
+      "coverage": "liability"
+     },
+     {
+      "symbols": [
+       2
+      ],
+      "coverage": "medical payments"
+     },
+     {
+      "symbols": [
+       2
+      ],
+      "coverage": "uninsured and underinsured motorists"
+     },
+     {
+      "symbols": [
+       7
+      ],
+      "coverage": "comprehensive"
+     },
+     {
+      "symbols": [
+       7
+      ],
+      "coverage": "collision"
+     }
+    ],
+    "auto_vehicle_use": {
+     "value": "commercial",
+     "source": "ai",
+     "confidence": "ai_high",
+     "value_state": "present",
+     "evidence_state": "source_verified",
+     "verified_in_text": true
+    }
+   }
+  },
+  {
+   "doc_type": "certificate",
+   "filename": "2_certificate.pdf",
+   "facts": {
+    "operations_description": null,
+    "auto_covered_symbols": [
+     {
+      "symbols": [
+       1
+      ],
+      "coverage": "commercial general liability"
+     },
+     {
+      "symbols": [
+       1
+      ],
+      "coverage": "automobile liability"
+     },
+     {
+      "symbols": [
+       1
+      ],
+      "coverage": "umbrella liability"
+     }
+    ],
+    "auto_vehicle_use": null
+   }
+  },
+  {
+   "doc_type": "narrative",
+   "filename": "3_narrative.pdf",
+   "facts": {
+    "operations_description": {
+     "value": "Commercial general contractor. The company manages tenant-finish, remodeling and light commercial construction projects for building owners and property managers in the Denver metro area, working from its office at 4800 Dahlia St # D13.",
+     "source": "ai",
+     "confidence": "ai_high"
+    },
+    "auto_covered_symbols": [],
+    "auto_vehicle_use": null
+   }
+  }
+ ],
+ "text": {
+  "vehicle_block": [
+   "LOC: 001 4800 DAHLIA STREET D13",
+   "DENVER CO. 80216-3121",
+   "VEH NO 1 TERR: 111 .",
+   "2012 SUBARU OUTBACK SEDAN ID NO 4S4BRCGC9C3217772.",
+   "ADDITIONAL INFORMATION:",
+   "COST NEW: 26680 RADIUS: NA USE: NA .",
+   "AGE: LIAB-I PHYS-I .",
+   "PRIV PASSENGER - COMM CLASS: 7383 .",
+   "COVERED AUTOS LIABILITY .$ 1,496.00",
+   "AUTO MEDICAL PAYMENTS . 35.00",
+   "UNINSURED MOTORISTS . INCLUDED",
+   "UNDERINSURED MOTORISTS . INCLUDED",
+   "COMPREHENSIVE ACV 1000 DED . 134.00",
+   "$ 1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO",
+   "(A MAXIMUM DEDUCTIBLE MAY ALSO APPLY REFER TO COVERAGE FORM",
+   "FOR DETAILS.)"
+  ],
+  "deductible_lines": [
+   "$ 1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO",
+   "Hired Auto Physical Damage - Comprehensive Deductible $1,000",
+   "Hired Auto Physical Damage - Collision Deductible $1,000",
+   "Property Damage Deductible $1,000 Each Pollution Incidents",
+   "CG 72 76 | 11 16 | Limited Pollution Coverage - Work Sites; Each Pollution Incident Limit - $1,000,000; Pollution Liability Aggregate Limit - $1,000,000; Property Damage Deductible $1,000 Each Pollution Incidents"
+  ],
+  "description_lines": [
+   "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+   "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+   "Insured is LLC Business Desc: COMMERCIAL GENERAL CONTRA"
+  ]
+ },
+ "stored": {
+  "ACORD_186": {
+   "ContractorsUnderwriting_LicenseNumberIdentifier_A": {
+    "value": "W6258-0001",
+    "confidence": "ai_verified"
+   },
+   "GeneralLiability_EachOccurrence_LimitAmount_A": {
+    "value": "1,000,000",
+    "confidence": "filled"
+   },
+   "GeneralLiability_GeneralAggregate_LimitAmount_A": {
+    "value": "2,000,000",
+    "confidence": "filled"
+   }
+  },
+  "ACORD_127": {
+   "Vehicle_Coverage_AgreedOrStatedAmount_A": {
+    "value": "100,000",
+    "confidence": "ai_verified"
+   },
+   "Vehicle_Coverage_ValuationActualCashValueIndicator_A": {
+    "value": "Yes",
+    "confidence": "filled"
+   },
+   "Vehicle_SymbolCode_A": {
+    "value": "7",
+    "confidence": "filled"
+   },
+   "Vehicle_ComprehensiveSymbolCode_A": {
+    "value": "07",
+    "confidence": "filled"
+   },
+   "Vehicle_CollisionSymbolCode_A": {
+    "value": "07",
+    "confidence": "filled"
+   },
+   "Vehicle_Use_CommercialIndicator_A": {
+    "value": "Yes",
+    "confidence": "filled"
+   },
+   "CommercialVehicleLineOfBusiness_Attachment_VehicleScheduleIndicator_A": {
+    "value": "Y",
+    "confidence": "filled"
+   },
+   "Vehicle_CostNewAmount_A": {
+    "value": null,
+    "confidence": "low_confidence"
+   }
+  },
+  "ACORD_126": {
+   "GeneralLiability_PropertyDamage_DeductibleAmount_A": {
+    "value": "1,000",
+    "confidence": "filled"
+   },
+   "GeneralLiability_BodilyInjury_DeductibleAmount_A": {
+    "value": "1,000",
+    "confidence": "filled"
+   },
+   "GeneralLiability_OtherDeductibleAmount_A": {
+    "value": "1,000",
+    "confidence": "filled"
+   },
+   "GeneralLiability_OtherDeductibleDescription_A": {
+    "value": "Property Damage Deductible $1,000 Each Pollution Incidents",
+    "confidence": "ai_verified"
+   },
+   "Contractors_Question_ABBCode_A": {
+    "value": "N",
+    "confidence": "low_confidence"
+   },
+   "Contractors_Question_AADCode_A": {
+    "value": "N",
+    "confidence": "low_confidence"
+   },
+   "GeneralLiabilityLineOfBusiness_Question_ABCCode_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   }
+  },
+  "ACORD_131": {
+   "CommercialUmbrellaLineOfBusiness_Question_ABBCode_A": {
+    "value": "Y",
+    "confidence": "low_confidence"
+   },
+   "CommercialUmbrellaLineOfBusiness_Question_AAICode_A": {
+    "value": "Y",
+    "confidence": "filled"
+   },
+   "BusinessInformation_OperationsDescription_A": {
+    "value": "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+    "confidence": "filled"
+   }
+  },
+  "ACORD_137_CO": {
+   "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_C": {
+    "value": "Yes",
+    "confidence": "filled"
+   },
+   "Vehicle_BusinessAutoSymbol_OtherSymbolCode_C": {
+    "value": "1",
+    "confidence": "filled"
+   }
+  },
+  "ACORD_125": {
+   "CommercialPolicy_OperationsDescription_A": {
+    "value": "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA",
+    "confidence": "filled"
+   },
+   "Producer_ContactPerson_EmailAddress_A": {
+    "value": "vinaysharma@astreait.com",
+    "confidence": "filled"
+   }
+  }
+ }
+}

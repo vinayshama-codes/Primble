@@ -114,10 +114,26 @@ def printing_roles(name: str, norm_texts: Iterable[str]) -> List[Optional[str]]:
     `norm_texts` must already be `_norm`-ed (done once per package, not once per
     row). A match inside a longer word or name is not a printing of this name.
     """
-    needle = _norm(name)
     roles: List[Optional[str]] = []
-    if len(needle) < _MIN_NAME_CHARS:
-        return roles
+    # EVERY WORD ORDER OF THE NAME (24 Sep 2026). A schedule prints "ROYAL,
+    # ERIN"; extraction may return "Erin Royal". Searching only the extracted
+    # order found no printing, so the Drive Other Car individual stayed a
+    # DRIVER - asked about as one, and printed on ACORD 127 as one.
+    toks = re.findall(r"[^\s,;]+", _norm(name))
+    orders = {_norm(name), " ".join(toks)}
+    if 2 <= len(toks) <= 4:
+        orders.add(" ".join(toks[-1:] + toks[:-1]))      # "erin royal" -> "royal erin"
+        orders.add(" ".join(toks[1:] + toks[:1]))        # "royal erin" -> "erin royal"
+    for needle in orders:
+        if len(needle) < _MIN_NAME_CHARS:
+            continue
+        roles.extend(_roles_for(needle, norm_texts))
+    return roles
+
+
+def _roles_for(needle: str, norm_texts: Iterable[str]) -> List[Optional[str]]:
+    """How each printing of ONE spelling of a name is headed."""
+    roles: List[Optional[str]] = []
     for hay in norm_texts:
         start = 0
         while True:

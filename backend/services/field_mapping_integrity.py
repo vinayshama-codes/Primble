@@ -700,9 +700,22 @@ _PARTY_LEGAL_SUFFIX_RX = re.compile(
     r"limited|l\.?p|l\.?l\.?p|p\.?l\.?l\.?c|p\.?c|p\.?a|plc|trust|bank|banking|"
     r"association|assn|authority|district|agency|university|college|academy|"
     r"hospital|church|foundation|partnership|holdings|group|enterprises|"
-    r"services|properties|leasing|finance|financial|credit\s+union|fcu|n\.?a|"
+    r"services|properties|leasing|finance|financial|capital|credit\s+union|fcu|n\.?a|"
     r"municipality|city|county|state|department|dept|board|commission|"
     r"cooperative|co-?op|institute|society|club|estate|lp)\b", re.I)
+
+# A legal form or organisation noun ENDING the name (see the override in
+# `names_a_party`).
+_PARTY_ENTITY_TAIL_RX = re.compile(
+    r"(?:" + _PARTY_LEGAL_SUFFIX_RX.pattern + r")\.?\s*$", re.I)
+# Openers no real name begins with, even one ending on an entity word.
+_PARTY_NEVER_A_NAME_START = frozenset({
+    "any", "all", "each", "every", "none", "no", "not", "this", "that", "these",
+    "those", "such", "see", "refer", "subject", "per", "if", "when", "while",
+    "where", "unless", "except", "including", "included", "pursuant",
+    "regarding", "re", "please", "being", "been", "was", "were", "are",
+    "shall", "should", "must", "whom", "whoever", "whichever",
+})
 
 # Openers a NOUN PHRASE never begins with. Articles are deliberately absent -
 # "The Bank of New York Mellon" is a party.
@@ -724,6 +737,8 @@ _PARTY_CLAUSE_TAILS = frozenset({
     "applies", "necessary", "available", "pending", "tbd", "unknown",
     # A document's own copy marker: "Agency Copy", "Insured Copy", "File Copy".
     "copy", "copies",
+    # "Same" - "same as named insured" shorthand, not a party (24 Sep 2026).
+    "same",
 })
 
 _PARTY_FINITE_VERB_RX = re.compile(
@@ -881,6 +896,26 @@ def names_a_party(value: Any, third_party: bool = False,
     lead = [w for w in words if w.lower() not in _PARTY_ARTICLES]
     if not lead:
         return False
+    # AN ENTITY TAIL OUTRANKS A CLAUSE-SHAPED HEAD (24 Sep 2026). Boilerplate
+    # never ENDS on a legal form or an organisation noun; real names often
+    # START on a word the clause tests read as a preposition or a verb: "Will
+    # County", "On Deck Capital", "For Rent Properties LLC", "Covers Unlimited
+    # Inc", "May Department Stores Co" - twelve real parties were refused,
+    # which blanked a real lender and, on the human-answer path, refused the
+    # producer's own typing. Kept narrow: at most seven words, title-cased, and
+    # never opening on a quantifier or subordinator ("Any City", "Per the
+    # State") - those stay clauses.
+    if (_PARTY_ENTITY_TAIL_RX.search(head) and len(words) <= 7
+            and lead[0].lower().strip(".") not in _PARTY_NEVER_A_NAME_START
+            and all(w[:1].isupper() or len(w) <= 3 for w in lead)):
+        if third_party:
+            try:
+                from services.normalization import is_party_role_label
+                if is_party_role_label(head):
+                    return False
+            except Exception:                                 # noqa: BLE001
+                pass
+        return True
     if lead[0].lower().strip(".") in _PARTY_CLAUSE_OPENERS:
         return False
     if words[-1].lower().strip(".") in _PARTY_CLAUSE_TAILS:
@@ -903,6 +938,10 @@ def names_a_party(value: Any, third_party: bool = False,
         return True
     proper = [w for w in lead if w[:1].isupper() or w.isupper()]
     if len(proper) >= 2:
+        return True
+    # A short ALL-CAPS initialism is a name ("3M", "IBM", "AT&T"); run after
+    # every disqualifier, so "TBD" is still refused.
+    if re.fullmatch(r"[0-9]*[A-Z][A-Z0-9&]{0,5}", head):
         return True
     return len(lead) == 1 and len(lead[0]) >= 3 and lead[0][:1].isupper()
 

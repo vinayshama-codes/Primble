@@ -340,14 +340,17 @@ def _resolve_kind(fact_key: str) -> str:
 # writes three million). The multiplier is only ever honoured on a money-typed
 # field, so a policy number containing "3M" can never be read as an amount.
 _MONEY_RE = re.compile(
-    r"(?<![\w.])\$?\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s?(MM|[KMB])?"
+    r"(?<![\w.])\$?\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s?(MM|MILLION|MIL|THOUSAND|[KMB])?"
     # A trailing SENTENCE period must not block the match ("$2,000,000." is an
     # amount), but a following digit must ("1.000.000" is not 1). Hence two
     # lookaheads instead of the single (?![\w.]) the first cut used.
     r"(?![\w])(?!\.\d)", re.I)
 # "303-996-7800 x212" / "ext. 212" - an extension is not part of the number.
 _PHONE_EXT_RE = re.compile(r"\b(?:x|ext\.?|extension)\s*\d+\s*$", re.I)
-_MULT = {"K": 1_000, "M": 1_000_000, "MM": 1_000_000, "B": 1_000_000_000}
+# The words too: "$3 million" was read as three dollars - a narrative's
+# "The umbrella limit is $1 million" could never agree with "$1,000,000".
+_MULT = {"K": 1_000, "M": 1_000_000, "MM": 1_000_000, "B": 1_000_000_000,
+         "MILLION": 1_000_000, "MIL": 1_000_000, "THOUSAND": 1_000}
 
 # The Yes/No vocabulary moved to `normalization` (SYS-07) so the comparator,
 # the merge, the stamper and the checkbox writer all read one table. These two
@@ -772,9 +775,8 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
     # spelling ("&"/"and", Co/Company, L.L.C./LLC) and nothing else.
     if kind == KIND_NAME:
         try:
-            from services.normalization import strict_entity_key
-            ka, kb = strict_entity_key(sa), strict_entity_key(sb)
-            if ka and kb and ka == kb:
+            from services.normalization import same_entity_name
+            if same_entity_name(sa, sb):      # spelling, or spaces lost by OCR
                 return SAME
         except Exception:                                    # pragma: no cover
             pass

@@ -780,35 +780,31 @@ def carried_lines_of_business(facts: Any, flags: Any = None) -> list:
         return []
     names = [str(x).strip() for x in raw if str(x or "").strip()]
 
-    lines = facts.get("coverage_lines") if isinstance(facts, dict) else None
-    if isinstance(lines, dict) and "value" in lines:
-        lines = lines.get("value")
-    rows = [e for e in lines if isinstance(e, dict)] if isinstance(lines, list) else []
-    evidenced: set = set(_flag_families(flags))
-    granted: set = set()
-    identified: set = set()
-    for entry in rows:
-        fam = canon_line(entry.get("line"))
-        if not fam or denies_coverage(entry):
-            continue
-        if _grants_coverage(entry):
-            granted.add(fam)
-        elif _row_identifies_policy(entry):
-            identified.add(fam)
-    # A premium or a limit is money changing hands and outranks a false flag.
-    # A policy number only IDENTIFIES a contract, and the live extraction put
-    # the Inland Marine number on the Property, Crime and Workers' Compensation
-    # rows the declarations deny - so identity alone never overrides an
-    # explicitly false `has_<line>` flag.
-    evidenced |= granted
-    evidenced |= (identified - _flag_denied_families(flags))
+    # One evidence reading, shared with `line_is_carried` and the 125 boxes
+    # (see `evidenced_line_families` / `_row_evidence`). A premium or a limit is
+    # money changing hands and outranks a false flag; identity alone never
+    # overrides an explicitly false `has_<line>` flag (the live extraction put
+    # the Inland Marine number on the Property, Crime and WC rows the
+    # declarations deny).
+    evidenced, _rows_exist = evidenced_line_families(facts, flags)
 
-    if not rows and not evidenced:
-        # No per-line evidence FOR anything - the legacy raw list, less any line
-        # an explicitly false `has_<line>` flag denies. A false flag is positive
-        # evidence of absence, not silence; the fuzz found this branch printing
-        # a line its own flag had turned off.
-        denied = _flag_denied_families(flags)
+    if not evidenced:
+        # No AFFIRMATIVE per-line evidence for anything - the legacy raw list,
+        # less any line explicitly denied: by a false `has_<line>` flag (the fuzz
+        # found this branch printing a line its own flag had turned off) or by a
+        # "NO COVERAGE" row. Rows that only DENY are not evidence FOR the other
+        # mentions, so they cannot drop them (24 Sep 2026: a declarations page
+        # whose one row denied Property lost its General Liability mention, and
+        # the Property contradiction with the application went silent).
+        denied = set(_flag_denied_families(flags))
+        _rows = facts.get("coverage_lines") if isinstance(facts, dict) else None
+        if isinstance(_rows, dict) and "value" in _rows:
+            _rows = _rows.get("value")
+        for _e in _rows if isinstance(_rows, list) else []:
+            if isinstance(_e, dict) and denies_coverage(_e):
+                _fam = canon_line(_e.get("line"))
+                if _fam:
+                    denied.add(_fam)
         return _one_name_per_line([n for n in names if canon_line(n) not in denied])
 
     kept, dropped = [], []
@@ -821,6 +817,141 @@ def carried_lines_of_business(facts: Any, flags: Any = None) -> list:
             "evidence and are not reported as carried - %s",
             len(dropped), ", ".join(dropped[:6]))
     return _one_name_per_line(kept)
+
+
+def evidenced_line_families(facts: Any, flags: Any = None) -> Tuple[set, bool]:
+    """(families the package has AFFIRMATIVE evidence for, per-line rows exist).
+
+    The evidence `carried_lines_of_business` applies - a granting row, a row
+    identifying its own policy unless a false flag denies the line, or a true
+    `has_<line>` flag - exposed as FAMILIES, so a caller holding a fact rather
+    than a line name asks the same question the cover page asks.
+    """
+    lines = facts.get("coverage_lines") if isinstance(facts, dict) else None
+    if isinstance(lines, dict) and "value" in lines:
+        lines = lines.get("value")
+    rows = [e for e in lines if isinstance(e, dict)] if isinstance(lines, list) else []
+    evidenced: set = set(_flag_families(flags))
+    granted, identified = _row_evidence(rows)
+    evidenced |= granted
+    evidenced |= (identified - _flag_denied_families(flags))
+    return evidenced, bool(rows)
+
+
+def _contract_key(value: Any) -> str:
+    return re.sub(r"[^0-9A-Za-z]", "", str(value or "")).upper()
+
+
+def _same_contract_key(a: str, b: str) -> bool:
+    """One contract printed with and without its term marker (BBC7263 /
+    BBC7263-26, 6E74002 / 6E7-40-02---26): equal, or one a 6+ character
+    prefix of the other."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 6 and long_.startswith(short)
+
+
+def _row_evidence(rows: list) -> Tuple[set, set]:
+    """(families a row GRANTS, families a row IDENTIFIES) - one reading for
+    the cover page, the scorer and ACORD 125's line-of-business boxes.
+
+    Identity is narrower than it was, on two measured shapes (24 Sep 2026):
+      * a BORROWED number is not identity. An endorsement-menu row ("Liquor
+        Liability Coverage Part") carrying the GL policy's own number is a
+        coverage PART of that policy - the number is already owned by a
+        granting row of a DIFFERENT line. Before this, one footer number put
+        Liquor and Pollution on the cover and ticked them on the 125;
+      * a NAIC with no number of the row's own identifies a line only on a
+        package where NO row is priced. A NAIC is the carrier's, and the
+        menu rows carry the carrier.
+    """
+    granted: set = set()
+    owners: list = []                  # (contract key, family) of granting rows
+    for entry in rows:
+        fam = canon_line(entry.get("line"))
+        if not fam or denies_coverage(entry):
+            continue
+        if _grants_coverage(entry):
+            granted.add(fam)
+            k = _contract_key(entry.get("policy_number"))
+            if k:
+                owners.append((k, fam))
+    any_priced = bool(granted)
+    identified: set = set()
+    for entry in rows:
+        fam = canon_line(entry.get("line"))
+        if not fam or denies_coverage(entry) or _grants_coverage(entry):
+            continue
+        if not _row_identifies_policy(entry):
+            continue
+        num = str(entry.get("policy_number") or "").strip()
+        own_number = bool(num and num.lower() not in _IDENTITY_PLACEHOLDERS
+                          and not COVERAGE_DENIAL_RE.search(num))
+        if own_number:
+            k = _contract_key(num)
+            if any(_same_contract_key(k, ok) and of != fam for ok, of in owners):
+                continue                   # another line's policy - a coverage part
+            identified.add(fam)
+        elif not any_priced:
+            identified.add(fam)            # NAIC only, on an unpriced package
+    return granted, identified
+
+
+def line_is_carried(family: Optional[str], facts: Any, flags: Any = None) -> Optional[bool]:
+    """Is this canonical line carried by the package? True / False / None.
+
+    False needs POSITIVE evidence of absence: its `has_<line>` flag is
+    explicitly false, or the package has a per-line inventory and nothing in
+    it evidences this line. None - cannot tell - when there is no per-line
+    evidence at all, and a caller must read None as "keep today's behaviour".
+    """
+    if not family:
+        return None
+    if family in _flag_denied_families(flags):
+        return False
+    evidenced, rows_exist = evidenced_line_families(facts, flags)
+    if family in evidenced:
+        return True
+    if rows_exist and evidenced:
+        return False
+    return None
+
+
+# Fact-key PREFIX -> the line the fact describes. Derived from the fact
+# registry's own naming convention; a key with no line prefix is not judged.
+_FACT_PREFIX_FAMILY: Tuple[Tuple[str, str], ...] = (
+    ("property_", "property"), ("gl_", "general_liab"), ("auto_", "auto"),
+    ("umbrella_", "umbrella"), ("wc_", "workers_comp"), ("crime_", "crime"),
+    ("inland_marine_", "inland_marine"), ("liquor_", "liquor"),
+    ("epli_", "epli"), ("cyber_", "cyber"),
+)
+
+
+def fact_line_family(fact_key: Any) -> Optional[str]:
+    """The line of business a canonical FACT belongs to, or None.
+
+    Prefixes first (`property_building_value` -> property), then the scorer's
+    own coverage-gated table for the unprefixed property/COPE and WC keys
+    (`year_built`, `construction_type`, `employers_liability_limits` ...), so
+    this and the SQS relevance gate read one declaration."""
+    k = str(fact_key or "").strip().lower()
+    if not k or k.startswith("_"):
+        return None
+    for prefix, fam in _FACT_PREFIX_FAMILY:
+        if k.startswith(prefix):
+            return fam
+    try:
+        from services.sqs_service import _COVERAGE_GATED_FACT_FLAGS as _gated
+        flag = _gated.get(k)
+    except Exception:                                        # noqa: BLE001
+        flag = None
+    if flag:
+        m = re.match(r"^has[_\s]+(.+)$", flag)
+        return canon_line(m.group(1).replace("_", " ")) if m else None
+    return None
 
 
 def _one_name_per_line(names: list) -> list:

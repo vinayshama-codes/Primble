@@ -1,0 +1,635 @@
+{
+  "_meta": {
+    "kit": "T1 - table fidelity and row identity",
+    "generated_by": "backend/scripts/make_t1_test_pdfs.py",
+    "read_first": "t1_test_data/README-HOW-TO-TEST.md"
+  },
+  "_doc": "t1_test_data/T1_verdant_slope_package.pdf",
+  "_forms": [
+    "ACORD_125",
+    "ACORD_126",
+    "ACORD_131"
+  ],
+  "_normalisation": {
+    "case": "insensitive",
+    "whitespace": "collapsed",
+    "currency": "$ and thousands separators ignored; 1000000 == $1,000,000",
+    "percent": "trailing % ignored; 34 == 34%",
+    "dates": "MM/DD/YYYY only; a differently formatted date is WRONG",
+    "yes_no": "Y == Yes == On == X == true; N == No == false",
+    "containment": "a stamped value that contains the expected one, or vice versa, counts CORRECT - ACORD boxes routinely carry a longer legal name"
+  },
+  "expect": {
+    "ACORD_125": {
+      "Policy_PolicyNumberIdentifier_A": "CPP 4Q 887214 26",
+      "Policy_EffectiveDate_A": "03/15/2026",
+      "Policy_ExpirationDate_A": "03/15/2027",
+      "Policy_Payment_EstimatedTotalAmount_A": "$148,730",
+      "Insurer_FullName_A": "Cascade Summit Mutual Insurance Company",
+      "Insurer_NAICCode_A": "21326",
+      "Insurer_Underwriter_FullName_A": "Marguerite Solano",
+      "Producer_FullName_A": "Halloway Ridge Insurance Advisors, LLC",
+      "Producer_MailingAddress_LineOne_A": "601 W Main St",
+      "Producer_MailingAddress_LineTwo_A": "Ste 900",
+      "Producer_MailingAddress_CityName_A": "Louisville",
+      "Producer_MailingAddress_StateOrProvinceCode_A": "KY",
+      "Producer_MailingAddress_PostalCode_A": "40202",
+      "NamedInsured_BusinessStartDate_A": "04/02/2009",
+      "NamedInsured_Contact_FullName_A": "Delphine Ostrander",
+      "NamedInsured_Contact_PrimaryPhoneNumber_A": "(303) 555-0147",
+      "NamedInsured_Contact_PrimaryEmailAddress_A": "dostrander@verdantslopebuilders.com",
+      "NamedInsured_Primary_WebsiteAddress_A": "www.verdantslopebuilders.com",
+      "Policy_Status_RenewIndicator_A": "Yes",
+      "Policy_LineOfBusiness_CommercialGeneralLiability_A": "Yes",
+      "Policy_LineOfBusiness_CommercialProperty_A": "Yes",
+      "Policy_LineOfBusiness_BusinessAutoIndicator_A": "Yes",
+      "Policy_LineOfBusiness_UmbrellaIndicator_A": "Yes",
+      "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A": "Yes",
+      "Policy_Payment_DirectBillIndicator_A": "Yes",
+      "Policy_Payment_PaymentScheduleCode_A": "Quarterly - 25% Down",
+      "LossHistory_InformationYearCount_A": "5",
+      "LossHistory_TotalAmount_A": "$568,495",
+      "CommercialPolicy_FormalSafetyProgram_SafetyManualIndicator_A": "Yes",
+      "CommercialPolicy_FormalSafetyProgram_MonthlyMeetingsIndicator_B": "Yes",
+      "CommercialPolicy_FormalSafetyProgram_SafetyPositionIndicator_B": "Yes",
+      "CommercialPolicy_FormalSafetyProgram_OSHAIndicator_B": "Yes",
+      "NamedInsured_FullName_A": "Verdant Slope Builders, LLC",
+      "NamedInsured_SICCode_A": "1761",
+      "NamedInsured_NAICSCode_A": "238160",
+      "NamedInsured_MailingAddress_LineOne_A": "1188 Larimer Crossing",
+      "NamedInsured_MailingAddress_LineTwo_A": "Ste 400",
+      "NamedInsured_MailingAddress_CityName_A": "Denver",
+      "NamedInsured_MailingAddress_StateOrProvinceCode_A": "CO",
+      "NamedInsured_MailingAddress_PostalCode_A": "80204",
+      "NamedInsured_Primary_PhoneNumber_A": "(303) 555-0142",
+      "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": "Yes",
+      "NamedInsured_LegalEntity_MemberManagerCount_A": "3",
+      "NamedInsured_FullName_B": "Halewood Ridge Framing, Inc.",
+      "NamedInsured_SICCode_B": "1751",
+      "NamedInsured_NAICSCode_B": "238350",
+      "NamedInsured_MailingAddress_LineOne_B": "704 N Weber St",
+      "NamedInsured_MailingAddress_LineTwo_B": "Unit 12",
+      "NamedInsured_MailingAddress_CityName_B": "Colorado Springs",
+      "NamedInsured_MailingAddress_StateOrProvinceCode_B": "CO",
+      "NamedInsured_MailingAddress_PostalCode_B": "80903",
+      "NamedInsured_Primary_PhoneNumber_B": "(719) 555-0178",
+      "NamedInsured_LegalEntity_CorporationIndicator_B": "Yes",
+      "NamedInsured_FullName_C": "Cotter Bench Equipment Leasing, LLC",
+      "NamedInsured_SICCode_C": "7359",
+      "NamedInsured_NAICSCode_C": "532412",
+      "NamedInsured_MailingAddress_LineOne_C": "9420 E Costilla Ave",
+      "NamedInsured_MailingAddress_LineTwo_C": "Bldg 3",
+      "NamedInsured_MailingAddress_CityName_C": "Greenwood Village",
+      "NamedInsured_MailingAddress_StateOrProvinceCode_C": "CO",
+      "NamedInsured_MailingAddress_PostalCode_C": "80112",
+      "NamedInsured_Primary_PhoneNumber_C": "(720) 555-0133",
+      "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_C": "Yes",
+      "NamedInsured_LegalEntity_MemberManagerCount_C": "2",
+      "CommercialStructure_Location_ProducerIdentifier_A": "001",
+      "CommercialStructure_PhysicalAddress_LineOne_A": "1188 Larimer Crossing",
+      "CommercialStructure_PhysicalAddress_LineTwo_A": "Ste 400",
+      "CommercialStructure_PhysicalAddress_CityName_A": "Denver",
+      "CommercialStructure_PhysicalAddress_CountyName_A": "Denver",
+      "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": "CO",
+      "CommercialStructure_PhysicalAddress_PostalCode_A": "80204",
+      "BuildingOccupancy_OccupiedArea_A": "6,500",
+      "BuildingOccupancy_OperationsDescription_A": "Executive offices, estimating and project administration",
+      "BusinessInformation_FullTimeEmployeeCount_A": "11",
+      "BusinessInformation_PartTimeEmployeeCount_A": "2",
+      "CommercialStructure_InsuredInterest_TenantIndicator_A": "Yes",
+      "CommercialStructure_Location_ProducerIdentifier_B": "002",
+      "CommercialStructure_PhysicalAddress_LineOne_B": "3390 E Overland Rd",
+      "CommercialStructure_PhysicalAddress_LineTwo_B": "Unit B",
+      "CommercialStructure_PhysicalAddress_CityName_B": "Aurora",
+      "CommercialStructure_PhysicalAddress_CountyName_B": "Arapahoe",
+      "CommercialStructure_PhysicalAddress_StateOrProvinceCode_B": "CO",
+      "CommercialStructure_PhysicalAddress_PostalCode_B": "80011",
+      "BuildingOccupancy_OccupiedArea_B": "18,000",
+      "BuildingOccupancy_OperationsDescription_B": "Materials warehouse and fabrication shop for roofing assemblies",
+      "BusinessInformation_FullTimeEmployeeCount_B": "9",
+      "BusinessInformation_PartTimeEmployeeCount_B": "3",
+      "CommercialStructure_InsuredInterest_OwnerIndicator_B": "Yes",
+      "CommercialStructure_Location_ProducerIdentifier_C": "003",
+      "CommercialStructure_PhysicalAddress_LineOne_C": "704 N Weber St",
+      "CommercialStructure_PhysicalAddress_LineTwo_C": "Unit 12",
+      "CommercialStructure_PhysicalAddress_CityName_C": "Colorado Springs",
+      "CommercialStructure_PhysicalAddress_CountyName_C": "El Paso",
+      "CommercialStructure_PhysicalAddress_StateOrProvinceCode_C": "CO",
+      "CommercialStructure_PhysicalAddress_PostalCode_C": "80903",
+      "BuildingOccupancy_OccupiedArea_C": "3,200",
+      "BuildingOccupancy_OperationsDescription_C": "Southern Colorado branch office and small tool storage",
+      "BusinessInformation_FullTimeEmployeeCount_C": "5",
+      "BusinessInformation_PartTimeEmployeeCount_C": "1",
+      "CommercialStructure_InsuredInterest_TenantIndicator_C": "Yes",
+      "CommercialStructure_Location_ProducerIdentifier_D": "004",
+      "CommercialStructure_PhysicalAddress_LineOne_D": "15 Foothills Service Rd",
+      "CommercialStructure_PhysicalAddress_CityName_D": "Golden",
+      "CommercialStructure_PhysicalAddress_CountyName_D": "Jefferson",
+      "CommercialStructure_PhysicalAddress_StateOrProvinceCode_D": "CO",
+      "CommercialStructure_PhysicalAddress_PostalCode_D": "80401",
+      "BuildingOccupancy_OccupiedArea_D": "24,000",
+      "BuildingOccupancy_OperationsDescription_D": "Equipment yard, vehicle maintenance bay and covered material racks",
+      "BusinessInformation_FullTimeEmployeeCount_D": "14",
+      "BusinessInformation_PartTimeEmployeeCount_D": "2",
+      "CommercialStructure_InsuredInterest_OwnerIndicator_D": "Yes",
+      "PriorCoverage_GeneralLiability_InsurerFullName_A": "Sentinel Prairie Casualty Company",
+      "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A": "GL 7784120 25",
+      "PriorCoverage_GeneralLiability_EffectiveDate_A": "03/15/2025",
+      "PriorCoverage_GeneralLiability_ExpirationDate_A": "03/15/2026",
+      "PriorCoverage_GeneralLiability_TotalPremiumAmount_A": "$54,120",
+      "PriorCoverage_Automobile_InsurerFullName_A": "Sentinel Prairie Casualty Company",
+      "PriorCoverage_Automobile_PolicyNumberIdentifier_A": "CA 7784121 25",
+      "PriorCoverage_Automobile_TotalPremiumAmount_A": "$16,900",
+      "PriorCoverage_Property_InsurerFullName_A": "Sentinel Prairie Casualty Company",
+      "PriorCoverage_Property_PolicyNumberIdentifier_A": "CF 7784122 25",
+      "PriorCoverage_Property_TotalPremiumAmount_A": "$22,455",
+      "CommercialPolicy_Question_KAACode_A": "Y",
+      "CommercialPolicy_Question_AAICode_A": "N",
+      "CommercialPolicy_Question_AAJCode_A": "Y",
+      "CommercialPolicy_Question_KACCode_A": "N",
+      "CommercialPolicy_Question_KANCode_A": "Y",
+      "CommercialPolicy_Question_ABCCode_A": "Y"
+    },
+    "ACORD_126": {
+      "GeneralLiability_EachOccurrence_LimitAmount_A": "$1,000,000",
+      "GeneralLiability_GeneralAggregate_LimitAmount_A": "$2,000,000",
+      "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": "$2,000,000",
+      "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": "$1,000,000",
+      "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": "$300,000",
+      "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": "$10,000",
+      "GeneralLiability_OccurrenceIndicator_A": "Yes",
+      "GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator_A": "Yes",
+      "GeneralLiability_EmployeeBenefits_LimitAmount_A": "$1,000,000",
+      "GeneralLiability_EmployeeBenefits_RetroactiveDate_A": "04/02/2009",
+      "GeneralLiability_EmployeeBenefits_EmployeeCount_A": "51",
+      "GeneralLiability_EmployeeBenefits_EmployeeCoveredCount_A": "42",
+      "GeneralLiability_EmployeeBenefits_PerClaimDeductibleAmount_A": "$1,000",
+      "Contractors_SubcontractorsPaidAmount_A": "$2,145,000",
+      "Contractors_WorkSubcontractedPercent_A": "34%",
+      "Contractors_FullTimeEmployeeCount_A": "42",
+      "Contractors_PartTimeEmployeeCount_A": "9",
+      "GeneralLiability_Hazard_LocationProducerIdentifier_A": "001",
+      "GeneralLiability_Hazard_HazardProducerIdentifier_A": "001",
+      "GeneralLiability_Hazard_ClassCode_A": "91340",
+      "GeneralLiability_Hazard_Classification_A": "Carpentry - construction of residential property not exceeding three stories",
+      "GeneralLiability_Hazard_Exposure_A": "1,318,000",
+      "GeneralLiability_Hazard_TerritoryCode_A": "008",
+      "GeneralLiability_Hazard_PremisesOperationsRate_A": "3.412",
+      "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_A": "$44,970",
+      "GeneralLiability_Hazard_ProductsRate_A": "1.106",
+      "GeneralLiability_Hazard_ProductsPremiumAmount_A": "$14,577",
+      "GeneralLiability_Hazard_LocationProducerIdentifier_B": "002",
+      "GeneralLiability_Hazard_HazardProducerIdentifier_B": "001",
+      "GeneralLiability_Hazard_ClassCode_B": "91580",
+      "GeneralLiability_Hazard_Classification_B": "Contractors - subcontracted work - in connection with construction",
+      "GeneralLiability_Hazard_Exposure_B": "2,145,000",
+      "GeneralLiability_Hazard_TerritoryCode_B": "008",
+      "GeneralLiability_Hazard_PremisesOperationsRate_B": "0.902",
+      "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_B": "$19,348",
+      "GeneralLiability_Hazard_ProductsRate_B": "0.000",
+      "GeneralLiability_Hazard_ProductsPremiumAmount_B": "$0",
+      "GeneralLiability_Hazard_LocationProducerIdentifier_C": "004",
+      "GeneralLiability_Hazard_HazardProducerIdentifier_C": "001",
+      "GeneralLiability_Hazard_ClassCode_C": "92478",
+      "GeneralLiability_Hazard_Classification_C": "Roofing - all kinds",
+      "GeneralLiability_Hazard_Exposure_C": "486,000",
+      "GeneralLiability_Hazard_TerritoryCode_C": "008",
+      "GeneralLiability_Hazard_PremisesOperationsRate_C": "8.114",
+      "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_C": "$39,434",
+      "GeneralLiability_Hazard_ProductsRate_C": "2.331",
+      "GeneralLiability_Hazard_ProductsPremiumAmount_C": "$11,329",
+      "Contractors_Question_AACCode_A": "N",
+      "Contractors_Question_AADCode_A": "N",
+      "Contractors_Question_AAECode_A": "Y",
+      "Contractors_Question_AAGCode_A": "Y",
+      "Contractors_Question_AAICode_A": "N",
+      "GeneralLiabilityLineOfBusiness_Question_ABCCode_A": "Y",
+      "GeneralLiabilityLineOfBusiness_Question_ACDCode_A": "N",
+      "GeneralLiabilityLineOfBusiness_Question_AAJCode_A": "Y",
+      "GeneralLiabilityLineOfBusiness_Question_ACACode_A": "N",
+      "GeneralLiabilityLineOfBusiness_Question_AACCode_A": "N"
+    },
+    "ACORD_131": {
+      "ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": "$5,000,000",
+      "ExcessUmbrella_Umbrella_AggregateAmount_A": "$5,000,000",
+      "ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": "$10,000",
+      "ExcessUmbrella_OccurrenceIndicator_A": "Yes",
+      "UnderlyingPolicy_GeneralLiability_InsurerFullName_A": "Cascade Summit Mutual Insurance Company",
+      "UnderlyingPolicy_GeneralLiability_PolicyNumberIdentifier_A": "CPP 4Q 887214 26",
+      "UnderlyingPolicy_GeneralLiability_PolicyEffectiveDate_A": "03/15/2026",
+      "UnderlyingPolicy_GeneralLiability_PolicyExpirationDate_A": "03/15/2027",
+      "UnderlyingPolicy_GeneralLiability_PremisesOperationsPremiumAmount_A": "$46,900",
+      "UnderlyingPolicy_GeneralLiability_ProductsPremiumAmount_A": "$14,555",
+      "UnderlyingPolicy_GeneralLiability_FormEditionDate_A": "04 13",
+      "UnderlyingPolicy_Automobile_InsurerFullName_A": "Cascade Summit Mutual Insurance Company",
+      "UnderlyingPolicy_Automobile_PolicyNumberIdentifier_A": "CPP 4Q 887214 26",
+      "UnderlyingPolicy_Automobile_PolicyEffectiveDate_A": "03/15/2026",
+      "UnderlyingPolicy_Automobile_PolicyExpirationDate_A": "03/15/2027",
+      "UnderlyingPolicy_Automobile_CombinedSingleLimitPremiumAmount_A": "$18,240",
+      "UnderlyingPolicy_EmployersLiability_InsurerFullName_A": "Foundry State Compensation Fund",
+      "UnderlyingPolicy_EmployersLiability_PolicyNumberIdentifier_A": "WC 9930221 26",
+      "UnderlyingPolicy_EmployersLiability_PolicyEffectiveDate_A": "03/15/2026",
+      "UnderlyingPolicy_EmployersLiability_PolicyExpirationDate_A": "03/15/2027",
+      "UnderlyingPolicy_EmployersLiability_PremiumAmount_A": "$71,410",
+      "UnderlyingPolicy_EmployersLiability_ModificationFactor_A": "0.94",
+      "UnderlyingPolicy_OtherPolicy_PolicyTypeDescription_A": "Contractors Pollution Liability",
+      "UnderlyingPolicy_OtherPolicy_InsurerFullName_A": "Meridian Environmental Indemnity Company",
+      "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_A": "CPL 3308821 26",
+      "UnderlyingPolicy_OtherPolicy_PolicyEffectiveDate_A": "03/15/2026",
+      "UnderlyingPolicy_OtherPolicy_PolicyExpirationDate_A": "03/15/2027",
+      "UnderlyingPolicy_OtherPolicy_CombinedSingleLimitAmount_A": "$1,000,000",
+      "UnderlyingPolicy_OtherPolicy_PremiumAmount_A": "$4,860",
+      "UnderlyingCoverage_Coverage_GeneralLiabilityOccurrenceIndicator_A": "Yes",
+      "UnderlyingCoverage_Coverage_AnyAutoIndicator_A": "Yes",
+      "BusinessInformation_AnnualGrossReceiptsAmount_A": "$9,410,000",
+      "BusinessInformation_TotalPayrollAmount_A": "$1,804,000",
+      "BusinessInformation_EmployeeCount_A": "51",
+      "BusinessInformation_OperationsDescription_A": "Commercial and residential re-roofing, new roof installation, sheet metal flashing fabrication and gutter installation, performed by employees and subcontracted crews across the Front Range"
+    }
+  },
+  "must_be_blank": {
+    "ACORD_125": [
+      "BusinessInformation_ParentOrganizationName_A",
+      "LossHistory_NoPriorLossesIndicator_A",
+      "Policy_LineOfBusiness_CyberAndPrivacy_A",
+      "Policy_LineOfBusiness_CrimeIndicator_A",
+      "Policy_LineOfBusiness_LiquorLiabilityIndicator_A",
+      "Policy_LineOfBusiness_YachtIndicator_A",
+      "Policy_LineOfBusiness_MotorCarrierIndicator_A",
+      "Policy_LineOfBusiness_TruckersIndicator_A",
+      "Policy_LineOfBusiness_GarageAndDealersIndicator_A",
+      "Policy_LineOfBusiness_BoilerAndMachineryIndicator_A",
+      "Policy_LineOfBusiness_FiduciaryLiabilityIndicator_A",
+      "Policy_LineOfBusiness_BusinessOwnersIndicator_A",
+      "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_A",
+      "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_A",
+      "CommercialPolicy_JudgementOrLienExplanation_A",
+      "CommercialPolicy_JudgementOrLien_OccurrenceDate_A",
+      "CommercialPolicy_Question_ABBCode_A",
+      "CommercialPolicy_Question_AAFCode_A"
+    ],
+    "ACORD_126": [
+      "ProductAndCompletedOperations_ProductName_A",
+      "ProductAndCompletedOperations_ProductName_B",
+      "ProductAndCompletedOperations_ProductName_C",
+      "ProductAndCompletedOperations_AnnualGrossSalesAmount_A",
+      "ProductAndCompletedOperations_AnnualGrossSalesAmount_B",
+      "ProductAndCompletedOperations_AnnualGrossSalesAmount_C",
+      "ProductAndCompletedOperations_UnitCount_A",
+      "ProductAndCompletedOperations_UnitCount_B",
+      "ProductAndCompletedOperations_UnitCount_C",
+      "ProductAndCompletedOperations_InMarketMonthCount_A",
+      "ProductAndCompletedOperations_InMarketMonthCount_B",
+      "ProductAndCompletedOperations_InMarketMonthCount_C",
+      "ProductAndCompletedOperations_ExpectedLifeMonthCount_A",
+      "ProductAndCompletedOperations_ExpectedLifeMonthCount_B",
+      "ProductAndCompletedOperations_ExpectedLifeMonthCount_C",
+      "ProductAndCompletedOperations_IntendedUse_A",
+      "ProductAndCompletedOperations_IntendedUse_B",
+      "ProductAndCompletedOperations_IntendedUse_C",
+      "ProductAndCompletedOperations_PrincipalComponents_A",
+      "ProductAndCompletedOperations_PrincipalComponents_B",
+      "ProductAndCompletedOperations_PrincipalComponents_C",
+      "GeneralLiability_ClaimsMadeIndicator_A",
+      "GeneralLiability_ClaimsMade_ProposedRetroactiveDate_A",
+      "GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate_A",
+      "GeneralLiabilityLineOfBusiness_Question_AAECode_A",
+      "GeneralLiabilityLineOfBusiness_Question_ACECode_A",
+      "GeneralLiabilityLineOfBusiness_Question_ACFCode_A",
+      "GeneralLiabilityLineOfBusiness_Question_ABDCode_A",
+      "GeneralLiabilityLineOfBusiness_Question_KAHCode_A",
+      "GeneralLiabilityLineOfBusiness_Question_ACGCode_A",
+      "GeneralLiabilityLineOfBusiness_Question_ABHCode_A"
+    ],
+    "ACORD_131": [
+      "UnderlyingPolicy_OtherPolicy_PolicyTypeDescription_B",
+      "UnderlyingPolicy_OtherPolicy_InsurerFullName_B",
+      "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_B",
+      "UnderlyingPolicy_OtherPolicy_PolicyEffectiveDate_B",
+      "UnderlyingPolicy_OtherPolicy_PolicyExpirationDate_B",
+      "UnderlyingPolicy_OtherPolicy_CombinedSingleLimitAmount_B",
+      "UnderlyingPolicy_OtherPolicy_PremiumAmount_B",
+      "ExcessUmbrella_PropertyRating_ApartmentCount_A",
+      "ExcessUmbrella_PropertyRating_ApartmentCount_B",
+      "ExcessUmbrella_PropertyRating_SwimmingPoolCount_A",
+      "ExcessUmbrella_PropertyRating_SwimmingPoolCount_B",
+      "ExcessUmbrella_PropertyRating_DivingBoardCount_A",
+      "ExcessUmbrella_PropertyRating_DivingBoardCount_B",
+      "ExcessUmbrella_PropertyRating_StructureStoreyCount_A",
+      "ExcessUmbrella_PropertyRating_StructureStoreyCount_B",
+      "ExcessUmbrella_MalpracticeLiability_BedCount_A",
+      "ExcessUmbrella_MalpracticeLiability_DoctorCount_A",
+      "ExcessUmbrella_MalpracticeLiability_NurseCount_A",
+      "BusinessInformation_ForeignGrossSalesAmount_A",
+      "ExcessUmbrella_ClaimsMadeIndicator_A",
+      "ExcessUmbrella_ProposedRetroactiveDate_A",
+      "ExcessUmbrella_CurrentRetroactiveDate_A",
+      "ExcessUmbrella_EmployeeBenefits_AggregateLimitAmount_A",
+      "ExcessUmbrella_EmployeeBenefits_EachEmployeeLimitAmount_A"
+    ]
+  },
+  "forbidden": {
+    "ACORD_125": {
+      "NamedInsured_FullName_*": [
+        "Any person or organization for whom the Named Insured has ag",
+        "Bank of the Front Range, N.A.",
+        "Sentinel Prairie Casualty Company",
+        "Cascade Summit Mutual Insurance Company",
+        "Halloway Ridge Insurance Advisors, LLC",
+        "Ridgeline Specialty Indemnity Company"
+      ],
+      "NamedInsured_MailingAddress_LineTwo_*": [
+        "Ste 900"
+      ],
+      "NamedInsured_MailingAddress_LineOne_*": [
+        "601 W Main St"
+      ],
+      "Insurer_FullName_A": [
+        "Sentinel Prairie Casualty Company",
+        "Halloway Ridge Insurance Advisors, LLC",
+        "Ridgeline Specialty Indemnity Company"
+      ],
+      "Policy_Payment_EstimatedTotalAmount_A": [
+        "$61,455",
+        "$23,900",
+        "$54,120"
+      ],
+      "Policy_PolicyNumberIdentifier_A": [
+        "GL 7784120 25",
+        "XSU 55 210934 26",
+        "XSU 55 210934 25"
+      ],
+      "BusinessInformation_ParentOrganizationName_*": [
+        "Cascade Summit Mutual Insurance Company",
+        "Halloway Ridge Insurance Advisors, LLC"
+      ]
+    },
+    "ACORD_126": {
+      "GeneralLiability_Hazard_TerritoryCode_*": [
+        "104"
+      ],
+      "GeneralLiability_Hazard_Exposure_*": [
+        "$9,410,000",
+        "$8,275,000",
+        "$6,940,000"
+      ],
+      "GeneralLiability_EachOccurrence_LimitAmount_A": [
+        "$5,000,000"
+      ],
+      "GeneralLiability_GeneralAggregate_LimitAmount_A": [
+        "$5,000,000"
+      ]
+    },
+    "ACORD_131": {
+      "UnderlyingPolicy_*_InsurerFullName_*": [
+        "Sentinel Prairie Casualty Company",
+        "Halloway Ridge Insurance Advisors, LLC"
+      ],
+      "ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": [
+        "$1,000,000"
+      ],
+      "ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": [
+        "$2,500"
+      ],
+      "UnderlyingPolicy_GeneralLiability_PolicyNumberIdentifier_A": [
+        "XSU 55 210934 26",
+        "GL 7784120 25"
+      ]
+    }
+  },
+  "shapes": {
+    "ACORD_125": {
+      "NamedInsured_SICCode_*": {
+        "regex": "^\\d{4}$",
+        "why": "SIC is 4 digits"
+      },
+      "NamedInsured_NAICSCode_*": {
+        "regex": "^\\d{6}$",
+        "why": "NAICS is 6 digits"
+      }
+    }
+  },
+  "row_sets": {
+    "ACORD_125": {
+      "premises": {
+        "slots": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "columns": {
+          "line1": "CommercialStructure_PhysicalAddress_LineOne_{row}",
+          "city": "CommercialStructure_PhysicalAddress_CityName_{row}",
+          "county": "CommercialStructure_PhysicalAddress_CountyName_{row}",
+          "zip": "CommercialStructure_PhysicalAddress_PostalCode_{row}",
+          "occupied": "BuildingOccupancy_OccupiedArea_{row}",
+          "ft": "BusinessInformation_FullTimeEmployeeCount_{row}"
+        },
+        "rows": [
+          {
+            "line1": "1188 Larimer Crossing",
+            "city": "Denver",
+            "county": "Denver",
+            "zip": "80204",
+            "occupied": "6,500",
+            "ft": "11"
+          },
+          {
+            "line1": "3390 E Overland Rd",
+            "city": "Aurora",
+            "county": "Arapahoe",
+            "zip": "80011",
+            "occupied": "18,000",
+            "ft": "9"
+          },
+          {
+            "line1": "704 N Weber St",
+            "city": "Colorado Springs",
+            "county": "El Paso",
+            "zip": "80903",
+            "occupied": "3,200",
+            "ft": "5"
+          },
+          {
+            "line1": "15 Foothills Service Rd",
+            "city": "Golden",
+            "county": "Jefferson",
+            "zip": "80401",
+            "occupied": "24,000",
+            "ft": "14"
+          },
+          {
+            "line1": "2201 S Yuma Frontage Rd",
+            "city": "Pueblo",
+            "county": "Pueblo",
+            "zip": "81004",
+            "occupied": "4,100",
+            "ft": "3"
+          }
+        ]
+      },
+      "loss_history": {
+        "slots": [
+          "A",
+          "B",
+          "C"
+        ],
+        "columns": {
+          "date": "LossHistory_OccurrenceDate_{row}",
+          "desc": "LossHistory_OccurrenceDescription_{row}",
+          "paid": "LossHistory_PaidAmount_{row}",
+          "reserved": "LossHistory_ReservedAmount_{row}",
+          "lob": "LossHistory_LineOfBusiness_{row}"
+        },
+        "rows": [
+          {
+            "date": "02/28/2025",
+            "desc": "Fall from scaffold, subcontractor employee, bodily injury",
+            "paid": "$91,000",
+            "reserved": "$145,000",
+            "lob": "General Liability"
+          },
+          {
+            "date": "07/22/2023",
+            "desc": "Water damage to third party finishes during re-roof",
+            "paid": "$38,400",
+            "reserved": "$0",
+            "lob": "General Liability"
+          },
+          {
+            "date": "09/03/2025",
+            "desc": "Alleged faulty installation with resulting water intrusion",
+            "paid": "$0",
+            "reserved": "$75,000",
+            "lob": "General Liability"
+          },
+          {
+            "date": "11/09/2024",
+            "desc": "Backing collision with parked vehicle, no injuries",
+            "paid": "$6,215",
+            "reserved": "$0",
+            "lob": "Automobile"
+          },
+          {
+            "date": "05/16/2022",
+            "desc": "Hail damage to owned warehouse roof",
+            "paid": "$212,880",
+            "reserved": "$0",
+            "lob": "Property"
+          }
+        ]
+      }
+    },
+    "ACORD_126": {
+      "gl_hazards": {
+        "slots": [
+          "A",
+          "B",
+          "C"
+        ],
+        "columns": {
+          "loc": "GeneralLiability_Hazard_LocationProducerIdentifier_{row}",
+          "class": "GeneralLiability_Hazard_ClassCode_{row}",
+          "exposure": "GeneralLiability_Hazard_Exposure_{row}",
+          "territory": "GeneralLiability_Hazard_TerritoryCode_{row}",
+          "po_rate": "GeneralLiability_Hazard_PremisesOperationsRate_{row}",
+          "po_premium": "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_{row}"
+        },
+        "rows": [
+          {
+            "loc": "001",
+            "class": "91340",
+            "exposure": "1,318,000",
+            "territory": "008",
+            "po_rate": "3.412",
+            "po_premium": "$44,970"
+          },
+          {
+            "loc": "002",
+            "class": "91580",
+            "exposure": "2,145,000",
+            "territory": "008",
+            "po_rate": "0.902",
+            "po_premium": "$19,348"
+          },
+          {
+            "loc": "004",
+            "class": "92478",
+            "exposure": "486,000",
+            "territory": "008",
+            "po_rate": "8.114",
+            "po_premium": "$39,434"
+          }
+        ]
+      }
+    },
+    "ACORD_131": {
+      "loss_history": {
+        "slots": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E",
+          "F"
+        ],
+        "columns": {
+          "desc": "LossHistory_OccurrenceDescription_{row}",
+          "paid": "LossHistory_PaidAmount_{row}",
+          "reserved": "LossHistory_ReservedAmount_{row}",
+          "lob": "LossHistory_LineOfBusiness_{row}"
+        },
+        "rows": [
+          {
+            "desc": "Fall from scaffold, subcontractor employee, bodily injury",
+            "paid": "$91,000",
+            "reserved": "$145,000",
+            "lob": "General Liability"
+          },
+          {
+            "desc": "Water damage to third party finishes during re-roof",
+            "paid": "$38,400",
+            "reserved": "$0",
+            "lob": "General Liability"
+          },
+          {
+            "desc": "Alleged faulty installation with resulting water intrusion",
+            "paid": "$0",
+            "reserved": "$75,000",
+            "lob": "General Liability"
+          },
+          {
+            "desc": "Backing collision with parked vehicle, no injuries",
+            "paid": "$6,215",
+            "reserved": "$0",
+            "lob": "Automobile"
+          },
+          {
+            "desc": "Hail damage to owned warehouse roof",
+            "paid": "$212,880",
+            "reserved": "$0",
+            "lob": "Property"
+          }
+        ]
+      }
+    }
+  },
+  "expected_absent": {
+    "ACORD_125": {
+      "why": "The document states 4 named insureds and 5 premises; the form prints 3 and 4. The overflow entities are real - a run that drops a slotted row to make room for one of these has reordered a schedule, which is the defect this catches.",
+      "values": [
+        "Verdant Slope Property Holdings, LLC",
+        "92-0668311",
+        "2201 S Yuma Frontage Rd",
+        "Pueblo"
+      ],
+      "scope": [
+        "NamedInsured_*",
+        "CommercialStructure_*",
+        "BuildingOccupancy_*",
+        "BusinessInformation_*"
+      ]
+    }
+  }
+}

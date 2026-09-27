@@ -218,40 +218,13 @@ def _grouped_with_package_caps(
     pkg,
     cross_issues=None,
 ):
-    """`build_grouped_view` plus any 60-cap the PACKAGE scorer holds privately.
-
-    OWNER RULE, 2026-08-31: the card must match the cap. `calculate_package_sqs`
-    can hold a score at 60 through a stop that never becomes a structured issue -
-    the `property_building_value` conflict it MANUFACTURES internally is the live
-    case, and a `hard_cross` entry is the other. Both survived only as
-    `cap_reason`, a sentence the pre-form Review screen never prints (it renders
-    `tier` alone). The producer saw warnings and a 60 with nothing joining them.
-
-    Two shapes, both from the scorer:
-      * `cap_hard_stop_codes` names a card that ALREADY EXISTS for the same
-        fact - it is promoted to hard-stop severity rather than duplicated, so
-        the row keeps its wording and its Resolve control (for a cross-document
-        conflict that control opens Data Consistency, the only place it can
-        actually be cleared);
-      * `cap_hard_stops` carries the message for a cap with no card at all -
-        appended to the DISPLAY copy of the hard-stop list, where
-        `build_grouped_view`'s safety net renders it and its `_covered_by`
-        check keeps it from doubling a row that is already there.
-
-    Display only. The caller's own arrays - which drive capping, dismiss credit
-    and issue_id hashing - are never touched, and no score moves.
-    """
-    pkg = pkg or {}
-    codes = [c for c in (pkg.get("cap_hard_stop_codes") or []) if c]
-    # A message whose card is being promoted must NOT also be appended, or the
-    # same problem prints twice under two different wordings.
-    extra = [] if codes else [m for m in (pkg.get("cap_hard_stops") or []) if m]
-    return build_grouped_view(
-        structured_issues or [],
-        list(hard_stops or []) + extra,
-        soft_stops or [],
+    """Thin delegate - the implementation moved to `issue_registry` on
+    2026-09-23 so `audit_routes` rebuilds this screen through the same door.
+    See `issue_registry.grouped_with_package_caps` for the reasoning."""
+    from services.issue_registry import grouped_with_package_caps
+    return grouped_with_package_caps(
+        structured_issues, hard_stops, soft_stops, pkg,
         cross_issues=cross_issues,
-        promote_codes=codes,
     )
 
 
@@ -298,6 +271,18 @@ _FORM_EXECUTOR = _cf.ThreadPoolExecutor(
 )
 
 
+async def _lite_shared_gap_fill(loop, session: dict, form_ids: list) -> dict:
+    """`form_service.shared_gap_fill` for the essentials paths. Never raises:
+    any failure returns {} and each form falls back to its own gap fill."""
+    try:
+        from services.form_service import shared_gap_fill
+        return await loop.run_in_executor(
+            None, shared_gap_fill, session, list(form_ids)) or {}
+    except Exception as ex:                                   # noqa: BLE001
+        logger.error("combined_gap_fill: lite path failed, falling back per-form: %s", ex)
+        return {}
+
+
 async def _bg_lite_generate(session_id: str) -> None:
     """Background task: generate the top recommended form for essentials users and store SQS in session."""
     try:
@@ -318,6 +303,11 @@ async def _bg_lite_generate(session_id: str) -> None:
 
         loop = asyncio.get_event_loop()
         results = {}
+        # The ONE generation door (form_service.shared_gap_fill): each coverage
+        # line's gap fill reads only its own pages. This path skipped it and
+        # gave the form a whole-document fill (24 Sep 2026). Never raises - {}
+        # falls back to the form's own gap fill.
+        per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
         for form_id in form_ids:
             form_meta = next((f for f in session.get("all_forms", []) if f["form_id"] == form_id), None)
             if not form_meta:
@@ -329,7 +319,9 @@ async def _bg_lite_generate(session_id: str) -> None:
             if not os.path.exists(tpl):
                 continue
             try:
-                result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+                result = await loop.run_in_executor(
+                    None, process_single_form, form_meta, session,
+                    per_form_pre_filled.get(form_id))
                 results[form_id] = result
             except Exception as ex:
                 logger.error("bg_lite: form generation error form=%s session=%s: %s", form_id, session_id, ex)
@@ -510,21 +502,23 @@ async def upload_declaration(
         sid                = pipeline_result["session_id"]
         structured_issues  = list(pipeline_result.get("structured_issues") or [])
 
-        # NOTE: Tier-1 / ACORD 125 baseline is no longer a hard gate.
-        # When required fields are missing, we surface them as soft warnings
-        # on the recommendations / SQS screens and let the broker continue.
-        if not tier1_ok and tier1_missing:
-            # No document has this value (that is the gap being reported) - the
-            # form is already named in the message itself; remediation is the
-            # only honest addition, no fabricated document source.
-            _tier1_warnings = [
-                f"ACORD 125 minimum field missing: {m} "
-                "(Fix: Provide this value manually, or upload a document that states it.)"
-                for m in tier1_missing
-            ]
-            soft_stops = list(soft_stops) + _tier1_warnings
-            for _m, _w in zip(tier1_missing, _tier1_warnings):
-                structured_issues.append(make_issue(f"tier1_missing_{_m}", "soft_warning", _w))
+        # NOTE: Tier-1 / ACORD 125 baseline is no longer a hard gate. Missing
+        # required fields surface as soft warnings and the broker continues.
+        #
+        # THE EMISSION MOVED TO `sqs_service.evaluate_stops` ON 2026-09-23 and
+        # must not come back here. This block appended the six baseline
+        # sentences to a LOCAL `soft_stops` that was returned in the upload
+        # response and never persisted, so they capped nothing while sitting
+        # under a banner that said they capped the score at 85 - and because
+        # `evaluate_stops` did not emit them, the first recompute of any kind
+        # (Resolve, Dismiss, an answer, a field edit) rebuilt the stop lists
+        # without them and every row vanished whether or not it had been fixed.
+        # Measured live: a producer resolved "Proposed effective date", both
+        # rows disappeared, and all three contact facts were still empty.
+        #
+        # `tier1_ok` / `tier1_missing` are still read from the pipeline result
+        # below for the readiness card, which is a DISPLAY of the same check -
+        # not a second emitter.
 
         # Record the Submission Integrity verdict (Beta Report §4.1). Best-effort:
         # captures whether a multi-insured warning was raised so a later override
@@ -685,6 +679,18 @@ def enforce_integrity_gate(session: dict) -> None:
 
 
 # ASYNC-SAFE
+def _export_carried_lines(session: dict, facts: dict) -> list:
+    """The package's CARRIED lines for an EPIC / Vertafore export - the cover
+    page's evidence door, never the raw mention list (which, on a real policy
+    booklet, is every ISO endorsement menu: Farm, Liquor, EPLI, OCP ...)."""
+    try:
+        from services.lob_canon import carried_lines_of_business
+        return carried_lines_of_business(facts or {}, (session or {}).get("flags") or {})
+    except Exception:                                         # noqa: BLE001
+        raw = (facts or {}).get("lines_of_business", [])
+        return raw.get("value", []) if isinstance(raw, dict) else (raw or [])
+
+
 def enforce_building_value_gate(session: dict) -> None:
     """Block form generation while a building-value conflict is unresolved.
 
@@ -697,6 +703,16 @@ def enforce_building_value_gate(session: dict) -> None:
     and recommendations are unaffected — only generation is gated.
     """
     from services.underwriting_consistency import GENERATION_BLOCKING_RECONCILABLE_KEYS
+    # A package that carries no PROPERTY line has no building value to confirm
+    # and no ACORD 140 to generate - blocking it here refused the client's
+    # Orbin package (Property "No Coverage") until a meaningless pick was made.
+    try:
+        from services.lob_canon import line_is_carried
+        if line_is_carried("property", session.get("facts") or {},
+                           session.get("flags") or {}) is False:
+            return
+    except Exception:                                         # noqa: BLE001
+        pass
     uw = session.get("underwriting_consistency") or {}
     blocking = [
         f for f in (uw.get("fields") or [])
@@ -1261,87 +1277,18 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         #            GPT result so Pass 2 is replaced by a dict lookup.
         # When the flag is off, this whole block is skipped and the historic
         # per-form path runs unchanged.
+        # Stages 4-6 through the ONE door every generation path uses
+        # (form_service.shared_gap_fill, 24 Sep 2026 - the async worker used to
+        # skip it entirely). One shared gap fill across the selected forms, each
+        # coverage line reading only its own pages; any failure returns {} and
+        # each form falls back to its own gap fill, exactly as before.
         per_form_pre_filled: dict = {}
         if ENABLE_COMBINED_GAP_FILL:
             try:
-                async def _compute_gaps_one(form_id: str):
-                    form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
-                    if not form_meta:
-                        return form_id, None, None, None
-                    try:
-                        tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
-                    except ValueError:
-                        return form_id, None, None, None
-                    if not os.path.exists(tpl):
-                        return form_id, None, None, None
-                    schema = await loop.run_in_executor(
-                        _FORM_EXECUTOR, extract_form_schema, tpl, form_id,
-                    )
-                    facts_with_flags = {**session["facts"], **session.get("flags", {})}
-                    mapped, unmatched, _det = await loop.run_in_executor(
-                        _FORM_EXECUTOR, compute_form_gaps, form_id, schema, facts_with_flags,
-                    )
-                    return form_id, schema, unmatched, mapped
-
-                gap_previews = await asyncio.gather(
-                    *[_compute_gaps_one(fid) for fid in req.form_ids],
-                    return_exceptions=True,
-                )
-
-                forms_to_unmatched: dict = {}
-                forms_to_mapped: dict = {}
-                for item in gap_previews:
-                    if isinstance(item, Exception):
-                        logger.warning("combined_gap_fill: gap preview exception: %s", item)
-                        continue
-                    fid, _schema, unmatched, mapped = item
-                    if unmatched:
-                        forms_to_unmatched[fid] = unmatched
-                    if mapped:
-                        forms_to_mapped[fid] = mapped
-
-                if forms_to_unmatched:
-                    # Excluded documents are NOT sent to the model - see
-                    # form_service.active_document_text for why this must match
-                    # what extraction already does.
-                    raw_text = active_document_text(session)
-                    facts_with_flags = {**session["facts"], **session.get("flags", {})}
-                    # Which pages each coverage line's questions may read - see
-                    # pdf_service.build_line_page_scopes. Same active documents
-                    # as `raw_text`; an empty result keeps today's behaviour.
-                    try:
-                        from services.pdf_service import build_line_page_scopes
-                        _active_docs = [d for d in (session.get("docs") or [])
-                                        if isinstance(d, dict) and not d.get("excluded")] \
-                            or [d for d in (session.get("docs") or []) if isinstance(d, dict)]
-                        line_scopes = build_line_page_scopes(_active_docs, facts_with_flags)
-                    except Exception as _scope_ex:      # noqa: BLE001
-                        logger.warning("combined_gap_fill: line scoping unavailable: %s", _scope_ex)
-                        line_scopes = {}
-                    logger.info(
-                        "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
-                        "total_mapped_fields=%d line_scopes=%s",
-                        len(forms_to_unmatched), len(forms_to_mapped),
-                        sum(len(v) for v in forms_to_mapped.values()),
-                        {k: len(v) for k, v in (line_scopes or {}).items()},
-                    )
-                    per_form_pre_filled = await loop.run_in_executor(
-                        _FORM_EXECUTOR,
-                        functools.partial(
-                            combined_gap_fill,
-                            forms_to_unmatched, facts_with_flags, raw_text,
-                            forms_to_mapped=forms_to_mapped,
-                            line_scopes=line_scopes,
-                        ),
-                    )
-                else:
-                    logger.info("combined_gap_fill: no gaps after Pass 1 + 1.5 — skipping shared GPT pass")
+                from services.form_service import shared_gap_fill
+                per_form_pre_filled = await loop.run_in_executor(
+                    _FORM_EXECUTOR, shared_gap_fill, session, list(req.form_ids))
             except Exception as ex:
-                # Any failure in the combined path falls back to the historic
-                # per-form GPT path (process_single_form with pre_filled_gpt=None).
-                # exc_info=True: a silent fallback here means already_filled
-                # context never reaches gap-fill at all - this must be visible
-                # in the logs, not just a one-line message with no traceback.
                 logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex, exc_info=True)
                 per_form_pre_filled = {}
 
@@ -1683,6 +1630,8 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
 
     results = {}
     loop = asyncio.get_event_loop()
+    # The ONE generation door - see `_bg_lite_generate`.
+    per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
     for form_id in form_ids:
         form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
         if not form_meta:
@@ -1695,7 +1644,9 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         if not os.path.exists(tpl):
             continue
         try:
-            result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+            result = await loop.run_in_executor(
+                None, process_single_form, form_meta, session,
+                per_form_pre_filled.get(form_id))
             results[form_id] = result
         except Exception as ex:
             logger.error(f"Lite internal generation error for {form_id}: {ex}")
@@ -2754,7 +2705,7 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
                         "timestamp": timestamp, "session_id": session_id,
                         "user_email": current_user.get("email"), "organization": org_name,
                         "applicant": facts.get("applicant_name"), "effective_date": facts.get("effective_date"),
-                        "lines_of_business": facts.get("lines_of_business", []), **_build_payload(form_id, generated[form_id])}
+                        "lines_of_business": _export_carried_lines(proc_session, facts), **_build_payload(form_id, generated[form_id])}
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
@@ -2798,7 +2749,7 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
                    "timestamp": timestamp, "session_id": session_id,
                    "user_email": current_user.get("email"), "organization": org_name,
                    "applicant": facts.get("applicant_name"), "effective_date": facts.get("effective_date"),
-                   "lines_of_business": facts.get("lines_of_business", []), **_build_payload(form_id, generated[form_id])}
+                   "lines_of_business": _export_carried_lines(proc_session, facts), **_build_payload(form_id, generated[form_id])}
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 

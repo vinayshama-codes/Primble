@@ -268,6 +268,65 @@ def _check_gl_class_code_vs_operations(
     return issues
 
 
+def _check_acord127_state_section(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """ACORD 127 selected on a CO / CA auto risk without its state ACORD 137.
+
+    Client 11 Sep 2026 item 7 and again 22 Sep: the 127 itself says "USE ACORD
+    137 FOR YOUR STATE TO PROVIDE COVERAGES / LIMITS INFORMATION", so a 127
+    generated alone carries NO auto limits anywhere in the package - the $1M
+    liability, Med Pay, UM and deductibles live only on the 137. The 137 stays
+    labelled Needs Confirmation (Brent's June ruling: not every carrier wants
+    it), the selection screen ticks it with the 127 (24 Sep owner decision),
+    and this advisory - no score cap - names it when a producer unticks it.
+    The state set is the recommender's own (`_supported_state_forms`), so this
+    can never ask for a state form the recommender would not offer.
+    """
+    if "ACORD_127" not in triggered_ids:
+        return []
+    if not (flags.get("has_auto_coverage") or flags.get("has_commercial_auto")
+            or flags.get("has_auto_liability")):
+        return []
+    try:
+        from services.form_service import _supported_state_forms
+        states = _supported_state_forms(facts, flags)
+    except Exception:                                        # noqa: BLE001
+        return []
+    issues: List[dict] = []
+    # One literal emit per state form, so `add_forms` is a declaration the
+    # anti-rot harvester (tests/test_add_form_resolution.py) can read.
+    if "CO" in states and "ACORD_137_CO" not in triggered_ids:
+        issues.append(_issue(
+            "advisory",
+            "acord127_missing_state_137",
+            (
+                "ACORD 127 is included but ACORD 137 CO is not. ACORD 127 directs "
+                "you to use the state ACORD 137 for coverages and limits, so "
+                "without it the auto liability, medical payments, uninsured "
+                "motorist limits and deductibles appear on no form. Add ACORD "
+                "137 CO unless this carrier does not require it."
+            ),
+            ["ACORD_127", "ACORD_137_CO"],
+            add_forms=["ACORD_137_CO"],
+        ))
+    if "CA" in states and "ACORD_137_CA" not in triggered_ids:
+        issues.append(_issue(
+            "advisory",
+            "acord127_missing_state_137",
+            (
+                "ACORD 127 is included but ACORD 137 CA is not. ACORD 127 directs "
+                "you to use the state ACORD 137 for coverages and limits, so "
+                "without it the auto liability, medical payments, uninsured "
+                "motorist limits and deductibles appear on no form. Add ACORD "
+                "137 CA unless this carrier does not require it."
+            ),
+            ["ACORD_127", "ACORD_137_CA"],
+            add_forms=["ACORD_137_CA"],
+        ))
+    return issues
+
+
 def _check_location_address_reconciliation(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -2044,31 +2103,30 @@ def _check_property_deductible_structure(
             ["ACORD_140", "ACORD_141"],
         ))
 
-    # Check for peril-specific deductible consistency
     has_wind = _fv(facts, "property_deductible_wind")
     has_earth = _fv(facts, "property_deductible_earthquake")
     has_flood = _fv(facts, "property_deductible_flood")
 
-    # If any peril deductible is present, all should be defined (or user chose not to include)
-    peril_deductibles = [has_wind, has_earth, has_flood]
-    present_count = sum(1 for p in peril_deductibles if p)
-
-    if 0 < present_count < 3:
-        missing_perils = []
-        if not has_wind:
-            missing_perils.append("wind/hail")
-        if not has_earth:
-            missing_perils.append("earthquake")
-        if not has_flood:
-            missing_perils.append("flood")
-
-        issues.append(_issue(
-            "soft_warning",
-            "property_peril_deductible_incomplete",
-            f"Some peril-specific deductibles defined but missing: {', '.join(missing_perils)}. "
-            "Define all peril deductibles or remove partially-defined ones.",
-            ["ACORD_140", "ACORD_141"],
-        ))
+    # ── `property_peril_deductible_incomplete` DELETED 2026-09-23 ────────────
+    # Its gate was `0 < present_count < 3` - i.e. it fired on EVERY policy that
+    # states some peril deductibles but not all three. That is the ordinary
+    # shape of a real property policy: a wind/hail deductible with no
+    # earthquake or flood coverage bought at all. So every normal property
+    # package carried this warning, and a warning is an 85 ceiling, which is a
+    # large part of why a complete property submission could never score above
+    # "Almost There".
+    #
+    # "Define all peril deductibles or remove partially-defined ones" asks the
+    # producer to invent a deductible for a peril the policy does not cover, or
+    # to delete a true one. Neither is a fix, and there is no per-peril coverage
+    # evidence anywhere in the fact set that could tell the two cases apart.
+    #
+    # It was also the third copy of one rule: an identical hard stop sat in
+    # `_check_peril_specific_deductibles_referenced` just below (also deleted)
+    # and another in `sqs_service.evaluate_stops`. The single surviving rule
+    # lives in `evaluate_stops` and fires only when peril deductibles are
+    # REFERENCED and no amount was captured at all - the one form of this a
+    # producer can actually satisfy.
 
     # Check deductible basis (if deductible present, basis should be clear)
     has_any_ded = aop_ded or has_wind or has_earth or has_flood
@@ -2147,47 +2205,27 @@ def _check_property_coinsurance_enforcement(
 def _check_peril_specific_deductibles_referenced(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
+    """DELETED 2026-09-23 - a false positive by construction. Kept as an empty
+    rule so its registration and any stored issue id stay valid.
+
+    `property_has_peril_deductibles` is set by extraction when the document
+    shows a wind/hail OR earthquake OR flood deductible - one is enough. This
+    function hard-stopped unless ALL THREE were defined, so an ordinary policy
+    with a wind/hail deductible and no earthquake or flood coverage was capped
+    at 60 and asked to state amounts for perils it does not carry.
+
+    It was also a second, independent copy of the identical rule in
+    `sqs_service.evaluate_stops`, and the soft twin below it
+    (`property_peril_deductible_incomplete`, gated on 0 < present_count < 3)
+    was a third - one rule at two severities in two files, which is the exact
+    duplication that let the Umbrella SIR and auto-symbol defects survive their
+    first fixes.
+
+    The single surviving rule lives in `sqs_service.evaluate_stops` and fires
+    only when peril deductibles are referenced and NO amount was captured at
+    all - the one version of this that a producer can actually satisfy.
     """
-    Enforce hard stop if peril-specific deductibles are REFERENCED but undefined.
-
-    Spec requirement: If peril deductible is mentioned on doc but amount not provided,
-    this is a HARD STOP (incomplete coverage definition).
-    """
-    issues: List[dict] = []
-
-    if not flags.get("has_property_coverage"):
-        return issues
-
-    if "ACORD_140" not in triggered_ids and "ACORD_141" not in triggered_ids:
-        return issues
-
-    # Check if peril deductibles are REFERENCED in the fact-extraction
-    # but not defined with actual amounts
-    peril_deductible_referenced = flags.get("property_has_peril_deductibles", False)
-
-    if peril_deductible_referenced:
-        has_wind = _fv(facts, "property_deductible_wind")
-        has_earth = _fv(facts, "property_deductible_earthquake")
-        has_flood = _fv(facts, "property_deductible_flood")
-
-        missing_perils = []
-        if not has_wind:
-            missing_perils.append("wind/hail")
-        if not has_earth:
-            missing_perils.append("earthquake")
-        if not has_flood:
-            missing_perils.append("flood")
-
-        if missing_perils:
-            issues.append(_issue(
-                "hard_stop",
-                "peril_deductible_referenced_but_undefined",
-                f"Peril-specific deductible referenced on document but amounts undefined: {', '.join(missing_perils)}. "
-                "Define deductible amounts or remove references.",
-                ["ACORD_140", "ACORD_141"],
-            ))
-
-    return issues
+    return []
 
 
 def _check_identity_address_distinction(
@@ -2614,6 +2652,7 @@ _RULE_FUNCTIONS = [
     _check_property_coinsurance_enforcement,  # NEW: Coinsurance enforcement
     _check_peril_specific_deductibles_referenced,  # NEW: Peril deductible hard stops
     _check_acord186_subcontracting_vs_gl_wc,
+    _check_acord127_state_section,             # 24 Sep 2026: client item 7
     _check_auto_hired_nonowned_symbols,
     _check_auto_symbols_captured,              # NEW (2026-08-07): symbols absent entirely
     _check_auto_owned_fleet_symbol_gap,        # NEW (2026-08-07): real coverage hole

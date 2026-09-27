@@ -50,8 +50,17 @@ logger = logging.getLogger(__name__)
 # model still filled one of them from the operations text, which turned a
 # -15 into a -10. No schema change; the version moves so the five live
 # packages re-extract under the stricter rule instead of serving v15 replies.
-PROMPT_VERSION = "v21"
-SCHEMA_VERSION = "v21"
+# v22 (2026-09-21, A125 kit test 2): SEVEN additive facts, no reshape -
+# named_insured_details, applicant_contacts, additional_interests,
+# organization_relationships, safety_program_elements, disclosure_answers,
+# other_named_insured_operations - plus abbreviation hints on the premises
+# table's FT / PT columns. Root cause: the schema modelled the applicant as one
+# entity with singular attributes while ACORD prints tables of entities, so a
+# second insured's website was stamped on the first insured's row; and ACORD
+# 125's whole GENERAL INFORMATION section had no backing fact at all, which is
+# why two runs of one document disagreed on 13 boxes.
+PROMPT_VERSION = "v22"
+SCHEMA_VERSION = "v22"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -164,7 +173,16 @@ _EXTRACT_SCHEMA = (
     '  "dba_name": string or null, "mailing_address": string or null,\n'
     '  "physical_address": string or null, "contact_name": string or null,\n'
     '  "contact_phone": string or null, "contact_email": string or null,\n'
-    '  "applicant_website": string or null,\n'
+    # The applicant's OWN table columns. `named_insured_details` describes the
+    # OTHER named insureds only, so row A of ACORD 125's applicant table had no
+    # fact for its business phone, GL class code or member/manager count - three
+    # boxes that simply could not be filled by anything.
+    '  "applicant_business_phone": string or null (the APPLICANT organisation main phone, not a contact person direct line - that is contact_phone),\n'
+    '  "applicant_gl_class_code": string or null (the General Liability class code the document gives the APPLICANT itself),\n'
+    '  "applicant_member_manager_count": string or null (for an LLC, the number of members and managers),\n'
+    '  "sales_installation_repair_percent": string or null (the percentage of TOTAL SALES the document attributes to installation, service or repair work),\n'
+    '  "sales_installation_repair_off_premises_percent": string or null (the percentage of that installation / service / repair work performed AWAY from the applicant own premises),\n'
+    '  "applicant_website": string or null (the FIRST named insured own website ONLY. A DIFFERENT named insured website belongs in named_insured_details[].website - on a live run this single slot took the SECOND insured website and it was stamped on the FIRST insured row of the application),\n'
     # Producer-scoped identity. These exist because `contact_*` above means the
     # APPLICANT (see RULE 11 and arq_service's own client-facing wording, "the
     # best phone number to reach YOU"). Before these existed, the producer's
@@ -272,6 +290,37 @@ _EXTRACT_SCHEMA = (
     # 125 as OTHER NAMED INSURED - so the application asserted shared
     # policy status for parties the policy does not name.
     '  "additional_named_insureds": [string] (ONLY parties the document names as a NAMED INSURED on the policy itself - a co-insured entity, a subsidiary or affiliate carried on the same policy, an additional NAMED insured endorsement. A party shown as ADDITIONAL INSURED, certificate holder, loss payee, mortgagee, lienholder or under any other interest does NOT belong here - put an additional insured in risk_transfer.additional_insured_names instead. Where the document gives a party an interest word, that word decides; never promote a party to named insured because it is printed near the insured block),\n'
+    # ── Row-bearing detail for the parties, interests and disclosures ACORD
+    # prints as TABLES (A125 kit, test 2, 21 Sep 2026) ────────────────────────
+    # These are ADDITIVE, never a reshape. `additional_named_insureds` stays a
+    # [string] roster with its twenty-odd consumers untouched; the detail rides
+    # alongside, exactly as `property_locations` rides alongside `locations`.
+    # Reshaping the roster in place would have put every scorer, validator,
+    # questionnaire and stamper that reads it at risk for no extra coverage.
+    #
+    # Why they exist: the extraction schema modelled the applicant as ONE
+    # entity with SINGULAR attributes while ACORD prints tables of entities.
+    # Measured on a live ACORD 125 - `applicant_website` is one string for
+    # three rows, so the SECOND insured's website was stamped on the FIRST
+    # insured's row; `contact_*` is one set for two contact blocks, so the
+    # second contact's phone landed in the first contact's SECONDARY box.
+    # A value with nowhere to go does not stay put: it lands on the primary
+    # entity, lands in an adjacent slot, or is lost.
+    '  "named_insured_details": [{"name": string (must match a name in additional_named_insureds EXACTLY - this is the SAME party, described. NEVER the first named insured: its attributes are the applicant_* / fein / sic_code / naics_code scalars), "fein": string or null, "sic": string or null, "naics": string or null, "gl_class_code": string or null, "phone": string or null, "website": string or null, "address_line_one": string or null, "address_line_two": string or null, "city": string or null, "state": string or null, "postal_code": string or null, "entity_type": string or null (Corporation, LLC, Partnership, Individual, Joint Venture, Not For Profit, Subchapter S Corporation, Trust), "member_manager_count": string or null}] (ONE entry per OTHER named insured, in the SAME ORDER as additional_named_insureds and describing the SAME parties - entry 1 describes additional_named_insureds[0]. The FIRST named insured is NOT in this list; its own attributes are the applicant_* / fein / sic_code / naics_code scalars above. Record an attribute ONLY under the party the document attributes it to - never copy the applicant FEIN, phone or website onto another entity because they are printed nearby, and never copy another entity onto the applicant),\n'
+    '  "applicant_contacts": [{"contact_type": string or null (what the document calls this contact - Inspection, Accounting, Claims, Billing, Primary), "name": string or null, "phone": string or null, "phone_kind": "Home"|"Business"|"Cell"|null, "email": string or null, "secondary_phone": string or null, "secondary_email": string or null}] (the APPLICANT contacts, one entry each, in the order the document lists them. Never the producer or carrier people - those belong in producer_contact_*),\n'
+    '  "additional_interests": [{"name": string, "interest_type": string or null (the word the document uses - Loss Payee, Mortgagee, Lienholder, Additional Insured, Owner, Trustee, Registrant, Co-Owner, Breach of Warranty, Lenders Loss Payable, Employee as Lessor, Leaseback Owner), "address_line_one": string or null, "address_line_two": string or null, "city": string or null, "state": string or null, "postal_code": string or null, "country": string or null (ONLY when the document prints a country - never inferred from the address), "rank": string or null, "reference_number": string or null (reference / loan / account number), "lien_amount": string or null, "phone": string or null, "fax": string or null, "email": string or null, "interest_reason": string or null (WHY they hold the interest - e.g. "Equipment finance agreement"), "item_description": string or null (the specific property the interest attaches to), "item_location_number": string or null (the LOCATION number the interest attaches to, when the document gives one), "interest_end_date": string or null, "evidence_requested": string or null (Certificate, Policy, Send Bill)}] (parties holding an interest in specific property WITHOUT being a named insured. A party the document names as a NAMED INSURED does not belong here),\n'
+    '  "organization_relationships": [{"role": "parent"|"subsidiary", "name": string, "relationship_description": string or null, "percent_owned": string or null}] (ownership relationships the document STATES - "parent" when the named entity owns or controls the applicant, "subsidiary" when the applicant owns or controls the named entity. Never inferred from a shared address or a similar name),\n'
+    '  "other_named_insured_operations": string or null (the operations narrative the document gives for the OTHER named insureds, when it prints one SEPARATELY from the applicant own operations. Null when the document describes only one set of operations - never a copy of operations_description),\n'
+    '  "safety_program_elements": [string] (ONLY the formal-safety-programme elements the document states the applicant has, each as one of exactly: "Safety Manual", "Safety Position", "Monthly Meetings", "OSHA". A safety programme mentioned with no element named gives an EMPTY list, which is not the same as the applicant having no programme),\n'
+    # The GENERAL INFORMATION disclosures. Before this fact existed NOT ONE of
+    # ACORD 125's 15 questions had anything behind it - every answer, every
+    # explanation and every occurrence date came from a non-deterministic LLM
+    # call with no fact underneath. Measured consequence: questions 1a, 1b, 2
+    # and 8 were fully answered on one run of a document and fully BLANK on the
+    # next run of the SAME document over the SAME code. 13 boxes moved on
+    # nothing. The topics are the ACORD questions themselves, so one fact
+    # serves every form that asks them - the question CODES are shared.
+    '  "disclosure_answers": [{"topic": "subsidiary_of_another"|"has_subsidiaries"|"formal_safety_program"|"flammables_explosives_chemicals"|"other_insurance_with_carrier"|"coverage_declined_cancelled_nonrenewed"|"abuse_molestation_discrimination_claims"|"fraud_arson_conviction"|"uncorrected_fire_safety_violations"|"foreclosure_repossession_bankruptcy"|"judgement_or_lien"|"business_in_trust"|"foreign_operations"|"other_business_ventures"|"owns_leases_operates_drones"|"hires_drone_operators", "answer": "Y"|"N"|null, "explanation": string or null, "occurrence_date": string or null, "resolution": string or null (ONLY a resolution that has HAPPENED - a planned or scheduled remedy is not a resolution), "resolution_date": string or null, "evidence_quote": string or null (the sentence in the document that states this, copied verbatim)}] (ONE entry per question the document ACTUALLY ADDRESSES. A question the document is silent on must be OMITTED ENTIRELY - do not emit an entry with answer "N" to mean "not mentioned". Silence is not a No. The explanation must be what the document SAYS, never a restatement of the question),\n'
     '  "property_building_value": string or null, "property_bpp_value": string or null,\n'
     '  "construction_type": string or null, "occupancy_type": string or null,\n'
     '  "year_built": string or null, "roof_year": string or null,\n'
@@ -383,7 +432,7 @@ _EXTRACT_SCHEMA = (
     'premises sits in, only when the document states it - e.g. "Arapahoe"; never guessed from the city), '
     '"ownership": string or null (owner, tenant, or a short description '
     'of the actual interest if neither, e.g. "licensee"), '
-    '"inside_city_limits": boolean or null, "full_time_employees": string or null, "part_time_employees": string or null, '
+    '"building_number": string or null (the BLD # the premises table prints beside the LOC #, when it prints one), "any_area_leased_to_others": "Y"|"N"|null (ONLY when the document states it for THAT premises), "inside_city_limits": boolean or null, "full_time_employees": string or null (a premises table often heads this column with an ABBREVIATION - FT, F/T, "# FULL TIME EMPL", FULL TIME, EMPL FT - all name this column), "part_time_employees": string or null (headed PT, P/T, "# PART TIME EMPL" or PART TIME), '
     '"annual_revenue": string or null, "occupied_area": string or null, "open_to_public_area": string or null, '
     '"total_building_area": string or null (the TOTAL square footage of the building, NOT the same as occupied_area - '
     'leave null if the document does not state the whole building\'s size), '
@@ -1918,6 +1967,14 @@ _LIST_FIELDS = frozenset({
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
     "coverage_lines",
+    # A125 kit test 2 (21 Sep 2026) - the row-bearing detail facts. Both this
+    # set AND _LONG_DOC_LIST_KEYS must carry them:
+    # test_every_list_shaped_extraction_fact_is_registered fails the build
+    # otherwise, and a list missing from _LONG_DOC_LIST_KEYS is merged as a
+    # SCALAR - one chunk's rows win and the rest of the document's are lost.
+    "named_insured_details", "applicant_contacts", "additional_interests",
+    "organization_relationships", "safety_program_elements",
+    "disclosure_answers",
 })
 
 
@@ -2280,6 +2337,12 @@ _LONG_DOC_LIST_KEYS = [
     "additional_named_insureds", "auto_covered_symbols",
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
+    # A125 kit test 2 - see the note in _LIST_FIELDS. A named insured described
+    # on page 3 and an additional interest described on page 74 are in
+    # different chunks; a scalar merge would keep one of them.
+    "named_insured_details", "applicant_contacts", "additional_interests",
+    "organization_relationships", "safety_program_elements",
+    "disclosure_answers",
     # Without this the cross-chunk merge treats coverage_lines as a scalar and
     # keeps ONE chunk's list, so a dec page split across chunks silently loses
     # every line mentioned in the other chunks.
@@ -4086,18 +4149,39 @@ def _fold_unkeyed_into_matching_rows(groups: List[dict],
             kept.append(row)
             continue
         matches = []
+        # DESCRIPTIVE words agree by CONTAINMENT (24 Sep 2026): the dec prints
+        # "OUTBACK SEDAN" and the narrative "Outback", or the narrative folds
+        # the make into the model ("Subaru Outback") - one car, and the exact
+        # compare printed a second phantom Subaru on ACORD 127. Per field, as
+        # before: a field the target does not state is NEW information, never
+        # a conflict. When both state it, it agrees if either printing (with
+        # punctuation removed) sits inside the other side's whole description.
+        # Identifiers and numbers (VIN, year, codes, symbols) still need
+        # equality.
+        _desc_keys = ("make", "model", "body_type", "description", "vehicle_description")
+
+        def _desc_compact(r: dict) -> str:
+            return "".join(_norm(r.get(k)) for k in _desc_keys)
+
         for g in groups:
             shared = 0
+            agrees = True
             for k, v in stated.items():
                 other = g.get(k)
                 if _is_empty(other):
                     continue                    # target silent - no conflict
-                if _norm(other) != _norm(v):
-                    break                       # a disagreement: different entity
+                a, b = _norm(v), _norm(other)
+                if k in _desc_keys and a != b:
+                    if not ((len(a) >= 3 and a in _desc_compact(g))
+                            or (len(b) >= 3 and b in _desc_compact(stated))):
+                        agrees = False          # a different make or model
+                        break
+                elif a != b:
+                    agrees = False              # a disagreement: different entity
+                    break
                 shared += 1
-            else:
-                if shared:
-                    matches.append(g)
+            if agrees and shared:
+                matches.append(g)
         if len(matches) != 1:
             kept.append(row)                    # none, or ambiguous - keep it
             continue
@@ -6785,7 +6869,12 @@ def apply_declared_absent_downgrades(
 
     changed: List[str] = []
     for flag in _lines_declared_absent(text):
-        if not flags.get(flag):
+        # An ABSENT flag is recorded too (24 Sep 2026), not only a true one.
+        # The declarations' own "PROPERTY - NO COVERAGE" is positive evidence
+        # of absence; left unset, the flag read as silence and the recommender
+        # offered ACORD 130 / 140 on the real Orbin text, and the carried-lines
+        # door lost its veto. Still never turns a flag ON.
+        if flags.get(flag) is False:
             continue                        # already false - nothing to do
         words = _FLAG_LINE_WORDS[flag]
         if any(w in cl for cl in covered_words for w in words):
@@ -8438,8 +8527,16 @@ _FORM_NUMBER_RE = re.compile(r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", re.I)
 
 
 def _looks_like_a_form_number(value: Any) -> bool:
-    """True for 'CG 00 01 04 13', 'IM 7100 06 04', 'IL 00 17 11 98'."""
-    return bool(_FORM_NUMBER_RE.match(str(value or "").strip()))
+    """True for 'CG 00 01 04 13', 'IM 7100 06 04', 'IL 00 17 11 98' - and, since
+    24 Sep 2026, for a carrier's own edition-dated forms ('CU7001A 11-15',
+    'CA7450 M', 'CG 70 01A 10 12'). One shape door for every layer:
+    `normalization.looks_like_a_form_number`. `_FORM_NUMBER_RE` above is the
+    ISO/AAIS half of it, kept for the callers that anchor on it."""
+    try:
+        from services.normalization import looks_like_a_form_number
+        return looks_like_a_form_number(value)
+    except Exception:                                        # noqa: BLE001
+        return bool(_FORM_NUMBER_RE.match(str(value or "").strip()))
 
 
 def _looks_like_a_policy_number(value: Any) -> bool:
@@ -8655,19 +8752,90 @@ def prior_term_policy_numbers(facts: Any) -> set:
     grid = facts.get("prior_coverage_by_line")
     if isinstance(grid, dict) and "value" in grid:
         grid = grid.get("value")
-    if not isinstance(grid, list):
+    # ...and the policies the merge retired as an expired predecessor of a
+    # later policy on the same line (`_retire_predecessor_policies`).
+    # A renewal that KEPT its number leaves that number on a current row too;
+    # the current policy is never history.
+    retired = facts.get(RETIRED_COVERAGE_LINES_KEY)
+    live = facts.get("coverage_lines")
+    live_numbers = {_norm_policy_number(r.get("policy_number")) for r in (live if isinstance(live, list) else [])
+                    if isinstance(r, dict)}
+    retired = [r for r in (retired if isinstance(retired, list) else [])
+               if isinstance(r, dict) and _norm_policy_number(r.get("policy_number")) not in live_numbers]
+    rows = [r for r in (grid if isinstance(grid, list) else []) + retired if isinstance(r, dict)]
+    if not rows:
         return out
     current = facts.get("policy_number")
     if isinstance(current, dict) and "value" in current:
         current = current.get("value")
     current_norm = _norm_policy_number(current)
-    for row in grid:
-        if not isinstance(row, dict):
-            continue
+    for row in rows:
         pn = _norm_policy_number(row.get("policy_no") or row.get("policy_number"))
         if pn and pn != current_norm:
             out.add(pn)
     return out
+
+
+# ── An expired policy is its successor's history, never its rival ───────────
+# Owner, 27 Sep 2026: policies are removed from a package only when they
+# conflict or have expired - and a real conflict belongs in Data Consistency.
+# Measured on a renewal package (last year's GL declarations uploaded beside
+# this year's): the expired GL policy and its renewal were two records on one
+# line, so the picker reported "two policies on the same coverage line", the
+# 126 header and the 131 underlying GL row went blank waiting for a choice, and
+# ACORD 125 listed the expired policy as current "other insurance". The client's
+# own rule (item 10) is to compare only within the same line AND the applicable
+# time period.
+#
+# A row is retired only when ALL hold: it and another row on the same line both
+# carry a full term, it ended on or before the other began, its end has passed,
+# and the other names a real policy. Anything short of that - a missing date,
+# overlapping terms, two live policies, a future quote - is untouched, and two
+# live policies on one line stay the Data Consistency question they always were.
+# Retired rows are KEPT, on `prior_coverage_lines`, never deleted.
+RETIRED_COVERAGE_LINES_KEY = "prior_coverage_lines"
+
+
+def _retire_predecessor_policies(mf: dict, today: Optional[str] = None) -> List[str]:
+    lines = mf.get("coverage_lines") if isinstance(mf, dict) else None
+    if not isinstance(lines, list) or len(lines) < 2:
+        return []
+    from datetime import datetime as _dt
+    from services.normalization import normalize_date
+    today = today or _dt.now().strftime("%Y-%m-%d")
+
+    def _term(e: dict):
+        eff = normalize_date(e.get("effective_date"))
+        exp = normalize_date(e.get("expiration_date"))
+        return (eff, exp) if eff and exp and eff < exp else None
+
+    by_line: Dict[str, List[int]] = {}
+    for i, e in enumerate(lines):
+        if isinstance(e, dict) and not _line_entry_denies_coverage(e):
+            canon = _canon_line(e.get("line"))
+            if canon:
+                by_line.setdefault(canon, []).append(i)
+    retire: Dict[int, str] = {}
+    for canon, idxs in by_line.items():
+        for i in idxs:
+            ta = _term(lines[i])
+            if not ta or ta[1] > today:
+                continue                                   # no full term, or not expired
+            for j in idxs:
+                tb = _term(lines[j]) if j != i else None
+                if (tb and ta[1] <= tb[0]
+                        and str(lines[j].get("policy_number") or "").strip()):
+                    retire[i] = (f"{canon}: {lines[i].get('policy_number') or '(no number)'} "
+                                 f"{ta[0]}..{ta[1]} precedes {lines[j].get('policy_number')} "
+                                 f"from {tb[0]}")
+                    break
+    if not retire:
+        return []
+    prior = mf.get(RETIRED_COVERAGE_LINES_KEY)
+    prior = list(prior) if isinstance(prior, list) else []
+    mf[RETIRED_COVERAGE_LINES_KEY] = prior + [dict(lines[i]) for i in sorted(retire)]
+    mf["coverage_lines"] = [e for k, e in enumerate(lines) if k not in retire]
+    return [retire[i] for i in sorted(retire)]
 
 
 def _prior_programme_sections(entries: Any, prior: set) -> set:
@@ -9355,12 +9523,12 @@ def _usable_account_agency(name: str) -> str:
             return ""
     except Exception:                                        # noqa: BLE001
         pass
-    try:
-        from services.field_mapping_integrity import names_a_party
-        if not names_a_party(name):
-            return ""
-    except Exception:                                        # noqa: BLE001
-        pass
+    # NO PROPER-NOUN TEST on the user's own agency (24 Sep 2026). The party
+    # shape check exists to refuse a DOCUMENT's boilerplate; applied to what
+    # the user typed in their own profile it refused "thinksmith" (lower case)
+    # - and a refused account silently handed the producer block back to the
+    # EXPIRING agency. Only a non-answer ("N/A", "TBD", "none") is refused,
+    # and a refused one now leaves the block blank (`_account_unreadable`).
     return name
 
 
@@ -9393,26 +9561,48 @@ def _route_producer_party(mf: dict, docs: list,
     def _same(a: str, b: str) -> bool:
         return _norm_name_key(a) == _norm_name_key(b) or same_agency(a, b) is True
 
+    acct_name = acct_person = acct_email = acct_phone = ""
+    if isinstance(account, dict):
+        acct_name = _usable_account_agency(account.get("organization_name"))
+        acct_person = str(account.get("full_name") or "").strip()
+        acct_email = str(account.get("email") or "").strip()
+        acct_phone = str(account.get("phone") or "").strip()
+    # A USER is submitting but which agency cannot be read. Then an agency the
+    # expiring programme also prints is the INCUMBENT wherever it appears - a
+    # narrative "placed through Commercial Risk Solutions" names the current
+    # broker - and never evidence of who is submitting (24 Sep 2026: with the
+    # profile's agency blank, the client's own narrative put Commercial Risk
+    # Solutions back on the new application).
+    incumbents = (_incumbent_agencies(docs)
+                  if not acct_name and _account_unreadable(account) else [])
     agencies: List[str] = []
     for role, f in rows:
         name = _agency(f)
         if role in _SUBMISSION_ROLES and name and not any(_same(name, a) for a in agencies):
+            if any(_same(name, i) for i in incumbents):
+                continue
             agencies.append(name)
-    if len(agencies) > 1:
-        return None                    # two submitting agencies: a real question
-    acct_name = acct_person = ""
-    if isinstance(account, dict):
-        acct_name = _usable_account_agency(account.get("organization_name"))
-        acct_person = str(account.get("full_name") or "").strip()
-    if not agencies and acct_name:
+    if acct_name:
         # The account IS the insured (an applicant preparing its own
         # submission). It is not a producer, and the Producer block would put
         # the insured on both sides of the application.
         applicant = _producer_text(mf.get("applicant_name"))
         if applicant and _same(acct_name, applicant):
             acct_name = ""
-    submitting = agencies[0] if agencies else acct_name
-    if not submitting:
+    # THE LOGIN OUTRANKS A DOCUMENT (24 Sep 2026, client item 4). The person
+    # generating the submission IS its producer. A narrative or application
+    # that names an agency usually names the CURRENT broker ("the account has
+    # been placed through Commercial Risk Solutions") - reading that as the
+    # submitting agency printed the old broker on every form under the new
+    # agency's own login. A document's agency decides only when no usable
+    # account exists (offline callers, and an account with no agency).
+    if acct_name:
+        submitting = acct_name
+    else:
+        if len(agencies) > 1:
+            return None                # two submitting agencies: a real question
+        submitting = agencies[0] if agencies else ""
+    if not submitting and not incumbents:
         return None
 
     # The documents' agencies are clustered among THEMSELVES first: "CRS
@@ -9438,6 +9628,12 @@ def _route_producer_party(mf: dict, docs: list,
     own_rows: List[Tuple[str, dict]] = []
     expiring: List[dict] = []
     for cluster in clusters:
+        if not submitting:
+            # Only the incumbent is named: every printing of it is the
+            # expiring agency's record, and the block is left for the producer.
+            if any(_same(n, i) for _r, _f, n in cluster for i in incumbents):
+                expiring.extend(f for _r, f, _n in cluster)
+            continue
         if all(same_agency(n, n) is None for _r, _f, n in cluster):
             continue                   # no identity at all ("Insurance Agency")
         verdicts = [True if _same(submitting, n) else same_agency(submitting, n)
@@ -9445,10 +9641,27 @@ def _route_producer_party(mf: dict, docs: list,
         if any(v is True for v in verdicts):
             own_rows.extend((r, f) for r, f, _n in cluster)
         elif all(v is False for v in verdicts):
-            expiring.extend(f for r, f, _n in cluster if r in _EXPIRING_PROGRAMME_ROLES)
+            # Under the LOGIN's agency, a document naming a DIFFERENT agency is
+            # that agency's record whatever its role - a narrative saying "the
+            # account has been placed through <old broker>" names the current
+            # broker, not the submitting one (24 Sep 2026).
+            _by_login = bool(acct_name) and submitting == acct_name
+            expiring.extend(f for r, f, _n in cluster
+                            if r in _EXPIRING_PROGRAMME_ROLES or _by_login)
         elif any(r in _EXPIRING_PROGRAMME_ROLES for r, _f, _n in cluster):
             return None                # an expiring agency we cannot place
     if not expiring:
+        if acct_name and submitting == acct_name and not clusters:
+            # NO document names any agency: the login IS the producer, and
+            # only EMPTY producer facts take its values - nothing is replaced.
+            filled: List[str] = []
+            for key, val in (("producer_name", acct_name), ("producer_contact_name", acct_person),
+                             ("producer_contact_email", acct_email),
+                             ("producer_contact_phone", acct_phone)):
+                if val and not _producer_text(mf.get(key)):
+                    mf[key] = _account_producer_envelope(val)
+                    filled.append(f"{key}<-account")
+            return filled or None
         return None                    # same agency, or nothing to separate
 
     # The submitting side's own documents, submission-role ones first.
@@ -9459,11 +9672,17 @@ def _route_producer_party(mf: dict, docs: list,
             if _producer_text(f.get(key)):
                 block[key] = f.get(key)
                 break
-    if not agencies:                   # the account is the submitting side
+    if acct_name and submitting == acct_name:   # the account is the submitting side
         if "producer_name" not in block:
             block["producer_name"] = _account_producer_envelope(acct_name)
         if "producer_contact_name" not in block and acct_person:
             block["producer_contact_name"] = _account_producer_envelope(acct_person)
+        # The producer's own contact, from the login - the block printed a
+        # name and nothing else before (24 Sep 2026).
+        if "producer_contact_email" not in block and acct_email:
+            block["producer_contact_email"] = _account_producer_envelope(acct_email)
+        if "producer_contact_phone" not in block and acct_phone:
+            block["producer_contact_phone"] = _account_producer_envelope(acct_phone)
 
     moved: List[str] = []
     for key in _PRODUCER_IDENTITY_KEYS:
@@ -9557,10 +9776,41 @@ def _submission_names_one_agency(docs: Any) -> bool:
                for _r, n in named)
 
 
+def _incumbent_agencies(docs: Any) -> List[str]:
+    """The agencies the EXPIRING programme prints (dec, policy, certificate,
+    ...). Read only when a user is submitting and which agency cannot be read
+    (`_account_unreadable`): then a submission document naming one of these
+    names the incumbent, not the submitter."""
+    out: List[str] = []
+    for d in docs if isinstance(docs, list) else []:
+        if not (isinstance(d, dict) and isinstance(d.get("facts"), dict)):
+            continue
+        if str(d.get("doc_type") or "").strip().lower() not in _EXPIRING_PROGRAMME_ROLES:
+            continue
+        name = _producer_text(d["facts"].get("producer_name"))
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def _names_an_incumbent(name: str, incumbents: List[str]) -> bool:
+    from services.fact_comparison import same_agency
+    return bool(name) and any(_norm_name_key(name) == _norm_name_key(i)
+                              or same_agency(name, i) is True for i in incumbents)
+
+
 def _account_unreadable(account: Any) -> bool:
-    """A USER is submitting, but which agency could not be read (the
-    pipeline's `_submitting_account_for` returns {"unreadable": True})."""
-    return isinstance(account, dict) and bool(account.get("unreadable"))
+    """A USER is submitting, but which agency could not be read: the
+    pipeline's `_submitting_account_for` returned {"unreadable": True}, or the
+    account's agency name is a non-answer ("N/A", "TBD"). The second case used
+    to fall through to the documents alone and print the EXPIRING agency on
+    the new application (24 Sep 2026 audit, client item 4)."""
+    if not isinstance(account, dict):
+        return False
+    if account.get("unreadable"):
+        return True
+    return ("organization_name" in account
+            and not _usable_account_agency(account.get("organization_name")))
 
 
 def _route_producer_identity(mf: dict, docs: Any,
@@ -9593,6 +9843,7 @@ def _route_producer_identity(mf: dict, docs: Any,
     if party_moved is not None:
         return party_moved
     one_agency = _submission_names_one_agency(docs)
+    incumbents = _incumbent_agencies(docs) if _account_unreadable(account) else []
     moved: List[str] = []
     for key in _PRODUCER_IDENTITY_KEYS:
         rec = mf.get(key)
@@ -9616,6 +9867,9 @@ def _route_producer_identity(mf: dict, docs: Any,
                 # the rule `_route_producer_party` applies. Fuzzing: an unnamed
                 # narrative's contact replaced the agency's own contact.
                 continue
+            if role in _SUBMISSION_ROLES and _names_an_incumbent(
+                    _producer_text(dfacts.get("producer_name")), incumbents):
+                continue               # names the incumbent (`_incumbent_agencies`)
             stated_by.add(role)
             by_role.setdefault(role, set()).add(dval.strip())
         if not stated_by:
@@ -9734,12 +9988,22 @@ def _drop_form_numbers_from_policy_facts(mf: dict) -> List[str]:
     defect wearing a different hat.
     """
     cleared: List[str] = []
+    # The declarations' own labels decide the edge cases both ways: a value
+    # printed under POLICY NUMBER is a contract whatever its shape, and one
+    # printed under ACCOUNT NUMBER is not a policy at all (Orbin page 1,
+    # "Account Number: 0482854", was offered on the card as a fifth policy).
+    try:
+        from services.normalization import is_not_a_policy_number
+    except Exception:                                        # noqa: BLE001
+        def is_not_a_policy_number(v, _e=None):              # type: ignore
+            return _looks_like_a_form_number(v)
+    entries = _fv(mf, "dec_page_entries")
     for key in list(mf.keys()):
         if not _is_policy_number_fact(key):
             continue
         rec = mf.get(key)
         raw = rec.get("value") if (isinstance(rec, dict) and "value" in rec) else rec
-        if not isinstance(raw, str) or not _looks_like_a_form_number(raw):
+        if not isinstance(raw, str) or not is_not_a_policy_number(raw, entries):
             continue
         if isinstance(rec, dict) and "value" in rec:
             mf[key] = dict(rec, value="")
@@ -9780,10 +10044,17 @@ def _scrub_non_contract_identifiers(facts: Any) -> List[str]:
     if not isinstance(facts, dict):
         return cleared
     try:
-        from services.normalization import is_insurance_bureau
+        from services.normalization import is_insurance_bureau, is_not_a_policy_number
     except Exception:                                        # noqa: BLE001
         def is_insurance_bureau(_v):                         # type: ignore
             return False
+
+        def is_not_a_policy_number(v, _e=None):              # type: ignore
+            return _looks_like_a_form_number(v)
+    # This document's own labelled printings: POLICY NUMBER keeps a value,
+    # ACCOUNT NUMBER removes one (see `normalization.is_not_a_policy_number`).
+    _entries = facts.get("dec_page_entries")
+    _entries = _entries.get("value") if isinstance(_entries, dict) and "value" in _entries else _entries
     for key in set(_ROW_POLICY_KEYS) | set(_ROW_CARRIER_KEYS):
         held = facts.get(key)
         rows = held.get("value") if isinstance(held, dict) and "value" in held else held
@@ -9794,7 +10065,7 @@ def _scrub_non_contract_identifiers(facts: Any) -> List[str]:
                 continue
             for sub in _ROW_POLICY_KEYS.get(key, ()):
                 val = row.get(sub)
-                if isinstance(val, str) and _looks_like_a_form_number(val):
+                if isinstance(val, str) and is_not_a_policy_number(val, _entries):
                     row[sub] = None
                     cleared.append(f"{key}.{sub}={val.strip()!r}")
             for sub in _ROW_CARRIER_KEYS.get(key, ()):
@@ -9983,7 +10254,8 @@ def _bind_carriers_to_contracts(mf: dict, docs: Any) -> List[str]:
     if not binding:
         return []
     try:
-        from services.normalization import strict_entity_key
+        from services.normalization import (
+            entity_compact_key, same_entity_name, deglue_entity_text)
     except Exception:                                        # noqa: BLE001
         return []
     by_line = current_numbers_by_line(mf.get("dec_page_entries"), mf)
@@ -9991,7 +10263,7 @@ def _bind_carriers_to_contracts(mf: dict, docs: Any) -> List[str]:
     for line, numbers in (by_line or {}).items():
         bound = {binding[_norm_policy_number(n)] for n in numbers
                  if _norm_policy_number(n) in binding}
-        if len({strict_entity_key(b) for b in bound}) == 1:
+        if len({entity_compact_key(b) for b in bound}) == 1:
             line_carrier[line] = next(iter(bound))
     changed: List[str] = []
     for key, pol_sub in (("coverage_lines", "policy_number"), ("underlying_policies", "policy_no")):
@@ -10010,7 +10282,19 @@ def _bind_carriers_to_contracts(mf: dict, docs: Any) -> List[str]:
             if not carrier:
                 continue
             current = str(row.get("carrier") or "").strip()
-            if current and strict_entity_key(current) == strict_entity_key(carrier):
+            if current and same_entity_name(current, carrier):
+                # ONE company, printed two ways. The NAIC stays - it belongs to
+                # the entity, and the entity did not change. Only a printing
+                # OCR glued ("EMCProperty&CasualtyCompany", the client's own
+                # certificate) yields to the declarations' header printing;
+                # before 24 Sep the glue made this an "entity change", so the
+                # row lost a correct NAIC and 126 printed the carrier blank.
+                glued = (deglue_entity_text(current, for_display=True) != current
+                         or (" " not in current and " " in carrier))
+                if glued and current != carrier:
+                    row["carrier"] = carrier
+                    changed.append(f"{key}:{str(row.get('line'))[:28]}: "
+                                   f"{current} -> {carrier} (spacing only)")
                 continue
             if current and row.get("naic"):
                 row["naic"] = None
@@ -10028,9 +10312,11 @@ def _pair_carrier_naic_scalars(mf: dict) -> Optional[str]:
     INSURER A (EMC Property & Casualty, 25186) - a pair no document prints, and
     every consumer that reads both printed it. The roster is built only from
     rows that print a carrier AND a NAIC together. Returns the new NAIC or None.
+    Keyed on the COMPACT entity key, so the certificate's glued printing of a
+    carrier finds the NAIC the declarations print beside the spaced one.
     """
     try:
-        from services.normalization import strict_entity_key
+        from services.normalization import entity_compact_key
     except Exception:                                        # noqa: BLE001
         return None
     name = str(_fv(mf, "carrier_name") or "").strip()
@@ -10045,8 +10331,8 @@ def _pair_carrier_naic_scalars(mf: dict) -> Optional[str]:
         carrier = str(row.get("carrier") or "").strip()
         naic = str(row.get("naic") or "").strip()
         if carrier and re.fullmatch(r"\d{4,6}", naic):
-            roster.setdefault(strict_entity_key(carrier), set()).add(naic)
-    mine = roster.get(strict_entity_key(name)) or set()
+            roster.setdefault(entity_compact_key(carrier), set()).add(naic)
+    mine = roster.get(entity_compact_key(name)) or set()
     current = str(_fv(mf, "carrier_naic") or "").strip()
     rec = mf.get("carrier_naic")
     if len(mine) == 1:
@@ -10060,7 +10346,7 @@ def _pair_carrier_naic_scalars(mf: dict) -> Optional[str]:
                            "inputs": ["carrier_name", "coverage_lines"]}}
         return target
     if current and any(current in v for k, v in roster.items()
-                       if k != strict_entity_key(name)):
+                       if k != entity_compact_key(name)):
         mf.pop("carrier_naic", None)       # it belongs to a different company
         return ""
     return None
@@ -10145,6 +10431,285 @@ def vehicle_type_of(value: Any) -> Optional[str]:
     for canon, rx in _VEHICLE_TYPE_WORDS:
         if s.lower() == canon.replace("_", " ") or rx.match(s):
             return canon
+    return None
+
+
+# "2012 SUBARU OUTBACK SEDAN ID NO 4S4BRCGC9C3217772." - the real Orbin
+# auto declarations line: year, make, model, an IDENTIFIER label, the VIN.
+_VEHICLE_VIN_LINE_RE = re.compile(
+    r"\b(?P<year>(?:19|20)\d{2})\s+(?P<make>[A-Z][A-Z&\-]{1,20})\s+"
+    r"(?P<model>[A-Z0-9][A-Z0-9 .&/\-]{0,40}?)\s+"
+    r"(?:ID\s*NO|VIN|SERIAL(?:\s*NO)?|S/N)\b\.?\s*[:#]?\s*"
+    r"(?P<vin>[A-HJ-NPR-Z0-9]{17})\b")
+
+
+def _backfill_vehicle_rows_from_text(mf: dict, docs: Any) -> List[str]:
+    """Rebuild `auto_vin_schedule` from the VIN lines a document PRINTS, when
+    extraction returned no vehicle at all. Returns the VINs added.
+
+    Client item 11 (24 Sep 2026 audit): with the schedule empty, the client was
+    asked "Please list the vehicles to be insured" - pre-ticked - on a package
+    whose auto declarations print the vehicle, VIN and all. Evidence only: a
+    row needs an IDENTIFIER label (ID NO / VIN / SERIAL) and a well-formed
+    17-character VIN, and the schedule must be empty - a vehicle extraction
+    already returned is never replaced or added to.
+    """
+    held = mf.get("auto_vin_schedule")
+    rows = held.get("value") if isinstance(held, dict) and "value" in held else held
+    if isinstance(rows, list) and any(isinstance(r, dict) and any(
+            str(v or "").strip() for v in r.values()) for r in rows):
+        return []
+    found: Dict[str, dict] = {}
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        text = str((d or {}).get("text") or "") if isinstance(d, dict) else ""
+        for m in _VEHICLE_VIN_LINE_RE.finditer(text.upper()):
+            vin = m.group("vin")
+            if vin in found:
+                continue
+            found[vin] = {"year": m.group("year"), "make": m.group("make").title(),
+                          "model": m.group("model").strip(" .").title(), "vin": vin}
+    if not found:
+        return []
+    mf["auto_vin_schedule"] = {
+        "value": list(found.values()), "source": "derived", "confidence": "deterministic",
+        "derivation": {"rule": "vehicle_rows_from_printed_vin_lines",
+                       "inputs": ["document text"]}}
+    return sorted(v[-6:] for v in found)
+
+
+# The vehicle block's own location line - "LOC: 001 4800 DAHLIA STREET D13"
+# then "DENVER CO. 80216-3121" - printed above the VIN line it belongs to.
+_VEHICLE_LOC_LINE_RE = re.compile(r"^\s*LOC(?:ATION)?\s*:?\s*\d{1,4}\s+(?P<street>\d+\s+[A-Z0-9 #.\-]{3,60}?)\s*\.?\s*$")
+_CITY_STATE_ZIP_RE = re.compile(
+    r"^\s*(?P<city>[A-Z][A-Z .'\-]{1,40}?)[\s,]+(?P<st>[A-Z]{2})\.?\s+(?P<zip>\d{5}(?:-\d{4})?)\s*\.?\s*$")
+_VEHICLE_LOC_LOOKBACK = 8
+
+
+def _backfill_garaging_from_vehicle_block(mf: dict, docs: Any) -> Optional[str]:
+    """`auto_garaging_addresses` from the LOC lines the auto schedule prints
+    above each vehicle, when extraction captured none. Returns the address.
+
+    Client item 11 (24 Sep 2026 audit): "Where are your business vehicles
+    primarily kept overnight?" was asked whenever extraction missed the LOC
+    line, though the policy prints it on the vehicle's own block. One address
+    only - several different LOC lines stay with the document - and nothing
+    extraction returned is replaced. The garaging boxes' own owner
+    (`pdf_service._resolve_vehicle_garaging_cell`) still decides what prints.
+    """
+    held = mf.get("auto_garaging_addresses")
+    cur = held.get("value") if isinstance(held, dict) and "value" in held else held
+    if (isinstance(cur, list) and any(str(x or "").strip() for x in cur)) or \
+            (isinstance(cur, str) and cur.strip()):
+        return None
+    found: set = set()
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        lines = str((d or {}).get("text") or "").upper().splitlines() if isinstance(d, dict) else []
+        for i, ln in enumerate(lines):
+            if not _VEHICLE_VIN_LINE_RE.search(ln):
+                continue
+            for j in range(i - 1, max(-1, i - _VEHICLE_LOC_LOOKBACK - 1), -1):
+                m = _VEHICLE_LOC_LINE_RE.match(lines[j])
+                if not m:
+                    continue
+                nxt = _CITY_STATE_ZIP_RE.match(lines[j + 1]) if j + 1 < len(lines) else None
+                if not nxt:
+                    break
+                found.add(f"{m.group('street').strip()}, {nxt.group('city').strip()}, "
+                          f"{nxt.group('st')} {nxt.group('zip')}")
+                break
+    if len(found) != 1:
+        return None
+    addr = next(iter(found))
+    mf["auto_garaging_addresses"] = {
+        "value": [addr], "source": "derived", "confidence": "deterministic",
+        "derivation": {"rule": "garaging_from_vehicle_block_loc_line",
+                       "inputs": ["document text"]}}
+    return addr
+
+
+# ── The vehicle block's own COST NEW and USE cells (24 Sep 2026 live run) ──
+# "2012 SUBARU OUTBACK SEDAN ID NO 4S4BRCGC9C3217772." then
+# "COST NEW: 26680 RADIUS: NA USE: NA ." - two answers the declarations print
+# for THIS vehicle. The schedule has no cost-new column, so 26680 never reached
+# ACORD 127; and extraction answered the use "commercial" off the "COMM CLASS"
+# line beside it, so COMM'L was ticked on a vehicle whose own cell says NA.
+_VEHICLE_BLOCK_SPAN = 8
+_COST_NEW_CELL_RE = re.compile(r"\bCOST\s*NEW\s*[:=]?\s*\$?\s*(?P<amt>\d[\d,]*)(?:\.\d{2})?\b")
+_USE_CELL_RE = re.compile(
+    r"(?<![A-Z])USE\s*:\s*(?P<use>[A-Z][A-Z/]*(?:\s[A-Z][A-Z/]*)?)\s*"
+    r"(?=\.|,|$|\s+(?:RADIUS|COST|AGE|CLASS|TERR|GVW|SYM)\b)")
+_USE_NON_ANSWER_WORDS = frozenset({"NA", "N/A", "N A", "NONE", "NOT APPLICABLE", "UNKNOWN"})
+# A person's answer is recognised by `_PERSON_FACT_SOURCES` (defined below, with
+# the page-one rules) - one set for the whole merge.
+
+
+def _vehicle_blocks(docs: Any):
+    """(vin, [lines]) for every printed VIN line: the VIN line and the lines
+    after it, up to the next VIN line or `_VEHICLE_BLOCK_SPAN` lines."""
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        lines = str((d or {}).get("text") or "").upper().splitlines() if isinstance(d, dict) else []
+        hits = [(i, m.group("vin")) for i, ln in enumerate(lines)
+                for m in [_VEHICLE_VIN_LINE_RE.search(ln)] if m]
+        for k, (i, vin) in enumerate(hits):
+            stop = i + 1 + _VEHICLE_BLOCK_SPAN
+            if k + 1 < len(hits):
+                stop = min(stop, hits[k + 1][0])
+            yield vin, lines[i:stop]
+
+
+def _read_vehicle_block_cells(mf: dict, docs: Any) -> List[str]:
+    """Apply the vehicle block's own COST NEW and USE cells. Returns notes.
+
+    COST NEW fills only an EMPTY `cost_new` on the row with that VIN. USE is
+    policy-level: one distinct reading across the blocks decides, a person's
+    answer always stands, and a non-answer ("NA") clears an extracted use -
+    the documents state none, so the question is asked (15 Sep ruling)."""
+    notes: List[str] = []
+    cost: Dict[str, set] = {}
+    uses: set = set()
+    for vin, block in _vehicle_blocks(docs):
+        for ln in block:
+            mc = _COST_NEW_CELL_RE.search(ln)
+            if mc:
+                amt = int(mc.group("amt").replace(",", ""))
+                if amt > 0:
+                    cost.setdefault(vin, set()).add(amt)
+            mu = _USE_CELL_RE.search(ln)
+            if mu:
+                uses.add(re.sub(r"\s+", " ", mu.group("use")).strip())
+    held = mf.get("auto_vin_schedule")
+    rows = held.get("value") if isinstance(held, dict) and "value" in held else held
+    if isinstance(rows, list) and cost:
+        new_rows, changed = [], False
+        for r in rows:
+            if isinstance(r, dict):
+                vin = str(r.get("vin") or "").strip().upper()
+                amts = cost.get(vin)
+                if amts and len(amts) == 1 and not str(r.get("cost_new") or "").strip():
+                    r = dict(r, cost_new=str(next(iter(amts))))
+                    changed = True
+                    notes.append(f"cost_new {vin[-6:]}={r['cost_new']}")
+            new_rows.append(r)
+        if changed:
+            if isinstance(held, dict) and "value" in held:
+                mf["auto_vin_schedule"] = dict(held, value=new_rows)
+            else:
+                mf["auto_vin_schedule"] = new_rows
+    if len(uses) == 1:
+        reading = next(iter(uses))
+        cur = mf.get("auto_vehicle_use")
+        person = isinstance(cur, dict) and str(cur.get("source") or "").lower() in _PERSON_FACT_SOURCES
+        cur_val = str(cur.get("value") if isinstance(cur, dict) else cur or "").strip()
+        if not person:
+            if reading in _USE_NON_ANSWER_WORDS:
+                if cur_val:
+                    mf.pop("auto_vehicle_use", None)
+                    notes.append(f"auto_vehicle_use {cur_val!r} cleared - the vehicle's own USE cell reads {reading!r}")
+            elif cur_val.upper() != reading:
+                mf["auto_vehicle_use"] = {
+                    "value": reading.title(), "source": "derived", "confidence": "deterministic",
+                    "derivation": {"rule": "vehicle_use_from_own_block", "inputs": ["document text"]}}
+                notes.append(f"auto_vehicle_use={reading!r} from the vehicle's own USE cell")
+    return notes
+
+
+# ── Which deductible the GL deductible IS (24 Sep 2026 live run) ────────────
+# `gl_deductible` is one scalar and three Pass-1 rules printed it in ACORD
+# 126's PROPERTY DAMAGE, BODILY INJURY and OTHER boxes at once. On the live
+# package the only GL deductible is "Property Damage Deductible $1,000 Each
+# Pollution Incidents" - the Limited Pollution endorsement's - so the policy
+# gained a $1,000 bodily injury deductible no document prints. The printed
+# line says what the deductible applies to; that decides the box.
+_DEDUCTIBLE_LINE_FILLER = frozenset({
+    "deductible", "deductibles", "ded", "liability", "coverage", "amount", "per", "each",
+    "any", "one", "claim", "claims", "occurrence", "occurrences", "applies", "apply",
+    "to", "the", "a", "an", "of", "for", "and", "or", "only", "all", "is", "limit",
+    "insurance", "combined", "single", "bi", "pd", "property", "damage", "bodily",
+    "injury", "usd", "dollars", "basis", "shown"})
+_DEDUCTIBLE_NOT_GL_RE = re.compile(
+    r"\b(?:autos?|vehicles?|collision|comprehensive|perils?|comp|coll|otc|hired)\b", re.I)
+_FORM_CODE_TOKEN_RE = re.compile(r"\b[A-Z]{2,3}\s?\d{2,4}[A-Z]?(?:\s?\d{2}[\s/-]?\d{2})?\b")
+
+
+def _deductible_line_scope(line: str) -> Optional[str]:
+    low = _FORM_CODE_TOKEN_RE.sub(" ", line).lower()
+    has_pd, has_bi = "property damage" in low, "bodily injury" in low
+    content = [w for w in re.findall(r"[a-z]+", low) if w not in _DEDUCTIBLE_LINE_FILLER]
+    if content:
+        return "other"               # scoped to a coverage part ("pollution incidents")
+    if has_pd and has_bi:
+        return "bi_pd"
+    return "pd" if has_pd else ("bi" if has_bi else None)
+
+
+def _classify_gl_deductible(mf: dict, docs: Any) -> Optional[str]:
+    """Record `_gl_deductible_scope` from the line(s) that print the GL
+    deductible's amount beside the word "deductible". Positive evidence only:
+    no printed line, or lines that disagree, leave the legacy rules alone."""
+    amount = _amount_key(_fv(mf, "gl_deductible"))
+    if not amount:
+        return None
+    found: Dict[str, str] = {}
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        for ln in str((d or {}).get("text") or "").splitlines() if isinstance(d, dict) else []:
+            if "deductible" not in ln.lower() or _DEDUCTIBLE_NOT_GL_RE.search(ln):
+                continue
+            if float(amount) not in _money_amounts(ln):
+                continue
+            scope = _deductible_line_scope(ln)
+            if scope:
+                found.setdefault(scope, re.sub(r"\s+", " ", ln).strip())
+    if len(found) != 1:
+        return None
+    scope, text = next(iter(found.items()))
+    mf["_gl_deductible_scope"] = {"scope": scope, "text": text}
+    return scope
+
+
+# ── The applicant's own description of its operations (24 Sep 2026) ────────
+# ACORD 125 and 131 printed "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL
+# CONTRA" - a declarations page's fixed-width classification field, cut off
+# mid-word by the carrier and carrying its own labels - while the narrative
+# describes the operations in full. The description is the applicant's own
+# account of what it does; a submission document's words outrank a carrier's
+# classification field, and label text never stays in the value.
+_OPS_LABEL_RE = re.compile(
+    r"^.*?\b(?:business\s+)?desc(?:ription)?(?:\s+of\s+operations)?\s*[:\-]\s*", re.I)
+
+
+def _strip_operations_labels(value: str) -> str:
+    m = _OPS_LABEL_RE.match(value or "")
+    rest = value[m.end():].strip() if m else (value or "").strip()
+    return rest if re.search(r"[A-Za-z]{3}", rest) else (value or "").strip()
+
+
+def _prefer_submission_operations_description(mf: dict, docs: Any) -> Optional[str]:
+    cur = mf.get("operations_description")
+    if isinstance(cur, dict) and str(cur.get("source") or "").lower() in _PERSON_FACT_SOURCES:
+        return None
+    cur_val = str(cur.get("value") if isinstance(cur, dict) else cur or "").strip()
+    best, best_env = "", None
+    for d in docs if isinstance(docs, (list, tuple)) else []:
+        if not isinstance(d, dict) or str(d.get("doc_type") or "").strip().lower() not in _SUBMISSION_ROLES:
+            continue
+        env = (d.get("facts") or {}).get("operations_description")
+        v = str(env.get("value") if isinstance(env, dict) else env or "").strip()
+        if len(v.split()) >= 6 and len(v) > len(best):
+            best, best_env = v, env
+    if best and _norm_name_key(best) != _norm_name_key(cur_val):
+        stated_by_submission = any(
+            isinstance(d, dict) and str(d.get("doc_type") or "").strip().lower() in _SUBMISSION_ROLES
+            and _norm_name_key(str(_fv(d.get("facts") or {}, "operations_description") or "")) == _norm_name_key(cur_val)
+            for d in (docs if isinstance(docs, (list, tuple)) else []))
+        if not stated_by_submission:
+            mf["operations_description"] = dict(best_env) if isinstance(best_env, dict) else {
+                "value": best, "source": "ai", "confidence": "ai_high"}
+            return best
+    if cur_val:
+        cleaned = _strip_operations_labels(cur_val)
+        if cleaned != cur_val:
+            mf["operations_description"] = dict(cur, value=cleaned) if isinstance(cur, dict) else cleaned
+            return cleaned
     return None
 
 
@@ -10650,7 +11215,22 @@ def _stated_umbrella_limits(mf: dict) -> List[str]:
 
 
 def _amount_key(v: Any) -> Optional[int]:
-    """Whole dollars, or None when there is no figure to compare."""
+    """Whole dollars, or None when there is no ONE figure to compare.
+
+    Read through the shared money reader (24 Sep 2026). Concatenating every
+    digit read "$1M" as 1 and "$1,000,000 Each Occurrence / $1,000,000
+    Aggregate" as 10000001000000 - each a third, bogus "amount" that turned a
+    dated change into an intra-document conflict and blanked the umbrella on
+    ACORD 131 / 25. Two DIFFERENT figures are no single figure: None."""
+    try:
+        from services.fact_equivalence import money_amounts
+        got = money_amounts(v)
+        if len(got) == 1:
+            return int(float(got[0]))
+        if len(got) > 1:
+            return None
+    except Exception:                                        # noqa: BLE001
+        pass
     digits = re.sub(r"[^\d]", "", str(v or "").split(".")[0])
     return int(digits) if digits else None
 
@@ -11410,6 +11990,12 @@ _THIRD_PARTY_NAME_KEYS: Tuple[str, ...] = (
 _THIRD_PARTY_NESTED_NAME_KEYS: Dict[str, Tuple[str, ...]] = {
     "risk_transfer": ("certificate_holder_name", "loss_payee_name", "mortgagee_name"),
 }
+# (list fact, the name column - None for a list of plain names)
+_THIRD_PARTY_NAME_LISTS: Tuple[Tuple[str, Optional[str]], ...] = (
+    ("additional_named_insureds", None),
+    ("additional_interests", "name"),
+    ("named_insured_details", "name"),
+)
 
 
 def drop_non_party_names(dfacts: Any) -> List[str]:
@@ -11454,6 +12040,32 @@ def drop_non_party_names(dfacts: Any) -> List[str]:
                 inner[sub] = None
                 rejected.add(_norm_name_key(bad))
                 cleared.append(f"{parent}.{sub}={bad[:40]!r}")
+    # ROSTERS AND ROW TABLES (24 Sep 2026). A placeholder in the other-named-
+    # insured roster printed as an Other Named Insured on 125 / 28 / 101 / 133,
+    # and one in v22's `additional_interests` knocked the real lender out of
+    # row A (the only row with address boxes). An entry naming nobody is
+    # removed; the roster and every real row stay. The additional-INSURED list
+    # is still not judged here - its entries carry role wording around real
+    # names (see the docstring).
+    for key, name_sub in _THIRD_PARTY_NAME_LISTS:
+        held = dfacts.get(key)
+        rows = held.get("value") if isinstance(held, dict) and "value" in held else held
+        if not isinstance(rows, list) or not rows:
+            continue
+        kept = []
+        for row in rows:
+            text = row.get(name_sub) if (name_sub and isinstance(row, dict)) else row
+            bad = _placeholder(text) if isinstance(text, (str, dict)) else ""
+            if bad:
+                rejected.add(_norm_name_key(bad))
+                cleared.append(f"{key}[{bad[:40]!r}]")
+            else:
+                kept.append(row)
+        if len(kept) != len(rows):
+            if isinstance(held, dict) and "value" in held:
+                dfacts[key] = dict(held, value=kept)
+            else:
+                dfacts[key] = kept
     rejected.discard("")
     if rejected:
         try:
@@ -11490,6 +12102,19 @@ def merge_facts(docs: List[dict], primary: dict,
     # persisted per-document copies agree. See separate_contact_twins.
     _rejected_party_keys: set = set()
     for _cd in docs:
+        # A CERTIFICATE prints one contact block - the PRODUCER's - and no box
+        # for the insured's contacts (24 Sep 2026). v22's `applicant_contacts`
+        # read off an ACORD 25 is therefore the agent: on the Orbin COI, Terri
+        # Wroblewski of the EXPIRING broker printed as the applicant's contact.
+        try:
+            if (isinstance(_cd, dict) and isinstance(_cd.get("facts"), dict)
+                    and str(_cd.get("doc_type") or "").strip().lower() == "certificate"
+                    and _cd["facts"].pop("applicant_contacts", None) is not None):
+                logger.info("merge_facts: %s is a certificate - its contact block is "
+                            "the producer's, not the applicant's; applicant_contacts "
+                            "dropped", _cd.get("filename"))
+        except Exception as exc:  # noqa: BLE001 - never block the pipeline
+            logger.warning("merge_facts: certificate contact drop failed: %s", exc)
         try:
             _removed = separate_contact_twins(
                 _cd.get("facts") if isinstance(_cd, dict) else None)
@@ -11848,12 +12473,52 @@ def merge_facts(docs: List[dict], primary: dict,
                         _paired or "(dropped: it belonged to another company)")
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: carrier/NAIC pairing failed: %s", exc)
+    # After numbers and carriers are final, before anything builds line records
+    # or the Data Consistency store from the list. See _retire_predecessor_policies.
+    try:
+        _retired = _retire_predecessor_policies(mf)
+        if _retired:
+            logger.info("merge_facts: expired policy kept as history, not as a rival "
+                        "of its successor - %s", "; ".join(_retired[:4]))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: predecessor-policy check failed: %s", exc)
+    try:
+        _rows_added = _backfill_vehicle_rows_from_text(mf, docs)
+        if _rows_added:
+            logger.info("merge_facts: vehicle schedule rebuilt from the printed "
+                        "VIN lines - %s", _rows_added)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: vehicle row backfill failed: %s", exc)
+    try:
+        _gar = _backfill_garaging_from_vehicle_block(mf, docs)
+        if _gar:
+            logger.info("merge_facts: garaging read off the vehicle's own block - %r", _gar[:60])
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: garaging backfill failed: %s", exc)
     try:
         _veh = _backfill_vehicle_codes_from_text(mf, docs)
         if _veh:
             logger.info("merge_facts: vehicle codes read beside their own VIN - %s", _veh)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: vehicle code backfill failed: %s", exc)
+    try:
+        _cells = _read_vehicle_block_cells(mf, docs)
+        if _cells:
+            logger.info("merge_facts: vehicle block cells applied - %s", _cells)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: vehicle block cells failed: %s", exc)
+    try:
+        _ded = _classify_gl_deductible(mf, docs)
+        if _ded:
+            logger.info("merge_facts: GL deductible applies to %r (its own printed line)", _ded)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: GL deductible scope failed: %s", exc)
+    try:
+        _ops = _prefer_submission_operations_description(mf, docs)
+        if _ops:
+            logger.info("merge_facts: operations description from the applicant's own words - %r", _ops[:60])
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: operations description preference failed: %s", exc)
 
     # -- A FORM NUMBER IS NOT A POLICY NUMBER, KILLED AT THE SOURCE ----------
     # Client 2026-09-11 item 3. The shape test was applied at a dozen
@@ -11887,6 +12552,16 @@ def merge_facts(docs: List[dict], primary: dict,
             )
     except Exception as exc:  # noqa: BLE001 - never block the pipeline
         logger.warning("merge_facts: producer routing failed: %s", exc)
+    # ...and no producer PERSON is an applicant contact (v22's per-contact
+    # table and business phone bypassed both the certificate role rule and the
+    # contact-twin separation - 24 Sep 2026 audit).
+    try:
+        _dropped_contacts = _drop_producer_people_from_applicant(mf)
+        if _dropped_contacts:
+            logger.info("merge_facts: producer contact(s) removed from the applicant's "
+                        "contacts - %s", ", ".join(_dropped_contacts[:6]))
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: applicant contact check failed: %s", exc)
     # A limit the documents say CHANGED on a stated date is the new limit, not
     # a disagreement (client 11 Sep: "a policy change over time, not simply a
     # $3M versus $1M conflict"). BEFORE the withhold below, which then sees the
@@ -11934,6 +12609,43 @@ def merge_facts(docs: List[dict], primary: dict,
         _route_renewal_dates(mf, docs)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: renewal date routing failed: %s", exc)
+    # ── A DISCLOSURE'S WARRANT IS CHECKED WHERE THE DOCUMENT IS IN HAND ─────
+    # `disclosure_answers` (v22) is the deterministic floor under ACORD's
+    # GENERAL INFORMATION block, and `_resolve_disclosure_answer` requires each
+    # entry to carry an `evidence_quote` before it will answer. It cannot
+    # verify that quote: a resolver is handed (field, facts) and never sees the
+    # document.
+    #
+    # Left there, the DETERMINISTIC path would be WEAKER than the LLM one it
+    # replaces - the evidence gate blanks an ungrounded Y/N from gap fill, and
+    # the same value with the same invented quote would stamp from a fact.
+    # Found by adversarial review, 22 Sep: five 'N' answers quoting a sentence
+    # nowhere in the document stamped fraud/arson, abuse & molestation,
+    # declined coverage, judgment-or-lien and bankruptcy on a declarations-only
+    # package - "Blank is not No" failing on the five most material questions
+    # on the form.
+    #
+    # The merge tail is the one place that holds both the facts and the text.
+    # `fact_relationships` already owns the question and is the single door.
+    try:
+        _rows = mf.get("disclosure_answers")
+        if isinstance(_rows, list) and _rows:
+            from services.fact_relationships import check_fact_relationships
+            _hay = "\n".join(str((d or {}).get("text") or "") for d in (docs or []))
+            if _hay.strip():
+                _bad = {f.get("index") for f in
+                        check_fact_relationships(mf, _hay)
+                        if f.get("code") == "EVIDENCE_QUOTE_NOT_IN_DOCUMENT"}
+                if _bad:
+                    mf["disclosure_answers"] = [
+                        r for i, r in enumerate(_rows) if i not in _bad]
+                    logger.warning(
+                        "merge_facts: dropped %d disclosure answer(s) whose evidence "
+                        "quote is not in the uploaded document - an unverifiable "
+                        "warrant may not answer a compliance question", len(_bad))
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: disclosure grounding check failed: %s", exc)
+
     # ACORD 125 page 1 is the policy being APPLIED FOR (Brent's 125 answer key,
     # 15 Sep 2026): mark the carrier / premium only the current policy states.
     try:
@@ -11954,6 +12666,17 @@ def merge_facts(docs: List[dict], primary: dict,
     # questionnaire never asks for it. Runs AFTER renewal routing so it reads
     # the settled dates.
     _derive_years_in_business(mf)
+    # An AGENCY is never the prior CARRIER (24 Sep 2026, client item 4 / the
+    # cover page's "PRIOR CARRIER: Commercial Risk Solutions"): a stated
+    # `prior_carrier` that names one of the package's own producers is dropped
+    # here, so the derivation below fills it from the expiring policies.
+    try:
+        _dropped_pc = _drop_agency_as_prior_carrier(mf)
+        if _dropped_pc:
+            logger.info("merge_facts: prior_carrier %r is a producer agency, not a "
+                        "carrier - dropped", _dropped_pc[:60])
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: prior carrier agency check failed: %s", exc)
     # Client item 11 (15 Sep 2026): the prior carrier is the carrier of the
     # expiring policies we were handed - never asked back. See the function.
     try:
@@ -12055,6 +12778,92 @@ def _strip_non_value_facts(mf: dict) -> None:
             logger.info("merge: dropped %s=%r - it names a role or a bureau, "
                         "not a party", key, val[:40])
             mf.pop(key, None)
+
+
+def _drop_producer_people_from_applicant(mf: dict) -> List[str]:
+    """Remove every `applicant_contacts` entry, and `applicant_business_phone`,
+    that is one of the package's PRODUCER people - submitting or expiring - by
+    name, phone digits or e-mail. Positive evidence only: an entry sharing
+    nothing with a producer is kept. Returns what was removed, for logging."""
+    if not isinstance(mf, dict):
+        return []
+
+    def _digits(v: Any) -> str:
+        d = re.sub(r"\D", "", str(_unwrap_fact(v) or ""))
+        return d[-10:] if len(d) >= 7 else ""
+
+    names, phones, emails = set(), set(), set()
+    for side in ("producer_", "expiring_producer_"):
+        n = _norm_name_key(_producer_text(mf.get(side + "contact_name")))
+        if n:
+            names.add(n)
+        for k in ("contact_phone", "fax", "phone"):
+            d = _digits(mf.get(side + k))
+            if d:
+                phones.add(d)
+        e = _producer_text(mf.get(side + "contact_email")).lower()
+        if "@" in e:
+            emails.add(e)
+    if not (names or phones or emails):
+        return []
+    removed: List[str] = []
+    held = mf.get("applicant_contacts")
+    rows = held.get("value") if isinstance(held, dict) and "value" in held else held
+    if isinstance(rows, list):
+        kept = []
+        for r in rows:
+            if not isinstance(r, dict):
+                kept.append(r)
+                continue
+            hit = (_norm_name_key(str(r.get("name") or "")) in names
+                   or any(_digits(r.get(k)) in phones for k in ("phone", "secondary_phone")
+                          if _digits(r.get(k)))
+                   or any(str(r.get(k) or "").strip().lower() in emails
+                          for k in ("email", "secondary_email")))
+            if hit:
+                removed.append(f"applicant_contacts:{str(r.get('name') or '?')[:30]}")
+            else:
+                kept.append(r)
+        if len(kept) != len(rows):
+            if isinstance(held, dict) and "value" in held:
+                mf["applicant_contacts"] = dict(held, value=kept)
+            else:
+                mf["applicant_contacts"] = kept
+    bp = _digits(mf.get("applicant_business_phone"))
+    if bp and bp in phones:
+        mf.pop("applicant_business_phone", None)
+        removed.append("applicant_business_phone")
+    return removed
+
+
+def _drop_agency_as_prior_carrier(mf: dict) -> Optional[str]:
+    """Remove a `prior_carrier` that names one of the package's own producer
+    agencies (submitting or expiring). Returns the value dropped, or None.
+
+    Positive evidence only: the value must be the SAME agency as a producer
+    name the package itself carries (`fact_comparison.same_agency`, the door
+    that already folds "CRS Insurance Brokerage" into "Commercial Risk
+    Solutions, Inc."). A person's own answer is never touched."""
+    if not isinstance(mf, dict):
+        return None
+    rec = mf.get("prior_carrier")
+    val = _producer_text(rec)
+    if not val:
+        return None
+    if isinstance(rec, dict) and str(rec.get("source") or "").lower() in (
+            "producer", "client", "client_arq", "user", "manual"):
+        return None
+    try:
+        from services.fact_comparison import same_agency
+    except Exception:                                        # noqa: BLE001
+        return None
+    agencies = [_producer_text(mf.get(k)) for k in (
+        "producer_name", "expiring_producer_name")]
+    if any(a and (same_agency(val, a) is True
+                  or _norm_name_key(val) == _norm_name_key(a)) for a in agencies):
+        mf.pop("prior_carrier", None)
+        return val
+    return None
 
 
 def _derive_prior_carrier(mf: dict, docs: Any) -> Optional[str]:

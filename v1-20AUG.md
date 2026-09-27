@@ -11332,3 +11332,655 @@ Read from the stored session data (the PDFs were blank - item 8) and replayed th
   SRC-4410982 on two lines. Worth a copy at the union before anything relies on per-document rows as evidence.
 - Suite after retest 1 (clean run): **9447 passed / 2 failed / 18 skipped** - the same two pre-existing failures;
   +4 tests (`test_policy_by_line_live_kit_17sep.py` now 58).
+
+## A125 kit - a row's own value is not an echo of row A (21 Sep 2026, evening)
+
+Owner sent a live ACORD 125 (`ACORD_125_FILLED 3.pdf`, 20:55) and asked for a comparison with the
+previous run. **First finding: neither that PDF nor the two before it were produced by the code on
+disk.** All three came from separate sessions whose stored facts carry NONE of the v22 per-entity
+keys (`named_insured_details`, `applicant_contacts`, `additional_interests`, `disclosure_answers`,
+`safety_program_elements`, `organization_relationships`), and the deterministic stamper on disk
+already returns `A` for the audit code and already rejects `"(None)"` - both of which that PDF
+prints. **Grade a live run only after restarting the backend and re-uploading; the stamper seam was
+verified independently (a v22 reply survives `extract_facts` and `extract_facts_long` intact).**
+
+**Three defects found in the code as it stands, all one class - a repeat is not a duplicate:**
+1. **Guard 2 (repeating-row de-dup) deleted four CORRECT values** the moment the v22 detail fact
+   made them stampable: row B's state (`OR`), row B's website, row C's SIC (`1711`) and NAICS
+   (`238220`) - each equal to row A's and each the party's own. Three companies in one state are all
+   `OR`; two mechanical contractors share a class code. A cell whose value equals
+   `_resolve_named_insured_detail`'s answer for that row is now exempt - the same GROUNDED-beats-
+   equal precedent the subject-of-insurance row already uses. An UNGROUNDED gap-fill echo is still
+   blanked and a session with no detail fact is untouched (`_SCHED_SKIP`), so this can only SAVE a
+   value the document attributes to that row. H1-F's lesson again: necessary is not sufficient.
+2. **`applicant_website` named a different party.** The broadcast half was fixed earlier the same
+   day (rows B-N routed to the detail fact); row A still printed Cedar Bluff's site while Cedar
+   Bluff's own row went dark, because Guard 2 then deleted B as an echo of A. Row A now ships BLANK
+   when another named insured's own detail row claims that site (`_website_belongs_to_another_
+   named_insured`) - right-or-blank, and the questionnaire asks.
+3. **The loss-overflow sentence REPLACED the applicant's stated remark.** That door was written on
+   the premise that the remarks box "is an owned blank today"; on this kit it is not (common control
+   with Harbor Line Capital Partners, and a seasonal lease at Location 005). The box now carries the
+   stated remark FIRST and the overflow after it, and the composition is re-entrant through
+   `_LOSS_OVERFLOW_MARKER` so an edited box saved back cannot print the notice twice. A missing value
+   is the failure mode this file calls worse than a wrong one.
+
+**The grader was also wrong, in our favour's opposite direction:** `score_form_fill.py` never
+implemented its own key's `_normalisation.abbreviations` rule, so it reported three false defects
+("Ste 310" against "Suite 310") on values `display_canonicalizer` abbreviates BY DESIGN. Both sides
+are now expanded before comparison. **Do not "fix" the pipeline to print "Suite".**
+
+**Measured (all three graded with the corrected grader).** 17:00 run: 178 correct / 3 wrong / 6
+must-be-blank / 0 contamination. 20:55 run: 179 / 5 / 6 / **2** (row C took row B's SIC and NAICS -
+gap fill guessing, because the session had no detail fact). **Deterministic stamper with these
+fixes and GAP FILL OFF: 180 / 2 / 1 / 0, precision 98.9%.** The two remaining wrongs are a value
+invented by the test overlay and an operations-description wording difference that needs a live run.
+
+Tests: `tests/test_named_insured_rows_21sep.py` (21). Suite **9622 passed / 2 failed / 18 skipped** -
+the documented `httpx` ImportError and `test_confidence_score_covers_every_label` (the
+`confidence_fill_rate` truncation, open defect #2, deliberately NOT fixed - D6, Brent sees the
+numbers first). Zero regressions.
+
+### Test results in full - 21 Sep 2026 session
+
+Runner: `backend/.venv/bin/python -m pytest -q -p no:randomly` from `backend/`.
+**Use this venv.** The machine is macOS 12.7.6 / Intel, where `pikepdf==10.5.1` (requirements.txt)
+has no wheel and will not build without qpdf headers; the venv pins **pikepdf 9.3.0**, which is why
+`pikepdf.Boolean` must never come back (it does not exist in 9.x - every download on this machine
+was the blank template until 17 Sep). Install locally with:
+`{ grep -v '^pikepdf==' requirements.txt; tail -n +3 requirements-dev.txt; echo 'pikepdf==9.3.0'; } > /tmp/req-local.txt && pip install -r /tmp/req-local.txt`
+(`requirements-dev.txt` re-includes `requirements.txt`, so filtering one file is not enough.)
+
+| Run | Result |
+|---|---|
+| Full suite, final state | **9622 passed, 2 failed, 18 skipped** (510s) |
+| `test_named_insured_rows_21sep.py` (new) | 21 passed |
+| A125 + guard files (`test_a125_complete_fix_21sep`, `test_a125_fixes_21sep`, `test_authoritative_blank_contract`, `test_table_row_dedup`, `test_fact_relationships_21sep`, `test_location_consolidation`) | 199 passed |
+| Free-tier files (`test_free_package_limit`, `test_pricing_restructure_16sep`) | 28 passed |
+| auth / download / usage / billing / stripe / pricing subset | 5721 passed, 8 skipped |
+
+**The 2 failures are the standing pair and neither is new:**
+1. `test_arq_acord125_missing_only` - the documented `httpx`/`openai` `ImportError`.
+2. `test_confidence_score_covers_every_label::test_verified_ai_values_never_read_as_an_empty_form` -
+   `confidence_fill_rate` returns **84 where the exact value is 85** (`int()` truncation, open
+   defect #2). It imports `sqs_service` only and fails at HEAD; **deliberately NOT fixed - D6.**
+   **The "1 failed" baseline in CLAUDE.md is now STALE: expect 2 until that one-character fix ships.**
+
+### Free-tier allowance 3 -> 1 (21 Sep 2026, same session)
+
+Client direction: a new `subscription_tier == "free"` account gets ONE package, not three.
+`config/settings.FREE_PACKAGE_LIMIT` (default 1, env-overridable) is the ONE door - 12 gates,
+remaining-counts and the upgrade message in `auth_routes` / `form_routes` / `download_routes` /
+`dev_routes` read it, plus the AuthModal and LandingPage copy.
+**No DB change exists or is needed:** `users.downloads_used` COUNTS UP; "remaining" is computed.
+
+**Two defects found by testing the change, both fixed:**
+1. **A free user could not download the one package their credit paid for.** The package is counted
+   at GENERATION (`usage_service.count_session_usage`, once per session via `package_counted_at`),
+   so `downloads_used` already includes it by download time; both download routes gated on the bare
+   counter BEFORE loading the session. Latent at 3 (it blocked the third package), fatal at 1.
+   `download_routes._free_limit_blocks` now exempts a session stamped `package_counted_at`; an
+   uncounted session would spend a new credit and is still refused.
+2. **`downloads_remaining` went negative** (-1, -2) for accounts that used 2-3 under the old limit.
+   The frontend tests `=== 0` for the upgrade wall, so those users saw the upload screen and a
+   header reading "-1 free packages remaining" while the backend blocked them. Clamped `max(0, ...)`.
+
+**Verified over real HTTP through `main.app`** (login, users row and a stop after each gate faked,
+every gate's own code real) at `downloads_used` 0/1/2/3: allowed at 0, BLOCKED from 1 on all of
+upload / generate / download-new, paid-for package always downloadable, remaining 1/0/0/0. At
+`FREE_PACKAGE_LIMIT=3` the same probe blocks at 3 - the old boundary, reproduced.
+Tests: `tests/test_free_package_limit.py` (24, incl. the gate-order AST pin).
+**Testing phase:** set `FREE_PACKAGE_LIMIT=999` in `backend/.env` when the cap blocks testing, or
+`UPDATE users SET downloads_used = 0 WHERE email = '...'`. `.env` also has `OCR_PROVIDER` and
+`REDIS_URL` declared twice (last wins) - harmless, worth tidying.
+
+### How to reproduce the A125 grading without burning an LLM call
+
+The three live PDFs came from sessions `42d6499d` (15:32), `9b55a690` (17:00), `db700550` (20:55) -
+one upload each, **none with the v22 per-entity facts**. Facts load through
+`repositories.session_repository.get_processing_session` after `config.database.create_pool()`
+(the table is `processing_sessions(id, user_id, data, ...)` - there is no `session_id` column and
+no `created_at` on the returned dict).
+
+Drive the CURRENT stamper over stored facts with gap fill OFF by passing `raw_text=""` to
+`map_facts_to_form`, write it with `fill_pdf("templates/ACORD_125.pdf", mapped, conf)`, then grade
+the folder with `scripts/score_form_fill.py`. Overlay a simulated v22 extraction on top of the
+stored facts to see what a FRESH run would print - that is how all three defects above were
+measured, and it costs nothing. **An offline probe proves the FUNCTION, never the SEAM** (C50's
+standing lesson), so the extraction seam was checked separately by stubbing only `groq_chat` and
+asserting the v22 keys survive `extract_facts` and `extract_facts_long` into `facts`.
+
+### Why the A125 is not at 100% - the four causes, and page one had no addressee (21 Sep 2026, late)
+
+Owner: "why are we not reaching 100 percent accuracy?" Traced every unfilled box on the kit.
+**It is four causes, not one, and only one was a code defect:**
+
+| Cause | Boxes | Fixable in code |
+|---|---|---|
+| The fact EXISTS and nothing binds it to the box | 4 | **yes - fixed below** |
+| Extraction has no fact at all (per-LOCATION employee counts, building numbers, member/manager counts, per-location "area leased to others") | ~18 | no - needs a prompt change + `PROMPT_VERSION` bump, which re-extracts every cached package |
+| Per-entity facts a real run supplies (disclosure topics, entity types, contact phone kinds) - the offline overlay simply omitted them | ~26 | already built (v22 resolvers) |
+| The key's own `absent_by_design` | 13-15 | not gaps |
+
+**ROOT CAUSE FIXED - nothing knew who the submission was ADDRESSED to.** The 15 Sep rule
+correctly REFUSES the expiring carrier in ACORD 125's page-one CARRIER / NAIC boxes; nothing was
+ever built to supply the receiving one, so they shipped EMPTY on a package that names it twice
+("SUBMITTED TO" on the cover sheet, "CARRIER RECEIVING SUBMISSION" in the submission detail, both
+NAIC 41394, both `owner: carrier`). **A rule that prevents the wrong value is only half a rule.**
+- `_receiving_carrier_from_entries` reads the pair from the verified dec index. **Name and NAIC
+  only ever from ONE section** (RC1) - the kit prints four carriers and five NAIC numbers - and a
+  section naming two addressees yields nothing. `owner` must be `carrier`, so "Submitted by"
+  (the producer) is never read. No entries, no opinion: the box stays the blank it was.
+- **STATUS was ticking RENEW.** ACORD's RENEW asks the receiving carrier to renew ITS OWN policy;
+  this programme renews with Cascadia but is being SENT to Northbridge, so it is a quote request -
+  Brent's key ticks QUOTE with RENEW blank. `_resolve_policy_status` now ticks RENEW only when the
+  addressee IS the current carrier (compared through `fact_comparison`, the C1 door - never a
+  second copy), and QUOTE otherwise. ACORD 125 only; a package with no stated addressee keeps the
+  old answer exactly.
+- **The NAIC pair guard then blanked the right answer.** Its attested pairs come from
+  `coverage_lines`, and the receiving carrier writes none of them yet - that is what a submission
+  IS. The dec index attests the pair itself (printed side by side in one section), so it is added
+  to `_naic_pairs`. Same class as the Guard 2 defect above: a guard whose evidence source cannot
+  see the new fact.
+- **`LossHistory_InformationYearCount_A`**: `loss_history_years` has been extracted and registered
+  all along and was bound to NOTHING, so "FOR THE LAST __ YEARS" fell to gap fill every run. Now
+  printed when STATED and never counted from the rows (a five-year history with one claim still
+  says five). Outside 1-99, or silence, stays blank.
+
+**Measured, deterministic only (gap fill OFF), graded with the corrected grader:**
+
+| Run | correct | wrong | must-be-blank | cross-row |
+|---|---|---|---|---|
+| Live 20:55 PDF (stale code, with gap fill) | 179 | 5 | 6 | 2 |
+| After the guard/website/remark fixes | 190 | 2 | 2 | 0 |
+| After the page-one + year-count fixes | **194** | **2** | **1** | **0** |
+
+Precision **99.0%**, recall 79.2% (83.6% excluding owned blanks). The 2 remaining wrongs are a
+value invented by the offline overlay and one operations-description wording difference.
+Tests: `tests/test_named_insured_rows_21sep.py` (**47**). Suite **9648 passed / 2 failed / 18
+skipped** - the documented `httpx` ImportError and the `confidence_fill_rate` truncation (open
+defect #2, still NOT fixed - D6). Zero regressions.
+
+**The next 100%-blocker is an extraction change, not a stamping one:** ACORD 125 prints FULL TIME
+/ PART TIME employee counts, a BLD #, an "any area leased to others" answer and an installation
+percentage PER LOCATION, and `property_locations` carries none of them (the package-level
+`num_employees_full_time` 50 / 11 must NOT be stamped into a location row - the kit's four rows
+sum to 47 / 10). That is a v23 prompt change and a re-extraction of every cached package: Brent's
+call, not a drive-by.
+
+### Run 4 (22:16) - the live server had been serving 16:01 code all evening
+
+Owner re-uploaded `A125_meridian_package.pdf` and sent `ACORD_125_FILLED 4.pdf`. It graded
+**180 correct / 3 wrong / 6 must-be-blank / 0 cross-row** - better than run 3 but nowhere near
+the 194/2/1/0 the code on disk produces. **Every defect in it is the same stale-process symptom,
+not a new code defect:** `Policy_Audit_FrequencyCode_A` printed `Annual` (the resolver on disk
+returns `A`), `NamedInsured_MailingAddress_LineTwo_B/C` printed the literal `(None)`
+(`_is_empty_llm_value` already rejects it, parentheses included), the remarks box carried the
+loss overflow alone, CARRIER / NAIC were blank, STATUS ticked RENEW and row A still printed the
+SECOND insured's website.
+
+**Root cause, measured:** `uvicorn --reload`'s worker (pid 83949) started at **16:01:33** and
+never restarted again, so the live process predated BOTH the v22 extraction work (18:41) and
+every stamper fix (20:48-22:00). Proof beyond the symptoms: the fresh 22:13 session's facts hold
+**86 keys and none of the v22 ones** (`named_insured_details`, `applicant_contacts`,
+`disclosure_answers`, `additional_interests`, `safety_program_elements`,
+`organization_relationships`) while `dec_page_entries` has 343 - a pre-v22 extraction schema,
+and its cache key (`pv=`/`sv=`) cannot collide with a v22 one.
+
+**`--reload` IS NOT A DEPLOY MECHANISM HERE. Verify the worker's start time after any change:**
+`ps -eo pid,lstart,command | grep main:app` - the CHILD's clock is the code's clock, and it must
+be later than the edit. The old parent also ignored SIGTERM and kept port 8000; `kill -9` on the
+parent AND the reload child was needed, then a plain `uvicorn main:app --port 8000` (no reload).
+Restarted 22:21:23 and verified healthy on the current tree.
+
+| Run (all graded with the corrected grader) | correct | wrong | must-be-blank | cross-row |
+|---|---|---|---|---|
+| 17:00 (run 2) | 178 | 3 | 6 | 0 |
+| 20:55 (run 3) | 179 | 5 | 6 | 2 |
+| 22:16 (run 4, still 16:01 code) | 180 | 3 | 6 | 0 |
+| Deterministic stamper on the current tree, gap fill OFF | **194** | **2** | **1** | **0** |
+
+**Nothing was changed in response to run 4** - there was nothing to change. The next upload is the
+first one that will actually exercise v22 extraction and the five fixes.
+
+### Run 5 (22 Sep) - the first run on current code + v22 extraction, and a bug I shipped and caught
+
+**The restart and the re-upload did it.** Run 5's session carries 88 facts WITH every v22 key
+(`named_insured_details` 3, `applicant_contacts` 2, `disclosure_answers` 16,
+`additional_interests` 2, `safety_program_elements` 3, `organization_relationships` 2), and
+`property_locations` now carries `building_number`, `full_time_employees`,
+`part_time_employees` and `any_area_leased_to_others` per row.
+
+| Run (corrected grader) | correct | wrong | must-be-blank | ROW-CELL | cross-row |
+|---|---|---|---|---|---|
+| 17:00 run 2 | 178 | 3 | 6 | 80/86 | 0 |
+| 20:55 run 3 | 179 | 5 | 6 | 79/86 | 2 |
+| 22:16 run 4 (stale 16:01 process) | 180 | 3 | 6 | 79/86 | 0 |
+| **22:5x run 5 (current code, fresh v22)** | **231** | **3** | **5** | **86/86** | **0** |
+| run 5 facts re-stamped, gap fill OFF, after the two fixes below | 231 | 3 | 1 | 85/86 | 0 |
+
+**Two more defects found in run 5, both fixed:**
+1. **Guard 2 again, one table down.** All four premises legitimately carry BLD # `001`, so rows
+   B, C and D were deleted as echoes of row A; the leased-to-others column beside them survived
+   only because a Yes/No value was already exempt. The exemption now consults EVERY per-row
+   resolver through `_GROUNDED_ROW_DETAIL_RESOLVERS` (named insured, additional interest,
+   premises, contact), not just the named-insured one. **When a fix is about "a row owns its own
+   value", apply it to every row-bearing table in the same commit.**
+2. **A borrowed evidence quote.** Question 9 (foreclosure / repossession / bankruptcy) came back
+   `N` citing *"The business has not been placed in a trust."* - question 11's sentence. The
+   document never addresses question 9. `_quote_is_shared_across_topics` refuses a
+   `disclosure_answers` entry whose quote another topic also cites; both fall to the gated LLM
+   path, exactly as a missing quote already does. Quote-to-QUOTE only - never quote-to-topic,
+   the heuristic rejected three times before. **Honest cost: it also declines the TRUST question,
+   which legitimately owns that sentence (231 instead of 232 deterministically). Blank over
+   wrong, and gap fill gets a second chance at it live.**
+
+**A BUG I SHIPPED AND THE SUITE CAUGHT - read this before adding any helper to `pdf_service`.**
+The §1 helper was inserted as a top-level `def` **in the middle of** `_enforce_post_fill_guards`.
+Python accepted it: Guards 2-8 (**1,234 lines**) became the body of the helper and the guard chain
+ended after Guard 1. **Row de-dup, wrong-type rejection, boilerplate bleed and
+explanation-without-a-Yes were all dead.** The module imported, the 59 new tests passed, and the
+A125 score did not move - the ONLY signal was the full suite going **2 failed -> 89 failed**.
+Fixed by relocating the helper to module level (`_enforce_post_fill_guards` is 1,320 lines again).
+**A green feature file and a good-looking form prove nothing about a 1,300-line function; run the
+whole suite.** Pinned by `test_every_guard_still_lives_inside_the_guard_function` (each guard's own
+log marker must be lexically inside the function) plus a length floor; re-breaking it fails 5.
+
+**Still open on the A125, and every one is EXTRACTION, not stamping:**
+`foreign_operations = Y` read off *"western Oregon and south-west Washington"* (a US state is not
+foreign - the last must-be-blank); three narratives paraphrased instead of transcribed
+(judgement/lien, fire-code violation, primary operations); and no fact at all for the Inland
+Marine LOB tick, the two installation percentages, the applicant's own business phone or the
+applicant's own GL class code. A v23 prompt change plus a re-extraction of every cached package -
+Brent's call.
+
+Tests: `tests/test_named_insured_rows_21sep.py` (**64**). Suite **9660 passed / 2 failed / 18
+skipped** - the documented `httpx` ImportError and the `confidence_fill_rate` truncation.
+
+## ORBIN client re-test - the 11 items again, on the client's own shapes (2026-09-24)
+
+Client (Michelle, 22 Sep): most of the 11 Sep items are **not fixed**. Owner: verify in code, brutally honest, then
+fix them properly without breaking anything. **Verdict of the audit: the client was right.** Rounds 1-8 were pushed
+(5a263e1 16 Sep -> 42a092a 18 Sep on `ready-for-deployment-V1`, in sync with origin) and the client tested code that
+contained them. They failed for three reasons, none of them "the fix was never written":
+
+1. **Our fixtures were cleaner than the client's documents (D22, again).** The real certificate's OCR runs words
+   together - `INSURER A :EMCProperty&CasualtyCompany 25186`, `ForInformationalPurposesOnly`,
+   `Note:ReducedUmbrellaLimitfrom$3,000,000to$1,000,000LimitEffective7/25/25.` - and every identity key, the party
+   test and the umbrella reader had only ever seen spaced text. EMC prints its OWN form numbers (`CU7001A 11-15`,
+   `CA7450 M`, `CA7000A 02-22`, `CG 70 01A 10 12`) and the detector knew only ISO / AAIS shapes.
+2. **Production generates through a path we never ran.** `render.yaml` sets `ENABLE_ASYNC_PROCESSING=true`;
+   `worker.py` called `process_single_form(form_meta, session)` with no shared answers, so each form ran its own
+   whole-document gap fill with no line page scopes. Every item-6 fix lived only on the synchronous route. Add-form
+   and both essentials (lite) generators had the same shape. CLAUDE.md's "the legacy per-form path is no longer
+   reachable" was false.
+3. **"Which lines does this package carry?" had one right answer and many readers.** The stamped boxes used the
+   evidence; the cover page, the session list, the EPIC / Vertafore export, the 125 LOB ticks, the 131 coverage
+   ticks, the Data Consistency card and the building-value hard stop / 409 generation block read the raw
+   `lines_of_business`, which lists endorsement MENUS (Farm, Liquor, EPLI, OCP, Pollution) and "No Coverage" lines.
+
+**Built from the client's shapes, not ours:** `backend/scripts/make_orbin_retest_pdfs.py` -> `orbin_retest_kit/`
+(3 PDFs: 49-page EMC package condensed from the real 271 pages, a certificate whose extracted text is run-together
+exactly like the client's, a narrative naming only the old broker; `README-HOW-TO-TEST.md`, rows A-N tagged by item).
+Its self-check proves 17/17 passages copied from the client's OCR come back verbatim through the pipeline's text
+layer and the four run-together strings survive plain `extract_text()`.
+
+### What shipped, per item
+
+- **1 - one company printed with its spaces lost is one company.** `normalization.deglue_entity_text` (identity
+  strength, and a stricter display strength), `entity_compact_key` (strict key with spaces removed; the legal-form
+  tail is canonicalised, never stripped - LLC != Inc) and `same_entity_name`. `normalize_name`,
+  `normalize_carrier` (now canonicalises "Co." / "Company" via `_STRICT_TOKEN_CANON` BEFORE the alias lookup -
+  "Employers Mutual Casualty Co." fell to a different family than "... Company") and `strict_entity_key` de-glue
+  first; `entity_identity_conflict` skips compact-equal pairs. Consumers moved onto it: `fact_comparison` (grouping
+  key, `carriers_same_family`, `same_agency`), `fact_equivalence` KIND_NAME, `underwriting_consistency` name keys,
+  `extraction_service._bind_carriers_to_contracts` (keeps the NAIC, upgrades a glued printing to the header's) and
+  `_pair_carrier_naic_scalars`, `pdf_service._carrier_identity_key` and the 131 underlying-grid check.
+  `display_canonicalizer` re-spaces a glued insurer / carrier / party name for print; real brands
+  (`InTownSuitesLLC`, `McDonald`, `iPhone Repair LLC`) are never rewritten.
+- **2 - one carried-lines door.** `lob_canon.evidenced_line_families` / `line_is_carried` / `fact_line_family`
+  (the family read from `sqs_service._COVERAGE_GATED_FACT_FLAGS`, not a second table). Evidence is a priced row or
+  a verified number / carrier of the line's own; a menu row carrying another line's footer number is not evidence
+  (the borrowed-number rule), and a NAIC alone counts only on an unpriced package. `carried_lines` is persisted on
+  the session; the session list, the EPIC / Vertafore payloads, the 125 LOB ticks, the 131 Liquor / Pollution /
+  Professional ticks (`_OPTIONAL_COVERAGE_PART_BOXES`), `check_doc_consistency`'s per-document LOB rows and the
+  Data Consistency card (`assess_underwriting_consistency(..., flags=)`, a line-relevance gate) all read it.
+  `apply_declared_absent_downgrades` records the False even when the flag was absent. `enforce_building_value_gate`
+  (the 409) and `worker.py`'s copy return early with no property line.
+- **3 - one form-number door.** `normalization.is_not_a_policy_number(value, entries)`: ISO / AAIS, carrier
+  edition (`CU7001A 11-15`, `CA7450 M`) and edition-letter shapes, plus the dec entries' LABELS - printed under
+  POLICY NUMBER exempts a value, printed under ACCOUNT refuses it (`0482854`). Measured: 20/20 real form numbers
+  caught, 0/29 real policy numbers and 0/20,000 fuzzed policy-number shapes flagged. Every reader delegates to it
+  (extraction scrub, stamper Guard 3b-ii, the card, the confirmation validator). **125 Q4 "other insurance with
+  this company" restored** (`pdf_service._other_policy_rows`, denied lines skipped, Q4 Y/N follows the list) -
+  owner decision, reversing round 8's blanking (16 Sep).
+- **4 - the login is the producer.** `_route_producer_party` is login-first: a narrative naming the CURRENT broker
+  used to become the "submitting" agency under ThinkSmith's own login. Under a login a document naming another
+  agency is recorded as `expiring_producer_*` whatever its role; the login's e-mail and phone fill the block
+  (`_submitting_account_for` returns them); with no agency in any document the login fills the empty producer
+  facts. `_usable_account_agency` refuses only non-answers (it refused a lower-case "thinksmith" and handed the block
+  back to the old broker); a non-answer or unreadable agency blanks the block. **Found by the consolidated test
+  file:** under an unreadable login the narrative still made Commercial Risk Solutions the submitter, because a
+  submission-role document named it - an agency the expiring programme also prints is now the INCUMBENT
+  (`_incumbent_agencies`, both the party route and the per-key rules). An empty profile agency reaches exactly this
+  path. Also: an agency is never the prior carrier (`_drop_agency_as_prior_carrier`), a certificate's
+  `applicant_contacts` and producer people leave the applicant's contacts.
+- **5 / 10 - comparisons only within one kind, line and term.** `underwriting_consistency.
+  _drop_values_of_another_kind` (a yes/no is not a rival to an amount, a form title or a "Renewal of <number>"
+  line; the yes/no vocabulary is `normalization.is_strong_yes_no_word`, not a private copy). Proposed-term date
+  candidates are skipped when current-term documents state the date (`_POLICY_TERM_DATE_FACTS`,
+  `_PROPOSED_TERM_ROLES`); `sqs_service._conflicts_within_one_term` - an expiring dec and a new application are two
+  terms. 126 `GeneralAggregate_LimitAppliesToCode` (the OTHER basis) is an owned blank. **Found by the Run B
+  replay:** a GL-scoped policy-number card listed and SUGGESTED the auto number, because `_printings_by_line` read
+  the loss run's "General Liability 6E7 40 02 26" row as a line printing; it now reads only documents the role door
+  (`fact_comparison.document_witnesses`) lets witness `coverage_lines` and the fact.
+- **6 - one generation door.** `form_service.shared_gap_fill(session, form_ids)` - Pass 1 / 1.5 gaps, line page
+  scopes, ONE combined line-scoped gap fill - called by the sync route, `worker.py`, add-form and both essentials
+  generators. Never raises; `{}` falls back per form exactly as before. `test_client_retest_24sep::
+  test_no_generation_call_skips_the_one_scoped_door` AST-walks every backend module and fails on any
+  `process_single_form` call without the shared answers. Also: 127 FARTHEST TERMINAL blanks a witnessed line code;
+  another line's coverage in a section form's OTHER description is blanked (hired / non-owned liability and stop-gap
+  EL stay - they sit on a GL policy); the cross-line borrow override needs two sources.
+- **7 - ACORD 137.** Owner decision: ticking 127 ticks the state's 137 (producer can untick; the card keeps Needs
+  Confirmation). Generating 127 without it raises the advisory `acord127_missing_state_137` (never a cap) with a
+  one-click Add, and the selection screen shows the same banner. The state comes from garaging as well as mailing.
+- **8 - text that names nobody fills no party box.** The placeholder rosters (`additional_named_insureds`,
+  `additional_interests`, `named_insured_details`) are judged in `drop_non_party_names`; a typed answer naming no
+  party is refused (`answer_semantics` step 6c, `not_a_party`); the party test splits glued text and gained an
+  entity-tail override (real names refused 12 -> 0: "Will County", "On Deck Capital", "For Rent Properties LLC").
+- **9 - the umbrella reduction, read off the run-together remark.** `narrative_facts.respace_glued_prose` runs
+  before mining; "reduced to" / "changed to" / "from ... to" all read; an abbreviation ("eff.") no longer ends a
+  sentence; `dated_change` supplies a missing "from" amount from the two printed values; a later Date of Issue is
+  the document's as-of date. With no dated sentence it stays a conflict (owner) and the card now suggests the
+  amount the forms print (D16) instead of the one more documents repeat.
+- **11 - what the policy prints is confirmed, not asked.** Vehicle rows fold on descriptive containment
+  ("Subaru Outback" = "SUBARU OUTBACK SEDAN", "Out-back", body "Wagon"; never "Forester" or another year); when
+  extraction returned no vehicle, the rows are rebuilt from the printed VIN lines (only then) - on the real 271-page
+  text: 2012 / Subaru / Outback Sedan / 4S4BRCGC9C3217772 / class 7383 / territory 111; garaging is read from the
+  vehicle block's LOC line (4800 DAHLIA STREET D13, DENVER, CO 80216-3121); confirm items are pre-ticked outside the
+  selection cap; the Drive Other Car individual is found in any word order ("ROYAL, ERIN" / "Erin Royal").
+
+### Owner decisions (24 Sep)
+- ACORD 137 ticked with 127, label unchanged, banner + one-click Add if generated without it.
+- 125 Q4 list back (reverses round 8).
+- Umbrella with no dated sentence: stays a conflict. **Note:** the question's wording said the boxes would stay
+  blank until confirmed; D16 (Brent, 21 Aug) stamps the suggested value, and D16 was kept - the card's suggestion
+  was aligned to what stamps instead.
+
+### Tests that changed, and why the TEST was wrong
+`test_run_20260813b` (CA7000A 02-22 IS a form number), `test_run10_fixes_16sep` (Q4 restored),
+`test_add_form_resolution` (harvester reads "ACORD 137 CO"), `test_legacy_rules` (`_NO_FIX_CAUSE` entry for the
+advisory), `test_coverage_presence_14sep` (the borrowed number is not evidence), `test_declared_absent_coverage`,
+`test_comparison_guards_14sep` (the OTHER basis box is an owned blank), `test_dec_index_purge` (fact_comparison is a
+purge-safe consumer), `test_brent_prep_fixes_15sep` (the login's e-mail / phone), `test_party_role_14sep` (login
+outranks documents; a non-answer agency never prints the old one), `test_known_data_not_reasked_14sep` (confirm
+items are selected). Each carries a docstring saying what it used to pin and why that was the defect.
+
+### D6 - scores (tell Brent; measured, not argued)
+- `score_delta_probe.py --diff` against the session-start tree (HEAD 42a092a + the uncommitted 23 Sep work):
+  **0 of 11 packages moved.** The scorer is untouched for the same facts.
+- The client's stored session (`sess.json`, 4 documents) replayed through merge -> Data Consistency -> package
+  scorer in both trees: **85 -> 85**, every form unchanged (125 90, 126 68, 127 65, 131 90, 25 90). Under the
+  ThinkSmith login the producer changes from the documents' agency to the login's.
+- Where a live run CAN move: facts the merge now recovers from document text (the vehicle, garaging) raise auto
+  completeness; false Data Consistency / doc-consistency rows removed by the kind, line and term gates lift 85 caps;
+  a profile with no agency now blanks the producer (Tier 1) instead of printing the old broker - down. None of
+  these can be measured offline (the session stores facts, not text).
+
+### Not done (named)
+- An abbreviated placeholder ("FIO", "FIPO", "F.I.O.") passes the party test - an initialism reads exactly like
+  "3M" / "EMC" / "CRS". The full phrase, spaced or glued, is refused.
+- A policy number extracted without its carrier prefix (`7263-26` vs `BBC7263-26`, seen in the Run B session) is
+  still a GL-scoped card. A suffix-election rule would also fold two carriers' GL policies sharing a numeric core
+  (defect D-1); not done blind.
+- ACORD 131 Garagekeepers / Watercraft / Aircraft and EL Stop-Gap / FELA / Jones Act boxes still go to gap fill,
+  guarded only by the Yes/No evidence gate. ACORD 160 is still offered as "Inland Marine Application". ACORD 137's
+  hired physical damage deductible still comes from gap fill.
+- The per-form fallback (`shared_gap_fill` failing) is still unscoped - an error path, logged.
+- Session dumps with client PII (`backend/sess.json`, `run.json`, `run.log`) are committed to the remote.
+
+### Standing lesson
+A live run on our own kit verified our kit. Every earlier "LIVE-VERIFIED" was true of text we wrote; the client's
+certificate had no spaces and production had no line scoping. Build the kit from the client's own OCR, and before
+calling anything fixed, ask which PATH the client's server runs (`render.yaml`), not which one localhost runs.
+
+Tests: `tests/test_client_retest_24sep.py` (149, one class per item, real shapes; the vehicle / garaging /
+named-individual tests read `271page_test_data/271page-testdec.txt`).
+Suite (clean run, `-p no:randomly`): **9905 passed / 1 failed / 19 skipped** - the documented httpx
+`test_arq_acord125_missing_only`. Session-start baseline 9755 / 1 / 19: +150 tests, zero regressions.
+
+### Round 2 - the owner's live run of the retest kit (24 Sep 2026, evening)
+
+The owner ran `orbin_retest_kit/` live (session ed46dede, read with the owner's
+explicit go-ahead, read-only). **The 11 client items held on the forms** except one
+item-4 leak, and grading every value against the kit found ten more wrong values.
+Each cause was confirmed on the stored session (facts, declarations index, raw text,
+each form's stored values and their confidence labels) before anything was changed,
+and every fix was replayed through the live session (before / after, all six forms).
+
+- **Item 4 - the old broker's AGENT NO. as ACORD 186's contractor licence** (gap fill).
+  The ownership guards key on facts in party-prefixed boxes; an agent number is not a
+  fact and `ContractorsUnderwriting_*` has no owner. New post-fill guard
+  `_blank_producer_identifiers`: the producer's codes / phones / e-mails come from the
+  declarations index (owner "producer") and the producer facts; they may appear only
+  in the producer block, and ANOTHER agency's (an expiring producer is recorded)
+  nowhere. The block is `Producer_*` plus ACORD 125's CODE / SUBCODE, which ACORD
+  names `Insurer_ProducerIdentifier` / `Insurer_SubProducerIdentifier` - found by
+  sweeping all 17 schemas, pinned by the incumbent test. Names, addresses, cities and
+  ZIPs are never identifiers.
+- **186 "minimum GL limits required of subcontractors" = Orbin's own $1M / $2M** (Pass
+  1 rule on a generic field name). `_resolve_minimum_limit_box`: an owned blank for any
+  field whose tooltip reads "this is the minimum limit" (only these two, all schemas).
+- **127 stated amount $100,000 beside ACV** - the hired-auto limit (gap fill). The index
+  had no witness, so the meaning gate could not see it. `_blank_unexplained_stated_amount`:
+  an agreed / stated amount only beside a ticked Agreed or Stated valuation.
+- **127 COST NEW missing, USE = Commercial.** The schedule has no cost-new column and the
+  index never recorded "USE: NA"; extraction answered "commercial" off "PRIV PASSENGER -
+  COMM CLASS". `_read_vehicle_block_cells` reads COST NEW and USE from each vehicle's own
+  block (after its VIN line): cost new fills an empty row cell (26,680 prints); a
+  non-answer USE clears an AI-extracted use (the 15 Sep rule then asks); a printed class
+  is taken; a person's answer always stands; two different uses decide nothing.
+- **127 SYM / COMP SYM / COLL SYM = 7 / 07 / 07 - owner decision: blank.** Those columns
+  are vehicle rating symbols; the covered-auto symbols print on the 137.
+  `_resolve_vehicle_rating_symbol` owns all twelve boxes. Reverses the 7 Aug stamping
+  (tell Brent).
+- **127 "ACORD 129 attached" with one vehicle.** The box means the schedule OVERFLOWED;
+  it now ticks only above the form's own rows (4 vehicles / 13 drivers, read from the
+  schema).
+- **126 PD and BI deductibles $1,000** - the Limited Pollution endorsement's "Property
+  Damage Deductible $1,000 Each Pollution Incidents" sprayed by three Pass-1 rules.
+  `_classify_gl_deductible` reads the deductible's own printed line (auto lines are not
+  GL evidence) and `_resolve_gl_deductible_box` routes it: PD, BI, both, or the OTHER
+  row with the line as its description. No wording, or lines that disagree: the legacy
+  rules, unchanged.
+- **131 Q14 Y vs 126 Q4 N** (subcontractors' limits; neither answer supported).
+  `reconcile_cross_form_yes_no`, called at the one generation door: the same question
+  (content words, pronouns and "applicant" ignored, Jaccard >= 0.8) answered both ways on
+  two forms is blanked on both for the producer.
+- **137 CO UM row "other symbol 1".** The certificate's extraction attached symbol 1 to
+  "umbrella liability", and `normalize_coverages` matched "um" as a substring of
+  "UMbrella". Three layers: short abbreviations match whole words only; a symbol row
+  naming a non-auto line is ignored; the 137 grid's "Other" is only for symbols ACORD
+  prints on no row (a known symbol a row does not offer is a mis-attribution).
+- **125 / 131 "INSURED IS: LLC BUSINESS DESC: COMMERCIAL GENERAL CONTRA".**
+  `_prefer_submission_operations_description`: the narrative's / application's own
+  description outranks a declarations classification field; label text is stripped
+  when the dec is the only source; a person's answer stands.
+- **Cover "current term 07/15/25 - 07/15/26" / "currently in force".** `_moved_term_ended`:
+  an ended term prints "expired term" and the summary is told "Last Policy Term
+  (EXPIRED - not in force)" (prompt change - improving-ll.md C96).
+- **"Tailored for: Renewal"** followed the substring "renew"; it now follows the
+  `is_renewal` fact, and no chip when unknown.
+
+**Not changed, and why.** 126's hold-harmless "Y" from "written subcontract agreements."
+is the known evidence-gate residual: a verb-less phrase can be real grounding
+("Blanket additional insureds." answers the additional-insured question), and telling
+the two apart needs the quote-topic matching the codebase rejected. It stays
+highlighted for the producer on Field QA.
+
+Tests: `tests/test_orbin_live_run_24sep.py` (92, every class reads the live values in
+`tests/fixtures/orbin_live_24sep.json` and pins the other direction too).
+Tests that changed, and why the TEST was wrong: `test_a125_fixes_21sep` (the 129 / 163
+"attached for additional" boxes ticked for ONE vehicle / driver - ACORD's own tooltips
+say overflow), `test_state_auto_grid_14sep` (a known symbol a row does not offer is a
+mis-attribution - ISO symbol 1 is liability only - not "Other"),
+`test_relationship_fixes_20260816` (the comp symbol no longer stamps on 127; the NET VEH
+credit guard now reads its witness from the facts), `test_run10_fixes_16sep` (07/15/26 had
+ended when those tests were written), `test_form_recommendation` (the chip follows the
+fact). Three real defects in my own first cut were caught by the suite and fixed: a
+duplicated `_PERSON_FACT_SOURCES`, a stated-amount rule that also blanked an amount with
+no valuation ticked (overrode the 16 Aug decision - narrowed to ACV only), and the NET VEH
+guard losing its witness when the symbol columns went blank. The replay also caught one
+of mine: the deductible classifier imported a helper from the wrong module and the
+merge's try/except hid it.
+Suite (clean run, `-p no:randomly`): **10,002 passed / 1 failed / 19 skipped** - the
+documented httpx `test_arq_acord125_missing_only`. Round-1 baseline 9,905 / 1 / 19.
+**D6 (tell Brent):** measured on the live session's own merged facts with only this
+round's merge changes applied - package **64 -> 63**, tier unchanged ("Major Gaps"), every
+form score unchanged. The one pillar that moves is Exposure 77 -> 72: the vehicle's use
+was an AI inference ("commercial") while its own cell prints "USE: NA", so it is now
+ASKED (the 15 Sep ruling) instead of ticked. A first measurement that re-ran only
+`merge_facts` showed 64 -> 59; that was an artifact - the live pipeline adds narrative and
+loss facts after the merge, which a merge-only replay drops.
+
+### Round 3 - the owner's second live run of the kit (24 Sep 2026, late; session 5ca5cff5)
+
+Forms 125, 126, 127, 131, 137 CO, 186 (no cover). Read read-only from the owner's own
+test session under the same go-ahead as round 2. **Round 2 held on every form**: 186
+licence and minimum-limit boxes blank; 127 stated amount blank, COST NEW 26,680, SYM
+columns blank, "ACORD 129 attached" unticked; 126 PD / BI deductibles blank; the 137 UM
+row clean; the 125 / 131 descriptions the narrative's own; the producer correct.
+Grading every other value found five wrong ones. Each cause was confirmed on the stored
+session - and, for the Yes answers, against the live API - before anything changed.
+
+- **Three AI "Yes" answers on borrowed sentences.** 125 Q "exposure to flammables,
+  explosives, chemicals?" = Y, explained by the business description; 126 "vendors
+  coverage required?" = Y and 131 Q14 "do subcontractors carry coverages or limits less
+  than applicant?" = Y, both explained by the narrative's "Subcontractors are required to
+  carry their own general liability insurance and to provide certificates of insurance
+  before they start work." The deterministic gate passes all three by design (real,
+  unique, asserting sentences); implication is the evidence judge's job (C74). Called
+  directly on these inputs, **the judge rejects the 125 and 126 answers 6 times out of
+  6** - so on the live run it was not reached for them. It made ONE attempt per form,
+  straight behind the gap-fill burst, and a failed call was "no opinion", so every kept
+  Yes stood. The 131 answer is a second defect: the judge accepted it (5 of 6). Fixed
+  (improving-ll.md C97): the judge retries on the TPM schedule; a Yes it was reachable for
+  and did not confirm is blanked (`evidence_judge UNCONFIRMED_YES`), while an unavailable
+  judge still changes nothing; prompt rule 7 ("same people or activity is not the
+  condition asked about"); batches of 5, run in parallel. Measured on 37 labelled
+  answers: the rule took small batches from wrong-every-time on the 131 shape to 0 errors
+  in ~90 judgments; batch 5 gave 3 errors in 296 judgments against ~2% at 20.
+- **127 USE printed OTHER = "PRIVATE PASSENGER"** (the vehicle's TYPE) beside the cell
+  "USE: NA". Round 2's reader had cleared the AI use, so the seven boxes were owned
+  blanks - but the OTHER description box had no owner: gap fill wrote the type there, and
+  the evidence gate's "rescue a stranded grounded Yes" (Pass B) ticked OTHER beside it,
+  past the resolver, labelled "filled". Two layers: the rescue (Pass B and Pass C) never
+  promotes a box a resolver keeps blank, and `_resolve_vehicle_use_other_description`
+  owns the description (a stated use no class names prints there; anything else blank).
+- **186 Q8 "subcontractors without a certificate?" = N** under the form's own "* DO NOT
+  ANSWER IF THIS FORM IS ATTACHED TO ACORD 126". The tooltips carry no asterisk.
+  `_resolve_acord186_starred_question`: AAB, AAI, AAC, AAG, ABB, AAD, AAE, KAE, KAH are
+  owned blanks when the package contains ACORD 126 - the set read off the printed form
+  and pinned against the template; the 126 asks all nine (watercraft and leased employees
+  under its own codes). `form_service.package_form_ids` is the one package list for both
+  stamping and the shared gap fill, so the model is no longer asked them.
+- **125 premises / 131 named-insured DESCRIPTION OF OPERATIONS** printed the whole
+  236-character paragraph in a one-line 8pt box: `_fit_text_to_box` shrank it to 3.5pt and
+  it still clipped mid-word. A one-line operations box now prints its leading whole
+  sentences at a readable size ("Commercial general contractor."); print-only - the stored
+  value, the editor and 125's multi-line DESCRIPTION OF PRIMARY OPERATIONS keep the
+  paragraph. Abbreviations ("St. Louis") are not sentence ends; a value with no sentence
+  that fits prints as before.
+
+**Checked and NOT changed:**
+- **125 VEHICLE SCHEDULE ticked with one vehicle** - the client's own call:
+  `fix-form-stamping.md` lists it under "Correctly ticked on the same run, do not
+  regress" on this package. The round-2 overflow rule belongs to the 127's "additional
+  vehicles on the attached ACORD 129" box, not to this one. (My first plan was to change
+  it; the record said otherwise.)
+- **137 NON-OWNED "employees" = Y** is right: the auto dec rates non-ownership liability
+  on "NUMBER OF EMPLOYEES 0 - 25 $137.00".
+- **126 OTHER deductible blank** - extraction returned no `gl_deductible` this run, so
+  round 2's classifier had nothing to route. Blank, not wrong.
+- **131 UNDERLYING description** "Commercial General Liability and Commercial Auto
+  Liability underlying policies listed with minimum applicable limits." - AI-composed and
+  generic, but true.
+
+**Considered and rejected:** a deterministic package-wide "one sentence, one Yes" rule. It
+would catch all three borrowed Yeses, and it would also blank the 186's CORRECT "direct
+oversight of each jobsite?" and "renovation work?" Yeses, because the model borrows the
+same few narrative sentences for many questions.
+
+**Replay lesson (cost me one wrong turn):** the schema read back from the session row is
+JSONB-sorted (length, then bytes), not layout-ordered, and `_question_explanation_pairs`
+pairs by position - on that schema it paired 127's OTHER description with "For hire, row
+D". Generation uses `extract_form_schema` (layout order). Replays must too.
+
+**Verified:** replaying the stored run-2 answers through the full gate on all six forms
+with `extract_form_schema`, round 3's deterministic changes switched on vs off: **2,054
+fields, 2 changed** - the 127 USE OTHER tick and description - and "off" reproduces the
+live values exactly. Run 1 (ed46dede) through round 2's replay harness: 2,054 fields, only
+the completion date moved (the date moved). The rescue-guard test fails with the guard
+switched off. **D6:** no fact changed, so the package score cannot move; every per-form
+SQS unchanged (127 71, 186 60, 125 61, 126 76, 131 85 before and after); the displayed
+fill rate drops about a point where a wrong value comes out.
+Tests: `tests/test_orbin_live_run2_25sep.py` (73, fixture
+`tests/fixtures/orbin_live_25sep.json`).
+Test that changed, and why the TEST was wrong: `test_a125_complete_fix_21sep::
+test_the_package_form_list_reads_a_session_key_somebody_writes` found the package-list
+code by the FIRST mention of `_package_form_ids`; the list moved into the helper
+`form_service.package_form_ids`, so the first mention became the shared gap fill's call
+site. It now reads the helper's body; its two assertions (reads `selected_form_ids`;
+every key it reads has a writer) are unchanged.
+Suite (clean run, `-p no:randomly`): **10,075 passed / 1 failed / 19 skipped** - the
+pre-existing `test_arq_acord125_missing_only` (on this Mac's venv an AssertionError at
+line 95, identical in the session-start baseline and round 2). Round 2: 10,002 / 1 / 19.
+
+### 27 Sep 2026 - owner follow-ups after round 3
+
+- **Data Consistency no longer shows line-scoped rows.** The "Policies in this submission"
+  table and the per-line "N policies, N values - not a conflict" rows (carrier, policy
+  number, NAIC) are gone from both layouts; the heading says "Your documents agree - there
+  is nothing to confirm" when nothing does. The client's rule (1 Sep, SYS-06) was to
+  MAINTAIN line -> carrier -> NAIC -> policy -> term -> source, not to show it; listed under
+  "Your documents disagree" it read as the flag they asked us not to raise. The backend is
+  unchanged, and two live policies on one line still render as a conflict card. Test that
+  changed: `test_v1_c1d_client_answer_review` required the scoped rows (F2b); it now
+  requires their absence in both layouts.
+- **An expired policy beside its renewal is history, not a rival**
+  (`extraction_service._retire_predecessor_policies`). Six package shapes were run through
+  the real merge, Data Consistency and stamper; five were right (six current policies
+  across four carriers all reach every form; a certificate-only WC policy is kept; a policy
+  with no premium is kept; two live GL policies are a conflict; "No Coverage" is dropped).
+  The sixth - last year's GL declarations beside this year's - was a false "two policies on
+  the same coverage line": the 126 header and 131 underlying GL went blank and the 125
+  listed the expired policy as current. The rule retires a row only when it and another
+  row on the same line are fully dated, it ended on or before the other began, its end has
+  passed and the other carries a number; retired rows are kept on `prior_coverage_lines`,
+  count as prior-term for every reader (`prior_term_policy_numbers`), never as prior when a
+  renewal kept the number, and never reach the gap-fill prompt. Found on the way: a missing
+  `datetime` import that the merge's try/except swallowed - the tests call the function
+  directly for exactly that reason.
+- **A post-generation re-fill never writes "UNMATCHED"** (`arq_service._refill_value`, both
+  re-fill paths). The fill engine answers that marker when it cannot place a value; the
+  re-fills skipped only an empty result. Not seen on the two Orbin sessions; the test fails
+  on the old check.
+- **The dec index stays after generation (`PURGE_DEC_INDEX_AFTER_GENERATION=0`, owner).**
+  Measured on both Orbin sessions: with the purge, package and per-form SQS are unchanged
+  on re-score, and re-fills lose the 126 / 186 GL policy number and four 127 decisions -
+  nothing wrong, only less. The SQS reads the index for WC payroll by state, "payroll is
+  annual" and vehicle radius, so a WC / auto package could lose a deduction's evidence on
+  re-score. The documents' full text sits in the same row, so the purge removed a copy,
+  not the data.
+- **CORRECTION - production is synchronous.** The Render dashboard sets
+  `ENABLE_ASYNC_PROCESSING=false`; the round-1 claim that the client's server ran the
+  worker came from `render.yaml`, which did not match the dashboard (it now does, and is
+  pinned by test). The worker fix (C95) stands but was not the client's path.
+- **Render: the nightly scheduler runs nowhere.** Only `main.py` starts it, production
+  defaults it off, the dashboard does not set it, and `worker.py` never starts one - so
+  retention clean-up, facts retention, audit-log retention, the daily payment lifecycle
+  and questionnaire reminders are not running. Owner decision (enabling it starts billing
+  lock-outs and reminder e-mails); safe to enable only while `WEB_CONCURRENCY` is 1.
+- Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Run-1 replay after the merge
+  change: 2,054 fields, only the form date moved. Suite (clean, `-p no:randomly`): **10,104
+  passed / 1 failed / 19 skipped** - the pre-existing `test_arq_acord125_missing_only`.

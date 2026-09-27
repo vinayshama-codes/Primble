@@ -398,9 +398,15 @@ def test_extraction_schema_carries_the_counts_and_moved_to_v17():
     it - which is exactly what it did on 11 Sep. v20 since 2026-09-14: RULE 16
     (coverage_lines from declarations pages only; a form number is never a
     policy number) - improving-ll.md C88. v21 since 2026-09-14: `gl_form_type`
-    defined and `umbrella_form_type` added - improving-ll.md C89."""
+    defined and `umbrella_form_type` added - improving-ll.md C89. v22 since
+    2026-09-21 (A125 kit test 2): seven ADDITIVE row-bearing facts -
+    named_insured_details, applicant_contacts, additional_interests,
+    organization_relationships, safety_program_elements, disclosure_answers,
+    other_named_insured_operations - plus FT/PT abbreviation hints on the
+    premises table. THE TEST MOVED, NOT THE RULE: the pin exists so a schema
+    edit cannot skip a bump, and this edit bumped."""
     from services import extraction_service as es
-    assert es.PROMPT_VERSION == "v21" and es.SCHEMA_VERSION == "v21"
+    assert es.PROMPT_VERSION == "v22" and es.SCHEMA_VERSION == "v22"
     assert '"full_time_employees": string or null' in es._EXTRACT_SCHEMA
     assert '"part_time_employees": string or null' in es._EXTRACT_SCHEMA
 

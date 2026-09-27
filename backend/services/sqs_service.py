@@ -1123,6 +1123,41 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     hard, soft = run_field_validations(facts)
 
+    # ── ACORD 125 BASELINE (Tier 1) - EMITTED HERE, NOT IN A ROUTE ───────────
+    # These warnings lived in `form_routes` on the UPLOAD response only
+    # (2026-09-23). Three things followed from that, all reported live:
+    #
+    #   1. They were appended to a LOCAL `soft_stops` and never persisted, so
+    #      they were absent from the array `_resolve_cap` reads - they sat under
+    #      a banner reading "Caps your SQS at 85" while capping nothing.
+    #   2. `evaluate_stops` never emitted them, so the FIRST recompute (any
+    #      Resolve, Dismiss, answer or field edit rebuilds the stop lists from
+    #      this function) dropped every one of them - the ones that had been
+    #      fixed and the ones that had not, identically. Measured on a live
+    #      session: the producer resolved "Proposed effective date", both rows
+    #      vanished, and `contact_name` / `contact_phone` / `contact_email` were
+    #      all still None with `check_tier1` still reporting the gap.
+    #   3. Nothing else re-raised them, so the gap then went silent while still
+    #      costing 20 points of the Tier 1 component inside Structural.
+    #
+    # Emitting from the engine every recompute path already runs makes the
+    # warning behave like every other rule: persisted, re-derived from the
+    # facts, and gone only when the fact is actually answered. `_answered`
+    # (inside check_tier1) means a human saying "there is none" also clears it.
+    #
+    # SCORES MOVE DOWN on packages missing a Tier 1 field, because an 85 ceiling
+    # now applies where the display had merely claimed one. D6 - Brent sees the
+    # numbers. The pillar deduction and the ceiling coexist here exactly as they
+    # do for the V1 H1 auto-completeness items: the legacy soft stop sets the
+    # ceiling, the pillar carries the points.
+    _t1_ok, _t1_missing = check_tier1(facts, flags)
+    if not _t1_ok:
+        for _t1_item in _t1_missing:
+            soft.append(
+                f"ACORD 125 minimum field missing: {_t1_item} "
+                "(Fix: Provide this value manually, or upload a document that states it.)"
+            )
+
     date_issue = validate_effective_date_window(facts)
     if date_issue:
         soft.append(date_issue[1])
@@ -1207,21 +1242,47 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             if not _fv(facts, "business_income_limit"):
                 soft.append("Business Income coverage detected - BI limit and Period of Restoration should be provided")
 
-        if flags.get("property_has_peril_deductibles"):
-            missing_perils = [
-                p for p, k in [
-                    ("wind/hail",  "property_deductible_wind"),
-                    ("earthquake", "property_deductible_earthquake"),
-                    ("flood",      "property_deductible_flood"),
-                ]
-                if not _fv(facts, k)
-            ]
-            if missing_perils:
-                # Spec: peril-specific deductible referenced but undefined → hard stop
-                hard.append(
-                    "Peril-specific deductibles referenced but not defined - specify amounts for: "
-                    + ", ".join(missing_perils)
-                )
+        # ── ONE PERIL IS WHAT THE FLAG MEANS (2026-09-23) ───────────────────
+        # `property_has_peril_deductibles` is set by extraction when the
+        # document shows a wind/hail **or** earthquake **or** flood deductible -
+        # ONE is enough (extraction_service.py, and the prompt says so in
+        # terms). This rule then HARD STOPPED unless all THREE were defined, so
+        # an ordinary policy carrying a wind/hail deductible and no earthquake
+        # or flood coverage at all was capped at 60 and told to "specify
+        # amounts" for perils it does not buy. A false positive by
+        # construction, on the single most common property shape there is, and
+        # measured as the live report's actual capper (80 earned, held at 60).
+        #
+        # There is no per-peril coverage evidence anywhere in the fact set, so
+        # "carries flood but did not state the deductible" and "has no flood
+        # coverage" are indistinguishable. Asking for a number that does not
+        # exist is the failure this project's blank-over-wrong rule exists to
+        # prevent, so the only genuine, SATISFIABLE gap is the one below: the
+        # document referenced peril deductibles and we captured no amount at
+        # all. Filling any one of the three clears it.
+        #
+        # WARNING, not a hard stop: `sqs_service` records the client's ruling
+        # three times over for this family - carrier practice varies, so we
+        # flag and never block.
+        #
+        # TWO DUPLICATE COPIES WERE DELETED WITH THIS EDIT, both in
+        # `cross_form_validator` - an identical hard stop
+        # (`_check_peril_specific_deductibles_referenced`) and a soft twin
+        # gated on `0 < present_count < 3`, which is exactly the ordinary
+        # wind-only policy. One rule, one owner; duplication at two severities
+        # is what let the Umbrella SIR and auto-symbol defects survive their
+        # first fixes.
+        if flags.get("property_has_peril_deductibles") and not any(
+            _fv(facts, k) for k in (
+                "property_deductible_wind",
+                "property_deductible_earthquake",
+                "property_deductible_flood",
+            )
+        ):
+            soft.append(
+                "Peril-specific deductibles referenced but not defined - state the "
+                "deductible for each peril this policy actually carries"
+            )
 
         if not _fv(facts, "valuation_method"):
             soft.append("Property valuation method not specified - select RCV or ACV")
@@ -2064,6 +2125,29 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         "its own term - confirm which term applies to the submission."
         if _multi_contract and not _dates_explained else "")
 
+    # ── ONE TERM PER COMPARISON (24 Sep 2026) ────────────────────────────────
+    # Client 11 Sep item 10: compare "only when they represent the same field,
+    # same LOB/policy and applicable time period". Declarations, certificates,
+    # binders and endorsements state the CURRENT (expiring) policy's term; an
+    # application, supplemental, quote or narrative states the term being
+    # APPLIED FOR. Two different periods are not a contradiction - an expiring
+    # dec against a new application hard-stopped the package at 60 (v1-20AUG
+    # Q33: "Engineering did NOT fix it"). A difference INSIDE either family is
+    # still compared exactly as before.
+    _PROPOSED_TERM_ROLES = frozenset({
+        "application", "supplemental", "quote", "narrative", "acord_form",
+        "submission", "proposal"})
+
+    def _conflicts_within_one_term(key: str) -> bool:
+        cur, prop = [], []
+        for d in docs:
+            v = _fv(d["facts"], key)
+            if not v or not _doc_witnesses(d.get("doc_type"), key):
+                continue
+            role = str(d.get("doc_type") or "").strip().lower()
+            (prop if role in _PROPOSED_TERM_ROLES else cur).append(v)
+        return any(len(fam) >= 2 and _conflicts(key, fam) for fam in (cur, prop))
+
     def _dates_owned_separately(key: str) -> bool:
         """PROOF that the differing dates belong to DIFFERENT contracts.
 
@@ -2084,7 +2168,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         pass  # resolved via the Data Consistency picker
     elif _dates_owned_separately("effective_date"):
         pass  # PROVEN to be two contracts' own terms - not a disagreement
-    elif _conflicts("effective_date", eff_raw):
+    elif _conflicts("effective_date", eff_raw) and _conflicts_within_one_term("effective_date"):
         issues.append(
             f"{_date_prefix} code=date_conflict "
             "Policy date mismatch across documents." + (
@@ -2100,7 +2184,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         pass  # resolved via the Data Consistency picker
     elif _dates_owned_separately("expiration_date"):
         pass  # PROVEN to be two contracts' own terms - not a disagreement
-    elif _conflicts("expiration_date", exp_raw):
+    elif _conflicts("expiration_date", exp_raw) and _conflicts_within_one_term("expiration_date"):
         issues.append(
             f"{_date_prefix} code=expiration_conflict "
             "Policy expiration date mismatch across documents." + (
@@ -2143,8 +2227,24 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             out.add(_cl(x) or _canon_part_leaf(x, present) or n)
         return frozenset(out)
 
+    # Each document's CARRIED lines, not its raw mention list (24 Sep 2026).
+    # The raw list is every line a document MENTIONS - on the Orbin policy that
+    # is the ISO endorsement menus (Farm, Liquor, EPLI, OCP, Pollution ...), so
+    # this row expanded to exactly the phantom list the client reported, and a
+    # certificate's empty preprinted WC row could turn it into an 85-cap
+    # warning. `carried_lines_of_business` is the cover page's own evidence
+    # door; a document with no per-line rows (a narrative) keeps its list.
+    try:
+        from services.lob_canon import carried_lines_of_business as _carried_lines
+    except Exception:                                         # noqa: BLE001
+        _carried_lines = None
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
+        if _carried_lines is not None and isinstance(lob, list) and lob:
+            try:
+                lob = _carried_lines(d["facts"], d.get("flags") or None)
+            except Exception:                                 # noqa: BLE001
+                pass
         if lob and isinstance(lob, list) and lob:
             norm = _fold(lob)
             if norm:
@@ -2586,7 +2686,29 @@ def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
         CONFIDENCE_SCORE.get(confidence_dict.get(field), 0.0)
         for field in filled_items
     )
-    return int((weighted / filled_count) * 100)
+    # ── THE FLOOR IS DELIBERATE; THE FLOAT ERROR IS NOT (2026-09-23) ─────────
+    # This was `int(... * 100)`. Truncating a genuine 86.4 to 86 is a defensible
+    # choice and is preserved. Truncating a value whose EXACT arithmetic result
+    # is 87 down to 86, because binary floating point represents it as
+    # 86.99999999999999, is not - it is the same number arriving one lower for
+    # no reason a broker could ever be shown.
+    #
+    # Measured over every label multiset up to n=12 (CONFIDENCE_SCORE has
+    # twelve labels): 32,912 multisets have a whole-number exact value that
+    # `int()` returned one below. CLAUDE.md's own example reproduces - three
+    # `deterministic` plus `ai_high` plus `ai_low` is exactly 87 and returned 86.
+    #
+    # Rounding to nine places first collapses ONLY the representation error,
+    # then the original floor runs unchanged. Deliberately NOT a bare `round()`:
+    # that would also flip the 149,065 multisets whose exact value ends in .5
+    # from floor to round-half-up, which is a semantic change to the metric
+    # nobody has asked for and which moves far more scores than the defect does.
+    #
+    # `confidence_fill_rate` feeds the per-form Structural pillar, the package's
+    # Form Fill Quality component and the questionnaire's fill-rate deltas, so
+    # SCORES MOVE UP by one point wherever a submission lands on such a
+    # boundary. Nothing moves down. D6 - Brent sees the numbers.
+    return int(round((weighted / filled_count) * 100, 9))
 
 
 # ── Loss history integrity coefficient ───────────────────────────────────────
@@ -2861,6 +2983,60 @@ def _cap_stop_items(messages, coded_issues=None):
         out.append({"message": msg, "code": code, "resolution": resolution,
                     "severity": "hard_stop", "forms": list(forms)})
     return out
+
+
+def _pillar_rec_field(pillar: str, action: str) -> Optional[str]:
+    """The canonical fact that would answer a PACKAGE top-recommendation.
+
+    WHY THIS EXISTS (2026-09-23). `top_recs` entries are built from pillar
+    rankings and carry `pillar` / `score` / `action` / `missing` - and no
+    `field`. `_route_recommendations` routes through
+    `answer_routing.stamp_recommendations`, which reads `rec["field"]`, so every
+    package recommendation came back `answer_mode: "none"` with the note "This
+    one has no single value to fill - attach a supporting document or dismiss it
+    with a note."
+
+    That was false for all three a live package produced, and visibly so: the
+    numbered package list said "no single value to fill" for Loss History and
+    Narrative while the FORM cards directly beneath it offered working controls
+    for the same two problems, and the third row ("FEIN / Tax ID") offered
+    nothing at all even though `fein` is an ordinary writable Tier 2 fact. One
+    screen, two doors, opposite answers - the BUG-05 class at package level.
+
+    DERIVED, never a new table: the loss messages go through the existing
+    `loss_recommendation_field`, the structural labels are looked up in the
+    Tier 1 / Tier 2 tables that DEFINE those labels, and narrative uses the same
+    writable fact the form card uses (`additional_remarks_text` - NOT
+    `acord101_remarks`, which is a read-only alias the producer-answer door
+    refuses). Returning None leaves the old `none` behaviour untouched, so a
+    pillar we cannot route is never given a box that would be refused.
+    """
+    if not action:
+        return None
+    if pillar == "loss_history_alignment":
+        return loss_recommendation_field(action)
+    if pillar == "narrative_quality":
+        # The literal, matching `rec_narrative_components` a few hundred lines
+        # below in this same file. Importing arq_service.NARRATIVE_ANSWER_FIELD
+        # here would be a new sqs_service -> arq_service edge for one string.
+        return "additional_remarks_text"
+    if pillar == "structural_completeness":
+        # `action` is a LABEL from check_tier1 / check_tier2. Both tables are
+        # the authority for their own labels, so this cannot drift from them.
+        label = action.strip()
+        for _fact, _label in TIER2_FIELDS.items():
+            if _label == label:
+                return _fact
+        for _fact, _label in TIER1_FIELDS.items():
+            if _label == label:
+                return _fact
+        if label == "Contact information":
+            # Any one satisfies Tier 1 (client 9.1); offer the first, exactly as
+            # the Tier 1 resolution does.
+            return TIER1_CONTACT[0]
+        if label == "NAICS or SIC industry code":
+            return "naics_code"
+    return None
 
 
 def _route_recommendations(recs, facts=None):
@@ -5334,7 +5510,20 @@ def _weighted_pillar_sum(pillars: Dict[str, Optional[float]],
     if not active or total_w <= 0:
         return 0
     scale = 1.0 / total_w
-    return int(sum(v * weights[k] * scale for k, v in active.items()))
+    # ── FLOOR THE SCORE, NOT THE FLOAT ERROR (2026-09-23) ───────────────────
+    # Spec section 2 mandates "rounded down to a whole number", so flooring a
+    # genuine 90.84 is correct. Flooring an EXACT 100 to 99 is not, and that is
+    # what `int()` did here: with two pillars Not Applicable (umbrella absent
+    # plus a confirmed New Venture) the rescale lands 100 on
+    # 99.99999999999999, so a flawless submission could not print 100.
+    # Measured: all six at 100 -> 100; umbrella N/A -> 100; umbrella AND loss
+    # N/A -> 99.
+    #
+    # Identical defect, identical treatment, to the one fixed in
+    # `confidence_fill_rate` earlier the same day: round to nine places to
+    # collapse the representation error, then floor exactly as before. Nothing
+    # else moves - a real fraction still rounds DOWN.
+    return int(round(sum(v * weights[k] * scale for k, v in active.items()), 9))
 
 
 def effective_pillar_weights(pillars: Dict[str, Optional[float]],
@@ -5830,7 +6019,25 @@ def calculate_package_sqs(
     # place a cross-document conflict can actually be cleared.
     _bv_msg = None
     _bv_code = "underwriting_reconciliation_property_building_value"
-    if any(
+    # ── RELEVANCE IS A PRECONDITION, HERE TOO (C75, applied 2026-09-23) ──────
+    # `extraction_pipeline.py` already decided this exact question for this
+    # exact fact and wrote the ruling down: a building-value conflict "cannot
+    # block anything on a package that has no property coverage - there is no
+    # ACORD 140 to generate and no box for the number", so it keeps the conflict
+    # a WARNING when `has_property_coverage` is false. This function applied it
+    # UNCONDITIONALLY, so one fact had two verdicts in two files and the harsher
+    # one won: the pipeline drew a warning while the scorer capped the package
+    # at 60.
+    #
+    # Measured on the live Orbin session (has_property_coverage is False):
+    # 72 -> 60, and the tier with it ("Needs Work" -> "Major Gaps"). The package
+    # carries no property line at all.
+    #
+    # Gated on the SAME flag the pipeline reads, so the two cannot drift again.
+    # When the flag is false the conflict is not dropped - the pipeline's own
+    # soft warning still carries it into `soft_stops` and still holds the 85.
+    # SCORES GO UP on packages with no property coverage; nothing goes down.
+    if flags.get("has_property_coverage") and any(
         f.get("fact_key") == "property_building_value" and f.get("review_required")
         for f in (_uw_data.get("fields") or [])
     ):
@@ -5982,15 +6189,40 @@ def calculate_package_sqs(
         "umbrella_limit_adequacy": p5,  # None when N/A — excluded from ranking
         "narrative_quality":       p6,
     }
-    # N/A pillars (None) are excluded from recommendations entirely rather than
-    # being given a fictitious 100, which would make the dict unsortable with mixed
-    # types and could silently misrank other pillars when p5 is missing.
-    _ranked_pillars = [
-        (k, v) for k, v in sorted(
-            ((k, v) for k, v in _pillar_scores.items() if v is not None),
-            key=lambda x: x[1],
-        ) if v < 90
-    ][:3]
+    # ── EVERY GAP, RANKED BY WHAT IT IS WORTH (2026-09-23) ──────────────────
+    # This used to be `sorted by score ascending, keep those under 90, take the
+    # first three`. Three things were wrong with that, and together they are why
+    # a producer with ZERO open warnings and a score of 78 had nothing to act on:
+    #
+    #   1. THE [:3] CAP HID REAL POINTS. A package with four weak pillars showed
+    #      three. On the live session Exposure sat at 82 and was worth 5.3
+    #      points, and because three lower-scoring pillars existed it got no row
+    #      anywhere in the product.
+    #   2. THE `< 90` FILTER HID MORE. A pillar at 92 still costs points; at the
+    #      .25 weights that is over a point, and it was never mentioned.
+    #   3. RANKING BY SCORE IS THE WRONG ORDER. Pillars carry different weights,
+    #      so a low score on a light pillar can rank above a mild gap on a heavy
+    #      one. Measured on the live package: narrative 40 (worth 7.1) sorted
+    #      ABOVE structural 70 (worth 8.8), so the panel's "Best Solutions"
+    #      recommended the smaller win first.
+    #
+    # Now: every applicable pillar that is short of 100, ordered by the points
+    # it would actually return, using the SAME effective weights the score used
+    # (so a Not Applicable pillar's weight is already redistributed and the
+    # numbers add up to the real gap). N/A pillars stay excluded - they are not
+    # a gap, they are removed from the calculation entirely.
+    _na_pillars = [k for k, v in _pillar_scores.items() if v is None]
+    _live_weight = sum(w for k, w in SPEC_PILLAR_WEIGHTS.items()
+                       if k not in _na_pillars) or 1.0
+
+    def _points_available(pillar: str, score: float) -> float:
+        eff = SPEC_PILLAR_WEIGHTS.get(pillar, 0.0) / _live_weight
+        return round((100 - score) * eff, 1)
+
+    _ranked_pillars = sorted(
+        ((k, v) for k, v in _pillar_scores.items() if v is not None and v < 100),
+        key=lambda x: -_points_available(x[0], x[1]),
+    )
     # §6.3 AC#4: build per-component narrative gap list so top_recs can emit a
     # targeted message instead of the generic "Improve narrative quality" fallback.
     _absent_narrative_comps = [
@@ -6010,8 +6242,10 @@ def calculate_package_sqs(
                           "action": _hs_list[0] if _hs_list else "Resolve hard stops to lift the Submission Quality Score (SQS) cap",
                           "missing": _hs_list[:3]})
     for pillar, score in _ranked_pillars:
-        if len(top_recs) >= 3:
-            break
+        # NO `[:3]` - see the ranking note above. The producer is shown every
+        # gap that is worth points, because a gap nobody renders is a gap nobody
+        # can close, and that is exactly how a package with no open warnings sat
+        # 22 points short with nothing on screen to act on.
         miss_list = _miss_by_pillar.get(pillar, [])
         if pillar == "narrative_quality" and _narrative_components:
             # §6.3 AC#4: state what the narrative covers alongside what it lacks.
@@ -6025,11 +6259,49 @@ def calculate_package_sqs(
                     )
                 else:
                     _action = miss_list[0] if miss_list else "Improve narrative quality"
+        elif pillar == "exposure_consistency" and not miss_list and _exposure_subscores:
+            # NAME THE BUCKET, don't say "improve exposure consistency" - that
+            # sentence tells a producer nothing they can act on, and this pillar
+            # is frequently the largest remaining gap once the obvious ones are
+            # closed. The sub-scores are already computed by
+            # `_calculate_exposure_consistency`; this only reads them.
+            _weak = sorted(
+                ((k, v) for k, v in (_exposure_subscores or {}).items()
+                 if isinstance(v, (int, float)) and v < 100),
+                key=lambda x: x[1],
+            )
+            if _weak:
+                _action = "Incomplete: " + ", ".join(
+                    k.replace("_", " ") for k, _v in _weak[:3])
+            else:
+                _action = "Improve exposure consistency"
         else:
             _action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
+        _field = _pillar_rec_field(pillar, _action)
+        # WHAT WOULD ACTUALLY CLOSE THIS. A producer needs to know whether a gap
+        # is theirs to type or waits on the insured to send something - without
+        # it, a package whose last points need a loss run reads exactly like one
+        # that is a keystroke away.
+        if pillar == "loss_history_alignment" and not _has_loss_run:
+            _closes = "document"
+        elif pillar == "narrative_quality" and not _has_narrative and not _field:
+            _closes = "document"
+        elif _field:
+            _closes = "type"
+        else:
+            _closes = "review"
         top_recs.append({"pillar": pillar, "score": score,
                           "action": _action,
-                          "missing": miss_list[:3]})
+                          "missing": miss_list[:3],
+                          # So `_route_recommendations` can ask the ONE DOOR
+                          # whether this is answerable, instead of defaulting
+                          # every package recommendation to "none".
+                          "field": _field,
+                          # The whole point of the change: what this gap is
+                          # WORTH, in the same points the headline is in, and
+                          # how it gets closed.
+                          "points_available": _points_available(pillar, score),
+                          "closes_with": _closes})
 
     # Enrichment - new fields added in §6 (additive, never breaks existing callers)
     _umbrella_state    = _get_umbrella_state(facts, flags)
@@ -6143,6 +6415,14 @@ def calculate_package_sqs(
         "weights_used":        SPEC_PILLAR_WEIGHTS,
         "weights_version":     "spec_compliant_v2.3.0",
         "top_recommendations": _route_recommendations(top_recs, facts),
+        # THE HEADLINE THE PANEL COULD NEVER STATE (2026-09-23). The sum of what
+        # every open gap is worth - i.e. how far this package is from 100, in
+        # the same points as the score. Derived from the same effective weights
+        # the score used, so `raw + points_remaining` lands on 100 by
+        # construction rather than by a second calculation that can drift.
+        "points_remaining": round(
+            sum(r.get("points_available") or 0
+                for r in top_recs if r.get("pillar") != "hard_stops_present"), 1),
         "sqs_history":         history,
         "delta_this_session":  delta,
         "routing_decision": (
@@ -7373,30 +7653,38 @@ def calculate_sqs(
                 "score_impact": 8,
                 "priority": 1,
             })
-        if flags.get("property_has_peril_deductibles"):
-            missing_perils = [
-                (f, lbl) for f, lbl in [
-                    ("property_deductible_wind",       "wind/hail"),
-                    ("property_deductible_earthquake", "earthquake"),
-                    ("property_deductible_flood",      "flood"),
-                ]
-                if not _fv(facts, f)
-            ]
-            if missing_perils:
-                _prop_hard_because(
-                    "Peril-specific deductibles referenced but not defined: "
-                    + ", ".join(l for _, l in missing_perils))
-                for fk, lbl in missing_perils:
-                    issues.append(f"Peril-specific {lbl} deductible referenced but not defined")
-                recommendations.append({
-                    "rec_id": "rec_peril_deductibles",
-                    "field": "property_deductible_wind",
-                    "component": "property_integrity",
-                    "message": "Define peril deductibles: " + ", ".join(l for _, l in missing_perils),
-                    "type": "hard_stop",
-                    "score_impact": 0,
-                    "priority": 1,
-                })
+        # ── SAME ONE RULE AS evaluate_stops (2026-09-23) ────────────────
+        # `property_has_peril_deductibles` means the document showed a wind/hail
+        # OR earthquake OR flood deductible - ONE is enough. Demanding all three
+        # capped an ordinary wind-only policy at 60 and asked for amounts for
+        # perils it does not carry. This was the FOURTH and FIFTH copy of that
+        # rule (evaluate_stops and two in cross_form_validator were the others);
+        # they were found by the anti-rot test written for the first three,
+        # which is the only reason they did not survive the fix.
+        # Fires only on the satisfiable gap - referenced, nothing captured - and
+        # WARNS rather than blocking, per the client ruling this file records
+        # three times for the property family.
+        if flags.get("property_has_peril_deductibles") and not any(
+            _fv(facts, k) for k in (
+                "property_deductible_wind",
+                "property_deductible_earthquake",
+                "property_deductible_flood",
+            )
+        ):
+            _prop_soft_because(
+                "Peril-specific deductibles referenced but not defined")
+            issues.append(
+                "Peril-specific deductibles referenced but not defined")
+            recommendations.append({
+                "rec_id": "rec_peril_deductibles",
+                "field": "property_deductible_wind",
+                "component": "property_integrity",
+                "message": ("State the deductible for each peril this policy "
+                            "actually carries"),
+                "type": "soft_warning",
+                "score_impact": 5,
+                "priority": 2,
+            })
         # Coinsurance: if value present but coinsurance missing → soft block
         if (_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")) and \
                 not _fv(facts, "coinsurance_percentage") and not _fv(facts, "agreed_value_endorsement"):
@@ -7439,23 +7727,28 @@ def calculate_sqs(
                 "Business income limit present but period of restoration not specified")
             issues.append("BI coverage present but period of restoration not specified")
 
-        if flags.get("property_has_peril_deductibles"):
-            _missing_perils = [
-                label for label, key in [
-                    ("wind/hail", "property_deductible_wind"),
-                    ("earthquake", "property_deductible_earthquake"),
-                    ("flood", "property_deductible_flood"),
-                ]
-                if not _fv(facts, key)
-            ]
-            if _missing_perils:
-                _prop_hard_because(
-                    "Peril-specific deductibles referenced but not defined: "
-                    + ", ".join(_missing_perils))
-                issues.append(
-                    "Peril-specific deductible referenced but not defined: "
-                    + ", ".join(_missing_perils)
-                )
+        # ── SAME ONE RULE AS evaluate_stops (2026-09-23) ────────────────
+        # `property_has_peril_deductibles` means the document showed a wind/hail
+        # OR earthquake OR flood deductible - ONE is enough. Demanding all three
+        # capped an ordinary wind-only policy at 60 and asked for amounts for
+        # perils it does not carry. This was the FOURTH and FIFTH copy of that
+        # rule (evaluate_stops and two in cross_form_validator were the others);
+        # they were found by the anti-rot test written for the first three,
+        # which is the only reason they did not survive the fix.
+        # Fires only on the satisfiable gap - referenced, nothing captured - and
+        # WARNS rather than blocking, per the client ruling this file records
+        # three times for the property family.
+        if flags.get("property_has_peril_deductibles") and not any(
+            _fv(facts, k) for k in (
+                "property_deductible_wind",
+                "property_deductible_earthquake",
+                "property_deductible_flood",
+            )
+        ):
+            _prop_soft_because(
+                "Peril-specific deductibles referenced but not defined")
+            issues.append(
+                "Peril-specific deductibles referenced but not defined")
 
         if (
             (_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value"))
@@ -7629,7 +7922,37 @@ def calculate_sqs(
 
     # ── Cap gates ─────────────────────────────────────────────────────────────
     cope_hard = fid in ("ACORD_140", "ACORD_141", "ACORD_133") and breakdown["property_integrity"] == 0
-    umb_fail  = flags.get("has_umbrella") and umbrella_score is not None and umbrella_score == 0
+    # ── THE UMBRELLA GATE BLOCKS ONLY THE BROKEN TOWER (2026-09-23) ─────────
+    # This was `umbrella_score == 0` alone, which caps the FORM at 60. But the
+    # umbrella pillar starts at 100 and subtracts up to 135 points across seven
+    # deductions (-25 missing umbrella limit, -20 GL occurrence, -20 GL
+    # aggregate, -20 auto CSL, -25 EL, -15 no schedule of underlying, -10
+    # follow-form unconfirmed), so it reaches 0 by ACCUMULATION on packages
+    # whose underlying limits are all present and stated. Two of those seven
+    # fire on nearly every submission.
+    #
+    # That contradicted a ruling recorded three times in this very file -
+    # "underlying limits below the umbrella baseline must be a WARNING + score
+    # reduction, NOT a hard stop. Carrier attachment points vary, so we never
+    # block" (client Q1/Q2, and an entry was DELETED from
+    # `_ALWAYS_HARD_PATTERNS` for exactly this reason). The ruling was honoured
+    # inside the pillar and undone by the gate that reads it. Brent sanctioned
+    # the REDUCTIONS; nobody sanctioned the 60 cap.
+    #
+    # `_umbrella_has_underlying` is the existing ONE DOOR that separates the two
+    # ways the pillar reaches 0, and the cap's own reason sentence already reads
+    # from it. Now the cap does too: a genuinely broken tower (umbrella with no
+    # underlying GL or Auto limit) still caps at 60 - and that case additionally
+    # has its own hard stop in `evaluate_stops`, so it is never silent -
+    # while accumulated deductions stay what the client asked for, a pillar
+    # reduction. SCORES GO UP on umbrella packages with real underlying limits.
+    # D6 - Brent sees the numbers.
+    umb_fail = (
+        flags.get("has_umbrella")
+        and umbrella_score is not None
+        and umbrella_score == 0
+        and not _umbrella_has_underlying(facts)
+    )
 
     # Preserve the UNCAPPED score before the ceiling is applied (2026-08-16).
     # It used to be overwritten, so a capped form score could not be told apart
@@ -7668,13 +7991,14 @@ def calculate_sqs(
          or "Property details are incomplete - review the property section")
         if _prop_hard else None
     )
+    _gate_soft_reason = (
+        (_prop_soft_reason
+         or "Property details are incomplete - review the property section")
+        if _prop_soft else None)
     cap_applied, cap_reason = _resolve_cap(
         hard_stops, soft_stops,
         extra_hard_reason=_gate_hard_reason,
-        extra_soft_reason=(
-            (_prop_soft_reason
-             or "Property details are incomplete - review the property section")
-            if _prop_soft else None),
+        extra_soft_reason=_gate_soft_reason,
     )
     if cap_applied is not None:
         raw_score = min(raw_score, cap_applied)
@@ -7692,6 +8016,28 @@ def calculate_sqs(
         cap_hard_stops.append(_gate_hard_reason)
         if _gate_hard_reason not in issues:
             issues.append(_gate_hard_reason)
+
+    # ── AND AN 85 MUST NAME ITSELF TOO (2026-09-23) ─────────────────────────
+    # The block above shipped 2026-08-31 for the 60 gates, and stopped there.
+    # `_resolve_cap`'s `extra_soft_reason` (the property soft gate) lives
+    # OUTSIDE `soft_stops` exactly as `extra_hard_reason` lives outside
+    # `hard_stops`, so a form held at 85 by that gate carried its reason only in
+    # `cap_reason` - a field no surface prints. The producer saw a score five
+    # points below "Submission Ready" with an empty Warnings list and no control
+    # anywhere that returns those five points.
+    #
+    # Same contract as the hard half, deliberately: populated ONLY when this
+    # gate is what actually bound the score (`cap_reason == _gate_soft_reason`
+    # proves `soft_stops` was empty, because `_resolve_cap` appends the gate
+    # last) and only when no existing card already carries the sentence.
+    # DISPLAY ONLY - no cap fires that did not fire before and no score moves.
+    cap_soft_stops: List[str] = []
+    if (cap_applied == SOFT_STOP_CAP and _gate_soft_reason
+            and cap_reason == _gate_soft_reason
+            and _gate_soft_reason not in (soft_stops or [])):
+        cap_soft_stops.append(_gate_soft_reason)
+        if _gate_soft_reason not in issues:
+            issues.append(_gate_soft_reason)
 
     # fraud_penalty is applied AFTER the cap, exactly as before. It is currently
     # always 0 (never assigned anywhere), so this ordering is behaviour-neutral -
@@ -7822,6 +8168,11 @@ def calculate_sqs(
         # table every other legacy stop uses, so the row carries the identical
         # "Open to fix" the pre-form banners do.
         "cap_hard_stop_items": _cap_stop_items(cap_hard_stops,
+                                               coded_issues=cross_issues_full),
+        # The 85 half of the same contract (2026-09-23). Same shape, so a
+        # display surface renders it with the code it already has for the 60.
+        "cap_soft_stops":      cap_soft_stops,
+        "cap_soft_stop_items": _cap_stop_items(cap_soft_stops,
                                                coded_issues=cross_issues_full),
         "score_trace":         _score_trace,
         "tier":                tier,

@@ -76,8 +76,11 @@ NARRATIVE_FACT_KEYS = (
 # reader so "$ 3,000,000" and "$3,000,000.00" are the same amount to both. The
 # broker's shorthand "$3M" / "$2MM" / "$500K" keeps its multiplier: without it
 # "$3M" was read as three dollars (14 Sep break-it pass).
-_AMOUNT_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?(?:\s?(?:MM|[KMB])\b)?"
-                        r"|\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b")
+_AMOUNT_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?(?:\s?(?:MM|[KMB]|million|mil)\b)?"
+                        r"|\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b"
+                        # A bare shorthand amount - "decreased to 1M", "from
+                        # 3 million" - keeps its multiplier (24 Sep 2026).
+                        r"|\b\d+(?:\.\d+)?\s?(?:MM|[KMB]|million|mil)\b")
 _DATE_RE = re.compile(
     r"\b(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}"
     r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b",
@@ -90,6 +93,7 @@ _DATE_RE = re.compile(
 _CHANGE_VERBS = (
     "reduced", "increased", "raised", "lowered", "changed", "amended",
     "revised", "corrected", "restated", "endorsed",
+    "decreased", "cut", "adjusted", "modified",
 )
 _AMENDMENT_RE = re.compile(
     r"\b(?:" + "|".join(_CHANGE_VERBS) + r")\b[^.]{0,40}?\bfrom\b\s*"
@@ -98,9 +102,26 @@ _AMENDMENT_RE = re.compile(
     r"(?P<to>" + _AMOUNT_RE.pattern + r")",
     re.I)
 
-# "effective 7/25/25", "as of 7/25/25", "with effect from 7/25/25".
+# The same change with only its NEW amount named after the verb - "UMBRELLA
+# LIMIT CHANGED TO $1M EFFECTIVE 07/25/25", "was reduced to $1,000,000
+# effective 7/25/25" - and with only its OLD one, the new amount printed just
+# before the verb: "Umbrella $1,000,000 (reduced from $3,000,000 as of
+# 7/25/25)". The missing amount is never invented here: `fact_comparison.
+# dated_change` supplies it only from the documents' own two printings.
+_AMENDMENT_TO_ONLY_RE = re.compile(
+    r"\b(?:" + "|".join(_CHANGE_VERBS) + r")\b(?:(?!\bfrom\b)[^.]){0,40}?"
+    r"\b(?:to|down to|up to)\b\s*(?P<to>" + _AMOUNT_RE.pattern + r")",
+    re.I)
+_AMENDMENT_FROM_ONLY_RE = re.compile(
+    r"\b(?:" + "|".join(_CHANGE_VERBS) + r")\b[^.]{0,20}?\bfrom\b\s*"
+    r"(?P<from>" + _AMOUNT_RE.pattern + r")(?!\s*\b(?:to|down to|up to)\b)",
+    re.I)
+
+# "effective 7/25/25", "eff. 7-25-25", "effective date 7/25/25", "as of
+# 7/25/25", "with effect from 7/25/25".
 _AS_OF_RE = re.compile(
-    r"\b(?:effective|as of|with effect from|commencing)\b\s*(?:on\s+)?"
+    r"\b(?:effective(?:\s+date)?|eff\.?|as of|as at|with effect from|commencing"
+    r"|starting|beginning)(?:\b|(?<=\.))\s*[:\-]?\s*(?:on\s+)?"
     r"(?P<date>" + _DATE_RE.pattern + r")", re.I)
 
 # A value stated against a label: "a general aggregate of $2,000,000",
@@ -144,7 +165,20 @@ def _sentences(text: str) -> List[str]:
     The premium is $952." must not pair the limit with the premium.
     """
     parts = re.split(r"(?<=[.;])\s+(?=[A-Z0-9\"'])", str(text or ""))
-    return [p.strip() for p in parts if p and p.strip()]
+    parts = [p.strip() for p in parts if p and p.strip()]
+    # An ABBREVIATION's full stop is not a sentence end: "decreased to 1M eff.
+    # 7-25-25" was cut before its own date (24 Sep 2026).
+    merged: List[str] = []
+    for part in parts:
+        if merged and _ABBREVIATION_END_RE.search(merged[-1]):
+            merged[-1] = merged[-1] + " " + part
+        else:
+            merged.append(part)
+    return merged
+
+
+_ABBREVIATION_END_RE = re.compile(
+    r"\b(?:eff|no|nos|co|inc|ins|approx|appr|incl|excl|ea|per|vs|ltd)\.$", re.I)
 
 
 # ── Subject vocabulary ───────────────────────────────────────────────────────
@@ -294,6 +328,83 @@ def _policy_in(sentence: str, context) -> Optional[str]:
     return printed.group(0).strip(" .-") if printed else key
 
 
+# ── OCR glue: a remark printed with its spaces lost (24 Sep 2026) ───────────
+# The client's REAL certificate OCR prints its remark as ONE token:
+#   Note:ReducedUmbrellaLimitfrom$3,000,000to$1,000,000LimitEffective7/25/25.
+# Every pattern in this module reads WORDS, so that sentence produced no
+# statement at all - the umbrella stayed a "$3M vs $1M" conflict with no
+# explanation. The 14 Sep handoff named this risk "unverified"; a fixture that
+# printed the remark with spaces kept every test green (D22).
+#
+# Re-spaced only where the text is visibly glued (a run of 18+ characters with
+# no space), at boundaries the characters themselves mark - a capital after a
+# lower-case letter, a "$" after a letter, a digit against a letter, a colon
+# before a word - and a lower-case run that is not itself a word is split into
+# ACORD's own vocabulary ("Limitfrom" -> "Limit from"), never into anything
+# else. Ordinary spaced prose is returned byte-identical.
+_GLUED_RUN_RE = re.compile(r"\S{18,}")
+
+
+def _split_lower_glue(word: str) -> str:
+    try:
+        from services.field_mapping_integrity import _segment_glued_caps, _acord_vocabulary
+        _fields, tips = _acord_vocabulary()
+    except Exception:                                        # noqa: BLE001
+        return word
+    if len(word) < 6 or not word.isalpha() or word.lower() in tips:
+        return word
+    pieces = _segment_glued_caps(word.lower())
+    if not pieces or len(pieces) < 2 or len(pieces) > 3:
+        return word
+    out, at = [], 0
+    for piece in pieces:
+        out.append(word[at:at + len(piece)])
+        at += len(piece)
+    return " ".join(out)
+
+
+def respace_glued_prose(text: Any) -> str:
+    """Undo OCR glue in a remark - see the block comment above."""
+    s = str(text or "")
+    if not s or not _GLUED_RUN_RE.search(s):
+        return s
+    out: List[str] = []
+    for tok in re.split(r"(\s+)", s):
+        if not tok or tok.isspace() or len(tok) < 18:
+            out.append(tok)
+            continue
+        t = re.sub(r"(?<=:)(?=[A-Za-z$])", " ", tok)
+        t = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", t)
+        t = re.sub(r"(?<=[A-Za-z])(?=\$)", " ", t)
+        t = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", t)
+        t = re.sub(r"(?<=[a-z])(?=\d)", " ", t)
+        out.append(" ".join(_split_lower_glue(w) for w in t.split(" ")))
+    return "".join(out)
+
+
+# A limit-sized amount on a sentence that names the umbrella: the one subject
+# we may infer when the vocabulary finds none ("Umbrella decreased to 1M").
+_UMBRELLA_WORD_RE = re.compile(r"\b(?:umbrella|excess)\b", re.I)
+_LIMIT_SIZED = 100_000
+
+
+def _umbrella_subject_by_size(sentence: str, amounts: List[Any]) -> Optional[tuple]:
+    """("umbrella_limit", word) when the sentence names the umbrella and every
+    amount it changes is limit-sized - a premium or a retention never is."""
+    m = _UMBRELLA_WORD_RE.search(sentence)
+    if not m:
+        return None
+    try:
+        from services.fact_equivalence import money_amounts
+        vals = [float(a) for x in amounts if x for a in money_amounts(x)]
+    except Exception:                                        # noqa: BLE001
+        return None
+    if vals and all(v >= _LIMIT_SIZED for v in vals):
+        return "umbrella_limit", m.group(0).lower()
+    return None
+
+
+
 # ── Mining ───────────────────────────────────────────────────────────────────
 
 def mine_statements(text: Any, context=None) -> List[dict]:
@@ -305,10 +416,11 @@ def mine_statements(text: Any, context=None) -> List[dict]:
     """
     out: List[dict] = []
     try:
-        for sentence in _sentences(text):
+        for sentence in _sentences(respace_glued_prose(text)):
             policy = _policy_in(sentence, context)
             as_of_m = _AS_OF_RE.search(sentence)
             as_of = as_of_m.group("date") if as_of_m else None
+            _verbs_done: set = set()
 
             # 1. AMENDMENT - the highest-value shape, and the client's own
             #    example. "reduced from $3,000,000 to $1,000,000".
@@ -317,14 +429,67 @@ def mine_statements(text: Any, context=None) -> List[dict]:
                 # Umbrella Limit from ...") - the most specific place a subject
                 # can be, so it is read first; then the label before the verb.
                 subj = (_subject_inside(sentence, m.start(), m.start("from"))
-                        or _subject_for(sentence, m.start()))
+                        or _subject_for(sentence, m.start())
+                        or _umbrella_subject_by_size(
+                            sentence, [m.group("from"), m.group("to")]))
+                _verbs_done.add(m.start())
                 if not subj:
                     continue
                 out.append({
                     "kind": "amendment", "subject": subj[0],
                     "matched_label": subj[1],
-                    "from": m.group("from").strip(),
-                    "to": m.group("to").strip(),
+                    "from": m.group("from").strip().rstrip(","),
+                    "to": m.group("to").strip().rstrip(","),
+                    "as_of": as_of, "policy_number": policy,
+                    "quote": sentence,
+                    "asserted": _asserts_the_change(sentence, m.start()),
+                })
+
+            # 1b. The same change naming only its NEW amount after the verb
+            #     ("changed to $1M"), or only its OLD one with the new amount
+            #     printed before the verb ("$1,000,000 (reduced from
+            #     $3,000,000 ...)"). The missing side stays None here -
+            #     `fact_comparison.dated_change` may fill it only from the
+            #     documents' own two printings.
+            for m in _AMENDMENT_TO_ONLY_RE.finditer(sentence):
+                if m.start() in _verbs_done:
+                    continue
+                subj = (_subject_inside(sentence, m.start(), m.start("to"))
+                        or _subject_for(sentence, m.start())
+                        or _umbrella_subject_by_size(sentence, [m.group("to")]))
+                _verbs_done.add(m.start())
+                if not subj:
+                    continue
+                out.append({
+                    "kind": "amendment", "subject": subj[0],
+                    "matched_label": subj[1], "from": None,
+                    "to": m.group("to").strip().rstrip(","),
+                    "as_of": as_of, "policy_number": policy,
+                    "quote": sentence,
+                    "asserted": _asserts_the_change(sentence, m.start()),
+                })
+            for m in _AMENDMENT_FROM_ONLY_RE.finditer(sentence):
+                if m.start() in _verbs_done:
+                    continue
+                before = [x for x in _AMOUNT_RE.finditer(sentence[:m.start()])]
+                if not before:
+                    continue
+                new_amt = before[-1]
+                # The new amount must sit in the verb's own clause - a
+                # parenthesis may separate them, a sentence break may not.
+                if re.search(r"[.;]", sentence[new_amt.end():m.start()]):
+                    continue
+                subj = (_subject_for(sentence, new_amt.start())
+                        or _umbrella_subject_by_size(
+                            sentence, [new_amt.group(0), m.group("from")]))
+                _verbs_done.add(m.start())
+                if not subj:
+                    continue
+                out.append({
+                    "kind": "amendment", "subject": subj[0],
+                    "matched_label": subj[1],
+                    "from": m.group("from").strip().rstrip(","),
+                    "to": new_amt.group(0).strip().rstrip(","),
                     "as_of": as_of, "policy_number": policy,
                     "quote": sentence,
                     "asserted": _asserts_the_change(sentence, m.start()),
@@ -390,7 +555,34 @@ def statements_for_facts(facts: Optional[dict], context=None,
                     st["source_fact"] = key
                     st["source_doc_index"] = doc_index
                     out.append(st)
+                    continue
+                # ONE SENTENCE IN TWO DOCUMENTS (24 Sep 2026): credit the one
+                # that PRINTS the new value as the fact itself - the document
+                # `dated_change` needs. Crediting whichever came first let a
+                # narrative repeating the certificate's note, uploaded before
+                # it, turn the dated change back into a conflict.
+                if doc_index is None:
+                    continue
+                prior = next(x for x in out if (x["subject"], x["from"], x["to"],
+                                                 x["as_of"]) == sig)
+                if _prints_value(src, st["subject"], st["to"]) and not (
+                        prior.get("source_doc_index") is not None
+                        and _prints_value(sources[prior["source_doc_index"]][1],
+                                          st["subject"], st["to"])):
+                    prior["source_doc_index"] = doc_index
+                    prior["source_fact"] = key
     return out
+
+
+def _prints_value(facts: Any, subject: Any, amount: Any) -> bool:
+    """Does this document state ``amount`` as ``subject`` itself?"""
+    try:
+        from services.extraction_service import _fv
+        from services.fact_equivalence import money_amounts
+        own = money_amounts(_fv(facts or {}, subject) or "")
+        return bool(own) and bool(set(own) & set(money_amounts(amount or "")))
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 # ── The consumer: explain a conflict, never resolve it ───────────────────────

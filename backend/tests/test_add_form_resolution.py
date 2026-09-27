@@ -49,7 +49,7 @@ _SOURCE = inspect.getsource(cfv)
 _TREE = ast.parse(_SOURCE)
 
 # "ACORD 186" / "ACORD_186" / "ACORD 137_CA" -> the id the form list uses.
-_ACORD_RE = re.compile(r"ACORD[ _]?(\d{2,3}(?:_[A-Z]{2})?)")
+_ACORD_RE = re.compile(r"ACORD[ _]?(\d{2,3}(?:[ _](?:CA|CO)\b)?)")
 
 # Cue matching is PHRASE-SCOPED, not message-scoped, and the two directions are
 # deliberately different. Getting this wrong in the first draft produced four
@@ -151,7 +151,15 @@ def test_the_harvester_is_not_vacuous():
     over a pipeline dropping 46% of a document because its recorder never
     exercised the path. A harvester needs its own floor.
     """
-    assert len(_ISSUE_CALLS) > 60, f"only harvested {len(_ISSUE_CALLS)} _issue() calls"
+    # The floor states "the harvest is not empty or near-empty", NOT "the rule
+    # count never changes". It was `> 60` and the file emitted exactly 61, so
+    # retiring the two duplicate peril-deductible rules on 2026-09-23 - a
+    # deliberate consolidation - failed this guard for a reason it was never
+    # written to catch. A floor pinned to today's count is a change-detector
+    # wearing a guard's clothes: it reports every legitimate edit and teaches
+    # people to move the number, which is exactly how a real vacuous harvest
+    # would eventually be waved through.
+    assert len(_ISSUE_CALLS) > 40, f"only harvested {len(_ISSUE_CALLS)} _issue() calls"
     assert any(c == "contractor_missing_acord186" for c, _, _, _ in _ISSUE_CALLS)
     assert sum(1 for _, _, d, _ in _ISSUE_CALLS if d) >= 17
 
@@ -166,7 +174,7 @@ def _forms_the_message_tells_you_to_add(message: str):
         if _LOCATIVE_RE.search(before):
             continue
         if _ADD_BEFORE_RE.search(before) or _ADD_AFTER_RE.search(after):
-            found.add("ACORD_" + m.group(1))
+            found.add("ACORD_" + m.group(1).replace(" ", "_"))
     return found
 
 
@@ -239,7 +247,9 @@ def test_no_rule_declares_a_form_its_message_never_mentions():
     for code, message, declared, lineno in _ISSUE_CALLS:
         for fid in declared:
             num = fid.replace("ACORD_", "")
-            if not re.search(r"ACORD[ _]?" + re.escape(num), message):
+            # A state edition reads "ACORD 137 CO" to the producer and
+            # "ACORD_137_CO" to the form list - both name the same form.
+            if not re.search(r"ACORD[ _]?" + re.escape(num).replace("_", "[ _]"), message):
                 drifted.append(f"L{lineno} {code or '?'}: declares {fid}, message never names it")
     assert not drifted, "add_forms declarations drifted from their messages:\n  " + "\n  ".join(drifted)
 

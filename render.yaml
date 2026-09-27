@@ -7,16 +7,45 @@ services:
     startCommand: "gunicorn main:app -w ${WEB_CONCURRENCY:-2} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 600 --keep-alive 65 --graceful-timeout 30 --worker-tmp-dir /dev/shm"
     healthCheckPath: /api/health
     envVars:
+      # KEEP THIS FILE EQUAL TO THE DASHBOARD (27 Sep 2026). It said async and
+      # easyocr while production ran synchronously on Google Vision, and that
+      # mismatch misdirected a whole diagnosis. The dashboard is what runs.
       - key: ENVIRONMENT
         value: production
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: JOB_QUEUE_BACKEND
         value: db
+      # Generation runs inside this web service, exactly as on localhost. true
+      # hands it to acordly-worker below instead - same code, but then the
+      # worker must be running with the same settings as this service.
       - key: ENABLE_ASYNC_PROCESSING
-        value: "true"
+        value: "false"
+      # Only this service (main.py) can start the nightly scheduler; worker.py
+      # never does. false = retention clean-up, audit-log retention, the daily
+      # payment lifecycle and questionnaire reminders run NOWHERE. Turning it
+      # on is an owner decision (it starts billing lock-outs and reminder
+      # e-mails); safe to enable only while WEB_CONCURRENCY is 1.
       - key: SCHEDULER_ENABLED
         value: "false"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_MODEL
+        value: gpt-5.4-mini
+      - key: GPT_MODEL
+        value: gpt-5.4-mini
+      # LLM_REQUEST_TIMEOUT is deliberately NOT set (owner, 27 Sep 2026): the
+      # code default, 120 s, applies. Localhost must not set it either, or a
+      # long document call times out here and not there.
+      - key: OPENAI_MAX_CONCURRENT
+        value: "8"
+      # 0 = keep the declarations index after generation (owner, 27 Sep 2026):
+      # later re-fills and re-scores keep their evidence, and client runs can
+      # be diagnosed. The documents' full text is stored in the same row anyway.
+      - key: PURGE_DEC_INDEX_AFTER_GENERATION
+        value: "0"
       - key: MAX_CONCURRENT_HEAVY_OPS
         value: "8"
       # GLOBAL (Redis-distributed) cap on in-flight OpenAI chat completions.
@@ -44,12 +73,12 @@ services:
       # main DATABASE_URL should stay on transaction mode (port 6543).
       - key: DATABASE_URL_DIRECT
         sync: false
-      # OCR_PROVIDER stays on easyocr until paid OCR is provisioned.
-      # easyocr loads ~400 MB of model weights per process; with
-      # WEB_CONCURRENCY=2 that's ~800 MB just for OCR — needs Render
-      # Standard (2 GB) at minimum.
+      # Google Vision is the only OCR the code ships (any other value falls
+      # back to it); easyocr is not even in requirements.txt.
       - key: OCR_PROVIDER
-        value: "easyocr"
+        value: google
+      - key: GOOGLE_VISION_API_KEY
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: GOOGLE_CLIENT_ID
@@ -86,6 +115,11 @@ services:
       # CRITICAL: Ensure DATABASE_URL points to a Render Postgres Starter plan ($7/mo) or higher.
       # The free Postgres plan expires after 90 days and will cause DATA LOSS.
 
+  # Used ONLY when the web service's ENABLE_ASYNC_PROCESSING is true. With it
+  # false (production, 27 Sep 2026) this service receives no generation work -
+  # suspend it: it costs money, and a worker polling the jobs table can claim a
+  # job the web service has just created. If async is ever turned on, give it
+  # the web service's model / OCR / timeout / purge settings first.
   - type: worker
     name: acordly-worker
     runtime: python
@@ -139,9 +173,16 @@ services:
       # through. If unset, the worker falls back to pure polling.
       - key: DATABASE_URL_DIRECT
         sync: false
-      # OCR_PROVIDER stays on easyocr (free) until paid OCR is provisioned.
       - key: OCR_PROVIDER
-        value: "easyocr"
+        value: google
+      - key: GOOGLE_VISION_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gpt-5.4-mini
+      - key: GPT_MODEL
+        value: gpt-5.4-mini
+      - key: PURGE_DEC_INDEX_AFTER_GENERATION
+        value: "0"
       - key: DATABASE_URL
         sync: false
       - key: OPENAI_API_KEY

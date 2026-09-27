@@ -47,12 +47,25 @@ _FACTS = {
     "loss_history": "No known losses",
     "loss_history_no_prior_losses_indicator": "Y", "prior_carrier": "EMC",
     "property_building_value": "$2,500,000",
+    # Minimum Viable COPE, so the property line does not raise a hard stop of
+    # its own and this file keeps testing the CAP DISPLAY rather than COPE.
+    "locations": [{"address": "123 Main St, Detroit, MI 48226"}],
+    "occupancy_type": "Contractor office and shop",
+    "construction_type": "Joisted Masonry",
     "operations_description": "Commercial roofing contractor performing re-roofing "
                               "and repair on existing structures.",
     "account_description": "Established roofing contractor, 12 years, stable "
                            "losses, strong safety program.",
 }
-_FLAGS = {"has_general_liability": True, "has_property_coverage": False}
+# PROPERTY COVERAGE IS TRUE, AND THAT IS THE POINT (changed 2026-09-23).
+# It was False, which made the building-value conflict IRRELEVANT - and on
+# 2026-09-23 `calculate_package_sqs` stopped hard-stopping on an irrelevant
+# conflict, honouring the ruling `extraction_pipeline` had already written down
+# ("cannot block anything on a package that has no property coverage"). This
+# file tests that a cap which DOES fire is visible, so its fixture has to be one
+# where the cap legitimately fires. The old behaviour is pinned from the other
+# side by test_an_irrelevant_building_value_conflict_does_not_cap below.
+_FLAGS = {"has_general_liability": True, "has_property_coverage": True}
 _UW = {"fields": [{
     "fact_key": "property_building_value", "review_required": True,
     "label": "Property Building Value",
@@ -126,6 +139,19 @@ def test_promotion_upgrades_the_existing_card_and_does_not_duplicate_it():
     # warning-count delta.
     assert _all_messages(after).count(_WARN) == 1
     assert after["counts"]["warnings"] == _before_warn
+    # PROMOTION MOVES A ROW, it never mints one (2026-09-23). `counts` reports
+    # only what rendered, so the un-promoted picker row appears in neither
+    # bucket; `hidden_warnings` is where it is accounted for, and the sum of all
+    # three is what must hold steady across the promotion.
+    def _total(g):
+        return (g["counts"]["hard_stops"] + g["counts"]["warnings"]
+                + g.get("hidden_warnings", 0))
+    assert _total(after) == _total(before)
+    assert before["hidden_warnings"] == 1, (
+        "the un-promoted picker row caps the score at 85 and draws no card - it "
+        "must still be accounted for somewhere, or the screen reads 0 warnings"
+    )
+    assert after["hidden_warnings"] == 0
 
 
 def test_promotion_is_inert_without_codes():
@@ -174,3 +200,103 @@ def test_every_package_60_cap_is_said_somewhere(has_property):
     assert pkg["cap_reason"] in hard or pkg["cap_reason"] in pkg["cap_hard_stops"], (
         f"package held at 60 by {pkg['cap_reason']!r} with nothing on screen"
     )
+
+
+# ── The Review screen is built in TWO route modules (2026-09-23) ─────────────
+# `form_routes` folded the package scorer's private 60-cap into the grouped view
+# through `_grouped_with_package_caps` at all five of its response sites.
+# `audit_routes._form_selection_view` - which rebuilds the SAME screen after
+# resolve-issue and reopen-issue - called bare `build_grouped_view`. So the
+# producer clicked "Open to fix" on any unrelated issue, the fix succeeded, and
+# the only card explaining the 60 disappeared with the score unchanged. Exactly
+# the class the promote_codes work shipped to close, surviving on the one call
+# site that was not part of it, because nothing tied the two declarations
+# together.
+#
+# The Cross-Form Validation PANEL is a deliberate exception: it renders the raw
+# cross-form list for one panel and is not the Review screen's stop banner, so
+# it neither has nor needs package stops. It is identified by function name.
+_CROSS_PANEL_BUILDERS = ("_grouped_cross_issues_for_panel",
+                         "_grouped_cross_issues_or_none")
+
+
+def test_no_route_builds_the_review_view_without_the_package_caps():
+    import ast
+    import pathlib
+
+    routes_dir = pathlib.Path(__file__).resolve().parent.parent / "routes"
+    offenders = []
+    checked = 0
+    for path in sorted(routes_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if fn.name in _CROSS_PANEL_BUILDERS:
+                continue
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "build_grouped_view"):
+                    checked += 1
+                    offenders.append(f"{path.name}::{fn.name}:{node.lineno}")
+    assert checked or not offenders
+    assert not offenders, (
+        "these route functions build the grouped view WITHOUT the package "
+        f"scorer's private caps: {offenders} - use "
+        "issue_registry.grouped_with_package_caps so a 60 held by the package "
+        "scorer keeps its card, or add the function to _CROSS_PANEL_BUILDERS "
+        "if it genuinely renders only the cross-form panel"
+    )
+
+
+def test_the_shared_door_exists_and_both_route_modules_reach_it():
+    """The guard above is only meaningful if the door is real and used."""
+    from services.issue_registry import grouped_with_package_caps
+    import pathlib
+
+    routes_dir = pathlib.Path(__file__).resolve().parent.parent / "routes"
+    users = [p.name for p in sorted(routes_dir.glob("*.py"))
+             if "grouped_with_package_caps" in p.read_text(encoding="utf-8")]
+    assert "form_routes.py" in users
+    assert "audit_routes.py" in users, (
+        "audit_routes rebuilds the Review screen after resolve/reopen - if it "
+        "stops using the shared door, a package 60-cap loses its card again"
+    )
+    assert callable(grouped_with_package_caps)
+
+
+def test_an_irrelevant_building_value_conflict_does_not_cap():
+    """C75, applied to the package scorer (2026-09-23).
+
+    `extraction_pipeline` decided this exact question for this exact fact and
+    wrote the ruling into the code: a building-value conflict "cannot block
+    anything on a package that has no property coverage - there is no ACORD 140
+    to generate and no box for the number", so it keeps the conflict a WARNING
+    when `has_property_coverage` is false. `calculate_package_sqs` applied it
+    unconditionally, so one fact carried two verdicts in two files and the
+    harsher one won: the pipeline drew a warning while the scorer capped the
+    package at 60.
+
+    Measured on the live Orbin session before the fix: 72 -> 60, taking the tier
+    from "Needs Work" to "Major Gaps", on a package with no property line at
+    all.
+    """
+    no_property = dict(_FLAGS, has_property_coverage=False)
+    hard, soft = evaluate_stops(_FACTS, no_property)
+    pkg = calculate_package_sqs(
+        facts=_FACTS, flags=no_property, form_results=[], cross_issues=[],
+        hard_stops=list(hard), soft_stops=list(soft) + [_WARN],
+        session_data={"docs": [], "selected_form_ids": ["ACORD_125"],
+                      "sqs_history": [], "underwriting_consistency": _UW},
+    )
+    assert pkg["cap_applied"] != HARD_STOP_CAP, (
+        "a building-value conflict hard-stopped a package that carries no "
+        "property coverage - the pipeline calls the same conflict a warning"
+    )
+    assert pkg["cap_hard_stops"] == []
+    assert pkg["cap_hard_stop_codes"] == []
+
+    # ...and it is NOT silently dropped: the conflict is still open, so the
+    # warning it arrived as still holds the 85.
+    assert pkg["cap_applied"] == 85

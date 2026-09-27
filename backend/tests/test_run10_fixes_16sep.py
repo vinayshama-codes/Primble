@@ -78,11 +78,23 @@ def _cover_call(monkeypatch, facts):
     return seen
 
 
+_IN_FORCE = dict(_ROUTED,
+                 prior_effective_date={"value": "07/15/2098", "routed_from": "current_term"},
+                 prior_expiration_date={"value": "07/15/2099", "routed_from": "current_term"})
+
+
 def test_the_cover_ai_is_told_the_prior_carrier_and_the_current_term(monkeypatch):
+    """24 Sep 2026: 07/15/25 - 07/15/26 had ENDED when this test was written
+    (16 Sep 2026), and the summary told the client the account "is currently
+    in force". An ended term is now named as expired; an in-force one is still
+    the current term."""
     prompt = _cover_call(monkeypatch, _ROUTED)["prompts"][0]
     assert f"Prior Carrier: {PRIOR}" in prompt
-    assert "Current Policy Term: 07/15/25 - 07/15/26" in prompt
+    assert "Last Policy Term (EXPIRED - not in force): 07/15/25 - 07/15/26" in prompt
+    assert "Current Policy Term" not in prompt
     assert "Proposed Effective Date: To be confirmed" in prompt
+    live = _cover_call(monkeypatch, _IN_FORCE)["prompts"][0]
+    assert "Current Policy Term: 07/15/2098 - 07/15/2099" in live
 
 
 def test_a_term_that_was_not_moved_adds_no_current_term_line(monkeypatch):
@@ -104,7 +116,10 @@ def test_the_cache_key_follows_the_data_the_ai_reads(monkeypatch):
 # ── 4. The cover's submission table ──────────────────────────────────────────
 def test_the_policy_period_says_what_is_known():
     v = cs._cover_info_values(_ROUTED, {}, {"full_name": "Vinay Sharma"}, "Astrea It services")
-    assert v["period"] == "To be confirmed (current term 07/15/25 - 07/15/26)"
+    # 24 Sep 2026: the term ended on 07/15/26 - "current" was wrong even then.
+    assert v["period"] == "To be confirmed (expired term 07/15/25 - 07/15/26)"
+    live = cs._cover_info_values(_IN_FORCE, {}, {"full_name": "Vinay Sharma"}, "Astrea It services")
+    assert live["period"] == "To be confirmed (current term 07/15/2098 - 07/15/2099)"
     assert v["prior_carrier"] == PRIOR
     assert v["revenue"] == "Not provided" and v["employees"] == "Not provided"
     assert not [k for k, x in v.items() if "—" in str(x)]
@@ -116,7 +131,9 @@ def test_the_policy_period_says_what_is_known():
     ({}, "To be confirmed"),
     ({"prior_expiration_date": "07/15/26"}, "To be confirmed"),        # an older prior term we did not move
     ({"prior_expiration_date": {"value": "07/15/26", "routed_from": "current_term"}},
-     "To be confirmed (current term ending 07/15/26)"),
+     "To be confirmed (expired term ending 07/15/26)"),         # ended (24 Sep 2026)
+    ({"prior_expiration_date": {"value": "07/15/2099", "routed_from": "current_term"}},
+     "To be confirmed (current term ending 07/15/2099)"),
 ])
 def test_every_period_shape(facts, period):
     v = cs._cover_info_values(facts, {}, None, "")
@@ -133,7 +150,7 @@ def test_the_rendered_cover_prints_it():
         text = re.sub(r"\s+", " ", " ".join(p.extract_text() or "" for p in pdf.pages[:1]))
     # The table cell wraps, and text extraction reads a wrapped cell's second
     # line after the row beside it - so the two halves are checked, not the join.
-    assert "To be confirmed (current term 07/15/25 -" in text
+    assert "To be confirmed (expired term 07/15/25 -" in text      # ended (24 Sep 2026)
     assert "07/15/26)" in text
     assert "— - —" not in text and "ANNUAL REVENUE Not provided" in text
 
@@ -159,18 +176,37 @@ def _q4_numbers(f):
     return {ps._resolve_other_policy_cell(f"OtherPolicy_PolicyNumberIdentifier_{r}", f) for r in "ABCD"} - {None}
 
 
+# ── 24 Sep 2026: DECISION REVERSED BY THE OWNER - the list is restored ──────
+# The client's reviewer called this section CORRECT on the 11 Sep audit ("the
+# Other Policy section already correctly identifies the GL, Auto, Inland Marine
+# and Umbrella policy numbers"). Blanking it on 16 Sep left the Inland Marine
+# and Umbrella numbers printed nowhere on the 125. These two tests pinned the
+# blank; they now pin the restored list and its Y/N, which follow ONE row set.
 @pytest.mark.parametrize("box", _Q4)
-def test_q4_is_blank_until_the_receiving_carrier_is_known(box):
+def test_q4_lists_the_package_policies_even_before_the_receiving_carrier_is_known(box):
     f = _q4_facts(carrier_is_current_policy=True)
-    assert ps._resolve_other_policy_cell(box, f) is None
-    assert ps._is_authoritative_blank_field(box, f)
+    assert ps._resolve_other_policy_cell(box, f) not in (None, "")
+    assert _q4_numbers(f) == {"BBC7263 - 26", "6E7-40-02---26", "6C7-40-02---26", "6J7-40-02---26"}
 
 
-def test_q4_yes_no_is_not_asked_either():
+def test_q4_yes_no_follows_the_listed_policies():
     marked = _q4_facts(carrier_is_current_policy=True)
-    assert ps._resolve_page_one_receiving_carrier("CommercialPolicy_Question_AAHCode_A", marked) is None
-    assert ps._resolve_page_one_receiving_carrier("CommercialPolicy_Question_AAHCode_A", _q4_facts()) \
-        is ps._SCHED_SKIP
+    assert ps._resolve_page_one_receiving_carrier("CommercialPolicy_Question_AAHCode_A", marked) == "Y"
+    assert ps._resolve_page_one_receiving_carrier("CommercialPolicy_Question_AAHCode_A", _q4_facts()) == "Y"
+    # Nothing to list -> the 15 Sep rule stands: an owned blank while only the
+    # current policy's documents name the carrier.
+    empty = _q4_facts(carrier_is_current_policy=True, coverage_lines=[])
+    assert ps._resolve_page_one_receiving_carrier("CommercialPolicy_Question_AAHCode_A", empty) is None
+
+
+def test_q4_never_lists_a_denied_line():
+    f = _q4_facts(carrier_is_current_policy=True)
+    f["coverage_lines"] = f["coverage_lines"] + [
+        {"line": "Workers' Compensation", "policy_number": "6C7-40-02---26",
+         "premium": "No Coverage"}]
+    assert _q4_numbers(f) == {"BBC7263 - 26", "6E7-40-02---26", "6C7-40-02---26", "6J7-40-02---26"}
+    labels = {ps._resolve_other_policy_cell(f"OtherPolicy_LineOfBusinessCode_{r}", f) for r in "ABCD"}
+    assert not any("compensation" in str(l or "").lower() for l in labels)
 
 
 def test_without_the_mark_q4_lists_every_policy_as_before():
@@ -195,7 +231,11 @@ def test_q4_through_the_stamper_and_gap_fill():
     schema = _schema("ACORD_125")
     f = _q4_facts(carrier_is_current_policy=True)
     m = _mapped(ps.map_facts_to_form(dict(f), schema, "ACORD_125"))
-    assert not [k for k in _Q4 if m.get(k) not in EMPTY]
+    printed = {m.get(f"OtherPolicy_PolicyNumberIdentifier_{r}") for r in "ABCD"} - set(EMPTY)
+    assert {str(v).replace(" ", "") for v in printed} == {
+        "BBC7263-26", "6E7-40-02---26", "6C7-40-02---26", "6J7-40-02---26"}
+    assert m.get("CommercialPolicy_Question_AAHCode_A") == "Y"
+    # Owned deterministically - never asked of the model.
     unmatched = set(ps.compute_form_gaps("ACORD_125", schema, f)[1])
     assert "CommercialPolicy_Question_AAHCode_A" not in unmatched
     assert not [k for k in unmatched if k.startswith("OtherPolicy_")]

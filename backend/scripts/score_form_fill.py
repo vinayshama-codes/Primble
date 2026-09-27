@@ -102,7 +102,34 @@ def norm(value) -> str:
             # rate ("0.902") keeps its leading zero and stays comparable.
             digits = digits.lstrip("0") or "0"
         return digits
-    return s
+    return _expand_abbreviations(s)
+
+
+# The key's own `_normalisation.abbreviations` rule, which this grader did not
+# implement: "Ste == Suite, Rd == Road, St == Street, Ave == Avenue and the
+# like - an address abbreviation is the same address". Without it the grader
+# reported three false defects on the A125 kit ("Ste 310" against "Suite 310"),
+# and the pipeline abbreviates DELIBERATELY - display_canonicalizer maps Suite
+# -> Ste for every address it prints. Expanding BOTH sides can only make equal
+# things compare equal; two different addresses still differ afterwards.
+_ADDR_ABBREV = {
+    "ste": "suite", "apt": "apartment", "rm": "room", "fl": "floor",
+    "bldg": "building", "dept": "department", "unit": "unit",
+    "st": "street", "rd": "road", "ave": "avenue", "av": "avenue",
+    "blvd": "boulevard", "dr": "drive", "ln": "lane", "ct": "court",
+    "pl": "place", "pkwy": "parkway", "hwy": "highway", "cir": "circle",
+    "sq": "square", "ter": "terrace", "trl": "trail", "way": "way",
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
+}
+
+
+def _expand_abbreviations(s: str) -> str:
+    out = []
+    for tok in s.split():
+        bare = tok.strip(".,")
+        out.append(_ADDR_ABBREV.get(bare, bare))
+    return " ".join(out)
 
 
 def same(expected, actual) -> bool:

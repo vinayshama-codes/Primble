@@ -213,32 +213,15 @@ async def add_form_to_session(
     from routes.form_routes import _FORM_EXECUTOR
 
     try:
-        facts_with_flags = {**(session.get("facts") or {}),
-                            **(session.get("flags") or {})}
-
-        schema = await loop.run_in_executor(
-            _FORM_EXECUTOR, extract_form_schema, tpl, form_id,
-        )
-        mapped, unmatched, _det = await loop.run_in_executor(
-            _FORM_EXECUTOR, compute_form_gaps, form_id, schema, facts_with_flags,
-        )
-
-        # ONE form's slice of the shared pass. `combined_gap_fill` is the same
-        # function generation uses; calling it with a single-entry dict is the
-        # documented degenerate case, not a special path - so batching, the
-        # evidence gate and every post-fill guard behave identically.
-        pre_filled = None
-        if unmatched:
-            raw_text = active_document_text(session)
-            pre_filled_all = await loop.run_in_executor(
-                _FORM_EXECUTOR,
-                functools.partial(
-                    combined_gap_fill,
-                    {form_id: unmatched}, facts_with_flags, raw_text,
-                    forms_to_mapped={form_id: mapped} if mapped else None,
-                ),
-            )
-            pre_filled = (pre_filled_all or {}).get(form_id)
+        # ONE form's slice of the shared pass, through the SAME door every
+        # generation path uses (`form_service.shared_gap_fill`, 24 Sep 2026) -
+        # so a form added after generation gets the line-scoped gap fill too.
+        # It used to call `combined_gap_fill` with no line scopes, so an added
+        # GL form read the auto pages (client item 6).
+        from services.form_service import shared_gap_fill
+        pre_filled_all = await loop.run_in_executor(
+            _FORM_EXECUTOR, shared_gap_fill, session, [form_id])
+        pre_filled = (pre_filled_all or {}).get(form_id)
 
         result = await loop.run_in_executor(
             _FORM_EXECUTOR, process_single_form, form_meta, session, pre_filled,

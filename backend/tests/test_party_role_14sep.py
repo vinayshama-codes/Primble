@@ -187,17 +187,28 @@ class TestProducerRouting:
                     "producer_contact_phone", "producer_contact_email", "producer_fax"):
             assert _v(mf.get(key)) == _v(base.get(key)), key
 
-    def test_a_submission_document_outranks_the_account(self):
+    def test_the_login_outranks_a_submission_document(self):
+        """24 Sep 2026 - this test used to pin the OPPOSITE (a submission
+        document's agency beat the login). The person generating the
+        submission IS its producer; an application or narrative naming another
+        agency is usually the CURRENT broker, or a prior-year application in
+        the package - reading it as the submitting agency is how the old broker
+        kept printing on the client's new application. That agency is recorded
+        as the expiring side and prints nowhere."""
         docs = _orbin_docs()
         docs.append({"doc_id": "app", "filename": "app.pdf", "doc_type": "application",
                      "text": "", "flags": {},
                      "facts": {"producer_name": _env("Cascade Risk Partners"),
                                "producer_contact_name": _env("Dana Whitfield")}})
         mf, _ = _merge(docs, account=THINKSMITH)
-        assert _v(mf["producer_name"]) == "Cascade Risk Partners"
-        assert _v(mf["producer_contact_name"]) == "Dana Whitfield"
+        assert _v(mf["producer_name"]) == "ThinkSmith Agency LLC"
+        assert _v(mf["producer_contact_name"]) == "Michelle Smith"
         assert "producer_address" not in mf
-        assert _v(mf["expiring_producer_name"]) == "COMMERCIAL RISK SOLUTIONS, INC."
+        assert _v(mf.get("expiring_producer_name")) in (
+            "COMMERCIAL RISK SOLUTIONS, INC.", "Cascade Risk Partners")
+        for key in ("producer_name", "producer_contact_name"):
+            assert "Cascade" not in str(_v(mf.get(key)))
+            assert "Dana" not in str(_v(mf.get(key)))
 
     def test_the_submission_route_is_atomic_too(self):
         mf = {"producer_name": "Commercial Risk Solutions",
@@ -211,21 +222,38 @@ class TestProducerRouting:
         assert "producer_address" not in mf
         assert mf["expiring_producer_address"] == "9780 S MERIDIAN BLVD STE 400"
 
-    def test_no_producer_in_any_document_is_left_as_it_was(self):
+    def test_no_producer_in_any_document_takes_the_login(self):
+        """24 Sep 2026 - this used to pin an EMPTY producer block when no
+        document names an agency. The login IS the submitting producer; with
+        nothing to contradict it the block takes the account's agency and
+        person, and never replaces a value a document stated."""
         docs = [{"doc_id": "d", "filename": "d.pdf", "doc_type": "dec_page", "text": "",
                  "flags": {}, "facts": {"applicant_name": _env("ORBIN CONTRACTING LLC")}}]
         mf, _ = _merge(docs, account=THINKSMITH)
-        assert "producer_name" not in mf
+        assert _v(mf["producer_name"]) == "ThinkSmith Agency LLC"
+        assert _v(mf["producer_contact_name"]) == "Michelle Smith"
 
-    @pytest.mark.parametrize("acct", [
-        {}, {"organization_name": "  "}, "junk", 7,
-        {"organization_name": "N/A", "full_name": "X Y"},
-        {"organization_name": "TBD", "full_name": "X Y"},
-        {"organization_name": "none", "full_name": "X Y"}])
-    def test_an_account_without_an_agency_is_ignored(self, acct):
+    @pytest.mark.parametrize("acct", [{}, "junk", 7])
+    def test_no_account_row_is_ignored(self, acct):
         base, _ = _merge(account=None)
         mf, _ = _merge(account=acct)
         assert _v(mf.get("producer_name")) == _v(base.get("producer_name"))
+
+    @pytest.mark.parametrize("acct", [
+        {"organization_name": "  "},
+        {"organization_name": "N/A", "full_name": "X Y"},
+        {"organization_name": "TBD", "full_name": "X Y"},
+        {"organization_name": "none", "full_name": "X Y"}])
+    def test_an_account_whose_agency_is_a_non_answer_never_prints_the_old_agency(self, acct):
+        """24 Sep 2026 - this used to pin that such an account is IGNORED,
+        which printed the EXPIRING agency (Commercial Risk Solutions / Terri)
+        on the new application. A user IS submitting; which agency is unknown,
+        so the old one is recorded and the producer block is left for the
+        producer - the same rule as an unreadable account."""
+        mf, _ = _merge(account=acct)
+        assert not _v(mf.get("producer_name"))
+        assert "Terri" not in str(_v(mf.get("producer_contact_name")) or "")
+        assert _v(mf.get("expiring_producer_name"))
 
     # ── found by fuzzing 6,000 random packages (14 Sep) ─────────────────────
     def test_a_submission_document_naming_no_agency_lends_nothing(self):

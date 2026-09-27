@@ -445,6 +445,11 @@ async def _submitting_account_for(user_id):
         return {
             "organization_name": str(row.get("organization_name")).strip(),
             "full_name": str(row.get("full_name") or "").strip(),
+            # The submitting producer's OWN contact details (24 Sep 2026): the
+            # block used to print a name and nothing else, so the client saw a
+            # half-empty producer section on every separated package.
+            "email": str(row.get("email") or "").strip(),
+            "phone": str(row.get("phone") or "").strip(),
         }
     logger.warning("submitting account unavailable for user %s (no agency on the "
                    "account) - an agency named only by expiring documents will not "
@@ -1154,7 +1159,8 @@ async def _finalize_pipeline(
                        "comparison falls back to the deterministic reader "
                        "exactly as before", _ynex)
 
-    underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations)
+    underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations,
+                                                   flags=mflags)
     # Client 2026-08-15 ("unresolved conflicts must remain unresolved"): facts
     # whose cross-document conflict is unresolved are listed on the session
     # facts so the stamping layer withholds their value until the picker
@@ -1440,8 +1446,19 @@ async def _finalize_pipeline(
     except Exception as _sex:                                  # noqa: BLE001
         logger.warning("fact_state annotation skipped: %s", _sex)
 
+    # The package's CARRIED lines, as plain text beside the encrypted facts, so
+    # the dashboard card lists what the package has - not the raw mention list
+    # (an unencrypted row showed "Property, Liability +15"), and not nothing
+    # (the facts blob is encrypted, so the SQL path read NULL). Line names
+    # only - no PII.
+    try:
+        from services.lob_canon import carried_lines_of_business as _carried_for_card
+        _carried_lines_card = _carried_for_card(merged_facts, mflags)
+    except Exception:                                          # noqa: BLE001
+        _carried_lines_card = None
     session_payload = {
         "user_id":              user_id,
+        "carried_lines":        _carried_lines_card,
         "client_answer_conflicts": dict(merged_facts.get("_client_answer_conflicts") or {}),
         "docs":                 processed_docs,
         "primary_doc":          primary["filename"],
@@ -1465,6 +1482,9 @@ async def _finalize_pipeline(
         "underwriting_consistency":   underwriting,
         "underwriting_confirmations": confirmations,
     }
+    if _carried_lines_card is None:
+        # A JSON null is not SQL NULL - COALESCE would pick it and blank the card.
+        session_payload.pop("carried_lines", None)
 
     if session_id:
         # The facts merge is additive and SKIPS an empty list, so a re-run that
@@ -1818,7 +1838,8 @@ async def confirm_underwriting_value(
     pre_candidates: Optional[list] = None
     pre_reason: Optional[str] = None
     try:
-        pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations)
+        pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations,
+                                              flags=session.get("flags") or {})
         target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
         if target:
             # V1 plan C1 F10: what the producer was choosing BETWEEN, captured
@@ -1955,12 +1976,21 @@ async def apply_marketing_reason(
         session_id, reason, is_adverse, user_id or session.get("user_id"),
     )
 
-    await upd_processing_session(session_id, {
+    try:
+        from services.lob_canon import carried_lines_of_business as _carried_for_card
+        _carried_lines_card = _carried_for_card(facts, flags)
+    except Exception:                                          # noqa: BLE001
+        _carried_lines_card = None
+    _upd = {
         "facts":           facts,
         "flags":           flags,
+        "carried_lines":   _carried_lines_card,
         "recommendations": recommendations,
         "account_profile": account_profile,
-    })
+    }
+    if _carried_lines_card is None:
+        _upd.pop("carried_lines")
+    await upd_processing_session(session_id, _upd)
 
     return {
         "session_id":                   session_id,

@@ -537,3 +537,134 @@ def test_uncovered_safety_net_still_gets_a_fix_from_its_message():
     row = next(r for r in rows if r["message"] == msg)
     assert row["resolution"]["mode"] == "field"
     assert row["resolution"]["facts"] == ["total_payroll"]
+
+
+# ── A `none`-mode resolution must name its own cause (2026-09-22) ────────────
+# WHY THIS EXISTS. `legacy_gl_no_class_codes` shipped as `_r_review()` on the
+# stated grounds that GL class codes were "a per-location SCHEDULE with no live
+# capture table, so there is nothing to type into". True when written. FALSE
+# from the day `services/answer_routing.py` shipped (BUG-05, 2026-09-08) - the
+# ONE DOOR for "can a human answer this?" returns `{"mode": "field"}` for
+# `gl_class_codes_by_location` whenever it is empty, which is precisely when the
+# rule fires. Two declarations of one thing, no test between them, so they
+# drifted silently and a GL package whose documents print no class codes was
+# pinned at SOFT_STOP_CAP (85) with a Resolve button that refused, a note that
+# pointed at ACORD 126 (which has no writeback to either GL class-code fact) and
+# a Dismiss whose credit `final_score_with_credits` clamps straight back under
+# the same ceiling. Reported live as "we cannot get the Orbin package over 85".
+#
+# The house pattern is already established for cap gates - `_prop_hard_because`
+# ("a cap gate must name its own cause"). This is the same rule for the other
+# end: a resolution that offers NO fix must say why, and when the reason is
+# "that is not a fact a human can write", the one door has to agree.
+#
+#   ()          - genuinely not about any fact (a placement, a form, unknowable)
+#   ("fact",)   - it IS about these facts; a HUMAN decided none-mode anyway
+_NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
+    # Fixed by ADDING an ACORD form; each carries `add_forms` at its emit site,
+    # so the card already offers the only action that clears it.
+    "contractor_missing_acord186": (),
+    "acord127_missing_state_137": (),
+    "certificate_requested_but_acord25_missing": (),
+    "property_evidence_requested_but_acord28_missing": (),
+    "acord125_missing": (),
+    # Fixed by placing the coverage, not by typing a value.
+    "crime_silent_exposure": (),
+    "cyber_silent_exposure": (),
+    # WC in ND/OH/WA/WY: the fix is the PLACEMENT (state fund vs private
+    # carrier). The one door agrees - neither backing key is writable.
+    "legacy_wc_monopolistic_state": (),
+    "legacy_wc_monopolistic_private_carrier": (),
+    # Primble cannot tell which line the value belongs to. Nothing to offer.
+    "unmapped_coverage_line": (),
+    # ── Named, and left as `none` by a HUMAN decision (not by drift) ─────────
+    # These fire on a value that is PRESENT and looks wrong for the risk, not on
+    # an empty fact, so "type the value" is not obviously the fix. Listed here
+    # so the choice is visible and re-checkable rather than silent. Revisit with
+    # the owner; do NOT flip them without one.
+    # The Tier 1 backstop: reached only by a sentence whose label is not one
+    # check_tier1 emits, so the field it means is genuinely unknown. A real
+    # Tier 1 sentence is classified by label before this row is consulted and
+    # gets `_r_field` naming the exact fact - see _tier1_code_from_message.
+    "legacy_tier1_unrecognised_field": (),
+    "acv_high_value_building": ("valuation_method",),
+    "rcv_old_building": ("valuation_method",),
+    "auto_drive_other_car_not_specified": ("auto_drivers",),
+}
+
+
+def test_every_no_fix_resolution_declares_its_cause():
+    """A new `none`-mode rule cannot ship without someone deciding WHY it has no
+    fix. Without this, the next hand-authored dead end is invisible until a
+    customer reports a score that will not move."""
+    from services.issue_registry import RESOLUTION_MAP
+
+    undeclared = sorted(
+        code
+        for src in (_LEGACY_CODE_RESOLUTIONS, RESOLUTION_MAP)
+        for code, res in src.items()
+        if (res or {}).get("mode") in (None, "none")
+        and not (res or {}).get("add_forms")
+        and code not in _NO_FIX_CAUSE
+    )
+    assert not undeclared, (
+        "these resolutions offer the producer no fix and do not say why: "
+        f"{undeclared} - add each to _NO_FIX_CAUSE with the fact(s) it is "
+        "about, or give it a real resolution mode"
+    )
+
+
+def test_a_no_fix_rule_about_nothing_is_confirmed_by_the_one_door():
+    """`_NO_FIX_CAUSE[code] == ()` claims "there is no fact behind this".
+    `services/answer_routing.py` is the ONE DOOR for that question, so it has to
+    agree. This is the exact drift that stranded legacy_gl_no_class_codes."""
+    from services.answer_routing import answer_mode
+    from services.issue_registry import RESOLUTION_MAP
+
+    _all = {**_LEGACY_CODE_RESOLUTIONS, **RESOLUTION_MAP}
+    # Facts each "about nothing" rule could plausibly be about, so the claim is
+    # tested rather than asserted. Empty tuple = the rule names no fact at all.
+    _backing = {
+        "legacy_wc_monopolistic_state": ("wc_state_fund_acknowledged", "wc_carrier_type"),
+        "legacy_wc_monopolistic_private_carrier": ("wc_state_fund_acknowledged", "wc_carrier_type"),
+    }
+    bad = []
+    for code, facts in _NO_FIX_CAUSE.items():
+        if facts or code not in _all:
+            continue
+        for fact in _backing.get(code, ()):
+            if answer_mode(fact, {}).get("mode") != "none":
+                bad.append((code, fact, answer_mode(fact, {}).get("mode")))
+    assert not bad, (
+        "a rule declared 'no fact behind this' but answer_routing says the fact "
+        f"IS answerable: {bad} - the card and the write door disagree"
+    )
+
+
+def test_gl_class_codes_can_actually_be_answered():
+    """The live regression, pinned at the shape the customer hit: a GL package
+    with no class codes must offer a fix that WRITES the fact the rule reads."""
+    from services.answer_routing import answer_mode
+    from services.arq_service import _canonical_key
+    from services.issue_registry import _legacy_message_resolution
+    from services.sqs_service import evaluate_stops
+
+    msg = "GL coverage detected but no class codes found"
+    res = _legacy_message_resolution(msg)
+    assert res["mode"] == "field", "the GL class-code warning has no typed fix again"
+    fact = res["facts"][0]
+    assert answer_mode(fact, {})["mode"] == "field", "the one door refuses this fact"
+    assert _canonical_key(fact), "the producer-answer path cannot write this fact"
+
+    facts = {"gl_limits": {"value": "$1,000,000"}}
+    flags = {"has_general_liability": True}
+    _, soft = evaluate_stops(facts, flags)
+    assert msg in soft, "the warning no longer fires - rewrite this test, not the rule"
+
+    facts[fact] = {"value": "91580 Carpentry - residential",
+                   "confidence": "filled", "source": "producer"}
+    _, soft_after = evaluate_stops(facts, flags)
+    assert msg not in soft_after, (
+        "answering the fact the card offers does NOT clear the warning - the "
+        "85 ceiling would stand after a correct answer"
+    )

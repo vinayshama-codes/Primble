@@ -152,7 +152,35 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     assert {k: len(v) for k, v in sorted(claimants.items())} == {
         "_resolve_prior_coverage_cell": 64,
         "_resolve_section_attached_indicator": 4,
-        "_resolve_applicant_website": 3,
+        # NEW on 2026-09-21, and it is ONE box: ACORD 125's additional-interest
+        # COUNTRY. Swept all 17 schemas - every CountryCode box in the product
+        # is an AdditionalInterest one (4 across 125/126/140), `_ACORD_FIELD_
+        # RULES` maps it to None, and no fact anywhere else can supply it. So a
+        # value there is provably not read from the document; a live run
+        # printed "US" on a package that names no country. The other TWELVE
+        # columns of that resolver, and all six sibling per-entity resolvers,
+        # claim NOTHING on a fact-less probe by design - they return
+        # _SCHED_SKIP when their v22 fact is absent so a pre-v22 session keeps
+        # exactly today's behaviour.
+        "_resolve_additional_interest_detail": 1,
+        # ONE box, for the same reason as the country above: ACORD's
+        # AdditionalInterest_Item_LocationProducerIdentifier wants OUR location
+        # numbering - the index into the premises schedule this application
+        # prints - so no amount of reading the document produces it. It is
+        # deterministic-or-blank. Without this claim, unblocking the box in
+        # `_is_nonfillable_field` would have handed three forms a new box for
+        # gap fill to guess at; `test_call2_retrieval` caught exactly that.
+        "_resolve_additional_interest_evidence": 1,
+        # 3 -> 1 on 2026-09-21 (A125 kit test 2). `applicant_website` is a
+        # PACKAGE-LEVEL SCALAR and this resolver returned it for every row
+        # letter, so one website was broadcast across all three named-insured
+        # rows and Guard 2 then deleted B and C as echoes of A - which is how a
+        # live ACORD 125 printed the SECOND insured's website on the FIRST
+        # insured's row while the right box stayed empty. Rows B-N now belong
+        # to `_resolve_named_insured_detail`, which reads the per-entity fact
+        # and SKIPS when that fact is absent, so nothing is newly withheld.
+        # THE CODE CHANGED, NOT THE TEST'S SUBJECT.
+        "_resolve_applicant_website": 1,
         "_resolve_producer_printed_name": 1,
         "_resolve_applicant_contact": 24,
         # 3 -> 10 on 2026-08-13: the WHOLE transaction-status family, not just
@@ -234,6 +262,16 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         # same row, left unowned. A code abbreviates a printed word, so no
         # verbatim or echo check can see it; `audit_period` stamps when a
         # document really prints one.
+        # +28 on 2026-09-21 (A125 kit): the ATTACHMENTS family. It was blocked
+        # wholesale by the "Attachment_" substring in `_is_nonfillable_field`,
+        # which reached the right answer for the wrong reason - it blanked the
+        # boxes nobody can know AND the ones this package can prove, and could
+        # never tick either. `_resolve_attachment_indicator` owns them
+        # properly: Y when the package contains the form or the schedule the
+        # box names, an owned blank otherwise. Scoped to `*_Attachment_*` only -
+        # `Policy_SectionAttached_*` already has its own owner and its own
+        # partition test, and claiming it here shadowed four working boxes.
+        "_resolve_attachment_indicator": 28,
         "_resolve_audit_frequency": 1,
         # +1 on 2026-09-06: METHOD OF PAYMENT. Two runs printed a SIBLING
         # checkbox's tooltip - "Direct Bill" and "producer / agency billed" are
@@ -274,7 +312,28 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     # NOT touched. Note the numbers above had drifted - the prose said 113/25
     # while the code was already at 117/29 - so both are restated from a real
     # run here rather than incremented.
-    assert len(owned) < 0.25 * len(schema), (
+    #
+    # 2026-09-21 (A125 kit), MEASURED not carried forward: 127 -> 155 of 548
+    # (28.3%), +28 for the ATTACHMENTS family. THE CEILING MOVES, AND HERE IS
+    # WHY IT IS NOT A REGRESSION.
+    #
+    # Those 28 boxes were ALREADY withheld from the model - by the "Attachment_"
+    # substring in `_is_nonfillable_field`, which this counter never saw. The
+    # fix replaced a blunt name match with `_resolve_attachment_indicator`,
+    # which can also TICK the boxes this package can prove (the Contractors
+    # Supplement when we generate ACORD 186, a vehicle schedule when we fill
+    # one). Measured both ways on ACORD 125:
+    #
+    #     withheld by a registered resolver     127 -> 155
+    #     withheld by _is_nonfillable_field      88 ->  60
+    #     withheld by EITHER - what the model
+    #     never sees                            202 -> 202   <- UNCHANGED
+    #
+    # So nothing new is hidden; 28 fields moved from an uncounted mechanism to
+    # a counted one, and gained the ability to be answered. The ceiling is
+    # raised to 30% rather than the family being declared a "grid" to keep the
+    # number flat - the same refusal this file recorded in 2026-09-05.
+    assert len(owned) < 0.30 * len(schema), (
         f"{len(owned)} of {len(schema)} fields withheld from the model"
     )
     # ...and the scalar half must stay small, which is the constraint the
@@ -282,6 +341,10 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     # their OWNING RESOLVER, not by a guessed name prefix - the resolver is the
     # thing that actually decides, and a prefix list would drift from it.
     _grid_owners = {"_resolve_prior_coverage_cell", "_resolve_applicant_contact"}
+    # `_resolve_attachment_indicator` is NOT listed as a grid owner. Sixteen of
+    # its 28 boxes are singleton `_A` checkboxes, so by this file's own
+    # definition - a grid is a REPEATING structure - they are scalar growth and
+    # are counted as such.
     _scalar = sum(len(v) for k, v in claimants.items() if k not in _grid_owners)
     # 29 -> 37 on 2026-09-05 (SYS-09), raised DELIBERATELY rather than dodged.
     # The cheap way out was available and refused: the producer contact (3) and
@@ -300,9 +363,15 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
     # had to clear. The prose above this assert had drifted to "25" while the
     # code stood at 29; 37 is measured, not incremented.
     #
-    # Ceiling 40, deliberately tight: three short of the next block of this
+    # 37 -> 65 on 2026-09-21 (A125 kit): +28 for the ATTACHMENTS family, which
+    # is scalar growth by this file's definition and is counted as such rather
+    # than relabelled. It is a ONE-OFF: the family is finite, ACORD publishes it
+    # on the form, and `test_no_attachment_field_on_any_form_can_reach_gap_fill`
+    # now pins it, so it cannot grow quietly.
+    #
+    # Ceiling 68, deliberately tight: three short of the next block of this
     # size, so whoever adds one still has to argue it here.
-    assert _scalar < 40, (
+    assert _scalar < 68, (
         f"{_scalar} non-grid fields withheld - the contract is growing "
         "scalars, not just repeating structures"
     )

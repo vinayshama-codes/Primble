@@ -1748,6 +1748,18 @@ def _merge_form_ids_into_question(questions: List[dict], canon: str, new_form_id
         return
 
 
+def _refill_value(value) -> bool:
+    """True when a post-generation re-fill has something to WRITE.
+
+    `_deterministic_map` answers a value, None (a box its owner keeps blank) or
+    the marker "UNMATCHED" (nothing it can decide - at generation that sends
+    the box to gap fill). Both re-fill paths treated only an empty result as
+    "nothing", so the marker itself would have been written into the box
+    (found 27 Sep 2026, checking what the dec-index purge changes)."""
+    s = str(value).strip() if value is not None else ""
+    return bool(s) and s != "UNMATCHED"
+
+
 def _guard_blanked_fields(form_data: dict) -> set:
     """Boxes a post-fill guard emptied at generation - judged impossible for
     that box, so no later deterministic pass may reopen them."""
@@ -1860,7 +1872,7 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
                         mapped_val = _deterministic_map(sf, {**facts, "_form_id": fid})
                 except Exception:
                     mapped_val = None
-                if mapped_val is None or str(mapped_val).strip() == "":
+                if not _refill_value(mapped_val):
                     continue
                 fs[sf] = mapped_val
                 form_data["field_state"] = fs
@@ -4608,7 +4620,7 @@ def _restamp_canonical_into_forms(
                 from contextlib import nullcontext as _schema_context
             with _schema_context(schema):
                 mapped_val = _deterministic_map(schema_field, {**facts, "_form_id": fid})
-            if mapped_val is None or str(mapped_val).strip() == "":
+            if not _refill_value(mapped_val):
                 continue
             if str(field_state.get(schema_field) or "").strip() == str(mapped_val).strip():
                 # Already shows the confirmed value — still label as client-supplied
@@ -5327,12 +5339,71 @@ async def get_session_schedules(
     facts     = proc.get("facts", {}) or {}
     generated = proc.get("generated_forms", {}) or {}
 
+    # ── THE FORMS THIS PACKAGE WILL USE, NOT ONLY THE ONES ALREADY BUILT ────
+    # This read `generated_forms` alone, while the docstring above says "the
+    # session's SELECTED forms" - two statements of one rule, and the code was
+    # the stricter one. Before generation both dicts are empty, so every
+    # schedule was filtered out by the `not form_ids and not rows` test below
+    # and the endpoint returned nothing.
+    #
+    # Reported live 2026-09-23: the "Driver schedule not provided" warning fires
+    # pre-selection (it is gated on `has_auto_coverage`, which exists the moment
+    # extraction finishes), its resolution is `schedule` mode, and opening it
+    # answered "This schedule is not available for the current forms." A card
+    # offering a control the server cannot serve is the BUG-05 defect class -
+    # the producer is told to fix something and handed nothing to fix it with.
+    #
+    # Three sources now, widest last, each a real statement that the package
+    # uses that form:
+    #   * generated_forms  - authoritative, and carries its own schema, so no
+    #                        file read;
+    #   * selected_form_ids - chosen, not yet built;
+    #   * recommendations   - what the recommender says this package needs, the
+    #                        only signal that exists before selection.
+    # `schedules_on_form` answers from the form's OWN schema in forms_schemas/,
+    # so this states a property of the FORM and needs no generated instance.
+    #
+    # THE FALLBACK MUST NARROW AGAIN (2026-09-23, same day as the widening).
+    # `recommendations` is written once at extraction and never pruned -
+    # `select_forms_bulk` writes only `selected_form_ids` / `generated_forms`.
+    # Unioning it in unconditionally therefore let a form the producer DECLINED
+    # keep contributing its schedules for the life of the session. Measured: a
+    # property package (125 + 140 generated) that had been offered ACORD 130 and
+    # 127 was still served `wc_class_codes`, `wc_officers`, `auto_drivers` and
+    # `auto_vin_schedule`, labelled "Forms: 130" - breaking this function's own
+    # docstring guarantee. `save_session_schedule` has no relevance gate, so the
+    # table was ACCEPTED: it wrote `wc_class_codes` plus a derived
+    # `wc_payroll_by_state` onto a package with no WC line and returned success
+    # with `forms_updated: []` - a control the server accepts and that changes
+    # nothing, which is the BUG-05 shape one step over.
+    #
+    # And the comment that defended the widening was wrong on its facts: the
+    # recommender DOES put ACORD 130 in front of a package with no WC flag, at
+    # tier `needs_confirmation`, precisely so the producer can confirm or
+    # decline it. Declining is the designed outcome, not an edge case.
+    #
+    # So the recommender is consulted ONLY while nothing has been chosen yet,
+    # which is the whole of the defect the widening was for.
     relevant: dict = {}
     for fid, form_data in generated.items():
         for schema_field in (form_data.get("schema", {}) or {}).keys():
             lk = schedule_capture.schedule_list_key_for_field(schema_field)
             if lk:
                 relevant.setdefault(lk, set()).add(fid)
+
+    _planned = {str(f) for f in (proc.get("selected_form_ids") or []) if f}
+    _planned |= set(generated)
+    if not _planned:
+        _planned = {str(r["form_id"]) for r in (proc.get("recommendations") or [])
+                    if isinstance(r, dict) and r.get("form_id")}
+    for fid in sorted(_planned - set(generated)):
+        try:
+            for lk in schedule_capture.schedules_on_form(fid):
+                relevant.setdefault(lk, set()).add(fid)
+        except Exception as _sx:                                   # noqa: BLE001
+            # A form id we cannot read a schema for must never break the
+            # endpoint - it just contributes nothing.
+            logger.warning("get_session_schedules: %s schema unreadable: %s", fid, _sx)
 
     out: List[dict] = []
     for list_key, defn in schedule_capture.SCHEDULE_DEFS.items():

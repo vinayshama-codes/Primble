@@ -344,6 +344,93 @@ def canonical_yes_no(value: Any) -> Optional[str]:
 # `fact_comparison`, `fact_equivalence` and `pdf_service` all need the same
 # answer and a second copy is how the auto-symbol and Umbrella-SIR bugs each
 # survived their first fix.
+# ── A FORM NUMBER IS NOT A POLICY NUMBER - the one shape door (24 Sep 2026) ──
+# A form number names coverage WORDING; a policy number names a contract.
+# Until today the test existed twice (extraction and stamping) and read ONE
+# shape - ISO/AAIS "IM 7100 06 04". The client's own package prints its
+# carrier's forms in three more, and every one passed as a POLICY number at the
+# merge, the row scrub, producer confirmation and the box guard:
+#   series + series letter + edition   CU7001A 11-15 / CU7001A(11/15) /
+#                                      CA7000A 02-22 / IL 71 31A 04 01 /
+#                                      CG 70 01A 10 12 / CG7001A Ed. 10-12
+#   series + bracketed edition         IM7100(06/04) / CA7450(09-24)
+#   series + edition LETTER            CA7450 M / WC 00 00 00 C
+# Structural, not a list of known forms: two or three letters, a four-digit
+# series (ISO prints it as two pairs), then an edition - a real MONTH (01-12)
+# and a year, or a single edition letter. A form series never runs five digits
+# together, so a policy number that does (BOP 7654321 01 26, SRC-4410982) is
+# never read as one, and one that leads with a digit (6E7-40-02---26) or ends
+# on a bare term suffix (BBC7263-26, BBC7263 - 26) has no edition to match.
+_ISO_FORM_NUMBER_RE = re.compile(r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", re.I)
+_CARRIER_FORM_NUMBER_RE = re.compile(
+    r"^(?!.*\d{5})[A-Z]{2,3}\s?\d{2}\s?\d{2}[A-Z]{0,2}\s*[(\[]?\s*"
+    r"(?:ed(?:ition)?\.?\s*)?(?:0[1-9]|1[0-2])\s*[-/.\s]\s*(?:\d{2}|\d{4})\s*[)\]]?$",
+    re.I)
+_EDITION_LETTER_FORM_NUMBER_RE = re.compile(r"^[A-Z]{2,3}(?:\s?\d{2}){2,3}\s[A-Z]$")
+
+
+def looks_like_a_form_number(value: Any) -> bool:
+    """True when ``value`` is shaped like an insurance FORM number (ISO, AAIS or
+    a carrier's own edition-dated form), never a contract's policy number.
+
+    Shape only. A caller holding the declarations' own "POLICY NUMBER" printings
+    passes them through `is_contract_identifier` first - a printed contract
+    number is a policy number whatever it looks like."""
+    s = str(value or "").strip()
+    if not s or len(s) > 40:
+        return False
+    return bool(_ISO_FORM_NUMBER_RE.match(s)
+                or _CARRIER_FORM_NUMBER_RE.match(s)
+                or _EDITION_LETTER_FORM_NUMBER_RE.match(s))
+
+
+_ACCOUNT_LABEL_RE = re.compile(r"\b(?:account|acct)\b", re.I)
+_POLICY_NO_LABEL_RE = re.compile(
+    r"\bpol(?:icy|\.)?\s*(?:number|num|no\.?|nbr|#)", re.I)
+
+
+def _identifier_key(value: Any) -> str:
+    return re.sub(r"[^0-9A-Za-z]", "", str(value or "")).upper()
+
+
+def labelled_identifiers(entries: Any) -> Tuple[Set[str], Set[str]]:
+    """(contract numbers, account numbers) the declarations index PRINTS under
+    their own label - "POLICY NUMBER: 6E7-40-02---26", "Account Number:
+    0482854". Keyed on the alphanumerics only. Positive evidence both ways:
+    an entry whose label names neither contributes nothing."""
+    contracts: Set[str] = set()
+    accounts: Set[str] = set()
+    for e in entries if isinstance(entries, list) else []:
+        if not isinstance(e, dict):
+            continue
+        label = str(e.get("label") or "")
+        key = _identifier_key(e.get("value"))
+        if len(key) < 4:
+            continue
+        if _ACCOUNT_LABEL_RE.search(label) and not _POLICY_NO_LABEL_RE.search(label):
+            accounts.add(key)
+        elif _POLICY_NO_LABEL_RE.search(label):
+            contracts.add(key)
+    return contracts, accounts
+
+
+def is_not_a_policy_number(value: Any, entries: Any = None) -> bool:
+    """True for a value that cannot be THIS package's policy number: a form
+    number (unless the declarations print it as a contract), or the value the
+    declarations print under an ACCOUNT label (Orbin's "Account Number:
+    0482854" was listed on the card as a fifth policy)."""
+    s = str(value or "").strip()
+    if not s:
+        return False
+    contracts, accounts = labelled_identifiers(entries) if entries else (set(), set())
+    key = _identifier_key(s)
+    if key in contracts:
+        return False
+    if key in accounts:
+        return True
+    return looks_like_a_form_number(s)
+
+
 _POLICY_NUM_WORDS = ("number", "num", "no", "nbr", "id")
 
 
@@ -904,6 +991,130 @@ def _basic(s: Any) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+# ── OCR glue: one company printed with its spaces lost (24 Sep 2026) ─────────
+# The client's real certificate OCR prints its insurers as
+# "EMCProperty&CasualtyCompany" and "EmployersMutualCasualtyCo." - each ONE
+# token. Every identity key in this module tokenises on whitespace, so the
+# certificate's carrier read as a company the declarations never mention:
+# a false "Carrier NAIC: documents disagree (25186, 21415)" card, the
+# "Multiple carriers referenced across documents" integrity warning, and the
+# header binder dropping a correct NAIC because only the SPELLING differed.
+# Every fixture had typed the names WITH their spaces, so none of it was seen.
+#
+# A mixed-case glued token still carries its word boundaries: a lower-case
+# letter followed by a capital ("CasualtyCompany") or an initialism running
+# into a capitalised word ("EMCProperty"). Split there - but only when the
+# split is evidently several words: three or more pieces, or a later piece
+# that is a company word. "McDonald", "ThinkSmith", "PayPal", "iPhone" stay
+# whole. An ALL-CAPS glued token has no boundary to read; `entity_compact_key`
+# covers that case for comparisons instead of guessing at a segmentation.
+_GLUE_BOUNDARY_RE = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_GLUE_WORD_CACHE: List[FrozenSet[str]] = []
+
+# Words that DESCRIBE a business - never a legal form, never a connector. Only
+# these may re-space a name for DISPLAY: "InTownSuitesLLC" contains none, so a
+# real glued brand is never rewritten into "In Town Suites LLC".
+_GLUE_DESCRIPTIVE_EXTRA = frozenset({
+    "agencies", "brokerage", "brokers", "broker", "risk", "solutions",
+    "partners", "holdings", "specialty", "surety", "fire", "marine",
+    "employers", "commercial", "capital", "bank", "trust", "authority",
+    "county", "construction", "contracting", "contractors", "insurers",
+    "underwriting", "management", "associates", "consulting", "benefits",
+})
+
+
+def _glue_words() -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """(company words, descriptive words), derived from this module's own
+    tables - the strict-key token canon, the legal-form suffixes and the
+    carrier aliases - plus the descriptive business words above."""
+    if not _GLUE_WORD_CACHE:
+        legal = {w for suf in _ENTITY_SUFFIXES for w in suf.split()}
+        canon = set(_STRICT_TOKEN_CANON) | set(_STRICT_TOKEN_CANON.values())
+        alias = {w for a in _CARRIER_ALIASES for w in a.split()}
+        company = frozenset(canon | legal | alias | _GLUE_DESCRIPTIVE_EXTRA)
+        descriptive = frozenset(
+            w for w in company
+            if w not in legal and w not in _STRICT_NOISE_TOKENS
+            and w not in {"co", "cos", "company", "companies", "emc"} and len(w) > 2)
+        _GLUE_WORD_CACHE.extend([company, descriptive])
+    return _GLUE_WORD_CACHE[0], _GLUE_WORD_CACHE[1]
+
+
+def deglue_entity_text(value: Any, *, for_display: bool = False) -> str:
+    """Re-space the mixed-case tokens OCR glued together from several words.
+
+    ``for_display`` is the stricter test used before a name is PRINTED: a
+    token is split only when one of its pieces is a descriptive business word
+    (Property, Casualty, Mutual, Insurance, Agency, Solutions ...), and "&" /
+    "," regain their spacing. Identity keys use the broader test (three or
+    more pieces, or any company word including a legal form), because both
+    printings of one company go through it and only equality matters there.
+    Tokens without an internal capital boundary are returned byte-identical.
+    """
+    s = "" if value is None else str(value)
+    if not s or not _GLUE_BOUNDARY_RE.search(s):
+        return s
+    company, descriptive = _glue_words()
+    out: List[str] = []
+    for tok in re.split(r"(\s+)", s):
+        if not tok or tok.isspace() or not _GLUE_BOUNDARY_RE.search(tok):
+            out.append(tok)
+            continue
+        pieces = [p for p in _GLUE_BOUNDARY_RE.split(tok) if p]
+        words = [w for p in pieces for w in re.findall(r"[a-z]+", p.lower())]
+        later = [w for p in pieces[1:] for w in re.findall(r"[a-z]+", p.lower())]
+        if for_display:
+            split = len(pieces) >= 2 and any(w in descriptive for w in words)
+        else:
+            split = len(pieces) >= 3 or any(w in company for w in later)
+        if not split:
+            out.append(tok)
+            continue
+        spaced = " ".join(pieces)
+        if for_display:
+            spaced = re.sub(r"\s*&\s*", " & ", spaced)
+            spaced = re.sub(r",(?=[A-Za-z])", ", ", spaced)
+        out.append(spaced)
+    return "".join(out)
+
+
+# Legal-form TAILS a glued printing leaves unexpanded ("...CasualtyCo."),
+# canonicalised the way `_STRICT_TOKEN_CANON` canonicalises a spaced one.
+# Longest first; a tail is rewritten, never stripped, so "LLC" and "Inc" stay
+# two different entities (Round 10 fix 46).
+_COMPACT_TAILS = (
+    ("incorporated", "inc"), ("corporation", "corp"), ("companies", "company"),
+    ("company", "company"), ("limited", "ltd"), ("cos", "company"), ("co", "company"),
+)
+
+
+def entity_compact_key(value: Any) -> str:
+    """The strict entity key with every space removed - a comparison key that
+    cannot be moved by OCR spacing. "EMCPROPERTY&CASUALTYCOMPANY",
+    "EMCProperty&CasualtyCompany" and "EMC Property & Casualty Company" share
+    it; "EMC Property & Casualty" and "Employers Mutual Casualty" do not, and
+    neither do an LLC and an Inc of one name. Equality only - never display."""
+    compact = strict_entity_key(value).replace(" ", "")
+    if not compact:
+        return ""
+    for tail, canon in _COMPACT_TAILS:
+        if compact.endswith(tail) and len(compact) - len(tail) >= 3:
+            if not compact.endswith(canon):
+                compact = compact[: -len(tail)] + canon
+            break
+    return compact
+
+
+def same_entity_name(a: Any, b: Any) -> bool:
+    """True when two printings name ONE legal entity by spelling: equal strict
+    keys, or equal compact keys (the same name with its spaces lost)."""
+    ka, kb = strict_entity_key(a), strict_entity_key(b)
+    if ka and kb and ka == kb:
+        return True
+    ca, cb = entity_compact_key(a), entity_compact_key(b)
+    return bool(ca and cb and ca == cb)
+
+
 # ── Public normalizers ────────────────────────────────────────────────────────
 
 def normalize_name(value: Any) -> str:
@@ -914,7 +1125,7 @@ def normalize_name(value: Any) -> str:
     so "ORBIN CONTRACTING LLC", "Orbin Contracting LLC" and "Orbin Contracting,
     LLC" all reduce to "orbin contracting". Returns '' when no usable signal.
     """
-    s = _basic(value)
+    s = _basic(deglue_entity_text(value))
     if not s:
         return ""
     changed = True
@@ -1172,11 +1383,22 @@ def normalize_carrier(value: Any) -> str:
     remaining name tokens are returned for comparison. Carrier differences are
     treated as REVIEW (not a hard conflict) by the caller.
     """
-    s = _basic(value)
+    s = _basic(deglue_entity_text(value))
     if not s:
         return ""
     if s in _CARRIER_ALIASES:
         return _CARRIER_ALIASES[s]
+    # The alias map is keyed on the FULL printing, so an abbreviated legal form
+    # missed it: "Employers Mutual Casualty Co." fell through to the trimmed
+    # token "employers" while "... Company" answered "emc" - one carrier, two
+    # families, and submission integrity reported "Multiple carriers referenced
+    # across documents" on the client's package. Canonicalise the spelling the
+    # way the strict key does (Co -> company, Cas -> casualty, Prop ->
+    # property), then ask the alias map again. Words are expanded, never added
+    # or dropped, so two different families cannot be joined here.
+    canon = " ".join(_STRICT_TOKEN_CANON.get(t, t) for t in s.split())
+    if canon in _CARRIER_ALIASES:
+        return _CARRIER_ALIASES[canon]
     # Strip generic insurer descriptors so "EMC Property and Casualty Company"
     # and "EMC Insurance" both reduce toward "emc".
     _GENERIC = {
@@ -1184,7 +1406,7 @@ def normalize_carrier(value: Any) -> str:
         "group", "co", "inc", "corp", "ins", "and", "of", "the", "national",
         "indemnity", "underwriters", "assurance", "general",
     }
-    tokens = [t for t in s.split() if t not in _GENERIC]
+    tokens = [t for t in canon.split() if t not in _GENERIC]
     trimmed = " ".join(tokens).strip()
     # Re-check the alias map against the trimmed token (catches "emc" alone).
     if trimmed in _CARRIER_ALIASES:
@@ -1474,7 +1696,9 @@ _STRICT_NOISE_TOKENS = frozenset({"the", "of", "and", "a", "an"})
 
 
 def _strict_entity_tokens(value: Any) -> FrozenSet[str]:
-    s = _basic(value)
+    # De-glued first: an OCR printing with its spaces lost must tokenise like
+    # the spaced one, or every subset test below calls one company two.
+    s = _basic(deglue_entity_text(value))
     if not s:
         return frozenset()
     for phrase, canon in _STRICT_PHRASE_CANON:
@@ -1486,8 +1710,13 @@ def _strict_entity_tokens(value: Any) -> FrozenSet[str]:
 
 def strict_entity_key(value: Any) -> str:
     """Spelling-canonical, distinction-preserving comparison key for a legal
-    entity name (person, organization, or carrier)."""
-    s = _basic(value)
+    entity name (person, organization, or carrier).
+
+    OCR glue is undone first (`deglue_entity_text`), so the certificate's
+    "EmployersMutualCasualtyCo." keys exactly like the declarations'
+    "EMPLOYERS MUTUAL CASUALTY COMPANY". Spaced input is untouched by that
+    step, so every existing key is unchanged."""
+    s = _basic(deglue_entity_text(value))
     if not s:
         return ""
     for phrase, canon in _STRICT_PHRASE_CANON:
@@ -1503,11 +1732,17 @@ def entity_identity_conflict(raw_values: List[Any]) -> bool:
     Token-subset compatibility: equal sets, or one a subset of the other
     (truncation / missing suffix), are the same entity. Each carrying a token
     the other lacks is a real disagreement the review picker must surface.
+    Two printings with one compact key (the same name, spaces lost) never
+    conflict - an all-caps glued OCR token has no boundary to tokenise on.
     """
-    keys = [t for t in (_strict_entity_tokens(v) for v in raw_values) if t]
+    vals = [v for v in raw_values if _strict_entity_tokens(v)]
+    keys = [_strict_entity_tokens(v) for v in vals]
+    compact = [entity_compact_key(v) for v in vals]
     for i in range(len(keys)):
         for j in range(i + 1, len(keys)):
             a, b = keys[i], keys[j]
+            if compact[i] and compact[i] == compact[j]:
+                continue
             if not (a <= b or b <= a):
                 return True
     return False

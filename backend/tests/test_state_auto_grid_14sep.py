@@ -381,11 +381,24 @@ def test_a_symbol_acord_does_not_print_goes_in_the_other_box(liability, other, c
     assert d["Vehicle_BusinessAutoSymbol_OneIndicator_A"] == ("Yes" if 1 in liability else "No")
 
 
-def test_an_own_family_symbol_the_row_does_not_print_goes_in_the_other_box():
+def test_an_own_family_symbol_the_row_does_not_print_is_dropped_not_other():
+    """24 Sep 2026 (owner's live run): this pinned a known symbol the row does
+    not offer as "Other". ACORD prints every symbol valid for a coverage on
+    its row - ISO's symbol 1 ("any auto") exists only for liability - so a 1
+    on Medical Payments (or, live, on UM via the certificate's "umbrella
+    liability" row) is a mis-attribution, never an "Other" symbol. A symbol
+    ACORD prints on NO row still goes to Other (next test)."""
     d = _decide(_orbin(auto_covered_symbols=[{"coverage": "medical payments", "symbols": [1]}]))
-    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_B"] == "Yes"
-    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolCode_B"] == "1"
+    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_B"] == "No"
+    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolCode_B"] is None
     assert d["Vehicle_BusinessAutoSymbol_TwoIndicator_B"] == "No"
+
+
+@pytest.mark.parametrize("unknown", [5, 19, 10])
+def test_a_symbol_acord_prints_on_no_row_still_goes_in_the_other_box(unknown):
+    d = _decide(_orbin(auto_covered_symbols=[{"coverage": "medical payments", "symbols": [unknown]}]))
+    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_B"] == "Yes"
+    assert d["Vehicle_BusinessAutoSymbol_OtherSymbolCode_B"] == str(unknown)
 
 
 def test_an_unattributed_legacy_list_never_reaches_rows_b_to_h():

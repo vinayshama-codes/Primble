@@ -30,6 +30,15 @@ import services.pdf_service as ps                                 # noqa: E402
     "CG 00 01 04 13",     # ISO CGL occurrence form
     "IL 00 17 11 98",     # ISO Common Policy Conditions
     "IL 70 04 05 09",
+    # 24 Sep 2026 - moved here from the "real policy number" list below, where
+    # it was WRONG. The client's own 271-page package prints it in its forms
+    # schedule as "CA7000A(11-19) - Commercial Auto Declarations" and in the
+    # auto page footer as "CA7000A 02-22 BPP 07/15/25 027 SB 6E74002 2601" -
+    # the carrier's declarations FORM, edition 02-22, printed beside the real
+    # policy number 6E74002. Pinning it as a policy number encoded the exact
+    # defect the client reported on 11 Sep ("distinguish policy numbers from
+    # form/endorsement numbers").
+    "CA7000A 02-22",
 ])
 def test_a_form_number_is_recognised(code):
     assert ps._looks_like_a_form_number(code)
@@ -40,8 +49,8 @@ def test_a_form_number_is_recognised(code):
     "6C7-40-02---26",     # Inland Marine        policy number from the client's
     "6J7-40-02---26",     # Umbrella             package and must survive
     "BBC7263 - 26",       # General Liability
-    "0482854",            # the account number
-    "CA7000A 02-22",      # a carrier dec-page code, not an ISO/AAIS form number
+    "0482854",            # the account number (not a FORM shape; the account
+                          # label is judged by `is_not_a_policy_number`)
 ])
 def test_a_real_policy_number_survives(policy):
     assert not ps._looks_like_a_form_number(policy)

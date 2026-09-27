@@ -1074,11 +1074,22 @@ def _form_selection_view(sess: dict, cross_issues: list) -> dict:
     warning_stops: list = []
     try:
         from services.sqs_service import classify_stops
-        from services.issue_registry import build_grouped_view
+        from services.issue_registry import grouped_with_package_caps
         can_proceed, _, warning_stops = classify_stops(hard, sess.get("flags") or {})
-        grouped = build_grouped_view(
+        # ── THROUGH THE SAME DOOR AS form_routes (2026-09-23) ───────────────
+        # This called bare `build_grouped_view`, so the 60-cap the PACKAGE
+        # scorer holds privately - the manufactured property_building_value
+        # conflict, or a hard_cross entry - had no card here, while all five
+        # form_routes responses folded it in. Both `resolve_issue` and
+        # `reopen_issue` rebuild this screen, so fixing ANY unrelated issue
+        # succeeded and simultaneously deleted the only row explaining why the
+        # package was still held at 60. That is precisely the defect the
+        # promote_codes work shipped to close, surviving on the one call site
+        # that was not part of it.
+        grouped = grouped_with_package_caps(
             sess.get("structured_issues") or [],
             hard, soft,
+            sess.get("package_sqs") or {},
             cross_issues=cross_issues,
         )
     except Exception as _fgx:                                  # noqa: BLE001

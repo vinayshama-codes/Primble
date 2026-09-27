@@ -470,11 +470,19 @@ def test_cap_hard_stops_ship_an_actionable_row():
         # Umbrella gate: no underlying at all.
         ("ACORD_131", {"applicant_name": "X", "umbrella_limit": "$5,000,000"},
          {"has_umbrella": True}),
-        # Umbrella gate: underlying present, supporting detail incomplete.
-        ("ACORD_131",
-         {"applicant_name": "X", "gl_each_occurrence": "$300,000",
-          "gl_aggregate": "$600,000", "auto_liability_limit": "$300,000"},
-         {"has_umbrella": True, "has_gl_coverage": True, "has_auto_coverage": True}),
+        # Property gate on the OTHER form that carries it, so the guard is not
+        # resting on a single form id.
+        ("ACORD_141", {"applicant_name": "X"}, {"has_property_coverage": True}),
+        # COPE gate on ACORD 133, the third form the property gate covers.
+        ("ACORD_133", {"applicant_name": "X"}, {"has_property_coverage": True}),
+        # REMOVED 2026-09-23 - "umbrella underlying present, supporting detail
+        # incomplete" no longer caps at 60, deliberately. The umbrella pillar
+        # reaches 0 by ACCUMULATION on packages whose underlying limits are all
+        # stated, and the client ruling (recorded three times in sqs_service) is
+        # that this must be a warning plus a score reduction, never a block. Its
+        # replacement above keeps the count of exercised cap sentences at four;
+        # the un-capping itself is pinned by
+        # tests/test_cap_60_is_visible.py::test_a_healthy_umbrella_tower_is_never_capped_at_60.
     ]
     seen = 0
     for fid, facts, flags in scenarios:

@@ -364,10 +364,17 @@ class TestFalseFlagOutranksIdentity:
     def test_borrowed_numbers_do_not_revive_the_denied_lines(self):
         assert carried_lines_of_business(_with_borrowed_numbers(), ORBIN_FLAGS) == CARRIED
 
-    def test_without_the_flags_they_would_come_back(self):
-        """Why the cover must be HANDED the flags: identity alone keeps them."""
+    def test_without_the_flags_a_borrowed_number_still_does_not_revive_them(self):
+        """24 Sep 2026 - this test used to pin the OPPOSITE ("identity alone
+        keeps them") as the reason the cover must be handed the flags. The
+        number on those rows is the Inland Marine policy's, owned by the priced
+        Inland Marine row: a borrowed number is a coverage PART of another
+        policy, never identity for a line of its own (`lob_canon._row_evidence`).
+        So a caller that forgets the flags no longer brings the denied lines
+        back - the flags are belt and braces, not the only defence."""
         out = carried_lines_of_business(_with_borrowed_numbers(), None)
-        assert set(_DENIED) <= set(out)
+        assert not (set(_DENIED) & set(out))
+        assert set(CARRIED) <= set(out)
 
     def test_the_cover_page_now_receives_the_flags(self):
         from services.cover_service import _cover_lines_of_business

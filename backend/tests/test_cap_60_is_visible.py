@@ -48,12 +48,26 @@ _LIVE_FLAGS = {
 }
 
 
-def test_client_reported_case_is_explained():
-    """The literal reported run: 60 with an empty Hard Stops list."""
-    hard, soft = evaluate_stops(_LIVE_FACTS, _LIVE_FLAGS)
-    assert hard == [], "fixture must reproduce the ZERO-hard-stop condition"
+# A genuinely BROKEN tower - umbrella present, no underlying GL or Auto limit.
+# This is the only shape the umbrella gate caps on since 2026-09-23; see
+# test_a_healthy_umbrella_tower_is_never_capped_at_60 below for why.
+_BARE_FACTS = {k: v for k, v in _LIVE_FACTS.items()
+               if k not in ("gl_each_occurrence", "auto_liability_limit")}
 
-    sqs = _score(_LIVE_FACTS, _LIVE_FLAGS, hard, soft)
+
+def test_client_reported_case_is_explained():
+    """A 60 held by the gate alone, with an empty Hard Stops list, must name
+    itself.
+
+    THE FIXTURE MOVED ON 2026-09-23, the invariant did not. It used to be
+    `_LIVE_FACTS` - a package carrying BOTH underlying limits - because back
+    then the umbrella gate capped that at 60 by accumulated pillar deductions.
+    That was the defect CLAUDE.md held for Brent ("the umbrella gate turns
+    Brent's own warnings into a hard stop"), now fixed, so a healthy tower is
+    correctly no longer capped and cannot exercise this invariant. The broken
+    tower still caps, so it carries the test.
+    """
+    sqs = _score(_BARE_FACTS, _LIVE_FLAGS)     # no stops passed: gate alone
     assert sqs["cap_applied"] == HARD_STOP_CAP
     # The cap is now named, on the form, in a channel the UI renders.
     assert sqs["cap_hard_stops"], "a 60 cap with no hard stop must surface one"
@@ -61,17 +75,41 @@ def test_client_reported_case_is_explained():
     assert sqs["cap_reason"] in sqs["issues"]
 
 
+def test_a_healthy_umbrella_tower_is_never_capped_at_60():
+    """The client ruling, made executable (2026-09-23).
+
+    `sqs_service` records it three times over - underlying limits below the
+    umbrella baseline are a WARNING plus a score reduction, never a block,
+    because carrier attachment points vary. The pillar honoured it and the cap
+    gate reading that pillar undid it: `_calculate_umbrella_adequacy` starts at
+    100 and subtracts up to 135 points across seven deductions, two of which
+    fire on nearly every submission, so it hit 0 by ACCUMULATION on packages
+    whose underlying limits were all present - and 0 meant a 60 cap.
+
+    `_LIVE_FACTS` states both a GL occurrence limit and an auto liability
+    limit. It must never be capped at 60 by the umbrella gate again.
+    """
+    assert _umbrella_has_underlying(_LIVE_FACTS) is True
+    hard, soft = evaluate_stops(_LIVE_FACTS, _LIVE_FLAGS)
+    assert hard == [], "fixture must carry no hard stop of its own"
+    sqs = _score(_LIVE_FACTS, _LIVE_FLAGS, hard, soft)
+    assert sqs["cap_applied"] != HARD_STOP_CAP, (
+        "a package stating both underlying limits was capped at 60 by the "
+        "umbrella gate - the ruling says warn, never block"
+    )
+    assert sqs["cap_hard_stops"] == []
+
+
 def test_the_reason_does_not_lie_about_underlying_limits():
     """The old wording claimed 'no underlying GL or Auto limits' on a package
-    carrying both. The two causes are now told apart by one shared door."""
+    carrying both. The two causes are told apart by one shared door - and since
+    2026-09-23 the has-underlying case does not reach the gate at all, which is
+    a stronger guarantee than wording it correctly."""
     assert _umbrella_has_underlying(_LIVE_FACTS) is True
-    stated = _score(_LIVE_FACTS, _LIVE_FLAGS)["cap_hard_stops"][0]
-    assert "no underlying" not in stated.lower()
+    assert _score(_LIVE_FACTS, _LIVE_FLAGS)["cap_hard_stops"] == []
 
-    bare = {k: v for k, v in _LIVE_FACTS.items()
-            if k not in ("gl_each_occurrence", "auto_liability_limit")}
-    assert _umbrella_has_underlying(bare) is False
-    absent = _score(bare, _LIVE_FLAGS)["cap_hard_stops"][0]
+    assert _umbrella_has_underlying(_BARE_FACTS) is False
+    absent = _score(_BARE_FACTS, _LIVE_FLAGS)["cap_hard_stops"][0]
     assert "no underlying" in absent.lower()
 
 

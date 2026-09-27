@@ -136,6 +136,15 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # pinned by test_h1_coverage_gap_closure.py::
         # test_dec_entry_signals_survive_the_purge_through_derived_facts.
         "coverage_evidence.py",
+        # fact_comparison `_issue_date_of` (24 Sep 2026, client item 9). Reads a
+        # declarations page's own "Date of Issue" entry so a dec RE-ISSUED
+        # after a dated change is not taken as the change's older side. It runs
+        # in the merge and in every re-run, i.e. also after generation - and it
+        # reads the PER-DOCUMENT `doc["facts"]["dec_page_entries"]`, which the
+        # purge never deletes (only the merged session fact goes). Same answer
+        # both sides of the purge; with no entry it returns None and the
+        # inception date stands - exactly the pre-change behaviour.
+        "fact_comparison.py",
         # form_addition (UX-05, 2026-09-08). The only mention there is the module
         # docstring, and it is there because this module is the FIRST thing that
         # deliberately generates a form AFTER the purge has run: the producer

@@ -609,6 +609,10 @@ def test_rule_16_defines_the_form_number_and_moved_to_v20():
     """A prompt edit that does not bump the version is served from the
     extraction cache and never reaches the model. v21 since the same day's
     coverage-basis definitions (improving-ll.md C89) - RULE 16 is unchanged."""
-    assert es.PROMPT_VERSION == "v21"
+    # v22 since 2026-09-21 (A125 kit test 2): seven ADDITIVE row-bearing facts
+    # plus premises columns and FT/PT abbreviation hints. THE TEST MOVED, NOT
+    # ITS SUBJECT - the pin exists so a schema edit cannot skip a bump, and
+    # this edit bumped. See improving-ll.md C94.
+    assert es.PROMPT_VERSION == "v22"
     assert "A FORM number is never a policy number" in es._EXTRACT_PROMPT_PREFIX
     assert "never carry one over from another page or another line" in es._EXTRACT_PROMPT_PREFIX

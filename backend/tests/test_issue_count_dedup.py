@@ -162,37 +162,40 @@ def test_inputs_are_never_mutated():
 # build_grouped_view: the legacy twin is hidden when its coded counterpart is
 # present, but never when it is the only source of the blocker.
 def test_grouped_view_shows_only_the_resolvable_twin():
-    """The screenshot bug: COPE + peril each appeared twice, once without a fix
-    affordance. After suppression each cluster has ONE item - the coded, resolvable
-    one."""
-    legacy_peril = (
-        "Peril-specific deductibles referenced but not defined - specify amounts "
-        "for: wind/hail, earthquake, flood"
-    )
-    coded_peril = {
-        "code": "peril_deductible_referenced_but_undefined",
-        "type": "hard_stop",
-        "message": "Peril-specific deductible referenced on document but amounts "
-                   "undefined: wind/hail, earthquake, flood.",
-        "forms": ["ACORD_140", "ACORD_141"],
-    }
-    hard = [LEGACY_COPE, legacy_peril, CROSS_COPE_STOP, coded_peril["message"]]
+    """The screenshot bug: a cluster appeared twice, once without a fix
+    affordance. After suppression it has ONE item - the coded, resolvable one.
+
+    THE PERIL HALF OF THIS TEST WAS REMOVED ON 2026-09-23, because the scenario
+    it built can no longer occur. It hand-constructed a coded
+    `peril_deductible_referenced_but_undefined` issue; that cross-form rule has
+    been retired as a false positive by construction (it demanded all three
+    peril deductibles from a flag that means "at least one", so an ordinary
+    wind-only policy was capped at 60 and asked for amounts for perils it does
+    not carry). With no rule emitting the code, its suppression entry had to go
+    too - a suppression keyed on a dead code hides a LIVE legacy warning behind
+    a card that can never be drawn, which
+    tests/test_stop_visibility_c75.py fails the build on.
+
+    COPE keeps the test: its coded twin is still live, so it still exercises
+    the real suppression path this file exists to lock down. The surviving
+    single peril rule is covered by
+    tests/test_peril_deductibles_one_owner.py.
+    """
+    hard = [LEGACY_COPE, CROSS_COPE_STOP]
     structured = build_structured_from_sources(
-        legacy_hard=[LEGACY_COPE, legacy_peril],
-        cross_issues=[CROSS_COPE_ISSUE, coded_peril],
+        legacy_hard=[LEGACY_COPE],
+        cross_issues=[CROSS_COPE_ISSUE],
     )
     grouped = build_grouped_view(
-        structured, hard, [], cross_issues=[CROSS_COPE_ISSUE, coded_peril]
+        structured, hard, [], cross_issues=[CROSS_COPE_ISSUE]
     )
     by_cluster = {c["cluster"]: c for c in grouped["hard_stops"]}
     assert "Property COPE completeness" in by_cluster
-    assert "Property deductible completeness" in by_cluster
-    for cl in ("Property COPE completeness", "Property deductible completeness"):
-        c = by_cluster[cl]
-        assert c["count"] == 1, f"{cl} still duplicated: {c['count']}"
-        # The surviving item is the coded one (carries a resolution / Open-to-fix).
-        assert c["items"][0]["code"] in _LEGACY_SUPERSEDED_BY_CODE
-        assert c.get("resolution")
+    c = by_cluster["Property COPE completeness"]
+    assert c["count"] == 1, f"still duplicated: {c['count']}"
+    # The surviving item is the coded one (carries a resolution / Open-to-fix).
+    assert c["items"][0]["code"] in _LEGACY_SUPERSEDED_BY_CODE
+    assert c.get("resolution")
 
 
 def test_legacy_twin_survives_when_coded_counterpart_absent():

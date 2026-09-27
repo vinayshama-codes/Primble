@@ -414,6 +414,17 @@ def _collect_states(facts: dict) -> set:
         for k in wc_by_state.keys():
             _add_code(k)
 
+    # Where the VEHICLES are garaged (24 Sep 2026). ACORD 137 is the state
+    # section for the AUTOS, so a CO insured with a truck garaged in Los
+    # Angeles needs the 137 CA - and a TX insured whose autos sit in Denver
+    # needs the 137 CO - even when no mailing address names that state.
+    garaging = _fv(facts, "auto_garaging_addresses")
+    for g in garaging if isinstance(garaging, list) else ([garaging] if garaging else []):
+        if isinstance(g, dict):
+            _add_code(g.get("state") or " ".join(str(v) for v in g.values()))
+        else:
+            _add_code(g)
+
     return states
 
 
@@ -504,8 +515,12 @@ def derive_account_profile(facts: dict, flags: dict, text: str = "") -> dict:
     ]
 
     # Account type - package (multi-line) vs monoline; new vs renewal.
-    is_renewal = bool(flags.get("is_renewal")) or "renew" in blob
-    transaction_type = "renewal" if is_renewal else "new_business"
+    # From the is_renewal FACT, never a substring (24 Sep 2026): "renew" is in
+    # every policy's cancellation / renewal boilerplate, so the chip read
+    # "Renewal" on nearly any upload. Unknown -> no chip, never a guess.
+    _renewal = flags.get("is_renewal")
+    transaction_type = ("renewal" if _renewal is True
+                        else "new_business" if _renewal is False else None)
     is_package = (
         len(coverage_goals) >= 2
         or bool(flags.get("is_package_policy"))
@@ -1931,6 +1946,145 @@ def active_document_text(session: dict) -> str:
     return " ".join(d.get("text", "") for d in active)
 
 
+def shared_gap_fill(session: dict, form_ids: List[str]) -> dict:
+    """Stages 4-6 of generation - Pass 1 / 1.5 gaps for every selected form,
+    each coverage line's own pages, then ONE shared, LINE-SCOPED gap fill.
+    Returns ``{form_id: pre_filled_gpt}`` for `process_single_form`.
+
+    ONE DOOR for every path that generates a package (24 Sep 2026). This was
+    inline in `form_routes.select_forms_bulk` only, and production's
+    render.yaml sets ENABLE_ASYNC_PROCESSING=true, which sends generation to
+    `worker.py` - where each form called `process_single_form` with NO
+    pre-filled answers, so every form's gap fill read the WHOLE document and
+    every line's facts: the GL form saw the auto pages and the auto form the
+    GL class schedule. That is the client's item 6 ("cross-line
+    contamination") on exactly the path the client runs, while every local
+    run - async off - went through the scoped route and looked fixed.
+
+    Never raises: any failure returns {} and each form falls back to its own
+    per-form gap fill, exactly as the route always did.
+    """
+    try:
+        from config.settings import ENABLE_COMBINED_GAP_FILL
+    except Exception:                                        # noqa: BLE001
+        ENABLE_COMBINED_GAP_FILL = True
+    if not ENABLE_COMBINED_GAP_FILL or not form_ids:
+        return {}
+    try:
+        from utils.helpers import safe_join
+        from services.pdf_service import (
+            compute_form_gaps, combined_gap_fill, build_line_page_scopes)
+        facts_with_flags = {**(session.get("facts") or {}), **(session.get("flags") or {})}
+        # The same package list the stamping pass reads, so a box it will own
+        # (the 186's starred questions beside a 126) is never asked of the model.
+        try:
+            facts_with_flags["_package_form_ids"] = (
+                package_form_ids(session) or [str(f) for f in form_ids if f])
+        except Exception as _pkg_ex:                         # noqa: BLE001
+            logger.warning("combined_gap_fill: package form list unavailable: %s", _pkg_ex)
+        forms_to_unmatched: dict = {}
+        forms_to_mapped: dict = {}
+        schemas: dict = {}
+        for form_id in form_ids:
+            form_meta = next((f for f in session.get("all_forms", [])
+                              if f.get("form_id") == form_id), None)
+            if not form_meta:
+                continue
+            try:
+                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+            except ValueError:
+                continue
+            if not os.path.exists(tpl):
+                continue
+            try:
+                schema = extract_form_schema(tpl, form_id)
+                schemas[form_id] = schema
+                mapped, unmatched, _det = compute_form_gaps(form_id, schema, facts_with_flags)
+            except Exception as ex:                          # noqa: BLE001
+                logger.warning("combined_gap_fill: gap preview exception (%s): %s", form_id, ex)
+                continue
+            if unmatched:
+                forms_to_unmatched[form_id] = unmatched
+            if mapped:
+                forms_to_mapped[form_id] = mapped
+        if not forms_to_unmatched:
+            logger.info("combined_gap_fill: no gaps after Pass 1 + 1.5 - skipping shared GPT pass")
+            return {}
+        # Excluded documents are NOT sent to the model (see active_document_text).
+        raw_text = active_document_text(session)
+        try:
+            _docs = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+            _active = [d for d in _docs if not d.get("excluded")] or _docs
+            line_scopes = build_line_page_scopes(_active, facts_with_flags)
+        except Exception as _scope_ex:                       # noqa: BLE001
+            logger.warning("combined_gap_fill: line scoping unavailable: %s", _scope_ex)
+            line_scopes = {}
+        logger.info(
+            "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
+            "total_mapped_fields=%d line_scopes=%s",
+            len(forms_to_unmatched), len(forms_to_mapped),
+            sum(len(v) for v in forms_to_mapped.values()),
+            {k: len(v) for k, v in (line_scopes or {}).items()},
+        )
+        per_form = combined_gap_fill(
+            forms_to_unmatched, facts_with_flags, raw_text,
+            forms_to_mapped=forms_to_mapped, line_scopes=line_scopes) or {}
+        # One question, one answer per package (24 Sep 2026).
+        try:
+            from services.pdf_service import reconcile_cross_form_yes_no
+            _contradicted = reconcile_cross_form_yes_no(per_form, schemas)
+            if _contradicted:
+                logger.info("combined_gap_fill: the same question answered both ways "
+                            "across forms - blanked for the producer: %s", _contradicted)
+        except Exception as _yn_ex:                          # noqa: BLE001
+            logger.warning("combined_gap_fill: cross-form Y/N check skipped: %s", _yn_ex)
+        return per_form
+    except Exception as ex:                                  # noqa: BLE001
+        logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex, exc_info=True)
+        return {}
+
+
+def package_form_ids(session: dict, form_id: str = "") -> List[str]:
+    """The forms this package contains, for the facts' private
+    `_package_form_ids` key (read by `pdf_service._package_form_ids`).
+
+    ACORD 125's ATTACHMENTS block asks what accompanies the application we are
+    producing (21 Sep 2026), and ACORD 186 must leave nine questions to an
+    attached ACORD 126 (24 Sep 2026) - only generation knows the package.
+    Carried on the facts dict the way `_form_id` is, so `map_facts_to_form`
+    needs no signature change. The shared gap fill reads the same list, so the
+    model is never asked a box the stamping pass will own.
+
+    THE KEY THAT ACTUALLY EXISTS IS `selected_form_ids`. The first cut read
+    `session["selected_forms"]`, which no writer puts at the top level of a
+    session row - `form_routes` writes that name nested inside
+    `clarity_result`. So the list always collapsed through `generated_forms`
+    (empty on a FIRST generation, since it is written after) to [this form],
+    and the ATTACHMENTS boxes could only ever tick on a RE-generation.
+    Verified against a real session row on 22 Sep: `selected_forms` absent,
+    `selected_form_ids` present as a list of plain strings.
+
+    Accepts both shapes at every source - a bare id or a {"form_id": ...}
+    dict - because `all_forms` uses the dict shape and `selected_form_ids` the
+    string one, and guessing wrong is how this broke the first time."""
+    def _ids(raw):
+        out = []
+        for item in (raw or []):
+            if isinstance(item, dict):
+                item = item.get("form_id")
+            if item and str(item).strip():
+                out.append(str(item).strip())
+        return out
+
+    pkg = (_ids(session.get("selected_form_ids"))
+           or _ids(session.get("selected_forms"))
+           or [str(k) for k in (session.get("generated_forms") or {})]
+           or _ids(session.get("all_forms")))
+    if not pkg and form_id:
+        pkg = [form_id]
+    return [f for f in pkg if f]
+
+
 def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = None) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
@@ -1938,6 +2092,12 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
     # is_contractor, has_auto_coverage, etc. for checkbox resolution.
     facts_with_flags = {**session["facts"], **session.get("flags", {})}
+    # THE FORMS THIS PACKAGE CONTAINS (21 Sep 2026) - see `package_form_ids`.
+    try:
+        facts_with_flags["_package_form_ids"] = package_form_ids(
+            session, str(form_meta.get("form_id") or ""))
+    except Exception as _pkg_ex:                              # noqa: BLE001
+        logger.warning("process_single_form: package form list unavailable: %s", _pkg_ex)
     # Guard blanks: boxes a post-fill guard emptied because the value was not
     # possible for that box. They are invisible to `evaluate_stops` (which
     # validates FACTS, not stamped VALUES), which is why four consecutive runs

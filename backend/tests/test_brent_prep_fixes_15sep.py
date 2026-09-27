@@ -267,15 +267,19 @@ class TestSubmittingAccountLookup:
             return None
 
         async def ok(uid):
-            return {"organization_name": "ThinkSmith Agency LLC", "full_name": "Michelle Smith"}
+            return {"organization_name": "ThinkSmith Agency LLC", "full_name": "Michelle Smith",
+                    "email": "michelle@thinksmith.example", "phone": "(303) 555-0142"}
 
         for fn, expected in ((boom, {"unreadable": True}), (no_agency, {"unreadable": True}),
                              (missing, {"unreadable": True})):
             monkeypatch.setattr(ur, "get_user_by_id", fn)
             assert asyncio.run(ep._submitting_account_for("u1")) == expected
         monkeypatch.setattr(ur, "get_user_by_id", ok)
+        # 24 Sep 2026: the account also carries the producer's OWN contact, so
+        # the separated producer block is no longer a name and nothing else.
         assert asyncio.run(ep._submitting_account_for("u1")) == {
-            "organization_name": "ThinkSmith Agency LLC", "full_name": "Michelle Smith"}
+            "organization_name": "ThinkSmith Agency LLC", "full_name": "Michelle Smith",
+            "email": "michelle@thinksmith.example", "phone": "(303) 555-0142"}
         assert asyncio.run(ep._submitting_account_for(None)) is None
 
 

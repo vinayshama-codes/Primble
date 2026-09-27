@@ -122,8 +122,18 @@ Deduplicates unmatched fields across ALL selected forms, runs ONE shared LLM pas
 distributes results back to each form. `ENABLE_COMBINED_GAP_FILL` is hardcoded `True`.
 
 **Effective pipeline:** shared extraction → alias stamp → one combined gap fill.
-The legacy per-form gap-fill path still exists in code but is no longer reachable
-via configuration.
+**One door: `form_service.shared_gap_fill(session, form_ids)`** - the sync route,
+`worker.py`, add-form and both essentials generators all call it. Until 2026-09-24 only
+the sync route did: the worker, add-form and the essentials paths ran the legacy
+per-form, whole-document, UNSCOPED gap fill (improving-ll.md C95).
+**CORRECTION 27 Sep 2026 - production runs the SYNC route, like localhost.** The Render
+dashboard sets `ENABLE_ASYNC_PROCESSING=false`; `render.yaml` said `true` and was never
+what ran (it now matches the dashboard, pinned by `test_policy_history_and_refill_27sep`).
+The worker takes no generation work in production - suspend it. **The dashboard, not
+render.yaml, is the truth; read it before diagnosing anything as "production's path".**
+The per-form path is now reached only as the logged fallback when `shared_gap_fill`
+fails, and an AST test fails the build on any `process_single_form` call that skips
+the shared answers.
 
 ### Known Performance Issue in Combined Gap Fill (not yet fixed)
 - 1531 fields × ~400 chars/field = 612k char fields block → only 33k chars left for raw text → 22 chunks
@@ -413,6 +423,108 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### Client Re-test Of The 11 Orbin Items - FIXED OFFLINE 2026-09-24, awaiting the kit's live run
+**Read `v1-20AUG.md` "ORBIN client re-test" before touching entity identity, carried
+lines, form-number detection, producer routing, the umbrella reader or any generation
+path.** Michelle re-tested on 22 Sep and most of the 11 items failed - on code that
+CONTAINED the 11-17 Sep fixes (pushed 16-18 Sep). The earlier "LIVE-VERIFIED" claims
+were true of our kits and wrong about the client's package, for three reasons:
+- **Our fixtures were cleaner than the client's documents.** The real certificate's OCR
+  runs words together (`EMCProperty&CasualtyCompany`, `ForInformationalPurposesOnly`,
+  the umbrella remark); EMC prints its own form numbers (`CU7001A 11-15`, `CA7450 M`).
+- ~~Production runs async and the worker had no line scoping~~ - **wrong, corrected 27
+  Sep:** the dashboard runs production synchronously (see the pipeline note). The worker
+  WAS unscoped and is fixed, but it was not the client's path.
+- **"Which lines are carried?" had one right answer and many readers** (cover page,
+  session list, EPIC / Vertafore export, 125 / 131 ticks, the Data Consistency card, the
+  building-value 409).
+
+**One door each now:** `normalization.entity_compact_key` / `same_entity_name` (a glued
+name is the same company; the legal form is canonicalised, never stripped);
+`lob_canon.evidenced_line_families` / `line_is_carried` / `fact_line_family`;
+`normalization.is_not_a_policy_number(value, entries)` (ISO / AAIS / carrier-edition /
+edition-letter shapes plus the dec entries' labels); `form_service.shared_gap_fill`.
+Also: the login outranks a document for the producer and an unreadable login never
+prints the incumbent; the Data Consistency card compares only one kind, line and term,
+and reads line printings through `fact_comparison.document_witnesses`; the umbrella
+reader re-spaces run-together remarks; vehicles fold by containment and are rebuilt from
+VIN lines, garaging from the LOC line. Owner decisions: 137 ticked with 127; 125 Q4
+"other insurance with this company" restored (reverses 16 Sep); an umbrella with no
+dated sentence stays a conflict whose suggestion is what the forms print (D16).
+**D6:** 0 of 11 panel packages moved; the client's stored session 85 -> 85.
+**Live kit:** `py backend/scripts/make_orbin_retest_pdfs.py` -> `orbin_retest_kit/`
+(3 PDFs built from the client's own OCR shapes, `README-HOW-TO-TEST.md`).
+**Not done:** initialism placeholders ("FIO") pass the party test; a prefix-less policy
+number (`7263-26` vs `BBC7263-26`) is still a GL card; 131 garagekeepers / watercraft /
+aircraft boxes and 137's hired PD deductible come from gap fill; ACORD 160's label.
+**Standing lesson:** before calling a fix live-verified, ask which PATH the client's
+server runs (`render.yaml`), and build the kit from the client's own OCR.
+Tests: `tests/test_client_retest_24sep.py` (149).
+
+**Round 2 (same evening, the owner's live run of the kit - `v1-20AUG.md` "Round 2").**
+The 11 items held; the run found ten more wrong values, each traced on the stored session
+and each fix replayed through it (2,057 fields, 19 changed, all intended). New doors worth
+knowing: `pdf_service._blank_producer_identifiers` (a producer code / phone / e-mail from
+the dec index stays in the producer block - `Producer_*` plus 125's CODE / SUBCODE
+`Insurer_(Sub)ProducerIdentifier` - and another agency's appears nowhere);
+`_resolve_minimum_limit_box` (tooltip "this is the minimum limit" = owned blank);
+`_resolve_vehicle_rating_symbol` (127's SYM columns are owned blanks - owner decision,
+reverses 7 Aug); `extraction_service._read_vehicle_block_cells` (COST NEW / USE from the
+vehicle's own block); `_classify_gl_deductible` + `_resolve_gl_deductible_box` (the
+deductible goes to the box its own printed line names); `reconcile_cross_form_yes_no`
+(one question, one answer across forms, at `shared_gap_fill`);
+`_prefer_submission_operations_description`. `auto_symbols` short abbreviations match
+whole words only ("um" matched "UMbrella"). Tests: `tests/test_orbin_live_run_24sep.py`
+(92, fixture `tests/fixtures/orbin_live_24sep.json` from the live session).
+
+**Round 3 (the owner's second live run, session 5ca5cff5 - `v1-20AUG.md` "Round 3").**
+Round 2 held. Five new wrong values, each traced on the stored session:
+- **Three AI "Yes" answers on borrowed sentences** (125 flammables = the business
+  description; 126 vendors and 131 "subs carry LESS" = the subcontractor sentence).
+  The evidence judge (C74) rejects the first two every time it is reached. It made ONE
+  attempt straight behind the gap-fill burst, and a failed call left every Yes standing.
+  Now (improving-ll.md **C97**): it waits out a 429 on the shared 5/15/30/60 schedule;
+  **a Yes it was reachable for and did not confirm is blanked** (an UNAVAILABLE judge -
+  disabled, refused key, no network - still changes nothing, which is what the offline
+  suite sees); a same-subject rule (prompt rule 7); batches of **5** (measured: ~2% of
+  wrong answers got through at 20), run 4 in parallel. Knobs: `EVIDENCE_JUDGE`,
+  `EVIDENCE_JUDGE_BATCH`, `EVIDENCE_JUDGE_RETRIES`, `EVIDENCE_JUDGE_POOL`.
+- **127 USE "OTHER: PRIVATE PASSENGER"** beside the cell "USE: NA": the Other
+  description had no owner, and the gate's "rescue a stranded Yes" (Pass B, and Pass C)
+  ticked OTHER past the resolver that owns it. The rescue now never promotes an owned
+  blank; `_resolve_vehicle_use_other_description` owns the box.
+- **186 answered a "* DO NOT ANSWER IF THIS FORM IS ATTACHED TO ACORD 126" question.**
+  `_resolve_acord186_starred_question` (set read off the printed form and pinned against
+  the template). `form_service.package_form_ids` is now one helper shared by stamping and
+  the shared gap fill; `_package_form_ids` / `_gl_deductible_scope` never reach the prompt.
+- **One-line DESCRIPTION OF OPERATIONS boxes** (125 premises, 131 named insureds) print
+  their leading whole sentences at a readable size (`_leading_sentences_that_fit`,
+  print-only; the stored value and 125's multi-line box keep the paragraph).
+**Checked, NOT defects:** 125 VEHICLE SCHEDULE tick (client's own "do not regress");
+137 non-owned EMPLOYEES tick (the dec rates it on "NUMBER OF EMPLOYEES 0 - 25").
+**Rejected:** a package-wide "one sentence, one Yes" rule - it would blank the 186's
+correct "direct oversight of each jobsite?" / "renovation?" Yeses, because the model
+borrows the same narrative sentences elsewhere. **D6:** no fact changed, every per-form
+SQS unchanged. **Replay lesson:** a schema read back from the session row is JSONB-sorted,
+not layout-ordered - position-based pairing on it is wrong; replay with
+`extract_form_schema`. Tests: `tests/test_orbin_live_run2_25sep.py` (73, fixture
+`tests/fixtures/orbin_live_25sep.json`). Suite 10,075 passed / 1 failed / 19 skipped.
+
+**27 Sep follow-ups (owner, `v1-20AUG.md` "27 Sep").** (1) Data Consistency no longer
+shows per-line carrier / policy / NAIC rows or the "Policies in this submission" table -
+separate policies must not look flagged; the relationship stays on the backend
+(`line_records`), and two live policies on ONE line are still a conflict card. (2)
+**`extraction_service._retire_predecessor_policies`:** an expired policy beside a later
+policy on the same line (both fully dated, ended on or before the successor began, end
+passed, successor numbered) moves to `prior_coverage_lines` and counts as prior-term for
+every reader; it was a false "two policies on one line" conflict that blanked the 126
+header. (3) `arq_service._refill_value`: a post-generation re-fill never writes the fill
+engine's "UNMATCHED" marker. (4) `render.yaml` matches the dashboard. **Render facts
+worth knowing:** `SCHEDULER_ENABLED` is unset and production defaults it off, and only
+`main.py` starts the scheduler - so retention clean-up, facts retention, audit-log
+retention, the payment lifecycle and questionnaire reminders run NOWHERE (owner decision
+pending). Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Suite 10,104 / 1 / 19.
+
 ### Policy Number By Line - Live Kit Fixes - SHIPPED 2026-09-17
 **Read `v1-20AUG.md` "Policy number by line - the live kit run" before touching
 `_repair_coverage_lines_from_entries`, `_withhold_page_header_numbers`, the header
@@ -567,82 +679,118 @@ real schemas), `tests/test_legacy_rules.py` (+3, now 78). Suite **7233 passed /
 (2 packages, 13 checks, `README-HOW-TO-TEST.md`); `scripts/verify_bug05.py` is
 the offline before/after check.
 
-### OPEN - Three Score-Moving Defects Held For Brent (2026-08-31)
+### The Score Ceiling Work - SHIPPED 2026-09-23 (was "OPEN - Three Score-Moving Defects")
 
-**None of these are fixed. All three move customer-visible scores, so D6 applies -
-Brent sees the numbers before the change ships, not after.** Found while tracing a
-live report: three generated forms and the package all pinned at exactly 60 with an
-empty Hard Stops list on screen.
+**Read `backend/scripts/why_capped.py` and `backend/scripts/score_delta_probe.py`
+before touching any cap, stop or pillar.** The first names what is holding one
+session's score down; the second is the D6 evidence table - a panel of eleven
+representative packages scored through the real scorers, with `--save` /
+`--diff` for before-and-after.
 
-**1. The umbrella gate turns Brent's own warnings into a hard stop.**
-`calculate_sqs`'s `umb_fail` (the `extra_hard_reason` block) caps a form at 60 whenever
-`_calculate_umbrella_adequacy` returns 0. That pillar starts at 100 and subtracts up to
-**135** points (-25 missing umbrella limit, -20 GL occurrence, -20 GL aggregate, -20
-auto CSL, -25 EL, -15 no schedule of underlying, -10 follow-form unconfirmed), so it
-reaches 0 by ACCUMULATION on a package whose underlying limits are all present and
-stated. Two of those seven fire on nearly every submission, so an umbrella package
-starts at 75 before anything is wrong.
+**What started it.** Client: *"we cannot get the Orbin package score over 85."*
+Root cause was not one bug - it was that a ceiling could be held by something
+the producer could neither see nor satisfy. Seven fixes, all measured.
 
-**This contradicts a ruling already on record, in three places in the same file:**
-`sqs_service.py:1105` - *"Client Q1: underlying limits below the umbrella baseline must
-be a WARNING + score reduction (handled in `_calculate_umbrella_adequacy`), NOT a hard
-stop. Carrier attachment points vary, so we never block."*; `:1219` - an entry was
-DELETED from `_ALWAYS_HARD_PATTERNS` for exactly this reason; `:5276` - *"client Q1/Q2:
-warn, not block"*. The ruling is honoured inside the pillar and undone by the gate that
-reads it.
+**1. `legacy_gl_no_class_codes` was unsatisfiable.** The rule fires when
+`gl_class_codes_by_location` / `gl_class_code_schedule` are empty and was
+declared `_r_review()` - mode `none`, "there is no single value to enter here",
+pointing the producer at ACORD 126. **No ACORD field writes back to either
+fact** (`_ACORD_FIELD_RULES` / `_FORM_FIELD_WRITEBACK`, verified), "Mark
+resolved" is work-tracking that never touches a score, and a Dismiss credit is
+added to the RAW score and clamped straight back under the same 85. Meanwhile
+`services/answer_routing.py` - the declared ONE DOOR for "can a human answer
+this?" - returns `{"mode": "field"}` for that fact, and the ARQ producer
+questionnaire has always asked for it. **One truth, two declarations, no test
+between them.** Now `_r_field("gl_class_codes_by_location")`.
 
-Provenance of the deductions, since it decides what may change: the THRESHOLDS
-($1M GL occ / $2M agg / $1M auto CSL / $1M-$500K EL) are **client-approved**
-(Beta Report section 6, Q1/Q2/Q3 - `sqs_service.py:23`); the -15 schedule of underlying
-is a **client V1 requirement**; the -10 follow-form is **client Q4 Option B**; the
-**-25 for a missing umbrella limit is NOT client-listed** - its own comment says so and
-calls it a display-consistency adjustment retained by owner decision. Brent sanctioned
-the REDUCTIONS. Nobody sanctioned the 60 cap.
+**2. An 85 named itself nowhere.** `calculate_sqs` returned `cap_hard_stops` for
+the 60 gates and nothing for the 85 gate, whose reason lives OUTSIDE
+`soft_stops` exactly as the hard one lives outside `hard_stops`. Added
+`cap_soft_stops` / `cap_soft_stop_items`, same contract.
 
-*Fix when approved:* cap only when `_umbrella_has_underlying(facts)` is False - the
-genuine broken-tower case the rule was written for, which already has its own hard stop
-in `evaluate_stops`. Everything else stays a pillar reduction. **Scores go UP.**
+**3. A capping warning could render no card and be counted nowhere.** UI-13
+removes Data Consistency rows from the warning clusters (the picker owns them),
+and `counts` is summed from what rendered - so the screen printed **"0 warnings"
+beside a score those rows held at 85**. `counts` deliberately still equals what
+renders (that contract fixed the 2026-08-12 toast); the view now also returns
+`hidden_warnings` / `hidden_warning_messages` so a ceiling can be explained
+without reprinting a worse card. **Considered and rejected:** making the
+doc-conflict supersession conditional on the picker row surviving - it puts the
+legacy row back, and that row reprints the folded address spellings the client
+reported.
 
-**2. `confidence_fill_rate` truncates instead of rounding - a live off-by-one.**
-It ends `return int((weighted / filled_count) * 100)`. Binary floating point lands an
-exact 87 on `86.99999999999999`, and `int()` throws the fraction away. **Measured, not
-theorised - 11 real label combinations found inside n<=30**, e.g. 3x `deterministic` +
-`ai_high` + `ai_low` returns **86 where the exact value is 87**; 2x `deterministic` +
-3x `ai_high` returns **90 where it is 91**. `confidence_fill_rate` feeds the per-form
-Structural pillar, the package's Form Fill Quality component and the fill-rate deltas
-the questionnaire reports, so the error propagates into the headline SQS. One-character
-fix (`round`), but it moves every score that lands on such a boundary - **Brent
-conversation, not a drive-by.**
+**4. Resolving anything erased the 60-cap card.** `form_routes` folded the
+package scorer's private cap in via `_grouped_with_package_caps` at all five of
+its sites; `audit_routes._form_selection_view` - which rebuilds the SAME screen
+after resolve-issue and reopen-issue - called bare `build_grouped_view`. The
+door now lives in `issue_registry.grouped_with_package_caps` and an AST test
+fails the build on any route that bypasses it.
 
-**3. The package scorer manufactures a hard stop that never becomes a card.**
-`calculate_package_sqs` (the P2 block) injects its own
-`{"type": "hard_stop", "field": "property_building_value", ...}` into the local `_cross`
-list when `underwriting_consistency` has that fact `review_required`. It caps the
-package at 60 and its own comment claims *"so it shows in the Hard Stops section"* - it
-does not. The dict is created inside the function and is never written to
-`cross_issues_last` or `structured_issues`, so `build_grouped_view` cannot see it:
-`grouped_issues.hard_stops` is empty, `counts.hard_stops` is 0 and the frontend's
-`hasHardStops` gate is False, so the Hard Stops banner does not render at all. It
-survives ONLY as `cap_reason`, which the pre-form Review screen never prints (it renders
-`packageSqs.tier` alone) and the editor prints inside a COLLAPSED panel.
+**5. The package scorer hard-stopped on an irrelevant building-value conflict.**
+`extraction_pipeline` had already ruled that a building-value conflict "cannot
+block anything on a package that has no property coverage"; `calculate_package_
+sqs` applied it unconditionally. **Live Orbin session: 72 -> 60**, tier "Needs
+Work" -> "Major Gaps", on a package with no property line. Now gated on the same
+flag. Still a hard 60 when property coverage IS present (pinned both ways).
 
-Worse, it ignores the relevance rule the pipeline applies to the same fact.
-`extraction_pipeline.py` deliberately keeps a building-value conflict a WARNING when
-`has_property_coverage` is false (*"cannot block anything on a package that has no
-property coverage"*, C75); the scorer applies it unconditionally. Two files, opposite
-verdicts on one fact. **Reproduced: raw 68 -> displayed 60, `hard_stops == []`.**
+**6. The peril-deductible rule existed FIVE times and was a false positive by
+construction.** `property_has_peril_deductibles` is set when the document shows
+wind/hail **or** earthquake **or** flood - one is enough - and every copy
+demanded all three. An ordinary wind-only policy collected two hard stops and a
+warning and was capped at 60. Three copies were known; **the anti-rot test
+written for them found two more inside `calculate_sqs`'s per-form property
+gates**. One rule survives, in `evaluate_stops`, firing only when peril
+deductibles are referenced and NO amount was captured - the one version a
+producer can satisfy - at warning severity.
+`tests/test_peril_deductibles_one_owner.py` fails the build on the defect's
+SHAPE (a comprehension enumerating missing perils), not its wording.
 
-**Also open, non-scoring but same family:** the peril-deductible hard stop is a FALSE
-POSITIVE by construction. `property_has_peril_deductibles` is set by extraction when the
-document shows a wind/hail **or** earthquake **or** flood deductible (one is enough -
-`extraction_service.py:715`), and `evaluate_stops` (`sqs_service.py:948`) then
-hard-stops unless **all three** are defined. An ordinary policy with a wind/hail
-deductible and no earthquake or flood coverage is capped at 60 and told to "specify
-amounts" for perils it does not carry. The SAME rule exists in
-`cross_form_validator.py:1801` as a **soft warning** gated on `0 < present_count < 3` -
-two copies of one rule at opposite severities, the duplication class that let the
-Umbrella SIR and auto-symbol bugs survive their first fixes. **This was the live
-report's actual capper** (`80 earned, held at 60`), not the umbrella.
+**7. The umbrella gate turned Brent's own warnings into a hard stop.**
+`umb_fail` capped a form at 60 whenever `_calculate_umbrella_adequacy` hit 0 -
+but that pillar starts at 100 and subtracts up to 135 across seven deductions,
+two of which fire on nearly every submission, so it reached 0 by ACCUMULATION on
+packages whose underlying limits were all stated. The ruling is recorded three
+times in `sqs_service` itself ("warn, not block"). Now gated on
+`_umbrella_has_underlying(facts)` - only a genuinely broken tower caps.
+
+**8. `confidence_fill_rate` truncated a true 87 to 86.** Fixed as
+`int(round(x, 9))`, NOT a bare `round()`: measured over every label multiset up
+to n=12 (1,352,077 of them), that collapses only the 32,912 cases of binary
+float error and leaves the 149,065 exact-.5 cases on their existing floor, which
+is a semantic change nobody asked for.
+
+**MEASURED (D6 - Brent sees these before they reach him). Nothing went down:**
+
+| Package | Before | After |
+|---|---|---|
+| Property, wind deductible only (ordinary policy) | 60 | **80** |
+| ACORD 140 on that package (per-form) | 60 | **82** |
+| Building-value conflict, no property coverage | 60 | **85** |
+| Live Orbin session with that conflict | 60 | **72** |
+| Property, complete | 79 | 80 |
+| Everything, full package | 82 | 83 |
+| Building-value conflict WITH property coverage (control) | 60 | **60** |
+
+**STILL OPEN, and worth knowing:**
+- **A flawless submission tops out at 89.** Nothing in the panel reaches 90
+  ("Submission Ready"). Not a defect found so far - the pillars are behaving -
+  but it means the top tier is currently unreachable in practice. Owner call.
+- **Every contractor package is capped at 85 by default.**
+  `cross_form_validator` warns whenever `is_contractor` is set and ACORD 186 is
+  not selected. Brent's book is contractors. The only exit is adding ACORD 186
+  to every submission. Product decision, deliberately not changed.
+- `worker.py`'s async fallback still averages already-capped form scores with no
+  ceiling metadata; the credit re-application paths still recompute a ceiling
+  from the stop LISTS only, so a gate-produced 60 is released the first time any
+  credit lands; generation still does not refresh `groupedIssues`.
+- The frontend does not yet render `cap_soft_stops` / `hidden_warnings`. The
+  backend now carries both; the amber block beside the existing HARD STOPS panel
+  is not built.
+
+Suite: **1 failed / 9721 passed** - the single documented `httpx` ImportError.
+Zero regressions (the clean-tree baseline on this branch was 6 failed / 9675
+passed; four of those were order-dependent flakes).
+
 
 ### A 60 Cap Now Names Itself On The Form - SHIPPED 2026-08-31
 
@@ -2432,12 +2580,15 @@ Both exist in the repo but neither runs automatically at startup (confirmed: onl
 `init_db()` is called from `main.py`) — they are legacy/inactive paths. Adding a
 column there will not reach a real deployment.
 
-## SUITE BASELINE - corrected 2026-08-27
+## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **4824 passed, 1 failed, 14 skipped.**
+`py -m pytest -q -p no:randomly` from `backend/` -> **10,104 passed, 1 failed, 19 skipped** (~9 min, 27 Sep 2026).
 
-The ONE failure is `test_arq_acord125_missing_only` (the documented `httpx`/`openai`
-`ImportError: cannot import name 'URL' from 'httpx'`).
+The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
+conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac
+venv it is an AssertionError at line 95 (the ACORD 125 questionnaire now also asks tier-1
+facts such as `effective_date`, and the test expects `applicant_name` alone). Same test,
+pre-existing in both shapes - identical at the 24 Sep session start.
 
 **Every older note in this file claiming TWO pre-existing failures is STALE.**
 `test_normalization` was the second one and it is GREEN at HEAD (28 passed, verified

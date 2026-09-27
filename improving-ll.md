@@ -4061,3 +4061,217 @@ ranking) could serve a paragraph written from older data.
   the key.
 - Cost: roughly +15-25 input tokens per cover call. A cover whose data changed gets one
   fresh call instead of a stale paragraph.
+
+## C94 - 2026-09-21 A125 kit test 2: seven additive facts, v21 -> v22
+
+**One prompt changed (`extraction_service._EXTRACT_SCHEMA`); no new call site, no
+new call, same model, same 14 extraction calls.** `PROMPT_VERSION` and
+`SCHEMA_VERSION` both move v21 -> v22, so every cached extraction is discarded.
+
+**Why.** The schema modelled the applicant as ONE entity with SINGULAR
+attributes while ACORD prints TABLES of entities, and ACORD 125's entire
+GENERAL INFORMATION section had no backing fact at all. Both were measured on a
+live run, not reasoned about - see `improving125-21sep.md`, TEST 2:
+
+- `applicant_website` is one string and the form prints three rows, so the
+  SECOND named insured's website was stamped on the FIRST insured's row while
+  the right box stayed empty.
+- `contact_name` / `contact_phone` / `contact_email` are one set and the form
+  prints two contact blocks, so the second contact's phone landed in the first
+  contact's SECONDARY box.
+- No fact existed for subsidiaries, additional interests, or any of the fifteen
+  general-information questions. Two runs of the SAME document over the SAME
+  code disagreed on 13 boxes, because there was nothing for them to agree on.
+
+**What was added - all ADDITIVE, nothing reshaped.** `additional_named_insureds`
+keeps its `[string]` shape and all of its ~20 consumers; the detail rides
+alongside it exactly as `property_locations` rides alongside `locations`.
+
+| key | shape |
+|---|---|
+| `named_insured_details` | `[{name, fein, sic, naics, gl_class_code, phone, website, address_line_one/two, city, state, postal_code, entity_type, member_manager_count}]` - the OTHER insureds, same order as `additional_named_insureds` |
+| `applicant_contacts` | `[{contact_type, name, phone, phone_kind, email, secondary_phone, secondary_email}]` |
+| `additional_interests` | `[{name, interest_type, address..., country, rank, reference_number, lien_amount, phone, fax, email, interest_reason, item_description, item_location_number, interest_end_date, evidence_requested}]` |
+| `organization_relationships` | `[{role: parent\|subsidiary, name, relationship_description, percent_owned}]` |
+| `safety_program_elements` | `[string]` - the four ACORD elements only |
+| `disclosure_answers` | `[{topic (16-value enum), answer, explanation, occurrence_date, resolution, resolution_date, evidence_quote}]` |
+| `other_named_insured_operations` | `string or null` |
+
+Plus two `property_locations` columns (`building_number`,
+`any_area_leased_to_others`), `item_location_number` on the interest, and
+ABBREVIATION HINTS on the premises FT / PT columns.
+
+**The abbreviation hints are the cheapest fix in this entry and worth reading.**
+The kit prints ONE premises table headed
+`LOC BLDG FT PT REVENUE OCCUPIED PUBLIC TOTAL LEASED`. Four of those columns
+stamped correctly on all four rows and two did not - and the two that failed are
+the only two whose header is an ABBREVIATION with no lexical overlap with the
+fact name. The column, the binding and the stamper were all already correct. The
+hints name `FT`, `F/T`, `# FULL TIME EMPL` beside the column, taken from the
+ACORD form's OWN printed label rather than invented.
+
+**Cost, measured with `o200k_base`:**
+
+```
+_EXTRACT_SCHEMA   17,128 chars / 4,327 tokens  ->  22,870 chars / 5,673 tokens
+                                                   +5,742 chars / +1,346 tokens
+```
+
+The schema sits in the CONSTANT prefix of the extraction prompt, so it is
+cacheable: the first call of a run pays full price for the extra 1,346 tokens
+and the remaining ~13 pay the cached rate. No new call, no extra chunk - the
+addition is ~0.8% of a 700k-char package's own text and cannot move the chunk
+count. The one-off cost is the version bump discarding the extraction cache,
+which is the point of bumping it.
+
+**`disclosure_answers` asks for a closed 16-value enum**, which is the riskiest
+thing here: a model that emits a topic outside the list produces an entry no
+resolver can place. The resolver looks topics up by exact match and returns
+`_SCHED_SKIP` on anything it does not recognise, so an unknown topic costs
+nothing beyond the tokens - the box falls through to gap fill exactly as it does
+today. Worth watching in the first live run.
+
+## C95 - 2026-09-24 client re-test: every generation path through the ONE line-scoped gap fill
+
+**No prompt changed, no call site added, no model change.** What changed is WHICH paths reach the combined,
+line-scoped gap fill (C88) - before this, only one did.
+
+**The defect.** `form_routes.select_forms_bulk` (the synchronous route) built the combined gap fill inline: Pass 1 /
+1.5 gaps for every selected form, `build_line_page_scopes`, ONE shared `combined_gap_fill`, answers handed to
+`process_single_form`. Every other generation path called `process_single_form(form_meta, session)` with NO shared
+answers, so each form ran its own per-form gap fill over the WHOLE document with no line page scopes and no
+de-duplication across forms:
+
+| path | who runs it | before |
+|---|---|---|
+| `worker.py` | **production** - `render.yaml` sets `ENABLE_ASYNC_PROCESSING=true` | per form, whole document |
+| `form_addition` | "add a form" to a generated package | per form, whole document |
+| `_bg_lite_generate`, `lite_generate_internal` | essentials tier, top form | per form, whole document |
+
+So C88's measured win (205 -> 114 calls, 27.4M -> 13.9M input chars on Orbin) and its correctness fix (a GL box
+answered from the auto section's "TERRITORY") existed only on the path localhost runs. The client's item 6
+("cross-line contamination") came back on exactly the path production runs.
+
+**The fix.** The inline block moved, unchanged, into `form_service.shared_gap_fill(session, form_ids)`, and all
+five call sites use it. It never raises: any failure returns `{}` and each form falls back to its own gap fill, as
+the route always did (logged `falling back per-form`). Cost on the async path now equals the sync route's for the
+same selection - C88's numbers - where before it paid one whole-document fill PER FORM (not re-measured; strictly
+more calls, since the per-form path neither scopes nor de-duplicates).
+
+**Verification.** `py backend/scripts/inspect_gap_fill_prompts.py`: PASS, identical to the session-start tree -
+compliance 4 calls / 6,758-char cacheable prefix, gap fill 9 calls / 13,779-char prefix, $0.0603 projected. The
+prompt bytes did not move. Anti-rot: `tests/test_client_retest_24sep.py::
+test_no_generation_call_skips_the_one_scoped_door` AST-walks every backend module and fails on any
+`process_single_form` call, direct or via `run_in_executor`, that omits the shared answers (it names the two
+essentials call sites against the pre-fix `form_routes.py`).
+
+**Still per-form, named:** the fallback when `shared_gap_fill` fails - an error path, logged, deliberately kept so
+a gap-fill failure degrades a package instead of failing its generation.
+
+## C96 - 2026-09-24 owner's live run: the cover summary is told when the term has ENDED
+
+**One prompt line changed (`cover_service.generate_ai_cover_narrative`); no call added,
+same model, same cache rule (the key follows the data the model reads, C93).**
+
+The prompt used to say `Current Policy Term: 07/15/25 - 07/15/26` for the term the merge
+routed to `prior_*`. On 24 Sep 2026 that term had ended two months earlier, and the
+summary told the client the account "is currently in force". `_moved_term_ended` now
+compares the routed expiration with today: an ended term is sent as
+`Last Policy Term (EXPIRED - not in force): ...`, an in-force one keeps
+`Current Policy Term: ...`. The cover's POLICY PERIOD cell follows the same rule
+("expired term" / "current term"). ~6 extra tokens when the term has ended.
+
+**Also on this run, NOT a prompt or call change (recorded because it changes which
+gap-fill answers reach a form):** `pdf_service.reconcile_cross_form_yes_no`, called by
+`form_service.shared_gap_fill` on `combined_gap_fill`'s result, removes a Y/N answer when
+another form of the same package answered the same question the other way (ACORD 126
+Contractors Q4 "N" vs ACORD 131 Q14 "Y" on the live run). Deterministic, no LLM, and it
+only ever removes answers. `inspect_gap_fill_prompts.py` is unaffected (prompt bytes
+unchanged).
+
+## C97 - 2026-09-25 owner's second live run: the evidence judge is REACHED, and a Yes it cannot confirm is blank
+
+**One prompt rule added to `_JUDGE_SYSTEM_PROMPT` (C74's judge); the call now retries; its
+batch drops 20 -> 5 and batches run 4 in parallel. No new call site, same model. The
+gap-fill and compliance prompts are untouched - `inspect_gap_fill_prompts.py`: PASS,
+byte-identical to C95 (9 calls, 13,779-char prefix, $0.0603).**
+
+**The defect (session 5ca5cff5, three forms):** ACORD 125 "exposure to flammables,
+explosives, chemicals?" = Y, explained by the business description; 126 "vendors coverage
+required?" = Y and 131 "do subcontractors carry coverages or limits LESS than applicant?"
+= Y, both explained by "Subcontractors are required to carry their own general liability
+insurance and to provide certificates of insurance before they start work." Every
+deterministic check passes those sentences - real, unique to the question, asserting -
+because the defect is IMPLICATION, which is the judge's whole job.
+
+**Measured, live API, on the exact inputs:** the judge rejects the 125 and 126 answers
+**6 runs out of 6**. So on the live run it was not reached for them. It made ONE attempt,
+per form, straight behind the gap-fill burst that saturates the TPM window, with only the
+SDK's two short retries - the same shape that emptied the declarations index for three
+runs (config.settings, "429 IS NOT A TRANSIENT ERROR - IT IS A CLOCK"). And a failed call
+was "no opinion", so every kept Yes stood. The 131 answer is a second defect: the judge
+ACCEPTED it (5 of 6 on a 4-item batch).
+
+**Four changes:**
+1. **Retries.** A 429 / 5xx / 408 / 409 / timeout waits on the shared `_retry_wait_seconds`
+   schedule (Retry-After, else 5 / 15 / 30 / 60s for a 429), `EVIDENCE_JUDGE_RETRIES`
+   (default 4). An unparseable reply retries once. A 400 / 401 / 403 / 404 or no network
+   is the judge UNAVAILABLE - no retry, no opinion (the offline suite runs on a placeholder
+   key and must see exactly the old behaviour).
+2. **A Yes the judge could not confirm is blank.** `_judge_evidence_batch(..., unjudged=)`
+   collects the ids it WAS reachable for and did not judge (a batch that failed after
+   every retry, or an id the reply left out). Pass A2 blanks a kept AI "Yes" among them
+   (`evidence_judge UNCONFIRMED_YES`). A "No" and a rescue still treat silence as no
+   opinion. Blank over wrong: a wrong Yes asserts an exposure; a blank is asked.
+3. **Prompt rule 7 (same subject is not the same condition):** "A quote about the same
+   people or activity as the question does not answer it unless it states the specific
+   condition the question asks about. 'Subcontractors must carry their own insurance'
+   says nothing about whether their limits are LESS than the applicant's..." Measured on
+   a labelled set of 37 real and borrowed answers (13 wrong, 24 right, all implied-answer
+   shapes included): on 1-4 item batches the old prompt was wrong **every time** on the
+   131 shape and on a borrowed "No"; with the rule, **0 errors in ~90 judgments**. Two
+   rejected variants, on the record: listing specific kinds ("vendors, leased employees")
+   in the rule made it reject a correct vendors Yes 3 of 3 - fixture-tuning; adding
+   `question_asks` / `quote_states` reasoning fields to the schema broke correct "No"
+   answers 4-6 per run.
+4. **Batch 5, pool 4.** The same set, 8 shuffles, production mixes: at 17-20 items a
+   batch the judge let ~2% of wrong answers through (the vendors shape 2 batches in 16);
+   at 5 items, **3 errors in 296 judgments** and none of the live shapes. Batches run in
+   parallel (`EVIDENCE_JUDGE_POOL`, default 4) so a form waits no longer than before.
+
+**Cost:** C74 estimated ~5-15 judge calls per package at ~1-2k input tokens. Batches of
+five make it ~20-60 calls of ~1k tokens (the system prompt dominates and sits below the
+1,024-token cache floor either way): roughly **+$0.02-0.04 per package**, still a few
+percent of a package's LLM spend. Worst case under a 429 storm: ~110s of waiting per
+batch before a Yes is blanked - a slow correct answer beats a fast wrong one (the
+dec-index lesson).
+
+**Also on this run (not an LLM change, recorded because it changes which answers reach
+a form):** the gap-fill facts block now excludes `_package_form_ids` and
+`_gl_deductible_scope` (`_GAP_FILL_FACTS_EXCLUDE`) - routing machinery, not hints. The
+package list now also rides the shared gap fill, so the model is never asked ACORD 186's
+"* DO NOT ANSWER IF ATTACHED TO ACORD 126" questions. The inspector's fixture carries
+neither key, which is why its bytes did not move; on a live package whose merge recorded
+a GL deductible scope, the prompt loses that one key.
+
+**Considered and REJECTED:** a deterministic package-wide "one sentence, one Yes" rule.
+The model borrows the same few narrative sentences for many questions, so it would blank
+the 186's CORRECT "direct oversight of each jobsite?" (the principals supervise every
+project) and "renovation work?" (tenant-finish and remodeling) Yeses. Implication is the
+judge's job; the fix is to make sure it runs.
+
+Tests: `tests/test_orbin_live_run2_25sep.py` (73 - the judge's retry / unavailable /
+unjudged contract with a fake client, Pass A2's unconfirmed-Yes rule in both directions,
+and the live answers from `tests/fixtures/orbin_live_25sep.json`). Suite 10,075 passed /
+1 failed (pre-existing) / 19 skipped. The labelled judge set and harnesses are scratch
+probes, not in the repo - rerunning them costs a live API call per batch.
+
+**C97 addendum (27 Sep 2026).** `prior_coverage_lines` joins `_GAP_FILL_FACTS_EXCLUDE`: a
+policy the merge retires as an expired predecessor (`_retire_predecessor_policies`) used to
+sit in `coverage_lines`, which the facts block carries; it now reaches the prompt nowhere.
+Prompt bytes change only on a package that has such a policy - not Orbin, not the
+inspector fixture. **Correction to C95's premise:** production does NOT run the worker -
+the Render dashboard sets `ENABLE_ASYNC_PROCESSING=false`; `render.yaml` said otherwise and
+now matches. Render's `LLM_REQUEST_TIMEOUT` was unset (code default 120 s vs localhost's
+300 s): long gap-fill calls could time out and retry on Render only. **Owner decision: keep the
+120 s default on Render; localhost must drop its `LLM_REQUEST_TIMEOUT=300` line to match.**

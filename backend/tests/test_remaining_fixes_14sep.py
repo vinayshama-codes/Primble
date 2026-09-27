@@ -272,7 +272,11 @@ class TestCoverageBasis:
         assert row is None or row["status"] != "conflict"
 
     def test_the_prompt_defines_both_and_moved_to_v21(self):
-        assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v21"
+        # v22 since 2026-09-21 (A125 kit test 2): seven ADDITIVE row-bearing facts
+        # plus premises columns and FT/PT abbreviation hints. THE TEST MOVED, NOT
+        # ITS SUBJECT - the pin exists so a schema edit cannot skip a bump, and
+        # this edit bumped. See improving-ll.md C94.
+        assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v22"
         assert '"gl_form_type": "Occurrence"|"Claims-Made"|null' in es._EXTRACT_SCHEMA
         assert '"umbrella_form_type": "Occurrence"|"Claims-Made"|null' in es._EXTRACT_SCHEMA
 

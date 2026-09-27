@@ -382,9 +382,12 @@ def _grid_cell(family: str, word: str, kind: str, row: str, facts: Any,
     unknown = [n for n in designated if n not in _sym.BY_NUMBER]
     if not own and not unknown:
         return None                     # every symbol belongs to another family
-    prefix = _sym.FAMILY_FIELD_PREFIX[family]
-    printed = {n for n, s in table.items() if f"{prefix}{s.word}Indicator_{row}" in universe}
-    unprinted = [n for n in own if n not in printed] + unknown
+    # "Other" is for a symbol ACORD prints on NO row of this grid (ISO 5 / 19,
+    # a company-unique symbol). A known symbol this row does not offer is not
+    # valid for the coverage - ACORD prints exactly the valid ones per row -
+    # so it is a mis-attribution and is dropped, never printed as "Other"
+    # (24 Sep 2026: symbol 1 on the uninsured-motorists row).
+    unprinted = unknown
     if word == "OtherSymbol":
         if kind == "Indicator":
             return "Yes" if unprinted else "No"

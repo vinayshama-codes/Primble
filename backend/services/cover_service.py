@@ -126,6 +126,20 @@ def _moved_current_term(facts: dict) -> Optional[str]:
 _COVER_UNKNOWN = "Not provided"
 
 
+def _moved_term_ended(facts: dict) -> bool:
+    """Has the term `_moved_current_term` names already ended? (24 Sep 2026:
+    the cover called 07/15/25 - 07/15/26 the "current term" in September 2026
+    and its summary said the account "is currently in force".)"""
+    from datetime import date as _date, datetime as _dt
+    exp = str(_fv(facts, "prior_expiration_date") or "").strip()
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return _dt.strptime(exp, fmt).date() < _date.today()
+        except ValueError:
+            continue
+    return False
+
+
 def _cover_info_values(facts: dict, flags: dict, user: Optional[dict], org_name: str) -> Dict[str, str]:
     """The cover's submission table, as printed (live run 10, 15 Sep 2026).
     POLICY PERIOD printed "\u2014 - \u2014" once the proposed term became
@@ -140,7 +154,8 @@ def _cover_info_values(facts: dict, flags: dict, user: Optional[dict], org_name:
         period = f"{eff} - {exp}" if exp else f"{eff} - to be confirmed"
     else:
         moved = _moved_current_term(facts)
-        period = f"To be confirmed (current term {moved})" if moved else "To be confirmed"
+        _which = "expired term" if _moved_term_ended(facts) else "current term"
+        period = f"To be confirmed ({_which} {moved})" if moved else "To be confirmed"
     lobs = _cover_lines_of_business(facts, flags)
     return {
         "agent":           (user.get("full_name", "") if user else "") or _COVER_UNKNOWN,
@@ -198,7 +213,10 @@ async def generate_ai_cover_narrative(
                    else "the average of the form scores")
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
     _moved_term = _moved_current_term(facts)
-    _term_line = f"\nCurrent Policy Term: {_moved_term}" if _moved_term else ""
+    if _moved_term and _moved_term_ended(facts):
+        _term_line = (f"\nLast Policy Term (EXPIRED - not in force): {_moved_term}")
+    else:
+        _term_line = f"\nCurrent Policy Term: {_moved_term}" if _moved_term else ""
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
 Generate a professional cover page summary for this ACORD submission package.
 

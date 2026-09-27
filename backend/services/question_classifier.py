@@ -933,6 +933,17 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
             counts["suppressed"] += 1
 
         is_client = audience == AUDIENCE_CLIENT and not suppressed
+        # CONFIRM-OR-CORRECT IS ON BY DEFAULT (24 Sep 2026, client item 11:
+        # "Primble should prepopulate source-verified information and ask the
+        # client to confirm or correct it"). A client-facing confirm item - a
+        # known value, or a known table (the Subaru, the premises) in confirm
+        # mode - is pre-ticked. Outside the cap: one "This is correct" click
+        # must never push a real missing-data question off the list.
+        if is_client and q.get("confirm"):
+            q["default_selected"] = True
+            q["suggested"] = False
+            counts["default_selected"] += 1
+            continue
         if is_client and priority == PRIORITY_CRITICAL and selected < cap:
             q["default_selected"] = True
             q["suggested"] = False

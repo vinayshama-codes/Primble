@@ -250,7 +250,14 @@ def test_r13_displayed_sqs_cannot_exceed_85():
     hard, soft = sq.evaluate_stops(OWNED_NO_SCHEDULE_FACTS, OWNED_NO_SCHEDULE_FLAGS)
     cap, reason = sq._resolve_cap(hard, soft)
     assert cap == sq.SOFT_STOP_CAP == 85
-    assert "vehicle schedule" in reason.lower()
+    # THE WARNING IS PRESENT; WHICH ONE IS *FIRST* IS INCIDENTAL (2026-09-23).
+    # `_resolve_cap` documents that `reason` is simply the first open stop, and
+    # this fixture is minimal - it carries no Tier 1 baseline fields either, so
+    # since `evaluate_stops` took ownership of the ACORD 125 baseline warnings
+    # one of those now sorts ahead of the vehicle schedule. The ceiling, which
+    # is what this test is about, is unchanged.
+    assert reason in soft
+    assert any("vehicle schedule" in m.lower() for m in soft), soft
 
     for raw in (86, 88, 95, 100):
         assert sq.final_score_with_credits(raw, 0, cap) == 85, raw

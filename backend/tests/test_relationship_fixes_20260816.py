@@ -404,10 +404,11 @@ class TestValueShapeGuards:
                      {"coverage": "Comprehensive", "symbols": [7]},
                      {"coverage": "Collision", "symbols": [7]}]}
         mapped = _fill("ACORD_127", facts, {"Vehicle_NetRatingFactor_A": "07"})
-        assert mapped.get("Vehicle_ComprehensiveSymbolCode_A"), \
-            "fixture precondition: the symbol must actually stamp"
-        # "07" against a stamped "7" - the same symbol, and the guard must not
-        # be defeated by a cosmetic leading zero.
+        # 24 Sep 2026 (owner decision): ACORD 127's symbol columns are owned
+        # blanks - covered-auto symbols print on the 137. The guard's witness is
+        # now the symbol the FACTS designate, so "07" is still refused, and a
+        # cosmetic leading zero still cannot defeat it.
+        assert not mapped.get("Vehicle_ComprehensiveSymbolCode_A")
         assert not mapped.get("Vehicle_NetRatingFactor_A")
 
     def test_a_real_rating_factor_survives(self):

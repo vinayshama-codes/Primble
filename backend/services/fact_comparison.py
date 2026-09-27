@@ -43,6 +43,7 @@ from services.fact_equivalence import (          # re-exported on purpose
 from services.normalization import (
     normalize_value, normalize_fein, normalize_carrier, strict_entity_key,
     entity_identity_conflict as _entity_identity_conflict,
+    entity_compact_key, deglue_entity_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,9 @@ def compare(fact_key: str, values: Sequence[Any],
         order: List[str] = []
         for i in idx:
             if entity:
-                key = strict_entity_key(values[i])
+                # The COMPACT strict key: one printing with its spaces lost by
+                # OCR ("EMCProperty&CasualtyCompany") is the same printing.
+                key = entity_compact_key(values[i])
             else:
                 key = normalize_value(fact_key, values[i])
             key = key or f"__raw__{str(values[i]).strip().lower()}"
@@ -513,6 +516,9 @@ def carriers_same_family(a: Any, b: Any) -> bool:
         ta, tb = set(ka.split()), set(kb.split())
         if ta == tb or ta <= tb or tb <= ta:
             return True                   # truncation / missing suffix
+    xa, xb = entity_compact_key(sa), entity_compact_key(sb)
+    if xa and xb and xa == xb:
+        return True                       # one name, spaces lost by OCR
     return False
 
 
@@ -553,6 +559,10 @@ def same_agency(a: Any, b: Any) -> Optional[bool]:
     """
     def _body(name: Any) -> List[str]:
         # Single letters are noise, not identity: "N/A" names no agency.
+        # De-glued first: a certificate's "CommercialRiskSolutions,Inc." is one
+        # token otherwise, and called a DIFFERENT agency from its own spaced
+        # printing - which is what re-routes the old broker onto a new form.
+        name = deglue_entity_text(name)
         return [w for w in re.findall(r"[a-z0-9]+", str(name or "").lower())
                 if len(w) > 1 and w not in _AGENCY_LEGAL_WORDS
                 and w not in _AGENCY_SUFFIX_WORDS]
@@ -679,7 +689,34 @@ def document_as_of(doc: Optional[dict], fact_key: str) -> Optional[str]:
     if str(doc.get("doc_type") or "").strip().lower() not in _INCEPTION_DATED_DOC_TYPES:
         return None
     term = fact_term(fact_key, doc.get("facts") or {})
-    return term[0] if term else None
+    if not term:
+        return None
+    # A declarations page RE-ISSUED after a change speaks as of its issue date,
+    # not its inception (24 Sep 2026). Read from the page's own "Date of Issue"
+    # entry; only a LATER issue date moves it, so the Orbin dec (issued
+    # 07/16/25, before the 7/25/25 reduction) is unchanged, while a dec re-issued
+    # after the change that still prints the old limit is NOT proof of the old
+    # value "before" it - it stays a conflict, as the handoff always claimed.
+    issued = _issue_date_of(doc)
+    if issued and issued > term[0]:
+        return issued
+    return term[0]
+
+
+_ISSUE_LABEL_RE = re.compile(r"\b(?:date\s+of\s+issue|issue\s+date|date\s+issued|issued)\b", re.I)
+
+
+def _issue_date_of(doc: dict) -> Optional[str]:
+    """The ISO "Date of Issue" a document's own declarations entries print,
+    when they print exactly one."""
+    from services.normalization import normalize_date
+    facts = doc.get("facts") or {}
+    entries = facts.get("dec_page_entries")
+    entries = entries.get("value") if isinstance(entries, dict) and "value" in entries else entries
+    found = {normalize_date(e.get("value")) for e in (entries or [])
+             if isinstance(e, dict) and _ISSUE_LABEL_RE.search(str(e.get("label") or ""))}
+    found.discard(None)
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def dated_change(fact_key: str, printings: Sequence[tuple],
@@ -720,7 +757,19 @@ def dated_change(fact_key: str, printings: Sequence[tuple],
         if amount is None:
             return None                  # a printing that is not ONE amount
         by_amount.setdefault(amount, []).append((as_of, doc_index))
-        shown.setdefault(amount, str(value).strip())
+        # The value that STAMPS is the amount, never its label: a certificate
+        # printing "$1,000,000 Each Occurrence / $1,000,000 Aggregate" put that
+        # whole string in ACORD 131's each-occurrence box (24 Sep 2026). A
+        # printing with words beside the figure shows as the plain amount.
+        printed = str(value).strip()
+        if re.search(r"[A-Za-z]", printed.replace("MM", "").replace("M", "")
+                     .replace("K", "").replace("B", "")) or "/" in printed:
+            try:
+                printed = "${:,.0f}".format(float(amount))
+            except (TypeError, ValueError):
+                pass
+        if amount not in shown or len(printed) < len(shown[amount]):
+            shown[amount] = printed
     if len(by_amount) != 2:
         return None
     # Only a change the sentence ASSERTS ("was reduced"), never one it negates,
@@ -733,19 +782,31 @@ def dated_change(fact_key: str, printings: Sequence[tuple],
         d = normalize_date(st.get("as_of"))
         return d is None or start <= d <= end
 
+    def _from_of(st):
+        """The statement's OLD amount. A sentence naming only the new one
+        ("changed to $1M") takes the old amount from the documents' own
+        printings - and only when they print exactly two, one of them this
+        statement's new amount. Never invented (24 Sep 2026)."""
+        got = _one(st.get("from"))
+        if got:
+            return got
+        to = _one(st.get("to"))
+        others = [a for a in by_amount if a != to]
+        return others[0] if to in by_amount and len(others) == 1 else None
+
     # TWO DIFFERENT CHANGES to one fact - a reduction and a later reversal, or
     # two reductions - leave the current value unsaid: the producer's question.
     # Counted by amounts, so one change printed twice is still one; a change
     # dated in another term is that term's history, and an undated one cannot
     # be placed, so it counts.
-    if len({(_one(st.get("from")), _one(st.get("to")))
+    if len({(_from_of(st), _one(st.get("to")))
             for st in mine if _may_apply(st)}) > 1:
         return None
     for st in mine:
         when = normalize_date(st.get("as_of"))
         if not when or not (start <= when <= end):
             continue
-        a_from, a_to = _one(st.get("from")), _one(st.get("to"))
+        a_from, a_to = _from_of(st), _one(st.get("to"))
         if not a_from or not a_to or a_from == a_to \
                 or {a_from, a_to} != set(by_amount):
             continue

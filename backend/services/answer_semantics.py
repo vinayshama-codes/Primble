@@ -147,6 +147,135 @@ _ABSENCE_PHRASE_RE = re.compile(
     r")\b", re.I)
 
 
+# ── 3b. Placeholder text: a value that says only "there is nothing here" ────
+# A DELIBERATELY DIFFERENT SCOPE from _ABSENCE_TOKENS above, and the difference
+# is the whole point.
+#
+# `interpret_answer` reads a HUMAN's answer to a KNOWN fact. It has that fact's
+# declared kind, so it can afford to treat "0", "zero", "no" and "n" as "no
+# value" - it knows when a zero is real and when it is a shrug.
+#
+# A STAMPED FORM BOX has none of that context. On a live ACORD 125,
+# `LossHistory_ReservedAmount_A` is legitimately "$0", `BuildingOccupancy_
+# OpenToPublicArea_B` is legitimately "0", and every Y/N question box is
+# legitimately "N". Those are values a broker signs. Applying the absence
+# vocabulary to a form box would delete them.
+#
+# So this set holds ONLY tokens that are information-free in EVERY box on every
+# form, and it is the caller's whole test - no field list, no per-form tuning,
+# nothing that has to be maintained per ACORD family.
+#
+# Why it exists at all (A125 kit, test 2, 21 Sep 2026): the gap-fill model
+# returned the literal string "(None)" for an address line the document does
+# not print, and it was stamped onto two named-insured rows of a legal
+# application. Nothing between the model and the box asked whether the value
+# meant anything - CLAUDE.md records this as "GAP 1 - extraction is NOT
+# covered", with the predicted symptom "fields displaying N/A".
+_PLACEHOLDER_TOKENS = frozenset({
+    "none", "nil", "null", "n/a", "na", "n.a.", "not applicable",
+    "non applicable", "does not apply", "not relevant", "unknown", "unk",
+    "not known", "tbd", "t.b.d", "to be determined", "to be confirmed",
+    "to be advised", "to be provided", "not provided", "not stated",
+    "not specified", "not available", "not given", "not indicated",
+    "not disclosed", "undisclosed", "no data", "no information", "no value",
+    "blank", "empty", "none known", "none reported", "none to report",
+    "nothing to report", "none at all",
+})
+# DELIBERATELY NOT IN THE SET, though every one of them was drafted into it:
+#   "see attached" / "see schedule" - a real cross-reference a broker writes,
+#       and CLAUDE.md C22 records that amount boxes legitimately hold
+#       "Statutory", "Included", "See schedule". Blanking those loses data.
+#   "pending"      - a claim or an inspection genuinely can be pending; that is
+#       a status, not a shrug.
+#   "not required" / "no longer applicable" - both can be the true answer to a
+#       question about an obligation.
+# The test is "carries no information", not "sounds unhelpful".
+# Decoration a model wraps a placeholder in. Stripped from BOTH edges before
+# matching, so "(None)", "[N/A]", "- none -" and '"unknown"' are the same token
+# they would be bare. This is what `_strip_edges` does for human answers; the
+# set is wider here because a model's decoration is wider than a person's.
+_PLACEHOLDER_EDGES = " \t\r\n.!,;:?*_-–—\"'`()[]{}<>"
+
+
+def is_placeholder_text(value: Any) -> bool:
+    """True when a value carries no information beyond "there is nothing here".
+
+    The ONE door for that question. Use it wherever a machine-authored value is
+    about to become a printed box; do NOT re-derive the vocabulary at the call
+    site, and do NOT reach for `_ABSENCE_TOKENS` instead - see the note above
+    for why "0" and "N" are absent from this set on purpose.
+
+    Never true for a value that carries data, however short: "0", "N", "No",
+    "OR", "US" and "1" all return False. A caller that wants those judged needs
+    a different question, not a wider set here.
+    """
+    if not isinstance(value, str):
+        return False
+    s = _normalize(value)                       # case, quotes, whitespace
+    s = s.strip(_PLACEHOLDER_EDGES)
+    if not s:
+        return False                            # already blank - not our business
+    s = re.sub(r"\s+", " ", s)
+    if s in _PLACEHOLDER_TOKENS:
+        return True
+    # "n / a", "n.a.", "n-a" are one token wearing separators. Collapsing is
+    # scoped to the few abbreviations that are ambiguous when spaced; a longer
+    # phrase must match the set literally.
+    compact = re.sub(r"[\s./\-]+", "", s)
+    if compact in {"na", "nk", "tbd", "nil", "none", "null", "unknown", "unk"}:
+        return True
+    return False
+
+
+
+# ── 3c. An action described as NOT YET DONE ─────────────────────────────────
+# ACORD pairs "RESOLUTION" with "RESOLVE DATE", and a live ACORD 125 printed
+# "Abatement is scheduled, the premises has not yet been re-inspected" in the
+# box that ASSERTS a resolution - telling an underwriter a fire-code violation
+# was resolved when the document says it was not.
+#
+# The first fix for that read the DATE box: an undated resolution has not
+# happened. That is true of ACORD's layout and NOT of documents - plenty of
+# real remedies are described without a date, and the rule deleted every one of
+# them. This reads the sentence instead.
+#
+# TWO-SIDED ON PURPOSE. A future marker alone is not enough: "scheduled
+# maintenance was completed" carries one and describes a finished act. A
+# completion verb anywhere wins.
+_NOT_YET_DONE_RE = re.compile(
+    r"\b(?:is |are |be |being |to be |will be |shall be )?"
+    r"(?:scheduled|planned|pending|awaiting|upcoming|forthcoming|anticipated|"
+    r"expected|proposed|underway|in progress|ongoing)\b|"
+    r"\b(?:not|never|no)\s+(?:yet\s+)?"
+    r"(?:been\s+)?(?:re-?inspected|completed|corrected|resolved|repaired|"
+    r"abated|paid|satisfied|released|closed|remedied|done|finished)\b|"
+    r"\bhas not\b|\bhave not\b|\bhasn't\b|\bhaven't\b", re.I)
+_COMPLETED_RE = re.compile(
+    r"\b(?:corrected|completed|resolved|repaired|abated|remedied|rectified|"
+    r"cleared|passed|paid|satisfied|released|dismissed|discharged|closed|"
+    r"withdrawn|vacated|settled|reinstated|replaced|removed|installed)\b", re.I)
+
+
+def describes_incomplete_action(value: Any) -> bool:
+    """True when a narrative says the thing it describes has NOT happened yet.
+
+    The ONE door for that question. Used where a box asserts that something was
+    done - an ACORD RESOLUTION - so a sentence denying it can be refused
+    without reading the box's neighbours.
+    """
+    text = _normalize(value)
+    if not text:
+        return False
+    if not _NOT_YET_DONE_RE.search(text):
+        return False
+    # A denial of completion beats a completion verb elsewhere in the sentence
+    # ("repairs were completed but the premises has not yet been re-inspected").
+    if re.search(r"\b(?:not|never|no)\s+(?:yet\s+)?(?:been\s+)?", text) or \
+            re.search(r"\bhas ?n[o']t\b|\bhave ?n[o']t\b", text):
+        return True
+    return not _COMPLETED_RE.search(text)
+
+
 # ── 4. Affirmation / denial ──────────────────────────────────────────────────
 _AFFIRM_TOKENS = frozenset({
     "yes", "y", "yeah", "yep", "yup", "true", "correct", "confirmed", "confirm",
@@ -639,6 +768,25 @@ def interpret_answer(fact_key: str, answer: Any,
             f"for this field. Enter it as "
             f"{'MM/DD/YYYY' if kind == 'date' else 'digits (e.g. 12 or $50,000)'}"
             ", or answer \"None\" if there is none."))
+
+    # 6c. A THIRD-PARTY NAME must name a party (24 Sep 2026, client item 8).
+    #     The merge and the box guards refuse "For Informational Purposes
+    #     Only" read off a certificate; a HUMAN typing it into the certificate
+    #     holder, loss payee or mortgagee was accepted here as free text and
+    #     printed as the Additional Interest on six forms. Same structural test
+    #     (`names_a_party(third_party=True)`) over the same fact list
+    #     (`extraction_service._THIRD_PARTY_NAME_KEYS`) - no phrase list.
+    try:
+        from services.extraction_service import _THIRD_PARTY_NAME_KEYS
+        if fact_key in _THIRD_PARTY_NAME_KEYS:
+            from services.field_mapping_integrity import names_a_party
+            if not names_a_party(raw.strip(), third_party=True):
+                return out(UNKNOWN, reason="not_a_party", message=(
+                    "That does not read as the name of a person or organization. "
+                    "Enter the holder's, payee's or lender's name, or leave it "
+                    "blank if there is none."))
+    except Exception:                                         # noqa: BLE001
+        pass
 
     # 7. Ordinary free text is the value.
     return out(VALUE, value=raw.strip(), reason="free_text")

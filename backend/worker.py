@@ -271,7 +271,15 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         # unconfirmed. Mirrors form_routes.enforce_building_value_gate.
         from services.underwriting_consistency import GENERATION_BLOCKING_RECONCILABLE_KEYS
         _uw = session.get("underwriting_consistency") or {}
-        if any(
+        try:
+            # Same rule as form_routes.enforce_building_value_gate: no property
+            # line, no building value to block on.
+            from services.lob_canon import line_is_carried as _carried
+            _no_property = _carried("property", session.get("facts") or {},
+                                    session.get("flags") or {}) is False
+        except Exception:                                     # noqa: BLE001
+            _no_property = False
+        if not _no_property and any(
             f.get("fact_key") in GENERATION_BLOCKING_RECONCILABLE_KEYS and f.get("review_required")
             for f in (_uw.get("fields") or [])
         ):
@@ -285,6 +293,22 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             return
 
         loop = asyncio.get_running_loop()
+
+        # Stages 4-6 through the SAME door the synchronous route uses
+        # (form_service.shared_gap_fill, 24 Sep 2026): one shared gap fill,
+        # each coverage line reading only its own pages. Before this, the
+        # worker - production's path (render.yaml ENABLE_ASYNC_PROCESSING=true)
+        # - gave every form a whole-document, all-lines gap fill, which is the
+        # client's cross-line contamination (item 6). A failure returns {} and
+        # each form falls back to its own gap fill, as before.
+        try:
+            from services.form_service import shared_gap_fill
+            per_form_pre_filled = await loop.run_in_executor(
+                _FORM_GEN_EXECUTOR, shared_gap_fill, session, list(form_ids))
+        except Exception as _sg_ex:                               # noqa: BLE001
+            logger.error("Job %s: shared gap fill failed, per-form fallback: %s",
+                         job_id, _sg_ex)
+            per_form_pre_filled = {}
 
         async def _generate_one(fid: str):
             """Generate a single form; returns (fid, result) or (fid, None) on failure."""
@@ -300,7 +324,8 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                 return fid, None
             try:
                 result = await loop.run_in_executor(
-                    _FORM_GEN_EXECUTOR, process_single_form, form_meta, session
+                    _FORM_GEN_EXECUTOR, process_single_form, form_meta, session,
+                    (per_form_pre_filled or {}).get(fid),
                 )
                 return fid, result
             except Exception as ex:

@@ -371,15 +371,21 @@ def test_a_contested_or_already_asked_fact_is_not_duplicated():
     assert A._build_confirm_questions(facts, [fid], asked) == []
 
 
-def test_confirm_items_reach_the_list_unselected(monkeypatch):
+def test_confirm_items_reach_the_list_selected(monkeypatch):
+    """24 Sep 2026 - this used to pin confirm items UNSELECTED (the producer
+    had to click "Add confirmations"), so by default the client never saw the
+    confirm-or-correct step it asked for on 11 Sep ("prepopulate
+    source-verified information and ask the client to confirm or correct
+    it"). Client-facing confirm items - scalars and tables in confirm mode -
+    are now pre-ticked, outside the cap that protects real questions."""
     facts = _orbin_facts()
     gen = _orbin_127()
     gen["ACORD_125"] = {"schema": _schema("ACORD_125"), "confidence": {},
                         "field_state": {}, "client_filled_fields": []}
     qs = _generate(monkeypatch, gen, facts, _orbin_docs())
-    conf = [q for q in qs if q.get("confirm") and q.get("field_type") != "schedule"]
+    conf = [q for q in qs if q.get("confirm") and q.get("audience") == "client"]
     assert any(q["field_name"] == "applicant_name" for q in conf)
-    assert all(not q.get("default_selected") for q in conf)
+    assert conf and all(q.get("default_selected") for q in conf)
 
 
 # ── 6. The answer path: sanitize, submit, apply, receipt ─────────────────────

@@ -144,12 +144,18 @@ class TestAggregateBasisTicks:
         assert ps._first_rule_fact(
             "GeneralLiability_GeneralAggregate_LimitAmount_A") == "gl_aggregate"
 
-    def test_the_other_description_box_keeps_its_route(self):
-        """Deliberately unchanged. Re-routing this /Tx box would ASK gap fill
-        about a box that today ships blank (the D2 type guard refuses the
-        amount), which is a stamping change, not a comparison fix."""
-        assert ps._first_rule_fact(
-            "GeneralLiability_GeneralAggregate_LimitAppliesToCode_A") == "gl_aggregate"
+    def test_the_other_description_box_is_an_owned_blank_not_the_amount(self):
+        """24 Sep 2026 - this used to pin the box ON the aggregate's route, so
+        as not to ASK gap fill about a box that ships blank. The route itself
+        was the defect: Pass 1 wrote "$2,000,000" into it, a guard erased it,
+        gap fill was asked anyway, and a real entry drew "shows PER PROJECT but
+        the source value is $2,000,000". The concern is kept - the box is now
+        an OWNED blank, so gap fill is never asked - and the amount route is
+        gone, so Field QA has nothing to compare it with."""
+        box = "GeneralLiability_GeneralAggregate_LimitAppliesToCode_A"
+        assert ps._first_rule_fact(box) is None
+        assert ps._resolve_gl_aggregate_other_basis(box, {"_form_id": "ACORD_126"}) is None
+        assert ps._is_authoritative_blank_field(box, {"_form_id": "ACORD_126"})
 
     @pytest.mark.parametrize("field", _BASIS_TICKS)
     def test_stamping_is_unchanged(self, field):

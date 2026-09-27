@@ -597,9 +597,17 @@ def test_auto_below_minimum_has_cross_form_warning_parity_with_gl():
 
 
 def test_followform_review_item_survives_full_top_recs():
-    # §6.5 item 5: the follow-form gap must never be silently dropped. When the
-    # 3-item top_recs cap is already full of higher-priority hard stops, the
-    # follow-form review item must still be carried in the review_items array.
+    # §6.5 item 5: the follow-form gap must never be silently dropped. It is not
+    # a top_recs row - it lives in the dedicated review_items array - and that
+    # must hold however the recommendation list is built.
+    #
+    # THE `== 3` ASSERTION WENT ON 2026-09-23. top_recs no longer caps at three:
+    # the cap hid real points (a package with four weak pillars showed three, and
+    # on a live session Exposure was worth 5.3 points and got no row anywhere),
+    # so every pillar short of 100 is now listed, ranked by what it is worth.
+    # The count was incidental to this test; what it actually guards - that the
+    # follow-form item is carried in review_items and is NOT a top_recs row - is
+    # asserted below and is unchanged.
     facts = {
         "umbrella_limit": "5000000",
         "gl_limits": "1000000", "auto_liability_limit": "1000000",
@@ -611,8 +619,8 @@ def test_followform_review_item_survives_full_top_recs():
         hard_stops=["Hard stop A", "Hard stop B", "Hard stop C"],
         soft_stops=[], session_data={},
     )
-    assert len(result["top_recommendations"]) == 3
-    # Crowded out of the capped list...
+    assert result["top_recommendations"], "the list must not be empty"
+    # Never a top_recs row, whatever the list length...
     assert not any(r.get("review_item") for r in result["top_recommendations"])
     # ...but never lost: still present in the dedicated review_items array.
     assert any(

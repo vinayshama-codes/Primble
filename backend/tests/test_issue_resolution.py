@@ -159,9 +159,28 @@ def test_non_typeable_legacy_stops_never_get_a_typed_input():
     Since 2026-08-08 these rules carry an honest `none`-mode review NOTE instead
     of no resolution at all - the modal shows the reason it can't be typed here
     rather than looking like the fix feature skipped the row. The contract that
-    matters is unchanged and asserted below: never `field`, never `schedule`."""
+    matters is unchanged and asserted below: never `field`, never `schedule`.
+
+    "GL coverage detected but no class codes found" LEFT this list on
+    2026-09-22, for the same reason "Split liability limits incomplete" left it
+    on 2026-08-26: the premise in the first paragraph above ("a class-code
+    schedule with no live capture table") stopped being true. It is not about a
+    capture table at all - `services/answer_routing.py`, the ONE DOOR for "can a
+    human answer this?", returns `{"mode": "field"}` for
+    `gl_class_codes_by_location` whenever it is empty, which is exactly when the
+    rule fires, and the ARQ producer questionnaire has been asking for that same
+    fact as a text question all along. Keeping it `none` meant the rule could
+    never be satisfied - no ACORD field writes back to either GL class-code
+    fact, "Mark resolved" is work-tracking that never touches a score, and a
+    Dismiss credit is clamped straight back under the same ceiling - so a GL
+    package whose documents print no class codes sat at SOFT_STOP_CAP (85)
+    permanently. Reported live on the Orbin package. Pinned now by
+    tests/test_legacy_rules.py::test_gl_class_codes_can_actually_be_answered.
+
+    The Monopolistic WC row stays: its fix is the PLACEMENT (state fund vs
+    private carrier), and the one door agrees that neither backing key is
+    writable."""
     for msg in [
-        "GL coverage detected but no class codes found. Fix: ...",
         "Monopolistic WC state (ND/OH/WA/WY) requires the state fund.",
     ]:
         res = make_issue("legacy_soft_0", "soft_warning", msg).get("resolution")

@@ -15,7 +15,52 @@ evidence tests, or anything that stamps a carrier / NAIC / policy number.
 | 7 | No ACORD 137 for Colorado auto | not a defect - the rule fires, it sits in "Needs Confirmation" |
 | 11 | Re-asked for the Subaru, "Driver 25" | already fixed by BUG-07 (8 Sep). Only "confirm what we found" is missing |
 
-### Status - AFTER ROUND 6 (14 Sep) - offline-verified, awaiting live run 4
+### Status - AFTER ROUND 9 (24 Sep) - the client's 22 Sep re-test, fixed offline, awaiting the retest-kit live run
+
+**The client re-tested on 22 Sep and most items failed. The earlier "FIXED +
+LIVE-VERIFIED" rows below were true of OUR kits and wrong about the client's
+package.** Rounds 1-8 were pushed (5a263e1, 16 Sep -> 42a092a, 18 Sep, branch
+`ready-for-deployment-V1`, in sync with origin), so the client tested code that
+contained them. They did not hold for three reasons, all fixed in round 9:
+
+1. **Our fixtures were cleaner than the client's documents.** The real
+   certificate's OCR runs words together (`EMCProperty&CasualtyCompany`,
+   `ForInformationalPurposesOnly`,
+   `Note:ReducedUmbrellaLimitfrom$3,000,000to$1,000,000LimitEffective7/25/25.`);
+   every identity key, the party test and the umbrella reader were written
+   against spaced text. EMC prints its OWN form numbers (`CU7001A 11-15`,
+   `CA7450 M`, `CA7000A 02-22`) and the detector knew only ISO / AAIS shapes.
+2. **Production runs async and the async path had no line scoping.**
+   `render.yaml` sets `ENABLE_ASYNC_PROCESSING=true`; `worker.py` gave each
+   form its own unscoped whole-document gap fill, so every line-scope fix
+   (item 6) existed only on the synchronous route we tested.
+3. **Consumers answered "which lines does this package carry?" on their own.**
+   The stamped boxes used the evidence; the cover page, session list, EPIC /
+   Vertafore export, 125 LOB ticks, 131 coverage ticks, Data Consistency and
+   the building-value hard stop / 409 generation block read the raw list.
+
+| # | Item | Round 9 root cause | State |
+|---|---|---|---|
+| **1** | Carrier / NAIC / policy per line | run-together certificate names keyed as different companies; "Co." and "Company" fell into different carrier families | **FIXED offline** - one entity door (`normalization.entity_compact_key` / `same_entity_name`), glued names re-spaced for print |
+| **2** | Phantom coverages | endorsement-menu rows and "No Coverage" lines counted as carried by consumers that read the raw list | **FIXED offline** - one carried-lines door (`lob_canon.evidenced_line_families` / `line_is_carried` / `fact_line_family`), `carried_lines` persisted |
+| **3** | Form number as policy number | detector ISO-only; the account number had no label check; the 125 Q4 list had been blanked | **FIXED offline** - one door `normalization.is_not_a_policy_number` (ISO / AAIS / carrier edition / edition-letter forms + the dec entries' labels). Q4 list restored (owner) |
+| **4** | Expiring vs submitting producer | document-first: the narrative naming the CURRENT broker made it the "submitting" agency under the new agency's login | **FIXED offline** - the login outranks a document; its e-mail / phone fill the block; an unreadable login never prints the incumbent |
+| **5** | Bad comparisons ($2M vs a Y/N box, Claims-Made vs a form title) | the Data Consistency card compared values of different KINDS | **FIXED offline** - kind gate; the aggregate OTHER-basis box is an owned blank |
+| **6** | Cross-line codes | the async worker (production) bypassed line scoping | **FIXED offline** - one generation door `form_service.shared_gap_fill` (sync, worker, add-form); zone / OTHER-description guards |
+| **7** | ACORD 137 CO | offered under Needs Confirmation, never ticked | **FIXED offline** - ticked with 127 (owner), label kept; advisory + one-click Add if 127 is generated without it |
+| **8** | "For Informational Purposes Only" as a party | the rosters were never judged; human answers skipped the entity test; the glued phrase read as one word | **FIXED offline** - rosters judged, answers refused (`not_a_party`), glued text split |
+| **9** | Umbrella $3M -> $1M | the run-together remark was unreadable; "to"-only / "from"-only phrasings unread | **FIXED offline** - the reader re-spaces glued prose; with no dated sentence it stays a conflict (owner) and the card suggests what the forms print (D16) |
+| **10** | Comparison guardrails | no kind, line or period gate on the card; the line restriction read a loss run as a witness | **FIXED offline** - kind, line-relevance and term gates; one role door for line printings |
+| **11** | Re-asked for what the policy states | vehicle rows folded only on exact equality; a missed vehicle was never rebuilt; garaging unread; confirm items not pre-ticked | **FIXED offline** - containment fold, VIN-line rebuild, LOC-line garaging, confirm items pre-ticked |
+
+**Awaiting:** one more fresh 3-document live run of `orbin_retest_kit/`
+(`README-HOW-TO-TEST.md`, rows A-P), then the client. The kit has been run live
+twice since round 9 (rounds 10 and 11 at the end of this file). On the FORMS every
+item above held on both runs (run 1 had one item-4 leak, fixed in round 10); the
+pre-form screen (Data Consistency, warnings) was graded on run 1 only. Each run's new
+findings were fixed. Detail: "Round 9".
+
+### Status - AFTER ROUND 6 (14 Sep) - SUPERSEDED by round 9 above (the "LIVE-VERIFIED" rows were verified on our kit, not the client's package)
 
 **10 of 11 client items fixed; 1 is not a defect.** Item 9 left "parked" on
 14 Sep (round 6, owner's go-ahead). Three live runs, each verifying the last
@@ -1944,3 +1989,68 @@ Full entry: `v1-20AUG.md` "ORBIN live run 10". Short version:
 - 125 Q4 "other insurance with this company" is blank until the receiving carrier is known.
 - 126 OTHER limit row: only a limit the GL declarations print with no box of its own - never the GL deductible, never gap fill.
 - Cover POLICY PERIOD "To be confirmed (current term ...)"; the other-named-insured rows no longer listed as "left blank by the AI".
+
+# Round 9 - the client's 22 Sep re-test (2026-09-24)
+Full entry: `v1-20AUG.md` "ORBIN client re-test". Short version:
+- The client re-tested code that CONTAINED rounds 1-8 (pushed 16-18 Sep) and most items failed. Three causes: our
+  kits were cleaner than the client's documents (run-together certificate text, EMC's own form numbers);
+  production runs async and `worker.py` had no line scoping; "which lines are carried" had one right answer and
+  many readers. The "LIVE-VERIFIED" rows in the round 6 status were verified on our kit, not the client's package.
+- One door each: entity identity (`normalization.entity_compact_key`), carried lines (`lob_canon.line_is_carried`),
+  form numbers (`normalization.is_not_a_policy_number`), generation (`form_service.shared_gap_fill` - sync, worker,
+  add-form, both essentials paths; an AST test fails on any call that skips it).
+- Producer: the login outranks a document; an unreadable login never prints the incumbent. Umbrella: the
+  run-together remark is read; no dated sentence stays a conflict whose suggestion is what the forms print (D16).
+  137 ticked with 127 (owner). 125 Q4 list restored (owner, reverses round 8). Vehicles folded by containment,
+  rebuilt from VIN lines, garaging from the LOC line; confirm items pre-ticked.
+- Kit: `orbin_retest_kit/` (3 PDFs from the client's own OCR shapes) - the live run is the next step.
+- D6: 0 of 11 panel packages moved; the client's stored session 85 -> 85.
+- Not done: "FIO" initialisms; a prefix-less policy number (`7263-26`) is still a GL card; 131 garagekeepers /
+  watercraft / aircraft boxes and 137's hired PD deductible still from gap fill; ACORD 160 label.
+- Tests: `tests/test_client_retest_24sep.py` (149). Suite 9905 passed / 1 failed (httpx) / 19 skipped;
+  baseline 9755 / 1 / 19, zero regressions.
+
+# Round 10 - the owner's live run of the retest kit (2026-09-24, evening)
+Full entry: `v1-20AUG.md` "Round 2 - the owner's live run of the retest kit". Short version:
+- The 11 client items held on the forms, except the old broker's AGENT NO. (W6258-0001)
+  printed as ACORD 186's contractor licence (item 4). Ten more wrong values were found by
+  grading every box against the kit.
+- Each cause was confirmed on the stored session (owner-authorised, read-only), each fix
+  replayed through it: of 2,057 fields on six forms, 19 changed - all intended, 0 others.
+- Fixed: producer identifiers stay in the producer block (125 CODE/SUBCODE included);
+  186 subcontractor-minimum boxes are owned blanks; no stated amount beside ACV; COST NEW
+  and USE read off the vehicle's own block; 127 symbol columns blank (owner decision);
+  "ACORD 129 attached" only on overflow; the GL deductible goes to the box its own line
+  names; one question, one answer across forms; "um" no longer matches "UMbrella" and
+  the 137 grid never prints a known symbol as "Other"; the applicant's own description
+  outranks the dec's truncated field; an ended term is "expired" on the cover; the
+  "Renewal" chip follows the fact.
+- Not changed: 126's hold-harmless "Y" from "written subcontract agreements." - the
+  evidence-gate residual; highlighted for the producer.
+- Kit README gained 15 rows (D9, E8-E9, F8-F12, G7-G8, H5, P1-P4, L4-L5, A6) and log greps.
+- Tests: `tests/test_orbin_live_run_24sep.py` (92), fixture `tests/fixtures/orbin_live_24sep.json`.
+  Suite 10,002 passed / 1 failed (httpx) / 19 skipped.
+
+# Round 11 - the owner's second live run of the retest kit (2026-09-25)
+Full entry: `v1-20AUG.md` "Round 3 - the owner's second live run of the kit". Short version:
+- Round 10 held on every form. Five new wrong values, each traced on the stored session
+  (5ca5cff5, owner's own test session, read-only).
+- **Three AI "Yes" answers on borrowed sentences** (125 flammables = the business
+  description; 126 vendors and 131 "subs carry LESS" = the subcontractor sentence). The
+  evidence judge rejects the first two six times out of six when it is reached; it made
+  one attempt per form behind the gap-fill burst, and a failed call left every Yes
+  standing. Now it retries on the TPM schedule, a Yes it was reachable for and did not
+  confirm is blanked, prompt rule 7 stops "same subject" passing for "same condition", and
+  batches are 5 (improving-ll.md C97). This also covers round 10's hold-harmless residual
+  (rejected 7 of 8 in production-size batches).
+- 127 USE: OTHER "PRIVATE PASSENGER" beside "USE: NA" - the evidence gate's rescue ticked a
+  box a resolver keeps blank. The rescue never does that now; the description has an owner.
+- 186 answered a "* DO NOT ANSWER IF ATTACHED TO ACORD 126" question - nine owned blanks
+  when the 126 is in the package, the set read off the printed form.
+- 125 / 131 one-line operations descriptions print their first sentence legibly instead
+  of a clipped 3.5pt paragraph.
+- Not defects: 125 VEHICLE SCHEDULE (client's own "do not regress"); 137 non-owned
+  EMPLOYEES (the dec rates on employee count).
+- Kit README gained D10, D11, E10, E11, P5, I4 and a sharper F10 / G8.
+- Tests: `tests/test_orbin_live_run2_25sep.py` (73), fixture `tests/fixtures/orbin_live_25sep.json`.
+  Suite 10,075 passed / 1 failed (the pre-existing `test_arq_acord125_missing_only`) / 19 skipped.

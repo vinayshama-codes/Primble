@@ -109,8 +109,15 @@ def test_no_audit_term_means_an_owned_blank():
 
 def test_a_stated_audit_term_still_stamps():
     """Fact-or-blank, not blank-always. A guard that swallows real data is a
-    worse bug than the one it fixes."""
-    assert ps._resolve_audit_frequency(_AUDIT, {"audit_period": "Annual"}) == "Annual"
+    worse bug than the one it fixes.
+
+    UPDATED 21 Sep 2026 (A125 kit): the subject of this test is that a STATED
+    term still stamps, and it still does. What changed is the VALUE - ACORD's
+    own tooltip for this box reads "Enter code: ... A - annual, S - semi-annual,
+    Q - Quarterly, M - Monthly, O - Other". A document prints the word; the box
+    takes the letter, and the live run printed `Annual` into a code box. The
+    assertion below was incidental to this test's purpose and was wrong."""
+    assert ps._resolve_audit_frequency(_AUDIT, {"audit_period": "Annual"}) == "A"
 
 
 def test_the_audit_box_never_reaches_gap_fill():
@@ -133,7 +140,7 @@ def test_it_claims_no_other_box_in_that_row():
     # family: an audit term belongs to the policy, so if a form ever prints the
     # box on a second row it is the same answer, not a new question.
     assert ps._resolve_audit_frequency(
-        "Policy_Audit_FrequencyCode_B", {"audit_period": "Annual"}) == "Annual"
+        "Policy_Audit_FrequencyCode_B", {"audit_period": "Annual"}) == "A"
 
 
 # ── 3. A party fact that is an exact COPY of another party's ────────────────

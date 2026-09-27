@@ -849,8 +849,10 @@ def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optiona
         try:
             from services.fact_comparison import _fe as _door
             if _door.value_kind(fact_key or "") == _door.KIND_NAME:
-                from services.normalization import strict_entity_key
-                return strict_entity_key(value) or None
+                # Compact key: a printing OCR glued ("EMCProperty&Casualty
+                # Company") groups with its own spaced printing, not as a rival.
+                from services.normalization import entity_compact_key
+                return entity_compact_key(value) or None
         except Exception:                                     # noqa: BLE001
             pass
         norm = normalize_value(fact_key or "", value)
@@ -1464,6 +1466,123 @@ def _drop_values_outside_declared_domain(fact_key: str,
     return folded
 
 
+# ── A VALUE OF ANOTHER KIND IS NOT A RIVAL ANSWER (24 Sep 2026) ─────────────
+# Client 11 Sep item 10, repeated 22 Sep: "boolean vs dollar amount ... values
+# should only be compared when they represent the same field." The domain
+# check above reads CLOSED option lists only (by design - SYS-07 owns open
+# Yes/No vocabulary), so an auto-discovered Yes/No fact still compared:
+#   is_renewal            "true"  vs  "Renewal of BBC7263 - 25"
+#   hired_auto_indicator  "true"  vs  "$1,000,000"
+#   umbrella_follow_form  "Yes"   vs  a form reference
+# Three outcomes, never a fourth:
+#   * SAME ANSWER  - a sentence that names the fact's OWN concept is the
+#     document's Yes ("Renewal of ..." for is_renewal), or its No when it
+#     carries a negation cue. It MERGES with that answer; it never rivals it.
+#   * OFF-TYPE     - an amount, a date or a policy / form number printed in a
+#     Yes/No fact, or a bare Yes/No printed in an amount or date fact. Dropped.
+#   * UNCLEAR      - kept exactly as today, so a genuine "Yes" vs "No coverage
+#     for hired autos" still conflicts.
+# Never empties the field (the rule every filter in this chain follows).
+_KIND_NEGATION_RE = re.compile(
+    r"\b(?:not|no|none|never|without|excluded|exclude|declined|denied)\b", re.I)
+_KIND_MONEY_RE = re.compile(r"\$\s*\d|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b")
+
+
+def _concept_stems(fact_key: str) -> List[str]:
+    """The words a Yes/No fact is ABOUT, from its own key: is_renewal ->
+    [renew]; hired_auto_indicator -> [hire, auto]."""
+    k = str(fact_key or "").strip().lower()
+    k = re.sub(r"^(?:is|has|was|does|did)_", "", k)
+    k = re.sub(r"_(?:indicator|flag|yn|y_n|answer|code)$", "", k)
+    words = [w for w in k.split("_") if len(w) >= 3]
+    return [w[:max(4, len(w) - 2)] for w in words]
+
+
+def _kind_reading(fact_key: str, kind: str, text: str) -> Optional[str]:
+    """"Y" / "N" (a Yes/No answer), "off" (another kind), or None (unclear)."""
+    s = str(text or "").strip()
+    if not s:
+        return None
+    low = s.lower().strip(" .")
+    try:
+        from services.fact_equivalence import KIND_YESNO, KIND_MONEY, KIND_DATE, KIND_COUNT, KIND_PERCENT
+    except Exception:                                         # noqa: BLE001
+        return None
+    if kind == KIND_YESNO:
+        try:
+            from services.normalization import yes_no_answer, looks_like_a_form_number, normalize_date
+            yn = yes_no_answer(s)
+        except Exception:                                     # noqa: BLE001
+            return None
+        if yn in ("Y", "N"):
+            return yn
+        stems = _concept_stems(fact_key)
+        toks = re.findall(r"[a-z]+", low)
+        if stems and all(any(t.startswith(st) for t in toks) for st in stems):
+            return "N" if _KIND_NEGATION_RE.search(low) else "Y"
+        if (_KIND_MONEY_RE.search(s) or looks_like_a_form_number(s)
+                or (normalize_date(s) and not re.search(r"[a-z]{4,}", low))):
+            return "off"
+        return None
+    if kind in (KIND_MONEY, KIND_COUNT, KIND_PERCENT, KIND_DATE):
+        # The ONE Yes/No vocabulary (`normalization`) - an unambiguous boolean
+        # word printed in an amount or date fact is another kind of value.
+        try:
+            from services.normalization import is_strong_yes_no_word
+            return "off" if is_strong_yes_no_word(s) else None
+        except Exception:                                     # noqa: BLE001
+            return None
+    return None
+
+
+def _drop_values_of_another_kind(fact_key: str, values: List[dict]) -> List[dict]:
+    """See the block comment above. Operates on candidate GROUPS
+    ({normalized, display, sources:[{raw}]}), the shape the engine builds."""
+    if len(values) < 2:
+        return values
+    try:
+        from services.fact_equivalence import value_kind, KIND_YESNO
+        kind = value_kind(fact_key)
+    except Exception:                                         # noqa: BLE001
+        return values
+
+    def _printings(g) -> List[str]:
+        out = [g.get("display")] + [src.get("raw") for src in (g.get("sources") or [])
+                                    if isinstance(src, dict)]
+        return [str(x) for x in out if str(x or "").strip()]
+
+    readings = []
+    for g in values:
+        rs = {_kind_reading(fact_key, kind, p) for p in _printings(g)} - {None}
+        readings.append(rs)
+    keep = [g for g, rs in zip(values, readings) if rs != {"off"}]
+    if not keep:
+        return values
+    if kind != KIND_YESNO:
+        return keep if len(keep) != len(values) else values
+    # Merge groups that give the SAME Yes/No answer - one answer, two printings.
+    merged: List[dict] = []
+    by_answer: Dict[str, dict] = {}
+    for g in keep:
+        rs = readings[values.index(g)] - {"off"}
+        if len(rs) != 1:
+            merged.append(g)
+            continue
+        ans = next(iter(rs))
+        if ans in by_answer:
+            host = by_answer[ans]
+            host["sources"] = list(host.get("sources") or []) + list(g.get("sources") or [])
+            continue
+        host = dict(g)
+        by_answer[ans] = host
+        merged.append(host)
+    if len(merged) != len(values):
+        logger.info("underwriting: %s - %d candidate(s) of another kind or the same "
+                    "Yes/No answer folded (%s)", fact_key, len(values) - len(merged),
+                    "; ".join(str(g.get("display"))[:30] for g in values))
+    return merged
+
+
 def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
                                    context=None) -> List[dict]:
     """Collapse value groups that are the SAME underlying fact.
@@ -1517,7 +1636,7 @@ def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
 # prints $1,000,000 as the GL Each Occurrence limit, and the $3M-vs-$1M
 # umbrella conflict (the one the client praised) was scoped into silence.
 # Identifiers, carrier names and dates do not collide that way; amounts do.
-def _is_form_number_policy_value(fact_key: Any, value: Any) -> bool:
+def _is_form_number_policy_value(fact_key: Any, value: Any, entries: Any = None) -> bool:
     """True when a POLICY-NUMBER fact holds an ISO/AAIS FORM number.
 
     Orbin, 14 Sep 2026: the card's only two "Policy Number" candidates were
@@ -1529,11 +1648,22 @@ def _is_form_number_policy_value(fact_key: Any, value: Any) -> bool:
     key = str(fact_key or "").strip().lower()
     if not (key == "policy_number" or key.endswith("_policy_number")):
         return False
+    if not isinstance(value, str):
+        return False
+    # ``entries`` (a document's declarations index) lets its own labels decide
+    # the edge cases: printed under POLICY NUMBER it is a contract whatever its
+    # shape; printed under ACCOUNT NUMBER it is no policy at all (24 Sep 2026 -
+    # Orbin's "0482854" was a fifth "policy" on this card).
+    try:
+        from services.normalization import is_not_a_policy_number
+        return is_not_a_policy_number(value, entries)
+    except Exception:                                         # noqa: BLE001
+        pass
     try:
         from services.extraction_service import _looks_like_a_form_number
     except Exception:                                         # noqa: BLE001
         return False
-    return isinstance(value, str) and _looks_like_a_form_number(value)
+    return _looks_like_a_form_number(value)
 
 
 def usable_confirmations(confirmations: Optional[dict]) -> dict:
@@ -1620,8 +1750,14 @@ def _drop_unknown_form_references(fact_key: str, values: List[dict],
             return any(identifiers_match(p, c) or same_policy_contract(p, c)
                        for c in contracts)
 
+        try:
+            from services.normalization import looks_like_a_form_number as _form_shape
+        except Exception:                                     # noqa: BLE001
+            def _form_shape(v):                               # type: ignore
+                return bool(_FORM_REFERENCE_RE.match(str(v).strip()))
         keep = [g for g in values
-                if any(_known(p) or not _FORM_REFERENCE_RE.match(p.strip())
+                if any(_known(p) or not (_FORM_REFERENCE_RE.match(p.strip())
+                                         or _form_shape(p))
                        for p in _printings(g))]
         if not keep or len(keep) == len(values):
             return values
@@ -1787,6 +1923,12 @@ def _printings_by_line(fact_key: str, docs: Optional[List[dict]]) -> Dict[str, s
     Read from each document's OWN `coverage_lines`, not the merged list, so it
     survives a line-scoped confirmation having already rewritten the merged
     row - which is exactly when it is needed.
+
+    Only a document whose ROLE witnesses the line schedule and this fact is
+    read - the role door every other comparison here uses (24 Sep 2026). A
+    loss run lists the policy each CLAIM sat under ("6E7 40 02 26" on its
+    General Liability row); read as a line's printing, it put the AUTO number
+    on the "Confirm for general liab" card and made it the suggested answer.
     """
     out: Dict[str, set] = {}
     column = _LINE_SCOPED_FACT_COLUMN.get(fact_key)
@@ -1794,9 +1936,13 @@ def _printings_by_line(fact_key: str, docs: Optional[List[dict]]) -> Dict[str, s
         return out
     try:
         from services.extraction_service import _canon_line
+        from services.fact_comparison import document_witnesses
     except Exception:                                         # noqa: BLE001
         return out
     for d in docs or []:
+        if not (document_witnesses(d.get("doc_type"), "coverage_lines")
+                and document_witnesses(d.get("doc_type"), fact_key)):
+            continue
         for row in (_fv(d.get("facts") or {}, "coverage_lines") or []):
             if not isinstance(row, dict):
                 continue
@@ -2420,10 +2566,19 @@ def _producer_block_separated(merged_facts: Optional[dict]) -> bool:
     return same_agency(current, expiring) is False
 
 
+# Policy-term dates and the document roles that state the term APPLIED FOR
+# (see the one-term-per-card rule inside `assess_underwriting_consistency`).
+_POLICY_TERM_DATE_FACTS = frozenset({"effective_date", "expiration_date"})
+_PROPOSED_TERM_ROLES = frozenset({
+    "application", "supplemental", "quote", "narrative", "acord_form",
+    "submission", "proposal"})
+
+
 def assess_underwriting_consistency(
     docs: List[dict],
     merged_facts: Optional[dict] = None,
     confirmations: Optional[dict] = None,
+    flags: Optional[dict] = None,
 ) -> dict:
     """Assess cross-document consistency of the reconcilable underwriting fields.
 
@@ -2538,7 +2693,34 @@ def assess_underwriting_consistency(
     # able to put back. The key stays ASSESSED so `detect_source_conflicts`,
     # which skips exactly the keys assessed here, does not re-report it.
     _producer_separated = _producer_block_separated(merged_facts)
+    # ── A fact of a line the package does not carry is never compared ────────
+    # Client 11 Sep item 10: "values should only be compared when they
+    # represent the same field, same LOB/policy and applicable time period."
+    # Orbin carries no property coverage (the declarations print "Property -
+    # No Coverage"), yet two documents' building-value mentions raised a
+    # "Building value differs" card that capped the package at 60 AND refused
+    # to generate forms (409) until the producer picked between two numbers
+    # that describe no policy. The line comes from the fact's own key
+    # (`lob_canon.fact_line_family`) and "carried" from the cover page's own
+    # evidence door; only a DECISIVE not-carried skips - no evidence either
+    # way (None) keeps today's comparison. The key stays ASSESSED so
+    # `detect_source_conflicts` does not re-report it.
+    try:
+        from services.lob_canon import fact_line_family as _fact_line, line_is_carried as _carried
+        _flags_for_lines = flags if isinstance(flags, dict) else (merged_facts.get("_flags") or {})
+    except Exception:                                         # noqa: BLE001
+        _fact_line = None
     for fact_key, cfg in effective_fields.items():
+        if _fact_line is not None:
+            try:
+                _fam = _fact_line(fact_key)
+                if _fam and _carried(_fam, merged_facts, _flags_for_lines) is False:
+                    assessed_keys.add(fact_key)
+                    logger.info("underwriting: %s not compared - the package "
+                                "carries no %s line", fact_key, _fam)
+                    continue
+            except Exception:                                 # noqa: BLE001
+                pass
         kind = cfg["kind"]
         label = cfg["label"]
         is_auto = bool(cfg.get("_auto"))
@@ -2556,11 +2738,26 @@ def assess_underwriting_consistency(
         # distinct in the UI from confirmed LLM-extracted values.
         groups: Dict[str, dict] = {}
 
+        # ONE POLICY TERM PER CARD (24 Sep 2026, client item 10 "applicable
+        # time period"): the policy's own dates on declarations / certificates
+        # are the CURRENT term; an application / quote / narrative states the
+        # term APPLIED FOR. When current-term documents state the date, the
+        # proposed-term printing is a different period, not a rival - the same
+        # rule `sqs_service.check_doc_consistency` applies to its date stop.
+        _skip_proposed_term = False
+        if fact_key in _POLICY_TERM_DATE_FACTS:
+            _skip_proposed_term = any(
+                str(_d.get("doc_type") or "").strip().lower() not in _PROPOSED_TERM_ROLES
+                and _door_witnesses(_d.get("doc_type") or "unknown", fact_key)
+                and _fv(_d.get("facts") or {}, fact_key)
+                for _d in docs)
         for idx, d in enumerate(docs):
             dt = d.get("doc_type") or "unknown"
             doc_id   = str(d.get("doc_id") or idx)
             filename = d.get("filename") or f"document_{idx + 1}"
             dt_label = DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title())
+            if _skip_proposed_term and str(dt).strip().lower() in _PROPOSED_TERM_ROLES:
+                continue
 
             # Pass 1: LLM-extracted fact value.
             # A document only testifies about what its ROLE covers (client 1.2).
@@ -2581,7 +2778,8 @@ def assess_underwriting_consistency(
                 continue
             # A FORM number is never a candidate policy number (see
             # `_is_form_number_policy_value`) - not from the scalar, not from a row.
-            if _is_form_number_policy_value(fact_key, raw):
+            if _is_form_number_policy_value(
+                    fact_key, raw, _fv(d.get("facts") or {}, "dec_page_entries")):
                 raw = None
             llm_norm = None
             if raw is not None:
@@ -2621,7 +2819,8 @@ def assess_underwriting_consistency(
                     if not isinstance(_ln, dict):
                         continue
                     _lv = _ln.get(_line_attr)
-                    if _is_form_number_policy_value(fact_key, _lv):
+                    if _is_form_number_policy_value(
+                            fact_key, _lv, _fv(d.get("facts") or {}, "dec_page_entries")):
                         continue
                     _ln_norm = _normalize(_lv, kind, fact_key) if _lv else None
                     if not _ln_norm:
@@ -2733,7 +2932,7 @@ def assess_underwriting_consistency(
                 # one inside a function body (fixed 2026-08-23).
                 from services.fact_comparison import entities_materially_differ
                 from services.normalization import (
-                    strict_entity_key, NAME_FIELDS, CARRIER_FIELDS,
+                    entity_compact_key, NAME_FIELDS, CARRIER_FIELDS,
                 )
                 _is_entity_field = (
                     fact_key in NAME_FIELDS or fact_key in CARRIER_FIELDS
@@ -2745,7 +2944,7 @@ def assess_underwriting_consistency(
                         _regrouped: Dict[str, dict] = {}
                         for g in groups.values():
                             for s in g["sources"]:
-                                sk = strict_entity_key(s["raw"]) or g["normalized"]
+                                sk = entity_compact_key(s["raw"]) or g["normalized"]
                                 ng = _regrouped.setdefault(
                                     sk, {"normalized": sk,
                                          "display": s["raw"], "sources": []})
@@ -2792,6 +2991,9 @@ def assess_underwriting_consistency(
         values = _drop_class_exposure_candidates(fact_key, values, merged_facts)
         # A value that is not legal FOR THIS FIELD is not a rival answer.
         values = _drop_values_outside_declared_domain(fact_key, values)
+        # Nor is a value of another KIND - an amount in a Yes/No fact, or a
+        # sentence that is the document's own way of saying the same Yes.
+        values = _drop_values_of_another_kind(fact_key, values)
         # Nor is a form reference no verified contract names, offered as a
         # policy number (see `_FORM_REFERENCE_RE` - both conditions).
         values = _drop_unknown_form_references(fact_key, values, merged_facts, docs)
@@ -2954,6 +3156,23 @@ def assess_underwriting_consistency(
         # no suggestion. ``preselect`` is True only for HIGH confidence on a
         # non-hard-stop field (the frontend pre-checks that radio).
         suggestion = _suggest_for_field(fact_key, kind, values) if status == "conflict" else None
+        # D16 (Brent, 2026-08-21): an unresolved conflict STAMPS the suggested
+        # value. For an AMOUNT the card ranked by document count while the merge
+        # stamped by document authority, so the Orbin umbrella read "Suggested
+        # $1,000,000" beside forms printing $3,000,000 (24 Sep 2026 audit). The
+        # badge now names what the forms actually print - the declarations'
+        # own figure when it is one of the candidates - so the card and the
+        # form cannot disagree; the producer still confirms either value.
+        if status == "conflict" and kind == "currency":
+            try:
+                _stamped = _normalize(_fv(merged_facts, fact_key), kind, fact_key)
+                _host = next((g for g in values if g.get("normalized") == _stamped), None)
+                if _host is not None and (suggestion is None
+                                          or suggestion.get("normalized") != _stamped):
+                    suggestion = {"value": _host.get("display"), "normalized": _stamped,
+                                  "confidence": "medium", "preselect": False}
+            except Exception:                                 # noqa: BLE001
+                pass
 
         # ── What the submission's own remarks say about this disagreement ────
         # Client 2026-08-17: "A paragraph containing policy numbers, dates,
@@ -3308,7 +3527,7 @@ def _apply_scoped_confirmations(out: dict, scoped: List[Tuple[str, str, str]]) -
             # stands behind it is unknown. With two companies on the line,
             # neither may be printed beside it.
             try:
-                from services.normalization import strict_entity_key as _ek
+                from services.normalization import entity_compact_key as _ek
             except Exception:                                 # noqa: BLE001
                 def _ek(v):                                   # type: ignore
                     return str(v or "").strip().lower()
@@ -3468,7 +3687,10 @@ def validate_confirmation(fact_key: str, value: Any, docs: Optional[List[dict]] 
         raise ValueError("underwriting_unknown_field")
     if value is None or str(value).strip() == "":
         raise ValueError("underwriting_empty_value")
-    if _is_form_number_policy_value(fact_key, str(value).strip()):
+    _all_entries = [e for d in (docs or []) if isinstance(d, dict)
+                    for e in (_fv(d.get("facts") or {}, "dec_page_entries") or [])
+                    if isinstance(e, dict)]
+    if _is_form_number_policy_value(fact_key, str(value).strip(), _all_entries):
         raise ValueError("underwriting_invalid_value")
     kind = cfg["kind"]
     # A confirmed value must parse with the field's NATIVE normalizer (no text

@@ -115,10 +115,19 @@ def test_a_flag_is_never_turned_on():
     assert not any(flags.values())
 
 
-def test_a_flag_absent_from_the_dict_is_not_created():
+def test_an_absent_flag_records_the_declared_denial_as_false():
+    """24 Sep 2026 - this test used to pin the OPPOSITE ("an absent flag is not
+    created"). An explicit "Property - No Coverage" on the declarations is
+    positive evidence of absence; left unset, the flag read as SILENCE, so the
+    recommender offered ACORD 130 / 140 on the real Orbin text and the
+    carried-lines door lost its veto. It is still downgrade-only: every created
+    flag is False, and a line the page does not deny is never touched."""
     flags = {}
-    apply_declared_absent_downgrades(flags, {}, ORBIN_DECS)
-    assert flags == {}
+    changed = apply_declared_absent_downgrades(flags, {}, ORBIN_DECS)
+    assert set(changed) == {"has_property_coverage", "has_crime", "has_workers_comp"}
+    assert flags == {"has_property_coverage": False, "has_crime": False,
+                     "has_workers_comp": False}
+    assert not any(flags.values())
 
 
 def test_denial_phrases_exclude_the_dangerous_ones():
