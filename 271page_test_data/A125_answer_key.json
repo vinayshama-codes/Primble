@@ -6,11 +6,11 @@
   "built_by": "backend/scripts/make_a125_test_pdf.py",
   "fields_on_form": 548,
   "verdict_counts": {
-   "expect": 245,
+   "expect": 243,
    "blank_no_data": 233,
-   "blank_by_rule": 51,
+   "blank_by_rule": 52,
    "not_applicable": 8,
-   "not_scored": 11
+   "not_scored": 12
   },
   "absent_by_design": [
    "applicant website for the FIRST named insured (row B has one, row A does not)",
@@ -85,7 +85,7 @@
    "CommercialPolicy_FormalSafetyProgram_MonthlyMeetingsIndicator_B": "Y",
    "CommercialPolicy_OperationsDescription_A": "Licensed mechanical and structural contractor. Work comprises shop fabrication of piping assemblies and steel members at Location 002, followed by field erection and installation at customer premises. Service work covers planned maintenance, controls replacement and emergency repair of installed systems. No residential work, no demolition and no work at heights exceeding four storeys.",
    "CommercialPolicy_OperationsDescription_B": "Cedar Bluff Steel Fabricators, Inc. performs shop fabrication of structural steel members. Tualatin Valley Mechanical Services, LLC performs planned maintenance and emergency repair of installed mechanical systems at customer premises.",
-   "CommercialPolicy_RemarkText_A": "The applicant is under common control with Harbor Line Capital Partners, LLC. Location 005 is a seasonal lease and is included in values but carries no permanent staff.",
+   "CommercialPolicy_RemarkText_A": "The applicant is under common control with Harbor Line Capital Partners, LLC. Location 005 is a seasonal lease and is included in values but carries no permanent staff. Additional loss not shown in the loss grid: 06/08/2022 PG-2022-041266 Commercial Inland Marine Theft of portable welding units from an open job site paid $9,450 reserved $0.",
    "NamedInsured_FullName_A": "Meridian Ironworks & Mechanical, LLC",
    "NamedInsured_TaxIdentifier_A": "93-2841760",
    "NamedInsured_SICCode_A": "1711",
@@ -263,7 +263,6 @@
    "PriorCoverage_Automobile_TotalPremiumAmount_B": "$26,475",
    "PriorCoverage_Automobile_EffectiveDate_B": "10/01/2024",
    "PriorCoverage_Automobile_ExpirationDate_B": "10/01/2025",
-   "PriorCoverage_OtherLine_LineOfBusinessCode_A": "Commercial Umbrella",
    "PriorCoverage_OtherLine_InsurerFullName_A": "Sentinel Cascade Excess Indemnity Company",
    "PriorCoverage_OtherLine_PolicyNumberIdentifier_A": "XSU-9920415-25",
    "PriorCoverage_OtherLine_TotalPremiumAmount_A": "$12,880",
@@ -275,7 +274,6 @@
    "Subsidiary_ParentOwnershipPercent_B": "100%",
    "Subsidiary_ParentSubsidiaryRelationshipDescription_B": "Wholly owned steel fabrication subsidiary",
    "AdditionalInterest_FullName_A": "Ironbridge Capital Leasing Corporation",
-   "AdditionalInterest_FullName_B": "Vaughn Street Holdings LP",
    "AdditionalInterest_MailingAddress_LineOne_A": "900 SW 5th Ave",
    "AdditionalInterest_MailingAddress_LineTwo_A": "Suite 2100",
    "AdditionalInterest_MailingAddress_CityName_A": "Portland",
@@ -295,6 +293,7 @@
  },
  "must_be_blank": {
   "ACORD_125": [
+   "AdditionalInterest_FullName_B",
    "AdditionalInterest_InterestEndDate_A",
    "AdditionalInterest_Interest_AdditionalInsuredIndicator_A",
    "AdditionalInterest_Interest_BreachOfWarrantyIndicator_A",
@@ -2209,8 +2208,8 @@
   },
   "CommercialPolicy_RemarkText_A": {
    "verdict": "expect",
-   "value": "The applicant is under common control with Harbor Line Capital Partners, LLC. Location 005 is a seasonal lease and is included in values but carries no permanent staff.",
-   "why": "",
+   "value": "The applicant is under common control with Harbor Line Capital Partners, LLC. Location 005 is a seasonal lease and is included in values but carries no permanent staff. Additional loss not shown in the loss grid: 06/08/2022 PG-2022-041266 Commercial Inland Marine Theft of portable welding units from an open job site paid $9,450 reserved $0.",
+   "why": "the stated remark plus the overflowed fourth loss (lossless)",
    "trap": "",
    "match": "semantic"
   },
@@ -4196,9 +4195,9 @@
    "match": "exact"
   },
   "PriorCoverage_OtherLine_LineOfBusinessCode_A": {
-   "verdict": "expect",
-   "value": "Commercial Umbrella",
-   "why": "the only line without a dedicated column in year one, named as the document prints it",
+   "verdict": "not_scored",
+   "value": "",
+   "why": "ACORD wants a line-of-business CODE and no code table exists in the repo - open item, see improving125-21sep.md ROUND 2",
    "trap": "",
    "match": "exact"
   },
@@ -4462,10 +4461,10 @@
    "match": "exact"
   },
   "AdditionalInterest_FullName_B": {
-   "verdict": "expect",
-   "value": "Vaughn Street Holdings LP",
-   "why": "",
-   "trap": "",
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "ACORD tooltip: 'this is the name of the trust' - question 11 is N",
+   "trap": "must not be Vaughn Street Holdings LP - a second interest is not a trust",
    "match": "exact"
   },
   "AdditionalInterest_MailingAddress_LineOne_A": {

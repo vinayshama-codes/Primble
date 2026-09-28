@@ -1,7 +1,7 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
-import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel } from "../../utils/formatters";
+import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel, lineLabel } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
@@ -4852,6 +4852,8 @@ const AcordModal = forwardRef(function AcordModal({
     d => !d.excluded && ((d.doc_type || "unknown") === "unknown" || d.doc_type_confidence === "low")
   );
   const openConflicts = (underwriting?.fields || []).filter(f => f.status === "conflict");
+  // The package's line records, for naming a line by what the policy prints.
+  const dcLineRecords = (underwriting?.fields || []).map(f => f.line_records).find(r => (r || []).length) || [];
   const openItemCount = docsNeedingReview.length + openConflicts.length;
 
   // Workstream 6 §9.1 - what the Hard Stops / Warnings sections actually have to
@@ -7205,10 +7207,11 @@ const AcordModal = forwardRef(function AcordModal({
                 Sales plus identity/policy fields (name, FEIN, dates, entity type,
                 address, carrier) — with each document's value as a choice plus a
                 custom-value option. Consistent fields are silent (no action). */}
-            {/* Line-scoped values (one carrier / policy number / NAIC per policy)
-                are not shown (owner, 27 Sep 2026) - see ReviewRailLayout. The
-                backend keeps the line -> carrier -> policy relationship. */}
-            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "changed") && (
+            {/* A value the documents say CHANGED on a stated date (the umbrella
+                cut) is not shown (owner, 27 Sep 2026) - see ReviewRailLayout.
+                The backend keeps it: the forms print the current value and no
+                conflict is raised. */}
+            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped") && (
               <div ref={dcSectionRef} className="doc-summary review-section" style={{ marginTop: 12 }}>
                 <CollapsibleSection
                   title="Data Consistency"
@@ -7225,40 +7228,120 @@ const AcordModal = forwardRef(function AcordModal({
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {/* Client 11 Sep (Orbin): a value the documents say CHANGED
-                      on a stated date is not a conflict - the certificate
-                      records the umbrella limit reduced from $3,000,000 to
-                      $1,000,000 effective 7/25/25. Read-only: the current value
-                      applies, the earlier one is kept as history, and there is
-                      nothing to confirm. A later document stating anything else
-                      turns it back into a conflict. */}
-                  {underwriting.fields.filter(f => f.status === "changed").map((f) => (
-                    <div key={`changed-${f.fact_key}`} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                  {/* SYS-06: the relationship itself, once, as a table -
+                      "Line of Business -> Carrier -> NAIC -> Policy Number ->
+                      Effective Date -> Expiration Date -> Source". Rendered
+                      only on a MULTI-POLICY package: on a single-policy
+                      submission it would just repeat what every other panel
+                      already says. */}
+                  {(() => {
+                    const recs = (underwriting.fields || [])
+                      .map(f => f.line_records).find(r => (r || []).length > 1) || [];
+                    if (recs.length < 2) return null;
+                    const th = { textAlign: "left", padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+                    const td = { padding: "4px 8px", fontSize: 11.5, color: "#0f172a", borderTop: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+                    return (
+                      <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>
+                          Policies in this submission
+                        </div>
+                        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, lineHeight: 1.45 }}>
+                          Each coverage line keeps its own carrier and policy number. Different
+                          numbers across different lines are expected and are not a conflict.
+                        </div>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                            <thead><tr>
+                              <th style={th}>Line</th><th style={th}>Carrier</th><th style={th}>NAIC</th>
+                              <th style={th}>Policy number</th><th style={th}>Term</th><th style={th}>Source</th>
+                            </tr></thead>
+                            <tbody>
+                              {recs.map((r, i) => (
+                                <tr key={i}>
+                                  <td style={td}>{r.line_printed || lineLabel(r.line, dcLineRecords)}</td>
+                                  <td style={td}>{r.carrier_name || "-"}</td>
+                                  <td style={td}>{r.carrier_naic || "-"}</td>
+                                  <td style={td}>{r.policy_number || "-"}</td>
+                                  <td style={td}>{(() => {
+                                    // One date format per table: a dec page prints "07/15/25", a schedule "07/15/2025".
+                                    const d = (s) => {
+                                      const t = String(s || "").trim();
+                                      let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
+                                      if (m) {
+                                        const y = m[3].length === 2 ? `${Number(m[3]) > 69 ? "19" : "20"}${m[3]}` : m[3];
+                                        return `${m[1].padStart(2, "0")}/${m[2].padStart(2, "0")}/${y}`;
+                                      }
+                                      m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+                                      return m ? `${m[2]}/${m[3]}/${m[1]}` : s;
+                                    };
+                                    return r.effective_date || r.expiration_date ? `${d(r.effective_date) || "?"} - ${d(r.expiration_date) || "?"}` : "-";
+                                  })()}</td>
+                                  <td style={{ ...td, whiteSpace: "normal", color: "#64748b" }}>{[...new Set(r.sources || [])].join(", ") || "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* V1 C1 F2b: a multi-policy package legitimately carries one
+                      policy number / carrier / term PER POLICY. Client 1.5 says
+                      "retain each under its correct scope. Do not create a
+                      conflict" - so these render read-only, with their scope,
+                      and there is nothing to confirm. */}
+                  {underwriting.fields.filter(f => f.status === "scoped").map((f) => (
+                    <div key={`scoped-${f.fact_key}`} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                         <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                          Changed during the policy term - not a conflict
+                          {(() => {
+                            // Policies = the distinct contracts behind the lines the values are
+                            // scoped to (one carrier can write three policies; one package policy
+                            // can cover three lines), plus any value not matched to a line.
+                            const vals = f.values || [];
+                            const lines = new Set(vals.flatMap(v => (Array.isArray(v.scope) ? v.scope : [])));
+                            const allRecs = (underwriting.fields || []).map(x => x.line_records)
+                              .find(r => (r || []).length) || [];
+                            const recs = allRecs.filter(r => lines.has(r.line));
+                            const contracts = recs.length
+                              ? new Set(recs.map(r => r.policy_number || r.id || r.line)).size
+                              : lines.size;
+                            const policies = contracts
+                              + vals.filter(v => !(Array.isArray(v.scope) && v.scope.length)).length;
+                            return `${policies} ${policies === 1 ? "policy" : "policies"}, ${vals.length} ${vals.length === 1 ? "value" : "values"} - not a conflict`;
+                          })()}
                         </span>
+                        {Object.keys(f.confirmed_scopes || {}).length > 0 && (
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: "#16a34a" }}>
+                            Confirmed: {Object.entries(f.confirmed_scopes).map(([ln, val]) => `${lineLabel(ln, dcLineRecords)} - ${val}`).join("; ")}
+                          </span>
+                        )}
                       </div>
-                      {f.change && (
-                        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#475569" }}>
-                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                            <span style={{ fontWeight: 600, color: "#0f172a" }}>Now: {f.change.current}</span>
-                            {f.change.as_of ? ` - effective ${f.change.as_of}` : ""}
-                            {f.change.document ? <span style={{ color: "#94a3b8" }}>{` (${f.change.document})`}</span> : null}
+                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                        {(f.values || []).map((v, vi) => (
+                          <div key={vi} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#475569", flexWrap: "wrap" }}>
+                            <span style={{ minWidth: 0, overflowWrap: "anywhere", fontWeight: 600, color: "#1e293b" }}>{v.display}</span>
+                            {(v.scope || []).length > 0 ? (
+                              <span style={{ fontSize: 10, color: "#64748b", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 4, padding: "1px 6px" }}>
+                                {v.scope.map(ln => lineLabel(ln, dcLineRecords)).join(" / ")}
+                              </span>
+                            ) : (
+                              /* SYS-06: the store placed every other value but not
+                                 this one. Saying so is better than an unexplained
+                                 blank - and it is NOT a conflict, because a value
+                                 we cannot place is not evidence against the ones
+                                 we can. */
+                              <span style={{ fontSize: 10, color: "#94a3b8", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 4, padding: "1px 6px" }}>
+                                not matched to a coverage line
+                              </span>
+                            )}
+                            <span style={{ fontSize: 10.5, color: "#94a3b8", minWidth: 0, overflowWrap: "anywhere" }}>
+                              {[...new Set((v.sources || []).map(sr => sr.filename).filter(Boolean))].join(", ")}
+                            </span>
                           </div>
-                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                            Before: {f.change.prior}
-                            {(f.change.prior_documents || []).length > 0 ? <span style={{ color: "#94a3b8" }}>{` (${f.change.prior_documents.join(", ")})`}</span> : null}
-                          </div>
-                        </div>
-                      )}
-                      {f.narrative_note && (
-                        <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, background: "#f0f9ff", border: "1px solid #bae6fd", fontSize: 11.5, color: "#0c4a6e", lineHeight: 1.45 }}>
-                          <span style={{ fontWeight: 700 }}>From the submission: </span>
-                          {f.narrative_note}
-                        </div>
-                      )}
+                        ))}
+                      </div>
                     </div>
                   ))}
                   {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {
@@ -7282,7 +7365,7 @@ const AcordModal = forwardRef(function AcordModal({
                     // there is no single line to attribute it to, so the
                     // confirm stays submission-wide as it always was.
                     const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
-                    const lineScopeLabel = lineScope ? lineScope.replace(/_/g, " ") : null;
+                    const lineScopeLabel = lineScope ? lineLabel(lineScope, dcLineRecords) : null;
                     // UI-08: this list is DERIVED from the stamping paths
                     // (`forms_consuming_fact`) - it is where a confirmed value
                     // CAN land, not proof it has been written. On the pre-form

@@ -172,7 +172,10 @@ def test_a_genuinely_printed_payment_plan_stamps():
     mapped, _ = ps.map_facts_to_form(
         {"payment_plan": "MONTHLY"}, schema, "ACORD_125",
         raw_text="Payment Plan: Monthly", pre_filled_gpt=None)
-    assert str(mapped.get(_PAY_FIELD)).upper().startswith("MONTHLY")
+    # UPDATED 28 Sep 2026: the plan still stamps; it now stamps as the CODE the
+    # box's own tooltip asks for ("Enter code: ... MO - Monthly"), as both
+    # FR125 kit keys expect. Asserting the raw word pinned a shape, not the rule.
+    assert mapped.get(_PAY_FIELD) == "MO"
 
 
 def test_extraction_now_asks_for_the_payment_plan():

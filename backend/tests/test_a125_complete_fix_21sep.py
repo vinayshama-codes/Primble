@@ -63,12 +63,23 @@ _MUST_SURVIVE = [
     "not required", "None of the buildings are sprinklered",
     "No losses in the last five years", "2250 NW Vaughn St",
     "Meridian Ironworks & Mechanical, LLC", "93-2841760",
+    "-5", "$", "%", "#1",
 ]
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_whitespace_is_blank_not_a_placeholder(value):
+    """The branch the dash fix split: an EMPTY value is not this door's
+    business (the caller already treats it as blank)."""
+    from services.answer_semantics import is_placeholder_text
+    assert is_placeholder_text(value) is False
 _MUST_BLANK = [
     "(None)", "None", "none", "NONE", "[N/A]", '"unknown"', "- none -",
     "N/A", "n/a", "n / a", "n.a.", "NA", "TBD", "t.b.d", "to be determined",
     "not provided", "NOT STATED", "not specified", "null", "nil",
     "  (none)  ", "no data", "unknown", "not available", "none known",
+    # 28 Sep (FR125 kit): pure decoration is a printed "nothing here"
+    "--", "-", "\u2014", "\u2013", "---", "- -", "...", "()", "[ ]",
 ]
 
 
@@ -249,6 +260,12 @@ def test_the_second_contact_gets_its_own_block(ps):
 
 
 def test_a_second_additional_interest_can_reach_the_form(ps):
+    """CORRECTED 28 Sep 2026. On ACORD 125 `AdditionalInterest_FullName_B` is
+    NOT a second interest - its tooltip reads "As used here, this is the name
+    of the trust" (question 11). This test asserted the Vaughn Street mortgagee
+    there, the same misreading the A125 kit key carried; it passed only while no
+    schema was in context. The second interest reaches the form where ACORD
+    prints a second interest row - ACORD 127."""
     facts = {"additional_interests": [
         {"name": "Ironbridge Capital Leasing Corporation",
          "interest_reason": "Equipment finance agreement", "rank": "1",
@@ -258,7 +275,10 @@ def test_a_second_additional_interest_can_reach_the_form(ps):
     assert ps._resolve_additional_interest_detail(
         "AdditionalInterest_FullName_A", facts).startswith("Ironbridge")
     assert ps._resolve_additional_interest_detail(
-        "AdditionalInterest_FullName_B", facts) == "Vaughn Street Holdings LP"
+        "AdditionalInterest_FullName_B", dict(facts, _form_id="ACORD_127")) == \
+        "Vaughn Street Holdings LP"
+    assert ps._resolve_additional_interest_detail(
+        "AdditionalInterest_FullName_B", dict(facts, _form_id="ACORD_125")) is ps._SCHED_SKIP
     assert ps._resolve_additional_interest_detail(
         "AdditionalInterest_InterestReasonDescription_A", facts) == "Equipment finance agreement"
     assert ps._resolve_additional_interest_detail(
@@ -514,7 +534,11 @@ def test_every_new_list_fact_is_registered_in_both_merge_registries(fact):
 
 def test_the_prompt_version_moved_with_the_schema():
     from services import extraction_service as es
-    assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v22"
+    # v23 since 2026-09-28 (FR125 v2 tests 3-5): additive submission_* facts,
+    # nonrenewal_reasons and three columns. THE TEST MOVED, NOT ITS SUBJECT -
+    # this edit bumped. See improving-ll.md C98 (v23), C99 (v24) and C100 (v25,
+    # the same day: two v23 definitions reworded).
+    assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v25"
 
 
 @pytest.mark.parametrize("base", [

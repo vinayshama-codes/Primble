@@ -132,7 +132,37 @@ def _expand_abbreviations(s: str) -> str:
     return " ".join(out)
 
 
+_DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%m-%d-%Y", "%B %d, %Y",
+                 "%b %d, %Y", "%B %d %Y", "%b %d %Y", "%d %B %Y")
+
+
+def _as_date(value):
+    from datetime import datetime
+    s = str(value if value is not None else "").strip().rstrip(".")
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _tokens(s: str) -> List[str]:
+    return re.findall(r"[a-z0-9]+", norm(s))
+
+
 def same(expected, actual) -> bool:
+    """The EXACT tier: the same value, whatever the formatting.
+
+    Rewritten 2026-09-28. The old rule accepted any SUBSTRING of four characters
+    or more, which is right for "a longer legal name" and wrong for every
+    number: measured, it scored `$73,410` against `$734,100`, `1711` against
+    `17110`, `238210` against `2382101` - and, on the Front Range kit, it
+    flagged the key's OWN correct FEIN `12-3456789` as the forbidden USDOT
+    `3456789`, and the occupied `5,000` as the forbidden building total
+    `15,000`. A number that differs is a different value, so containment now
+    works on WHOLE WORDS and only when both sides carry the same numbers.
+    """
     # THE KEY DECIDES THE TYPE. When the expectation is a yes/no answer, compare
     # booleans - a ticked box reads as "1"/"x"/"on" and must still match "Yes".
     # When it is anything else, compare values, so a count or a location number
@@ -146,8 +176,187 @@ def same(expected, actual) -> bool:
         return False
     if e == a:
         return True
-    # ACORD boxes routinely carry a longer legal name than the key states.
-    return len(e) >= 4 and len(a) >= 4 and (e in a or a in e)
+    de, da = _as_date(expected), _as_date(actual)
+    if de is not None and da is not None:
+        return de == da                       # 06/15/2014 == 2014-06-15 == June 15, 2014
+    if re.sub(r"[^a-z0-9]", "", e) == re.sub(r"[^a-z0-9]", "", a):
+        return True                           # 12-3456789 == 123456789; (303) 555-0175
+    te, ta = _tokens(expected), _tokens(actual)
+    if [t for t in te if t.isdigit()] != [t for t in ta if t.isdigit()]:
+        return False                          # a different number is a different value
+    # ACORD boxes routinely carry a longer legal name than the key states:
+    # whole-word containment, in either direction.
+    short, long_ = (te, ta) if len(te) <= len(ta) else (ta, te)
+    if len("".join(short)) < 4:
+        return False
+    n = len(short)
+    return any(long_[i:i + n] == short for i in range(len(long_) - n + 1))
+
+
+# ── Code / word equivalence, read from ACORD's own tooltip ───────────────────
+# `Policy_Payment_PaymentScheduleCode_A` says "AN - Annual, MO - Monthly,
+# QT - Quarterly". A box carrying "Annual" and a key expecting "AN" (or the
+# reverse) state the same plan. The table is parsed from the schema, never
+# typed here, so it covers every code box on every form ACORD enumerates.
+_CODE_PAIR_RE = re.compile(r"\b([A-Z]{1,3})\s+-\s+([A-Za-z][A-Za-z\- ]{1,30}?)\s*(?=[,.;)]|$)")
+_SCHEMA_CACHE: Dict[str, dict] = {}
+
+
+def _schema(form: str) -> dict:
+    if form not in _SCHEMA_CACHE:
+        p = BACKEND / "forms_schemas" / f"{form}_schema.json"
+        try:
+            _SCHEMA_CACHE[form] = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:                                     # noqa: BLE001
+            _SCHEMA_CACHE[form] = {}
+    return _SCHEMA_CACHE[form]
+
+
+def tooltip_codes(form: str, field: str) -> Dict[str, str]:
+    """{code: word} for a box whose tooltip enumerates its codes."""
+    tu = str((_schema(form).get(field) or {}).get("tu") or "")
+    if not tu.lower().startswith("enter code"):
+        return {}
+    return {c.lower(): w.strip().lower() for c, w in _CODE_PAIR_RE.findall(tu)}
+
+
+def _code_word_equal(form: str, field: str, expected, actual) -> bool:
+    table = tooltip_codes(form, field)
+    if not table:
+        return False
+    # NOT `norm`: it expands address abbreviations, so the code "S" (semi-annual)
+    # would become "south" and "N" would become "north".
+    # A parenthetical is a qualifier: "Annual (paid in full)" states the plan
+    # "Annual". The WRONG SHAPE of such a box is reported separately.
+    e = re.sub(r"\s*\(.*?\)\s*", " ", plain(expected)).strip()
+    a = re.sub(r"\s*\(.*?\)\s*", " ", plain(actual)).strip()
+    word_of = lambda s: table.get(s, s)                        # noqa: E731
+    return word_of(e) == word_of(a)
+
+
+def as_printed(form: str, stamped: Dict[str, str]) -> Dict[str, str]:
+    """The stored values the way the PDF PRINTS them.
+
+    A session dump stores an unticked checkbox as "No" (the indicator rules'
+    word); the stamper renders every non-yes /Btn value as /Off - an EMPTY box.
+    Grading the dump raw counted 26 unticked boxes on the Front Range run as
+    "made-up values" (28 Sep). A PDF read with `read_acroform` already comes
+    back this way; a dump must be converted first."""
+    schema = _schema(form)
+    out: Dict[str, str] = {}
+    for f, v in (stamped or {}).items():
+        if (schema.get(f) or {}).get("ft") == "/Btn":
+            out[f] = "Y" if plain(v).lstrip("/") in TRUEISH else ""
+        else:
+            out[f] = "" if v is None else str(v)
+    return out
+
+
+def plain(value) -> str:
+    """Case and whitespace only - for codes and Y/N, where every letter counts."""
+    return re.sub(r"\s+", " ", str(value if value is not None else "").strip().lower())
+
+
+# ── The MEANING tier - narrative boxes only ──────────────────────────────────
+# A model rewrites a sentence; it does not rewrite a FEIN. So meaning-matching
+# is allowed ONLY on the fields the key lists under `match_modes.semantic`
+# (ACORD tooltip "Enter text:" + a narrative field name). Everywhere else the
+# exact tier above is the whole test.
+#
+# Four conditions, all required - each closes a way a paraphrase test lies:
+#   1. RECALL   >= 0.70 of the expected content words (stemmed) are present
+#   2. PRECISION >= 0.50 of the stamped content words are grounded in the
+#               expectation - a pasted page contains every word and says nothing
+#   3. POLARITY  no word is negated on one side and only affirmed on the other
+#               ("stores flammables" vs "no flammables are stored")
+#   4. NUMBERS   the box invents no number (two digits or more) the
+#               expectation does not state
+# PARTIAL (recall >= 0.30, precision >= 0.60): everything it says is right but
+# part of the meaning is missing. Counted WRONG, reported separately.
+_STOP = set("""a an the and or of to in on at for by with from as is are was were be
+been being this that these those it its their there which who whom whose into onto
+per any all each other such than then so if but also has have had do does did will
+shall may can could would should our we they he she his her them at about""".split())
+_NEG = {"no", "not", "never", "none", "without", "nor", "neither", "n't", "cannot"}
+# Verbs that carry no subject of their own. In "does not perform utility-line
+# construction" the negation belongs to the construction, not to "perform" -
+# so these never decide polarity (they still count toward recall).
+_WEAK_VERBS = {"perform", "provid", "includ", "conduct", "engag", "offer", "handl",
+               "work", "mak", "make", "undertak", "carry", "carri", "do", "doe"}
+_MEANING_RECALL, _MEANING_PRECISION = 0.70, 0.50
+_PARTIAL_RECALL, _PARTIAL_PRECISION = 0.30, 0.60
+
+
+def _stem(w: str) -> str:
+    for suf in ("ations", "ation", "ings", "ing", "edly", "ies", "ed", "es", "s"):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            return w[: -len(suf)] + ("y" if suf == "ies" else "")
+    return w
+
+
+def _clauses(text: str) -> List[List[str]]:
+    raw = str(text or "").lower().replace("n't", " not")
+    return [re.findall(r"[a-z0-9]+", c) for c in re.split(r"[.;:,\n()]|\band\b|\bbut\b", raw)]
+
+
+def _content(text: str) -> Tuple[set, set, set]:
+    """(all content stems, stems in a negated clause, stems in an affirmed one)."""
+    allw, neg, aff = set(), set(), set()
+    for words in _clauses(text):
+        # A negation governs what FOLLOWS it: in "a solar installer not part of
+        # this submission" the installer is affirmed and only the "part of"
+        # is denied. Marking the whole clause negated called that sentence the
+        # opposite of "a solar installer that is not part of this submission"
+        # (28 Sep 2026, FR125 v2).
+        cue = next((i for i, w in enumerate(words) if w in _NEG), None)
+        for i, w in enumerate(words):
+            if w in _STOP or w in _NEG or (len(w) < 3 and not w.isdigit()):
+                continue
+            s = _stem(w)
+            allw.add(s)
+            (neg if cue is not None and i > cue else aff).add(s)
+    return allw, neg, aff
+
+
+def meaning(expected, actual) -> Tuple[str, str]:
+    """('meaning' | 'partial' | 'no', why)."""
+    ew, en, ea = _content(expected)
+    aw, an, aa = _content(actual)
+    if not ew or len(aw) < 2:
+        return "no", "too short to carry the meaning"
+    # Two digits or more: "(1 of 4 total)" is a count the writer DERIVED, and
+    # a single digit cannot be a date, an amount, a code or a claim number.
+    invented = ({w for w in aw if w.isdigit() and len(w) >= 2}
+                - {w for w in ew if w.isdigit()})
+    if invented:
+        return "no", f"states a number the documents do not: {sorted(invented)[:3]}"
+    flipped = ({w for w in (en - ea) if w in aa and w not in an} |
+               {w for w in (an - aa) if w in ea and w not in en}) - _WEAK_VERBS
+    if flipped:
+        return "no", f"opposite polarity on {sorted(flipped)[:3]}"
+    recall = len(ew & aw) / len(ew)
+    precision = len(ew & aw) / len(aw)
+    if recall >= _MEANING_RECALL and precision >= _MEANING_PRECISION:
+        return "meaning", f"recall {recall:.2f} precision {precision:.2f}"
+    if recall >= _PARTIAL_RECALL and precision >= _PARTIAL_PRECISION:
+        return "partial", f"recall {recall:.2f} - part of the meaning is missing"
+    return "no", f"recall {recall:.2f} precision {precision:.2f}"
+
+
+def match(expected, actual, mode: str = "exact", form: str = "",
+          field: str = "") -> Tuple[str, str]:
+    """('exact' | 'code' | 'meaning' | 'partial' | 'no', why) - the tiers in order."""
+    if same(expected, actual):
+        return "exact", ""
+    if form and field and _code_word_equal(form, field, expected, actual):
+        return "code", "ACORD tooltip code and its word"
+    if mode == "semantic":
+        return meaning(expected, actual)
+    return "no", ""
+
+
+def semantic_fields(key: dict, form: str) -> set:
+    return set(((key.get("match_modes") or {}).get(form) or {}).get("semantic") or [])
 
 
 def blank(value) -> bool:
@@ -260,6 +469,7 @@ def score_form(form: str, key: dict, stamped: Dict[str, str], probe) -> dict:
     blanks = key["must_be_blank"].get(form, [])
     tally = Counter()
     details: Dict[str, List[tuple]] = defaultdict(list)
+    semantic = semantic_fields(key, form)
 
     for field, want in exp.items():
         got = stamped.get(field, "")
@@ -271,11 +481,19 @@ def score_form(form: str, key: dict, stamped: Dict[str, str], probe) -> dict:
             else:
                 tally["missing"] += 1
                 details["missing"].append((field, want, ""))
-        elif same(want, got):
+            continue
+        how, why = match(want, got, "semantic" if field in semantic else "exact",
+                         form, field)
+        if how in ("exact", "code", "meaning"):
             tally["correct"] += 1
+            tally[f"correct_{how}"] += 1
+            if how != "exact":
+                details[f"correct_{how}"].append((field, want, got, why))
         else:
             tally["wrong"] += 1
-            details["wrong"].append((field, want, got))
+            if how == "partial":
+                tally["wrong_partial"] += 1
+            details["wrong"].append((field, want, got, why or how))
 
     for field in blanks:
         got = stamped.get(field, "")
@@ -418,8 +636,12 @@ def main() -> int:
         print("=" * 78)
         print(f"  {form}    ({pdfs[form].name})")
         print("-" * 78)
-        print(f"  correct              {t['correct']:>4} / {n_exp}")
-        print(f"  wrong                {t['wrong']:>4}   contradicts the document")
+        print(f"  correct              {t['correct']:>4} / {n_exp}"
+              f"   ({t['correct_exact']} exact, {t['correct_code']} code = its word, "
+              f"{t['correct_meaning']} by meaning)")
+        print(f"  wrong                {t['wrong']:>4}   contradicts the document"
+              + (f" ({t['wrong_partial']} partial: part of the meaning missing)"
+                 if t['wrong_partial'] else ""))
         print(f"  missing              {t['missing']:>4}   stated in the document, box blank")
         print(f"  missing (owned)      {t['missing_owned']:>4}   the pipeline refuses this box by design")
         print(f"  must-be-blank hit    {t['blank_violation']:>4} / {len(key['must_be_blank'].get(form, []))}"
@@ -447,16 +669,21 @@ def main() -> int:
 
         for bucket, label in [("wrong", "WRONG"), ("blank_violation", "MUST BE BLANK"),
                               ("forbidden", "FORBIDDEN"), ("shape", "WRONG SHAPE"),
-                              ("overflow_leak", "OVERFLOW LEAK"), ("missing", "MISSING")]:
+                              ("overflow_leak", "OVERFLOW LEAK"), ("missing", "MISSING"),
+                              ("correct_meaning", "CORRECT BY MEANING (check the wording)"),
+                              ("correct_code", "CORRECT - CODE WRITTEN AS ITS WORD")]:
             items = res["details"].get(bucket) or []
             if not items:
                 continue
             print(f"\n  {label} ({len(items)})")
-            for field, want, got in items[:args.max_detail]:
+            for row in items[:args.max_detail]:
+                field, want, got = row[:3]
                 print(f"    {field}")
                 print(f"      expected {want!r}")
                 if got:
                     print(f"      stamped  {got!r}")
+                if len(row) > 3 and row[3]:
+                    print(f"      why      {row[3]}")
             if len(items) > args.max_detail:
                 print(f"    ... and {len(items) - args.max_detail} more")
         print()

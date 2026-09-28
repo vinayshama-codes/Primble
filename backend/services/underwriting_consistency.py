@@ -2345,7 +2345,14 @@ def _scope_from_store(fact_key: str, values: List[dict],
             # A genuine second policy on one coverage line (defect D-1, and the
             # client's own review rule). Name the line so the producer knows
             # which one to look at instead of being handed the whole package.
-            pretty = ", ".join(sorted(l.replace("_", " ") for l in collided))
+            # By the line's PRINTED name ("Commercial General Liability"), not
+            # its internal family key ("general_liab" read as "general liab").
+            printed: Dict[str, str] = {}
+            for _e in store:
+                _sc = (_e.get("scope") or {}) if isinstance(_e, dict) else {}
+                if _sc.get("line") and str(_sc.get("line_printed") or "").strip():
+                    printed.setdefault(_sc["line"], str(_sc["line_printed"]).strip())
+            pretty = ", ".join(sorted(printed.get(l) or l.replace("_", " ") for l in collided))
             return False, (f"two policies on the same coverage line ({pretty}) "
                            "in one submission - confirm which applies"), collided
         for g, own in zip(values, lines_for):

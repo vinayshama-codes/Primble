@@ -511,9 +511,12 @@ not layout-ordered - position-based pairing on it is wrong; replay with
 `tests/fixtures/orbin_live_25sep.json`). Suite 10,075 passed / 1 failed / 19 skipped.
 
 **27 Sep follow-ups (owner, `v1-20AUG.md` "27 Sep").** (1) Data Consistency no longer
-shows per-line carrier / policy / NAIC rows or the "Policies in this submission" table -
-separate policies must not look flagged; the relationship stays on the backend
-(`line_records`), and two live policies on ONE line are still a conflict card. (2)
+shows the umbrella "Changed during the policy term" row (kept on the backend: no conflict,
+the 131 prints the current $1,000,000). The "Policies in this submission" table and the
+per-line carrier / policy / NAIC rows STAY - 8b005ad removed them by misreading the owner
+and they were restored the same evening; the heading says "Your documents agree - there is
+nothing to confirm" when nothing does, and two live policies on ONE line are still a
+conflict card. (2)
 **`extraction_service._retire_predecessor_policies`:** an expired policy beside a later
 policy on the same line (both fully dated, ended on or before the successor began, end
 passed, successor numbered) moves to `prior_coverage_lines` and counts as prior-term for
@@ -524,6 +527,41 @@ worth knowing:** `SCHEDULER_ENABLED` is unset and production defaults it off, an
 `main.py` starts the scheduler - so retention clean-up, facts retention, audit-log
 retention, the payment lifecycle and questionnaire reminders run NOWHERE (owner decision
 pending). Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Suite 10,104 / 1 / 19.
+
+### FR125 v2 Runs (Round 2 Tests 3-8) - 220 -> 312 of 312 by test 8, 28 Sep 2026 (extraction v25)
+**Read `improving125-21sep.md` "ROUND 2 - TEST 3 RESULTS" before touching the 125 status
+boxes, page-one carrier, prior-carrier grid, Q4 list, NAME OF TRUST or the row guards.**
+Stored session `4c734a06` replayed: 220 -> 297 of 312 correct, 48 -> 1 wrong, 8 -> 0 made
+up. Extraction was 98.8% right; the defects were all after it. New doors:
+`extraction_service._mark_stated_new_business` (`submission_is_new_business` - the
+document's statement about THIS transaction; `is_renewal` is deliberately NOT
+overwritten, it still routes dates); `_other_policies_the_document_lists` (a Q4 answer
+outranks the inferred list); `_current_policies_before_the_proposal` (the current term
+is prior-grid year one when the proposal follows it); `_resolve_trust_name_box`
+(`AdditionalInterest_FullName_B` on 125 is the TRUST, by tooltip); `_receiving_section_
+detail` (program / underwriter only from the receiving carrier's own section);
+`_field_meta_for` (the `_form_id` schema outranks a stale thread-local). Guards 2 / 11
+and the contact-phone guard now ask the row's own fact first. Remaining 14 missing need
+a v23 prompt (owner's call). **Test 4 live (session a7ef6f98): 281 / 2 / 29 / 3; replayed
+through the second fixes 306 / 1 / 5 / 0** - Q1a/Q1b follow their block, prior rows and the
+payment method restored from the verified index / labelled text, an OTHER restating a
+ticked option is cleared against the label ACORD prints (`_printed_checkbox_labels`),
+organisation nouns are never a person's name. `scripts/replay_125_run.py` re-grades a
+stored run through current code. **Test 5 live 298 / 1 / 13 / 2 -> extraction v23**
+(`submission_*` carrier facts, `nonrenewal_reasons`, safety "Other:", secondary phone kind,
+interest building / class; improving-ll.md C98) - simulated 311 / 1 / 0 / 0. Page-one REMARKS
+was registered but never called; now wired and gated on a REMARKS heading. **Test 6 (first live
+v23) 304 / 6 / 2 / 4 -> v24** (improving-ll.md C99): the addressee fact is CHECKED, never
+trusted (`_validate_submission_carrier`, `_addressee_from_text`, two disagreeing witnesses =
+blank); Q4 from `other_insurance_policies` (every YES row, numbers verified in text); the
+labelled EXPLANATION wins (`_prefer_labelled_explanations`). Replayed 312 / 0 / 0 / 0. **Test 7
+(v24) 310 / 0 / 2 / 1 -> v25** (improving-ll.md C100): billing plan and audit are the SUBMISSION's
+(`_prefer_submission_terms` - statements under a declarations / current / expiring heading or
+about old paperwork never decide page one). Replayed 312. Tests:
+`tests/test_fr125_v2_run_28sep.py` (97). Suite 10,284 / 1 / 19. **Test 8 (v25): 312 of 312, 3 made up**
+(question 4 took the incumbent's policies from a second YES row) -> Q4 keeps only policies not
+paired with another carrier; disagreeing answers settle on the corroborated one
+(`_reconcile_disclosure_conflicts`). Replayed 312 / 0 made up. Tests: 102. Suite 10,289 / 1 / 19.
 
 ### Policy Number By Line - Live Kit Fixes - SHIPPED 2026-09-17
 **Read `v1-20AUG.md` "Policy number by line - the live kit run" before touching
@@ -2582,7 +2620,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **10,104 passed, 1 failed, 19 skipped** (~9 min, 27 Sep 2026).
+`py -m pytest -q -p no:randomly` from `backend/` -> **10,107 passed, 1 failed, 19 skipped** (~9-19 min, 28 Sep 2026).
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

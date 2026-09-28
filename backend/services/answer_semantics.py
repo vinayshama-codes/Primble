@@ -212,9 +212,18 @@ def is_placeholder_text(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     s = _normalize(value)                       # case, quotes, whitespace
+    if not s.strip():
+        return False                            # already blank - not our business
     s = s.strip(_PLACEHOLDER_EDGES)
     if not s:
-        return False                            # already blank - not our business
+        # ALL decoration: "--", "-", "—", "...", "()". The dash is how a
+        # declarations page or a schedule cell prints "nothing here", and until
+        # 28 Sep 2026 this branch returned False for it - the check above used
+        # to be "empty after stripping", which cannot tell a blank from a
+        # printed dash. No netted it: `_LLM_EMPTY_SENTINELS` and
+        # `placeholder_detector` also passed "--". Found by the FR125 kit's
+        # "Address line 2 .... --" before it reached a live form.
+        return True
     s = re.sub(r"\s+", " ", s)
     if s in _PLACEHOLDER_TOKENS:
         return True

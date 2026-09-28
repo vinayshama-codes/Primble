@@ -241,6 +241,7 @@ class TestWiring:
         "/api/client-answer/resolve",         # resolver
         "Needs your decision",                # the new section
         "loss_run_match_detail?.notes",       # F4 notes
+        'f.status === "scoped"',              # F2b rows
         "f.conflict_reason",                  # F10 reason
     ])
     def test_the_frontend_renders_it(self, needle):
@@ -250,17 +251,50 @@ class TestWiring:
                ).read_text(encoding="utf-8")
         assert needle in src, needle
 
-    def test_line_scoped_values_are_kept_but_not_shown(self):
-        """F2b used to RENDER the scoped rows ("N policies, N values - not a
-        conflict"). Owner, 27 Sep 2026: remove them from the screen and keep
-        them on the backend - listed under "Data Consistency" they read as the
-        very flag client 1.5 asked us not to raise. 1.5 ("retain each under its
-        correct scope. Do not create a conflict") is still met: the scope is
-        retained server-side (test_sys06_line_specific_identity_20260904) and
-        no conflict is raised. Both layouts must stay in step."""
+    _LAYOUTS = ("AcordModal.jsx", "review/ReviewRailLayout.jsx")
+
+    def _layout_sources(self):
         import pathlib
         root = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "components" / "form"
-        for name in ("AcordModal.jsx", "review/ReviewRailLayout.jsx"):
-            src = (root / name).read_text(encoding="utf-8")
-            assert 'f.status === "scoped"' not in src, name
-            assert "Policies in this submission" not in src, name
+        return {name: (root / name).read_text(encoding="utf-8") for name in self._LAYOUTS}
+
+    def test_the_policies_table_and_line_scoped_rows_are_shown(self):
+        """F2b renders the scoped rows ("N policies, N values - not a
+        conflict") and SYS-06 the "Policies in this submission" table - the
+        line -> carrier -> NAIC -> policy mapping the client wrote out as
+        correct (11 Sep). They were removed on 27 Sep by a misread of the
+        owner's instruction and restored the same day. Both layouts."""
+        for name, src in self._layout_sources().items():
+            assert 'f.status === "scoped"' in src, name
+            assert "Policies in this submission" in src, name
+
+    def test_a_dated_change_is_kept_but_not_shown(self):
+        """Owner, 27 Sep 2026: the umbrella cut ($3,000,000 -> $1,000,000
+        effective 7/25/25) must not be a conflict - the client's ask - and must
+        not be shown as a note either; they never asked to see one. The backend
+        still returns the row as status "changed" with nothing to review
+        (test_remaining_fixes_14sep), so no card is raised and the forms print
+        the current value. Neither layout may render it."""
+        for name, src in self._layout_sources().items():
+            assert 'f.status === "changed"' not in src, name
+            assert "Changed during the policy term" not in src, name
+            assert '"changed"].includes' not in src, name
+
+    def test_a_coverage_line_is_named_not_keyed(self):
+        """Owner, 28 Sep 2026: the per-line rows printed the internal family
+        key - "general liab" under the GL carrier, number and NAIC - while the
+        table above printed "Commercial General Liability". Every place the
+        Data Consistency screen names a line (scope chips, confirmed scopes,
+        the "Confirm for <line>" button, the table's fallback) goes through
+        `lineLabel`, which prefers the policy's printed name. Both layouts."""
+        import pathlib
+        fmt = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src"
+               / "utils" / "formatters.js").read_text(encoding="utf-8")
+        assert "export const lineLabel" in fmt and "line_printed" in fmt
+        for name, src in self._layout_sources().items():
+            assert "lineLabel" in src, name
+            for raw in ('v.scope.join(" / ").replace(/_/g, " ")',
+                        '${ln.replace(/_/g, " ")}',
+                        'lineScope.replace(/_/g, " ")',
+                        '(r.line || "").replace(/_/g, " ")'):
+                assert raw not in src, (name, raw)

@@ -4275,3 +4275,97 @@ the Render dashboard sets `ENABLE_ASYNC_PROCESSING=false`; `render.yaml` said ot
 now matches. Render's `LLM_REQUEST_TIMEOUT` was unset (code default 120 s vs localhost's
 300 s): long gap-fill calls could time out and retry on Render only. **Owner decision: keep the
 120 s default on Render; localhost must drop its `LLM_REQUEST_TIMEOUT=300` line to match.**
+
+## C98 - 2026-09-28 FR125 v2 tests 3-5: what page one and question 5 need, asked for by name (v22 -> v23)
+
+**One prompt changed (`extraction_service._EXTRACT_SCHEMA`); no new call site, no
+new call, same model, same extraction calls.** `PROMPT_VERSION` and
+`SCHEMA_VERSION` both move v22 -> v23, so every cached extraction is discarded
+and each package pays one fresh extraction on its next upload. The schema grows
+**2,267 chars / ~489 tokens** (o200k_base) - inside the cached extraction prefix,
+so after the first call of a run it is billed at the cached rate. Output grows
+only by the new keys a document actually fills (a few dozen tokens).
+
+**Why.** The same 100-page kit, generated three times on 28 Sep, kept three
+different subsets of the facts ACORD 125 asks for, because the schema never ASKED
+for them - they were found, when found, in the dec index or by gap fill:
+- test 5 lost the whole CARRIER block (6 boxes): the index kept the carrier's
+  acknowledgement NAIC / program code / underwriter but not its "Carrier" line;
+- question 5's reasons: test 4 wrote a listed reason into OTHER, test 5 ticked
+  UNDERWRITING and put "Agent no longer represents carrier" into OTHER as text;
+- the safety programme's OTHER element printed on test 4 and not on test 5 - the
+  schema allowed only the four listed elements;
+- REMARKS came back as a certificate footnote; the secondary phone kinds and the
+  interest's building number were never captured; one explanation was a
+  shortened paraphrase that dropped who noted the violation.
+
+**What was added - all ADDITIVE, nothing reshaped.**
+
+| key | shape | consumer |
+|---|---|---|
+| `submission_carrier_name`, `_naic`, `submission_program_name`, `_program_code`, `submission_underwriter`, `_underwriter_office` | scalars - the carrier THIS submission is addressed to, never the incumbent | `pdf_service._receiving_carrier_from_entries` / `_receiving_section_detail` read them FIRST (a value the merge could not find in the text is refused); `_mark_page_one_current_policy` marks the incumbent when the addressee differs |
+| `nonrenewal_reasons` | `[string]` - "Non-payment", "Agent no longer represents carrier", "Non-renewal", "Underwriting", "Condition corrected", "Other: <text>" | `_resolve_nonrenewal_reason` (question 5's boxes); empty = silence, gap fill keeps them |
+| `safety_program_elements` | now also "Other: <text>" | `_resolve_safety_program_element` (OTHER tick + description) |
+| `applicant_contacts[].secondary_phone_kind` | Home / Business / Cell | the SECONDARY kind ticks |
+| `additional_interests[].item_building_number`, `.item_class` | strings | BUILDING # (now fillable) and ITEM CLASS |
+| `additional_remarks_text` | DEFINED - the submission's remarks, never a footnote / disclaimer / forms list | page-one REMARKS, only when the text sits under a REMARKS / PROCESSING INSTRUCTIONS heading (`_mark_submission_remark`) |
+| `disclosure_answers` | `evidence_quote` = the complete sentence(s), narrative over table cell; `explanation` = the document's own words, never shortened | the explanation boxes (with `_document_words_for_explanation`) |
+
+**Measured offline** on the stored test 5 session with the v23 facts copied from
+the document: 298 -> **311 of 312**, 0 missing, 0 made up (the one left is the
+paraphrased explanation, which the new definition addresses at the source). The
+code-only backups on the SAME v22 facts already reach 306. Confirm live.
+
+**Also found and fixed on the way (no prompt involved):** page-one REMARKS was
+registered in `_AUTHORITATIVE_BLANK_RESOLVERS` but never called by the stamper -
+it printed blank on every run since August. Tests:
+`tests/test_fr125_v2_run_28sep.py` (75). Four version pins moved v22 -> v23. Suite
+10,262 passed / 1 failed (the pre-existing `test_arq_acord125_missing_only`).
+
+## C99 - 2026-09-28 FR125 v2 test 6: two v23 definitions reworded (v23 -> v24)
+
+**Same prompt, same calls, no schema change.** `PROMPT_VERSION` / `SCHEMA_VERSION` v23 ->
+v24, so every cached extraction is discarded once more (v23 lived one run).
+
+**Why - measured on the first live v23 run (session `c3059a2d`):**
+- `disclosure_answers.evidence_quote` said "the narrative sentence, not a table cell or a
+  checkbox line". On the FR125 questionnaire that steered questions 8-10 to the one-line
+  answer ("Yes. A leased compact excavator was repossessed in April 2022.") instead of the
+  text the document labels "EXPLANATION:" - which v22 had copied on three runs. Now: the
+  quote is the complete sentence(s) stating the answer, never the question or a checkbox
+  line; the explanation is the LABELLED Explanation / Describe text when printed, never a
+  bare "Yes."/"No." line; question 4's explanation lists each policy's line and number.
+- `submission_carrier_name` named the INCUMBENT on a submission that says the current
+  package "will NOT be renewed there". Added: when the documents call the submission new
+  business, or say the current policies will not be renewed with their carrier, that
+  carrier is not the addressee.
+
+**Deterministic, so a model that still gets it wrong cannot print it:** the merge rejects
+an addressee equal to the carrier page one ruled CURRENT and reads the letter's "TO:" line
+instead (NAIC only when printed on the same line as that name); question 4's policies come
+from every YES row, numbers verified in the text; the labelled EXPLANATION is taken from
+the question's own block. Measured on the stored test 6 session: 304 -> **312 of 312**.
+Four version pins moved v23 -> v24. Suite 10,278 passed / 1 failed (the pre-existing
+`test_arq_acord125_missing_only`).
+
+## C100 - 2026-09-28 FR125 v2 test 7: billing_plan and audit_period defined (v24 -> v25)
+
+**Same prompt, same calls, no schema shape change** - two definitions. `PROMPT_VERSION` /
+`SCHEMA_VERSION` v24 -> v25 (every cached extraction discarded once more).
+
+**Why - measured on session `5af86855`:** both facts were bare `string or null`, and
+extraction took both from one sentence about the OLD carrier's paperwork ("the old audit and
+quarterly agency billing"): `billing_plan = "quarterly agency billing"` (page one printed
+AGENCY) and `audit_period = "old audit"` (no period, so AUDIT printed blank). The submission
+asks for "Direct bill" and an "Annual" audit. Both now say they describe the policy APPLIED
+FOR: never the current or expiring policy's, never old paperwork, and an audit period must
+name a period.
+
+**Deterministic, so a model that still gets it wrong cannot print it:**
+`extraction_service._prefer_submission_terms` - statements under a DECLARATIONS / CURRENT /
+EXPIRING / PRIOR heading, or in a sentence about old / prior / expiring paperwork, are the
+old policy's; the submission's own statements decide when they agree; a person's entry is
+never replaced; a period-less audit value is dropped. Test 7 replayed: 310 -> **312 of 312**.
+Four version pins moved v24 -> v25. Suite 10,284 passed / 1 failed (the pre-existing
+`test_arq_acord125_missing_only`).
+

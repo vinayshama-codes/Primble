@@ -273,7 +273,16 @@ _FORM_EXECUTOR = _cf.ThreadPoolExecutor(
 
 async def _lite_shared_gap_fill(loop, session: dict, form_ids: list) -> dict:
     """`form_service.shared_gap_fill` for the essentials paths. Never raises:
-    any failure returns {} and each form falls back to its own gap fill."""
+    any failure returns {} and each form falls back to its own gap fill.
+
+    Also binds the package (the essentials form, not every recommendation) for
+    the stamping that follows on the same session dict - see
+    `form_service.bind_generation_package`."""
+    try:
+        from services.form_service import bind_generation_package
+        bind_generation_package(session, form_ids)
+    except Exception as _bind_ex:                             # noqa: BLE001
+        logger.warning("lite: package binding failed: %s", _bind_ex)
     try:
         from services.form_service import shared_gap_fill
         return await loop.run_in_executor(
@@ -1266,6 +1275,10 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     _sem_token = None
     results      = {}
     combined_ids = req.form_ids
+    # The package is what THIS request generates, not the analyze step's
+    # recommendations still sitting on the row (28 Sep 2026).
+    from services.form_service import bind_generation_package
+    bind_generation_package(session, combined_ids)
 
     try:
         loop = asyncio.get_event_loop()

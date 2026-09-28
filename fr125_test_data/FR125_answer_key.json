@@ -1,0 +1,5822 @@
+{
+ "_meta": {
+  "kit": "FR125 v2 - the client's case at data-map density",
+  "account": "Front Range Electrical Contractors LLC",
+  "document": "FR125_front_range_package.pdf",
+  "built_by": "backend/scripts/make_fr125_test_pdf.py",
+  "answers_from": "the client's rules (125_reference, 8-19-26) applied to documents that state what the Vertafore data map fills",
+  "fields_on_form": 548,
+  "verdict_counts": {
+   "expect": 312,
+   "blank_no_data": 166,
+   "blank_by_rule": 54,
+   "not_applicable": 0,
+   "not_scored": 16
+  },
+  "absent_by_design": [
+   "a policy number, premium, deposit or minimum premium for the policy being QUOTED",
+   "any aircraft, airport, boat or scheduled item for the additional interest",
+   "a resolution for the fire-code violation - service is only SCHEDULED",
+   "a second occurrence under questions 8, 9 or 10",
+   "any claim before 2023 in the five-year loss history"
+  ],
+  "scanned_only": [
+   "AdditionalInterest_FullName_B",
+   "CommercialPolicy_Question_AAFCode_A",
+   "CommercialPolicy_Question_ABBCode_A",
+   "CommercialPolicy_Question_KACCode_A",
+   "CommercialPolicy_Question_KAKCode_A",
+   "CommercialPolicy_Question_KALCode_A",
+   "CommercialPolicy_Question_KAMCode_A",
+   "CommercialPolicy_Question_KANCode_A",
+   "CommercialPolicy_Question_KAOCode_A",
+   "NamedInsured_LegalEntity_MemberManagerCount_A"
+  ]
+ },
+ "_doc": "FR125_front_range_package.pdf - one upload, 100 pages",
+ "_forms": [
+  "ACORD_125"
+ ],
+ "expect": {
+  "ACORD_125": {
+   "Form_EditionIdentifier_A": "ACORD 125 (2025/03)",
+   "Insurer_FullName_A": "Granite Arch Casualty Company",
+   "Insurer_NAICCode_A": "21334",
+   "Insurer_ProductDescription_A": "Contractors Select Program",
+   "Insurer_ProductCode_A": "CSP-EL",
+   "Insurer_Underwriter_FullName_A": "Dana Whitfield",
+   "Insurer_Underwriter_OfficeIdentifier_A": "Denver Branch",
+   "Policy_EffectiveDate_A": "10/01/2026",
+   "Policy_ExpirationDate_A": "10/01/2027",
+   "Policy_Status_QuoteIndicator_A": "Y",
+   "Policy_LineOfBusiness_CommercialGeneralLiability_A": "Y",
+   "Policy_LineOfBusiness_CommercialProperty_A": "Y",
+   "Policy_LineOfBusiness_BusinessAutoIndicator_A": "Y",
+   "Policy_LineOfBusiness_UmbrellaIndicator_A": "Y",
+   "Policy_Payment_DirectBillIndicator_A": "Y",
+   "Policy_Payment_PaymentScheduleCode_A": "MO",
+   "Policy_PaymentMethod_MethodDescription_A": "EFT",
+   "Policy_Audit_FrequencyCode_A": "A",
+   "CommercialPolicy_Question_AAICode_A": "Y",
+   "CommercialPolicy_Question_AAJCode_A": "Y",
+   "CommercialPolicy_Question_KAACode_A": "Y",
+   "CommercialPolicy_Question_ABCCode_A": "Y",
+   "CommercialPolicy_Question_AAHCode_A": "Y",
+   "CommercialPolicy_Question_AACCode_A": "Y",
+   "CommercialPolicy_Question_AADCode_A": "Y",
+   "CommercialPolicy_Question_KABCode_A": "N",
+   "CommercialPolicy_Question_AAFCode_A": "Y",
+   "CommercialPolicy_Question_KAKCode_A": "Y",
+   "CommercialPolicy_Question_KALCode_A": "Y",
+   "CommercialPolicy_Question_ABBCode_A": "Y",
+   "CommercialPolicy_Question_KACCode_A": "Y",
+   "CommercialPolicy_Question_KAMCode_A": "Y",
+   "CommercialPolicy_Question_KANCode_A": "Y",
+   "CommercialPolicy_Question_KAOCode_A": "Y",
+   "BusinessInformation_ParentOrganizationName_A": "Front Range Holdings Inc",
+   "Subsidiary_ParentSubsidiaryRelationshipDescription_A": "Parent holding company",
+   "Subsidiary_ParentOwnershipPercent_A": "80%",
+   "Subsidiary_OrganizationName_A": "Front Range Service Company LLC",
+   "Subsidiary_ParentSubsidiaryRelationshipDescription_B": "Wholly owned service subsidiary",
+   "Subsidiary_ParentOwnershipPercent_B": "100%",
+   "CommercialPolicy_FormalSafetyProgram_SafetyManualIndicator_A": "Y",
+   "CommercialPolicy_FormalSafetyProgram_SafetyPositionIndicator_B": "Y",
+   "CommercialPolicy_FormalSafetyProgram_MonthlyMeetingsIndicator_B": "Y",
+   "CommercialPolicy_FormalSafetyProgram_OSHAIndicator_B": "Y",
+   "CommercialPolicy_FormalSafetyProgram_OtherIndicator_B": "Y",
+   "CommercialPolicy_FormalSafetyProgram_OtherDescription_B": "Daily job hazard analysis before every shift",
+   "CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A": "Limited quantities of common jobsite adhesives and solvents stored in approved containers.",
+   "OtherPolicy_PolicyNumberIdentifier_A": "WC-GA-448120",
+   "OtherPolicy_PolicyNumberIdentifier_B": "IM-GA-220915",
+   "CancelNonRenew_AgentNoLongerWritesForInsurerIndicator_A": "Y",
+   "CancelNonRenew_UnderwritingIndicator_A": "Y",
+   "CancelNonRenew_UnderwritingConditionCorrectedIndicator_A": "Y",
+   "CancelNonRenew_UnderwritingConditionCorrectedDescription_A": "A written fleet safety program with MVR review and driver training was adopted in January 2025.",
+   "CommercialPolicy_PastLossesClaimsRelatingSexualAbuseDiscriminationNegligentHiringExplanation_A": "A former apprentice filed an EEOC discrimination charge in 2023; it was dismissed with no finding in November 2023.",
+   "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_A": "09/10/2026",
+   "CommercialPolicy_UncorrectedFireCodeViolationExplanation_A": "Colorado Springs Fire Department noted two extinguishers with expired inspection tags at Location 3.",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_A": "04/18/2022",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_A": "A leased compact excavator was repossessed by the lessor after a billing dispute.",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_A": "Dispute settled, balance paid in full and the lease account closed.",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_A": "08/30/2022",
+   "CommercialPolicy_JudgementOrLien_OccurrenceDate_A": "08/14/2023",
+   "CommercialPolicy_JudgementOrLienExplanation_A": "Mile High Supply recorded a mechanics lien on the Tennyson project over a disputed invoice.",
+   "CommercialPolicy_JudgementOrLien_ResolutionDescription_A": "Invoice paid and the lien released.",
+   "CommercialPolicy_JudgementOrLien_ResolutionDate_A": "02/27/2024",
+   "CommercialPolicy_ApplicantOtherBusinessVenturesCoverageNotRequestedExplanation_A": "The managing member owns Summit Solar Services LLC, a residential solar installer that is not part of this submission.",
+   "CommercialPolicy_ApplicantOwnLeaseOperateDronesExplanation_A": "The applicant owns one DJI Mavic 3 Enterprise drone flown by a Part 107 certified employee for roof and site inspections.",
+   "CommercialPolicy_ApplicantHireOthersOperateDronesExplanation_A": "The applicant hires Aerial Vantage LLC to fly progress-photography drones on large commercial projects.",
+   "CommercialPolicy_OperationsDescription_A": "Licensed electrical contractor performing commercial and residential electrical installation, repair and service. Work includes new wiring, service upgrades, panel replacement, lighting and electrical troubleshooting. No utility-line construction or electrical generation operations.",
+   "CommercialPolicy_OperationsDescription_B": "Front Range Service Company LLC performs after-hours electrical service calls and preventive maintenance for commercial customers. Commerce Way Equipment Leasing LLC owns the service vehicles and aerial lifts and leases them to the applicant; it has no other customers.",
+   "CommercialPolicy_RemarkText_A": "Please quote General Liability at $1,000,000 / $2,000,000 and the umbrella at $2,000,000. Locations 2 and 4 are owned; Locations 1 and 3 are leased.",
+   "NamedInsured_FullName_A": "Front Range Electrical Contractors LLC",
+   "NamedInsured_TaxIdentifier_A": "12-3456789",
+   "NamedInsured_SICCode_A": "1731",
+   "NamedInsured_NAICSCode_A": "238210",
+   "NamedInsured_GeneralLiabilityCode_A": "92478",
+   "NamedInsured_Primary_PhoneNumber_A": "303-555-0175",
+   "NamedInsured_Primary_WebsiteAddress_A": "www.example-electrical.com",
+   "NamedInsured_MailingAddress_LineOne_A": "8000 Commerce Way",
+   "NamedInsured_MailingAddress_LineTwo_A": "Suite 120",
+   "NamedInsured_MailingAddress_CityName_A": "Denver",
+   "NamedInsured_MailingAddress_StateOrProvinceCode_A": "CO",
+   "NamedInsured_MailingAddress_PostalCode_A": "80216",
+   "NamedInsured_LegalEntity_MemberManagerCount_A": "3",
+   "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": "Y",
+   "NamedInsured_FullName_B": "Front Range Service Company LLC",
+   "NamedInsured_TaxIdentifier_B": "45-6789012",
+   "NamedInsured_SICCode_B": "7629",
+   "NamedInsured_NAICSCode_B": "811310",
+   "NamedInsured_GeneralLiabilityCode_B": "97220",
+   "NamedInsured_Primary_PhoneNumber_B": "303-555-0176",
+   "NamedInsured_Primary_WebsiteAddress_B": "www.frservice-example.com",
+   "NamedInsured_MailingAddress_LineOne_B": "8000 Commerce Way",
+   "NamedInsured_MailingAddress_LineTwo_B": "Suite 130",
+   "NamedInsured_MailingAddress_CityName_B": "Denver",
+   "NamedInsured_MailingAddress_StateOrProvinceCode_B": "CO",
+   "NamedInsured_MailingAddress_PostalCode_B": "80216",
+   "NamedInsured_LegalEntity_MemberManagerCount_B": "1",
+   "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_B": "Y",
+   "NamedInsured_FullName_C": "Commerce Way Equipment Leasing LLC",
+   "NamedInsured_TaxIdentifier_C": "45-1122334",
+   "NamedInsured_SICCode_C": "7359",
+   "NamedInsured_NAICSCode_C": "532412",
+   "NamedInsured_GeneralLiabilityCode_C": "97111",
+   "NamedInsured_Primary_PhoneNumber_C": "303-555-0178",
+   "NamedInsured_Primary_WebsiteAddress_C": "www.cwleasing-example.com",
+   "NamedInsured_MailingAddress_LineOne_C": "8000 Commerce Way",
+   "NamedInsured_MailingAddress_LineTwo_C": "Suite 140",
+   "NamedInsured_MailingAddress_CityName_C": "Denver",
+   "NamedInsured_MailingAddress_StateOrProvinceCode_C": "CO",
+   "NamedInsured_MailingAddress_PostalCode_C": "80216",
+   "NamedInsured_LegalEntity_MemberManagerCount_C": "2",
+   "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_C": "Y",
+   "NamedInsured_BusinessStartDate_A": "06/15/2014",
+   "NamedInsured_Contact_ContactDescription_A": "Inspection",
+   "NamedInsured_Contact_FullName_A": "John Smith",
+   "NamedInsured_Contact_PrimaryPhoneNumber_A": "303-555-0188",
+   "NamedInsured_Contact_SecondaryPhoneNumber_A": "303-555-0175",
+   "NamedInsured_Contact_PrimaryEmailAddress_A": "john@example-electrical.com",
+   "NamedInsured_Contact_SecondaryEmailAddress_A": "jsmith.site@example-electrical.com",
+   "NamedInsured_Contact_PrimaryCellPhoneIndicator_A": "Y",
+   "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_A": "Y",
+   "NamedInsured_Contact_ContactDescription_B": "Accounting",
+   "NamedInsured_Contact_FullName_B": "Sarah Jones",
+   "NamedInsured_Contact_PrimaryPhoneNumber_B": "303-555-0190",
+   "NamedInsured_Contact_SecondaryPhoneNumber_B": "720-555-0142",
+   "NamedInsured_Contact_PrimaryEmailAddress_B": "accounting@example-electrical.com",
+   "NamedInsured_Contact_SecondaryEmailAddress_B": "sjones@example-electrical.com",
+   "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_B": "Y",
+   "NamedInsured_Contact_SecondaryCellPhoneIndicator_B": "Y",
+   "BusinessInformation_BusinessType_ContractorIndicator_A": "Y",
+   "CommercialStructure_Location_ProducerIdentifier_A": "1",
+   "CommercialStructure_Building_ProducerIdentifier_A": "1",
+   "CommercialStructure_PhysicalAddress_LineOne_A": "8000 Commerce Way",
+   "CommercialStructure_PhysicalAddress_LineTwo_A": "Suite 120",
+   "CommercialStructure_PhysicalAddress_CityName_A": "Denver",
+   "CommercialStructure_PhysicalAddress_CountyName_A": "Denver",
+   "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": "CO",
+   "CommercialStructure_PhysicalAddress_PostalCode_A": "80216",
+   "CommercialStructure_AnnualRevenueAmount_A": "$2,950,000",
+   "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_A": "Y",
+   "CommercialStructure_InsuredInterest_TenantIndicator_A": "Y",
+   "CommercialStructure_Question_ABBCode_A": "N",
+   "BusinessInformation_FullTimeEmployeeCount_A": "12",
+   "BusinessInformation_PartTimeEmployeeCount_A": "1",
+   "BuildingOccupancy_OccupiedArea_A": "5,000",
+   "BuildingOccupancy_OpenToPublicArea_A": "500",
+   "BuildingOccupancy_OperationsDescription_A": "Administrative office, electrical contracting warehouse and material storage.",
+   "Construction_BuildingArea_A": "15,000",
+   "CommercialStructure_Location_ProducerIdentifier_B": "2",
+   "CommercialStructure_Building_ProducerIdentifier_B": "1",
+   "CommercialStructure_PhysicalAddress_LineOne_B": "5300 N Federal Blvd",
+   "CommercialStructure_PhysicalAddress_CityName_B": "Denver",
+   "CommercialStructure_PhysicalAddress_CountyName_B": "Adams",
+   "CommercialStructure_PhysicalAddress_StateOrProvinceCode_B": "CO",
+   "CommercialStructure_PhysicalAddress_PostalCode_B": "80221",
+   "CommercialStructure_AnnualRevenueAmount_B": "$900,000",
+   "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_B": "Y",
+   "CommercialStructure_InsuredInterest_OwnerIndicator_B": "Y",
+   "CommercialStructure_Question_ABBCode_B": "N",
+   "BusinessInformation_FullTimeEmployeeCount_B": "4",
+   "BusinessInformation_PartTimeEmployeeCount_B": "1",
+   "BuildingOccupancy_OccupiedArea_B": "8,000",
+   "BuildingOccupancy_OpenToPublicArea_B": "0",
+   "BuildingOccupancy_OperationsDescription_B": "Fleet yard, vehicle maintenance bay and aerial lift storage.",
+   "Construction_BuildingArea_B": "8,000",
+   "CommercialStructure_Location_ProducerIdentifier_C": "3",
+   "CommercialStructure_Building_ProducerIdentifier_C": "1",
+   "CommercialStructure_PhysicalAddress_LineOne_C": "4750 Centennial Blvd",
+   "CommercialStructure_PhysicalAddress_LineTwo_C": "Suite 210",
+   "CommercialStructure_PhysicalAddress_CityName_C": "Colorado Springs",
+   "CommercialStructure_PhysicalAddress_CountyName_C": "El Paso",
+   "CommercialStructure_PhysicalAddress_StateOrProvinceCode_C": "CO",
+   "CommercialStructure_PhysicalAddress_PostalCode_C": "80919",
+   "CommercialStructure_AnnualRevenueAmount_C": "$400,000",
+   "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_C": "Y",
+   "CommercialStructure_InsuredInterest_TenantIndicator_C": "Y",
+   "CommercialStructure_Question_ABBCode_C": "N",
+   "BusinessInformation_FullTimeEmployeeCount_C": "2",
+   "BusinessInformation_PartTimeEmployeeCount_C": "0",
+   "BuildingOccupancy_OccupiedArea_C": "1,200",
+   "BuildingOccupancy_OpenToPublicArea_C": "150",
+   "BuildingOccupancy_OperationsDescription_C": "Branch estimating office for southern Colorado projects.",
+   "Construction_BuildingArea_C": "22,000",
+   "CommercialStructure_Location_ProducerIdentifier_D": "4",
+   "CommercialStructure_Building_ProducerIdentifier_D": "1",
+   "CommercialStructure_PhysicalAddress_LineOne_D": "780 Kimbark St",
+   "CommercialStructure_PhysicalAddress_CityName_D": "Longmont",
+   "CommercialStructure_PhysicalAddress_CountyName_D": "Boulder",
+   "CommercialStructure_PhysicalAddress_StateOrProvinceCode_D": "CO",
+   "CommercialStructure_PhysicalAddress_PostalCode_D": "80501",
+   "CommercialStructure_AnnualRevenueAmount_D": "$0",
+   "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_D": "Y",
+   "CommercialStructure_InsuredInterest_OwnerIndicator_D": "Y",
+   "CommercialStructure_Question_ABBCode_D": "Y",
+   "BusinessInformation_FullTimeEmployeeCount_D": "0",
+   "BusinessInformation_PartTimeEmployeeCount_D": "0",
+   "BuildingOccupancy_OccupiedArea_D": "1,500",
+   "BuildingOccupancy_OpenToPublicArea_D": "0",
+   "BuildingOccupancy_OperationsDescription_D": "Wire and conduit storage building; the other half is leased to a cabinet shop.",
+   "Construction_BuildingArea_D": "3,000",
+   "CommercialStructure_InstallationRepairWorkPercent_A": "100%",
+   "CommercialStructure_InstallationRepairWorkOffPremisesPercent_A": "90%",
+   "LossHistory_OccurrenceDate_A": "09/14/2025",
+   "LossHistory_ClaimDate_A": "09/16/2025",
+   "LossHistory_LineOfBusiness_A": "General Liability",
+   "LossHistory_OccurrenceDescription_A": "Customer ceiling damaged by water from a nicked sprinkler pipe during rough-in",
+   "LossHistory_PaidAmount_A": "$12,400",
+   "LossHistory_ReservedAmount_A": "$3,000",
+   "LossHistory_ClaimStatus_SubrogationCode_A": "Y",
+   "LossHistory_ClaimStatus_OpenCode_A": "Y",
+   "LossHistory_OccurrenceDate_B": "03/28/2024",
+   "LossHistory_ClaimDate_B": "03/28/2024",
+   "LossHistory_LineOfBusiness_B": "Business Auto",
+   "LossHistory_OccurrenceDescription_B": "Insured vehicle rear-ended third party at traffic light",
+   "LossHistory_PaidAmount_B": "$4,850",
+   "LossHistory_ReservedAmount_B": "$0",
+   "LossHistory_ClaimStatus_SubrogationCode_B": "N",
+   "LossHistory_ClaimStatus_OpenCode_B": "N",
+   "LossHistory_OccurrenceDate_C": "06/02/2023",
+   "LossHistory_ClaimDate_C": "06/03/2023",
+   "LossHistory_LineOfBusiness_C": "Commercial Property",
+   "LossHistory_OccurrenceDescription_C": "Theft of copper wire from the fleet yard at Location 2",
+   "LossHistory_PaidAmount_C": "$6,300",
+   "LossHistory_ReservedAmount_C": "$0",
+   "LossHistory_ClaimStatus_SubrogationCode_C": "N",
+   "LossHistory_ClaimStatus_OpenCode_C": "N",
+   "LossHistory_InformationYearCount_A": "5",
+   "LossHistory_TotalAmount_A": "$23,550",
+   "PriorCoverage_PolicyYear_A": "2025",
+   "PriorCoverage_GeneralLiability_InsurerFullName_A": "Timberline Mutual Insurance Company",
+   "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A": "GL-123456",
+   "PriorCoverage_GeneralLiability_TotalPremiumAmount_A": "$18,450",
+   "PriorCoverage_GeneralLiability_EffectiveDate_A": "10/01/2025",
+   "PriorCoverage_GeneralLiability_ExpirationDate_A": "10/01/2026",
+   "PriorCoverage_Automobile_InsurerFullName_A": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Automobile_PolicyNumberIdentifier_A": "BA-456789",
+   "PriorCoverage_Automobile_TotalPremiumAmount_A": "$14,200",
+   "PriorCoverage_Automobile_EffectiveDate_A": "10/01/2025",
+   "PriorCoverage_Automobile_ExpirationDate_A": "10/01/2026",
+   "PriorCoverage_Property_InsurerFullName_A": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Property_PolicyNumberIdentifier_A": "CP-567890",
+   "PriorCoverage_Property_TotalPremiumAmount_A": "$8,750",
+   "PriorCoverage_Property_EffectiveDate_A": "10/01/2025",
+   "PriorCoverage_Property_ExpirationDate_A": "10/01/2026",
+   "PriorCoverage_OtherLine_InsurerFullName_A": "Timberline Mutual Insurance Company",
+   "PriorCoverage_OtherLine_PolicyNumberIdentifier_A": "CU-678901",
+   "PriorCoverage_OtherLine_TotalPremiumAmount_A": "$4,100",
+   "PriorCoverage_OtherLine_EffectiveDate_A": "10/01/2025",
+   "PriorCoverage_OtherLine_ExpirationDate_A": "10/01/2026",
+   "PriorCoverage_PolicyYear_B": "2024",
+   "PriorCoverage_GeneralLiability_InsurerFullName_B": "Timberline Mutual Insurance Company",
+   "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_B": "GL-104471",
+   "PriorCoverage_GeneralLiability_TotalPremiumAmount_B": "$17,600",
+   "PriorCoverage_GeneralLiability_EffectiveDate_B": "10/01/2024",
+   "PriorCoverage_GeneralLiability_ExpirationDate_B": "10/01/2025",
+   "PriorCoverage_Automobile_InsurerFullName_B": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Automobile_PolicyNumberIdentifier_B": "BA-431120",
+   "PriorCoverage_Automobile_TotalPremiumAmount_B": "$13,450",
+   "PriorCoverage_Automobile_EffectiveDate_B": "10/01/2024",
+   "PriorCoverage_Automobile_ExpirationDate_B": "10/01/2025",
+   "PriorCoverage_Property_InsurerFullName_B": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Property_PolicyNumberIdentifier_B": "CP-540018",
+   "PriorCoverage_Property_TotalPremiumAmount_B": "$8,200",
+   "PriorCoverage_Property_EffectiveDate_B": "10/01/2024",
+   "PriorCoverage_Property_ExpirationDate_B": "10/01/2025",
+   "PriorCoverage_OtherLine_InsurerFullName_B": "Timberline Mutual Insurance Company",
+   "PriorCoverage_OtherLine_PolicyNumberIdentifier_B": "CU-652207",
+   "PriorCoverage_OtherLine_TotalPremiumAmount_B": "$3,900",
+   "PriorCoverage_OtherLine_EffectiveDate_B": "10/01/2024",
+   "PriorCoverage_OtherLine_ExpirationDate_B": "10/01/2025",
+   "PriorCoverage_PolicyYear_C": "2023",
+   "PriorCoverage_GeneralLiability_InsurerFullName_C": "Timberline Mutual Insurance Company",
+   "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_C": "GL-091233",
+   "PriorCoverage_GeneralLiability_TotalPremiumAmount_C": "$16,900",
+   "PriorCoverage_GeneralLiability_EffectiveDate_C": "10/01/2023",
+   "PriorCoverage_GeneralLiability_ExpirationDate_C": "10/01/2024",
+   "PriorCoverage_Automobile_InsurerFullName_C": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Automobile_PolicyNumberIdentifier_C": "BA-402266",
+   "PriorCoverage_Automobile_TotalPremiumAmount_C": "$12,980",
+   "PriorCoverage_Automobile_EffectiveDate_C": "10/01/2023",
+   "PriorCoverage_Automobile_ExpirationDate_C": "10/01/2024",
+   "PriorCoverage_Property_InsurerFullName_C": "Timberline Mutual Insurance Company",
+   "PriorCoverage_Property_PolicyNumberIdentifier_C": "CP-511907",
+   "PriorCoverage_Property_TotalPremiumAmount_C": "$7,850",
+   "PriorCoverage_Property_EffectiveDate_C": "10/01/2023",
+   "PriorCoverage_Property_ExpirationDate_C": "10/01/2024",
+   "PriorCoverage_OtherLine_InsurerFullName_C": "Harbor Excess Insurance Company",
+   "PriorCoverage_OtherLine_PolicyNumberIdentifier_C": "XS-3310472",
+   "PriorCoverage_OtherLine_TotalPremiumAmount_C": "$3,650",
+   "PriorCoverage_OtherLine_EffectiveDate_C": "10/01/2023",
+   "PriorCoverage_OtherLine_ExpirationDate_C": "10/01/2024",
+   "AdditionalInterest_FullName_A": "Peak National Bank",
+   "AdditionalInterest_MailingAddress_LineOne_A": "1600 Broadway",
+   "AdditionalInterest_MailingAddress_LineTwo_A": "Suite 900",
+   "AdditionalInterest_MailingAddress_CityName_A": "Denver",
+   "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": "CO",
+   "AdditionalInterest_MailingAddress_PostalCode_A": "80202",
+   "AdditionalInterest_MailingAddress_CountryCode_A": "US",
+   "AdditionalInterest_InterestRank_A": "1",
+   "AdditionalInterest_AccountNumberIdentifier_A": "CML-448-2019-07",
+   "AdditionalInterest_InterestEndDate_A": "06/30/2034",
+   "AdditionalInterest_LoanAmount_A": "$1,150,000",
+   "AdditionalInterest_Primary_PhoneNumber_A": "303-555-0240",
+   "AdditionalInterest_Primary_FaxNumber_A": "303-555-0241",
+   "AdditionalInterest_Primary_EmailAddress_A": "loanservicing@peaknational-example.com",
+   "AdditionalInterest_InterestReasonDescription_A": "First mortgage on the owned building at Location 2",
+   "AdditionalInterest_Item_LocationProducerIdentifier_A": "2",
+   "AdditionalInterest_Item_BuildingProducerIdentifier_A": "1",
+   "AdditionalInterest_ItemDescription_A": "Fleet yard building, 5300 N Federal Blvd, Denver",
+   "AdditionalInterest_FullName_B": "Ortega Family Trust",
+   "AdditionalInterest_Interest_MortgageeIndicator_A": "Y",
+   "AdditionalInterest_CertificateRequiredIndicator_A": "Y"
+  }
+ },
+ "must_be_blank": {
+  "ACORD_125": [
+   "AdditionalInterest_Interest_AdditionalInsuredIndicator_A",
+   "AdditionalInterest_Interest_BreachOfWarrantyIndicator_A",
+   "AdditionalInterest_Interest_CoOwnerIndicator_A",
+   "AdditionalInterest_Interest_EmployeeAsLessorIndicator_A",
+   "AdditionalInterest_Interest_LeasebackOwnerIndicator_A",
+   "AdditionalInterest_Interest_LendersLossPayableIndicator_A",
+   "AdditionalInterest_Interest_LienholderIndicator_A",
+   "AdditionalInterest_Interest_LossPayeeIndicator_A",
+   "AdditionalInterest_Interest_OtherDescription_A",
+   "AdditionalInterest_Interest_OtherIndicator_A",
+   "AdditionalInterest_Interest_OwnerIndicator_A",
+   "AdditionalInterest_Interest_RegistrantIndicator_A",
+   "AdditionalInterest_Interest_TrusteeIndicator_A",
+   "AdditionalInterest_Item_AircraftProducerIdentifier_A",
+   "AdditionalInterest_Item_AirportIdentifier_A",
+   "AdditionalInterest_Item_BoatProducerIdentifier_A",
+   "AdditionalInterest_Item_ScheduledItemClassCode_A",
+   "AdditionalInterest_Item_ScheduledItemProducerIdentifier_A",
+   "AdditionalInterest_Item_VehicleProducerIdentifier_A",
+   "AdditionalInterest_PolicyRequiredIndicator_A",
+   "AdditionalInterest_SendBillIndicator_A",
+   "BoilerAndMachineryLineOfBusiness_PremiumAmount_A",
+   "BusinessInformation_BusinessType_ApartmentsIndicator_A",
+   "BusinessInformation_BusinessType_CondominiumsIndicator_A",
+   "BusinessInformation_BusinessType_InstitutionalIndicator_A",
+   "BusinessInformation_BusinessType_ManufacturingIndicator_A",
+   "BusinessInformation_BusinessType_OfficeIndicator_A",
+   "BusinessInformation_BusinessType_OtherDescription_A",
+   "BusinessInformation_BusinessType_OtherIndicator_A",
+   "BusinessInformation_BusinessType_RestaurantIndicator_A",
+   "BusinessInformation_BusinessType_RetailIndicator_A",
+   "BusinessInformation_BusinessType_ServiceIndicator_A",
+   "BusinessInformation_BusinessType_WholesaleIndicator_A",
+   "BusinessOwnersLineOfBusiness_PremiumAmount_A",
+   "CancelNonRenew_NonPaymentIndicator_A",
+   "CancelNonRenew_OtherDescription_A",
+   "CancelNonRenew_OtherIndicator_A",
+   "CommercialInlandMarineLineOfBusiness_PremiumAmount_A",
+   "CommercialPolicy_Attachment_AdditionalInterestScheduleIndicator_A",
+   "CommercialPolicy_Attachment_AdditionalPremisesScheduleIndicator_A",
+   "CommercialPolicy_Attachment_ApartmentBuildingSupplementIndicator_A",
+   "CommercialPolicy_Attachment_CondominiumAssociationByLawsIndicator_A",
+   "CommercialPolicy_Attachment_ContractorsSupplementIndicator_A",
+   "CommercialPolicy_Attachment_CoveragesScheduleIndicator_A",
+   "CommercialPolicy_Attachment_HotelMotelSupplementIndicator_A",
+   "CommercialPolicy_Attachment_InternationalLiabilityExposureSupplementIndicator_A",
+   "CommercialPolicy_Attachment_InternationalPropertyExposureSupplementIndicator_A",
+   "CommercialPolicy_Attachment_LossSummaryIndicator_A",
+   "CommercialPolicy_Attachment_OtherDescription_A",
+   "CommercialPolicy_Attachment_OtherDescription_B",
+   "CommercialPolicy_Attachment_OtherDescription_C",
+   "CommercialPolicy_Attachment_OtherDescription_D",
+   "CommercialPolicy_Attachment_OtherDescription_E",
+   "CommercialPolicy_Attachment_OtherDescription_F",
+   "CommercialPolicy_Attachment_OtherIndicator_A",
+   "CommercialPolicy_Attachment_OtherIndicator_B",
+   "CommercialPolicy_Attachment_OtherIndicator_C",
+   "CommercialPolicy_Attachment_OtherIndicator_D",
+   "CommercialPolicy_Attachment_OtherIndicator_E",
+   "CommercialPolicy_Attachment_OtherIndicator_F",
+   "CommercialPolicy_Attachment_PremiumPaymentSupplementIndicator_A",
+   "CommercialPolicy_Attachment_ProfessionalLiabilitySupplementIndicator_A",
+   "CommercialPolicy_Attachment_RestaurantTavernSupplementIndicator_A",
+   "CommercialPolicy_Attachment_StateSupplementIndicator_A",
+   "CommercialPolicy_Attachment_StatementOfValuesIndicator_A",
+   "CommercialPolicy_Attachment_VacantBuildingSupplementIndicator_A",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_B",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_B",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_B",
+   "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_B",
+   "CommercialPolicy_JudgementOrLienExplanation_B",
+   "CommercialPolicy_JudgementOrLien_OccurrenceDate_B",
+   "CommercialPolicy_JudgementOrLien_ResolutionDate_B",
+   "CommercialPolicy_JudgementOrLien_ResolutionDescription_B",
+   "CommercialPolicy_PastFiveYearsAnyApplicantIndictedOrConvictedFraudBriberyArsonExplanation_A",
+   "CommercialPolicy_UncorrectedFireCodeViolationExplanation_B",
+   "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_B",
+   "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_A",
+   "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_B",
+   "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_A",
+   "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_B",
+   "CommercialPropertyLineOfBusiness_PremiumAmount_A",
+   "CommercialStructure_InsuredInterest_OtherDescription_A",
+   "CommercialStructure_InsuredInterest_OtherDescription_B",
+   "CommercialStructure_InsuredInterest_OtherDescription_C",
+   "CommercialStructure_InsuredInterest_OtherDescription_D",
+   "CommercialStructure_InsuredInterest_OtherIndicator_A",
+   "CommercialStructure_InsuredInterest_OtherIndicator_B",
+   "CommercialStructure_InsuredInterest_OtherIndicator_C",
+   "CommercialStructure_InsuredInterest_OtherIndicator_D",
+   "CommercialStructure_InsuredInterest_OwnerIndicator_A",
+   "CommercialStructure_InsuredInterest_OwnerIndicator_C",
+   "CommercialStructure_InsuredInterest_TenantIndicator_B",
+   "CommercialStructure_InsuredInterest_TenantIndicator_D",
+   "CommercialStructure_PhysicalAddress_LineTwo_B",
+   "CommercialStructure_PhysicalAddress_LineTwo_D",
+   "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_B",
+   "CommercialStructure_RiskLocation_OtherDescription_A",
+   "CommercialStructure_RiskLocation_OtherDescription_B",
+   "CommercialStructure_RiskLocation_OtherDescription_C",
+   "CommercialStructure_RiskLocation_OtherDescription_D",
+   "CommercialStructure_RiskLocation_OtherIndicator_A",
+   "CommercialStructure_RiskLocation_OtherIndicator_B",
+   "CommercialStructure_RiskLocation_OtherIndicator_C",
+   "CommercialStructure_RiskLocation_OtherIndicator_D",
+   "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_A",
+   "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_C",
+   "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_D",
+   "CommercialUmbrellaLineOfBusiness_PremiumAmount_A",
+   "CommercialVehicleLineOfBusiness_PremiumAmount_A",
+   "CrimeLineOfBusiness_PremiumAmount_A",
+   "CyberAndPrivacyLineOfBusiness_PremiumAmount_A",
+   "FiduciaryLineOfBusiness_PremiumAmount_A",
+   "GarageAndDealersLineOfBusiness_PremiumAmount_A",
+   "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A",
+   "Insurer_ProducerIdentifier_A",
+   "Insurer_SubProducerIdentifier_A",
+   "LiquorLiabilityLineOfBusiness_PremiumAmount_A",
+   "LossHistory_NoPriorLossesIndicator_A",
+   "MotorCarrierLineOfBusiness_PremiumAmount_A",
+   "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_A",
+   "NamedInsured_Contact_PrimaryCellPhoneIndicator_B",
+   "NamedInsured_Contact_PrimaryHomePhoneIndicator_A",
+   "NamedInsured_Contact_PrimaryHomePhoneIndicator_B",
+   "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_B",
+   "NamedInsured_Contact_SecondaryCellPhoneIndicator_A",
+   "NamedInsured_Contact_SecondaryHomePhoneIndicator_A",
+   "NamedInsured_Contact_SecondaryHomePhoneIndicator_B",
+   "NamedInsured_Initials_A",
+   "NamedInsured_LegalEntity_CorporationIndicator_A",
+   "NamedInsured_LegalEntity_CorporationIndicator_B",
+   "NamedInsured_LegalEntity_CorporationIndicator_C",
+   "NamedInsured_LegalEntity_IndividualIndicator_A",
+   "NamedInsured_LegalEntity_IndividualIndicator_B",
+   "NamedInsured_LegalEntity_IndividualIndicator_C",
+   "NamedInsured_LegalEntity_JointVentureIndicator_A",
+   "NamedInsured_LegalEntity_JointVentureIndicator_B",
+   "NamedInsured_LegalEntity_JointVentureIndicator_C",
+   "NamedInsured_LegalEntity_NotForProfitIndicator_A",
+   "NamedInsured_LegalEntity_NotForProfitIndicator_B",
+   "NamedInsured_LegalEntity_NotForProfitIndicator_C",
+   "NamedInsured_LegalEntity_OtherDescription_A",
+   "NamedInsured_LegalEntity_OtherDescription_B",
+   "NamedInsured_LegalEntity_OtherDescription_C",
+   "NamedInsured_LegalEntity_OtherIndicator_A",
+   "NamedInsured_LegalEntity_OtherIndicator_B",
+   "NamedInsured_LegalEntity_OtherIndicator_C",
+   "NamedInsured_LegalEntity_PartnershipIndicator_A",
+   "NamedInsured_LegalEntity_PartnershipIndicator_B",
+   "NamedInsured_LegalEntity_PartnershipIndicator_C",
+   "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A",
+   "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_B",
+   "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_C",
+   "NamedInsured_LegalEntity_TrustIndicator_A",
+   "NamedInsured_LegalEntity_TrustIndicator_B",
+   "NamedInsured_LegalEntity_TrustIndicator_C",
+   "NamedInsured_SignatureDate_A",
+   "NamedInsured_Signature_A",
+   "OtherPolicy_LineOfBusinessCode_C",
+   "OtherPolicy_LineOfBusinessCode_D",
+   "OtherPolicy_PolicyNumberIdentifier_C",
+   "OtherPolicy_PolicyNumberIdentifier_D",
+   "Policy_InformationPracticesNoticeIndicator_A",
+   "Policy_LineOfBusiness_BoilerAndMachineryIndicator_A",
+   "Policy_LineOfBusiness_BusinessOwnersIndicator_A",
+   "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A",
+   "Policy_LineOfBusiness_CrimeIndicator_A",
+   "Policy_LineOfBusiness_CyberAndPrivacy_A",
+   "Policy_LineOfBusiness_FiduciaryLiabilityIndicator_A",
+   "Policy_LineOfBusiness_GarageAndDealersIndicator_A",
+   "Policy_LineOfBusiness_LiquorLiabilityIndicator_A",
+   "Policy_LineOfBusiness_MotorCarrierIndicator_A",
+   "Policy_LineOfBusiness_OtherIndicator_A",
+   "Policy_LineOfBusiness_OtherIndicator_B",
+   "Policy_LineOfBusiness_OtherIndicator_C",
+   "Policy_LineOfBusiness_OtherIndicator_D",
+   "Policy_LineOfBusiness_OtherIndicator_E",
+   "Policy_LineOfBusiness_OtherIndicator_F",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_A",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_B",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_C",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_D",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_E",
+   "Policy_LineOfBusiness_OtherLineOfBusinessDescription_F",
+   "Policy_LineOfBusiness_TruckersIndicator_A",
+   "Policy_LineOfBusiness_YachtIndicator_A",
+   "Policy_Payment_DepositAmount_A",
+   "Policy_Payment_EstimatedTotalAmount_A",
+   "Policy_Payment_MinimumPremiumAmount_A",
+   "Policy_Payment_ProducerBillIndicator_A",
+   "Policy_PolicyNumberIdentifier_A",
+   "Policy_SectionAttached_AccountsReceivableValuablePapersIndicator_A",
+   "Policy_SectionAttached_DealerIndicator_A",
+   "Policy_SectionAttached_DriverInformationScheduleIndicator_A",
+   "Policy_SectionAttached_ElectronicDataProcessingIndicator_A",
+   "Policy_SectionAttached_GlassAndSignIndicator_A",
+   "Policy_SectionAttached_InstallationBuildersRiskIndicator_A",
+   "Policy_SectionAttached_OpenCargoIndicator_A",
+   "Policy_SectionAttached_OtherPremiumAmount_A",
+   "Policy_SectionAttached_OtherPremiumAmount_B",
+   "Policy_SectionAttached_OtherPremiumAmount_C",
+   "Policy_SectionAttached_OtherPremiumAmount_D",
+   "Policy_SectionAttached_OtherPremiumAmount_E",
+   "Policy_SectionAttached_OtherPremiumAmount_F",
+   "Policy_Status_BoundIndicator_A",
+   "Policy_Status_CancelIndicator_A",
+   "Policy_Status_ChangeIndicator_A",
+   "Policy_Status_EffectiveDate_A",
+   "Policy_Status_EffectiveTimeAMIndicator_A",
+   "Policy_Status_EffectiveTimePMIndicator_A",
+   "Policy_Status_EffectiveTime_A",
+   "Policy_Status_IssueIndicator_A",
+   "Policy_Status_RenewIndicator_A",
+   "Producer_AuthorizedRepresentative_Signature_A",
+   "Producer_CustomerIdentifier_A",
+   "Producer_FaxNumber_A",
+   "Producer_NationalIdentifier_A",
+   "Producer_StateLicenseIdentifier_A",
+   "TruckersLineOfBusiness_PremiumAmount_A",
+   "YachtLineOfBusiness_PremiumAmount_A"
+  ]
+ },
+ "forbidden": {
+  "ACORD_125": {
+   "Insurer_FullName_A": [
+    "Timberline Mutual Insurance Company"
+   ],
+   "Insurer_NAICCode_A": [
+    "27413"
+   ],
+   "Policy_PolicyNumberIdentifier_A": [
+    "GL-123456",
+    "CG 20 11 04 13"
+   ],
+   "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A": [
+    "$18,450"
+   ],
+   "Policy_Payment_EstimatedTotalAmount_A": [
+    "$45,500"
+   ],
+   "Policy_EffectiveDate_A": [
+    "10/01/2025"
+   ],
+   "Policy_PaymentMethod_MethodDescription_A": [
+    "Agency bill - Quarterly installments"
+   ],
+   "NamedInsured_Primary_WebsiteAddress_*": [
+    "www.timberlinemutual-ins.com"
+   ],
+   "NamedInsured_Primary_PhoneNumber_*": [
+    "(800) 555-0147",
+    "303-555-0100"
+   ],
+   "NamedInsured_TaxIdentifier_*": [
+    "12345678",
+    "3456789"
+   ],
+   "NamedInsured_NAICSCode_*": [
+    "92478"
+   ],
+   "CommercialStructure_AnnualRevenueAmount_*": [
+    "$4,610,000",
+    "$1,640,000",
+    "$4,250,000",
+    "$19,071,155"
+   ],
+   "BusinessInformation_PartTimeEmployeeCount_*": [
+    "6"
+   ],
+   "LossHistory_PaidAmount_*": [
+    "$3,200"
+   ],
+   "LossHistory_ReservedAmount_*": [
+    "$1,650"
+   ],
+   "LossHistory_TotalAmount_A": [
+    "$26,550"
+   ],
+   "AdditionalInterest_FullName_*": [
+    "Commerce Way Partners LP",
+    "Mortenson Construction"
+   ],
+   "NamedInsured_FullName_*": [
+    "Commerce Way Partners LP",
+    "Front Range Holdings Inc",
+    "Mortenson Construction"
+   ],
+   "Producer_CustomerIdentifier_A": [
+    "FREC-001"
+   ],
+   "AdditionalInterest_FullName_B": [
+    "Rocky Mountain Equipment Finance LLC"
+   ],
+   "Policy_ExpirationDate_A": [
+    "10/01/2026"
+   ]
+  }
+ },
+ "shapes": {
+  "ACORD_125": {
+   "NamedInsured_TaxIdentifier_*": {
+    "regex": "^\\d{2}-?\\d{7}$",
+    "why": "a FEIN is nine digits"
+   },
+   "NamedInsured_NAICSCode_*": {
+    "regex": "^\\d{6}$",
+    "why": "NAICS is six digits"
+   },
+   "NamedInsured_SICCode_*": {
+    "regex": "^\\d{4}$",
+    "why": "SIC is four digits"
+   },
+   "*_PostalCode_*": {
+    "regex": "^\\d{5}(-\\d{4})?$",
+    "why": "a US ZIP"
+   },
+   "*StateOrProvinceCode*": {
+    "regex": "^[A-Za-z]{2}$",
+    "why": "two letters"
+   },
+   "Policy_Payment_PaymentScheduleCode_A": {
+    "regex": "^[A-Z]{2}$",
+    "why": "AN / MO / QT"
+   },
+   "Policy_Audit_FrequencyCode_A": {
+    "regex": "^[ASQMO]$",
+    "why": "A / S / Q / M / O"
+   }
+  }
+ },
+ "expected_absent": {
+  "ACORD_125": {
+   "scope": [
+    "CommercialStructure_PhysicalAddress_LineOne_*",
+    "NamedInsured_FullName_*",
+    "AdditionalInterest_FullName_*",
+    "AdditionalInterest_MailingAddress_LineOne_*"
+   ],
+   "values": [
+    "1000 Tennyson St",
+    "1173 E Colfax Ave",
+    "1346 E Orchard Rd",
+    "1519 E Alameda Pkwy",
+    "1692 Pearl St",
+    "1865 Sheridan Blvd",
+    "2038 W 11th Ave",
+    "2211 W Jefferson Ave",
+    "2384 E 40th Ave",
+    "2557 S Syracuse St",
+    "2730 Stout St",
+    "2903 Quebec St",
+    "3076 E Arapahoe Rd",
+    "3249 Steele St",
+    "3422 Justice Way",
+    "3595 S Harrison St",
+    "3768 W 44th Ave",
+    "3941 E Crestline Cir",
+    "4114 E 1st Ave",
+    "4287 W 120th Ave",
+    "4460 17th St",
+    "4633 E Mexico Ave",
+    "4806 Wewatta St",
+    "4979 Mt Pyramid Ct",
+    "5152 E 32nd Ave",
+    "5325 S Ulster St",
+    "5498 W 29th Ave",
+    "5671 E Union Ave",
+    "5844 Blake St",
+    "6017 Lawrence St",
+    "6190 Tennyson St",
+    "6363 E Colfax Ave",
+    "6536 E Orchard Rd",
+    "6709 E Alameda Pkwy",
+    "6882 Pearl St",
+    "7055 Sheridan Blvd",
+    "7228 W 11th Ave",
+    "7401 W Jefferson Ave",
+    "7574 E 40th Ave",
+    "7747 S Syracuse St",
+    "7920 Stout St",
+    "8093 Quebec St",
+    "8266 E Arapahoe Rd",
+    "8439 Steele St",
+    "8612 Justice Way",
+    "8785 S Harrison St",
+    "8958 W 44th Ave",
+    "9131 E Crestline Cir",
+    "9304 E 1st Ave",
+    "9477 W 120th Ave",
+    "9650 17th St",
+    "9823 E Mexico Ave",
+    "1096 Wewatta St",
+    "1269 Mt Pyramid Ct",
+    "1442 E 32nd Ave",
+    "1615 S Ulster St",
+    "1788 W 29th Ave",
+    "1961 E Union Ave",
+    "2134 Blake St",
+    "2307 Lawrence St",
+    "2480 Tennyson St",
+    "2653 E Colfax Ave",
+    "2826 E Orchard Rd",
+    "2999 E Alameda Pkwy",
+    "3172 Pearl St",
+    "3345 Sheridan Blvd",
+    "3518 W 11th Ave",
+    "3691 W Jefferson Ave",
+    "3864 E 40th Ave",
+    "4037 S Syracuse St",
+    "4210 Stout St",
+    "4383 Quebec St",
+    "4556 E Arapahoe Rd",
+    "4729 Steele St",
+    "4902 Justice Way",
+    "5075 S Harrison St",
+    "5248 W 44th Ave",
+    "5421 E Crestline Cir",
+    "5594 E 1st Ave",
+    "5767 W 120th Ave",
+    "5940 17th St",
+    "6113 E Mexico Ave",
+    "6286 Wewatta St",
+    "6459 Mt Pyramid Ct",
+    "6632 E 32nd Ave",
+    "6805 S Ulster St",
+    "6978 W 29th Ave",
+    "7151 E Union Ave",
+    "7324 Blake St",
+    "7497 Lawrence St",
+    "7670 Tennyson St",
+    "7843 E Colfax Ave",
+    "8016 E Orchard Rd",
+    "8189 E Alameda Pkwy",
+    "8362 Pearl St",
+    "8535 Sheridan Blvd",
+    "8708 W 11th Ave",
+    "8881 W Jefferson Ave",
+    "9054 E 40th Ave",
+    "9227 S Syracuse St",
+    "9400 Stout St",
+    "9573 Quebec St",
+    "9746 E Arapahoe Rd",
+    "1019 Steele St",
+    "1192 Justice Way",
+    "1365 S Harrison St",
+    "1538 W 44th Ave",
+    "1711 E Crestline Cir",
+    "1884 E 1st Ave",
+    "2057 W 120th Ave",
+    "2230 17th St",
+    "2403 E Mexico Ave",
+    "2576 Wewatta St",
+    "2749 Mt Pyramid Ct",
+    "2922 E 32nd Ave",
+    "3095 S Ulster St",
+    "3268 W 29th Ave",
+    "3441 E Union Ave",
+    "3614 Blake St",
+    "3787 Lawrence St",
+    "Mortenson Construction",
+    "Saunders Construction LLC",
+    "GH Phipps Construction Companies",
+    "Hensel Phelps",
+    "PCL Construction Services Inc",
+    "Haselden Construction",
+    "Pinkard Construction Company",
+    "Adolfson & Peterson Construction",
+    "Swinerton Builders",
+    "Milender White",
+    "Brinkmann Constructors",
+    "Shaw Construction LLC",
+    "Cushman & Wakefield Property Mgmt",
+    "Highwoods Realty LP",
+    "Lincoln Property Company",
+    "Denver Public Schools Facilities",
+    "Aurora Public Schools",
+    "Cherry Creek Shopping Center LLC",
+    "Kaiser Permanente Colorado",
+    "UCHealth Facilities",
+    "Brookfield Residential",
+    "Hines Interests LP",
+    "Jones Lang LaSalle Americas",
+    "Colliers International Denver",
+    "City of Westminster",
+    "Boulder Valley School District",
+    "Arapahoe County Facilities",
+    "Western Sheet Metal Inc",
+    "1621 18th St, Suite 300",
+    "86 Inverness Pl N",
+    "1080 W Hampden Ave",
+    "420 6th Ave",
+    "2000 S Colorado Blvd",
+    "6950 S Potomac St",
+    "9195 W 6th Ave",
+    "797 Ventura St",
+    "1420 Wynkoop St",
+    "12655 W 54th Dr",
+    "4990 Pearl East Cir",
+    "300 Kalamath St",
+    "1401 Lawrence St",
+    "8101 E Prentice Ave",
+    "1801 Broadway",
+    "1860 Lincoln St",
+    "1085 Peoria St",
+    "3000 E 1st Ave",
+    "10350 E Dakota Ave",
+    "12401 E 17th Ave",
+    "6465 S Greenwood Plaza",
+    "1144 15th St",
+    "1225 17th St",
+    "4643 S Ulster St",
+    "4800 W 92nd Ave",
+    "6500 Arapahoe Rd",
+    "5334 S Prince St",
+    "7250 E 49th Ave",
+    "Commerce Way Partners LP",
+    "Front Range Holdings Inc"
+   ]
+  }
+ },
+ "row_sets": {
+  "ACORD_125": {
+   "named_insureds": {
+    "slots": [
+     "A",
+     "B",
+     "C"
+    ],
+    "columns": {
+     "name": "NamedInsured_FullName_{row}",
+     "fein": "NamedInsured_TaxIdentifier_{row}",
+     "naics": "NamedInsured_NAICSCode_{row}",
+     "phone": "NamedInsured_Primary_PhoneNumber_{row}",
+     "web": "NamedInsured_Primary_WebsiteAddress_{row}"
+    },
+    "rows": [
+     {
+      "name": "Front Range Electrical Contractors LLC",
+      "fein": "12-3456789",
+      "naics": "238210",
+      "phone": "303-555-0175",
+      "web": "www.example-electrical.com"
+     },
+     {
+      "name": "Front Range Service Company LLC",
+      "fein": "45-6789012",
+      "naics": "811310",
+      "phone": "303-555-0176",
+      "web": "www.frservice-example.com"
+     },
+     {
+      "name": "Commerce Way Equipment Leasing LLC",
+      "fein": "45-1122334",
+      "naics": "532412",
+      "phone": "303-555-0178",
+      "web": "www.cwleasing-example.com"
+     }
+    ]
+   },
+   "premises": {
+    "slots": [
+     "A",
+     "B",
+     "C",
+     "D"
+    ],
+    "columns": {
+     "loc": "CommercialStructure_Location_ProducerIdentifier_{row}",
+     "line1": "CommercialStructure_PhysicalAddress_LineOne_{row}",
+     "city": "CommercialStructure_PhysicalAddress_CityName_{row}",
+     "zip": "CommercialStructure_PhysicalAddress_PostalCode_{row}",
+     "revenue": "CommercialStructure_AnnualRevenueAmount_{row}",
+     "ft": "BusinessInformation_FullTimeEmployeeCount_{row}",
+     "occupied": "BuildingOccupancy_OccupiedArea_{row}",
+     "area": "Construction_BuildingArea_{row}"
+    },
+    "rows": [
+     {
+      "loc": "1",
+      "line1": "8000 Commerce Way",
+      "city": "Denver",
+      "zip": "80216",
+      "revenue": "$2,950,000",
+      "ft": "12",
+      "occupied": "5,000",
+      "area": "15,000"
+     },
+     {
+      "loc": "2",
+      "line1": "5300 N Federal Blvd",
+      "city": "Denver",
+      "zip": "80221",
+      "revenue": "$900,000",
+      "ft": "4",
+      "occupied": "8,000",
+      "area": "8,000"
+     },
+     {
+      "loc": "3",
+      "line1": "4750 Centennial Blvd",
+      "city": "Colorado Springs",
+      "zip": "80919",
+      "revenue": "$400,000",
+      "ft": "2",
+      "occupied": "1,200",
+      "area": "22,000"
+     },
+     {
+      "loc": "4",
+      "line1": "780 Kimbark St",
+      "city": "Longmont",
+      "zip": "80501",
+      "revenue": "$0",
+      "ft": "0",
+      "occupied": "1,500",
+      "area": "3,000"
+     }
+    ]
+   },
+   "contacts": {
+    "slots": [
+     "A",
+     "B"
+    ],
+    "columns": {
+     "type": "NamedInsured_Contact_ContactDescription_{row}",
+     "name": "NamedInsured_Contact_FullName_{row}",
+     "phone": "NamedInsured_Contact_PrimaryPhoneNumber_{row}",
+     "email": "NamedInsured_Contact_PrimaryEmailAddress_{row}"
+    },
+    "rows": [
+     {
+      "type": "Inspection",
+      "name": "John Smith",
+      "phone": "303-555-0188",
+      "email": "john@example-electrical.com"
+     },
+     {
+      "type": "Accounting",
+      "name": "Sarah Jones",
+      "phone": "303-555-0190",
+      "email": "accounting@example-electrical.com"
+     }
+    ]
+   },
+   "losses": {
+    "slots": [
+     "A",
+     "B",
+     "C"
+    ],
+    "columns": {
+     "occurrence": "LossHistory_OccurrenceDate_{row}",
+     "line": "LossHistory_LineOfBusiness_{row}",
+     "paid": "LossHistory_PaidAmount_{row}",
+     "reserved": "LossHistory_ReservedAmount_{row}",
+     "open": "LossHistory_ClaimStatus_OpenCode_{row}"
+    },
+    "rows": [
+     {
+      "occurrence": "09/14/2025",
+      "line": "General Liability",
+      "paid": "$12,400",
+      "reserved": "$3,000",
+      "open": "Y"
+     },
+     {
+      "occurrence": "03/28/2024",
+      "line": "Business Auto",
+      "paid": "$4,850",
+      "reserved": "$0",
+      "open": "N"
+     },
+     {
+      "occurrence": "06/02/2023",
+      "line": "Commercial Property",
+      "paid": "$6,300",
+      "reserved": "$0",
+      "open": "N"
+     }
+    ]
+   },
+   "prior_coverage": {
+    "slots": [
+     "A",
+     "B",
+     "C"
+    ],
+    "columns": {
+     "GeneralLiability_carrier": "PriorCoverage_GeneralLiability_InsurerFullName_{row}",
+     "GeneralLiability_policy": "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_{row}",
+     "GeneralLiability_premium": "PriorCoverage_GeneralLiability_TotalPremiumAmount_{row}",
+     "Automobile_carrier": "PriorCoverage_Automobile_InsurerFullName_{row}",
+     "Automobile_policy": "PriorCoverage_Automobile_PolicyNumberIdentifier_{row}",
+     "Automobile_premium": "PriorCoverage_Automobile_TotalPremiumAmount_{row}",
+     "Property_carrier": "PriorCoverage_Property_InsurerFullName_{row}",
+     "Property_policy": "PriorCoverage_Property_PolicyNumberIdentifier_{row}",
+     "Property_premium": "PriorCoverage_Property_TotalPremiumAmount_{row}",
+     "OtherLine_carrier": "PriorCoverage_OtherLine_InsurerFullName_{row}",
+     "OtherLine_policy": "PriorCoverage_OtherLine_PolicyNumberIdentifier_{row}",
+     "OtherLine_premium": "PriorCoverage_OtherLine_TotalPremiumAmount_{row}"
+    },
+    "rows": [
+     {
+      "GeneralLiability_carrier": "Timberline Mutual Insurance Company",
+      "GeneralLiability_policy": "GL-123456",
+      "GeneralLiability_premium": "$18,450",
+      "Automobile_carrier": "Timberline Mutual Insurance Company",
+      "Automobile_policy": "BA-456789",
+      "Automobile_premium": "$14,200",
+      "Property_carrier": "Timberline Mutual Insurance Company",
+      "Property_policy": "CP-567890",
+      "Property_premium": "$8,750",
+      "OtherLine_carrier": "Timberline Mutual Insurance Company",
+      "OtherLine_policy": "CU-678901",
+      "OtherLine_premium": "$4,100"
+     },
+     {
+      "GeneralLiability_carrier": "Timberline Mutual Insurance Company",
+      "GeneralLiability_policy": "GL-104471",
+      "GeneralLiability_premium": "$17,600",
+      "Automobile_carrier": "Timberline Mutual Insurance Company",
+      "Automobile_policy": "BA-431120",
+      "Automobile_premium": "$13,450",
+      "Property_carrier": "Timberline Mutual Insurance Company",
+      "Property_policy": "CP-540018",
+      "Property_premium": "$8,200",
+      "OtherLine_carrier": "Timberline Mutual Insurance Company",
+      "OtherLine_policy": "CU-652207",
+      "OtherLine_premium": "$3,900"
+     },
+     {
+      "GeneralLiability_carrier": "Timberline Mutual Insurance Company",
+      "GeneralLiability_policy": "GL-091233",
+      "GeneralLiability_premium": "$16,900",
+      "Automobile_carrier": "Timberline Mutual Insurance Company",
+      "Automobile_policy": "BA-402266",
+      "Automobile_premium": "$12,980",
+      "Property_carrier": "Timberline Mutual Insurance Company",
+      "Property_policy": "CP-511907",
+      "Property_premium": "$7,850",
+      "OtherLine_carrier": "Harbor Excess Insurance Company",
+      "OtherLine_policy": "XS-3310472",
+      "OtherLine_premium": "$3,650"
+     }
+    ]
+   }
+  }
+ },
+ "fields": {
+  "Form_EditionIdentifier_A": {
+   "verdict": "expect",
+   "value": "ACORD 125 (2025/03)",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Form_CompletionDate_A": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "the generation date",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_FullName_A": {
+   "verdict": "not_scored",
+   "value": "Summit Commercial Insurance",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_MailingAddress_LineOne_A": {
+   "verdict": "not_scored",
+   "value": "1800 Market Street",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_MailingAddress_LineTwo_A": {
+   "verdict": "not_scored",
+   "value": "Suite 400",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_MailingAddress_CityName_A": {
+   "verdict": "not_scored",
+   "value": "Denver",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_MailingAddress_StateOrProvinceCode_A": {
+   "verdict": "not_scored",
+   "value": "CO",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_MailingAddress_PostalCode_A": {
+   "verdict": "not_scored",
+   "value": "80202",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_ContactPerson_FullName_A": {
+   "verdict": "not_scored",
+   "value": "Michelle Smith",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_ContactPerson_PhoneNumber_A": {
+   "verdict": "not_scored",
+   "value": "303-555-0100",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_ContactPerson_EmailAddress_A": {
+   "verdict": "not_scored",
+   "value": "mproducer@example.com",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+   "verdict": "not_scored",
+   "value": "Michelle Smith",
+   "why": "resolved from the LOGGED-IN ACCOUNT by design, not from the uploaded document - scored manually against the account, not by this key",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_FaxNumber_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "no producer fax is printed",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_CustomerIdentifier_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "client: 'only if verified from agency/AMS' - FREC-001 is another agency's",
+   "trap": "must not be FREC-001",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_NationalIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "lives in the agency profile, never in an upload",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_StateLicenseIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "lives in the agency profile, never in an upload",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "AUTHORSHIP",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_FullName_A": {
+   "verdict": "expect",
+   "value": "Granite Arch Casualty Company",
+   "why": "the addressee of the submission",
+   "trap": "must not be Timberline Mutual Insurance Company",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_NAICCode_A": {
+   "verdict": "expect",
+   "value": "21334",
+   "why": "client: 'only if verified' - the carrier prints it on its acknowledgement",
+   "trap": "must not be 27413",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_ProductDescription_A": {
+   "verdict": "expect",
+   "value": "Contractors Select Program",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Insurer_ProductCode_A": {
+   "verdict": "expect",
+   "value": "CSP-EL",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_Underwriter_FullName_A": {
+   "verdict": "expect",
+   "value": "Dana Whitfield",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_Underwriter_OfficeIdentifier_A": {
+   "verdict": "expect",
+   "value": "Denver Branch",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_ProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "client: 'only if verified from agency/AMS'",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Insurer_SubProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "client: 'only if verified from agency/AMS'",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_EffectiveDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2026",
+   "why": "",
+   "trap": "must not be 10/01/2025",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_ExpirationDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2027",
+   "why": "",
+   "trap": "must not be 10/01/2026",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "client: blank for a new-business quote",
+   "trap": "GL-123456 is the EXPIRING policy",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_QuoteIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "client: QUOTE",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_IssueIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the transaction is a quote",
+   "trap": "the incumbent dec prints 'RENEWAL OF GL-104471'",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_BoundIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the transaction is a quote",
+   "trap": "the incumbent dec prints 'RENEWAL OF GL-104471'",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_ChangeIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the transaction is a quote",
+   "trap": "the incumbent dec prints 'RENEWAL OF GL-104471'",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_CancelIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the transaction is a quote",
+   "trap": "the incumbent dec prints 'RENEWAL OF GL-104471'",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_RenewIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the transaction is a quote",
+   "trap": "the incumbent dec prints 'RENEWAL OF GL-104471'",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_EffectiveDate_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_EffectiveTime_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_EffectiveTimeAMIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Status_EffectiveTimePMIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_CommercialGeneralLiability_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "a line requested on the cover letter",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_CommercialProperty_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "a line requested on the cover letter",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_BusinessAutoIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "a line requested on the cover letter",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_UmbrellaIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "a line requested on the cover letter",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_BoilerAndMachineryIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_BusinessOwnersIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_CrimeIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_CyberAndPrivacy_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_FiduciaryLiabilityIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_GarageAndDealersIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_LiquorLiabilityIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_MotorCarrierIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_TruckersIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_YachtIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not requested",
+   "trap": "inland marine is already with the carrier; property extensions are not lines",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_E": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_E": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_LineOfBusiness_OtherIndicator_F": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_F": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "BoilerAndMachineryLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessOwnersLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialInlandMarineLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPropertyLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialVehicleLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialUmbrellaLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CrimeLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CyberAndPrivacyLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "FiduciaryLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "GarageAndDealersLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LiquorLiabilityLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "MotorCarrierLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "TruckersLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "YachtLineOfBusiness_PremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "must not be $18,450",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_EstimatedTotalAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "a quote is not priced",
+   "trap": "must not be $45,500",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_DirectBillIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "client: 'Direct, if known' - stated",
+   "trap": "the incumbent dec says agency bill",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_ProducerBillIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "billing is Direct",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_PaymentScheduleCode_A": {
+   "verdict": "expect",
+   "value": "MO",
+   "why": "ACORD tooltip: 'MO - Monthly'",
+   "trap": "the incumbent billed quarterly",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_PaymentMethod_MethodDescription_A": {
+   "verdict": "expect",
+   "value": "EFT",
+   "why": "the cover letter states the method",
+   "trap": "must not be 'Agency bill - Quarterly installments'",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_Audit_FrequencyCode_A": {
+   "verdict": "expect",
+   "value": "A",
+   "why": "the carrier's acknowledgement: premium audit annual",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_DepositAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "set at quotation - the documents say so",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_Payment_MinimumPremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "set at quotation - the documents say so",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_InformationPracticesNoticeIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "AUTHORSHIP",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_VehicleScheduleIndicator_A": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "disputed: package principle vs the Orbin 'do not regress' list (owner decision)",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_AccountsReceivableValuablePapersIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_DealerIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_ElectronicDataProcessingIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_GlassAndSignIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_InstallationBuildersRiskIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_OpenCargoIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_DriverInformationScheduleIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated; the client: tick 'only when Primble actually creates and attaches' the schedule",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_B": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_C": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_D": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_E": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_E": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_E": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_F": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "not priced",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_F": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_OtherDescription_F": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_Attachment_ContractorsSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_StatementOfValuesIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_LossSummaryIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_AdditionalInterestScheduleIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_AdditionalPremisesScheduleIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_ApartmentBuildingSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_CondominiumAssociationByLawsIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_CoveragesScheduleIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_HotelMotelSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_InternationalLiabilityExposureSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_InternationalPropertyExposureSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_PremiumPaymentSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_ProfessionalLiabilitySupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_RestaurantTavernSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_StateSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Attachment_VacantBuildingSupplementIndicator_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "only ACORD 125 is generated",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AAICode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AAJCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KAACode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_ABCCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AAHCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AACCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AADCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KABCode_A": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "the questionnaire answers N",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_AAFCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KAKCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KALCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_ABBCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KACCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KAMCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KANCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "CommercialPolicy_Question_KAOCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the questionnaire answers Y",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "BusinessInformation_ParentOrganizationName_A": {
+   "verdict": "expect",
+   "value": "Front Range Holdings Inc",
+   "why": "1a",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Subsidiary_ParentSubsidiaryRelationshipDescription_A": {
+   "verdict": "expect",
+   "value": "Parent holding company",
+   "why": "1a",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Subsidiary_ParentOwnershipPercent_A": {
+   "verdict": "expect",
+   "value": "80%",
+   "why": "1a",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Subsidiary_OrganizationName_A": {
+   "verdict": "expect",
+   "value": "Front Range Service Company LLC",
+   "why": "1b",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "Subsidiary_ParentSubsidiaryRelationshipDescription_B": {
+   "verdict": "expect",
+   "value": "Wholly owned service subsidiary",
+   "why": "1b",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Subsidiary_ParentOwnershipPercent_B": {
+   "verdict": "expect",
+   "value": "100%",
+   "why": "1b",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_SafetyManualIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 2's elements",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_SafetyPositionIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 2's elements",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_MonthlyMeetingsIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 2's elements",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_OSHAIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 2's elements",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_OtherIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 2's elements",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_FormalSafetyProgram_OtherDescription_B": {
+   "verdict": "expect",
+   "value": "Daily job hazard analysis before every shift",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A": {
+   "verdict": "expect",
+   "value": "Limited quantities of common jobsite adhesives and solvents stored in approved containers.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "OtherPolicy_PolicyNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "WC-GA-448120",
+   "why": "question 4",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_LineOfBusinessCode_A": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "ACORD wants a line-of-business CODE; no code table in the repo",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_PolicyNumberIdentifier_B": {
+   "verdict": "expect",
+   "value": "IM-GA-220915",
+   "why": "question 4",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_LineOfBusinessCode_B": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "ACORD wants a line-of-business CODE; no code table in the repo",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_PolicyNumberIdentifier_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "two policies only",
+   "trap": "the INCUMBENT's policies are not with this company",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_LineOfBusinessCode_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_PolicyNumberIdentifier_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "two policies only",
+   "trap": "the INCUMBENT's policies are not with this company",
+   "source": "text",
+   "match": "exact"
+  },
+  "OtherPolicy_LineOfBusinessCode_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_AgentNoLongerWritesForInsurerIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 5 reason",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_UnderwritingIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 5 reason",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_UnderwritingConditionCorrectedIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "question 5",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_UnderwritingConditionCorrectedDescription_A": {
+   "verdict": "expect",
+   "value": "A written fleet safety program with MVR review and driver training was adopted in January 2025.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CancelNonRenew_NonRenewalIndicator_A": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "both events ARE non-renewals, but the questionnaire leaves this reason box unmarked - ambiguous",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_NonPaymentIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "no non-payment",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CancelNonRenew_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_PastLossesClaimsRelatingSexualAbuseDiscriminationNegligentHiringExplanation_A": {
+   "verdict": "expect",
+   "value": "A former apprentice filed an EEOC discrimination charge in 2023; it was dismissed with no finding in November 2023.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_PastFiveYearsAnyApplicantIndictedOrConvictedFraudBriberyArsonExplanation_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "question 7 is N",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_A": {
+   "verdict": "expect",
+   "value": "09/10/2026",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolationExplanation_A": {
+   "verdict": "expect",
+   "value": "Colorado Springs Fire Department noted two extinguishers with expired inspection tags at Location 3.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "the service is only SCHEDULED - a resolution that has not happened is not one",
+   "trap": "Extinguisher service is scheduled for 10/05/2026.",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "not resolved",
+   "trap": "10/05/2026 is the SCHEDULED date",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_A": {
+   "verdict": "expect",
+   "value": "04/18/2022",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_A": {
+   "verdict": "expect",
+   "value": "A leased compact excavator was repossessed by the lessor after a billing dispute.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_A": {
+   "verdict": "expect",
+   "value": "Dispute settled, balance paid in full and the lease account closed.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_A": {
+   "verdict": "expect",
+   "value": "08/30/2022",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_JudgementOrLien_OccurrenceDate_A": {
+   "verdict": "expect",
+   "value": "08/14/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_JudgementOrLienExplanation_A": {
+   "verdict": "expect",
+   "value": "Mile High Supply recorded a mechanics lien on the Tennyson project over a disputed invoice.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDescription_A": {
+   "verdict": "expect",
+   "value": "Invoice paid and the lien released.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDate_A": {
+   "verdict": "expect",
+   "value": "02/27/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolationExplanation_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_JudgementOrLienExplanation_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_JudgementOrLien_OccurrenceDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDate_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one occurrence each",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ApplicantOtherBusinessVenturesCoverageNotRequestedExplanation_A": {
+   "verdict": "expect",
+   "value": "The managing member owns Summit Solar Services LLC, a residential solar installer that is not part of this submission.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ApplicantOwnLeaseOperateDronesExplanation_A": {
+   "verdict": "expect",
+   "value": "The applicant owns one DJI Mavic 3 Enterprise drone flown by a Part 107 certified employee for roof and site inspections.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_ApplicantHireOthersOperateDronesExplanation_A": {
+   "verdict": "expect",
+   "value": "The applicant hires Aerial Vantage LLC to fly progress-photography drones on large commercial projects.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_OperationsDescription_A": {
+   "verdict": "expect",
+   "value": "Licensed electrical contractor performing commercial and residential electrical installation, repair and service. Work includes new wiring, service upgrades, panel replacement, lighting and electrical troubleshooting. No utility-line construction or electrical generation operations.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_OperationsDescription_B": {
+   "verdict": "expect",
+   "value": "Front Range Service Company LLC performs after-hours electrical service calls and preventive maintenance for commercial customers. Commerce Way Equipment Leasing LLC owns the service vehicles and aerial lifts and leases them to the applicant; it has no other customers.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialPolicy_RemarkText_A": {
+   "verdict": "expect",
+   "value": "Please quote General Liability at $1,000,000 / $2,000,000 and the umbrella at $2,000,000. Locations 2 and 4 are owned; Locations 1 and 3 are leased.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_FullName_A": {
+   "verdict": "expect",
+   "value": "Front Range Electrical Contractors LLC",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_TaxIdentifier_A": {
+   "verdict": "expect",
+   "value": "12-3456789",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_SICCode_A": {
+   "verdict": "expect",
+   "value": "1731",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_NAICSCode_A": {
+   "verdict": "expect",
+   "value": "238210",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_GeneralLiabilityCode_A": {
+   "verdict": "expect",
+   "value": "92478",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_PhoneNumber_A": {
+   "verdict": "expect",
+   "value": "303-555-0175",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_WebsiteAddress_A": {
+   "verdict": "expect",
+   "value": "www.example-electrical.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineOne_A": {
+   "verdict": "expect",
+   "value": "8000 Commerce Way",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineTwo_A": {
+   "verdict": "expect",
+   "value": "Suite 120",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_CityName_A": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_A": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_PostalCode_A": {
+   "verdict": "expect",
+   "value": "80216",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_A": {
+   "verdict": "expect",
+   "value": "3",
+   "why": "",
+   "trap": "",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_FullName_B": {
+   "verdict": "expect",
+   "value": "Front Range Service Company LLC",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_TaxIdentifier_B": {
+   "verdict": "expect",
+   "value": "45-6789012",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_SICCode_B": {
+   "verdict": "expect",
+   "value": "7629",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_NAICSCode_B": {
+   "verdict": "expect",
+   "value": "811310",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_GeneralLiabilityCode_B": {
+   "verdict": "expect",
+   "value": "97220",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_PhoneNumber_B": {
+   "verdict": "expect",
+   "value": "303-555-0176",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_WebsiteAddress_B": {
+   "verdict": "expect",
+   "value": "www.frservice-example.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineOne_B": {
+   "verdict": "expect",
+   "value": "8000 Commerce Way",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineTwo_B": {
+   "verdict": "expect",
+   "value": "Suite 130",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_CityName_B": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_B": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_PostalCode_B": {
+   "verdict": "expect",
+   "value": "80216",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_B": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_FullName_C": {
+   "verdict": "expect",
+   "value": "Commerce Way Equipment Leasing LLC",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_TaxIdentifier_C": {
+   "verdict": "expect",
+   "value": "45-1122334",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_SICCode_C": {
+   "verdict": "expect",
+   "value": "7359",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_NAICSCode_C": {
+   "verdict": "expect",
+   "value": "532412",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_GeneralLiabilityCode_C": {
+   "verdict": "expect",
+   "value": "97111",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_PhoneNumber_C": {
+   "verdict": "expect",
+   "value": "303-555-0178",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Primary_WebsiteAddress_C": {
+   "verdict": "expect",
+   "value": "www.cwleasing-example.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineOne_C": {
+   "verdict": "expect",
+   "value": "8000 Commerce Way",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_LineTwo_C": {
+   "verdict": "expect",
+   "value": "Suite 140",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_CityName_C": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_C": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_MailingAddress_PostalCode_C": {
+   "verdict": "expect",
+   "value": "80216",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_C": {
+   "verdict": "expect",
+   "value": "2",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_C": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "all three are LLCs",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_LegalEntity_OtherDescription_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_BusinessStartDate_A": {
+   "verdict": "expect",
+   "value": "06/15/2014",
+   "why": "",
+   "trap": "2019 is the relocation",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_ContactDescription_A": {
+   "verdict": "expect",
+   "value": "Inspection",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_Contact_FullName_A": {
+   "verdict": "expect",
+   "value": "John Smith",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryPhoneNumber_A": {
+   "verdict": "expect",
+   "value": "303-555-0188",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryPhoneNumber_A": {
+   "verdict": "expect",
+   "value": "303-555-0175",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryEmailAddress_A": {
+   "verdict": "expect",
+   "value": "john@example-electrical.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryEmailAddress_A": {
+   "verdict": "expect",
+   "value": "jsmith.site@example-electrical.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryCellPhoneIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryHomePhoneIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryCellPhoneIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryHomePhoneIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_ContactDescription_B": {
+   "verdict": "expect",
+   "value": "Accounting",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "NamedInsured_Contact_FullName_B": {
+   "verdict": "expect",
+   "value": "Sarah Jones",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryPhoneNumber_B": {
+   "verdict": "expect",
+   "value": "303-555-0190",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryPhoneNumber_B": {
+   "verdict": "expect",
+   "value": "720-555-0142",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryEmailAddress_B": {
+   "verdict": "expect",
+   "value": "accounting@example-electrical.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryEmailAddress_B": {
+   "verdict": "expect",
+   "value": "sjones@example-electrical.com",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryCellPhoneIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_PrimaryHomePhoneIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryCellPhoneIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Contact_SecondaryHomePhoneIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the phone's type is printed beside it",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Initials_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "AUTHORSHIP",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_Signature_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "AUTHORSHIP",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "NamedInsured_SignatureDate_A": {
+   "verdict": "blank_by_rule",
+   "value": "",
+   "why": "AUTHORSHIP",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_ContractorIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_ApartmentsIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_CondominiumsIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_InstitutionalIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_ManufacturingIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_OfficeIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_RestaurantIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_RetailIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_ServiceIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_WholesaleIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "one nature of business",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_BusinessType_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Building_ProducerIdentifier_A": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_A": {
+   "verdict": "expect",
+   "value": "8000 Commerce Way",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_A": {
+   "verdict": "expect",
+   "value": "Suite 120",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CityName_A": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_A": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_A": {
+   "verdict": "expect",
+   "value": "80216",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_AnnualRevenueAmount_A": {
+   "verdict": "expect",
+   "value": "$2,950,000",
+   "why": "",
+   "trap": "the company total, the projection, payroll and the backlog",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_Question_ABBCode_A": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_FullTimeEmployeeCount_A": {
+   "verdict": "expect",
+   "value": "12",
+   "why": "",
+   "trap": "20 is the headcount",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_PartTimeEmployeeCount_A": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "6 agency temps are not employees",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OccupiedArea_A": {
+   "verdict": "expect",
+   "value": "5,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OpenToPublicArea_A": {
+   "verdict": "expect",
+   "value": "500",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OperationsDescription_A": {
+   "verdict": "expect",
+   "value": "Administrative office, electrical contracting warehouse and material storage.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Construction_BuildingArea_A": {
+   "verdict": "expect",
+   "value": "15,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Location_ProducerIdentifier_B": {
+   "verdict": "expect",
+   "value": "2",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Building_ProducerIdentifier_B": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_B": {
+   "verdict": "expect",
+   "value": "5300 N Federal Blvd",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "no suite - the schedule prints '--'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CityName_B": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_B": {
+   "verdict": "expect",
+   "value": "Adams",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_B": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_B": {
+   "verdict": "expect",
+   "value": "80221",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_AnnualRevenueAmount_B": {
+   "verdict": "expect",
+   "value": "$900,000",
+   "why": "",
+   "trap": "the company total, the projection, payroll and the backlog",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_B": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_B": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_Question_ABBCode_B": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_FullTimeEmployeeCount_B": {
+   "verdict": "expect",
+   "value": "4",
+   "why": "",
+   "trap": "20 is the headcount",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_PartTimeEmployeeCount_B": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "6 agency temps are not employees",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OccupiedArea_B": {
+   "verdict": "expect",
+   "value": "8,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OpenToPublicArea_B": {
+   "verdict": "expect",
+   "value": "0",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OperationsDescription_B": {
+   "verdict": "expect",
+   "value": "Fleet yard, vehicle maintenance bay and aerial lift storage.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Construction_BuildingArea_B": {
+   "verdict": "expect",
+   "value": "8,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Location_ProducerIdentifier_C": {
+   "verdict": "expect",
+   "value": "3",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Building_ProducerIdentifier_C": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_C": {
+   "verdict": "expect",
+   "value": "4750 Centennial Blvd",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_C": {
+   "verdict": "expect",
+   "value": "Suite 210",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CityName_C": {
+   "verdict": "expect",
+   "value": "Colorado Springs",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_C": {
+   "verdict": "expect",
+   "value": "El Paso",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_C": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_C": {
+   "verdict": "expect",
+   "value": "80919",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_AnnualRevenueAmount_C": {
+   "verdict": "expect",
+   "value": "$400,000",
+   "why": "",
+   "trap": "the company total, the projection, payroll and the backlog",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_C": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_C": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_C": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_Question_ABBCode_C": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_FullTimeEmployeeCount_C": {
+   "verdict": "expect",
+   "value": "2",
+   "why": "",
+   "trap": "20 is the headcount",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_PartTimeEmployeeCount_C": {
+   "verdict": "expect",
+   "value": "0",
+   "why": "",
+   "trap": "6 agency temps are not employees",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OccupiedArea_C": {
+   "verdict": "expect",
+   "value": "1,200",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OpenToPublicArea_C": {
+   "verdict": "expect",
+   "value": "150",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OperationsDescription_C": {
+   "verdict": "expect",
+   "value": "Branch estimating office for southern Colorado projects.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Construction_BuildingArea_C": {
+   "verdict": "expect",
+   "value": "22,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Location_ProducerIdentifier_D": {
+   "verdict": "expect",
+   "value": "4",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_Building_ProducerIdentifier_D": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_D": {
+   "verdict": "expect",
+   "value": "780 Kimbark St",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "no suite - the schedule prints '--'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CityName_D": {
+   "verdict": "expect",
+   "value": "Longmont",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_D": {
+   "verdict": "expect",
+   "value": "Boulder",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_D": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_D": {
+   "verdict": "expect",
+   "value": "80501",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_AnnualRevenueAmount_D": {
+   "verdict": "expect",
+   "value": "$0",
+   "why": "",
+   "trap": "the company total, the projection, payroll and the backlog",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_D": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_D": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the document does not assert this",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_D": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "CommercialStructure_Question_ABBCode_D": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_FullTimeEmployeeCount_D": {
+   "verdict": "expect",
+   "value": "0",
+   "why": "",
+   "trap": "20 is the headcount",
+   "source": "text",
+   "match": "exact"
+  },
+  "BusinessInformation_PartTimeEmployeeCount_D": {
+   "verdict": "expect",
+   "value": "0",
+   "why": "",
+   "trap": "6 agency temps are not employees",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OccupiedArea_D": {
+   "verdict": "expect",
+   "value": "1,500",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OpenToPublicArea_D": {
+   "verdict": "expect",
+   "value": "0",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "BuildingOccupancy_OperationsDescription_D": {
+   "verdict": "expect",
+   "value": "Wire and conduit storage building; the other half is leased to a cabinet shop.",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "Construction_BuildingArea_D": {
+   "verdict": "expect",
+   "value": "3,000",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InstallationRepairWorkPercent_A": {
+   "verdict": "expect",
+   "value": "100%",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "CommercialStructure_InstallationRepairWorkOffPremisesPercent_A": {
+   "verdict": "expect",
+   "value": "90%",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDate_A": {
+   "verdict": "expect",
+   "value": "09/14/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimDate_A": {
+   "verdict": "expect",
+   "value": "09/16/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_LineOfBusiness_A": {
+   "verdict": "expect",
+   "value": "General Liability",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDescription_A": {
+   "verdict": "expect",
+   "value": "Customer ceiling damaged by water from a nicked sprinkler pipe during rough-in",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "LossHistory_PaidAmount_A": {
+   "verdict": "expect",
+   "value": "$12,400",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ReservedAmount_A": {
+   "verdict": "expect",
+   "value": "$3,000",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_OpenCode_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDate_B": {
+   "verdict": "expect",
+   "value": "03/28/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimDate_B": {
+   "verdict": "expect",
+   "value": "03/28/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_LineOfBusiness_B": {
+   "verdict": "expect",
+   "value": "Business Auto",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDescription_B": {
+   "verdict": "expect",
+   "value": "Insured vehicle rear-ended third party at traffic light",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "LossHistory_PaidAmount_B": {
+   "verdict": "expect",
+   "value": "$4,850",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ReservedAmount_B": {
+   "verdict": "expect",
+   "value": "$0",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_B": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_OpenCode_B": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDate_C": {
+   "verdict": "expect",
+   "value": "06/02/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimDate_C": {
+   "verdict": "expect",
+   "value": "06/03/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_LineOfBusiness_C": {
+   "verdict": "expect",
+   "value": "Commercial Property",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_OccurrenceDescription_C": {
+   "verdict": "expect",
+   "value": "Theft of copper wire from the fleet yard at Location 2",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "LossHistory_PaidAmount_C": {
+   "verdict": "expect",
+   "value": "$6,300",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ReservedAmount_C": {
+   "verdict": "expect",
+   "value": "$0",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_C": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_ClaimStatus_OpenCode_C": {
+   "verdict": "expect",
+   "value": "N",
+   "why": "",
+   "trap": "the 2024 fax is an OLD valuation of the auto claim",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_InformationYearCount_A": {
+   "verdict": "expect",
+   "value": "5",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_TotalAmount_A": {
+   "verdict": "expect",
+   "value": "$23,550",
+   "why": "ACORD tooltip: PAID",
+   "trap": "must not be $26,550 (incurred)",
+   "source": "text",
+   "match": "exact"
+  },
+  "LossHistory_NoPriorLossesIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "three claims",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_PolicyYear_A": {
+   "verdict": "expect",
+   "value": "2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_A": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "GL-123456",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_A": {
+   "verdict": "expect",
+   "value": "$18,450",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2026",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_InsurerFullName_A": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "BA-456789",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_A": {
+   "verdict": "expect",
+   "value": "$14,200",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_EffectiveDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_ExpirationDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2026",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_InsurerFullName_A": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "CP-567890",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_A": {
+   "verdict": "expect",
+   "value": "$8,750",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_EffectiveDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_ExpirationDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2026",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_A": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "CU-678901",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_A": {
+   "verdict": "expect",
+   "value": "$4,100",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_A": {
+   "verdict": "expect",
+   "value": "10/01/2026",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_PolicyYear_B": {
+   "verdict": "expect",
+   "value": "2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_B": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_B": {
+   "verdict": "expect",
+   "value": "GL-104471",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_B": {
+   "verdict": "expect",
+   "value": "$17,600",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_InsurerFullName_B": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_B": {
+   "verdict": "expect",
+   "value": "BA-431120",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_B": {
+   "verdict": "expect",
+   "value": "$13,450",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_EffectiveDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_ExpirationDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_InsurerFullName_B": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_B": {
+   "verdict": "expect",
+   "value": "CP-540018",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_B": {
+   "verdict": "expect",
+   "value": "$8,200",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_EffectiveDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_ExpirationDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_B": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_B": {
+   "verdict": "expect",
+   "value": "CU-652207",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_B": {
+   "verdict": "expect",
+   "value": "$3,900",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_B": {
+   "verdict": "expect",
+   "value": "10/01/2025",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_PolicyYear_C": {
+   "verdict": "expect",
+   "value": "2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_C": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_C": {
+   "verdict": "expect",
+   "value": "GL-091233",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_C": {
+   "verdict": "expect",
+   "value": "$16,900",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_InsurerFullName_C": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_C": {
+   "verdict": "expect",
+   "value": "BA-402266",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_C": {
+   "verdict": "expect",
+   "value": "$12,980",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_EffectiveDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Automobile_ExpirationDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_InsurerFullName_C": {
+   "verdict": "expect",
+   "value": "Timberline Mutual Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_C": {
+   "verdict": "expect",
+   "value": "CP-511907",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_C": {
+   "verdict": "expect",
+   "value": "$7,850",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_EffectiveDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_Property_ExpirationDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_C": {
+   "verdict": "expect",
+   "value": "Harbor Excess Insurance Company",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_C": {
+   "verdict": "expect",
+   "value": "XS-3310472",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_C": {
+   "verdict": "expect",
+   "value": "$3,650",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2023",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_C": {
+   "verdict": "expect",
+   "value": "10/01/2024",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "PriorCoverage_OtherLine_LineOfBusinessCode_A": {
+   "verdict": "not_scored",
+   "value": "",
+   "why": "ACORD wants a CODE; no code table in the repo",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_FullName_A": {
+   "verdict": "expect",
+   "value": "Peak National Bank",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+   "verdict": "expect",
+   "value": "1600 Broadway",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+   "verdict": "expect",
+   "value": "Suite 900",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+   "verdict": "expect",
+   "value": "Denver",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+   "verdict": "expect",
+   "value": "CO",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+   "verdict": "expect",
+   "value": "80202",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_MailingAddress_CountryCode_A": {
+   "verdict": "expect",
+   "value": "US",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_InterestRank_A": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+   "verdict": "expect",
+   "value": "CML-448-2019-07",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_InterestEndDate_A": {
+   "verdict": "expect",
+   "value": "06/30/2034",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_LoanAmount_A": {
+   "verdict": "expect",
+   "value": "$1,150,000",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Primary_PhoneNumber_A": {
+   "verdict": "expect",
+   "value": "303-555-0240",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Primary_FaxNumber_A": {
+   "verdict": "expect",
+   "value": "303-555-0241",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Primary_EmailAddress_A": {
+   "verdict": "expect",
+   "value": "loanservicing@peaknational-example.com",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_InterestReasonDescription_A": {
+   "verdict": "expect",
+   "value": "First mortgage on the owned building at Location 2",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_A": {
+   "verdict": "expect",
+   "value": "2",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_BuildingProducerIdentifier_A": {
+   "verdict": "expect",
+   "value": "1",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_ItemDescription_A": {
+   "verdict": "expect",
+   "value": "Fleet yard building, 5300 N Federal Blvd, Denver",
+   "why": "the loan summary",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "AdditionalInterest_FullName_B": {
+   "verdict": "expect",
+   "value": "Ortega Family Trust",
+   "why": "question 11 - the name of the trust (ACORD tooltip)",
+   "trap": "must not be Rocky Mountain Equipment Finance LLC (a loss payee, not the trust)",
+   "source": "scanned",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "a first mortgage",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_A": {
+   "verdict": "expect",
+   "value": "Y",
+   "why": "evidence: certificate",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_AdditionalInsuredIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_BreachOfWarrantyIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_CoOwnerIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_EmployeeAsLessorIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_LeasebackOwnerIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_LienholderIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_OwnerIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_RegistrantIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_TrusteeIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the interest is a mortgagee",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_PolicyRequiredIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "policy copy not required",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_SendBillIndicator_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "do not send bills",
+   "trap": "",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "",
+   "trap": "",
+   "source": "text",
+   "match": "semantic"
+  },
+  "AdditionalInterest_Item_AircraftProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_AirportIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_BoatProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_VehicleProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_ScheduledItemClassCode_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  },
+  "AdditionalInterest_Item_ScheduledItemProducerIdentifier_A": {
+   "verdict": "blank_no_data",
+   "value": "",
+   "why": "the loan summary prints 'N/A'",
+   "trap": "a placeholder never prints",
+   "source": "text",
+   "match": "exact"
+  }
+ },
+ "match_modes": {
+  "ACORD_125": {
+   "semantic": [
+    "AdditionalInterest_InterestReasonDescription_A",
+    "AdditionalInterest_ItemDescription_A",
+    "BuildingOccupancy_OperationsDescription_A",
+    "BuildingOccupancy_OperationsDescription_B",
+    "BuildingOccupancy_OperationsDescription_C",
+    "BuildingOccupancy_OperationsDescription_D",
+    "CancelNonRenew_UnderwritingConditionCorrectedDescription_A",
+    "CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A",
+    "CommercialPolicy_ApplicantHireOthersOperateDronesExplanation_A",
+    "CommercialPolicy_ApplicantOtherBusinessVenturesCoverageNotRequestedExplanation_A",
+    "CommercialPolicy_ApplicantOwnLeaseOperateDronesExplanation_A",
+    "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_A",
+    "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_A",
+    "CommercialPolicy_FormalSafetyProgram_OtherDescription_B",
+    "CommercialPolicy_JudgementOrLienExplanation_A",
+    "CommercialPolicy_JudgementOrLien_ResolutionDescription_A",
+    "CommercialPolicy_OperationsDescription_A",
+    "CommercialPolicy_OperationsDescription_B",
+    "CommercialPolicy_PastLossesClaimsRelatingSexualAbuseDiscriminationNegligentHiringExplanation_A",
+    "CommercialPolicy_RemarkText_A",
+    "CommercialPolicy_UncorrectedFireCodeViolationExplanation_A",
+    "Insurer_ProductDescription_A",
+    "LossHistory_OccurrenceDescription_A",
+    "LossHistory_OccurrenceDescription_B",
+    "LossHistory_OccurrenceDescription_C",
+    "NamedInsured_Contact_ContactDescription_A",
+    "NamedInsured_Contact_ContactDescription_B",
+    "Policy_PaymentMethod_MethodDescription_A",
+    "Subsidiary_ParentSubsidiaryRelationshipDescription_A",
+    "Subsidiary_ParentSubsidiaryRelationshipDescription_B"
+   ],
+   "rule": "semantic = ACORD tooltip 'Enter text:' AND a narrative field name."
+  }
+ },
+ "expected_facts": {
+  "_scalars": {
+   "applicant_name": "Front Range Electrical Contractors LLC",
+   "fein": "12-3456789",
+   "sic_code": "1731",
+   "naics_code": "238210",
+   "entity_type": "LLC",
+   "business_start_date": "06/15/2014",
+   "effective_date": "10/01/2026",
+   "expiration_date": "10/01/2027",
+   "operations_description": "Licensed electrical contractor performing commercial and residential electrical installation, repair and service. Work includes new wiring, service upgrades, panel replacement, lighting and electrical troubleshooting. No utility-line construction or electrical generation operations.",
+   "other_named_insured_operations": "Front Range Service Company LLC performs after-hours electrical service calls and preventive maintenance for commercial customers. Commerce Way Equipment Leasing LLC owns the service vehicles and aerial lifts and leases them to the applicant; it has no other customers.",
+   "applicant_business_phone": "303-555-0175",
+   "applicant_website": "www.example-electrical.com",
+   "applicant_gl_class_code": "92478",
+   "sales_installation_repair_percent": "100%",
+   "sales_installation_repair_off_premises_percent": "90%",
+   "audit_period": "Annual"
+  },
+  "_lists": {
+   "applicant_contacts": {
+    "expected": [
+     {
+      "name": "John Smith",
+      "contact_type": "Inspection",
+      "phone": "303-555-0188",
+      "email": "john@example-electrical.com"
+     },
+     {
+      "name": "Sarah Jones",
+      "contact_type": "Accounting",
+      "phone": "303-555-0190",
+      "email": "accounting@example-electrical.com"
+     }
+    ],
+    "key": "name",
+    "columns": [
+     "contact_type",
+     "phone",
+     "email"
+    ]
+   },
+   "property_locations": {
+    "expected": [
+     {
+      "address": "8000 Commerce Way",
+      "county": "Denver",
+      "full_time_employees": "12",
+      "part_time_employees": "1",
+      "annual_revenue": "$2,950,000",
+      "occupied_area": "5,000",
+      "open_to_public_area": "500",
+      "total_building_area": "15,000"
+     },
+     {
+      "address": "5300 N Federal Blvd",
+      "county": "Adams",
+      "full_time_employees": "4",
+      "part_time_employees": "1",
+      "annual_revenue": "$900,000",
+      "occupied_area": "8,000",
+      "open_to_public_area": "0",
+      "total_building_area": "8,000"
+     },
+     {
+      "address": "4750 Centennial Blvd",
+      "county": "El Paso",
+      "full_time_employees": "2",
+      "part_time_employees": "0",
+      "annual_revenue": "$400,000",
+      "occupied_area": "1,200",
+      "open_to_public_area": "150",
+      "total_building_area": "22,000"
+     },
+     {
+      "address": "780 Kimbark St",
+      "county": "Boulder",
+      "full_time_employees": "0",
+      "part_time_employees": "0",
+      "annual_revenue": "$0",
+      "occupied_area": "1,500",
+      "open_to_public_area": "0",
+      "total_building_area": "3,000"
+     }
+    ],
+    "key": "address",
+    "columns": [
+     "county",
+     "full_time_employees",
+     "part_time_employees",
+     "annual_revenue",
+     "occupied_area",
+     "open_to_public_area",
+     "total_building_area"
+    ]
+   },
+   "named_insured_details": {
+    "expected": [
+     {
+      "name": "Front Range Service Company LLC",
+      "fein": "45-6789012",
+      "sic": "7629",
+      "naics": "811310",
+      "phone": "303-555-0176",
+      "website": "www.frservice-example.com"
+     },
+     {
+      "name": "Commerce Way Equipment Leasing LLC",
+      "fein": "45-1122334",
+      "sic": "7359",
+      "naics": "532412",
+      "phone": "303-555-0178",
+      "website": "www.cwleasing-example.com"
+     }
+    ],
+    "key": "name",
+    "columns": [
+     "fein",
+     "sic",
+     "naics",
+     "phone",
+     "website"
+    ]
+   },
+   "organization_relationships": {
+    "expected": [
+     {
+      "name": "Front Range Holdings Inc",
+      "role": "parent",
+      "percent_owned": "80%"
+     },
+     {
+      "name": "Front Range Service Company LLC",
+      "role": "subsidiary",
+      "percent_owned": "100%"
+     }
+    ],
+    "key": "name",
+    "columns": [
+     "role",
+     "percent_owned"
+    ]
+   },
+   "disclosure_answers": {
+    "expected": [
+     {
+      "topic": "subsidiary_of_another",
+      "answer": "Y"
+     },
+     {
+      "topic": "has_subsidiaries",
+      "answer": "Y"
+     },
+     {
+      "topic": "formal_safety_program",
+      "answer": "Y"
+     },
+     {
+      "topic": "flammables_explosives_chemicals",
+      "answer": "Y"
+     },
+     {
+      "topic": "other_insurance_with_carrier",
+      "answer": "Y"
+     },
+     {
+      "topic": "coverage_declined_cancelled_nonrenewed",
+      "answer": "Y"
+     },
+     {
+      "topic": "abuse_molestation_discrimination_claims",
+      "answer": "Y"
+     },
+     {
+      "topic": "fraud_arson_conviction",
+      "answer": "N"
+     },
+     {
+      "topic": "uncorrected_fire_safety_violations",
+      "answer": "Y"
+     },
+     {
+      "topic": "foreclosure_repossession_bankruptcy",
+      "answer": "Y"
+     },
+     {
+      "topic": "judgement_or_lien",
+      "answer": "Y"
+     },
+     {
+      "topic": "business_in_trust",
+      "answer": "Y"
+     },
+     {
+      "topic": "foreign_operations",
+      "answer": "Y"
+     },
+     {
+      "topic": "other_business_ventures",
+      "answer": "Y"
+     },
+     {
+      "topic": "owns_leases_operates_drones",
+      "answer": "Y"
+     },
+     {
+      "topic": "hires_drone_operators",
+      "answer": "Y"
+     }
+    ],
+    "key": "topic",
+    "columns": [
+     "answer"
+    ]
+   },
+   "safety_program_elements": {
+    "expected": [
+     {
+      "element": "Safety Manual"
+     },
+     {
+      "element": "Safety Position"
+     },
+     {
+      "element": "Monthly Meetings"
+     },
+     {
+      "element": "OSHA"
+     }
+    ],
+    "key": "element",
+    "columns": []
+   },
+   "loss_history": {
+    "expected": [
+     {
+      "claim_number": "GL-25-01142",
+      "date": "09/14/2025",
+      "paid": "$12,400",
+      "reserved_amount": "$3,000",
+      "open_code": "O"
+     },
+     {
+      "claim_number": "BA-24-00731",
+      "date": "03/28/2024",
+      "paid": "$4,850",
+      "reserved_amount": "$0",
+      "open_code": "C"
+     },
+     {
+      "claim_number": "CP-23-00418",
+      "date": "06/02/2023",
+      "paid": "$6,300",
+      "reserved_amount": "$0",
+      "open_code": "C"
+     }
+    ],
+    "key": "claim_number",
+    "columns": [
+     "date",
+     "paid",
+     "reserved_amount",
+     "open_code"
+    ]
+   },
+   "additional_interests": {
+    "expected": [
+     {
+      "name": "Peak National Bank",
+      "interest_type": "Mortgagee",
+      "lien_amount": "$1,150,000",
+      "reference_number": "CML-448-2019-07",
+      "phone": "303-555-0240",
+      "email": "loanservicing@peaknational-example.com"
+     },
+     {
+      "name": "Rocky Mountain Equipment Finance LLC",
+      "interest_type": "Loss Payee"
+     }
+    ],
+    "key": "name",
+    "columns": [
+     "interest_type",
+     "lien_amount",
+     "reference_number",
+     "phone",
+     "email"
+    ]
+   }
+  },
+  "_must_be_empty": []
+ }
+}

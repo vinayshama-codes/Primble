@@ -62,6 +62,36 @@ def _norm(v) -> str:
     return re.sub(r"[^a-z0-9@./ ]+", "", s).strip()
 
 
+def _same_scalar(want, got, key: str = "") -> bool:
+    """The same value, judged the way `score_form_fill` judges a box (28 Sep):
+    formatting never matters (`June 15, 2014` IS `06/15/2014`; "Limited
+    Liability Company (LLC)" IS "LLC"), numbers must agree exactly, and a long
+    narrative is judged on MEANING. This grader compared strings, so the Front
+    Range run reported two right answers as wrong."""
+    if _norm(got) == _norm(want):
+        return True
+    if key == "entity_type":
+        # The product's own canonical form: "Limited Liability Company (LLC)"
+        # and "LLC" are one entity type.
+        try:
+            from services.normalization import normalize_entity_type as _net
+            if set(_net(want).split()) == set(_net(got).split()):
+                return True
+        except Exception:                                  # noqa: BLE001
+            pass
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_sff", str(BACKEND / "scripts" / "score_form_fill.py"))
+        sff = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sff)
+    except Exception:                                      # noqa: BLE001
+        return len(_norm(want)) > 40 and _norm(want)[:40] in _norm(got)
+    if sff.same(want, got):
+        return True
+    return len(str(want)) > 40 and sff.meaning(want, got)[0] == "meaning"
+
+
 def _unwrap(v):
     return v.get("value") if isinstance(v, dict) and "value" in v else v
 
@@ -208,6 +238,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("dump", nargs="?",
                     help="a125_run.json from dump_a125_run.py (or a bare facts json)")
+    ap.add_argument("--key", help="a kit answer key carrying `expected_facts` "
+                                  "(e.g. fr125_test_data/FR125_answer_key.json); "
+                                  "default is the A125 Meridian kit")
     ap.add_argument("--selftest", action="store_true",
                     help="grade two built-in fixtures instead - proves the harness "
                          "separates a correct extraction from a mis-attributed one")
@@ -228,14 +261,20 @@ def main() -> int:
     blob = json.loads(Path(a.dump).read_text())
     facts = blob.get("merged_facts", blob) or {}
     raw = blob.get("raw_text", "") or ""
-    return _report(facts, raw)
+    exp = None
+    if a.key:
+        exp = json.loads(Path(a.key).read_text()).get("expected_facts")
+        if not exp:
+            ap.error(f"{a.key} carries no expected_facts")
+    return _report(facts, raw, exp)
 
 
-def _report(facts: dict, raw: str) -> int:
-    exp = expected_facts()
+def _report(facts: dict, raw: str, exp: dict = None) -> int:
+    kit = "the supplied key" if exp else "the A125 kit"
+    exp = exp or expected_facts()
 
     print("=" * 74)
-    print("LLM CALL 1 vs the A125 kit")
+    print(f"LLM CALL 1 vs {kit}")
     print("=" * 74)
 
     ok = wrong = missing = 0
@@ -245,8 +284,7 @@ def _report(facts: dict, raw: str) -> int:
         if not _norm(got):
             missing += 1
             print(f"  MISSING  {k:34} want={str(want)[:40]!r}")
-        elif _norm(got) == _norm(want) or (
-                len(_norm(want)) > 40 and _norm(want)[:40] in _norm(got)):
+        elif _same_scalar(want, got, k):
             ok += 1
         else:
             wrong += 1
@@ -288,6 +326,17 @@ def _report(facts: dict, raw: str) -> int:
     pct = (100.0 * tot_ok / tot_cells) if tot_cells else 0.0
     print(f"\n  ENTITY-CELL  {tot_ok}/{tot_cells} = {pct:.1f}%"
           f"   cross-entity {tot_cross}   blank {tot_blank}")
+
+    invented = [(k, _unwrap(facts.get(k))) for k in exp.get("_must_be_empty", [])
+                if _unwrap(facts.get(k))]
+    if exp.get("_must_be_empty"):
+        print("\nMUST BE EMPTY (the documents state none of these)")
+        if not invented:
+            print("  all empty - nothing invented")
+        for k, v in invented:
+            n = len(v) if isinstance(v, list) else 1
+            print(f"  INVENTED  {k}: {n} entr{'y' if n == 1 else 'ies'} "
+                  f"{str(v)[:90]!r}")
 
     print("\nRELATIONSHIP CHECKS (no answer key - these run on any package)")
     findings = check_fact_relationships(facts, raw)

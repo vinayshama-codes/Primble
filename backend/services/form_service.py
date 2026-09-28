@@ -2085,6 +2085,34 @@ def package_form_ids(session: dict, form_id: str = "") -> List[str]:
     return [f for f in pkg if f]
 
 
+def bind_generation_package(session: dict, form_ids) -> List[str]:
+    """Make THIS request's forms the package every mid-generation reader sees.
+
+    THE DEFECT (Orbin, session 9fc52210, 28 Sep 2026). `package_form_ids` reads
+    `selected_form_ids`, and every generation route writes that key AFTER it
+    generates. Until then the row holds whatever the analyze step wrote - the
+    RECOMMENDED forms (`form_routes`: `selected_form_ids = [matched...]`). So on a
+    first generation "the forms in this package" meant the forms we recommended,
+    not the ones the producer chose: ACORD 125 generated ALONE ticked CONTRACTORS
+    SUPPLEMENT because ACORD 186 had been recommended. The same stale list fed the
+    shared gap fill's package (the 186's starred questions) and the per-form
+    cross-form checks (a recommended-but-not-generated 186 silenced the
+    "contractor without ACORD 186" warning).
+
+    Every route persists exactly this list once generation ends, so binding it
+    first makes what the readers see mid-generation equal what is stored after -
+    consistent by construction. In memory only; the route's own write persists.
+    """
+    ids: List[str] = []
+    for f in (form_ids or []):
+        f = str(f.get("form_id") if isinstance(f, dict) else f or "").strip()
+        if f and f not in ids:
+            ids.append(f)
+    if ids and isinstance(session, dict):
+        session["selected_form_ids"] = list(ids)
+    return ids
+
+
 def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = None) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])

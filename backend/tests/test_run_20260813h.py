@@ -238,9 +238,18 @@ def test_total_losses_stays_blank_without_evidence():
 
 
 def test_total_losses_opens_up_with_a_real_signal():
+    # CORRECTED 28 Sep 2026 - the DECISION changed, not the subject. A bare
+    # `asserts_no_known_losses` (set for any no-loss sentence, a narrative's
+    # included) is the client's NARRATIVE tier, not an attestation (5 Sep
+    # ruling; 8-19-26 key: "should not convert a narrative phrase such as 'no
+    # known losses' into a verified five-year loss history"). The real signal
+    # is the same one "Check if none" reads: an attestation on file.
     assert ps._resolve_loss_history_summary(
         "LossHistory_TotalAmount_A",
-        {"asserts_no_known_losses": True}) is ps._SCHED_SKIP
+        {"asserts_no_known_losses": True}) is None
+    assert ps._resolve_loss_history_summary(
+        "LossHistory_TotalAmount_A",
+        {"asserts_no_known_losses": True, "no_prior_losses": True}) is ps._SCHED_SKIP
     # UPDATED 2 Sep 2026. This used to assert SKIP - "with real entries the
     # normal flow fills the total" - and the normal flow was the measured live
     # defect: gap fill summed the THREE rows the grid displays ($129,400) while

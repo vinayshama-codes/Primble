@@ -276,7 +276,11 @@ class TestCoverageBasis:
         # plus premises columns and FT/PT abbreviation hints. THE TEST MOVED, NOT
         # ITS SUBJECT - the pin exists so a schema edit cannot skip a bump, and
         # this edit bumped. See improving-ll.md C94.
-        assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v22"
+        # v23 since 2026-09-28 (FR125 v2 tests 3-5): additive submission_* facts,
+        # nonrenewal_reasons and three columns. THE TEST MOVED, NOT ITS SUBJECT -
+        # this edit bumped. See improving-ll.md C98 (v23), C99 (v24) and C100 (v25,
+    # the same day: two v23 definitions reworded).
+        assert es.PROMPT_VERSION == es.SCHEMA_VERSION == "v25"
         assert '"gl_form_type": "Occurrence"|"Claims-Made"|null' in es._EXTRACT_SCHEMA
         assert '"umbrella_form_type": "Occurrence"|"Claims-Made"|null' in es._EXTRACT_SCHEMA
 

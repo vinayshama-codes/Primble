@@ -11938,15 +11938,37 @@ line 95, identical in the session-start baseline and round 2). Round 2: 10,002 /
 
 ### 27 Sep 2026 - owner follow-ups after round 3
 
-- **Data Consistency no longer shows line-scoped rows.** The "Policies in this submission"
-  table and the per-line "N policies, N values - not a conflict" rows (carrier, policy
-  number, NAIC) are gone from both layouts; the heading says "Your documents agree - there
-  is nothing to confirm" when nothing does. The client's rule (1 Sep, SYS-06) was to
-  MAINTAIN line -> carrier -> NAIC -> policy -> term -> source, not to show it; listed under
-  "Your documents disagree" it read as the flag they asked us not to raise. The backend is
-  unchanged, and two live policies on one line still render as a conflict card. Test that
-  changed: `test_v1_c1d_client_answer_review` required the scoped rows (F2b); it now
-  requires their absence in both layouts.
+- **Data Consistency: the umbrella "Changed during the policy term" row is no longer shown;
+  the policy table and per-line rows ARE (corrected the same evening).** The owner's
+  instruction was to take the UMBRELLA row off the screen and keep everything else. I read
+  "remove the policy thing" as the "Policies in this submission" table and the per-line
+  carrier / policy-number / NAIC rows, removed those, kept the umbrella row, and shipped it
+  in 8b005ad - the Render run (session 1597ac25) showed exactly that. Put right: the table
+  and the scoped rows are restored byte-for-byte in both layouts, and the dated-change row
+  is not rendered. The client asked for the umbrella cut NOT to be a conflict (item 9), never
+  for a note; the backend still returns it as status "changed" with nothing to review
+  (`test_remaining_fixes_14sep`), so no card is raised and the 131 prints $1,000,000. Kept
+  from the first change: the heading reads "Your documents agree - there is nothing to
+  confirm" when nothing needs confirming (it used to say "Your documents disagree" above rows
+  that each say "not a conflict"). Tests: `test_v1_c1d_client_answer_review` requires the
+  scoped rows and the table in both layouts and fails if either renders the dated change;
+  both fail against 8b005ad. Kit README B4 / B9 updated. Suite (clean, `-p no:randomly`): 10,106 passed / 1 failed (the pre-existing `test_arq_acord125_missing_only`) / 19 skipped; frontend build clean. **Lesson: when an instruction names
+  a screen element ambiguously, quote the element back before removing anything.**
+- **A coverage line is named, never keyed (owner, 28 Sep).** The per-line rows printed the
+  internal family key - "general liab" under the GL carrier, number and NAIC - while the
+  table above them printed "Commercial General Liability". Present since those rows were
+  built (the 24 Sep screen shows it). Every place Data Consistency names a line (scope
+  chips, "Confirmed:" scopes, the "Confirm for <line>" button, the table's fallback) now
+  goes through `utils/formatters.lineLabel`: the policy's own printed name from the line
+  records, then a readable family name, then the key made readable. The one backend string
+  that named a line, the same-line conflict reason ("two policies on the same coverage line
+  (general liab)"), now names it the same way from the stored scope; `conflict_scope` keeps
+  the key - it is data. Test that changed, and why the TEST was wrong:
+  `test_sys06_line_specific_identity_20260904::test_the_conflict_reason_names_the_line_in_dispute`
+  asserted "general liab" - it pinned the defect; it now requires "(Commercial General
+  Liability)" and forbids the key. New: `test_v1_c1d_client_answer_review::
+  test_a_coverage_line_is_named_not_keyed` (fails on 8b005ad). Suite: 10,107 passed / 1 failed (the
+  pre-existing `test_arq_acord125_missing_only`) / 19 skipped; frontend build clean.
 - **An expired policy beside its renewal is history, not a rival**
   (`extraction_service._retire_predecessor_policies`). Six package shapes were run through
   the real merge, Data Consistency and stamper; five were right (six current policies
@@ -11984,3 +12006,104 @@ line 95, identical in the session-start baseline and round 2). Round 2: 10,002 /
 - Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Run-1 replay after the merge
   change: 2,054 fields, only the form date moved. Suite (clean, `-p no:randomly`): **10,104
   passed / 1 failed / 19 skipped** - the pre-existing `test_arq_acord125_missing_only`.
+
+### 28 Sep 2026 - FR125 v2 kit, round 2 test 3 (session 4c734a06)
+Full account: `improving125-21sep.md` "ROUND 2 - TEST 3 RESULTS"; the run itself in
+`fr125_test_data/runs/`.
+- **As run: 220 of 312 correct, 48 wrong, 44 missing, 8 made up.** Extraction was 98.8%
+  right (entity-cell); every class of defect was made after it.
+- **Three classes, fixed generically:** (1) a statement about something ELSE decided a box -
+  the incumbent's "RENEWAL OF" line decided this submission's status (new marker
+  `submission_is_new_business`; `is_renewal` deliberately untouched, it still routes
+  dates), a declined item read as requested (per-clause negation), the loss payee in the
+  NAME OF TRUST box (tooltip decides), a scheduled date as a resolve date; (2) row guards
+  (Guard 2, Guard 11, contact phone) deleting real rows - each now asks the row's own fact
+  first; (3) the document's own answer losing to an inference - question 4, payment
+  method, receiving carrier (bare "Carrier" label in a submission-headed section), the
+  current term as prior-grid year one when the proposal follows it.
+- **Replayed through the fixes: 297 / 1 / 14 / 0.** Orbin stored run: 4 boxes move (earlier
+  fixes and an unprinted "No"). FR125 v1: 74 -> 75, made up 15 -> 5, nothing correct moved.
+  Meridian key corrected (its trust box expected the second interest; question 11 is NO).
+- **Test changed:** `test_run_20260814c_fixes.test_a_genuinely_printed_payment_plan_stamps`
+  now expects the code "MO" the tooltip asks for, not the word "MONTHLY".
+- **Owner decision pending:** v23 prompt for the remaining 14 missing (receiving carrier's
+  NAIC / program / underwriter / office, X-in-column answers, safety "Other", remarks,
+  secondary phone kinds, a dropped suite).
+- **Round 2 test 4 (live, session a7ef6f98): 281 / 2 / 29 / 3** - the first fixes held; see below.
+- Tests: `tests/test_fr125_v2_run_28sep.py` (46). Suite `-p no:randomly`: **10,233 passed /
+  1 failed / 19 skipped** - the pre-existing `test_arq_acord125_missing_only`.
+
+### 28 Sep 2026 (later) - round 2 test 4, live on the fixed code (session a7ef6f98)
+- **281 of 312 correct (from 220), 2 wrong, 29 missing, 3 made up.** Dump and PDF grade the same.
+- Every loss was call-1 variability on the SAME document: Q1a's entry skipped, the 2023
+  prior year dropped, "EFT" left out of the plan. Fixed so the form stops depending on
+  which half extraction kept: Q1a/Q1b follow the relationship block they own; prior rows
+  restored from the verified index; the method read where the document labels it.
+- Plus: an OTHER restating an option already ticked is cleared on every form, compared
+  against the label ACORD PRINTS (read from the template); ITEM CLASS is the interest's own
+  detail; organisation nouns are never a person's name (UNDERWRITER OFFICE "Denver
+  Branch"); program / underwriter fall back to the submission section; Guard 2 learned
+  Guard 11's unit rule (found by a second guard pass in replay).
+- **Replayed: 306 / 1 / 5 / 0.** Test 3 replay 297, Orbin 4 boxes, FR125 v1 75 - unchanged.
+- Tests: `tests/test_fr125_v2_run_28sep.py` 61. Suite `-p no:randomly`: **10,248 passed / 1 failed
+  / 19 skipped** (the pre-existing `test_arq_acord125_missing_only`). **Next:** round 2 test 5.
+
+### 28 Sep 2026 (evening) - test 5 (session b63c3e25) and extraction v23
+- **Test 5 live: 298 / 1 / 13 / 2.** Lost the whole CARRIER block (the index dropped the
+  acknowledgement's "Carrier" line) and wrote a listed Q5 reason into OTHER.
+- **Extraction v23 (owner approved, `improving-ll.md` C98):** `submission_*` carrier facts,
+  `nonrenewal_reasons`, safety "Other:", secondary phone kind, interest building / class,
+  remarks and explanation definitions. Every cached package re-extracts once.
+- Code: carrier from its section heading; the addressee attested for the insurer guard;
+  an OTHER equal to a printed option label moves the tick; **page-one REMARKS wired**
+  (registered in August, never called) and gated on a REMARKS / PROCESSING INSTRUCTIONS
+  heading (`_mark_submission_remark`) so a certificate footnote never prints.
+- Measured: test 5 facts + code 306; + v23 facts 311 of 312, 0 made up. Orbin unchanged.
+- Tests: `tests/test_fr125_v2_run_28sep.py` 75; four version pins moved to v23. Suite
+  `-p no:randomly`: **10,262 passed / 1 failed / 19 skipped** (the pre-existing
+  `test_arq_acord125_missing_only`). **Next:** test 6.
+
+### 28 Sep 2026 (night) - test 6 (session c3059a2d), the first live v23 run -> v24
+- **304 / 6 / 2 / 4.** v23's new facts all printed (remarks, Q5 reasons, safety OTHER,
+  phone kinds, building, program, underwriter). Broken: CARRIER printed the incumbent
+  beside the addressee's NAIC (the fact named the incumbent; the code trusted it); Q4 fell
+  back to the incumbent's policies (numbers in the explanation, checkbox line as the
+  quote); CONDITION CORRECTED unticked; explanations 8-10 took the one-line "Yes." answers
+  (my own v23 wording).
+- Fixed: addressee checked, not trusted (incumbent rejected, letter's TO line, NAIC only
+  on the same line, disagreeing witnesses = blank); Q4 from every YES row, numbers verified
+  in text, inferred list narrowed to the addressee's policies; the correction ticks
+  CONDITION CORRECTED; labelled EXPLANATION preferred, no leading "Yes."; a dropped suite
+  copied back only when unique and real ("Suite occupied" is not a unit); v24 wording
+  (improving-ll.md C99).
+- Replayed: test 6 -> 312 of 312; tests 3/4/5 -> 299/307/306 (test 3 first misrecorded as 307); FR125 v1 76 (made up 5);
+  Orbin unchanged. Tests: `tests/test_fr125_v2_run_28sep.py` 91; four version pins moved to
+  v24. Suite `-p no:randomly`: **10,278 passed / 1 failed / 19 skipped** (the pre-existing
+  `test_arq_acord125_missing_only`). **Next:** test 7 on v24.
+
+### 28 Sep 2026 (late night) - test 7 (session 5af86855), live on v24 -> v25
+- **310 / 0 / 2 / 1 - no wrong value; 100% accuracy of what it filled.** Every test 6 fix
+  held live (carrier block, Q4, Q5, labelled explanations, suite, remarks).
+- Left: BILLING PLAN ticked AGENCY and AUDIT blank - both from ONE sentence about the old
+  carrier's paperwork ("the old audit and quarterly agency billing"); neither fact had a
+  definition. Fixed: v25 defines both as the SUBMISSION's (improving-ll.md C100);
+  `_prefer_submission_terms` lets the submission's own agreeing statements decide and drops
+  an audit value that names no period. Audit C16 learned that a printed parent block
+  answers question 1a.
+- One test corrected (a 21 Sep test asserting a second interest in ACORD 125's trust box).
+- Replayed: test 7 -> **312 of 312**; Orbin unchanged; FR125 v1 77. Suite `-p no:randomly`:
+  **10,284 passed / 1 failed / 19 skipped** (the pre-existing `test_arq_acord125_missing_only`).
+  **Next:** test 8 on v25.
+
+### 28 Sep 2026 (latest) - test 8 (session e3cebd88), live on v25
+- **312 of 312 correct, 0 wrong, 0 missing, 3 made up.** Test 7's billing / audit fix held.
+- The 3 made up: question 4 listed two of the incumbent's policies after the right two - a
+  second YES row written from the incumbent's pages. Fixed: question 4 keeps only numbers
+  the documents do not pair with another carrier. Near miss found by the audit: question 5
+  had a YES row and a NO row; the form printed YES by row order. Fixed: disagreeing answers
+  settle on the one the document corroborates, else the question is left unanswered
+  (`_reconcile_disclosure_conflicts`).
+- Replayed: test 8 -> 312 / 0 made up; tests 3-7 and Orbin unchanged. No prompt change.
+  Suite `-p no:randomly`: **10,289 passed / 1 failed / 19 skipped** (the pre-existing
+  `test_arq_acord125_missing_only`).
+

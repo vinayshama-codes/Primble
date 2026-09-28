@@ -406,7 +406,11 @@ def test_extraction_schema_carries_the_counts_and_moved_to_v17():
     premises table. THE TEST MOVED, NOT THE RULE: the pin exists so a schema
     edit cannot skip a bump, and this edit bumped."""
     from services import extraction_service as es
-    assert es.PROMPT_VERSION == "v22" and es.SCHEMA_VERSION == "v22"
+    # v23 since 2026-09-28 (FR125 v2 tests 3-5): additive submission_* facts,
+    # nonrenewal_reasons and three columns. THE TEST MOVED, NOT ITS SUBJECT -
+    # this edit bumped. See improving-ll.md C98 (v23), C99 (v24) and C100 (v25,
+    # the same day: two v23 definitions reworded).
+    assert es.PROMPT_VERSION == "v25" and es.SCHEMA_VERSION == "v25"
     assert '"full_time_employees": string or null' in es._EXTRACT_SCHEMA
     assert '"part_time_employees": string or null' in es._EXTRACT_SCHEMA
 

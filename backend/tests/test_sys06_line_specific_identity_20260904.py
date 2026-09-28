@@ -116,11 +116,15 @@ def test_two_real_policies_on_one_line_still_raise_a_conflict():
 
 
 def test_the_conflict_reason_names_the_line_in_dispute():
-    """The producer is told WHICH line to look at, not handed the package."""
+    """The producer is told WHICH line to look at, not handed the package - by
+    the name the policy prints for it (owner, 28 Sep 2026), never the internal
+    family key, which read "general liab" on screen. The key itself stays in
+    `conflict_scope`: it is data, and the confirm button maps it to a name."""
     docs = [_doc("dec.pdf", "dec_page", RIVAL_GL)]
     out = uc.assess_underwriting_consistency(docs, _merged(RIVAL_GL, docs), {})
     row = _row(out, "carrier_name")
-    assert "general liab" in (row["conflict_reason"] or "")
+    assert "(Commercial General Liability)" in (row["conflict_reason"] or "")
+    assert "general liab" not in (row["conflict_reason"] or "")
     assert row["conflict_scope"] == ["general_liab"]
 
 

@@ -1051,7 +1051,17 @@ def build_key() -> dict:
     _put("CommercialPolicy_OperationsDescription_B", V_EXPECT,
          D.OTHER_INSURED_OPERATIONS.replace("\n", " "),
          "ACORD tooltip: operations for OTHER NAMED INSUREDS")
-    _put("CommercialPolicy_RemarkText_A", V_EXPECT, D.REMARKS)
+    # The applicant's own remark AND the loss the three-row grid cannot print.
+    # Four losses, three rows: `_resolve_loss_overflow_remark` (shipped 2 Sep)
+    # discloses the fourth here, lossless, and keeps the stated remark beside
+    # it. This key was written expecting the remark alone; the old scorer's
+    # substring rule hid that until 28 Sep.
+    _ov = D.LOSSES[3]
+    _put("CommercialPolicy_RemarkText_A", V_EXPECT,
+         f"{D.REMARKS} Additional loss not shown in the loss grid: "
+         f"{_ov['occurrence']} {_ov['claim_no']} {_ov['line']} {_ov['desc']} "
+         f"paid {_ov['paid']} reserved {_ov['reserved']}.",
+         "the stated remark plus the overflowed fourth loss (lossless)")
 
     # ── NAMEDINSURED rows A-C (a fourth entity is stated and has no slot) ────
     ent_map = {"LLC": "LimitedLiabilityCorporationIndicator",
@@ -1277,10 +1287,13 @@ def build_key() -> dict:
             _put(f"PriorCoverage_{box}_{k}_C", V_NO_DATA, "",
                  "policy year three is not documented")
     umb = exp_by_line["Commercial Umbrella"]
-    _put("PriorCoverage_OtherLine_LineOfBusinessCode_A", V_EXPECT,
-         "Commercial Umbrella",
-         "the only line without a dedicated column in year one, named as "
-         "the document prints it")
+    # NOT SCORED (28 Sep). The 21 Sep "correction" to "Commercial Umbrella" was
+    # itself wrong: ACORD's tooltip is "Enter CODE: the line of business code".
+    # The repo holds no ACORD line-of-business code table, so neither the
+    # phrase nor any code can be pinned without inventing one.
+    _put("PriorCoverage_OtherLine_LineOfBusinessCode_A", V_NOT_SCORED, "",
+         "ACORD wants a line-of-business CODE and no code table exists in the "
+         "repo - open item, see improving125-21sep.md ROUND 2")
     _put("PriorCoverage_OtherLine_InsurerFullName_A", V_EXPECT, D.UMB_CARRIER,
          "the umbrella sits with a THIRD carrier",
          trap=f"must not be {D.EXP_CARRIER}")
@@ -1334,7 +1347,14 @@ def build_key() -> dict:
     # but it must not push the LOSS PAYEE's details out of row A.
     it0, it1 = D.INTERESTS[0], D.INTERESTS[1]
     _put("AdditionalInterest_FullName_A", V_EXPECT, it0["name"])
-    _put("AdditionalInterest_FullName_B", V_EXPECT, it1["name"])
+    # NOT the second interest. ACORD reuses this field for question 11 and its
+    # tooltip says so: "As used here, this is the name of the trust." This
+    # package answers question 11 NO, so the box is empty by rule - and the
+    # second interest's name is exactly the value that must not land in it.
+    # (Corrected 28 Sep 2026: this key expected the second interest here.)
+    _put("AdditionalInterest_FullName_B", V_BY_RULE, "",
+         "ACORD tooltip: 'this is the name of the trust' - question 11 is N",
+         trap=f"must not be {it1['name']} - a second interest is not a trust")
     _put("AdditionalInterest_MailingAddress_LineOne_A", V_EXPECT, it0["l1"])
     _put("AdditionalInterest_MailingAddress_LineTwo_A", V_EXPECT, it0["l2"])
     _put("AdditionalInterest_MailingAddress_CityName_A", V_EXPECT, it0["city"])

@@ -218,7 +218,10 @@ async def add_form_to_session(
         # so a form added after generation gets the line-scoped gap fill too.
         # It used to call `combined_gap_fill` with no line scopes, so an added
         # GL form read the auto pages (client item 6).
-        from services.form_service import shared_gap_fill
+        # The package after this addition: what was generated before, plus the
+        # added form (form_service.bind_generation_package).
+        from services.form_service import bind_generation_package, shared_gap_fill
+        bind_generation_package(session, sorted(present) + [form_id])
         pre_filled_all = await loop.run_in_executor(
             _FORM_EXECUTOR, shared_gap_fill, session, [form_id])
         pre_filled = (pre_filled_all or {}).get(form_id)

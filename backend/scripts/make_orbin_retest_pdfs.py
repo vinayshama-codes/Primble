@@ -2851,12 +2851,12 @@ mislabelled Business Owners form).
 | B1 | 1, 3, 10 | Policy Number | no conflict card - scoped per line: GL `{POL_GL}`, Auto `{POL_AUTO}`, Inland Marine `{POL_IM}`, Umbrella `{POL_UMB}` | a card; `IM 7100 06 04` / `IM 7201 10 02` / `CU7001A 11-15` / `IL 71 31A 04 01` / `CG 70 01A 10 12` / `{ACCOUNT}` offered as a choice | yes | |
 | B2 | 1, 10 | Carrier | no conflict card - GL {CAR_PC}; Auto, Inland Marine, Umbrella {CAR_MUT_MIXED} | an "EMC Property & Casualty vs Employers Mutual" card; "EMC Insurance" or "EMCASCO" offered | yes | |
 | B3 | 1, 5, 10 | Carrier NAIC | no conflict card - {NAIC_PC} on GL only, {NAIC_MUT} on Auto / Umbrella; Inland Marine shows "-" (only the certificate prints NAICs, and it does not list the Inland Marine policy) | a "{NAIC_PC} vs {NAIC_MUT}" card; {NAIC_PC} beside Employers Mutual | yes | |
-| B4 | 9 | Umbrella Limit | read-only row **"Changed during the policy term - not a conflict"**: Now $1,000,000, effective 7/25/25 (certificate); Before $3,000,000 (policy) | a "$3,000,000 vs $1,000,000" card asking you to confirm | yes | |
+| B4 | 9 | Umbrella Limit | **no umbrella row and no card** - the dated cut is kept on the backend and not shown (owner, 27 Sep); the 131 prints 1,000,000 (G2) | a "$3,000,000 vs $1,000,000" card asking you to confirm; a "Changed during the policy term" row | yes | |
 | B5 | 4 | Producer Name | no card | COMMERCIAL RISK SOLUTIONS, INC. vs Commercial Risk Solutions, Inc. (or vs your agency) | | |
 | B6 | 10 | Building value | no card | any building-value card - the package has no property coverage | | |
 | B7 | 10 | Renewal | no is_renewal card | a renewal yes / no card - the only "renewal" words are cancellation-clause boilerplate | | |
 | B8 | 10 | Hired auto | no card | a hired-auto yes / no card (the certificate's UNTICKED "HIRED AUTOS ONLY" label vs the policy's Item Four) | | |
-| B9 | 1, 2 | Policies in this submission (if shown) | 4 policies, each with its own carrier and number; no Workers Comp, Property or Crime row | 5+ rows; a No Coverage line listed; a dash for a number | yes | |
+| B9 | 1, 2 | Policies in this submission | 4 policies, each with its own carrier and number; no Workers Comp, Property or Crime row | 5+ rows; a No Coverage line listed; a dash for a number | yes | |
 
 ### C. Warnings / hard stops (pre-form)
 
@@ -3024,7 +3024,7 @@ Package ___ | 125 ___ | 126 ___ | 127 ___ | 131 ___ | 137 CO ___
    literal value for every FAIL).
 2. The generated PDFs: ACORD 125, 126, 127, 131, 137 CO and the cover page.
 3. Screenshots of every **Send = yes** row - at minimum: the recommended-forms list
-   after ticking 127; the whole Data Consistency panel (cards, the umbrella row,
+   after ticking 127; the whole Data Consistency panel (cards, the per-line rows,
    the policies table); the warnings / hard stops; the pre-download review list;
    the Send to Client preview (vehicle table, location table, drivers, confirm
    items).

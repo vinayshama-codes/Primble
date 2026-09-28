@@ -33,3 +33,36 @@ export const shortFormLabel = (formId, formName) => {
   return "This form";
 };
 
+
+// A coverage line's name for the screen. The backend scopes values to a line
+// FAMILY key ("general_liab", "inland_marine" - services/lob_canon.py); the key
+// is an identifier, not a label, and printed raw it read "general liab". Prefer
+// the name the policy itself prints for that line (`line_printed` on the line
+// records - the same text the "Policies in this submission" table shows), then
+// a readable family name, then the key made readable.
+const LINE_FAMILY_LABELS = {
+  general_liab: "General Liability",
+  auto: "Automobile",
+  umbrella: "Umbrella",
+  workers_comp: "Workers Compensation",
+  property: "Property",
+  inland_marine: "Inland Marine",
+  crime: "Crime",
+  cyber: "Cyber",
+  professional: "Professional Liability",
+  epli: "Employment Practices Liability",
+  pollution: "Pollution",
+  directors_officers: "Directors and Officers",
+  employee_benefits: "Employee Benefits",
+  liquor: "Liquor Liability",
+};
+
+export const lineLabel = (key, lineRecords) => {
+  const k = String(key || "").trim();
+  if (!k) return "";
+  const rec = (lineRecords || []).find((r) => r && r.line === k && String(r.line_printed || "").trim());
+  if (rec) return String(rec.line_printed).trim();
+  if (LINE_FAMILY_LABELS[k]) return LINE_FAMILY_LABELS[k];
+  const s = k.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};

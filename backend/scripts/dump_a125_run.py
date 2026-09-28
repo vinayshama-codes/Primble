@@ -89,7 +89,11 @@ async def _dump(session_id: str) -> None:
     gen = (s.get("generated_forms") or {}).get(FORM) or {}
 
     try:
-        fates = _fates({**facts, **flags})
+        # Replay with the package this session generated, exactly as
+        # process_single_form hands it to the stamper - without it the
+        # ATTACHMENTS boxes replay as owned blanks whatever the run did.
+        fates = _fates({**facts, **flags,
+                        "_package_form_ids": list(s.get("selected_form_ids") or [])})
     except Exception as exc:                                   # noqa: BLE001
         fates = {"_error": f"{type(exc).__name__}: {exc}"}
 
@@ -110,6 +114,8 @@ async def _dump(session_id: str) -> None:
             for d in docs
         ],
         "stamped": gen.get("mapped") or {},
+        # the forms generated with it - what the ATTACHMENTS block may name
+        "package_form_ids": list(s.get("selected_form_ids") or []),
         "confidence": gen.get("confidence") or {},
         "fates": fates,
         "package_sqs": s.get("package_sqs"),

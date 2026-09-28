@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { gradeColor, sqsGradeFromScore } from "../../../utils/formatters";
+import { gradeColor, sqsGradeFromScore, lineLabel } from "../../../utils/formatters";
 import "./ReviewRailLayout.css";
 
 // The "rail" layout of the pre-form Review step - the default layout
@@ -318,14 +318,12 @@ export default function ReviewRailLayout(props) {
   // ── Derived numbers (one place, used by the rail, the Overview and the footer) ─
   const fields = underwriting?.fields || [];
   const confirmedCount = fields.filter((f) => f.status === "confirmed").length;
-  // Line-scoped values (one carrier / policy number / NAIC per policy) are NOT
-  // shown here (owner, 27 Sep 2026): the client's rule is that different
-  // policies on different lines must not be flagged, and listing them under
-  // "Data Consistency" read as flagging. The backend still keeps the full
-  // line -> carrier -> NAIC -> policy -> term -> source relationship
-  // (`line_records`, `_line_records`) and still raises a real conflict - two
-  // policies on ONE line - as a "conflict" row, which renders below.
-  const dcHasContent = fields.some((f) => ["conflict", "confirmed", "changed"].includes(f.status));
+  // A value the documents say CHANGED on a stated date (the umbrella cut from
+  // $3,000,000 to $1,000,000 effective 7/25/25) is NOT shown here (owner, 27 Sep
+  // 2026): the client asked for it not to be a conflict, never for a note about
+  // it. The backend keeps it - the forms print the current value and no
+  // conflict is raised. The line-scoped rows and the policies table stay.
+  const dcHasContent = fields.some((f) => ["conflict", "confirmed", "scoped"].includes(f.status));
   const dcNeedsConfirm = fields.some((f) => ["conflict", "confirmed"].includes(f.status));
 
   const groupedHard = groupedIssues?.hard_stops?.length > 0 ? groupedIssues.hard_stops : null;
@@ -660,7 +658,7 @@ export default function ReviewRailLayout(props) {
               const anyConfirmInFlight = underwritingBusy !== null;
               const picked = underwritingPicks[f.fact_key] ?? "";
               const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
-              const lineScopeLabel = lineScope ? lineScope.replace(/_/g, " ") : null;
+              const lineScopeLabel = lineScope ? lineLabel(lineScope, lineRecords) : null;
               const formsLabel = (f.forms || []).map((x) => x.replace("ACORD_", "ACORD ")).join(", ");
               const highlighted = dcHighlight === f.fact_key;
               const confidence = isConflict && f.confidence ? CONFIDENCE_META[f.confidence] : null;
@@ -730,27 +728,59 @@ export default function ReviewRailLayout(props) {
             })}
           </Panel>
         )}
-        {fields.filter((f) => f.status === "changed").map((f) => (
-          <Panel key={`changed-${f.fact_key}`}
-            title={<>{f.label}<span className="rr-scope-tag">Changed during the policy term - not a conflict</span></>}>
-            {f.change && (
-              <div className="rr-changed">
-                <div>
-                  <span className="rr-changed__now">Now: {f.change.current}</span>
-                  {f.change.as_of ? ` - effective ${f.change.as_of}` : ""}
-                  {f.change.document ? <span className="rr-muted">{` (${f.change.document})`}</span> : null}
+        {(() => {
+          const recs = fields.map((f) => f.line_records).find((r) => (r || []).length > 1) || [];
+          if (recs.length < 2) return null;
+          return (
+            <Panel title="Policies in this submission"
+              meta="Each coverage line keeps its own carrier and policy number. Different numbers across different lines are expected and are not a conflict."
+              bodyClassName="rr-table-wrap">
+              <table className="rr-table">
+                <thead>
+                  <tr><th>Line</th><th>Carrier</th><th>NAIC</th><th>Policy number</th><th>Term</th><th>Source</th></tr>
+                </thead>
+                <tbody>
+                  {recs.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.line_printed || lineLabel(r.line, lineRecords)}</td>
+                      <td>{r.carrier_name || "-"}</td>
+                      <td>{r.carrier_naic || "-"}</td>
+                      <td>{r.policy_number || "-"}</td>
+                      <td>{r.effective_date || r.expiration_date ? `${normaliseDate(r.effective_date) || "?"} - ${normaliseDate(r.expiration_date) || "?"}` : "-"}</td>
+                      <td className="rr-table__source">{[...new Set(r.sources || [])].join(", ") || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
+          );
+        })()}
+        {fields.filter((f) => f.status === "scoped").map((f) => {
+          const vals = f.values || [];
+          const lines = new Set(vals.flatMap((v) => (Array.isArray(v.scope) ? v.scope : [])));
+          const allRecs = fields.map((x) => x.line_records).find((r) => (r || []).length) || [];
+          const recs = allRecs.filter((r) => lines.has(r.line));
+          const contracts = recs.length ? new Set(recs.map((r) => r.policy_number || r.id || r.line)).size : lines.size;
+          const policies = contracts + vals.filter((v) => !(Array.isArray(v.scope) && v.scope.length)).length;
+          return (
+            <Panel key={`scoped-${f.fact_key}`}
+              title={<>{f.label}<span className="rr-scope-tag">{`${policies} ${policies === 1 ? "policy" : "policies"}, ${vals.length} ${vals.length === 1 ? "value" : "values"} - not a conflict`}</span></>}
+              meta={Object.keys(f.confirmed_scopes || {}).length > 0
+                ? <span className="rr-scope-confirmed">Confirmed: {Object.entries(f.confirmed_scopes).map(([ln, val]) => `${lineLabel(ln, lineRecords)} - ${val}`).join("; ")}</span>
+                : null}
+              bodyClassName="rr-rows">
+              {vals.map((v, vi) => (
+                <div key={vi} className="rr-scoped">
+                  <span className="rr-scoped__value">{v.display}</span>
+                  {(v.scope || []).length > 0
+                    ? <span className="rr-scope-chip">{v.scope.map((ln) => lineLabel(ln, lineRecords)).join(" / ")}</span>
+                    : <span className="rr-scope-chip rr-scope-chip--unmatched">not matched to a coverage line</span>}
+                  <span className="rr-scoped__source">{[...new Set((v.sources || []).map((sr) => sr.filename).filter(Boolean))].join(", ")}</span>
                 </div>
-                <div>
-                  Before: {f.change.prior}
-                  {(f.change.prior_documents || []).length > 0 ? <span className="rr-muted">{` (${f.change.prior_documents.join(", ")})`}</span> : null}
-                </div>
-              </div>
-            )}
-            {f.narrative_note && (
-              <div className="rr-note rr-note--blue"><strong>From the submission: </strong>{f.narrative_note}</div>
-            )}
-          </Panel>
-        ))}
+              ))}
+            </Panel>
+          );
+        })}
       </div>
     </>
   );

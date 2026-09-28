@@ -59,8 +59,30 @@ logger = logging.getLogger(__name__)
 # second insured's website was stamped on the first insured's row; and ACORD
 # 125's whole GENERAL INFORMATION section had no backing fact at all, which is
 # why two runs of one document disagreed on 13 boxes.
-PROMPT_VERSION = "v22"
-SCHEMA_VERSION = "v22"
+# v23 (2026-09-28, FR125 v2 tests 3-5): the same 100-page document, read three
+# times, kept three different subsets of the facts ACORD 125 asks for - the
+# carrier the submission is addressed to (test 5 lost the whole CARRIER block),
+# question 5's reasons, the safety programme's OTHER element - because nothing
+# in the schema ASKED for them. Additive: six `submission_*` scalars, one list
+# (`nonrenewal_reasons`), two interest columns, one contact column, an "Other:"
+# safety element, and definitions for `additional_remarks_text` and the
+# disclosure explanation / quote. improving-ll.md C98.
+# v24 (2026-09-28, FR125 v2 test 6 - the first live v23 run): two v23
+# definitions misfired. (1) "the narrative sentence, not a table cell" steered
+# the explanation of questions 8-10 to the questionnaire's one-line answer
+# ("Yes. A leased compact excavator was repossessed in April 2022.") instead
+# of the text the document LABELS "EXPLANATION:" - v22 had it right on three
+# runs. (2) submission_carrier_name named the INCUMBENT on a submission that
+# says the current package "will NOT be renewed there". No schema change; the
+# wording moves and the version with it. improving-ll.md C99.
+# v25 (2026-09-28, FR125 v2 test 7): `billing_plan` and `audit_period` were
+# bare "string or null". Test 7 took both from ONE sentence about the old
+# carrier's paperwork ("the old audit and quarterly agency billing") while the
+# submission asks for Direct bill and an Annual audit. Both now say what they
+# are: the SUBMISSION's billing and audit, never the old policy's. No schema
+# shape change. improving-ll.md C100.
+PROMPT_VERSION = "v25"
+SCHEMA_VERSION = "v25"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -259,9 +281,21 @@ _EXTRACT_SCHEMA = (
     '  "retro_date": string or null,\n'
     '  "carrier_name": string or null,\n'
     '  "carrier_naic": string or null,\n'
+    # v23: the carrier THIS SUBMISSION IS SENT TO. ACORD 125 page one is the
+    # policy being applied for (Brent's key: "carrier receiving submission");
+    # carrier_name is the carrier of the policies the documents describe, which
+    # on a re-marketed account is the INCUMBENT. Nothing asked for the
+    # addressee, so it was dug out of the dec index - and lost on 1 run in 3.
+    '  "submission_carrier_name": string or null (the insurance company THIS submission is addressed TO - the "TO:" / "Submitted to" of the cover letter, or the carrier acknowledging receipt of the submission. NEVER the current, expiring or incumbent carrier that wrote the enclosed policies, unless the document says the submission goes back to it - when the documents call this submission new business, or say the current policies will not be renewed with their carrier, that carrier is NOT the addressee. Null when the documents name no addressee),\n'
+    '  "submission_carrier_naic": string or null (the NAIC code printed FOR submission_carrier_name - never another carrier\'s),\n'
+    '  "submission_program_name": string or null (the program / product name the submission requests from submission_carrier_name),\n'
+    '  "submission_program_code": string or null (that program\'s code, as printed),\n'
+    '  "submission_underwriter": string or null (the underwriter at submission_carrier_name the submission is directed to - a person\'s name),\n'
+    '  "submission_underwriter_office": string or null (that underwriter\'s office or branch, as printed),\n'
     '  "prior_carrier_naic": string or null,\n'
-    '  "audit_period": string or null,\n'
-    '  "billing_plan": string or null,\n'
+    # v25: both describe the policy APPLIED FOR (ACORD 125 page one).
+    '  "audit_period": string or null (the premium audit period THIS submission states for the policy applied for - Annual, Semi-annual, Quarterly or Monthly, or its code A / S / Q / M. Never the current or expiring policy\'s audit, and null when no period is named - words that name no period are not an answer),\n'
+    '  "billing_plan": string or null (the billing plan THIS submission asks for - Direct bill or Agency bill, e.g. a cover letter\'s or application\'s "billing preference". Never the current or expiring policy\'s billing, and never a sentence about old paperwork),\n'
     # An INSTALLMENT plan ("Payment Plan: Monthly"), not the billing method and
     # not the audit term. Most dec pages print none - null is the normal answer.
     # Consumed only by _resolve_payment_schedule (fact-or-blank): every run
@@ -307,11 +341,11 @@ _EXTRACT_SCHEMA = (
     # A value with nowhere to go does not stay put: it lands on the primary
     # entity, lands in an adjacent slot, or is lost.
     '  "named_insured_details": [{"name": string (must match a name in additional_named_insureds EXACTLY - this is the SAME party, described. NEVER the first named insured: its attributes are the applicant_* / fein / sic_code / naics_code scalars), "fein": string or null, "sic": string or null, "naics": string or null, "gl_class_code": string or null, "phone": string or null, "website": string or null, "address_line_one": string or null, "address_line_two": string or null, "city": string or null, "state": string or null, "postal_code": string or null, "entity_type": string or null (Corporation, LLC, Partnership, Individual, Joint Venture, Not For Profit, Subchapter S Corporation, Trust), "member_manager_count": string or null}] (ONE entry per OTHER named insured, in the SAME ORDER as additional_named_insureds and describing the SAME parties - entry 1 describes additional_named_insureds[0]. The FIRST named insured is NOT in this list; its own attributes are the applicant_* / fein / sic_code / naics_code scalars above. Record an attribute ONLY under the party the document attributes it to - never copy the applicant FEIN, phone or website onto another entity because they are printed nearby, and never copy another entity onto the applicant),\n'
-    '  "applicant_contacts": [{"contact_type": string or null (what the document calls this contact - Inspection, Accounting, Claims, Billing, Primary), "name": string or null, "phone": string or null, "phone_kind": "Home"|"Business"|"Cell"|null, "email": string or null, "secondary_phone": string or null, "secondary_email": string or null}] (the APPLICANT contacts, one entry each, in the order the document lists them. Never the producer or carrier people - those belong in producer_contact_*),\n'
-    '  "additional_interests": [{"name": string, "interest_type": string or null (the word the document uses - Loss Payee, Mortgagee, Lienholder, Additional Insured, Owner, Trustee, Registrant, Co-Owner, Breach of Warranty, Lenders Loss Payable, Employee as Lessor, Leaseback Owner), "address_line_one": string or null, "address_line_two": string or null, "city": string or null, "state": string or null, "postal_code": string or null, "country": string or null (ONLY when the document prints a country - never inferred from the address), "rank": string or null, "reference_number": string or null (reference / loan / account number), "lien_amount": string or null, "phone": string or null, "fax": string or null, "email": string or null, "interest_reason": string or null (WHY they hold the interest - e.g. "Equipment finance agreement"), "item_description": string or null (the specific property the interest attaches to), "item_location_number": string or null (the LOCATION number the interest attaches to, when the document gives one), "interest_end_date": string or null, "evidence_requested": string or null (Certificate, Policy, Send Bill)}] (parties holding an interest in specific property WITHOUT being a named insured. A party the document names as a NAMED INSURED does not belong here),\n'
+    '  "applicant_contacts": [{"contact_type": string or null (what the document calls this contact - Inspection, Accounting, Claims, Billing, Primary), "name": string or null, "phone": string or null, "phone_kind": "Home"|"Business"|"Cell"|null, "email": string or null, "secondary_phone": string or null, "secondary_phone_kind": "Home"|"Business"|"Cell"|null (the kind the document prints for the SECONDARY phone), "secondary_email": string or null}] (the APPLICANT contacts, one entry each, in the order the document lists them. Never the producer or carrier people - those belong in producer_contact_*),\n'
+    '  "additional_interests": [{"name": string, "interest_type": string or null (the word the document uses - Loss Payee, Mortgagee, Lienholder, Additional Insured, Owner, Trustee, Registrant, Co-Owner, Breach of Warranty, Lenders Loss Payable, Employee as Lessor, Leaseback Owner), "address_line_one": string or null, "address_line_two": string or null, "city": string or null, "state": string or null, "postal_code": string or null, "country": string or null (ONLY when the document prints a country - never inferred from the address), "rank": string or null, "reference_number": string or null (reference / loan / account number), "lien_amount": string or null, "phone": string or null, "fax": string or null, "email": string or null, "interest_reason": string or null (WHY they hold the interest - e.g. "Equipment finance agreement"), "item_description": string or null (the specific property the interest attaches to), "item_location_number": string or null (the LOCATION number the interest attaches to, when the document gives one), "item_building_number": string or null (the BUILDING number at that location, when the document gives one), "item_class": string or null (the scheduled-item CLASS the document prints for this interest - null when it prints N/A or nothing), "interest_end_date": string or null, "evidence_requested": string or null (Certificate, Policy, Send Bill)}] (parties holding an interest in specific property WITHOUT being a named insured. A party the document names as a NAMED INSURED does not belong here),\n'
     '  "organization_relationships": [{"role": "parent"|"subsidiary", "name": string, "relationship_description": string or null, "percent_owned": string or null}] (ownership relationships the document STATES - "parent" when the named entity owns or controls the applicant, "subsidiary" when the applicant owns or controls the named entity. Never inferred from a shared address or a similar name),\n'
     '  "other_named_insured_operations": string or null (the operations narrative the document gives for the OTHER named insureds, when it prints one SEPARATELY from the applicant own operations. Null when the document describes only one set of operations - never a copy of operations_description),\n'
-    '  "safety_program_elements": [string] (ONLY the formal-safety-programme elements the document states the applicant has, each as one of exactly: "Safety Manual", "Safety Position", "Monthly Meetings", "OSHA". A safety programme mentioned with no element named gives an EMPTY list, which is not the same as the applicant having no programme),\n'
+    '  "safety_program_elements": [string] (ONLY the formal-safety-programme elements the document states the applicant has, each as one of exactly: "Safety Manual", "Safety Position", "Monthly Meetings", "OSHA", or "Other: <the element as the document prints it>" for an element the document lists that is not one of those four. A safety programme mentioned with no element named gives an EMPTY list, which is not the same as the applicant having no programme),\n'
     # The GENERAL INFORMATION disclosures. Before this fact existed NOT ONE of
     # ACORD 125's 15 questions had anything behind it - every answer, every
     # explanation and every occurrence date came from a non-deterministic LLM
@@ -320,7 +354,10 @@ _EXTRACT_SCHEMA = (
     # next run of the SAME document over the SAME code. 13 boxes moved on
     # nothing. The topics are the ACORD questions themselves, so one fact
     # serves every form that asks them - the question CODES are shared.
-    '  "disclosure_answers": [{"topic": "subsidiary_of_another"|"has_subsidiaries"|"formal_safety_program"|"flammables_explosives_chemicals"|"other_insurance_with_carrier"|"coverage_declined_cancelled_nonrenewed"|"abuse_molestation_discrimination_claims"|"fraud_arson_conviction"|"uncorrected_fire_safety_violations"|"foreclosure_repossession_bankruptcy"|"judgement_or_lien"|"business_in_trust"|"foreign_operations"|"other_business_ventures"|"owns_leases_operates_drones"|"hires_drone_operators", "answer": "Y"|"N"|null, "explanation": string or null, "occurrence_date": string or null, "resolution": string or null (ONLY a resolution that has HAPPENED - a planned or scheduled remedy is not a resolution), "resolution_date": string or null, "evidence_quote": string or null (the sentence in the document that states this, copied verbatim)}] (ONE entry per question the document ACTUALLY ADDRESSES. A question the document is silent on must be OMITTED ENTIRELY - do not emit an entry with answer "N" to mean "not mentioned". Silence is not a No. The explanation must be what the document SAYS, never a restatement of the question),\n'
+    '  "disclosure_answers": [{"topic": "subsidiary_of_another"|"has_subsidiaries"|"formal_safety_program"|"flammables_explosives_chemicals"|"other_insurance_with_carrier"|"coverage_declined_cancelled_nonrenewed"|"abuse_molestation_discrimination_claims"|"fraud_arson_conviction"|"uncorrected_fire_safety_violations"|"foreclosure_repossession_bankruptcy"|"judgement_or_lien"|"business_in_trust"|"foreign_operations"|"other_business_ventures"|"owns_leases_operates_drones"|"hires_drone_operators", "answer": "Y"|"N"|null, "explanation": string or null, "occurrence_date": string or null, "resolution": string or null (ONLY a resolution that has HAPPENED - a planned or scheduled remedy is not a resolution), "resolution_date": string or null, "evidence_quote": string or null (the COMPLETE sentence or sentences in the document that state the answer, copied verbatim - never the question itself and never a checkbox line)}] (ONE entry per question the document ACTUALLY ADDRESSES. A question the document is silent on must be OMITTED ENTIRELY - do not emit an entry with answer "N" to mean "not mentioned". Silence is not a No. The explanation: when the document prints a labelled EXPLANATION (or "Describe") for this question, copy THAT text; otherwise the document\'s own sentence(s) that explain the answer - complete, never shortened, never a restatement of the question, never a bare "Yes."/"No." answer line. For other_insurance_with_carrier the explanation lists each policy\'s line and policy number),\n'
+    # v23: question 5's REASONS. ACORD prints one box per reason; with no
+    # fact, gap fill chose - and on test 5 wrote a listed reason into OTHER.
+    '  "nonrenewal_reasons": [string] (for question 5 - a policy declined, cancelled or non-renewed - ONLY the reasons the document states or marks, each as one of exactly: "Non-payment", "Agent no longer represents carrier", "Non-renewal", "Underwriting", "Condition corrected", or "Other: <the reason as printed>" for a reason that is none of those. EMPTY when the document states no reason),\n'
     '  "property_building_value": string or null, "property_bpp_value": string or null,\n'
     '  "construction_type": string or null, "occupancy_type": string or null,\n'
     '  "year_built": string or null, "roof_year": string or null,\n'
@@ -519,7 +556,11 @@ _EXTRACT_SCHEMA = (
     '  "certificate_holder_address": string or null,\n'
     '  "certificate_description_of_operations": string or null,\n'
     '  "loss_payee_name": string or null,\n'
-    '  "additional_remarks_text": string or null,\n'
+    # v23: the box this feeds is ACORD's REMARKS / PROCESSING INSTRUCTIONS -
+    # what the producer asks the underwriter to do. Undefined, it came back as
+    # a certificate's footnote on FR125 while the letter's "REMARKS FOR THE
+    # APPLICATION" went unrecorded.
+    '  "additional_remarks_text": string or null (the remarks or processing instructions the SUBMISSION gives the underwriter - a block headed "Remarks", "Remarks for the application" or "Processing instructions" in the cover letter or application, copied. Never a certificate footnote, a disclaimer, policy wording or a forms list),\n'
     # ── Loss history schedule (ACORD 125, 186) ────────────────────────────
     '  "loss_history": [{"date": string or null, "claim_date": string or null, '
     '"description": string or null, "amount": string or null, "paid": string or null, '
@@ -1975,6 +2016,8 @@ _LIST_FIELDS = frozenset({
     "named_insured_details", "applicant_contacts", "additional_interests",
     "organization_relationships", "safety_program_elements",
     "disclosure_answers",
+    # v23 - question 5's reasons, a list of strings like the safety elements.
+    "nonrenewal_reasons",
 })
 
 
@@ -2342,7 +2385,7 @@ _LONG_DOC_LIST_KEYS = [
     # different chunks; a scalar merge would keep one of them.
     "named_insured_details", "applicant_contacts", "additional_interests",
     "organization_relationships", "safety_program_elements",
-    "disclosure_answers",
+    "disclosure_answers", "nonrenewal_reasons",
     # Without this the cross-chunk merge treats coverage_lines as a scalar and
     # keeps ONE chunk's list, so a dec page split across chunks silently loses
     # every line mentioned in the other chunks.
@@ -11406,6 +11449,114 @@ def _renewal_phrase_is_a_statement(text: str, match: Any) -> bool:
                          tail, re.I))
 
 
+# ── What THIS submission says it is (28 Sep 2026) ───────────────────────────
+# FR125 v2 prints "SUBMISSION - NEW BUSINESS - REQUEST FOR QUOTATION" and
+# "Transaction .... New business - quote", and encloses the incumbent's
+# declarations, which say "RENEWAL OF GL-104471". Extraction answered
+# is_renewal = Y from the incumbent's history, and ACORD 125 ticked RENEW and
+# printed the incumbent on page one as the carrier receiving the submission.
+#
+# `is_renewal` is NOT overwritten: it also drives the renewal DATE routing,
+# where "the expiring programme is being replaced" is true of a new-business
+# quote too (the Meridian kit is exactly that). What the document says about
+# the TRANSACTION is recorded beside it, for the two readers that ask about
+# the transaction: STATUS OF TRANSACTION and the page-one carrier.
+#
+# A statement, not a mention: "new business" on a line that also names the
+# transaction (submission / transaction / quote / application / request /
+# status), not inside a condition. A document that ALSO calls the submission
+# a renewal is contested and marks nothing.
+_NEW_BUSINESS_RE = re.compile(r"\bnew\s+business\b", re.I)
+_TRANSACTION_WORD_RE = re.compile(
+    r"\b(submission|submitted|transaction|quot\w*|application|request\w*|status)\b", re.I)
+_RENEWAL_TRANSACTION_RE = re.compile(
+    r"\brenewal\s+(?:submission|application|quot\w*|request\w*)\b"
+    r"|\btransaction\b[^\n]{0,80}\brenew", re.I)
+
+
+def _mark_stated_new_business(mf: dict, full_text: str) -> bool:
+    if not isinstance(mf, dict) or not (full_text or "").strip():
+        return False
+    stated = False
+    for m in _NEW_BUSINESS_RE.finditer(full_text):
+        ls = full_text.rfind("\n", 0, m.start()) + 1
+        le = full_text.find("\n", m.end())
+        line = full_text[ls:le if le != -1 else len(full_text)]
+        if not _TRANSACTION_WORD_RE.search(line):
+            continue
+        if _RENEWAL_CONDITION_RE.search(full_text[ls:m.start()]):
+            continue                       # "if this is new business ..."
+        stated = True
+        break
+    if not stated:
+        return False
+    for m in _RENEWAL_TRANSACTION_RE.finditer(full_text):
+        clause = full_text[max(0, m.start() - 160):m.start()]
+        if not _RENEWAL_CONDITION_RE.search(re.split(r"[.;:]\s", clause)[-1]):
+            logger.info("submission_is_new_business: NOT marked - the document "
+                        "also calls the submission a renewal (%r)", m.group(0)[:40])
+            return False
+    mf["submission_is_new_business"] = True
+    logger.info("submission_is_new_business: the document states this "
+                "submission is new business")
+    return True
+
+
+# ── An e-mail address is copied, never composed (28 Sep 2026) ──────────────
+# FR125 v2 prints "Alt e-mail ... jsmith.site@example-electrical.com" and the
+# contacts came back "jsmith.site@example.com" - the model kept the mailbox
+# and dropped part of the domain. An address the documents do not contain is
+# replaced by the ONE address they print with the same mailbox; with none, or
+# several, it is left as extracted (OCR can break an address the model read
+# correctly, so absence alone is not proof of invention).
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _repair_emails_from_text(mf: dict, full_text: str) -> List[str]:
+    if not isinstance(mf, dict) or not (full_text or "").strip():
+        return []
+    printed = {e.lower().rstrip(".") for e in _EMAIL_RE.findall(full_text)}
+    if not printed:
+        return []
+    by_mailbox: Dict[str, set] = {}
+    for e in printed:
+        by_mailbox.setdefault(e.split("@", 1)[0], set()).add(e)
+
+    def _fixed(val: Any) -> Optional[str]:
+        v = str(val or "").strip()
+        if not _EMAIL_RE.fullmatch(v) or v.lower() in printed:
+            return None
+        same = by_mailbox.get(v.lower().split("@", 1)[0]) or set()
+        return next(iter(same)) if len(same) == 1 else None
+
+    repaired: List[str] = []
+    for key, held in list(mf.items()):
+        if key.startswith("_"):
+            continue
+        val = _fv(mf, key)
+        if "email" in key.lower() and isinstance(val, str):
+            new = _fixed(val)
+            if new:
+                if isinstance(held, dict) and "value" in held:
+                    held["value"] = new
+                else:
+                    mf[key] = new
+                repaired.append(key)
+        elif isinstance(val, list):
+            for row in val:
+                if not isinstance(row, dict):
+                    continue
+                for col, cell in list(row.items()):
+                    if "email" in str(col).lower() and isinstance(cell, str):
+                        new = _fixed(cell)
+                        if new:
+                            row[col] = new
+                            repaired.append(f"{key}.{col}")
+    if repaired:
+        logger.info("email repair: %s now carry the address the documents print", repaired)
+    return repaired
+
+
 def _backfill_is_renewal(mf: dict, full_text: str) -> None:
     """Set is_renewal from the document's own printed wording when extraction
     left it empty. Never overrides a value the model DID state."""
@@ -11447,6 +11598,617 @@ def _entries_state_payroll(entries: Any) -> bool:
         if value == "payroll":
             return True
     return False
+
+
+# ── PAGE ONE's BILLING and AUDIT are the SUBMISSION's (28 Sep 2026) ──────────
+# FR125 v2 test 7 took both from one sentence about the OLD carrier's
+# paperwork - "The old Timberline paperwork still shows the old audit and
+# quarterly agency billing." - and printed AGENCY with no audit, while the
+# submission says "Billing preference Direct bill", "Direct bill, monthly EFT
+# please" and "Premium audit .... Annual (audit period code A)". ACORD 125's
+# page one is the policy being APPLIED FOR (Brent's key). A statement under the
+# incumbent's DECLARATIONS / CURRENT / EXPIRING / PRIOR heading, or in a
+# sentence about old / prior / previous / expiring paperwork, is the old
+# policy's; the rest are the submission's. When the submission's statements
+# agree on one billing plan or one audit period, that is the fact; when they
+# disagree, or say nothing, the extraction stands. A person's entry is never
+# replaced. An audit "period" that names no period ("old audit") is dropped.
+_INCUMBENT_HEADING_RE = re.compile(
+    r"DECLARATIONS|CURRENT POLICY|EXPIRING|INCUMBENT|PRIOR[- ]TERM|PRIOR CARRIER", re.I)
+_OLD_PAPERWORK_RE = re.compile(r"\b(old|prior|previous|expiring|incumbent|former)\b", re.I)
+_BILLING_STATEMENT_RE = re.compile(r"\b(direct|agency|producer)\s+bill(?:ing|ed)?\b", re.I)
+_AUDIT_PERIOD_WORDS = (("semi", "Semi-annual"), ("bi-annual", "Semi-annual"),
+                       ("biannual", "Semi-annual"), ("annual", "Annual"), ("yearly", "Annual"),
+                       ("quarter", "Quarterly"), ("month", "Monthly"))
+_AUDIT_CODE_WORDS = {"A": "Annual", "S": "Semi-annual", "Q": "Quarterly", "M": "Monthly"}
+
+
+def _heading_before(text: str, pos: int) -> str:
+    """The nearest section heading above `pos`: a line of 2+ words, no digits,
+    mostly capitals - how a document titles a declarations page or a letter."""
+    for line in reversed(text[max(0, pos - 6000):pos].split("\n")[:-1]):
+        t = line.strip()
+        letters = [c for c in t if c.isalpha()]
+        if (len(t.split()) >= 2 and len(letters) >= 8 and len(t) <= 110
+                and not re.search(r"\d", t)
+                and sum(c.isupper() for c in letters) / len(letters) >= 0.85):
+            return t
+    return ""
+
+
+def _sentence_around(text: str, pos: int) -> str:
+    start = max(text.rfind(". ", 0, pos), text.rfind(".\n", 0, pos), text.rfind("\n\n", 0, pos))
+    end = text.find(".", pos)
+    return text[start + 1:end if end != -1 else pos + 200]
+
+
+def _is_incumbent_statement(text: str, pos: int) -> bool:
+    return bool(_INCUMBENT_HEADING_RE.search(_heading_before(text, pos))
+                or _OLD_PAPERWORK_RE.search(_sentence_around(text, pos)))
+
+
+def _audit_period_of(text: str) -> Optional[str]:
+    low = str(text or "").lower()
+    code = re.search(r"\bcode\s+([ASQM])\b", str(text or ""))
+    for word, period in _AUDIT_PERIOD_WORDS:
+        if word in low:
+            return period
+    if code:
+        return _AUDIT_CODE_WORDS[code.group(1)]
+    t = str(text or "").strip().upper()
+    return _AUDIT_CODE_WORDS.get(t) if len(t) == 1 else None
+
+
+def _prefer_submission_terms(facts: dict, full_text: str) -> List[str]:
+    if not isinstance(facts, dict) or not (full_text or "").strip():
+        return []
+    text = full_text
+    changed: List[str] = []
+
+    def _person(key: str) -> bool:
+        held = facts.get(key)
+        return isinstance(held, dict) and str(held.get("source") or "").lower() in _PERSON_FACT_SOURCES
+
+    # billing plan
+    plans = {("AGENCY BILL" if m.group(1).lower() in ("agency", "producer") else "DIRECT BILL")
+             for m in _BILLING_STATEMENT_RE.finditer(text)
+             if not _is_incumbent_statement(text, m.start())}
+    if len(plans) == 1 and not _person("billing_plan"):
+        plan = plans.pop()
+        held = str(_fv(facts, "billing_plan") or "").lower()
+        now = "AGENCY BILL" if re.search(r"agency|producer", held) else (
+            "DIRECT BILL" if "direct" in held else None)
+        if now != plan:
+            facts["billing_plan"] = {"value": plan, "confidence": "filled",
+                                     "source": "document_text", "verified_in_text": True,
+                                     "derivation": {"rule": "submission_billing_statement",
+                                                    "inputs": []}}
+            changed.append("billing_plan")
+
+    # audit period
+    if not _person("audit_period"):
+        held = _fv(facts, "audit_period")
+        if held is not None and str(held).strip() and not _audit_period_of(str(held)):
+            facts.pop("audit_period", None)          # "old audit" names no period
+            changed.append("audit_period (dropped)")
+        periods = set()
+        for m in re.finditer(r"[^\n]*\baudit\b[^\n]*", text, re.I):
+            period = _audit_period_of(m.group(0))
+            if period and not _is_incumbent_statement(text, m.start()):
+                periods.add(period)
+        if len(periods) == 1:
+            period = periods.pop()
+            if _audit_period_of(str(_fv(facts, "audit_period") or "")) != period:
+                facts["audit_period"] = {"value": period, "confidence": "filled",
+                                         "source": "document_text", "verified_in_text": True,
+                                         "derivation": {"rule": "submission_audit_statement",
+                                                        "inputs": []}}
+                changed.append("audit_period")
+    if changed:
+        logger.info("page-one billing / audit from the SUBMISSION's own statements: %s", changed)
+    return changed
+
+
+# ── METHOD OF PAYMENT, read where the document labels it (28 Sep 2026) ──────
+# FR125 v2 test 4: the cover letter prints "Method of payment EFT (automatic
+# ACH debit)"; extraction has no method fact and folded it into the plan only
+# on SOME runs ("monthly EFT" on test 3, "Monthly (MO)" on test 4), so the box
+# flipped between EFT and the billing plan on one document. A line the
+# document LABELS as the method, and the first word of the closed vocabulary
+# on it (`pdf_service._PAYMENT_METHOD_WORDS`); several lines naming different
+# methods is a real ambiguity and leaves it empty. Never overwrites.
+_PAYMENT_METHOD_LABEL_RE = re.compile(
+    r"\b(?:method\s+of\s+payment|payment\s+method)\b[\s.:\-]*(?P<rest>[^\n]*)", re.I)
+
+
+def _backfill_payment_method(facts: dict, full_text: str) -> None:
+    if not isinstance(facts, dict) or _fv(facts, "payment_method") or not (full_text or "").strip():
+        return
+    try:
+        from services.pdf_service import _PAYMENT_METHOD_WORDS
+    except Exception:                                     # noqa: BLE001
+        return
+    found = set()
+    for m in _PAYMENT_METHOD_LABEL_RE.finditer(full_text):
+        before = full_text[full_text.rfind("\n", 0, m.start()) + 1:m.start()]
+        if _RENEWAL_CONDITION_RE.search(before):
+            continue
+        w = _PAYMENT_METHOD_WORDS.search(m.group("rest"))
+        if w:
+            found.add(w.group(1).upper() if w.group(1).upper() in ("EFT", "ACH") else w.group(1).lower())
+    if len(found) != 1:
+        if found:
+            logger.info("payment_method backfill: the document names %s - left empty", sorted(found))
+        return
+    val = found.pop()
+    facts["payment_method"] = {"value": val, "confidence": "filled", "source": "dec_entry",
+                               "derivation": {"rule": "labelled_payment_method_in_text",
+                                              "inputs": []}}
+    logger.info("payment_method BACKFILL value=%r - the document labels it", val)
+
+
+# ── PRIOR-CARRIER rows the index verified and extraction dropped (28 Sep) ────
+# FR125 v2: the prior-term summary prints one row per line per year
+# ("General Liability: Timberline Mutual Insurance Company GL-091233 $16,900
+# 10/01/2023 10/01/2024"). Test 3's extraction returned 2023 and 2024; test
+# 4's, on the same document, only 2024 - twenty boxes lost to call-1
+# variability. The verified dec index held every row both times. A row is
+# taken only whole: a section about PRIOR / EXPIRING / PREVIOUS terms, a label
+# the line canon knows, and a value that is exactly carrier, policy number,
+# premium, effective and expiration date. A policy the fact already lists is
+# never added twice; the grid's own "the current policy is not prior
+# coverage" rule still judges every row.
+_PRIOR_SECTION_RE = re.compile(r"\b(prior|expiring|previous|history)\b", re.I)
+_PRIOR_ROW_VALUE_RE = re.compile(
+    r"^(?P<carrier>[A-Za-z][^$\d]*?)\s+(?P<number>[A-Z0-9][A-Z0-9-]{4,})\s+"
+    r"\$?\s*(?P<premium>\d[\d,]*(?:\.\d{2})?)\s+"
+    r"(?P<eff>\d{1,2}/\d{1,2}/\d{4})\s*(?:-|to)?\s*(?P<exp>\d{1,2}/\d{1,2}/\d{4})$")
+
+
+def _backfill_prior_coverage_from_entries(facts: dict) -> List[dict]:
+    if not isinstance(facts, dict):
+        return []
+    entries = facts.get("dec_page_entries")
+    entries = entries.get("value") if isinstance(entries, dict) else entries
+    if not isinstance(entries, list) or not entries:
+        return []
+    try:
+        from services.lob_canon import canon_line
+    except Exception:                                     # noqa: BLE001
+        return []
+    held = _fv(facts, "prior_coverage_by_line")
+    held = [r for r in held if isinstance(r, dict)] if isinstance(held, list) else []
+    known = {re.sub(r"[^a-z0-9]", "", str(r.get("policy_no") or "").lower()) for r in held}
+    known.discard("")
+    added: List[dict] = []
+    for e in entries:
+        if not isinstance(e, dict) or not _PRIOR_SECTION_RE.search(str(e.get("section") or "")):
+            continue
+        label = str(e.get("label") or "").strip()
+        if not canon_line(label):
+            continue
+        m = _PRIOR_ROW_VALUE_RE.match(" ".join(str(e.get("value") or "").split()))
+        if not m:
+            continue
+        key = re.sub(r"[^a-z0-9]", "", m.group("number").lower())
+        if key in known:
+            continue
+        known.add(key)
+        added.append({"line": label, "carrier": m.group("carrier").strip(" ,;:-"),
+                      "policy_no": m.group("number"), "effective": m.group("eff"),
+                      "expiration": m.group("exp"), "premium": f"${m.group('premium')}",
+                      "source": "dec_entry"})
+    if not added:
+        return []
+    rows = held + added
+    fact = facts.get("prior_coverage_by_line")
+    if isinstance(fact, dict) and "value" in fact:
+        fact["value"] = rows
+    else:
+        facts["prior_coverage_by_line"] = rows
+    logger.info("prior_coverage_by_line BACKFILL +%d rows from the verified index: %s",
+                len(added), [r["policy_no"] for r in added])
+    return added
+
+
+# ── A remark is the SUBMISSION's when the document heads it as one (28 Sep) ──
+# ACORD 125's REMARKS / PROCESSING INSTRUCTIONS is what the producer asks the
+# underwriter. `additional_remarks_text` has held a certificate footnote (FR125
+# v2 test 3) and a certificate's DESCRIPTION OF OPERATIONS note (Orbin) as well
+# as the real "REMARKS FOR THE APPLICATION". The page-one box prints the fact
+# only when the text sits under a heading that says REMARKS or PROCESSING
+# INSTRUCTIONS, and that heading line is not a certificate's operations box.
+# A marker, like `current_term_rows_ok`: ACORD 101's use of the fact is
+# untouched.
+_REMARK_HEADING_RE = re.compile(r"\bremarks?\b|processing\s+instructions?", re.I)
+_NOT_A_REMARK_HEADING_RE = re.compile(r"description\s+of\s+operations|certificate", re.I)
+
+
+def _mark_submission_remark(facts: dict, full_text: str) -> bool:
+    if not isinstance(facts, dict):
+        return False
+    remark = _fv(facts, "additional_remarks_text")
+    if not isinstance(remark, str) or not remark.strip() or not (full_text or "").strip():
+        return False
+    squashed, where = [], []
+    for i, ch in enumerate(full_text):
+        if not ch.isspace():
+            squashed.append(ch.lower())
+            where.append(i)
+    probe = re.sub(r"\s+", "", remark.lower())[:60]
+    at = "".join(squashed).find(probe) if probe else -1
+    if at < 0:
+        return False
+    start = where[at]
+    window = full_text[max(0, start - 400):start]
+    heads = list(_REMARK_HEADING_RE.finditer(window))
+    if not heads:
+        return False
+    h = heads[-1]
+    line = window[window.rfind("\n", 0, h.start()) + 1:]
+    line = line[:line.find("\n")] if "\n" in line else line
+    if _NOT_A_REMARK_HEADING_RE.search(line):
+        return False
+    facts["remarks_under_remarks_heading"] = True
+    return True
+
+
+# ── The addressee is checked, not trusted (28 Sep 2026, FR125 v2 test 6) ────
+# The first live v23 run returned submission_carrier_name = the INCUMBENT
+# (Timberline Mutual) with the addressee's NAIC (21334, Granite Arch's), and
+# page one printed that pair - one company's name beside another's number.
+# Two structural checks, both from facts the merge already holds:
+#   * page one has ruled carrier_name the CURRENT policy's carrier, not the
+#     proposal's (`carrier_is_current_policy`) - an addressee equal to it is
+#     the incumbent restated, and it goes;
+#   * a NAIC is kept only where the document prints it beside THAT name.
+def _validate_submission_carrier(facts: dict, full_text: str) -> List[str]:
+    if not isinstance(facts, dict):
+        return []
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                     # noqa: BLE001
+        _ek = _norm_name_key
+    dropped: List[str] = []
+    name = str(_fv(facts, "submission_carrier_name") or "").strip()
+    held = facts.get("submission_carrier_name")
+    person = isinstance(held, dict) and str(held.get("source") or "").lower() in _PERSON_FACT_SOURCES
+    if name and not person and facts.get("carrier_is_current_policy") is True \
+            and _ek(name) == _ek(str(_fv(facts, "carrier_name") or "")):
+        for key in ("submission_carrier_name", "submission_carrier_naic"):
+            if facts.pop(key, None) is not None:
+                dropped.append(key)
+        logger.info("submission_carrier DROPPED %r - it is the incumbent page one "
+                    "already ruled out", name)
+        name = ""
+    if not str(_fv(facts, "submission_carrier_name") or "").strip():
+        found = _addressee_from_text(full_text)
+        if found:
+            facts["submission_carrier_name"] = {
+                "value": found["name"], "confidence": "filled", "source": "document_text",
+                "verified_in_text": True,
+                "derivation": {"rule": "cover_letter_to_line", "inputs": []}}
+            if found.get("naic"):
+                facts["submission_carrier_naic"] = {
+                    "value": found["naic"], "confidence": "filled", "source": "document_text",
+                    "verified_in_text": True,
+                    "derivation": {"rule": "naic_printed_beside_addressee", "inputs": []}}
+            else:
+                facts.pop("submission_carrier_naic", None)
+            name = found["name"]
+            logger.info("submission_carrier from the letter's TO line: %r (NAIC %s)",
+                        found["name"], found.get("naic"))
+    naic = re.sub(r"\D", "", str(_fv(facts, "submission_carrier_naic") or ""))
+    if name and naic and (full_text or "").strip():
+        text = full_text
+        # BESIDE means on the same line, within a few words - "Granite Arch
+        # Casualty Company NAIC 21334" - not anywhere nearby.
+        near = bool(re.search(re.escape(name) + r"[^\n]{0,60}?" + re.escape(naic), text, re.I)
+                    or re.search(re.escape(naic) + r"[^\n]{0,60}?" + re.escape(name), text, re.I))
+        if not near:
+            facts.pop("submission_carrier_naic", None)
+            dropped.append("submission_carrier_naic")
+            logger.info("submission_carrier_naic DROPPED %s - never printed beside %r",
+                        naic, name)
+    return dropped
+
+
+# The letter's own addressee: a "TO:" line naming a COMPANY, in a letter that
+# is about a submission / quote / application. One company, or no answer.
+_TO_LINE_RE = re.compile(r"^[ \t]*TO[ \t]*[:\-][ \t]*(?P<name>[^\n]{4,90}?)[ \t]*$", re.I | re.M)
+_COMPANY_WORD_TAIL_RE = re.compile(
+    r"\b(company|insurance|casualty|assurance|indemnity|mutual|underwriters|"
+    r"group|corporation|corp|inc|llc|ltd|exchange|reciprocal)\.?$", re.I)
+_SUBMISSION_WORD_RE = re.compile(r"\b(submission|quotation|quote|application)\b", re.I)
+
+
+def _addressee_from_text(full_text: str) -> Optional[dict]:
+    text = full_text or ""
+    names: Dict[str, str] = {}
+    for m in _TO_LINE_RE.finditer(text):
+        name = m.group("name").strip(" .,;")
+        if re.search(r"\d", name) or not _COMPANY_WORD_TAIL_RE.search(name):
+            continue
+        around = text[max(0, m.start() - 600):m.end() + 600]
+        if not _SUBMISSION_WORD_RE.search(around):
+            continue
+        names.setdefault(_norm_name_key(name), name)
+    if len(names) != 1:
+        return None
+    name = next(iter(names.values()))
+    naic = None
+    pair = re.search(re.escape(name) + r"[^\n]{0,40}?\bNAIC\b\D{0,5}(\d{5})", text, re.I)
+    if pair:
+        naic = pair.group(1)
+    return {"name": name, "naic": naic}
+
+
+# ── One question, one answer (28 Sep 2026, FR125 v2 test 8) ────────────────
+# Extraction reads the document in pieces, and two pieces can answer one
+# question differently: test 8 had question 5 as YES (with the dated
+# non-renewals, their reasons and the correction) and as NO - quoting "The old
+# Timberline paperwork still shows the old audit...", which says nothing about
+# a non-renewal. The form printed YES only because that row came first.
+# When the rows disagree, the answer the document CORROBORATES wins: a YES
+# carrying a dated event or a resolution, or backed by the fact that answers
+# the same question in detail (question 5's reasons, question 4's policies,
+# the parent / subsidiary rows, the safety elements, a named trust). With no
+# corroboration either way the question is left unanswered - the gated gap
+# fill decides, and blank beats a guess.
+_TOPIC_DETAIL_FACT = {
+    "coverage_declined_cancelled_nonrenewed": "nonrenewal_reasons",
+    "other_insurance_with_carrier": "other_insurance_policies",
+    "formal_safety_program": "safety_program_elements",
+}
+_TOPIC_RELATIONSHIP_ROLE = {"subsidiary_of_another": "parent", "has_subsidiaries": "subsidiary"}
+
+
+def _yes_is_corroborated(facts: dict, topic: str, row: dict) -> bool:
+    if any(str(row.get(k) or "").strip() for k in ("occurrence_date", "resolution", "resolution_date")):
+        return True
+    detail = _TOPIC_DETAIL_FACT.get(topic)
+    if detail:
+        held = _fv(facts, detail)
+        if isinstance(held, list) and [x for x in held if x]:
+            return True
+    role = _TOPIC_RELATIONSHIP_ROLE.get(topic)
+    if role:
+        rel = _fv(facts, "organization_relationships")
+        if isinstance(rel, list) and any(isinstance(r, dict) and str(r.get("role") or "").lower() == role
+                                         and str(r.get("name") or "").strip() for r in rel):
+            return True
+    text = " ".join(str(row.get(k) or "") for k in ("evidence_quote", "explanation"))
+    if topic == "business_in_trust":
+        return bool(re.search(r"\b(?:[A-Z][\w'&.-]*\s+){1,6}Trust\b", text))
+    if topic == "other_insurance_with_carrier":
+        # its own policy number (the derived list is built after this step)
+        return any(re.search(r"\d", t) and not re.fullmatch(r"\d{1,4}", t)
+                   for t in _Q4_POLICY_TOKEN_RE.findall(text))
+    return False
+
+
+def _reconcile_disclosure_conflicts(facts: dict, full_text: str = "") -> List[str]:
+    rows = _fv(facts or {}, "disclosure_answers")
+    if not isinstance(rows, list):
+        return []
+    by_topic: Dict[str, List[dict]] = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("topic"):
+            by_topic.setdefault(str(r["topic"]), []).append(r)
+    drop: set = set()
+    settled: List[str] = []
+    for topic, group in by_topic.items():
+        answers = {str(r.get("answer") or "").strip().upper()[:1] for r in group} - {""}
+        if answers != {"Y", "N"}:
+            continue
+        yes = [r for r in group if str(r.get("answer") or "").strip().upper().startswith("Y")]
+        if any(_yes_is_corroborated(facts, topic, r) for r in yes):
+            drop.update(id(r) for r in group if r not in yes)
+            settled.append(f"{topic}=Y")
+        else:
+            drop.update(id(r) for r in group)
+            settled.append(f"{topic}=unanswered")
+    if not drop:
+        return []
+    kept = [r for r in rows if id(r) not in drop]
+    held = facts.get("disclosure_answers")
+    if isinstance(held, dict) and "value" in held:
+        held["value"] = kept
+    else:
+        facts["disclosure_answers"] = kept
+    logger.info("disclosure answers that disagreed across chunks, settled: %s", settled)
+    return settled
+
+
+# ── Question 4's policies, from numbers the document prints (28 Sep 2026) ───
+# Test 6 answered question 4 YES with the numbers in the EXPLANATION and the
+# checkbox line as the quote; another chunk added a second YES row whose text
+# was about old paperwork. The stamper read the first row's quote, found no
+# number, and fell back to the incumbent's policies. Every YES row is read here,
+# quote and explanation, and a number counts only if the document prints it.
+# A NO with no YES is an empty list; no row at all leaves no fact.
+_Q4_POLICY_TOKEN_RE = re.compile(r"(?<![\w/-])([A-Z0-9][A-Z0-9-]{4,})(?![\w/-])")
+
+
+def _derive_other_insurance_policies(facts: dict, full_text: str) -> Optional[List[dict]]:
+    if not isinstance(facts, dict):
+        return None
+    rows = [r for r in (_fv(facts, "disclosure_answers") or [])
+            if isinstance(r, dict) and r.get("topic") == "other_insurance_with_carrier"]
+    if not rows:
+        return None
+    answers = {str(r.get("answer") or "").strip().upper()[:1] for r in rows}
+    squashed = re.sub(r"\s+", "", (full_text or "")).upper()
+    # "THIS COMPANY" is the carrier the submission goes to (test 8: a second
+    # YES row, written from the incumbent's pages, listed Timberline's four
+    # policies - numbers the document does print). A number the documents
+    # pair with ANOTHER carrier is not insurance with this company.
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                     # noqa: BLE001
+        _ek = _norm_name_key
+    addressee = _ek(str(_fv(facts, "submission_carrier_name") or ""))
+    owner_of: Dict[str, str] = {}
+    known_carriers: set = set()
+    for key, num_col, car_col in (("coverage_lines", "policy_number", "carrier"),
+                                  ("prior_coverage_by_line", "policy_no", "carrier"),
+                                  ("_line_records", "policy_number", "carrier_name")):
+        for r in (_fv(facts, key) or []):
+            if not isinstance(r, dict):
+                continue
+            car = str(r.get(car_col) or "").strip()
+            if car:
+                known_carriers.add(car)
+            num = re.sub(r"[^A-Z0-9]", "", str(r.get(num_col) or "").upper())
+            if num and car:
+                owner_of.setdefault(num, car)
+    foreign = [c for c in known_carriers if addressee and _ek(c) != addressee]
+    out: List[dict] = []
+    seen: set = set()
+    for r in rows:
+        if str(r.get("answer") or "").strip().upper()[:1] != "Y":
+            continue
+        for text in (r.get("evidence_quote"), r.get("explanation")):
+            for segment in re.split(r"[;\n,]", str(text or "")):
+                prev = 0
+                for m in _Q4_POLICY_TOKEN_RE.finditer(segment):
+                    number = m.group(1).strip("-")
+                    line = re.sub(r"\b(policy|pol|no|number|#)\b\.?|[#:.\-]", " ",
+                                  segment[prev:m.start()], flags=re.I)
+                    line = " ".join(line.split())
+                    prev = m.end()
+                    if (not re.search(r"\d", number) or re.fullmatch(r"\d{1,4}", number)
+                            or not re.search(r"[A-Za-z]{3}", line)):
+                        continue
+                    if squashed and re.sub(r"\s+", "", number).upper() not in squashed:
+                        continue                    # not printed in the document
+                    key = re.sub(r"[^A-Z0-9]", "", number.upper())
+                    if key in seen:
+                        continue
+                    if addressee and (
+                            (key in owner_of and _ek(owner_of[key]) != addressee)
+                            or any(c.lower() in segment.lower() for c in foreign)):
+                        continue                    # another carrier's policy
+                    seen.add(key)
+                    # the line is words - no amounts, dates or carrier names
+                    line = re.sub(r"\$?\d[\d,./-]*", " ", line)
+                    for c in known_carriers:
+                        line = re.sub(re.escape(c), " ", line, flags=re.I)
+                    line = " ".join(line.split()) or line
+                    out.append({"line": line, "policy_number": number})
+    if out:
+        facts["other_insurance_policies"] = out
+        return out
+    if answers == {"N"}:
+        facts["other_insurance_policies"] = []
+        return []
+    return None
+
+
+# ── The document's LABELLED explanation is the explanation (28 Sep 2026) ────
+# Test 6's questions 8-10 printed the questionnaire's one-line answer ("Yes. A
+# leased compact excavator was repossessed in April 2022.") while the same
+# block prints, three lines down, "EXPLANATION: A leased compact excavator was
+# repossessed by the lessor after a billing dispute." - the text ACORD's
+# EXPLANATION box asks for. A YES answer takes the text its own block LABELS
+# Explanation / Describe: found after the row's own words and before the next
+# numbered question, continued until the next label or a blank line.
+_NEXT_QUESTION_RE = re.compile(r"\n[ \t]*\d{1,2}[a-z]?\.[ \t]+\S")
+_EXPLANATION_LABEL_RE = re.compile(r"(?im)^[ \t]*(?:explanation|describe)[ \t]*[:\-][ \t]*(?P<first>\S[^\n]*)$")
+_ANY_LABEL_LINE_RE = re.compile(r"^[ \t]*[A-Z][A-Z /&()'-]{1,40}:")
+
+
+def _prefer_labelled_explanations(facts: dict, full_text: str) -> List[str]:
+    rows = _fv(facts or {}, "disclosure_answers")
+    if not isinstance(rows, list) or not (full_text or "").strip():
+        return []
+    text = full_text
+    squashed, where = [], []
+    for i, ch in enumerate(text):
+        if not ch.isspace():
+            squashed.append(ch.lower())
+            where.append(i)
+    flat = "".join(squashed)
+    changed: List[str] = []
+    for r in rows:
+        if not isinstance(r, dict) or not str(r.get("answer") or "").strip().upper().startswith("Y"):
+            continue
+        anchor = None
+        for src in (r.get("evidence_quote"), r.get("explanation")):
+            probe = re.sub(r"\s+", "", str(src or "").lower())[:50]
+            at = flat.find(probe) if len(probe) >= 15 else -1
+            if at >= 0:
+                anchor = where[at]
+                break
+        if anchor is None:
+            continue
+        block = text[anchor:anchor + 900]
+        nxt = _NEXT_QUESTION_RE.search(block, 1)
+        if nxt:
+            block = block[:nxt.start()]
+        m = _EXPLANATION_LABEL_RE.search(block)
+        if not m:
+            continue
+        parts = [m.group("first").strip()]
+        for line in block[m.end():].split("\n")[1:]:
+            if not line.strip() or _ANY_LABEL_LINE_RE.match(line):
+                break
+            parts.append(line.strip())
+        labelled = " ".join(" ".join(parts).split())
+        if len(labelled.split()) < 4 or labelled == str(r.get("explanation") or "").strip():
+            continue
+        r["explanation"] = labelled
+        changed.append(str(r.get("topic")))
+    if changed:
+        logger.info("disclosure explanations taken from the document's labelled "
+                    "EXPLANATION: %s", changed)
+    return changed
+
+
+# ── A premises unit the row dropped, copied back (28 Sep 2026) ──────────────
+# Test 5 printed "4750 Centennial Blvd / Suite 210"; test 6's row came back
+# "4750 Centennial Blvd, Colorado Springs, CO 80919". The premises table prints
+# "4750 Centennial Blvd Suite 210 ..." once. A row whose street carries no unit
+# takes the ONE unit the document prints right after that street; none, or
+# two different units (three companies at 8000 Commerce Way), leaves it alone.
+# A unit IDENTIFIER carries a digit or is one letter ("Suite 210", "Ste B",
+# "# D13") - "Suite occupied 5,000 SF" (FR125 v1's lease) is a sentence.
+_UNIT_ID = r"(?:[A-Za-z-]*\d[A-Za-z0-9-]*|[A-Za-z])"
+_UNIT_AFTER_STREET_RE = (r",?\s*((?:suite|ste|unit|apt|room|rm|floor|fl)\.?\s*#?\s*" + _UNIT_ID
+                         + r"|#\s*" + _UNIT_ID + r")\b")
+_HAS_UNIT_RE = re.compile(r"\b(suite|ste|unit|apt|room|rm|floor|fl)\b\.?\s*#?\s*\w|#\s*\w", re.I)
+
+
+def _repair_location_units(facts: dict, full_text: str) -> List[str]:
+    if not isinstance(facts, dict) or not (full_text or "").strip():
+        return []
+    rows = _fv(facts, "property_locations")
+    if not isinstance(rows, list):
+        return []
+    repaired: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        addr = str(row.get("address") or "").strip()
+        if not addr or _HAS_UNIT_RE.search(addr):
+            continue
+        street = addr.split(",")[0].strip()
+        if not re.match(r"^\d+\s+\S+", street) or len(street) < 8:
+            continue
+        units = {re.sub(r"\s+", " ", m.group(1).strip()).title()
+                 for m in re.finditer(re.escape(street) + _UNIT_AFTER_STREET_RE, full_text, re.I)}
+        if len(units) != 1:
+            continue
+        unit = units.pop()
+        rest = addr[len(street):].lstrip(", ")
+        row["address"] = f"{street}, {unit}" + (f", {rest}" if rest else "")
+        if row.get("address_line2") in (None, ""):
+            if "address_line2" in row:
+                row["address_line2"] = unit
+        repaired.append(row["address"])
+    if repaired:
+        logger.info("premises unit REPAIRED from the document: %s", repaired)
+    return repaired
 
 
 def _backfill_billing_plan(facts: dict, full_text: str) -> None:
@@ -12418,6 +13180,28 @@ def merge_facts(docs: List[dict], primary: dict,
             mf, " ".join(str(_d.get("text") or "") for _d in docs))
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: billing_plan backfill failed: %s", exc)
+    try:
+        _prefer_submission_terms(
+            mf, "\n".join(str(_d.get("text") or "") for _d in docs
+                          if isinstance(_d, dict) and not _d.get("excluded")))
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: submission billing / audit failed: %s", exc)
+    try:
+        _backfill_payment_method(
+            mf, "\n".join(str(_d.get("text") or "") for _d in docs
+                          if isinstance(_d, dict) and not _d.get("excluded")))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: payment_method backfill failed: %s", exc)
+    try:
+        _mark_submission_remark(
+            mf, "\n".join(str(_d.get("text") or "") for _d in docs
+                          if isinstance(_d, dict) and not _d.get("excluded")))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: remark heading check failed: %s", exc)
+    try:
+        _backfill_prior_coverage_from_entries(mf)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: prior-coverage backfill failed: %s", exc)
 
     # Canonical, deduplicated multi-location list (Beta Report Figure 27).
     # Must run LAST, after every chunk/doc-level merge above, so it is the
@@ -12606,6 +13390,18 @@ def merge_facts(docs: List[dict], primary: dict,
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: is_renewal backfill failed: %s", exc)
     try:
+        _repair_emails_from_text(
+            mf, "\n".join(str(_d.get("text") or "") for _d in docs
+                          if isinstance(_d, dict) and not _d.get("excluded")))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: email repair failed: %s", exc)
+    try:
+        _mark_stated_new_business(
+            mf, "\n".join(str(_d.get("text") or "") for _d in docs
+                          if isinstance(_d, dict) and not _d.get("excluded")))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: new-business marker failed: %s", exc)
+    try:
         _route_renewal_dates(mf, docs)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: renewal date routing failed: %s", exc)
@@ -12655,6 +13451,17 @@ def merge_facts(docs: List[dict], primary: dict,
                         "the proposal's - %s", ", ".join(_page_one))
     except Exception as exc:  # noqa: BLE001 - never block the pipeline
         logger.warning("merge_facts: page-one marking failed: %s", exc)
+    _tail_text = "\n".join(str(_d.get("text") or "") for _d in docs
+                           if isinstance(_d, dict) and not _d.get("excluded"))
+    for _step, _name in ((_validate_submission_carrier, "addressee check"),
+                         (_reconcile_disclosure_conflicts, "conflicting answers"),
+                         (_derive_other_insurance_policies, "question 4 policies"),
+                         (_repair_location_units, "premises unit repair"),
+                         (_prefer_labelled_explanations, "labelled explanations")):
+        try:
+            _step(mf, _tail_text)
+        except Exception as exc:  # noqa: BLE001 - never block the pipeline
+            logger.warning("merge_facts: %s failed: %s", _name, exc)
     # A count holds one number. BEFORE the derivation below, which never
     # overwrites a stated value: a "5+" years in business must not keep the
     # real figure from being derived.
@@ -13006,9 +13813,17 @@ def _mark_page_one_current_policy(mf: dict, docs: Any) -> List[str]:
                  or re.search(r"[1-9]", str(r.get("premium") or "")))
         }
         writers.discard("")
-        renewal = str(_fv(mf, "is_renewal") or "").strip().lower() in (
+        # A document that states the submission is NEW BUSINESS is not a
+        # renewal with its own writer, whatever the incumbent's decs say.
+        renewal = (str(_fv(mf, "is_renewal") or "").strip().lower() in (
             "yes", "y", "true", "1", "renewal", "renew")
-        if not named_by_proposal and not (renewal and writers == {key}):
+            and mf.get("submission_is_new_business") is not True)
+        # v23: the document names the carrier THIS submission goes to. A
+        # different company means carrier_name is the incumbent, never the
+        # page-one carrier, whatever else holds.
+        addressee = _ek(str(_fv(mf, "submission_carrier_name") or ""))
+        elsewhere = bool(addressee) and addressee != key
+        if elsewhere or (not named_by_proposal and not (renewal and writers == {key})):
             mf["carrier_is_current_policy"] = True
             marked.append("carrier")
     if not _person("total_policy_premium"):

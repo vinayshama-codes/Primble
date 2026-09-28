@@ -1,0 +1,20 @@
+{
+ "n_expect": 312,
+ "n_blank": 220,
+ "n_not_scored": 16,
+ "correct": 311,
+ "exact": 310,
+ "code": 0,
+ "meaning": 1,
+ "wrong": 1,
+ "partial": 1,
+ "missing": 0,
+ "missing_scanned": 0,
+ "violations": 0,
+ "made_up": 0,
+ "by_rule": 0,
+ "no_row": 0,
+ "forbidden": 0,
+ "shape": 0,
+ "overflow": 0
+}

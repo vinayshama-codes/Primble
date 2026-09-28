@@ -16,11 +16,11 @@ of the boxes we decided to look at.
 
 | verdict | meaning | count |
 |---|---|---|
-| `expect` | the document states it and this value belongs in THIS box | 245 |
+| `expect` | the document states it and this value belongs in THIS box | 243 |
 | `blank_no_data` | the document says nothing - the box must ship EMPTY | 233 |
-| `blank_by_rule` | the document DOES state something and one of our own rules owns the blank anyway (a signature, an agency-profile code, a premium on a quote) | 51 |
+| `blank_by_rule` | the document DOES state something and one of our own rules owns the blank anyway (a signature, an agency-profile code, a premium on a quote) | 52 |
 | `not_applicable` | a row the document has no entity for | 8 |
-| `not_scored` | generation-time metadata nobody can pin | 11 |
+| `not_scored` | generation-time metadata nobody can pin | 12 |
 
 `must_be_blank` in the scored key is the union of the middle three.
 

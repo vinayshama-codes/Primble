@@ -294,6 +294,11 @@ async def _process_form_generation_job(job: dict, queue) -> None:
 
         loop = asyncio.get_running_loop()
 
+        # The package is THIS job's forms, not the analyze step's
+        # recommendations still on the row (form_service.bind_generation_package).
+        from services.form_service import bind_generation_package
+        bind_generation_package(session, form_ids)
+
         # Stages 4-6 through the SAME door the synchronous route uses
         # (form_service.shared_gap_fill, 24 Sep 2026): one shared gap fill,
         # each coverage line reading only its own pages. Before this, the
