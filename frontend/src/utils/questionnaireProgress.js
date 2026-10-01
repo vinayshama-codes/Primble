@@ -83,10 +83,28 @@ export function hasResponded(question, value, seedValue, touched) {
 export function progressCounts(questions, answers, seed, touched, notSureValue) {
   let answered = 0;
   let notSure = 0;
+  // Point Q (1 Oct 2026): a `confirm` item ("We have this on file - is it
+  // right?") is a detail to CHECK, not a question. The end summary has always
+  // counted it apart ("21 of 21 questions answered - 0 of 4 details checked")
+  // while the header, the chips and the ring counted it as a question ("Questions
+  // (25)", "21 answered" of 25). Every count here splits the same way.
+  let questionsTotal = 0;
+  let questionsAnswered = 0;
+  let questionsNotSure = 0;
+  let checksTotal = 0;
+  let checksDone = 0;
+  let checksNotSure = 0;
   (questions || []).forEach((q) => {
+    const isCheck = !!q?.confirm;
+    if (isCheck) checksTotal += 1; else questionsTotal += 1;
     if (!hasResponded(q, answers?.[q.field_name], seed?.[q.field_name], touched)) return;
-    if (String(answers?.[q.field_name] ?? '').trim() === notSureValue) notSure += 1;
-    else answered += 1;
+    if (String(answers?.[q.field_name] ?? '').trim() === notSureValue) {
+      notSure += 1;
+      if (isCheck) checksNotSure += 1; else questionsNotSure += 1;
+    } else {
+      answered += 1;
+      if (isCheck) checksDone += 1; else questionsAnswered += 1;
+    }
   });
   const total = (questions || []).length;
   const responded = answered + notSure;
@@ -97,7 +115,31 @@ export function progressCounts(questions, answers, seed, touched, notSureValue) 
     total,
     remaining: Math.max(total - responded, 0),
     pct: total ? Math.round((responded / total) * 100) : 0,
+    questionsTotal,
+    questionsAnswered,
+    questionsResponded: questionsAnswered + questionsNotSure,
+    checksTotal,
+    checksDone,
+    checksResponded: checksDone + checksNotSure,
   };
+}
+
+/**
+ * "21 of 21 questions answered - 0 of 4 details checked" - the end summary's
+ * own sentence, built from `progressCounts`. A part with nothing in it is left
+ * out, so a questionnaire with no check items reads "3 of 5 questions answered".
+ */
+export function progressSummary(counts) {
+  const c = counts || {};
+  const plural = (n, word) => (n === 1 ? word : `${word}s`);
+  const parts = [];
+  if (c.questionsTotal) {
+    parts.push(`${c.questionsAnswered || 0} of ${c.questionsTotal} ${plural(c.questionsTotal, 'question')} answered`);
+  }
+  if (c.checksTotal) {
+    parts.push(`${c.checksDone || 0} of ${c.checksTotal} ${plural(c.checksTotal, 'detail')} checked`);
+  }
+  return parts.join(' - ');
 }
 
 /**

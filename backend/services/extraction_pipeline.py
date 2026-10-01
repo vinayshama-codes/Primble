@@ -576,6 +576,12 @@ async def _finalize_pipeline(
                 continue
             _human_val = _env.get("value")
             _doc_val = _fv(merged_facts, _k)
+            try:
+                from services.extraction_service import is_derived_proposed_term as _our_term
+                if _our_term(merged_facts.get(_k)):
+                    _doc_val = None      # our own derivation never outvotes a person
+            except Exception:                                 # noqa: BLE001
+                pass
             if _doc_val is None or not str(_doc_val).strip():
                 merged_facts[_k] = _env
                 _restored.append(_k)
@@ -916,6 +922,22 @@ async def _finalize_pipeline(
     confirmations = confirmations or {}
     if confirmations:
         merged_facts = apply_confirmations(merged_facts, confirmations, docs=active_docs)
+    try:
+        from services.extraction_service import follow_proposed_expiration
+        follow_proposed_expiration(merged_facts)
+    except Exception as _fpx:                                   # noqa: BLE001
+        logger.warning("proposed-expiration follow skipped: %s", _fpx)
+    # The producer's receiving carrier (the page-one card, 29 Sep 2026) is
+    # restored AFTER the merge judged page one, so judge it again with it:
+    # a new market must never keep the current policy's premiums.
+    try:
+        _sc = merged_facts.get("submission_carrier_name")
+        if isinstance(_sc, dict) and str(_sc.get("source") or "").lower() in (
+                "producer", "client_arq", "user_confirmed"):
+            from services.extraction_service import _mark_page_one_current_policy
+            _mark_page_one_current_policy(merged_facts, active_docs)
+    except Exception as _pox:                                   # noqa: BLE001
+        logger.warning("page-one re-check skipped: %s", _pox)
 
     tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 

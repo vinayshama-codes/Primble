@@ -10,6 +10,7 @@ import {
   encodeRows,
   hasResponded as respondedTo,
   progressCounts,
+  progressSummary,
   restoreTouched,
   DRAFT_MARKER,
 } from '../../utils/questionnaireProgress';
@@ -500,13 +501,22 @@ export default function ClientQuestionnaire({ token }) {
   const hasResponded = (q) =>
     respondedTo(q, answers[q.field_name], seedRef.current[q.field_name], touched);
 
+  const progress = progressCounts(questions, answers, seedRef.current, touched, NOT_SURE);
   const {
-    answered:  answeredCount,
     notSure:   notSureCount,
     responded: respondedCount,
     remaining: remainingCount,
     pct:       progressPct,
-  } = progressCounts(questions, answers, seedRef.current, touched, NOT_SURE);
+    // Point Q (1 Oct 2026): questions and details to check, counted apart -
+    // the header, the chips, the ring and the end summary say the same numbers.
+    questionsTotal,
+    questionsAnswered,
+    questionsResponded,
+    checksTotal,
+    checksDone,
+  } = progress;
+  const answeredCount = questionsAnswered;
+  const progressText = progressSummary(progress);
 
   const isNotSure = (fieldName) => (answers[fieldName] || '').trim() === NOT_SURE;
 
@@ -529,10 +539,18 @@ export default function ClientQuestionnaire({ token }) {
   //
   // Called once, immediately before the screen swaps, and the result is frozen
   // in state: a summary that could drift from what was sent is worse than none.
+  // A `confirm` item ("We have this on file - is it right?") is counted apart
+  // from the questions. Client, 22 Sep: the summary read "21 of 25 questions
+  // answered" when 3 of the 25 were verification items, which looked like four
+  // unanswered questions. A confirm item counts as CHECKED whether the client
+  // confirmed it or corrected it.
   const buildReceipt = () => {
     const items = [];
     let answeredItems = 0;
     let notSureItems  = 0;
+    let checkedItems  = 0;
+    const totalConfirms = questions.filter((q) => !!q.confirm).length;
+    const credit = (q) => { if (q.confirm) checkedItems += 1; else answeredItems += 1; };
 
     questions.forEach((q) => {
       const raw = answers[q.field_name];
@@ -544,7 +562,7 @@ export default function ClientQuestionnaire({ token }) {
 
       // Chat 5: "This is correct" on a value or table we already held.
       if (raw === CONFIRMED) {
-        answeredItems += 1;
+        credit(q);
         items.push({
           key:   q.field_name,
           label: q.question,
@@ -559,7 +577,7 @@ export default function ClientQuestionnaire({ token }) {
       if (q.field_type === 'schedule') {
         const rows = decodeRows(raw).filter((r) => !isBlankRow(r, q.columns || []));
         const singular = q.schedule_singular || 'row';
-        answeredItems += 1;
+        credit(q);
         items.push({
           key:   q.field_name,
           label: q.question,
@@ -582,11 +600,14 @@ export default function ClientQuestionnaire({ token }) {
         return;
       }
 
-      answeredItems += 1;
+      credit(q);
       items.push({ key: q.field_name, label: q.question, value: val, kind: 'answer' });
     });
 
-    return { items, answeredItems, notSureItems, total: questions.length };
+    return {
+      items, answeredItems, notSureItems, checkedItems, totalConfirms,
+      total: questions.length - totalConfirms,
+    };
   };
 
   const handleSubmit = async () => {
@@ -754,8 +775,13 @@ export default function ClientQuestionnaire({ token }) {
               )}
             </div>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
-              {receipt.answeredItems} of {receipt.total} question{receipt.total !== 1 ? 's' : ''} answered
+              {/* A questionnaire of "please check" items only has no questions
+                  to count - never print "0 of 0 questions answered". */}
+              {receipt.total > 0
+                ? `${receipt.answeredItems} of ${receipt.total} question${receipt.total !== 1 ? 's' : ''} answered`
+                : ''}
               {receipt.notSureItems > 0 && ` - ${receipt.notSureItems} marked "I'm not sure"`}
+              {receipt.totalConfirms > 0 && `${receipt.total > 0 ? ' - ' : ''}${receipt.checkedItems} of ${receipt.totalConfirms} detail${receipt.totalConfirms !== 1 ? 's' : ''} checked`}
             </div>
             <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
               {receipt.items.map((it, i) => {
@@ -842,6 +868,14 @@ export default function ClientQuestionnaire({ token }) {
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399' }} />
                   {answeredCount} answered
                 </span>
+                {checksTotal > 0 && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
+                                 background: 'rgba(16,185,129,0.10)', color: '#a7f3d0',
+                                 border: '1px solid rgba(110,231,183,0.25)', borderRadius: 20, padding: '3px 9px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#6ee7b7' }} />
+                    {checksDone} of {checksTotal} checked
+                  </span>
+                )}
                 {notSureCount > 0 && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
                                  background: 'rgba(251,191,36,0.18)', color: '#fcd34d',
@@ -868,7 +902,7 @@ export default function ClientQuestionnaire({ token }) {
             const circ = 2 * Math.PI * r;
             return (
               <div
-                title={`${answeredCount} answered`
+                title={progressText
                        + (notSureCount > 0 ? `, ${notSureCount} marked "I'm not sure"` : '')
                        + `, ${remainingCount} still open`}
                 style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
@@ -880,7 +914,11 @@ export default function ClientQuestionnaire({ token }) {
                     style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
                   <text x="26" y="31" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700" fontFamily="Arial,sans-serif">{pct}%</text>
                 </svg>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)' }}>{respondedCount}/{questions.length}</span>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 1.3 }}>
+                  {questionsTotal > 0 && <>{questionsResponded}/{questionsTotal} {questionsTotal === 1 ? 'question' : 'questions'}</>}
+                  {questionsTotal > 0 && checksTotal > 0 && <br />}
+                  {checksTotal > 0 && <>{checksDone}/{checksTotal} checked</>}
+                </span>
               </div>
             );
           })()}
@@ -912,7 +950,14 @@ export default function ClientQuestionnaire({ token }) {
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 2 }}>Questions ({questions.length})</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 2 }}>
+                {(questionsTotal > 0 || checksTotal === 0) && <>Questions ({questionsTotal})</>}
+                {checksTotal > 0 && (
+                  <span style={{ fontWeight: questionsTotal > 0 ? 500 : 600, color: questionsTotal > 0 ? '#64748b' : '#1e293b' }}>
+                    {questionsTotal > 0 ? ' · ' : ''}Details to check ({checksTotal})
+                  </span>
+                )}
+              </h2>
               <p style={{ fontSize: 12, color: '#64748b' }}>Answers are auto-saved as you type. You can close and return later.</p>
               {/* Agent-assist: make the escape hatch discoverable up front so a
                   confusing question never becomes a dead end. */}
@@ -1496,7 +1541,7 @@ export default function ClientQuestionnaire({ token }) {
           onClick={handleSubmit}
           disabled={submitting}
           className="floating-save-btn"
-          title={`Submit answers (${respondedCount} of ${questions.length} responded)`}
+          title={`Submit answers (${progressText})`}
           style={{
             width: 'auto',
             minWidth: '100px',
@@ -1559,9 +1604,9 @@ export default function ClientQuestionnaire({ token }) {
             corner, which is transparent, so no clickable area is lost. */}
         {!submitting && respondedCount > 0 && (
           <div
-            title={`${respondedCount} of ${questions.length} questions responded`}
+            title={progressText}
             role="status"
-            aria-label={`${respondedCount} of ${questions.length} questions responded`}
+            aria-label={progressText}
             style={{
               position: 'absolute',
               top: '-8px',
@@ -1717,7 +1762,7 @@ export default function ClientQuestionnaire({ token }) {
 
         /* Tooltip on hover for floating save button */
         .floating-save-btn:hover::after {
-          content: "Submit your answers (${respondedCount}/${questions.length})";
+          content: "Submit your answers (${progressText})";
           position: absolute;
           right: 100%;
           margin-right: 12px;

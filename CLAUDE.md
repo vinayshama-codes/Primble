@@ -563,6 +563,192 @@ about old paperwork never decide page one). Replayed 312. Tests:
 paired with another carrier; disagreeing answers settle on the corroborated one
 (`_reconcile_disclosure_conflicts`). Replayed 312 / 0 made up. Tests: 102. Suite 10,289 / 1 / 19.
 
+### Orbin Client Feedback Of 22 Sep (19 items) - Step 1 and Step 2 FIXED 29 Sep (offline; live check pending)
+**Read `25sepChanges.md` (repo root) before touching any of the items below.** It holds the baseline run of the
+client's own dec (session 8992d874), each item checked against the dec's text, the fix plan and the fix log.
+- **Step 1 done:**
+  - no "Important" preview;
+  - the driver-table card opens whatever forms are chosen: the table endpoint also serves any table a stored
+    issue's resolution names (`arq_service._schedules_offered_by_issues`);
+  - GL CODE comes from the policy's own class schedule (`pdf_service._applicant_gl_codes_from_schedule`);
+  - producer-typed boxes are labelled "producer", not "client_arq" (`_restamp_canonical_into_forms(...,
+    provenance=)`);
+  - question 4 names each policy by its own declarations;
+  - a ";"-joined one-line description prints readable;
+  - no New Venture card after a completed term (`loss_history_state.completed_policy_term`).
+- **The "producer" field label had no fill-rate weight** (producer-saved schedule cells scored 0.00). It is 1.00 now,
+  and `test_confidence_score_covers_every_label` also reads `arq_service` - a new label writer must be added there.
+- **Do not "fix" these two - they are deliberate:**
+  - a carrier's name prints exactly as the policy prints it (V1 H5);
+  - an Exposure row reads "100%" when it deducted nothing (C3 - the rows add up to the pillar).
+- **Step 2 = owner decisions (approved 29 Sep), several reversing rules built on purpose.** Done so far (details and
+  replays in `25sepChanges.md` "Step 2"):
+  - items 4 / 11: an ended dec term proposes the next term; a stale dec is asked; a person's effective date takes
+    its expiration with it (`extraction_service.follow_proposed_expiration`);
+  - items 7 / 8: a dec upload renews its programme (`_renews_current_programme`) - premiums print, a single writing
+    company prints, several writing companies get the unscored "carrier receiving this submission" card;
+  - item 5: a contact NAME alone never un-ticks the phone and e-mail questions;
+  - the dec agency's phone stays withheld (no change, 24 Sep rule).
+  - item 2: the pre-form screen shows the score number "so far"; the pre-form recalc now saves the door's own
+    recipe (`score_package_pre_generation`), so the number never jumps after a pre-form fix;
+  - item 12 + G2: `services/premises_interest.py` - a 0-point "own or rent?" card (Tenant pre-selected only when
+    both signals agree), one-location revenue = the business's `total_revenue` (never $0), landlord asked when
+    Tenant (recorded, not printed - Brent's call);
+  - item 15: `loss_history_state.attested_no_losses_not_applicable` - an uncontradicted attestation makes Loss
+    History Not Applicable. D6: up on healthy packages, DOWN on weak ones and some 1-5 year businesses.
+  Open owner calls: both carrier names joined on page one; pre-form cross-form rules checked against an empty form
+  set (lifts an 85 cap on 2 of 11 panel packages after a pre-form fix; pre-existing). Pre-existing bug logged: any
+  location-table edit drops LOC #, county, interest and per-row revenue.
+  Tests: `tests/test_step2_orbin_29sep.py` (190). Suite 10,717 / 1 / 19.
+**Live check (session 67e5ccf1) found two wrong values from a FRESH reading, both fixed:** a stated GL code
+the documents give only to another line (the Subaru's 7383) is not the GL code (`pdf_service._code_is_another_lines`
+over `_line_code_witnesses`); an AI value in any "Enter identifier:" box (FEIN, policy, licence, VIN - 223 boxes)
+must appear in the documents or is blanked (`_drop_ungrounded_identifiers`). `scripts/replay_125_run.py` must never
+restore a value a guard logged as "DROP_...: field=".
+Tests: `tests/test_orbin_feedback_29sep.py` (51). Suite 10,342 / 1 / 19.
+**Final localhost run, part 1 (30 Sep, session 17351800) - fixed offline the same evening, retest pending (script in
+`25sepChanges.md` "Retest after these fixes"):**
+- **Viewer: the picture and its boxes show ONE page.** Renders take a ticket (`renderSeqRef`), paint off screen and
+  swap in; the overlay and the double-click hit test are built for `shownPageRef` (the page the canvas really shows),
+  never the toolbar's page; the save / sign redraws use `pageNumRef` when they finish. Do not build an overlay from a
+  closure's `pageNum` again - that is what drew page 2's boxes on page 1.
+- **A dec entry's policy-number TAG is verified** (`extraction_service._verify_dec_entries` +
+  `_entry_number_shares_a_page`): kept only if a page printing the number also prints the entry's value. The model
+  tagged the whole Common Declarations page (no number printed) with the inland marine number, so GL looked like 6C7
+  and the repair stood down. The repair now treats two printings of one contract as one candidate
+  (`_one_contract_printing`) and a re-paired row takes its contract's carrier. `scripts/replay_125_run.py` re-runs
+  the check, the repair and the per-policy records like a fresh upload.
+- `pdf_service._blank_neighbour_copies`: an AI value in a TYPE / NUMBER box that repeats the name / address box beside
+  it is blanked (CONTACT TYPE "Erin Royal", BLD # "# D13"); logs `DROP_NEIGHBOUR_COPY`.
+- Guard rows carry `in_documents`; `needs_attention.held_back_reason` says "Found" only of a value the documents or our
+  records hold and never quotes an invented identifier. Unanswered high-impact Y/N QUESTIONS are listed as Missing in
+  the form's words; `field_qa` no longer calls a guard-refused box "not answered", nor explanation boxes / checkbox
+  options high-impact. The cover page drops "AI held back" / "Please verify" rows (`is_producer_todo_row`).
+- Pre-form: `sqs_service.key_details` also returns `missing_items` (each with its fix); `KeyDetailsMissing.jsx` makes
+  them links to the existing fix window. The pointer line and the toolbar "Unsaved" line are gone (owner).
+Tests: `tests/test_final_run_fixes_30sep.py` (29). Suite 10,746 / 1 / 19.
+**Retest, part 2 (30 Sep night, session 8739a72a, 125/126/127/131/186) - 13 of 22 points verified live; five
+fixes offline:** `arq_service._canonical_keys_for` also returns the fact a box WRITES BACK
+(`pdf_service.writeback_fact_for_field`), so answering "No known losses" ticks 125 / 131 "Check if none" and reopening
+clears it - the link had run one way; `extraction_service._merge_line_record` names a policy with no ACORD line name by
+its full-premium row (question 4 "Automobile", not the coverage part "COVERED AUTOS LIABILITY"); every `field_qa` row
+uses the form's words (`_form_words`); the side panel is two `CollapsibleSection`s ("Needs attention", "AI held back")
+with (i) tips; `key_details` items carry `audience` (NAICS / SIC agency - client PART 13). **Open:** `form_routes.
+update_pdf` keeps the AI's label on a box the producer types over (orange, 0.50 fill weight) - fixing it moves scores
+up (D6). Tests: +4 in `tests/test_final_run_fixes_30sep.py`. Suite 10,750 / 1 / 19.
+**The "done in part" items (1 Oct, owner's calls) - offline, live check pending (`25sepChanges.md` "Verify all
+together"):** a renewal of a programme SEVERAL companies write prints them all on 125 CARRIER, "; "-joined
+(`pdf_service._programme_carrier_names` / `extraction_service.current_policy_writer_names`; ACORD's tooltip says
+"company name(s)"), NAIC and POLICY NUMBER blank, no card - REVERSES the 29 Sep blank + card; the insurer guard attests
+each listed company, and only on that one box. `_refresh_acord125_page_one` also restamps question 4. A tenant's
+landlord prints on 125 ADDITIONAL INTEREST row A (`_resolve_landlord_interest_row`, Other "Landlord", certificate, LOC;
+refreshed on every landlord / premises answer by `arq_service._refresh_acord125_landlord`) - only when no document
+interest holds the row. Guards: a role is allowed in the 7 "type of additional interest" boxes, and `_a_person_typed`
+exempts a person's own answer from the names-a-party test. `needs_attention` lists a ticked line's blank premium and a
+blank total as Missing producer to-dos (`lob_premium_box_pairs`; rec id `_missing_producer`, off the cover page).
+`form_routes.label_producer_edits`: a typed value is labelled `producer` and leaves the client's list (was: the AI's
+label persisted - D6, fill rate up on edited forms). Y/N questions stay producer-only (owner). Items 1 and 14 not
+started (owner). Tests: `tests/test_partial_items_30sep.py` (20). Suite 10,770 / 1 / 19.
+**Covers (1 Oct, the owner's Submission Brief - improving-ll.md C101):** every cover reads grade and tier off the score
+with `sqs_service.tier_for_score` (the brief printed the package's 77 with the first form's "B"), routing prints in words
+(`cover_service.routing_label` - never a raw code like "priority_review"), revenue as money, carriers as the forms
+spell them. The hidden A2A block is `cover_service.a2a_block`, built from records - the model no longer writes it (it
+was asked for a FEIN and NAICS it never had). The lite prompt gets only TRUE flags (a false flag was read as its
+opposite). The viewer's unanswered Y/N tint is solid (`PDFJsViewer.YN_BLANK_BG`): a see-through tint showed a deleted
+answer. **The owner's `uvicorn --reload` can stall silently** - compare the worker's start time with file mtimes before
+trusting a live result.
+**Cover scores = the SQS panel (owner, 1 Oct):** every cover's table ends with a "Total Package Score" row from
+`current_package_sqs` (`download_routes._package_score_now`); the brief uses it once forms exist; the E&O "Score at
+download" is that package score, not an average. **Verified live** (session `359b36b0`: cover = panel, 73 stored).
+**The owner's fresh run (1 Oct, session 359b36b0) found three defects - fixed, and VERIFIED LIVE the same night
+(session 69687a55, C1-C5 all pass). An independent audit the same night graded the 22 Orbin points 9 done / 9
+partial / 2 declined / 2 not started - see `25sepChanges.md` "Independent audit"; the earlier "17 of 22" overclaimed:** (1) `update_pdf` scored the saved form WITHOUT `form_id`, so the scorer took
+`selected_form_ids[0]` - since May 2026 a save on any form but the first scored it by the first form's rules (the 127
+panel showed the 125's cards). Every scorer call must name its form; `tests/test_card_sync_1oct.py` fails the build
+otherwise. (2) **One door for the stored cards: `audit_service.sync_recommendation_cards`** (generation, worker, save,
+every answer's recalc). It records every live card (cards raised after generation - the landlord cards - never reached
+the review or the cover), reopens a system-closed card that is live again, resolves an open card NO form shows (a save
+used to resolve a card that left the saved form alone). Dismissed / answered rows are never touched; `fieldqa_` /
+`fieldmap_` rows keep their own refresh; no scored form = no change. (3) **The cover and the E&O download record read
+the needs-attention rows LIVE** (`audit_service.current_unresolved_recommendations`, the review's own rule) - the
+stored ones are rebuilt only on generation and saves, and re-running field QA per answer costs 5-10 s. A card that
+declares itself `unscored` (premises / landlord asks) stays off the underwriter's cover and out of the cover
+paragraph's input (`download_routes._unscored_card_ids`; a stored 0 is no proof - a scored card with a full pillar
+stores 0 too). Tests: `tests/test_card_sync_1oct.py` (24). Suite 10,813 / 1 / 19.
+**Best Solutions rows carry no percentage (owner, 1 Oct night: "confusing users")** - the row's % was the PACKAGE
+pillar score under THIS form's pillar bars; the "+N pts" stays.
+**Fix round after the audit (1 Oct night) - offline; the owner's retest is next (`25sepChanges.md` "Fix round after the
+audit", "Retest after the fix round").** Doors added, read before touching these areas:
+- `services/signature_boxes.py`: whose signature / date / initials box it is - ACORD's tooltip and the field's leading
+  segment, which must agree (else nobody). The Sign button paints PRODUCER boxes only (`inject_producer_signature` hides
+  the other signature boxes from the painter and restores them); this module's `regenerate_pdf_for_form` re-paints a
+  signed form cached before the fix (`signature_scope`). Checked on all 17 real templates. The applicant's steps are a
+  needs-attention row of their own ("To be signed by the applicant"), never a producer to-do, never on the cover.
+- In the MERGE (a stored session keeps its old facts - a fresh upload shows these): each line's limits are settled by
+  that line's own verified dec entries (`extraction_service._settle_line_limits`; the umbrella's $3M never becomes the
+  GL limit, in any row order - fuzzed); a code another line's rating owns leaves the line's code facts
+  (`_drop_codes_another_line_owns`: the Subaru's 7383 is not the GL / SIC code).
+- Gap-fill guards (`pdf_service`): an insurer in an owner / interest box is refused (`_insurer_in_a_party_box`; lenders,
+  intermediaries, the package's own interest parties and a person's answer never are); an AI count no document prints
+  is dropped (`_drop_unstated_counts`); evidence printed only inside the policy's own wording cannot answer a question
+  about the applicant (`_evidence_sits_in_policy_wording` - measured: of 42 AI Yes explanations on 85 sessions it flags
+  only the two CBD lines); a coverage denial cannot answer an applicant question "No". Each refusal puts a `reason` on
+  its guard row. `needs_attention.held_back` never repeats a refused Yes / No answer and describes, never quotes, a value
+  that belongs to another item.
+- ONE number per card (Orbin item 19): `sqs_service._unify_card_points`, inside `calculate_package_sqs` (never in a
+  probe run), writes onto every copy of a card what answering it does to the PACKAGE score - probed with an answer the
+  field's own validator accepts; a table or prose keeps the bounded "up to" fallback. Best Solutions rows get
+  `answer_gain`. Probes call `_PACKAGE_SCORER` (the function as defined), so a caller's spy or stub on the public name
+  sees ONE call. Generation scores the package BEFORE it saves the forms; every card sync runs after package scoring,
+  and `audit_service.sync_recommendation_cards` gives open stored cards the live number (`plan_card_sync` "repoint" -
+  dismissed / answered rows keep theirs: a credit is the number it was dismissed at). **D6:** card numbers and dismissal
+  credits change (loss card +7 everywhere; GL class codes 13 -> 0, they move only the 126's own score); no score moved
+  (panel 0 of 12; 34 stored sessions unchanged).
+- A person's text prints as typed only when it carries a capital (`pdf_service._casing_is_chosen`); all-lowercase typing
+  is formatted like a document's value. The re-stamp after an answer reads "who typed it" off the facts.
+- A box printing a value WE calculated (a derived estimate - the next policy term) is "Please verify" with the reason
+  "Calculated, not read from your documents" - `pdf_service.prints_a_calculated_value` decides both the label
+  (`apply_derived_value_labels`) and `needs_attention.verify_reason`, never "Filled by the AI".
+- `display_canonicalizer`: a bare dotted number ("3418.50") is no longer taken for a web domain (cents format), and
+  "3.14.15" is not an amount (prints as written).
+- Frontend: typed edits are saved before any form switch / fix window / download / new package (`PDFJsViewer` `editsRef`
+  handle, a save chained behind one in flight, page close -> keepalive save); green "Client" only while the client's
+  value is in the box (`viewerBoxes.isClientValueBox`, server `arq_service.current_client_boxes`); questions and check
+  items counted apart everywhere (`questionnaireProgress.progressSummary`, `arq_service.response_counts`).
+- `_POLICY_SELF_REFERENCE_RE` was defined twice in `pdf_service`, so the new check silently used the older pattern; the
+  new one is `_POLICY_NAMES_ITSELF_RE` (`test_no_module_name_redefined` catches the class).
+Tests: `tests/test_fix_round_1oct_night.py` (124), `tests/test_fuzz_fix_round_1oct.py` (340, seeded),
+`tests/test_fix_g1a_1oct.py` (41), `tests/test_fix_g1b_1oct.py` (55). Suite 11,373 / 1 / 19. No LLM call or prompt changed
+(every LLM-calling function is byte-identical to the pre-round code).
+**The owner's retest of that round (1 Oct, session `bfa8711d`, fresh upload) PASSED on every audit wrong value, edits,
+Sign, the panel's reasons / points, the cover and "Check if none" (`25sepChanges.md` "Retest results - 1 Oct"). Fixed
+after it, offline:**
+- ACORD 126 LOC # is the number ACORD 125 gives the premises (its tooltip). A hazard row whose location is an ADDRESS
+  (`_looks_like_street_address`, or a number then a word) maps to ONE premises via `_address_names_location` (the
+  127 garaging matcher) - `pdf_service._premises_number_at`; none or several = an owned blank, never the street number
+  (it printed "4800"). Labels ("Location 001", "Loc #2", "2 Warehouse") read as before (`_premises_numbered`).
+- The cover reads the agent through `display_value_for_box` (`cover_service._agent_name` - lower-case typing is
+  formatted, a capital is kept), names forms with `_cover_form_label`, and prints each open card with the PANEL's own
+  number and hedge (`download_routes._live_card_points` -> `_split_open_recs`; a card no form shows keeps its stored
+  number, hedged "up to").
+- Side panel (owner): "Needs attention" / "AI held back" start closed like every section; the applicant's steps are
+  their own group everywhere the list is drawn (`utils/needsAttention.attentionGroups`, label = the backend's
+  `_APPLICANT_ROW_TITLE`). The pending-edits note is the owner's "... from the last save. Save to update."
+- Google's account chooser "Continue to Acordly" is the OAuth consent screen's App name (Google Cloud Console), not
+  code. The repo's "acordly" strings are internal keys (the login token `acordly_tk`) - renaming signs everyone out.
+Tests: `tests/test_retest_fixes_1oct.py` (83, incl. 40 seeded address fuzz). Suite 11,456 / 1 / 19. 34 stored sessions
+replayed: 0 boxes, 0 scores changed.
+**R1-R5 on session `82a8b15d` passed; found and fixed offline (`25sepChanges.md` "R1-R5 results"):**
+- ACORD 126 PRODUCTS / COMPLETED OPERATIONS held the GL RATING schedule (class codes as products, each class's premium
+  as gross sales, a row from the coverage form; 4 of 17 stored 126s). `pdf_service._product_rows_to_refuse`: a name
+  that is a package rating class (`_rating_class_identities`: code, or the classification whole / first or last 3+
+  words) or a bare number is refused; a row with no name left keeps no AI cell and reports only its name. ACORD's
+  tooltip allows a product OR service, so a real row stands. `_LOB_TRAILING_NOISE_RE` also strips "coverage form" /
+  "form" / "endorsement" (34 sessions: changes one value, that junk). Replay: 9 boxes, all junk; 0 scores.
+- Cover: the score paragraph gets the package's own grade / tier / routing (`package_routing`, both routes) and
+  `cover_service._checked_sqs_reasoning` replaces it when a sentence naming no form states another tier or routing
+  (improving-ll.md C101 addendum). The pending-edits note is plain pink text (owner). Suite 11,534 / 1 / 19.
+
 ### Policy Number By Line - Live Kit Fixes - SHIPPED 2026-09-17
 **Read `v1-20AUG.md` "Policy number by line - the live kit run" before touching
 `_repair_coverage_lines_from_entries`, `_withhold_page_header_numbers`, the header
@@ -641,15 +827,26 @@ INFORMATION ("populate only the year it can substantiate").
   _page_one_current_policy` owns those 125 boxes as blanks. A quote /
   application, a person, or a one-carrier renewal prints.
 - `_route_renewal_dates(mf, docs)`: a term only expiring-programme documents
-  print moves to prior_* once started - in force -> next term (derived), ended
-  on a non-renewal -> asked. Without `docs` only the old renewal rule runs.
+  print moves to prior_* once started - in force -> next term (derived).
+  Without `docs` only the old renewal rule runs.
 - Prior-carrier grid year one = the current policies once their term moved
   (`_prior_rows_from_current_policies`); "the current policy is not prior
   coverage" still holds everywhere else.
-- **Do not "fix" a blank 125 carrier or premium on a dec-only package back to
-  the dec's value - that blank is the rule.** Section forms (126-137) keep the
-  current policy's identity per line (Brent's point 1). D6: an ended term loses
-  the Tier 1 proposed date (Orbin package 63 -> 59).
+- Section forms (126-137) keep the current policy's identity per line (Brent's
+  point 1).
+- **REVERSED 29 Sep 2026 for dec uploads (Orbin client items 4, 7, 8, 11 -
+  read `25sepChanges.md` "Step 2").** (a) An ENDED term now proposes the next
+  one (effective = the dec's expiration, one term later); only a stale dec
+  (next term over or within 30 days) or a term outside 300-400 days is asked.
+  A person's effective date takes its expiration with it
+  (`follow_proposed_expiration`). (b) `_renews_current_programme`: a dec /
+  policy / binder / endorsement upload with no quote or application, no stated
+  new business and no other addressee RENEWS its programme - the dec's premiums
+  print on page one, and the carrier prints when ONE company writes every
+  policy. Several writing companies keep CARRIER blank plus an unscored
+  "carrier receiving this submission" card. FR125 (an addressee) is unchanged
+  at 312 of 312. The old line "a blank carrier or premium on a dec-only package
+  is the rule" is no longer true - do not restore it.
 
 ### BUG-05: A Card Must Only Offer What The Server Accepts - SHIPPED 2026-09-08
 
@@ -880,7 +1077,8 @@ lands; and generation does not refresh `groupedIssues` / `hardStops` / `softStop
 
 ### Early Score / Readiness Presentation (client section 7, V1 H2) - SHIPPED 2026-08-27
 **Read `v1-20AUG.md` H2-A before touching the pre-form Review card or any pre-generation
-scoring.** The card printed `tier2_score` as "Submission Readiness NN%" - the Tier 2
+scoring.** **Reversed in part 29 Sep 2026 (Orbin item 2): the number is shown "so far";
+see `25sepChanges.md` Step 2.** The card printed `tier2_score` as "Submission Readiness NN%" - the Tier 2
 completeness ratio, ONE category of the Structural pillar, under a name and a percentage
 format that read as the SQS (the owner's screenshot: 100% beneath "12 warnings", which cap
 the score at 85). Now: **"Current Submission Readiness: <tier>"** read off the package scorer's
@@ -2620,7 +2818,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **10,107 passed, 1 failed, 19 skipped** (~9-19 min, 28 Sep 2026).
+`py -m pytest -q -p no:randomly` from `backend/` -> **11,534 passed, 1 failed, 19 skipped** (~11 min; 1 Oct 2026, after the R1-R5 fixes). **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

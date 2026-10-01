@@ -51,7 +51,9 @@ def test_the_client_wording_needs_no_inversion():
 
 def test_the_pillar_lands_where_the_specification_says():
     no_claims, had_claims = _NO_LOSS_OPTIONS
-    assert _pillar(no_claims) == 60, "an attestation is worth 60"
+    # Owner 29 Sep 2026 (Orbin item 15): the attestation takes Loss History out
+    # of the score - Not Applicable. It was worth 60.
+    assert _pillar(no_claims) is None, "an attestation is Not Applicable"
     assert _pillar(had_claims) == 25, "claims are not an attestation"
 
 
@@ -76,7 +78,9 @@ def test_the_control_can_express_not_answered():
 def test_old_stored_answers_keep_their_meaning():
     """Nothing written before today may change meaning. This is the whole
     reason the question was not simply inverted."""
-    assert _pillar("Yes") == 60, "a legacy 'Yes' meant NO losses and still must"
+    # A legacy "Yes" is still an attestation, so it takes the pillar out of
+    # the score exactly as the curated option does (29 Sep 2026; it was 60).
+    assert _pillar("Yes") is None, "a legacy 'Yes' meant NO losses and still must"
     assert _pillar("No") == 25, "a legacy 'No' meant they had losses and still must"
 
 

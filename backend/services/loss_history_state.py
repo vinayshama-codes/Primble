@@ -32,6 +32,10 @@ RULES OWNED HERE
   NOT make the pillar Not Applicable; the scorer keeps scoring and flags the
   contradiction (client 2.10: "unless contradictory source information
   suggests prior operations actually existed").
+- No Known Losses (owner, 29 Sep 2026, Orbin item 15): an attestation nothing
+  contradicts makes the Loss History pillar Not Applicable in the SCORER
+  (``attested_no_losses_not_applicable``). The canonical state stays
+  ``no_known_losses_attested``, so questionnaire gating does not move.
 - Prior-carrier applicability (client 2.3/2.7): expected context whenever the
   business is NOT a confirmed new venture. Never a bonus for presence.
 - Questionnaire gating (client 2.10): which loss questions each state
@@ -637,6 +641,43 @@ def new_venture_contradicted(facts: dict, flags: dict,
     return bool(prior_operations_evidence(facts, flags, has_loss_run_doc))
 
 
+# Where the documents print a policy's term. Proposed dates (`effective_date` /
+# `expiration_date` on a renewal) are deliberately absent: they are the term
+# being APPLIED for, not one the business has lived through.
+_PRINTED_TERM_SOURCES = ("_line_records", "coverage_lines",
+                         "prior_coverage_by_line", "prior_coverage_lines")
+
+
+def completed_policy_term(facts: dict, today: Optional[Any] = None) -> bool:
+    """Do the documents show a policy term that has already ENDED?
+
+    A business insured through a whole term operated through it, so it is not
+    "a new venture with no prior operations" - the New Venture card's own
+    words. Orbin (live, 28 Sep): its only policies ran 07/15/2025 - 07/15/2026
+    and the card still asked the producer to consider New Venture status.
+
+    Deliberately NOT part of `prior_operations_evidence`: that door judges a
+    CONFIRMED New Venture, and an in-force first policy is exactly what a real
+    new venture has. This only stops the card from being suggested; a
+    producer's own confirmation is judged exactly as before.
+    """
+    from datetime import date as _date
+    from services.normalization import normalize_date
+    facts = facts or {}
+    today_iso = (today or _date.today()).isoformat()
+    ends: List[Any] = [_fv(facts, "prior_expiration_date")]
+    for key in _PRINTED_TERM_SOURCES:
+        rows = _fv(facts, key)
+        for row in (rows if isinstance(rows, list) else []):
+            if isinstance(row, dict):
+                ends.append(row.get("expiration_date"))
+    for raw in ends:
+        iso = normalize_date(raw) if raw not in (None, "") else None
+        if iso and iso <= today_iso:
+            return True
+    return False
+
+
 def new_venture_answered(facts: dict, flags: dict) -> bool:
     """Has the producer ANSWERED the New Venture question - either way?
 
@@ -699,6 +740,48 @@ def loss_history_not_applicable(facts: dict, flags: dict,
         and (no_loss_attested_any(facts, flags) or no_runs_available_stated(facts)
              or loss_runs_pending_stated(facts, flags))
     )
+
+
+def attested_no_losses_not_applicable(facts: dict, flags: dict,
+                                      has_loss_run_doc: bool = False) -> bool:
+    """An attested "No Known Losses" takes Loss History out of the score.
+
+    OWNER DECISION 29 Sep 2026 (Orbin item 15). Michelle: *"Why is Loss Runs
+    still showing 60%? We've confirmed No Known Losses. It should not calculate
+    against the score."* The same mechanism a confirmed New Venture uses: the
+    pillar is Not Applicable and the remaining pillars rescale. In EVERY
+    years band - an attested "none" is literally "not calculated".
+
+    False, so the pillar is SCORED exactly as before, when:
+      * a loss-run document is on file - documents outrank an attestation;
+      * nobody attested - the narrative's passing mention is not one (40 stays);
+      * the insured ALSO answered "we have had claims" - a stale flag beside a
+        claims answer is not an attestation anyone still stands behind;
+      * claims are asserted AND corroborated - the conflict door
+        (`sqs_service._loss_history_conflict`) owns that case, and its 45
+        ceiling keeps it visible. A model-only claim figure is not
+        corroboration (the same rule the conflict door applies), so it cannot
+        hold the pillar in the score either.
+
+    Deliberately NOT folded into `loss_history_not_applicable`: that gate also
+    drives the questionnaire state, and an established business attesting "no
+    losses" is not a New Venture - it has a real prior carrier, so the
+    prior-carrier / prior-policy questions must still be asked.
+
+    Writes no derived fact. Withdrawing the attestation (or answering "we have
+    had claims") restores the pillar on the next score, with nothing to clean up.
+    """
+    facts, flags = facts or {}, flags or {}
+    if has_loss_run_doc:
+        return False
+    if not user_attested_no_losses(facts, flags):
+        return False
+    if had_claims_answer(facts):
+        return False
+    claims, incurred = asserted_claims(facts)
+    if (claims > 0 or incurred > 0) and claims_are_corroborated(facts, has_loss_run_doc):
+        return False
+    return True
 
 
 # Whole-answer forms of "there was no prior carrier". Exact match, because as
@@ -879,8 +962,18 @@ def no_runs_available_stated(facts: dict) -> bool:
 
 def had_claims_answer(facts: dict) -> bool:
     """The insured explicitly answered that they HAVE had claims (the second
-    ``_NO_LOSS_OPTIONS`` option, or equivalent wording). A bare legacy "No"
-    stored on the indicator also meant 'we had losses' and is preserved."""
+    ``_NO_LOSS_OPTIONS`` option, or equivalent wording naming claims had).
+
+    A bare negative ("No", "n", "false", "0", "off") is NOT a claims answer
+    (1 Oct 2026). It is what unticking ACORD 125 "Check if none" writes back
+    (`pdf_service.normalize_writeback_value`), and an untick RETRACTS the
+    attestation - it never says "we have had claims". It is also ambiguous on
+    its own: the old card asked "no prior losses?" (No = had losses) while the
+    question asked today is "Have you had any claims?" (No = none). Read as
+    claims it put a retraction into "Prior claims known" and asked for loss
+    runs; read as nothing it is "no information", the safe direction. Known
+    claims still read through the words that name them here, and through
+    `num_claims` / `total_incurred` / loss runs in `prior_claims_exist`."""
     v = _fv(facts or {}, "loss_history_no_prior_losses_indicator")
     if v is None:
         return False
@@ -890,10 +983,7 @@ def had_claims_answer(facts: dict) -> bool:
     if attested_true(v):
         return False
     # "Yes - we have had claims or losses" / free text naming claims had.
-    if "have had" in s or "had claims" in s or "had losses" in s:
-        return True
-    # Legacy bare "No" answer to "no prior losses?" = they had losses.
-    return s in ("no", "n", "false")
+    return "have had" in s or "had claims" in s or "had losses" in s
 
 
 def prior_claims_exist(facts: dict, flags: dict) -> bool:

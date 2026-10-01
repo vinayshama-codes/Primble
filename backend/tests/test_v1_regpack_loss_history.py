@@ -20,6 +20,12 @@ BAND NOTE (Brent ruling 2026-08-24, v1-20AUG.md C2-E): the client's 60 / 50
 numbers are the 5+-years and unknown-years column. A business of 1-5 years
 ("establishing") scores higher by ruling - 85 attested, 70 pending. Both
 columns are pinned below so a future edit cannot quietly move either.
+
+OWNER DECISION 29 Sep 2026 (Orbin item 15, "We've confirmed No Known Losses.
+It should not calculate against the score."): an attested No Known Losses is
+NOT APPLICABLE in every band - the pillar leaves the score and the rest
+rescale. Test 7's attested rows therefore read None where they read 60 / 85;
+the pending column is untouched.
 """
 import ast
 import sys
@@ -170,12 +176,15 @@ ATTESTED_AND_PENDING = {
 
 
 @pytest.mark.parametrize("years,expected,why", [
-    (None, 60, "years unknown - the client's own number"),
-    (12,   60, "5+ years"),
-    (3,    85, "1-5 years (Brent 2026-08-24): an attestation is satisfactory"),
+    # Owner 29 Sep 2026: the attestation is Not Applicable in every band
+    # (these rows read 60 / 60 / 85 before).
+    (None, None, "years unknown"),
+    (12,   None, "5+ years"),
+    (3,    None, "1-5 years - N/A here too, by the owner's decision"),
 ])
 def test_r07_attestation_outranks_pending(years, expected, why):
-    """Loss History = 60 until the runs arrive."""
+    """The attestation, not 'pending', decides the pillar until the runs
+    arrive - and since 29 Sep 2026 that means Loss History is Not Applicable."""
     facts = dict(ATTESTED_AND_PENDING)
     if years is not None:
         facts["years_in_business"] = years
@@ -183,7 +192,8 @@ def test_r07_attestation_outranks_pending(years, expected, why):
 
 
 def test_r07_attestation_is_what_lifted_it():
-    """Prove the 60 comes from the attestation, not from 'pending'."""
+    """Prove the result comes from the attestation, not from 'pending' (it was
+    60; Not Applicable since 29 Sep 2026)."""
     # The same package WITHOUT the attestation is the pending score, 50.
     assert _score({"loss_run_status": "pending"}, {}) == 50
     assert lhs.loss_runs_pending_stated(ATTESTED_AND_PENDING, {}) is True

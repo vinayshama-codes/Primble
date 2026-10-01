@@ -163,6 +163,14 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # whole package to add one form - the wrong trade, and it would undo the
         # PII minimisation the purge exists for.
         "form_addition.py",
+        # needs_attention (30 Sep 2026, Orbin items 9 / 19). DOES run after
+        # generation - the side panel and the pre-download review read it. It
+        # reads the entries for ONE thing: the WORDING of an "AI held back"
+        # reason ("Your documents print it as "AGENT PHONE""). Status, counts,
+        # values and scores never depend on it. After the purge the entry read
+        # finds nothing and the reason falls back to the fact match or the
+        # plain sentence - thinner wording, never a different row.
+        "needs_attention.py",
         # underwriting_consistency (14 Sep 2026, Orbin). DOES run after
         # generation - the Data Consistency card is rebuilt on every pipeline
         # re-run. `_verified_contracts` reads the entries' policy numbers so a

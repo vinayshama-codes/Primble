@@ -216,7 +216,7 @@
   color: #8b8b94;
   line-height: 1.4;
 }
-.rr-rail-foot__tier { margin-top: 3px; font-size: 15px; font-weight: 700; line-height: 1.4; }
+.rr-rail-foot__tier { margin-top: 3px; font-size: 15px; font-weight: 700; line-height: 1.4; text-wrap: balance; }
 .rr-rail-foot__sub { font-size: 12.5px; color: #a1a1aa; line-height: 1.4; }
 .rr-rail-foot__bar { height: 4px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: #27272a; }
 .rr-rail-foot__bar > i { display: block; height: 100%; border-radius: 999px; background: #e61b84; transition: width 0.4s ease; }
@@ -366,8 +366,13 @@
 /* ---------- Overview ---------- */
 .rr-overview-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; }
 .rr-ready { display: flex; align-items: center; gap: 22px; }
-.rr-gauge { width: 210px; flex-shrink: 0; text-align: center; }
+.rr-gauge { position: relative; width: 210px; flex-shrink: 0; text-align: center; }
 .rr-gauge__svg { display: block; width: 100%; height: auto; }
+/* The package SQS so far (Orbin item 2, 29 Sep 2026): the number sits in the
+   bowl of the arc (the gauge is a fixed 210px wide), so the tier label below
+   the arc stays exactly where it was. */
+.rr-gauge__score { position: absolute; top: 68px; left: 0; right: 0; font-size: 32px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.rr-gauge__of { font-size: 14px; font-weight: 700; color: #64748b; }
 .rr-gauge__tier { margin-top: -4px; font-size: 20px; font-weight: 800; line-height: 1.2; }
 .rr-ready__copy { min-width: 0; }
 .rr-ready__big { font-size: 13px; font-weight: 600; color: #1e293b; }

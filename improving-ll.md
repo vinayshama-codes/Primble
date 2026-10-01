@@ -4369,3 +4369,60 @@ never replaced; a period-less audit value is dropped. Test 7 replayed: 310 -> **
 Four version pins moved v24 -> v25. Suite 10,284 passed / 1 failed (the pre-existing
 `test_arq_acord125_missing_only`).
 
+
+## C101 - 2026-10-01 Cover narratives: told the truth, and the A2A block is no longer the model's
+
+**Two prompts changed (`cover_service.generate_lite_cover_narrative` and
+`generate_ai_cover_narrative`); no call added, same model, FEWER output tokens.**
+
+The owner's Submission Brief (session 8739a72a) printed "77/100 B" beside "Needs Work"
+(the app shows 77 as C: the brief carried the FIRST FORM's grade, 81 -> B), the scorer's
+routing code "priority_review" in the table and in the summary, "ANNUAL REVENUE 300000",
+and a summary saying the flags suggest no subcontractors on a package whose GL rates
+subcontracted work (class 91585, cost $350,000). The lite prompt handed the model all 49 raw
+flags; `asserts_no_subcontractors: False` means "the documents do not say there are none"
+and was read as "none".
+
+Now:
+- grade and tier come from `sqs_service.tier_for_score` (the app's one ladder) and routing
+  prints in words (`cover_service.routing_label`) - in both prompts, the printed table and the
+  A2A block. The brief's route also sets the package score's own grade.
+- revenue is formatted (`_money`: "$300,000"); carrier names print as the forms spell them
+  (`_as_the_forms_print`).
+- the lite prompt lists only the flags that are TRUE (`_true_flags`) plus the GL
+  classifications the declarations print (`_gl_classifications`).
+- **neither prompt asks for "ai_block" any more.** The hidden carrier-AI (A2A) block is built
+  from the package's own records (`cover_service.a2a_block`): scores with ladder grades and
+  routing words, stops, true flags, dates, lines, revenue, prior carrier. The model used to be
+  asked for `fein`, `naics_code`, `submission_id` and `generated_at` it was never given; the
+  block now carries no FEIN (PII) and nothing a record does not hold.
+- the lite cache key is the prompt's own hash (C93's rule), so a summary written from the old
+  inputs is never served again; the A2A block is rebuilt on every call (it carries a timestamp).
+
+Cost: output tokens DOWN on both calls (the A2A JSON was a large part of each reply). Input
+on the lite call is smaller too (a short list of true flags replaces the 49-key dict; the GL
+classes add ~200 chars). Tests: `tests/test_cover_sheet_1oct.py` (15, capturing the real
+prompts). `inspect_gap_fill_prompts.py` is unaffected (gap-fill prompts unchanged).
+
+**Same day, later (the owner's fresh run, session 359b36b0):** the package cover's summary said
+"ACORD 125 also shows major gaps, including missing contact information and landlord details
+for the rented premises". The landlord cards are worth zero points by their own declaration
+(`unscored`, "kept for certificates") - they explain nothing about the score. The full
+narrative's input (`generate_ai_cover_narrative`, each form's `recommendations`) now leaves out
+every `unscored` card. Prompt template unchanged; input a few hundred chars smaller on a
+package that carries such cards, identical otherwise. The cache key never read the cards, and
+now the model never sees them either, so the two agree. Test: `tests/test_card_sync_1oct.py`.
+
+**Addendum (1 Oct 2026, the owner's retest session 82a8b15d) - the package's own tier and routing.**
+`generate_ai_cover_narrative`'s prompt now carries one more line when a package score is passed -
+`Package grade / tier / routing: D / Major Gaps / Standard review` - and one more sentence in the
+`sqs_reasoning` instruction ("a tier or routing you give the submission must be the package's own").
+Why: the model was handed each FORM's grade, tier and routing (`_score_entry`) but only the package's
+NUMBER, so on a one-form package it wrote "drives the package into a Needs Work tier with priority
+review routing" - the ACORD 126's - under the cover's own table row "Total Package Score 63 D Major
+Gaps Standard review". Both call sites pass `package_routing` (`package_sqs.routing_decision`, the
+value the table prints). `_checked_sqs_reasoning` now falls back to the deterministic paragraph when a
+sentence that names no form states a tier or routing other than the package's (tiers read off the
+score ladder, routings off `_ROUTING_WORDS`; ordinary prose - "needs work", "hold back" - is not a
+claim). Cost: ~60 input chars per cover call, no new call, same model; the prompt is its own cache key,
+so every cached cover paragraph is rebuilt once. Tests: `tests/test_retest_fixes_1oct.py`.

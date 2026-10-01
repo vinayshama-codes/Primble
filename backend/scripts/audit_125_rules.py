@@ -322,6 +322,12 @@ def _status(c: Ctx):
     return R(True, fail)
 
 
+def _renews_programme(c) -> bool:
+    """The merge's verdict that this upload renews the current programme
+    (extraction_service._renews_current_programme). Absent -> False."""
+    return (c.facts or {}).get("renews_current_programme") is True
+
+
 @rule("C2", CLIENT, "Page-one carrier is the carrier RECEIVING the submission")
 def _carrier(c: Ctx):
     ins = c.get("Insurer_FullName_A")
@@ -334,6 +340,11 @@ def _carrier(c: Ctx):
     if not hit:
         return R(True)
     row = ("Insurer_FullName_A", ins, f"is the CURRENT carrier ({hit[0]})")
+    # A declarations upload that renews its programme prints the one company
+    # that writes it (29 Sep 2026, Orbin items 7 / 8): the merge records the
+    # verdict as `renews_current_programme`.
+    if _renews_programme(c):
+        return R(True)
     # A one-carrier renewal legitimately prints the incumbent (CLAUDE.md, "ACORD
     # 125 Page 1"). Without facts the audit cannot tell, so it asks instead.
     renewal = c.facts.get("is_renewal")
@@ -402,6 +413,11 @@ _PREMIUM_BOXES = ("Policy_Payment_EstimatedTotalAmount_A", "Policy_Payment_Depos
 def _premium(c: Ctx):
     if not ticked(c.get("Policy_Status_QuoteIndicator_A")):
         return R(False, note="not a quote")
+    if _renews_programme(c):
+        # 29 Sep 2026 (Orbin items 7 / 8): a declarations upload that renews its
+        # programme prints the dec's premiums as the renewal's - known, not a
+        # current figure leaking onto a quote.
+        return R(True)
     boxes = list(_PREMIUM_BOXES) + [f for f in c.schema
                                     if f.endswith("LineOfBusiness_PremiumAmount_A")]
     cur = c.current_policies()["premium"]

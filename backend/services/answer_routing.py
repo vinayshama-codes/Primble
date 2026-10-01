@@ -80,6 +80,11 @@ NOTE_NOT_A_FACT = (
     "This one can't be answered with a typed value - attach a supporting "
     "document or dismiss it with a note."
 )
+# A notice that only REPORTS something (an underwriting advisory, a New Venture
+# or No Known Losses status) has nothing to fill and needs no document (29 Sep
+# 2026, live run: the attested-losses notice told the producer to "attach a
+# supporting document").
+NOTE_INFORMATIONAL = "For your information - nothing to fill here. Dismiss it once read."
 NOTE_HAS_ROWS = (
     "This is a table, not a single value - it already holds rows. Edit it from "
     "the schedule so the existing entries are kept."
@@ -302,6 +307,8 @@ def stamp_recommendation(rec: Any, facts: Optional[dict] = None) -> Any:
         rec["schedule_key"] = routed["schedule_key"]
     if routed.get("note"):
         rec["answer_note"] = routed["note"]
+    if rec.get("informational") and routed["mode"] == MODE_NONE:
+        rec["answer_note"] = NOTE_INFORMATIONAL
     return rec
 
 

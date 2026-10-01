@@ -22,6 +22,22 @@ export const sqsGradeFromScore = (v) => {
   return "F";
 };
 
+// The pre-form Review screen's "score so far" (Orbin 22 Sep item 2, 29 Sep
+// 2026): the package SQS the backend's one door computed from the facts as
+// they stand, printed as "<n> / 100 - <tier>". It can still move when forms
+// are generated, hence "so far". Null when there is no finite score, so a
+// missing score reads "Not scored yet" and never "0 / 100" (Number(null) and
+// Number("") are both 0).
+export const scoreSoFar = (pkg) => {
+  const raw = pkg?.package_sqs_score;
+  if (typeof raw !== "number" && typeof raw !== "string") return null;
+  if (typeof raw === "string" && raw.trim() === "") return null;
+  const score = Number(raw);
+  if (!Number.isFinite(score)) return null;
+  const tier = typeof pkg?.tier === "string" ? pkg.tier.trim() : "";
+  return { score, text: tier ? `${score} / 100 - ${tier}` : `${score} / 100` };
+};
+
 // Short label for a form where space is tight (e.g. the pinned score header in a
 // 300px sidebar). form_name is the full title - "ACORD 137 CA (2023/01) -
 // California Commercial Auto Coverages / Limits Section" - which wraps badly

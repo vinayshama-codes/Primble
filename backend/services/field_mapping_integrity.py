@@ -142,6 +142,18 @@ def _form_label(form_id: str) -> str:
     return (form_id or "").replace("ACORD_", "ACORD ")
 
 
+def _form_words(form_id: str, fr: Optional[dict], field: str) -> str:
+    """The box as the FORM prints it (1 Oct 2026, Michelle's item 19): the
+    review, the E&O record and the cover printed "AdditionalInterest FullName".
+    The needs-attention door names every box (`form_box_label`); this is no
+    second copy of that rule."""
+    try:
+        from services.needs_attention import form_box_label
+        return form_box_label(form_id, field, (fr or {}).get("schema")) or _humanize_field(field)
+    except Exception:                                      # noqa: BLE001
+        return _humanize_field(field)
+
+
 # ── Field-role classification (from the field NAME shape) ─────────────────────
 
 # Name-bearing suffixes: the field holds the NAME of an entity (not an address,
@@ -464,22 +476,24 @@ def _finding_message(label: str, form_id: str, value: str, kind: str, fact_match
     the system doesn't have.
     """
     form_label = _form_label(form_id)
+    # The box in the form's words, quoted, as field QA names it (item 19).
+    where = f"{form_label}: \"{label}\""
     if fact_matched:
         return (
-            f"{label} on {form_label} shows \"{value}\", which matches your {kind} "
-            f"information, not the insured/owner. Review and correct this field "
+            f"{where} shows \"{value}\", which matches your {kind} "
+            f"information, not the insured/owner. Review and correct this box "
             "before sending the package to a carrier."
         )
     if kind == "policy":
         return (
-            f"{label} on {form_label} shows \"{value}\", which reads like a policy "
+            f"{where} shows \"{value}\", which reads like a policy "
             "number or identifier code, not an owner/insured name. If this is "
-            "genuinely the correct value for this field, no action is needed - "
+            "genuinely the correct value for this box, no action is needed - "
             "otherwise, correct it before sending the package to a carrier."
         )
     return (
-        f"{label} on {form_label} shows \"{value}\", which reads like an insurance "
-        f"{kind}'s name. If this is really the correct name for this field (e.g. a "
+        f"{where} shows \"{value}\", which reads like an insurance "
+        f"{kind}'s name. If this is really the correct name for this box (e.g. a "
         "lienholder or certificate holder whose own name contains an insurance-"
         "related word), no action is needed - otherwise, correct it before sending "
         "the package to a carrier."
@@ -542,7 +556,7 @@ def detect_field_mapping_contamination(
             if reason_code is None:
                 continue
 
-            label = _humanize_field(field)
+            label = _form_words(form_id, fr, field)
             kind = "policy" if reason_code.startswith("policy") else "carrier"
             findings.append({
                 "form_id":          form_id,
@@ -587,10 +601,16 @@ def detect_field_mapping_contamination(
 # to the producer on the pre-download SQS review screen and the post-download
 # checklist screen, but never block the download itself.
 
+# Every row this module writes starts with it. The cover leaves them out: each
+# is the producer's to correct before sending, not a gap in the submission
+# (`needs_attention.is_producer_todo_row`, 1 Oct 2026, Michelle's item 19).
+FIELD_MAPPING_REC_PREFIX = "fieldmap_"
+
+
 def _rec_id(*parts: str) -> str:
     """Stable, collision-safe rec id from its parts (so re-runs dedupe)."""
     slug = re.sub(r"[^A-Za-z0-9]+", "_", "_".join(str(p) for p in parts if p))
-    return f"fieldmap_{slug.strip('_')[:80]}"
+    return f"{FIELD_MAPPING_REC_PREFIX}{slug.strip('_')[:80]}"
 
 
 # A trailing single- or double-letter row suffix (_A, _B, ... _AA, _AB, ...) -
@@ -650,7 +670,7 @@ def to_recommendation_rows(result: Optional[dict]) -> List[dict]:
             label = sample.get("field_label") or _humanize_field(base_field)
             form_label = _form_label(form_id)
             message = (
-                f"{label} on {form_label}: the same value \"{value}\" appears in {n} "
+                f"{form_label}: \"{label}\" - the same value \"{value}\" appears in {n} "
                 "insured/owner fields. Review and correct each before sending the "
                 "package to a carrier."
             )

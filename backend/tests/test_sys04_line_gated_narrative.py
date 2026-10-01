@@ -836,14 +836,16 @@ def test_a_checkbox_export_value_becomes_a_word_the_scorer_understands(sent, sto
 
 def test_ticking_the_box_moves_the_loss_history_pillar():
     """The client's literal report. 40 is the narrative-only score; an
-    attestation is 60, or 85 on a business of 1-5 years (Brent 2026-08-24)."""
+    attestation was 60, or 85 on a business of 1-5 years (Brent 2026-08-24),
+    and since the owner's 29 Sep 2026 decision (Orbin item 15) it takes the
+    pillar out of the score - Not Applicable - in both bands."""
     narrative_only = {"narrative_states_no_losses": True}
     ticked = {"loss_history_no_prior_losses_indicator":
               {"value": "Yes", "confidence": "filled", "source": "producer"}}
     assert S.calculate_p4_loss_history({}, narrative_only)[0] == 40
-    assert S.calculate_p4_loss_history(ticked, narrative_only)[0] == 60
+    assert S.calculate_p4_loss_history(ticked, narrative_only)[0] is None
     assert S.calculate_p4_loss_history(
-        dict(ticked, years_in_business="3"), narrative_only)[0] == 85
+        dict(ticked, years_in_business="3"), narrative_only)[0] is None
 
 
 def test_unticking_the_box_retracts_the_attestation():
@@ -983,7 +985,9 @@ def test_the_box_and_the_score_read_the_same_definition():
     ]:
         box_says_attested = verdict(facts) == "Yes"
         scored = S.calculate_p4_loss_history(facts, flags)[0]
-        score_says_attested = scored >= 60
+        # An attestation takes the pillar out of the score since 29 Sep 2026
+        # (None); it scored 60 before. Either reading is "attested".
+        score_says_attested = scored is None or scored >= 60
         assert box_says_attested == score_says_attested, (facts, verdict(facts), scored)
 
 
@@ -1105,7 +1109,9 @@ def test_the_clients_three_evidence_states_are_all_distinct():
         {"loss_run_status": "not available", "no_loss_runs_available": "Yes"}, {})
 
     assert narrative[1] == "None stated"
-    assert confirmed[1] == "None corroborated"
+    # A producer's "no prior losses" takes the pillar out (29 Sep) and reads as
+    # what it is (1 Oct 2026, item 15) - still distinct from the other two.
+    assert confirmed[1] == "Attested - no known losses"
     assert no_runs[1] == "Loss runs not provided"
     labels = {narrative[1], confirmed[1], no_runs[1]}
     assert len(labels) == 3, f"collapsed: {labels}"
@@ -1148,11 +1154,13 @@ def test_the_original_five_client_words_are_untouched():
 
 
 def test_relabelling_moved_no_score():
-    """Display only - the states and the rubric are untouched."""
+    """Display only - the states and the rubric are untouched by SYS-02. (The
+    rubric itself moved later, on purpose: an attestation is Not Applicable
+    since the owner's 29 Sep 2026 decision; it scored 60 here before.)"""
     assert S.calculate_p4_loss_history({}, {"narrative_states_no_losses": True})[0] == 40
     assert S.calculate_p4_loss_history(
         {"loss_history_no_prior_losses_indicator":
          {"value": "Yes", "source": "producer", "confidence": "filled"}},
-        {"narrative_states_no_losses": True})[0] == 60
+        {"narrative_states_no_losses": True})[0] is None
     assert S.calculate_p4_loss_history(
         {"loss_run_status": "not available", "no_loss_runs_available": "Yes"}, {})[0] == 25

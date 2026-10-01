@@ -289,8 +289,10 @@ def test_loss_recency_penalty():
 
 
 def test_loss_attestation_credit_and_safety():
+    # Owner 29 Sep 2026 (Orbin item 15): the attestation takes Loss History out
+    # of the score (Not Applicable); it scored 60 before.
     attested, _ = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
-    assert attested == 60
+    assert attested is None
     # A stored "No" indicator must NOT be read as an attestation (Finding 4).
     # No-info score is now 25 (updated from 10 per client V1 approval).
     not_attested, _ = sq.calculate_p4_loss_history(
@@ -467,12 +469,14 @@ def test_moderate_match_maps_to_pending_validation():
 
 
 def test_no_loss_evidence_quality_scoring():
-    # C2 2.5: the two no-loss evidence sources score differently - a user
-    # attestation is an affirmative statement (60); a passing mention in the
-    # narrative is weaker (40, revised from 45). Both sit above no-info (25).
+    # C2 2.5: the two no-loss evidence sources are treated differently - a user
+    # attestation is an affirmative statement; a passing mention in the
+    # narrative is weaker (40, revised from 45) and stays above no-info (25).
+    # Since the owner's 29 Sep 2026 decision the attestation takes the pillar
+    # out of the score (Not Applicable) instead of scoring 60.
     user, _ = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
     narrative, _ = sq.calculate_p4_loss_history({}, {"narrative_states_no_losses": True})
-    assert user == 60
+    assert user is None
     assert narrative == 40
 
 

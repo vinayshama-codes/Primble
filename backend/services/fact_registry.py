@@ -109,6 +109,18 @@ def _is_covered_auto_symbols(v: str) -> bool:
     return bool(nums) and bool(nums & ALL_NUMBERS)
 
 
+def _premises_interest_answer(v: str) -> bool:
+    """An answer naming ONE interest in the premises - Tenant, Owner, or an
+    Other description - read by `premises_interest.kind_of_answer`, the same
+    rule the location consolidation reads a document's wording with.
+
+    Deliberately NOT named `_is_*`: the dec-entry backfill fills only `_is_*`
+    typed facts from printed labels, and an interest is never read off a label
+    (owner, 29 Sep 2026: tenant is never silently inferred)."""
+    from services.premises_interest import kind_of_answer
+    return kind_of_answer(v) is not None
+
+
 def _is_payroll_period(v: str) -> bool:
     """A payroll period stated by MEANING - annual in any spelling, or another
     recognised period. Owned by `coverage_evidence.payroll_period_meaning`, the
@@ -370,6 +382,18 @@ FACT_REGISTRY: dict[str, dict] = {
     "carrier_name": {
         "forms":       {"ACORD_125", "ACORD_126"},
         "question":    "What is the name of the insurance carrier?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    # The carrier RECEIVING this submission (v23 addressee fact). Written by a
+    # document's "TO:" line or, since 29 Sep 2026, by the producer's page-one
+    # card. Kept apart from `carrier_name` (the CURRENT policies' carrier the
+    # documents print) so a typed market is never overwritten or held as a
+    # conflict by the next re-merge (Orbin item 8).
+    "submission_carrier_name": {
+        "forms":       {"ACORD_125"},
+        "question":    "Which insurance company is this submission going to?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
@@ -1539,6 +1563,37 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": 2, "required": False,
         "validate":    None,
         "format_hint": "Free-text operations description",
+    },
+
+    # ── The ONE premises' interest, and a tenant's landlord (29 Sep 2026) ─────
+    # Orbin 22 Sep item 12 and G2 - see services/premises_interest.py. Asked
+    # only on a ONE-location package (a producer card and an optional client
+    # question), never inferred, never scored (tier None), and deliberately NOT
+    # in `sqs_service.FORM_FIELD_INVENTORY`, so no generator asks them on its
+    # own. NAMING: none may start with `property_` - `lob_canon.
+    # fact_line_family` would file it under the property line.
+    "premises_interest": {
+        "forms":       {"ACORD_125"},
+        "question":    "Does your business own the building at its location, or rent the space it uses?",
+        "tier": None, "required": False,
+        "validate":    _premises_interest_answer,
+        "format_hint": "Tenant, Owner, or Other",
+    },
+    # Recorded for certificates; printed on no form yet (the ACORD 125
+    # additional-interest row and the ACORD 25 holder are Brent's call).
+    "landlord_name": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the full name of your landlord (the owner of the building you rent)?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "landlord_address": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is your landlord's full mailing address? (Street, City, State, ZIP)",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
     },
 
 }

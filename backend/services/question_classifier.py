@@ -958,7 +958,11 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
             # pre-ticked by hand. `_FORCE_PRESELECT_FIELDS` still holds (the
             # approved mockup shows Urgency ticked) but it is now last in line
             # rather than ahead of everything that matters.
-            if (points > 0 or q.get("field_name") in _FORCE_PRESELECT_FIELDS) \
+            # `force_preselect` is set only by the eligibility overlay, from an
+            # owner decision (29 Sep 2026: a contact phone / e-mail stays
+            # pre-ticked when only the contact NAME is known).
+            if (points > 0 or q.get("field_name") in _FORCE_PRESELECT_FIELDS
+                    or q.get("force_preselect")) \
                     and selected < cap:
                 q["default_selected"] = True
                 selected += 1

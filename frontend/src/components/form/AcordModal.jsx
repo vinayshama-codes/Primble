@@ -1,10 +1,14 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
-import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel, lineLabel } from "../../utils/formatters";
+import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
+import NeedsAttentionPanel, { NeedsAttentionSummary } from "./NeedsAttentionPanel";
+import { fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
+import KeyDetailsMissing from "./review/KeyDetailsMissing";
+import { withKeyDetailCards } from "../../utils/keyDetailCards";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
 import ResolutionModal from "./ResolutionModal";
@@ -12,6 +16,7 @@ import ContactModal from "../account/ContactModal";
 import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 import { useToasts } from "../../hooks/useToasts";
 import { getReviewLayout } from "../../utils/reviewLayout";
+import { packageCapReasons, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
 import ReviewRailLayout from "./review/ReviewRailLayout";
 
 const SQS_LABELS = {
@@ -140,7 +145,7 @@ const pointsLabel = (rec) => {
 const SIGNAL_PROVENANCE = {
   narrative_attached:      { source: "A narrative document is attached", rule: "A narrative gives underwriters account context and lifts Narrative Quality." },
   operations_description:  { sourceFact: "operations_description", source: "Operations description provided", rule: "A clear operations description supports exposure and classification." },
-  no_losses_stated:        { source: "No known losses stated", rule: "A no-loss statement lifts Loss History. Corroborate with loss runs or a signed no-known-loss letter for full credit." },
+  no_losses_stated:        { source: "No known losses stated", rule: "A no-loss statement in the narrative lifts Loss History. An attested No Known Losses takes it out of the score." },
   loss_runs_attached:      { source: "Loss runs uploaded", rule: "Uploaded loss runs corroborate loss history - stronger than a narrative statement." },
   years_in_business:       { sourceFact: "years_in_business", source: "Years in business stated", rule: "Time in business is a positive underwriting signal." },
   prior_carrier:           { sourceFact: "prior_carrier", source: "Prior carrier identified", rule: "A named prior carrier strengthens the underwriting picture." },
@@ -178,6 +183,7 @@ const LOSS_STATE_PROV = {
   loss_history_pending_validation:{ direction: "info",     rule: "Loss runs parsed but ownership not fully verified.", remediation: "Confirm ownership with a FEIN or policy number." },
   new_venture_not_applicable:     { direction: "info",     rule: "Verified new venture - no prior operations exist, so Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed. If prior operations actually existed, correct the New Venture answer." },
   no_operating_history_not_applicable: { direction: "info", rule: "Under a year in business with no known losses - there are no loss runs to obtain, so Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed. If the business is older than it appears, correct the years-in-business figure." },
+  no_known_losses_not_applicable: { direction: "info",     rule: "No Known Losses attested - Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed for the score. A carrier may still ask for a signed no-known-loss letter before binding." },
   no_loss_runs_available:         { direction: "reduced",  rule: "The insured reports no loss runs are available - scored as no loss evidence until something stronger arrives.", remediation: "Ask the insured to attest No Known Losses, or record known claims." },
   prior_claims_exist:             { direction: "reduced",  rule: "Prior claims are known but no loss runs are on file.", remediation: "Request loss runs from the prior carrier, or record that they have been requested." },
 };
@@ -312,9 +318,23 @@ const LOSS_HISTORY_STATE_LABEL = {
   loss_history_pending_validation: "Loss history pending validation",
   new_venture_not_applicable:      "Not applicable - new venture",
   no_operating_history_not_applicable: "Not applicable - under a year in business",
+  no_known_losses_not_applicable:  "Not applicable - No Known Losses attested",
   no_loss_runs_available:          "No loss runs available",
   prior_claims_exist:              "Prior claims known - runs not provided",
 };
+
+// Why a pillar reads N/A, for the hover on its "N/A" chip. The umbrella wording
+// used to be printed for EVERY N/A pillar, so a Loss History removed by a
+// No Known Losses attestation or a New Venture said "No umbrella in this
+// submission". Loss History names its own reason from the loss state.
+function pillarNotApplicableTitle(key, sqs) {
+  if (key === "umbrella_limit_adequacy") return "No umbrella in this submission";
+  const st = sqs?.loss_history_state;
+  if (key === "loss_history_alignment" && typeof st === "string" && st.endsWith("_not_applicable")) {
+    return LOSS_HISTORY_STATE_LABEL[st] || "Not applicable to this submission";
+  }
+  return "Not applicable to this submission";
+}
 // §6.3: narrative component labels (must mirror backend NARRATIVE_COMPONENT_LABELS).
 const NARRATIVE_COMPONENT_LABELS = {
   account_overview:    "Account Overview",
@@ -850,10 +870,26 @@ function IssueLine({ message, className }) {
   let afterLabel = message.slice(fixIdx + "Fix: ".length);
   // A hint written INSIDE brackets - "...missing: Contact information (Fix:
   // Provide this value manually...)" - splits into a dangling "(" on the first
-  // line and a stray ")" on the second. Take the pair off together.
-  if (before.endsWith("(") && afterLabel.trimEnd().endsWith(")")) {
-    before = before.slice(0, -1).trimEnd();
-    afterLabel = afterLabel.trimEnd().slice(0, -1);
+  // line and a stray ")" on the second. Take the pair off together: the ")"
+  // that CLOSES the "(Fix:" bracket, not simply the last character. Anything
+  // after it (e.g. " (+1 related)") belongs to the headline - stripping the
+  // last ")" instead printed "states it.) (+1 related" (client, 22 Sep, item 3).
+  if (before.endsWith("(")) {
+    let depth = 1;
+    let close = -1;
+    for (let i = 0; i < afterLabel.length; i += 1) {
+      const ch = afterLabel[i];
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    if (close !== -1) {
+      const trailing = afterLabel.slice(close + 1).trim();
+      before = before.slice(0, -1).trimEnd() + (trailing ? ` ${trailing}` : "");
+      afterLabel = afterLabel.slice(0, close).trimEnd();
+    }
   }
   const isGeneric = afterLabel.trim() === _GENERIC_FIX_TEXT;
   return (
@@ -1102,8 +1138,7 @@ function BareStopRow({ message, className, renderActions }) {
 // Same identity for a grouped-issue CLUSTER (keyed off primary_message, not
 // message). issue_registry._make_clusters always stamps an issue_id, so this
 // is an exact match in practice; the fallback only covers alias-stamp clusters
-// that arrive without one. Used both to key the status control and to
-// de-duplicate the "Important" preview against the tiers below it.
+// that arrive without one. Used to key the status control.
 function clusterIdOf(c) {
   return (c && c.issue_id) || _fallbackIssueId(c && c.primary_message, c && c.forms);
 }
@@ -2072,10 +2107,21 @@ function RemediationDiffBand({ diff, compact = false }) {
 
 // ── Side panel recommendation row - own local state avoids shared-state race ──
 function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedule, initialValue = "" }) {
+  // A card may SUGGEST one of its own options (`suggested_answer`, backend
+  // services/premises_interest) - the choice opens pre-selected so the producer
+  // confirms it in one click, and `suggestion_evidence` says why. Only an option
+  // the card actually offers is ever pre-selected; nothing is applied until the
+  // producer presses Confirm.
+  const suggestedAnswer = (rec && typeof rec === "object"
+    && typeof onAnswer === "function"
+    && (rec.answer_mode || (rec.field ? "field" : "none")) === "field"
+    && typeof rec.suggested_answer === "string"
+    && Array.isArray(rec.answer_options)
+    && rec.answer_options.includes(rec.suggested_answer)) ? rec.suggested_answer : "";
   // `initialValue` carries the value this rec was previously answered with, when the
   // producer has just reopened it - so the input opens ready to edit instead of blank.
   // Only meaningful on the answerable path, where `reason` holds the typed answer.
-  const [reason, setReason] = useState(initialValue || "");
+  const [reason, setReason] = useState(initialValue || suggestedAnswer || "");
   const [otherReason, setOtherReason] = useState("");
   const [busy, setBusy]     = useState(false);
   const [result, setResult] = useState(null);
@@ -2154,7 +2200,10 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
-          {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
+          {isObj && !result && typeof rec.suggestion_evidence === "string" && rec.suggestion_evidence && (
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 2, lineHeight: 1.45 }}>{rec.suggestion_evidence}</div>
+          )}
+          {impact > 0 && <div title={rec.impact_scope === "package" ? "What answering this adds to the Total Package Score - the same on every form" : undefined} style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
         </div>
         <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Answered" : "Open"}</span>
       </div>
@@ -2256,7 +2305,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
                   disabled={busy}
                   onMouseDown={e => { e.preventDefault(); submit(); }}
                   style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: busy ? "default" : "pointer", whiteSpace: "nowrap", opacity: busy ? 0.7 : 1 }}>
-                  {busy ? "…" : "Submit"}
+                  {busy ? "…" : (answerable && suggestedAnswer && reason === suggestedAnswer ? "Confirm" : "Submit")}
                 </button>
               </HoverTip>
             )}
@@ -2281,7 +2330,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
 }
 
 // ── Download Pre-flight Modal ──────────────────────────────────────────────
-function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading, hasHardBlock }) {
+function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading, hasHardBlock }) {
   // Hard-block items (placeholder values / required COPE-style fields, Figure 35
   // client feedback) still 409 server-side unless the request explicitly carries a
   // typed reason (services/field_qa.py's "hardblock_" rec_id marker), but the
@@ -2292,6 +2341,8 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
   const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
   const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
   const allHardRecs = [...hardBlockItems, ...hardRecs];
+  const attentionTotal = attention?.counts?.total || 0;
+  const flaggedTotal = openRecs.length + attentionTotal;
   const reasonRequired = hasHardBlock && !overrideReason.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -2299,7 +2350,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
         <div style={{ flexShrink: 0 }}>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-            <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged - review before downloading` : "All clear - review the SQS summary below"}</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{flaggedTotal > 0 ? `${flaggedTotal} item${flaggedTotal !== 1 ? "s" : ""} flagged - review before downloading` : "All clear - review the SQS summary below"}</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
@@ -2311,6 +2362,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
               ))}
             </div>
           )}
+          <NeedsAttentionSummary attention={attention} />
           {softRecs.length > 0 && (
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
@@ -2873,10 +2925,13 @@ const AcordModal = forwardRef(function AcordModal({
   // Fig 24: what the last client questionnaire resolved / worsened / left open.
   const [issueDiff, setIssueDiff] = useState(null);
   // V1 H2 (client section 7, 2026-08-27): the pre-form screen no longer holds
-  // a percentage. It prints the package SQS's STATUS LABEL (read off
-  // packageSqs.tier, the same object the editor uses) and the Tier 1 + Tier 2
+  // the Tier 2 percentage. It prints the package SQS "so far" - its number and
+  // tier (scoreSoFar, read off packageSqs, the same object the editor uses;
+  // the number restored 29 Sep 2026, Orbin item 2) - and the Tier 1 + Tier 2
   // checklist split into "in place" / "missing" - {satisfied: [], missing: []}.
-  const [keyDetails, setKeyDetails] = useState(null);
+  // Held as the server sent it; the screen reads `keyDetails` (below), which
+  // also marks the details a rendered card already shows (item 3, 1 Oct 2026).
+  const [keyDetailsRaw, setKeyDetails] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [accountProfile, setAccountProfile] = useState(null);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
@@ -3038,6 +3093,13 @@ const AcordModal = forwardRef(function AcordModal({
   // Bumped after an inline resolution stamps a value into the forms, so the PDF
   // viewer re-fetches the regenerated PDF and the value shows on the field.
   const [pdfRefreshTick, setPdfRefreshTick] = useState(0);
+  // Item 10 (1 Oct 2026): the open viewer's handle - { hasUnsaved(), save() } -
+  // so every path that replaces the viewer saves the producer's typed edits first.
+  const viewerEditsRef = useRef(null);
+  // Needs-attention list (Orbin 22 Sep items 9, 19): the box the side panel
+  // asked the viewer to show, and the live list the pre-download review read.
+  const [attentionFocus, setAttentionFocus] = useState(null);
+  const [preflightAttention, setPreflightAttention] = useState(null);
   // True while the form viewer holds field edits that have not been saved yet.
   // The pillar bars below are computed by the SERVER from the last saved state,
   // so while this is set they describe a version of the form that no longer
@@ -3648,14 +3710,6 @@ const AcordModal = forwardRef(function AcordModal({
     );
   };
 
-  // "Important" is a read-only PREVIEW of the top 3 warning clusters (per
-  // client direction): a collapsible, open-by-default summary that says "these
-  // three matter most", with no action controls of its own. It is deliberately
-  // NOT de-duplicated against the tiers below - the same clusters still appear,
-  // actionable, under their real Required/Recommended headings, which is where
-  // the client wants the full data to live. So the preview and the tiers are
-  // rendered independently and no promotion/filtering state is needed here.
-
   useEffect(() => {
     if (!sessionId) return;
     // V1 H2 (2026-08-27): Resolve / Dismiss marks are stored server-side but
@@ -3723,6 +3777,7 @@ const AcordModal = forwardRef(function AcordModal({
     setPackageSqs(null);
     setDismissedRecs(new Set()); setDismissedRecDetails(new Map()); setShowDownloadPreflight(false);
     setPreflightRecs([]); setPreflightHardBlock(false); setPreflightOverrideReason(""); setPreflightCallback(null);
+    setPreflightAttention(null);
     setSqsNarrative("");
   };
 
@@ -3856,7 +3911,12 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setLoading(false); setShowDownloadOverlay(false); }
   };
 
-  const handleDownloadOneNoSummary = formId => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOneNoSummary(formId, draftOpts)));
+  // Item 10 (1 Oct 2026): a download prints what the server holds, so typed
+  // edits are saved first; a failed save stops the download.
+  const handleDownloadOneNoSummary = async formId => {
+    if (!(await saveViewerEdits())) return;
+    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOneNoSummary(formId, draftOpts)));
+  };
 
   const gatedDownload = action => {
     if (user?.acord_license_confirmed) { action(); return; }
@@ -4478,7 +4538,7 @@ const AcordModal = forwardRef(function AcordModal({
       setFlags(data.flags || flags);
       // Recomputed package SQS + key-details split returned by the reclassify
       // call (§4.2 item #5, V1 H2). Null when the scorer failed or the review
-      // is pending: the status label goes blank rather than stale.
+      // is pending: the score so far goes blank rather than stale.
       setKeyDetails(data.key_details || null);
       setPackageSqs(data.package_sqs || null);
       if (data.integrity) setIntegrity(data.integrity);
@@ -4699,7 +4759,7 @@ const AcordModal = forwardRef(function AcordModal({
       setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
-      setKeyDetails(data.key_details || keyDetails); setPackageSqs(data.package_sqs || null);
+      setKeyDetails(data.key_details || keyDetailsRaw); setPackageSqs(data.package_sqs || null);
       setFlags(data.flags || flags);
     } catch (e) {
       setError("Could not confirm the value: " + (e?.message || "network error"));
@@ -4769,9 +4829,10 @@ const AcordModal = forwardRef(function AcordModal({
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       setCrossGrouped(data.grouped_cross_issues || null);
       // Replace, never keep: packageSqs may hold the PRE-generation score the
-      // Review screen's label was read from (V1 H2). If the generation scorer
-      // failed, that number must not surface as the Total Package Score - null
-      // hides the section, exactly as before pre-generation scoring existed.
+      // Review screen printed "so far" (V1 H2; Orbin item 2). If the generation
+      // scorer failed, that number must not surface as the Total Package Score
+      // - null hides the section, exactly as before pre-generation scoring
+      // existed.
       setPackageSqs(data.package_sqs || null);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
@@ -4791,8 +4852,21 @@ const AcordModal = forwardRef(function AcordModal({
 
   const formIdList = Object.keys(generatedForms);
   const activeIdx = formIdList.indexOf(activeFormId);
-  const goNext = () => { if (activeIdx < formIdList.length - 1) setActiveFormId(formIdList[activeIdx + 1]); };
-  const goPrev = () => { if (activeIdx > 0) setActiveFormId(formIdList[activeIdx - 1]); };
+  // Item 10 (1 Oct 2026): typed edits are saved before anything replaces the
+  // viewer - a form switch, a fix window, a download, a new package. True when
+  // nothing is left unsaved; false when the save failed: the edits stay in
+  // their boxes, the toolbar says the save failed, and the action waits.
+  const saveViewerEdits = async () => {
+    const handle = viewerEditsRef.current;
+    if (!handle || !handle.hasUnsaved()) return true;
+    try { return !!(await handle.save()); } catch { return false; }
+  };
+  const switchForm = async (fid) => {
+    if (!fid || fid === activeFormId) return;
+    if (await saveViewerEdits()) setActiveFormId(fid);
+  };
+  const goNext = () => { if (activeIdx < formIdList.length - 1) switchForm(formIdList[activeIdx + 1]); };
+  const goPrev = () => { if (activeIdx > 0) switchForm(formIdList[activeIdx - 1]); };
   // ACORD 127 prints "USE ACORD 137 FOR YOUR STATE TO PROVIDE COVERAGES /
   // LIMITS INFORMATION". Client, 11 and 22 Sep 2026: a Colorado auto package
   // went out as a 127 alone, so its $1M liability, Med Pay, UM and deductibles
@@ -4869,6 +4943,9 @@ const AcordModal = forwardRef(function AcordModal({
   });
   const hasHardStops = reviewIssueCounts.hardStopCount > 0;
   const hasWarnings  = reviewIssueCounts.warningCount  > 0;
+  // Orbin item 3 (1 Oct 2026): a missing key detail that has its own Warnings /
+  // Hard Stops card is listed on the card only - both layouts read this.
+  const keyDetails = withKeyDetailCards(keyDetailsRaw, groupedIssues);
 
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
   // A 60 cap that has no entry in the package Hard Stops list. The COPE,
@@ -4881,6 +4958,32 @@ const AcordModal = forwardRef(function AcordModal({
   // a resolution descriptor. Empty on a session scored before 2026-09-08, in
   // which case the block renders exactly as it always did.
   const activeCapStopItems = (activeSqs && activeSqs.cap_hard_stop_items) || [];
+  // Orbin 22 Sep item 16 (30 Sep 2026): a cap stop the producer has HANDLED
+  // (resolved / dismissed) leaves the red HARD STOPS block for Reviewed,
+  // keeping its Reopen. The ids are the ones each row's status control keys,
+  // built exactly as the two blocks always built their items. Marking is
+  // work-tracking only, so a handled stop can still hold the score: the red
+  // block then gives way to `stillCappedNote`, never to a silent 60.
+  const _capStatusOf = (iid) => issueStatuses.get(iid)?.status;
+  const pkgCapSplit = splitCapStops(packageCapReasons(packageSqs),
+    packageSqs?.cap_hard_stop_items, { idOf: issueIdOf, statusOf: _capStatusOf });
+  const formCapSplit = splitCapStops(activeCapStops, activeCapStopItems, {
+    idOf: issueIdOf, statusOf: _capStatusOf, fallbackForms: activeFormId ? [activeFormId] : [],
+  });
+  // Reviewed is session-wide (like its recommendations), so it lists the
+  // handled stops of EVERY generated form, each keyed as its own form's block
+  // keys it - a stop never flips to another list when the form tab changes.
+  const reviewedStops = uniqueRows([
+    ...pkgCapSplit.handled.map((r) => ({ ...r, scope: "package" })),
+    ...Object.entries(generatedForms || {}).flatMap(([fid, f]) => splitCapStops(
+      (f && f.sqs && f.sqs.cap_hard_stops) || [], f && f.sqs && f.sqs.cap_hard_stop_items,
+      { idOf: issueIdOf, statusOf: _capStatusOf, fallbackForms: [fid] },
+    ).handled.map((r) => ({ ...r, scope: "form", formId: fid }))),
+  ]);
+  // Fixed legacy stops go to Reviewed too; the Cross-Form panel keeps its own.
+  const { reviewed: reviewedGhosts, crossForm: crossFormGhosts } =
+    routeGhostIssues(ghostIssues, new Set(reviewedStops.map((r) => r.iid)));
+  const reviewedCount = dismissedRecDetails.size + reviewedStops.length + reviewedGhosts.length;
   const activeKeyIssues = ((activeSqs && activeSqs.issues) || [])
     .filter((s) => !activeCapStops.includes(s));
   // The recommendation cards actually on screen. Derived once so the list and the
@@ -4898,8 +5001,9 @@ const AcordModal = forwardRef(function AcordModal({
   const inOverage = user?.subscription_tier !== "free" && pkgsLimit > 0 && pkgsUsed >= pkgsLimit + softBuffer;
   const freeExhausted = user?.subscription_tier === "free" && user?.downloads_remaining === 0;
 
-  const handleNewPackage = () => {
+  const handleNewPackage = async () => {
     if (freeExhausted) { onShowUpgrade(); return; }
+    if (!(await saveViewerEdits())) return;          // item 10
     resetToUpload();
   };
 
@@ -5061,9 +5165,10 @@ const AcordModal = forwardRef(function AcordModal({
   // RECOMMENDATION rather than writing a cross-form issue status: these two
   // trackers are separate on purpose and a schedule save must not seed a row in
   // the wrong one.
-  const handleOpenRecSchedule = (rec) => {
+  const handleOpenRecSchedule = async (rec) => {
     const key = rec?.schedule_key;
     if (!key) return;
+    if (!(await saveViewerEdits())) return;          // item 10, as openResolution
     setResolutionIssue({
       issue_id:   `rec::${rec.rec_id}`,
       code:       rec.rec_id,
@@ -5175,9 +5280,13 @@ const AcordModal = forwardRef(function AcordModal({
         for (const [fid, upd] of Object.entries(data.updated_forms)) {
           const form = next[fid];
           if (!form?.sqs) continue;
+          // Item 16 (30 Sep 2026): the editor's resolve / reopen now ship the
+          // whole recomputed form score (`new_sqs`, the answer route's key),
+          // so this form's HARD STOPS block reads the cap the fix LEFT. The
+          // headline patch below stays for any reply without it.
           next[fid] = {
             ...form,
-            sqs: {
+            sqs: upd.new_sqs ? upd.new_sqs : {
               ...form.sqs,
               sqs_score:  upd.new_sqs_score,
               grade:      upd.new_grade      ?? form.sqs.grade,
@@ -5189,9 +5298,25 @@ const AcordModal = forwardRef(function AcordModal({
         return next;
       });
     }
-    if (data.new_package_sqs_score != null) {
+    // PRE-FORM ONLY (Orbin 22 Sep item 2, 29 Sep 2026): the Review screen
+    // prints the package SQS number "so far", so a resolve / reopen there
+    // sends the WHOLE door payload (`package_sqs`) and the refreshed key
+    // details - replaced, never merged, so the card shows exactly what a
+    // reload would (null means "Not scored yet", never a stale number). The
+    // editor and Clarity / Lite responses carry neither key and keep the
+    // headline merge below.
+    if (data.package_sqs !== undefined) {
+      setPackageSqs(data.package_sqs || null);
+    } else if (data.editor_package_sqs) {
+      // EDITOR (item 16, 30 Sep 2026): the whole persisted package, cap
+      // fields included. The headline merge left `cap_applied` /
+      // `cap_hard_stops` behind, so a stop fixed through "Open to fix" stayed
+      // in the red HARD STOPS block ("Caps ... at 60") beside a score of 84.
+      setPackageSqs(data.editor_package_sqs);
+    } else if (data.new_package_sqs_score != null) {
       setPackageSqs(prev => prev ? { ...prev, package_sqs_score: data.new_package_sqs_score, tier: data.new_package_tier ?? prev.tier } : prev);
     }
+    if (data.key_details !== undefined) setKeyDetails(data.key_details || null);
     if (Array.isArray(data.hard_stops)) setHardStops(data.hard_stops);
     if (Array.isArray(data.soft_stops)) setSoftStops(data.soft_stops);
     if (Array.isArray(data.cross_issues)) setCrossIssues(data.cross_issues);
@@ -5216,6 +5341,8 @@ const AcordModal = forwardRef(function AcordModal({
   const handleIssueResolved = (data, issue) => {
     if (!data?.success) return;
     _applyCrossIssuePanelUpdate(data);
+    // A pre-form key detail is not an issue: no status chip to flip.
+    if (issue?.__keyDetail) { setResolutionIssue(null); return; }
     // Opened from a recommendation card (schedule mode), not from a validation
     // row: close the REC and leave the issue-status table alone.
     const _rec = issue?.__rec;
@@ -5337,8 +5464,31 @@ const AcordModal = forwardRef(function AcordModal({
   // Open the inline-resolution modal for a validation row/cluster that carries a
   // resolution descriptor. Clusters expose `resolution` + `primary_message`, so
   // normalize a cluster into an issue-shaped object the modal understands.
-  const openResolution = (issOrCluster) => {
+  // Pre-form "Key details missing" (Orbin item 9, owner 30 Sep 2026): a missing
+  // detail opens the SAME fix window the warnings use, so its answer goes
+  // through the one save path and the card's score and list refresh from the
+  // reply. It is not an issue: nothing is marked resolved (see
+  // handleIssueResolved) - the detail leaves the list because it is answered.
+  const openKeyDetailFix = (item) => {
+    if (!item?.resolution) return;
+    // Who normally answers it (owner, 30 Sep): a client fact can also wait for
+    // Send to Client; NAICS / SIC come from the producer or the underwriter.
+    const who = item.audience === "agency"
+      ? "This one comes from you or the underwriter - the client is not asked for it."
+      : "If you don't know it, leave it - Send to Client asks the client.";
+    setResolutionIssue({
+      message: `Key detail missing: ${item.label}. ${who} The score updates when you apply it.`,
+      code: null, issue_id: null, forms: [],
+      resolution: item.resolution,
+      __keyDetail: true,
+    });
+  };
+
+  const openResolution = async (issOrCluster) => {
     if (!issOrCluster?.resolution) return;
+    // The fix is applied on the server and the viewer is redrawn from it, so
+    // typed edits go first (item 10).
+    if (!(await saveViewerEdits())) return;
     const issue = issOrCluster.message
       ? issOrCluster
       : { ...issOrCluster, message: issOrCluster.primary_message, issue_id: issueIdOf(issOrCluster) };
@@ -5487,12 +5637,18 @@ const AcordModal = forwardRef(function AcordModal({
   const _runPreflightThenDownload = async (downloadFn) => {
     setDownloadPreflightLoading(true);
     try {
-      const [recsRes, narrativeRes] = await Promise.allSettled([
+      const [recsRes, narrativeRes, attentionRes] = await Promise.allSettled([
         fetch(`${API_BASE}/api/audit/open/${sessionId}`, { credentials: "include" }),
         fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { credentials: "include" }),
+        fetchNeedsAttention(sessionId),
       ]);
       const recsData = recsRes.status === "fulfilled" && recsRes.value.ok ? await recsRes.value.json() : null;
-      const openRecs = recsData?.open_recommendations || [];
+      // The live needs-attention list names every form and box (Orbin 22 Sep
+      // item 19d); the stored rows it supersedes are hidden only when it loaded.
+      const attention = attentionRes.status === "fulfilled" ? attentionRes.value : null;
+      setPreflightAttention(attention);
+      const attentionTotal = attention?.counts?.total || 0;
+      const openRecs = withoutSupersededRecs(recsData?.open_recommendations || [], attention);
       const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
       if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
       // Keep the post-download checklist in sync with the current package, even when
@@ -5506,7 +5662,7 @@ const AcordModal = forwardRef(function AcordModal({
       // to_recommendation_rows puts in rec_id - see backend/services/field_qa.py.
       const hasHardBlock = openRecs.some(r => (r.rec_id || "").includes("hardblock_"));
       setPreflightHardBlock(hasHardBlock);
-      if (openRecs.length === 0) { downloadFn({}); return; }
+      if (openRecs.length === 0 && attentionTotal === 0) { downloadFn({}); return; }
       setPreflightOverrideReason("");
       setPreflightCallback(() => downloadFn);
       setShowDownloadPreflight(true);
@@ -5541,8 +5697,14 @@ const AcordModal = forwardRef(function AcordModal({
     if (preflightCallback) preflightCallback({});
   };
 
-  const handleDownloadOne = formId => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOne(formId, draftOpts)));
-  const handleDownloadAll = () => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadAll(draftOpts)));
+  const handleDownloadOne = async formId => {
+    if (!(await saveViewerEdits())) return;          // item 10
+    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOne(formId, draftOpts)));
+  };
+  const handleDownloadAll = async () => {
+    if (!(await saveViewerEdits())) return;          // item 10
+    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadAll(draftOpts)));
+  };
 
   const handleLiteCoverSheet = async () => {
     setLiteCoverLoading(true); setShowDownloadOverlay(true);
@@ -6081,6 +6243,7 @@ const AcordModal = forwardRef(function AcordModal({
       {showDownloadPreflight && (
         <DownloadPreflightModal
           openRecs={preflightRecs}
+          attention={preflightAttention}
           narrative={sqsNarrative}
           overrideReason={preflightOverrideReason}
           onOverrideChange={setPreflightOverrideReason}
@@ -6431,17 +6594,25 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* Breakdown pillars */}
                         {sqs.breakdown && Object.keys(sqs.breakdown).length > 0 && (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                            {Object.entries(sqs.breakdown).slice(0, 4).map(([key, val]) => (
+                            {Object.entries(sqs.breakdown).slice(0, 4).map(([key, val]) => {
+                              // A pillar can be Not Applicable (null) - Loss History for a
+                              // New Venture or an attested No Known Losses - and this row
+                              // printed "null%". Same N/A treatment as the other panels.
+                              const isNA = val === null || val === undefined;
+                              return (
                               <div key={key}>
                                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}>
                                   <span style={{ color: "#64748b" }}>{SQS_LABELS[key] || key}</span>
-                                  <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
+                                  {isNA
+                                    ? <span title={pillarNotApplicableTitle(key, sqs)} style={{ fontWeight: 700, color: "#94a3b8", fontSize: 10 }}>N/A</span>
+                                    : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>}
                                 </div>
                                 <div style={{ height: 4, background: "#f1f5f9", borderRadius: 2, overflow: "hidden" }}>
-                                  <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2, transition: "width 0.6s ease" }} />
+                                  {!isNA && <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2, transition: "width 0.6s ease" }} />}
                                 </div>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -6984,6 +7155,7 @@ const AcordModal = forwardRef(function AcordModal({
             warningStops={warningStops}
             openItemCount={openItemCount}
             onContinue={() => setStep("form_selection")}
+            onFixKeyDetail={openKeyDetailFix}
           />
         )}
 
@@ -7020,37 +7192,47 @@ const AcordModal = forwardRef(function AcordModal({
                 return <NextStepBanner text={text} />;
               })()}
             </div>
-            {/* Current Submission Readiness (V1 H2, client section 7, 2026-08-27;
-                label wording is the owner's, 2026-08-27 live review).
+            {/* Submission Quality Score so far (V1 H2, client section 7,
+                2026-08-27; the number restored 29 Sep 2026 - Orbin 22 Sep
+                item 2, owner-approved).
                 This card used to print "Submission Readiness NN%" with a bar.
                 That number was tier2_score - the Tier 2 completeness ratio,
                 one category of one pillar - shown under a name and a format
                 that read as the SQS, so the screen blurred the score, the
                 submission status and information-gathering progress into one
-                figure (a 100% beside 12 warnings). Now:
-                  - the STATUS LABEL of the package SQS as it stands at this
-                    moment (packageSqs.tier - the same ladder and the same
-                    object the SQS panel uses; before forms exist the backend
-                    scores the facts through the same scorer). No percentage,
-                    no bar; the number stays on the SQS panel.
+                figure (a 100% beside 12 warnings). From 27 Aug it printed only
+                the status label; the client then asked "Do not require forms
+                to get the score". Now:
+                  - the package SQS NUMBER and its tier, "so far" (scoreSoFar:
+                    packageSqs.package_sqs_score - the real, capped package
+                    score the backend's one door computes from the facts as
+                    they stand, NEVER tier2_score). It can still move when
+                    forms are generated, and the line under it says so.
                   - the Tier 1 + Tier 2 checklist, split into what is in place
                     and what is missing. Audience-neutral wording on purpose:
                     NAICS / SIC are producer-only (master-plan 4.4, principle
                     5), so this line must never read as "ask the client".
                 Hard stops and warnings are NOT summarised here - their
                 handled / remaining counts live on their own sections below. */}
-            {(packageSqs?.tier || keyDetails?.satisfied?.length > 0 || keyDetails?.missing?.length > 0) && (
-              <div className="tier2-bar">
-                {packageSqs?.tier && (
-                  <div className="tier2-header">
-                    <span className="tier2-label">Current Submission Readiness</span>
-                    <span className="tier2-status" style={{ color: gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) }}>{packageSqs.tier}</span>
-                  </div>
-                )}
-                {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
-                {keyDetails?.missing?.length > 0 && <div className="tier2-missing">Key details missing: {keyDetails.missing.join(" · ")}</div>}
-              </div>
-            )}
+            {(() => {
+              const soFar = scoreSoFar(packageSqs);
+              if (!(soFar || keyDetails?.satisfied?.length > 0 || keyDetails?.missing?.length > 0)) return null;
+              return (
+                <div className="tier2-bar">
+                  {soFar && (
+                    <>
+                      <div className="tier2-header">
+                        <span className="tier2-label">Submission Quality Score so far</span>
+                        <span className="tier2-status" style={{ color: gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) }}>{soFar.text}</span>
+                      </div>
+                      <div className="tier2-detail">It can change when forms are generated.</div>
+                    </>
+                  )}
+                  {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
+                  <KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix} />
+                </div>
+              );
+            })()}
             {/* Submission Integrity status (Beta Report §4.1): advisory banner for
                 all statuses (HIGH / MEDIUM / LOW). LOW/MEDIUM expose an on-demand
                 "Review / separate documents" action; nothing is force-paused. */}
@@ -7548,40 +7730,10 @@ const AcordModal = forwardRef(function AcordModal({
                       <span className="stops-title-meta">Caps your Submission Quality Score (SQS) at 85</span>
                       {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat())}
                     </div>
-                    {/* "Important" preview - the top 3 warning clusters, shown as
-                        a read-only summary so the producer sees at a glance which
-                        few matter most. No cluster sub-headers and no
-                        Open/Resolve/Dismiss here (per client): those live on the
-                        real, actionable copy under the tiers below, which still
-                        list every cluster including these three. Collapsible like
-                        the tiers, but open by default. */}
-                    {groupedIssues?.important?.length > 0 && (
-                      <div className="warning-tier-section warning-important-section">
-                        <CollapsibleSection title="Important" defaultOpen titleSize={12} headerColor="#E61B84">
-                          {/* The preview lines sit on the same white card surface
-                              as every actionable cluster below, so "Important"
-                              reads as part of the same system rather than loose
-                              text on the pink banner. No action controls here -
-                              it stays a read-only summary. */}
-                          <div className="issue-card issue-card-soft">
-                            {groupedIssues.important.map((c, i) => (
-                              <div key={i}>
-                                <IssueLine
-                                  message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
-                                  className="stop-item stop-item-soft"
-                                />
-                                {/* The promotion stamps severity "soft_warning"
-                                    onto the cluster, so this band is exactly
-                                    where a score-neutral item looks most like a
-                                    real warning. `score_neutral` survives the
-                                    spread, so it can still say otherwise. */}
-                                <ScoreNeutralNote show={c.score_neutral} />
-                              </div>
-                            ))}
-                          </div>
-                        </CollapsibleSection>
-                      </div>
-                    )}
+                    {/* No "Important" preview (client, 22 Sep, item 3): it
+                        repeated the top clusters of the tiers below and read as
+                        duplicate items. Every cluster is listed once, under its
+                        tier. */}
                     {groupedIssues?.warnings ? (
                       ["required", "recommended", "binder_followup"].map((tier) => {
                         const clusters = groupedIssues.warnings[tier] || [];
@@ -7593,9 +7745,7 @@ const AcordModal = forwardRef(function AcordModal({
                                 Warnings banner (12px), clearly smaller than the 13px
                                 banner title above it, but clearly bigger than the
                                 cluster headers nested inside it. Shows every cluster
-                                in the tier; the three echoed in the Important preview
-                                above intentionally appear here too, where they are
-                                actionable. */}
+                                in the tier. */}
                             <CollapsibleSection
                               title={countTitle(groupedIssues.tier_labels[tier], totalCount)}
                               defaultOpen={tier === "required"}
@@ -7887,7 +8037,7 @@ const AcordModal = forwardRef(function AcordModal({
                     const fd = generatedForms[fid]; const sq = fd?.sqs;
                     const isActive = activeFormId === fid;
                     return (
-                      <div key={fid} onClick={() => setActiveFormId(fid)}
+                      <div key={fid} onClick={() => switchForm(fid)}
                         style={{ padding: "7px 9px", borderRadius: 7, cursor: "pointer", border: `1px solid ${isActive ? "#E61B84" : "transparent"}`, background: isActive ? "rgba(230,0,122,0.05)" : "transparent", transition: "all 0.15s" }}
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "#f8fafc"; }}
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
@@ -8086,28 +8236,35 @@ const AcordModal = forwardRef(function AcordModal({
                     })()}
 
                     {/* ── Per-form breakdown bars ── */}
-                    {/* doc-sourced = driven by uploaded documents, not form field edits */}
+                    {/* Where the three document-led pillars read from. Each also
+                        moves with a form edit: "Check if none" on 125 / 131 writes
+                        the loss-history fact, and the property and description
+                        boxes write theirs (update-pdf's write-back). The old line,
+                        "editing form fields won't change this", was false (1 Oct 2026). */}
                     {(() => {
-                      const docSourced = new Set(["property_integrity", "loss_history_alignment", "narrative_quality"]);
+                      const pillarSource = {
+                        loss_history_alignment: "From your documents and the form's loss history boxes, such as \"Check if none\".",
+                        property_integrity: "From your documents and the form's property boxes.",
+                        narrative_quality: "From your documents and the form's description boxes.",
+                      };
                       return (
-                        <div style={{ background: "#fff", border: `1px solid ${pendingEdits ? "#fde68a" : "#e2e8f0"}`, borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                           {/* Stale marker. These bars come from the server and cannot
                               reflect unsaved edits; a field highlight already does.
-                              Two views of one fact must not both look current. */}
+                              Two views of one fact must not both look current.
+                              Plain pink text, no box, no dot (owner, 1 Oct 2026). */}
                           {pendingEdits && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "5px 7px", marginBottom: 2 }}>
-                              <span style={{ width: 6, height: 6, background: "#f59e0b", borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />
-                              <span style={{ fontSize: 9.5, color: "#b45309", fontWeight: 600, lineHeight: 1.4 }}>
-                                You have unsaved field edits. These scores are from the last save - click Done Editing to update them.
-                              </span>
+                            <div style={{ fontSize: 9.5, color: "#E61B84", fontWeight: 600, lineHeight: 1.4, marginBottom: 2 }}>
+                              You have unsaved field edits. These scores are from the last save. Save to update.
                             </div>
                           )}
                           {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => {
-                            // umbrella_limit_adequacy is null when no umbrella is in the
-                            // submission (§6.5 - N/A, not a perfect score).
+                            // A pillar is null when Not Applicable (§6.5 - N/A, not a
+                            // perfect score): Umbrella with no umbrella, Loss History for
+                            // a New Venture or an attested No Known Losses.
                             const isNA = val === null || val === undefined;
                             // Weight (and the doc-sourced note) moved off the row into the tooltip.
-                            const tip = `Weight: ${SQS_WEIGHTS[key] || 0}% of the score.${docSourced.has(key) ? " Sourced from uploaded documents - editing form fields won't change this." : ""}`;
+                            const tip = `Weight: ${SQS_WEIGHTS[key] || 0}% of the score.${pillarSource[key] ? ` ${pillarSource[key]}` : ""}`;
                             return (
                             <div key={key} style={{ opacity: pendingEdits ? 0.5 : 1, transition: "opacity 0.2s ease" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
@@ -8116,7 +8273,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   <InfoTip text={tip} />
                                 </span>
                                 {isNA
-                                  ? <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 10 }}>N/A</span>
+                                  ? <span title={pillarNotApplicableTitle(key, activeSqs)} style={{ fontWeight: 700, color: "#94a3b8", fontSize: 10 }}>N/A</span>
                                   : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>}
                               </div>
                               <div style={{ height: 5, background: "#e2e8f0", borderRadius: 3, overflow: "hidden" }}>
@@ -8136,31 +8293,39 @@ const AcordModal = forwardRef(function AcordModal({
                         with no card of its own) and falls back to cap_reason, which names
                         the stop whatever its source. */}
                     {packageSqs && packageSqs.cap_applied === 60 && (() => {
-                      const reasons = (packageSqs.cap_hard_stops && packageSqs.cap_hard_stops.length)
-                        ? packageSqs.cap_hard_stops
-                        : (packageSqs.cap_reason ? [packageSqs.cap_reason] : []);
-                      if (!reasons.length) return null;
-                      // Classified server-side into rows with a rule code and a
-                      // resolution, so a blocker holding the PACKAGE at 60 gets
-                      // the same "Open to fix" the per-form block does. Empty on
-                      // a session scored before 2026-09-08, in which case this
-                      // renders exactly as it always did.
-                      const capItems = packageSqs.cap_hard_stop_items || [];
+                      // Reasons = cap_hard_stops, else cap_reason (packageCapReasons).
+                      // Each is paired with the row the server classified for it
+                      // (rule code + resolution), so a blocker holding the PACKAGE
+                      // at 60 gets the same "Open to fix" the per-form block does.
+                      // No rows on a session scored before 2026-09-08: the block
+                      // then renders exactly as it always did.
+                      //
+                      // Item 16: only OPEN stops print here. A handled one lives
+                      // under Reviewed; if every stop still holding the package is
+                      // handled, a short note says so - never a silent 60.
+                      const { open, handled } = pkgCapSplit;
+                      if (!open.length && !handled.length) return null;
+                      // Item 16 (1 Oct 2026): the note only - each marked stop's
+                      // sentence prints once, on its Reviewed row ("Still caps ...").
+                      if (!open.length) {
+                        return (
+                          <div data-still-capped="package" style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, padding: "7px 10px", marginBottom: 8 }}>
+                            <div style={{ fontSize: 10.5, fontWeight: 600, color: "#92400e", lineHeight: 1.45 }}>{stillCappedNote(handled, "package")}</div>
+                          </div>
+                        );
+                      }
                       return (
                         <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                           <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                             HARD STOPS
                             <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package Submission Quality Score (SQS) at 60</span>
                           </div>
-                          {reasons.map((s, i) => {
-                            const it = capItems.find((x) => x?.message === s);
-                            return (
-                              <div key={i} style={{ padding: "2px 0" }}>
-                                <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {s}</div>
-                                {it && itemResolveAndStatus(it, it.forms || [])}
-                              </div>
-                            );
-                          })}
+                          {open.map((r, i) => (
+                            <div key={i} style={{ padding: "2px 0" }}>
+                              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {r.message}</div>
+                              {r.item && itemResolveAndStatus(r.item, r.item.forms || [])}
+                            </div>
+                          ))}
                         </div>
                       );
                     })()}
@@ -8299,7 +8464,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   })()} />
                                 </span>
                                 {isNA
-                                  ? <span title="No umbrella in this submission" style={{ fontWeight: 700, color: "#94a3b8", fontSize: 9 }}>N/A</span>
+                                  ? <span title={pillarNotApplicableTitle(key, packageSqs)} style={{ fontWeight: 700, color: "#94a3b8", fontSize: 9 }}>N/A</span>
                                   : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>}
                               </div>
                               <div style={{ height: 3, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
@@ -8480,30 +8645,52 @@ const AcordModal = forwardRef(function AcordModal({
 
                     {/* Hard stops that hold THIS form's score at 60. Shown outside the
                         collapsible: a blocker behind a chevron is a blocker nobody reads. */}
-                    {activeCapStops.length > 0 && (
+                    {/* Item 16: open stops only; a handled one lives under
+                        Reviewed, and when every stop holding this form is
+                        handled a short note keeps the 60 explained. */}
+                    {formCapSplit.open.length > 0 && (
                       <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                           HARD STOPS
                           <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's Submission Quality Score (SQS) at 60</span>
                         </div>
-                        {activeCapStops.map((s, i) => {
-                          // The row the SERVER classified for this sentence, so
-                          // a blocker holding the score at 60 carries the same
+                        {formCapSplit.open.map((r, i) => (
+                          // `r.item` is the row the SERVER classified for this
+                          // sentence (forms defaulted to this form), so a
+                          // blocker holding the score at 60 carries the same
                           // "Open to fix" every other stop does. Before
                           // 2026-09-08 this block was text only - and two of
                           // the sentences were internal rule names.
-                          const it = activeCapStopItems.find((x) => x?.message === s);
-                          return (
-                            <div key={i} style={{ padding: "2px 0" }}>
-                              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {s}</div>
-                              {it && itemResolveAndStatus(
-                                { ...it, forms: it.forms?.length ? it.forms : (activeFormId ? [activeFormId] : []) },
-                                activeFormId ? [activeFormId] : [])}
-                            </div>
-                          );
-                        })}
+                          <div key={i} style={{ padding: "2px 0" }}>
+                            <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {r.message}</div>
+                            {r.item && itemResolveAndStatus(r.item, activeFormId ? [activeFormId] : [])}
+                          </div>
+                        ))}
                       </div>
                     )}
+                    {/* Item 16 (1 Oct 2026): the note only - the stop's own sentence
+                        prints once, on its Reviewed row. */}
+                    {formCapSplit.open.length === 0 && formCapSplit.handled.length > 0 && (
+                      <div data-still-capped="form" style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, padding: "7px 10px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: "#92400e", lineHeight: 1.45 }}>{stillCappedNote(formCapSplit.handled, "form")}</div>
+                      </div>
+                    )}
+
+                    {/* NEEDS ATTENTION (Orbin 22 Sep items 9, 19): this form's boxes that
+                        still need a human, one tag each - Missing / AI held back / Please
+                        verify - from the backend door. A row click shows the box on the form. */}
+                    <NeedsAttentionPanel
+                      Section={CollapsibleSection}
+                      sessionId={sessionId}
+                      formId={activeFormId}
+                      formSqs={activeSqs}
+                      packageSqs={packageSqs}
+                      refreshTick={pdfRefreshTick}
+                      onJump={(row) => {
+                        setAttentionFocus({ field: row.field, formId: row.form_id, nonce: `${Date.now()}:${row.field}` });
+                        if (window.innerWidth <= 900) setSidebarOpen(false);
+                      }}
+                    />
 
                     {/* ── RECOMMENDATIONS (collapsible, white): Key Issues → Best Solutions →
                         active recommendation cards. Each sub-part hides itself when empty. ── */}
@@ -8524,22 +8711,13 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* Best Solutions (renamed from Top Recommendations) - numbered list */}
                         {packageSqs?.top_recommendations?.length > 0 && (
                           <div style={{ marginBottom: 8 }}>
-                            {/* SAY WHICH SCORE THESE PERCENTAGES BELONG TO. They
-                                come from `packageSqs`, while the pillar bars just
-                                above them are THIS FORM's - and the two genuinely
-                                differ. Measured on a live session: ACORD 125 read
-                                structural_completeness 100 and exposure_consistency
-                                40 while the package read 65 and 77, so the panel
-                                showed "Structural Completeness 100%" and
-                                "Structural Completeness 65%" a few lines apart with
-                                nothing to tell them apart. Both numbers are right;
-                                only the labelling was wrong. Same class as the
-                                2026-08-12 fix where the narrative quoted a
-                                different score from the banner. */}
-                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Best Solutions</div>
-                            <div style={{ fontSize: 9.5, color: "#64748b", marginBottom: 6 }}>
-                              Percentages below are for the whole package, not this form.
-                            </div>
+                            {/* NO PERCENTAGE ON THESE ROWS (owner, 1 Oct 2026: "it is
+                                confusing users"). Each row's % was the PACKAGE pillar
+                                score, printed a few lines under THIS FORM's pillar
+                                bars, which differ - and next to "+N pts", which is
+                                what the producer can act on. The points stay; the
+                                pillar scores stay on the pillar rows above. */}
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions</div>
                             {/* HOW FAR IS THIS FROM 100, AND WHERE DOES IT SIT.
                                 Until 2026-09-23 nothing in the product answered
                                 either question. A package could show zero open
@@ -8576,12 +8754,21 @@ const AcordModal = forwardRef(function AcordModal({
                                     {typeof r.points_available === "number" && r.points_available > 0 && (
                                       <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", whiteSpace: "nowrap" }}>+{r.points_available} pts</span>
                                     )}
-                                    {typeof r.score === "number" && r.pillar !== "hard_stops_present" && (
-                                      <span style={{ fontSize: 11, fontWeight: 700, color: barColor(r.score) }}>{r.score}%</span>
-                                    )}
                                   </div>
                                   {r.action && (
                                     <div style={{ fontSize: 11, color: "#334155", marginLeft: 22, marginTop: 2 }}>{r.action}</div>
+                                  )}
+                                  {/* Item 19 (1 Oct 2026): the row's points are the
+                                      pillar's whole gap; the answer it asks for can be
+                                      worth less ("No known losses" takes Loss History
+                                      out: +7 of 11.2). Said only when they differ. */}
+                                  {typeof r.answer_gain === "number" && r.answer_gain > 0
+                                    && Math.round(r.answer_gain) !== Math.round(r.points_available || 0) && (
+                                    <div style={{ fontSize: 10, color: "#475569", marginLeft: 22, marginTop: 2 }}>
+                                      {r.answer_gain_is_exact === true
+                                        ? `Answering this adds +${r.answer_gain} pts`
+                                        : `Answering this adds up to +${r.answer_gain} pts`}
+                                    </div>
                                   )}
                                   {/* Whose move is it? A gap waiting on a document
                                       from the insured reads exactly like one the
@@ -8611,7 +8798,6 @@ const AcordModal = forwardRef(function AcordModal({
                               <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f1f5f9" : "none" }}>
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                                 <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{d.component}</span>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: barColor(d.score) }}>{d.score}%</span>
                               </div>
                             ))}
                           </div>
@@ -8638,10 +8824,10 @@ const AcordModal = forwardRef(function AcordModal({
                     )}
 
                     {/* Cross-Form Validation - now in the same flow so its gap matches the sections above.
-                        Stays visible even once every LIVE issue clears, as long as ghostIssues has
+                        Stays visible even once every LIVE issue clears, as long as crossFormGhosts has
                         entries - a fully-resolved submission still shows its resolved history rather
                         than the whole panel disappearing along with the last fixed issue. */}
-                    {(crossIssues.length > 0 || ghostIssues.length > 0) && (
+                    {(crossIssues.length > 0 || crossFormGhosts.length > 0) && (
                       <CollapsibleSection resetKey={activeFormId} title="Cross-Form Validation" tooltip="Checks that data agrees across the different ACORD forms.">
                         {(() => {
                           // One validation row. Shared by the grouped path and the
@@ -8776,12 +8962,12 @@ const AcordModal = forwardRef(function AcordModal({
                           return (
                             <>
                               {mainContent}
-                              {ghostIssues.length > 0 && (
+                              {crossFormGhosts.length > 0 && (
                                 <div key="resolved-ghosts" style={{ marginTop: 8 }}>
                                   <div style={{ fontSize: 9.5, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                                    Resolved ({ghostIssues.length})
+                                    Resolved ({crossFormGhosts.length})
                                   </div>
-                                  {ghostIssues.map((g, gi) => row(g, `resolved-${gi}`, gi < ghostIssues.length - 1))}
+                                  {crossFormGhosts.map((g, gi) => row(g, `resolved-${gi}`, gi < crossFormGhosts.length - 1))}
                                 </div>
                               )}
                             </>
@@ -8790,10 +8976,51 @@ const AcordModal = forwardRef(function AcordModal({
                       </CollapsibleSection>
                     )}
 
-                    {/* REVIEWED (renamed from Dismissed): session-wide answered/dismissed recs. Hidden when empty. */}
-                    {dismissedRecDetails.size > 0 && (
-                      <CollapsibleSection resetKey={activeFormId} title={`Reviewed (${dismissedRecDetails.size})`} tooltip="Recommendations you've already answered or dismissed.">
+                    {/* REVIEWED (renamed from Dismissed): session-wide answered/dismissed recs, and
+                        (item 16, 30 Sep 2026) the hard stops the producer has resolved or
+                        dismissed - moved out of the red HARD STOPS blocks with their Reopen.
+                        Hidden when empty. */}
+                    {reviewedCount > 0 && (
+                      <CollapsibleSection resetKey={activeFormId} title={`Reviewed (${reviewedCount})`} tooltip="Items you've already answered, resolved or dismissed.">
                         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                          {/* A handled stop STILL in the cap list: marking is work-tracking,
+                              so it still holds the score - said on the row, and in the note
+                              that replaces the red block. Same controls it had there. */}
+                          {reviewedStops.map((r) => (
+                            <div key={r.iid} data-reviewed-stop="held" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
+                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{r.message}</div>
+                              <div style={{ marginTop: 3, fontSize: 9.5, fontWeight: 700, color: "#b91c1c" }}>
+                                {r.scope === "form" ? `Still caps the ${shortFormLabel(r.formId)} score at 60` : "Still caps the package score at 60"}
+                              </div>
+                              {itemResolveAndStatus(r.item, r.item.forms || [])}
+                            </div>
+                          ))}
+                          {/* A fixed legacy stop (resolved, no longer firing). Same Reopen
+                              the Cross-Form panel's Resolved rows use: it undoes the fix. */}
+                          {reviewedGhosts.map((g) => (
+                            <div key={g.issue_id} data-reviewed-stop="fixed" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
+                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{g.message}</div>
+                              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
+                                <IssueStatusControl
+                                  issueId={g.issue_id}
+                                  status={issueStatuses.get(g.issue_id)?.status}
+                                  meta={{ form_id: Array.isArray(g.forms) ? g.forms[0] : null, rule_code: g.code, message: g.message }}
+                                  onSet={handleReopenIssue}
+                                />
+                                {reopeningIds.has(g.issue_id) && (
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 600, color: "#be185d" }}>
+                                    <span style={{ width: 10, height: 10, border: "2px solid #f9a8d4", borderTopColor: "#be185d", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                                    Reopening...
+                                  </span>
+                                )}
+                              </div>
+                              {reopenNotices.has(g.issue_id) && (
+                                <div style={{ fontSize: 10.5, color: "#78350f", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 7, padding: "6px 9px", marginTop: 6, lineHeight: 1.45 }}>
+                                  {reopenNotices.get(g.issue_id)}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                           {Array.from(dismissedRecDetails.entries()).map(([rid, d]) => (
                             <div key={rid} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
@@ -9029,8 +9256,10 @@ const AcordModal = forwardRef(function AcordModal({
                 onSignApplied={fid => setSignedForms(prev => new Set([...prev, fid]))}
                 onOpenSignatureModal={onOpenSignatureModal}
                 clientFilledFields={clientFilledFields}
+                focusField={attentionFocus && attentionFocus.formId === activeFormId ? attentionFocus : null}
                 onRefreshFields={refreshArqData}
                 onPendingEditsChange={(fid, dirty) => setPendingEdits(!!dirty)}
+                editsRef={viewerEditsRef}
                 onSqsUpdate={(fid, newSqs, extras) => {
                   // A score has arrived for the saved state, so nothing is stale.
                   setPendingEdits(false);
@@ -9072,7 +9301,8 @@ const AcordModal = forwardRef(function AcordModal({
               const recs     = preflightRecs || [];
               const hardRecs = recs.filter(r => r.recommendation_type === "hard_stop");
               const softRecs = recs.filter(r => r.recommendation_type !== "hard_stop");
-              const hasIssues = recs.length > 0;
+              const attentionTotal = preflightAttention?.counts?.total || 0;
+              const hasIssues = recs.length > 0 || attentionTotal > 0;
               const score = packageSqs?.package_sqs_score;
               const nextAction = (sqsNarrative || "").replace(/\n+/g, " ").trim();
               return (
@@ -9097,8 +9327,9 @@ const AcordModal = forwardRef(function AcordModal({
                   {hasIssues && (
                     <>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                        Unresolved items ({recs.length})
+                        Unresolved items ({recs.length + attentionTotal})
                       </div>
+                      <NeedsAttentionSummary attention={preflightAttention} />
                       {hardRecs.map((r, i) => (
                         <div key={`h${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#7f1d1d", padding: "4px 0", lineHeight: 1.5 }}>
                           <span style={{ color: "#dc2626", fontWeight: 700 }}>☐</span>

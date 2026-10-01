@@ -445,6 +445,12 @@ _FIELD_QUESTION_MAP = {
     "narrative_risk_controls":    "What safety or risk-control measures does your business have in place? (For example: written safety program, employee training, inspections, drug testing, maintenance program)",
     "narrative_growth_trends":    "Provide your WC payroll breakdown by class code - list each class code, its description, and the associated payroll amount. (For example: 5183 Plumbing - $320,000; 5190 Electrical - $180,000)",
     "narrative_target_markets":   "What is your workers comp experience modifier (EMOD / XMOD)? Provide the current mod value, the rating bureau, and any relevant context about losses or safety programs that affect it.",
+    # Orbin 22 Sep item 12 / G2 (29 Sep 2026) - the ONE premises' interest, and
+    # a tenant's landlord. Asked only on a one-location ACORD 125 package; see
+    # `_maybe_inject_premises_questions` and services/premises_interest.py.
+    "premises_interest":        "Does your business own the building at its location, or rent the space it uses?",
+    "landlord_name":            "What is the full name of your landlord (the owner of the building you rent)?",
+    "landlord_address":         "What is your landlord's full mailing address? (Street, City, State, ZIP)",
 }
 
 
@@ -528,6 +534,9 @@ _FIELD_HINT_MAP = {
     "narrative_risk_controls":    "List the steps you take to prevent accidents and losses, e.g. 'Written safety program, quarterly training, drug testing, annual equipment inspections'.",
     "narrative_growth_trends":    "List payroll by class code, e.g. '5183 Plumbing $320,000 | 5190 Electrical $180,000 | 8810 Clerical $95,000'.",
     "narrative_target_markets":   "State the mod value and bureau, e.g. 'EMOD 0.88 (NCCI) - credit mod reflecting 3 years clean; no lost-time claims'.",
+    "premises_interest":        "Choose Tenant if the business rents its space, Owner if the business owns the building. Choose Other for anything else, e.g. a licensee.",
+    "landlord_name":            "Enter the landlord's full legal name as it should appear on certificates of insurance, e.g. 'Main Street Properties LLC'.",
+    "landlord_address":         "Enter the landlord's full mailing address as it should appear on certificates, e.g. '100 Main St, Austin, TX 78701'.",
 }
 
 _PREFIX_HINT_MAP = {
@@ -640,6 +649,9 @@ _FIELD_PRODUCER_LABEL_MAP = {
     "narrative_risk_controls":    "Narrative - risk controls",
     "narrative_growth_trends":    "WC payroll breakdown by class code",
     "narrative_target_markets":   "Experience mod detail - EMOD",
+    "premises_interest":          "Premises interest - owner or tenant",
+    "landlord_name":              "Landlord name - for certificates",
+    "landlord_address":           "Landlord address - for certificates",
 }
 
 
@@ -1681,15 +1693,27 @@ def _canonical_keys_for(field_name: str) -> set:
     two copies of one rule drifting apart is how these indexes broke in the first
     place.
     """
+    keys: set = set()
     c = _canonical_key(field_name)
-    if not c or c.startswith("_"):
-        return set()
-    keys = {c}
+    if c and not c.startswith("_"):
+        keys.add(c)
+        try:
+            from services.pdf_service import _FACT_FALLBACKS
+            general = _FACT_FALLBACKS.get(c)
+            if general:
+                keys.add(general)
+        except Exception:                              # pragma: no cover
+            pass
+    # A box whose EDIT writes back a fact (`pdf_service._FORM_FIELD_WRITEBACK`)
+    # also takes that fact's ANSWER. The link was one-way: ticking ACORD 125's
+    # "Check if none" updated the no-loss fact, but answering "No known losses"
+    # never ticked the box, so it stayed a Missing row beside a score that had
+    # already counted the attestation (owner's live run, 30 Sep 2026).
     try:
-        from services.pdf_service import _FACT_FALLBACKS
-        general = _FACT_FALLBACKS.get(c)
-        if general:
-            keys.add(general)
+        from services.pdf_service import writeback_fact_for_field
+        wb = writeback_fact_for_field(field_name)
+        if wb:
+            keys.add(wb)
     except Exception:                                  # pragma: no cover
         pass
     return keys
@@ -2081,9 +2105,10 @@ NO_LOSS_INDICATOR_FIELD = "loss_history_no_prior_losses_indicator"
 # The chosen option text IS the stored value, and `sqs_service._attested_true`
 # already reads it correctly: it attests on a phrase containing "no" plus
 # "loss"/"claim", which the first option has and the second does not. Verified,
-# not assumed - the pillar scores 60 / 25 / 25 for option one, option two and
-# blank. Old sessions holding a bare "Yes" still read as attested, so nothing
-# stored before today changes meaning.
+# not assumed - option one attests (Loss History Not Applicable since the owner's
+# 29 Sep 2026 decision; 60 before), option two and blank score 25. Old sessions
+# holding a bare "Yes" still read as attested, so nothing stored before today
+# changes meaning.
 #
 # CHANGING THIS WORDING CHANGES WHAT IS STORED. If either option is ever
 # reworded, re-run test_the_client_wording_needs_no_inversion first.
@@ -2639,6 +2664,67 @@ def _maybe_inject_generic_client_questions(questions: List[dict], facts: dict, f
             and VEHICLES_RETURN_FIELD not in existing
             and not _val(VEHICLES_RETURN_FIELD)):
         _append(VEHICLES_RETURN_FIELD)
+
+
+PREMISES_INTEREST_FIELD = "premises_interest"
+LANDLORD_FIELDS = ("landlord_name", "landlord_address")
+
+
+def _maybe_inject_premises_questions(questions: List[dict], facts: dict, flags: dict,
+                                     form_ids, generated_forms: Optional[dict] = None) -> None:
+    """Orbin 22 Sep item 12 / G2 (29 Sep 2026): the ONE premises' interest, and
+    a tenant's landlord - OPTIONAL client questions, never pre-selected.
+
+    Asked only when ACORD 125 is in the package and it has exactly one location
+    (services/premises_interest.py):
+      * the interest, when neither the row nor a person has stated it and the
+        form shows no ticked interest box. The insured sees the plain question
+        and the three choices - never the producer card's evidence;
+      * the landlord's full name and address, only once the interest is TENANT.
+    Two or more locations, or any other package: nothing is added.
+    """
+    if "ACORD_125" not in {str(f) for f in (form_ids or []) if f}:
+        return
+    try:
+        from services import premises_interest as _pi
+        from services.answer_options import options_for
+    except Exception:                                         # noqa: BLE001
+        return
+    facts = facts or {}
+    if _pi.one_premises_row(facts) is None:
+        return
+    asked = {q.get("field_name") for q in questions} | \
+            {q.get("_canonical_key") for q in questions}
+
+    def _append(field_name: str, options=None) -> None:
+        q = {
+            "field_name":         field_name,
+            "question":           _FIELD_QUESTION_MAP[field_name],
+            "hint":               _FIELD_HINT_MAP.get(field_name, ""),
+            "forms":              "",
+            "form_ids":           [],
+            "field_type":         "select" if options else "text",
+            "current_value":      "",
+            "_group_label":       None,
+            "_is_curated_client": True,
+            "_canonical_key":     field_name,
+        }
+        if options:
+            q["options"] = list(options)
+        questions.append(q)
+
+    kind = _pi.single_premises_interest(facts)
+    if kind is None:
+        _form = (generated_forms or {}).get("ACORD_125") or {}
+        _state = _form.get("field_state") or _form.get("mapped") or {}
+        if (PREMISES_INTEREST_FIELD not in asked
+                and not _pi.fact_is_answered(facts, PREMISES_INTEREST_FIELD)
+                and not _pi.form_shows_interest(_state)):
+            _append(PREMISES_INTEREST_FIELD, options_for(PREMISES_INTEREST_FIELD))
+    elif kind == _pi.TENANT:
+        for field_name in LANDLORD_FIELDS:
+            if field_name not in asked and not _pi.fact_is_answered(facts, field_name):
+                _append(field_name)
 
 
 # ---------------------------------------------------------------------------
@@ -3678,6 +3764,9 @@ async def generate_arq_questions(
     # Client examples (2026-07): subcontractor % per class code + vehicles-return-
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
+    # Orbin item 12 / G2: the one premises' interest, then a tenant's landlord.
+    _maybe_inject_premises_questions(questions, facts, flags,
+                                     list(generated_forms or []), generated_forms)
 
     # Figure 15: ONE table question per repeating schedule, replacing the
     # per-field cards removed by _partition_schedule_fields above. The session's
@@ -3866,6 +3955,8 @@ def generate_arq_questions_from_facts(
     # Client examples (2026-07): subcontractor % per class code + vehicles-return-
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
+    # Orbin item 12 / G2: the one premises' interest, then a tenant's landlord.
+    _maybe_inject_premises_questions(questions, facts, flags, selected_form_ids)
 
     # Figure 15: ONE table question per repeating schedule.
     questions.extend(_build_schedule_questions(schedule_forms, facts))
@@ -4560,9 +4651,17 @@ def _restamp_canonical_into_forms(
     generated: dict,
     canon: str,
     facts: dict,
+    provenance: str = "client_arq",
 ) -> List[str]:
     """Stamp a client-confirmed canonical fact into every generated form that
     carries it under an ACORD schema field name.
+
+    `provenance` is WHO supplied the value, and it is what the form shows:
+    "client_arq" (the default - the questionnaire) paints the box green
+    "Client" and lists it in `client_filled_fields`; "producer" labels it the
+    producer's own entry and takes it OFF that list. Until 29 Sep every caller
+    got "client_arq", so a date the PRODUCER typed on an "Open to fix" card was
+    shown to the producer as the client's (client, 22 Sep, item 17).
 
     `canon` is a canonical fact key (e.g. `applicant_name`) already written into
     `facts`. For each generated form we run the SAME deterministic rule engine
@@ -4579,6 +4678,10 @@ def _restamp_canonical_into_forms(
     except Exception as ex:
         logger.warning(f"_restamp_canonical: pdf_service import failed: {ex}")
         return []
+    try:
+        from services.pdf_service import premises_twin_fact
+    except Exception:                                         # pragma: no cover
+        premises_twin_fact = None
 
     touched_forms: List[str] = []
     for fid, form_data in generated.items():
@@ -4608,7 +4711,14 @@ def _restamp_canonical_into_forms(
             # touches only the named-insured fields, nothing else. A box reading
             # a SPECIFIC fact also matches the general fact it falls back to -
             # see _canonical_keys_for.
-            if canon not in _canonical_keys_for(schema_field):
+            # ...and a ONE-PREMISES box copying this fact on THIS package (29 Sep
+            # 2026): ACORD 125's ANNUAL REVENUES from `total_revenue`, its
+            # interest boxes from `premises_interest`. Found by the twin, never
+            # by a rule, so a row whose own document value stands is untouched
+            # and keeps its label - see pdf_service._ONE_PREMISES_TWINS.
+            _twin = bool(premises_twin_fact
+                         and premises_twin_fact(schema_field, facts, fid) == canon)
+            if canon not in _canonical_keys_for(schema_field) and not _twin:
                 continue
             # The form's own door, as at generation: without `_form_id` every
             # form-scoped resolver fell back to the package scalar, so one
@@ -4620,18 +4730,35 @@ def _restamp_canonical_into_forms(
                 from contextlib import nullcontext as _schema_context
             with _schema_context(schema):
                 mapped_val = _deterministic_map(schema_field, {**facts, "_form_id": fid})
+            if _refill_value(mapped_val):
+                # Printed exactly as generation prints it ("300,000", not "300000").
+                # Whether a PERSON typed it is read off the facts, as generation
+                # reads it: a box reading a specific fact can resolve to the
+                # document's value, which is formatted, never kept as typed.
+                from services.pdf_service import display_value_for_box
+                mapped_val = display_value_for_box(fid, schema_field, mapped_val, facts=facts)
             if not _refill_value(mapped_val):
+                # A twin box a person's answer wrote is CLEARED when the answer
+                # no longer yields it: Tenant after "Other: licensee" must not
+                # leave "licensee" in the OTHER description, and a withdrawn
+                # revenue must not leave its copy behind. Only a box an answer
+                # path wrote - a document's value is never blanked here.
+                if (_twin and conf.get(schema_field) in ("producer", "client_arq")
+                        and str(field_state.get(schema_field) or "").strip()):
+                    field_state[schema_field] = ""
+                    conf.pop(schema_field, None)
+                    cff.discard(schema_field)
+                    form_touched = True
                 continue
             if str(field_state.get(schema_field) or "").strip() == str(mapped_val).strip():
-                # Already shows the confirmed value — still label as client-supplied
-                # but don't force a needless re-render.
-                if conf.get(schema_field) != "client_arq":
-                    conf[schema_field] = "client_arq"
-                cff.add(schema_field)
+                # Already shows the confirmed value - still label who supplied
+                # it, but don't force a needless re-render.
+                conf[schema_field] = provenance
+                _mark_client_filled(cff, schema_field, provenance)
                 continue
             field_state[schema_field] = mapped_val
-            conf[schema_field] = "client_arq"
-            cff.add(schema_field)
+            conf[schema_field] = provenance
+            _mark_client_filled(cff, schema_field, provenance)
             form_touched = True
 
         if form_touched or cff != set(form_data.get("client_filled_fields", [])):
@@ -4644,6 +4771,181 @@ def _restamp_canonical_into_forms(
             touched_forms.append(fid)
 
     return touched_forms
+
+
+# The merge's page-one verdict, stored as plain bools on facts.
+_PAGE_ONE_FLAGS = ("carrier_is_current_policy", "premium_is_current_policy",
+                   "current_term_rows_ok", "renews_current_programme")
+# ACORD 125 page-one boxes that follow the receiving carrier (29 Sep 2026).
+_PAGE_ONE_CARRIER_BOXES = ("Insurer_FullName_A", "Insurer_NAICCode_A")
+_PAGE_ONE_TOTAL_PREMIUM_BOX = "Policy_Payment_EstimatedTotalAmount_A"
+
+
+def _refresh_acord125_page_one(generated: dict, facts: dict, docs) -> List[str]:
+    """ACORD 125 page one after the producer names the carrier RECEIVING the
+    submission (29 Sep 2026, Orbin item 8; review finding).
+
+    Re-runs the merge's page-one verdict on the current facts
+    (`extraction_service._mark_page_one_current_policy`, idempotent), then:
+      * CARRIER / NAIC take what the stamper's own resolver chain now says
+        (`pdf_service.authoritative_expected_value`) - the producer's addressee,
+        its NAIC only as an attested pair;
+      * when the verdict now withholds the premiums (the named market does not
+        write the current policies, so the dec's figures are not its premiums),
+        every page-one premium box is BLANKED. The other direction - premiums
+        appearing - needs the document text the stamper checks them against, so
+        it waits for regeneration: a blank is safe, a wrong figure is not.
+    Returns the form ids it changed. Never raises."""
+    touched: List[str] = []
+    try:
+        from services.extraction_service import _fv, _mark_page_one_current_policy
+        from services.pdf_service import (
+            _AUTH_UNOWNED, _OTHER_POLICY_LINE_RE, _PAGE_ONE_RECEIVING_QUESTION,
+            _is_lob_premium_field, _page_one_current_policy,
+            authoritative_expected_value,
+        )
+        _mark_page_one_current_policy(facts, docs if isinstance(docs, list) else [])
+        form = (generated or {}).get("ACORD_125")
+        if not isinstance(form, dict):
+            return touched
+        schema = form.get("schema") or {}
+        state = form.get("field_state") or form.get("mapped") or {}
+        conf = form.get("confidence") or {}
+        cff = set(form.get("client_filled_fields") or [])
+        changed = False
+        person = _fv(facts, "submission_carrier_name")
+        # Question 4 ("other insurance with this company") lists the policies of
+        # the company CARRIER names, so it moves with CARRIER (30 Sep 2026: a
+        # carrier named after generation narrowed CARRIER and left question 4
+        # listing every company's policies until the forms were regenerated).
+        _q4_boxes = sorted(b for b in schema
+                           if _OTHER_POLICY_LINE_RE.match(b) or b == _PAGE_ONE_RECEIVING_QUESTION)
+        for box in list(_PAGE_ONE_CARRIER_BOXES) + _q4_boxes:
+            if box not in schema:
+                continue
+            val = authoritative_expected_value("ACORD_125", box, facts, schema)
+            if val is _AUTH_UNOWNED:
+                continue
+            new = str(val or "").strip()
+            if new == str(state.get(box) or "").strip():
+                continue
+            state[box] = new
+            if new:
+                conf[box] = "producer" if (box == "Insurer_FullName_A" and person
+                                           and new == str(person).strip()) else "filled"
+            else:
+                conf.pop(box, None)
+            cff.discard(box)
+            changed = True
+        if _page_one_current_policy({**facts, "_form_id": "ACORD_125"},
+                                    "premium_is_current_policy", "total_policy_premium"):
+            for box in schema:
+                if (box == _PAGE_ONE_TOTAL_PREMIUM_BOX or _is_lob_premium_field(box)) \
+                        and str(state.get(box) or "").strip():
+                    state[box] = ""
+                    conf.pop(box, None)
+                    cff.discard(box)
+                    changed = True
+        if changed:
+            form["field_state"] = state
+            form["confidence"] = conf
+            form["client_filled_fields"] = list(cff)
+            form["_pdf_cache_hash"] = ""
+            form["pdf_bytes"] = None
+            touched.append("ACORD_125")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("page-one refresh skipped: %s", exc)
+    return touched
+
+
+# The answers that decide whether ACORD 125's additional-interest row A holds a
+# tenant's landlord (G2, 30 Sep 2026 - `pdf_service.landlord_interest_row`).
+_LANDLORD_ROW_FACTS = ("landlord_name", "landlord_address", "premises_interest")
+
+
+def _refresh_acord125_landlord(generated: dict, before: Optional[dict], after: dict,
+                               provenance: str) -> List[str]:
+    """ACORD 125's additional-interest row A after a landlord or premises answer
+    (G2, 30 Sep 2026), so it never waits for regeneration.
+
+    While the landlord holds the row, every row-A box takes the stamper's own
+    owner answer (`pdf_service._resolve_landlord_interest_row`) - its part of
+    the landlord, or an owned blank. When the landlord LEAVES the row (the name
+    withdrawn, the premises no longer a tenancy), only a box still showing what
+    the landlord put there is cleared: anything else in the row is not ours.
+    `before` is the facts as they stood before the answer. Returns the form ids
+    it changed. Never raises."""
+    touched: List[str] = []
+    try:
+        from services.pdf_service import (
+            _LANDLORD_BOX_PART, _LANDLORD_ROW_RE, display_value_for_box, landlord_interest_row,
+        )
+        form = (generated or {}).get("ACORD_125")
+        if not isinstance(form, dict):
+            return touched
+        old = landlord_interest_row({**(before or {}), "_form_id": "ACORD_125"}) if before else None
+        new = landlord_interest_row({**(after or {}), "_form_id": "ACORD_125"})
+        if old is None and new is None:
+            return touched
+        schema = form.get("schema") or {}
+        state = form.get("field_state") or form.get("mapped") or {}
+        conf = form.get("confidence") or {}
+        cff = set(form.get("client_filled_fields") or [])
+
+        def _shown(row: Optional[dict], box: str, base: str) -> str:
+            part = _LANDLORD_BOX_PART.get(base)
+            val = (row or {}).get(part) if part else None
+            return str(display_value_for_box("ACORD_125", box, val) or "").strip() if val else ""
+
+        changed = False
+        for box in sorted(b for b in schema if _LANDLORD_ROW_RE.match(b)):
+            base = _LANDLORD_ROW_RE.match(box).group("base")
+            current = str(state.get(box) or "").strip()
+            if new is not None:
+                target = _shown(new, box, base)
+            else:
+                mine = _shown(old, box, base)
+                if not mine or current != mine:
+                    continue                  # not the landlord's value - leave it
+                target = ""
+            if target == current:
+                continue
+            state[box] = target
+            if target:
+                conf[box] = provenance if provenance in ("producer", "client_arq") else "filled"
+                _mark_client_filled(cff, box, provenance)
+            else:
+                conf.pop(box, None)
+                cff.discard(box)
+            changed = True
+        if changed:
+            form["field_state"] = state
+            form["confidence"] = conf
+            form["client_filled_fields"] = list(cff)
+            form["_pdf_cache_hash"] = ""
+            form["pdf_bytes"] = None
+            touched.append("ACORD_125")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("landlord refresh skipped: %s", exc)
+    return touched
+
+
+def _mark_client_filled(cff: set, schema_field: str, provenance: str) -> None:
+    """Only a CLIENT answer belongs on the client-filled list; any other
+    supplier's value for the same box takes it off (it replaced the client's)."""
+    if provenance == "client_arq":
+        cff.add(schema_field)
+    else:
+        cff.discard(schema_field)
+
+
+def _answer_provenance(facts: Optional[dict], fact_key: str) -> str:
+    """The box label for a value copied from `fact_key`: "client_arq" or
+    "producer" when that person supplied the fact, else "filled" - a value the
+    documents gave, exactly as generation labels it."""
+    held = (facts or {}).get(fact_key)
+    src = str(held.get("source") or "").lower() if isinstance(held, dict) else ""
+    return src if src in ("client_arq", "producer") else "filled"
 
 
 def _restamp_schedule_into_forms(
@@ -4697,6 +4999,10 @@ def _restamp_schedule_into_forms(
     except Exception as ex:  # pragma: no cover - defensive
         logger.warning(f"_restamp_schedule: pdf_service import failed: {ex}")
         return []
+    try:
+        from services.pdf_service import premises_twin_fact
+    except Exception:                                         # pragma: no cover
+        premises_twin_fact = None
 
     touched_forms: List[str] = []
     for fid, form_data in generated.items():
@@ -4717,9 +5023,26 @@ def _restamp_schedule_into_forms(
                 continue
             val = "" if (val is None or str(val).strip() == "") else val
 
-            if str(field_state.get(schema_field) or "").strip() != str(val).strip():
+            _changed = str(field_state.get(schema_field) or "").strip() != str(val).strip()
+            if _changed:
                 field_state[schema_field] = val
                 form_touched = True
+
+            # A ONE-PREMISES box copies a BUSINESS fact (`total_revenue`,
+            # `premises_interest`), not a cell of the table just saved, so it is
+            # labelled by whoever supplied that fact - a document's revenue is
+            # never relabelled as the client's - and an unchanged box keeps its
+            # label (29 Sep 2026, pdf_service._ONE_PREMISES_TWINS).
+            _twin = premises_twin_fact(schema_field, _ctx) if premises_twin_fact else None
+            if _twin:
+                if not val:
+                    conf.pop(schema_field, None)
+                    cff.discard(schema_field)
+                elif _changed:
+                    _label = _answer_provenance(facts, _twin)
+                    conf[schema_field] = _label
+                    _mark_client_filled(cff, schema_field, _label)
+                continue
 
             if val:
                 conf[schema_field] = "client_arq"
@@ -4845,7 +5168,7 @@ def _clear_orphaned_schedule_rows(
 
 
 # ASYNC-SAFE
-def _rederive_answer_dependent_facts(facts: dict) -> None:
+def _rederive_answer_dependent_facts(facts: dict) -> List[str]:
     """Facts the merge derives from other facts, re-derived once an answer
     lands (15 Sep 2026). The client is now asked only for the business start
     date, so the years in business must follow the answered date instead of
@@ -4861,10 +5184,18 @@ def _rederive_answer_dependent_facts(facts: dict) -> None:
             _derive_years_in_business(probe)
             if probe.get("years_in_business"):
                 facts["years_in_business"] = probe["years_in_business"]
-            return
-        _derive_years_in_business(facts)
+        else:
+            _derive_years_in_business(facts)
     except Exception as exc:                                 # noqa: BLE001
         logger.warning("answer re-derivation skipped: %s", exc)
+    changed: List[str] = []
+    try:
+        from services.extraction_service import follow_proposed_expiration
+        if follow_proposed_expiration(facts):
+            changed.append("expiration_date")
+    except Exception as exc:                                 # noqa: BLE001
+        logger.warning("proposed-expiration follow skipped: %s", exc)
+    return changed
 
 
 async def apply_arq_answers_to_session(
@@ -4898,6 +5229,7 @@ async def apply_arq_answers_to_session(
 
     generated = proc_session.get("generated_forms", {})
     facts     = dict(proc_session.get("facts", {}) or {})
+    _facts_before_answers = dict(facts)      # the landlord row's "before" (G2)
     # E&O 5.8/5.9: client-questionnaire writes were the largest unlogged
     # mutation path (found 2026-08-26) - facts overwritten with no before/after
     # anywhere. Changes are collected here and written to field_source_audit
@@ -5196,7 +5528,17 @@ async def apply_arq_answers_to_session(
         facts["_client_answer_conflicts"] = held_conflicts
     else:
         facts.pop("_client_answer_conflicts", None)
-    _rederive_answer_dependent_facts(facts)
+    for _dk in _rederive_answer_dependent_facts(facts):
+        for _fid in _restamp_canonical_into_forms(generated, _dk, facts, provenance="filled"):
+            if _fid not in updated:
+                updated.append(_fid)
+    # The client's landlord prints on ACORD 125's additional-interest row at once
+    # (G2, 30 Sep 2026); a held (contradicting) answer never reached `facts`.
+    if any(_canonical_key(str(_f)) in _LANDLORD_ROW_FACTS for _f in (answers or {})):
+        for _fid in _refresh_acord125_landlord(generated, _facts_before_answers, facts,
+                                               "client_arq"):
+            if _fid not in updated:
+                updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts,
                        "client_answer_conflicts": held_conflicts}
     if flags_changed:
@@ -5405,6 +5747,18 @@ async def get_session_schedules(
             # endpoint - it just contributes nothing.
             logger.warning("get_session_schedules: %s schema unreadable: %s", fid, _sx)
 
+    # ── A TABLE A CARD OFFERS IS ALWAYS SERVED (client, 22 Sep, item 6) ────
+    # The rules above decide relevance from FORMS. The legacy engine raises
+    # "Driver schedule not provided" from the auto LINE (`has_auto_coverage`),
+    # whatever forms are chosen, and its card opens the `auto_drivers` table.
+    # Live 28 Sep (session 8992d874, ACORD 125 chosen alone): the card was on
+    # screen and this endpoint served nothing, so the modal said "This schedule
+    # is not available for the current forms." - the BUG-05 shape again. The
+    # session's own issues record which table each card opens, so read them
+    # instead of re-deriving the rule that raised them: whatever a card offers,
+    # the server serves. It can only ADD a table a card already names.
+    offered = _schedules_offered_by_issues(proc)
+
     out: List[dict] = []
     for list_key, defn in schedule_capture.SCHEDULE_DEFS.items():
         if only_key and list_key != only_key:
@@ -5413,7 +5767,7 @@ async def get_session_schedules(
             list_key, schedule_capture.rows_from_facts(list_key, facts),
         )
         form_ids = sorted(relevant.get(list_key, set()))
-        if not form_ids and not rows:
+        if not form_ids and not rows and list_key not in offered:
             continue
         out.append({
             "schedule_key":      list_key,
@@ -5433,6 +5787,28 @@ async def get_session_schedules(
             })),
         })
     return out
+
+
+def _schedules_offered_by_issues(proc: dict) -> set:
+    """The schedule tables the session's stored issues open ("Open to fix").
+
+    Reads the resolution each issue carries; an issue stored without one (an
+    older session) is looked up by its rule code, the same door that attached
+    it in the first place."""
+    keys: set = set()
+    for issue in (proc.get("structured_issues") or []):
+        if not isinstance(issue, dict):
+            continue
+        res = issue.get("resolution")
+        if not isinstance(res, dict):
+            try:
+                from services.issue_registry import resolution_for
+                res = resolution_for(issue.get("code")) or {}
+            except Exception:                                      # noqa: BLE001
+                res = {}
+        if res.get("mode") == "schedule" and res.get("schedule_key"):
+            keys.add(str(res["schedule_key"]))
+    return keys
 
 
 # ASYNC-SAFE
@@ -5595,6 +5971,7 @@ async def apply_producer_answer_to_session(
     # ANSWERED for completeness but as NO VALUE for every semantic check, so
     # "None" can neither be penalised as a gap nor mistaken for a carrier name.
     # The producer's own words survive on the envelope as `answer_text`.
+    _facts_before_answer = dict(facts)
     try:
         from services.answer_semantics import build_fact_envelope, interpret_answer
         _interp = interpret_answer(canon, new_val)
@@ -5609,7 +5986,26 @@ async def apply_producer_answer_to_session(
 
     # Stamp the confirmed value into every generated form whose schema carries it
     # (same deterministic engine used by the initial fill and the ARQ apply path).
-    _stamped = _restamp_canonical_into_forms(generated, canon, facts)
+    # The PRODUCER typed this, so the boxes say so (not the client's green).
+    _stamped = _restamp_canonical_into_forms(generated, canon, facts,
+                                             provenance="producer")
+    # The carrier this submission goes to decides ACORD 125 page one (29 Sep
+    # 2026, Orbin item 8): re-read the page-one verdict and refresh its boxes
+    # now, so a new market never prints beside the current policy's premiums.
+    _page_one_gone: List[str] = []
+    if canon == "submission_carrier_name":
+        _flags_before = {k for k in _PAGE_ONE_FLAGS if k in facts}
+        _stamped = list(_stamped) + _refresh_acord125_page_one(
+            generated, facts, (proc_session or {}).get("docs"))
+        # The facts merge is additive: a flag the verdict dropped must be
+        # DELETED, or the stored copy survives the save.
+        _page_one_gone = sorted(k for k in _flags_before if k not in facts)
+    # A tenant's landlord prints on ACORD 125's additional-interest row the
+    # moment it is answered (G2, 30 Sep 2026) - the row is not keyed by these
+    # facts, so the canonical restamp above cannot reach it.
+    if canon in _LANDLORD_ROW_FACTS:
+        _stamped = list(_stamped) + _refresh_acord125_landlord(
+            generated, _facts_before_answer, facts, "producer")
     for _fid in _stamped:
         if _fid not in updated:
             updated.append(_fid)
@@ -5646,14 +6042,17 @@ async def apply_producer_answer_to_session(
     if field_name not in updated:
         updated.append(field_name)
 
-    _rederive_answer_dependent_facts(facts)
+    for _dk in _rederive_answer_dependent_facts(facts):
+        for _fid in _restamp_canonical_into_forms(generated, _dk, facts, provenance="filled"):
+            if _fid not in updated:
+                updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts}
     if flags_changed:
         _update_payload["flags"] = flags
     # D18: a stale derivation is REMOVED with delete_facts, never by popping it
     # out of `facts` - the merge is additive and a pop is a silent no-op.
     await upd_processing_session(processing_session_id, _update_payload,
-                                 delete_facts=_nv_delete or None)
+                                 delete_facts=(list(_nv_delete) + _page_one_gone) or None)
     logger.info(
         f"Producer answer applied: session={processing_session_id} "
         f"field={field_name} canon={canon} forms={_stamped}"
@@ -5729,7 +6128,8 @@ async def append_producer_narrative(
     )
 
 
-def _clear_canonical_from_forms(generated: dict, canon: str) -> List[str]:
+def _clear_canonical_from_forms(generated: dict, canon: str,
+                                facts: Optional[dict] = None) -> List[str]:
     """Blank every generated-form field that a producer's answer for `canon`
     previously stamped - the reverse of _restamp_canonical_into_forms's write.
 
@@ -5746,6 +6146,20 @@ def _clear_canonical_from_forms(generated: dict, canon: str) -> List[str]:
     data the client's documents actually provided - it can only undo what a
     producer typed through this exact flow.
     """
+    # The one-premises twins (29 Sep 2026): ACORD 125's row-A revenue and
+    # interest boxes carry `total_revenue` / `premises_interest` by a twin, not
+    # a rule, so `_canonical_key` cannot find them. `facts` (the session's, as
+    # they stood before the retraction) says whether the twin applies on this
+    # package - one location, the row's own value blank - so a row's own value
+    # on a multi-location package is never reached. Still only a box an answer
+    # path wrote.
+    premises_twin_fact = None
+    if isinstance(facts, dict):
+        try:
+            from services.pdf_service import premises_twin_fact
+        except Exception:                                     # pragma: no cover
+            premises_twin_fact = None
+
     touched_forms: List[str] = []
     for fid, form_data in generated.items():
         schema = form_data.get("schema", {}) or {}
@@ -5757,7 +6171,11 @@ def _clear_canonical_from_forms(generated: dict, canon: str) -> List[str]:
         form_touched = False
 
         for schema_field in schema.keys():
-            if _canonical_key(schema_field) != canon:
+            # Same box set the restamp writes to (`_canonical_keys_for`), so a
+            # reopened answer clears every box its answer filled.
+            if canon not in _canonical_keys_for(schema_field) and not (
+                    premises_twin_fact
+                    and premises_twin_fact(schema_field, facts, fid) == canon):
                 continue
             if conf.get(schema_field) not in ("producer", "client_arq"):
                 continue
@@ -5817,7 +6235,9 @@ async def clear_producer_answer_from_session(
         return False, []
 
     generated = proc_session.get("generated_forms", {}) or {}
-    cleared = _clear_canonical_from_forms(generated, canon)
+    # `facts` still holds the answer being retracted - the one-premises twin
+    # test reads the location count and the row, never the answer's value.
+    cleared = _clear_canonical_from_forms(generated, canon, facts)
 
     # Retract the flags apply_producer_answer_to_session derived FROM this answer -
     # a conclusion must not outlive the premise it was drawn from. Popped rather
@@ -5827,6 +6247,7 @@ async def clear_producer_answer_from_session(
     flags = dict(proc_session.get("flags", {}) or {})
     flags_changed = False
     _also_delete: List[str] = []
+    _page_one_set: dict = {}
     if canon == NO_LOSS_INDICATOR_FIELD:
         flags_changed = flags.pop("no_prior_losses", None) is not None
     elif canon == CARRIER_MARKETING_FIELD:
@@ -5849,7 +6270,37 @@ async def clear_producer_answer_from_session(
         except Exception as exc:                              # noqa: BLE001
             logger.warning("new-venture derivation retraction skipped: %s", exc)
 
+    elif canon == "effective_date":
+        # The expiration that FOLLOWED this answer (29 Sep 2026) goes with it;
+        # one the documents or the merge's own routing gave stays (review).
+        _exp = facts.get("expiration_date")
+        if isinstance(_exp, dict) and (_exp.get("derivation") or {}).get("rule") \
+                == "proposed_expiration_follows_effective":
+            _also_delete.append("expiration_date")
+            for _fid in _clear_canonical_from_forms(generated, "expiration_date", facts):
+                if _fid not in cleared:
+                    cleared.append(_fid)
+    elif canon == "submission_carrier_name":
+        # Page one is re-judged without the producer's carrier (29 Sep 2026): its
+        # box is not keyed by this fact, so the canonical clear above misses it.
+        _facts_after = {k: v for k, v in facts.items() if k != canon}
+        for _fid in _refresh_acord125_page_one(generated, _facts_after,
+                                               proc_session.get("docs")):
+            if _fid not in cleared:
+                cleared.append(_fid)
+        _page_one_set = {k: _facts_after[k] for k in _PAGE_ONE_FLAGS if k in _facts_after}
+        _also_delete += [k for k in _PAGE_ONE_FLAGS if k in facts and k not in _facts_after]
+    elif canon in _LANDLORD_ROW_FACTS:
+        # The landlord's additional-interest row is not keyed by these facts
+        # either (G2, 30 Sep 2026): re-judge it without the withdrawn answer.
+        _facts_after = {k: v for k, v in facts.items() if k != canon}
+        for _fid in _refresh_acord125_landlord(generated, facts, _facts_after, "producer"):
+            if _fid not in cleared:
+                cleared.append(_fid)
+
     _update_payload = {"generated_forms": generated}
+    if canon == "submission_carrier_name" and _page_one_set:
+        _update_payload["facts"] = _page_one_set
     if flags_changed:
         _update_payload["flags"] = flags
     # delete_facts, not {"facts": facts}: the facts merge is additive and would
@@ -5882,6 +6333,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         evaluate_stops, calculate_sqs, calculate_sqs_from_facts,
         calculate_package_sqs, _check_loss_run_insured_match, check_tier2,
         _extract_narrative_doc_text, doc_consistency_stops,
+        is_pre_form_session, score_package_pre_generation,
     )
     from services.extraction_service import _fv as _sqs_fv
     from services.cross_form_validator import (
@@ -5898,6 +6350,11 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     flags        = proc.get("flags", {}) or {}
     generated    = proc.get("generated_forms", {}) or {}
     selected_ids = proc.get("selected_form_ids") or list(generated.keys())
+    # The pre-form Review screen: nothing generated, nothing selected. Scored
+    # below through the SAME recipe its every response and reload read
+    # (`sqs_service.score_package_pre_generation`). Clarity / Lite (selected
+    # ids, no forms) and everything post-generation are untouched.
+    _pre_form    = is_pre_form_session(proc)
     # Recompute Tier-2 data completeness from the post-remediation facts rather than
     # reusing the extraction-time value stored on the session, so the per-form
     # scorers receive the current value (mirrors how package SQS recomputes it).
@@ -5982,6 +6439,8 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         sqs_list = [f.get("sqs") for f in generated.values() if f.get("sqs")]
     else:
         # Clarity/Lite path — no generated forms; score directly from facts.
+        # Pre-form, `selected_ids` is empty, so this list stays empty exactly
+        # as before (the auto-resolve pass below reads it unchanged).
         sqs_list = []
         for fid in selected_ids:
             try:
@@ -5996,13 +6455,37 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
             except Exception as ex:
                 logger.error(f"recalc facts SQS failed for {fid}: {ex}")
 
+    # True only when THIS call scored the package (no fallback below). Lets a
+    # pre-form route reuse the fresh door-recipe score instead of scoring the
+    # same row a second time.
+    _package_rescored = False
     try:
-        package_sqs = calculate_package_sqs(
-            facts=facts, flags=flags, form_results=sqs_list,
-            cross_issues=cf_deduped, hard_stops=hard_stops, soft_stops=soft_stops,
-            session_data=proc, session_id=processing_session_id, user_id=user_id,
-            calculation_stage="arq_remediated",
-        )
+        if _pre_form:
+            # ONE RECIPE BEFORE FORMS EXIST (29 Sep 2026, Orbin 22 Sep item 2).
+            # The Review screen prints this number ("so far"), and every
+            # pre-form response and reload computes it through
+            # `current_package_sqs` -> `score_package_pre_generation`. This
+            # branch used to fall through to the 3.7 no-form call below, a
+            # DIFFERENT recipe (no recommended-form scoring, the cross issues
+            # of an empty form set), so an unrelated Apply moved the number a
+            # point or two and a reload moved it back (Orbin: 60 vs 61).
+            # Scored on the row as this recalculation leaves it - the same
+            # facts and flags, the stop lists rebuilt above - so the persisted
+            # score is exactly what the door recomputes from the saved row.
+            package_sqs = score_package_pre_generation(
+                {**proc, "facts": facts, "flags": flags,
+                 "hard_stops": hard_stops, "soft_stops": soft_stops},
+                processing_session_id, user_id,
+                calculation_stage="arq_remediated",
+            )
+        else:
+            package_sqs = calculate_package_sqs(
+                facts=facts, flags=flags, form_results=sqs_list,
+                cross_issues=cf_deduped, hard_stops=hard_stops, soft_stops=soft_stops,
+                session_data=proc, session_id=processing_session_id, user_id=user_id,
+                calculation_stage="arq_remediated",
+            )
+        _package_rescored = True
     except Exception as ex:
         logger.error(f"recalc package SQS failed: {ex}", exc_info=True)
         package_sqs = proc.get("package_sqs")
@@ -6023,9 +6506,18 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         from services.audit_service import active_score_credits
         from services.sqs_service import _resolve_cap, apply_credits_to_score
 
-        _credits_total, _credit_rows = await active_score_credits(
-            processing_session_id, facts=facts,
-        )
+        if _pre_form:
+            # NOT BEFORE FORMS EXIST (29 Sep 2026). The pre-form number is the
+            # door's (`current_package_sqs`), which never applies a credit: the
+            # cards that earn one are shown only in the editor. Crediting here
+            # would persist a number no reload can reproduce - the very jump
+            # this branch exists to end. An outstanding credit is not lost: the
+            # first post-generation recalculation or edit re-applies it.
+            _credits_total, _credit_rows = 0, []
+        else:
+            _credits_total, _credit_rows = await active_score_credits(
+                processing_session_id, facts=facts,
+            )
         if _credits_total:
             # Per-form ceiling uses FIELD-LEVEL stops only; the package ceiling
             # adds the cross-form stops. Same split the scorers themselves use.
@@ -6157,68 +6649,20 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     except Exception as _snap_ex:                              # noqa: BLE001
         logger.warning("ARQ recalc: sqs snapshot skipped: %s", _snap_ex)
 
-    # §6.2 / AC2: auto-resolve open recommendation audit records whose underlying
-    # issue was cleared during this recalculation. After the SQS recompute, each
-    # form's recommendations list contains only still-active issues with stable
-    # rec_ids (e.g. "rec_applicant_name"). Any open audit record not in that set
-    # means the client's answers resolved the gap — mark it resolved automatically
-    # so the producer's recommendation panel stays in sync with the score.
-    try:
-        from services.audit_service import get_open_recommendations, mark_recommendation_resolved
-        from services.sqs_service import SQS_MODEL_VERSION
-        active_rec_ids: set = set()
-        for _fdata in generated.values():
-            for _rec in ((_fdata.get("sqs") or {}).get("recommendations") or []):
-                if isinstance(_rec, dict) and _rec.get("rec_id"):
-                    active_rec_ids.add(_rec["rec_id"])
-        for _sqs_item in sqs_list:
-            for _rec in (_sqs_item.get("recommendations") or []):
-                if isinstance(_rec, dict) and _rec.get("rec_id"):
-                    active_rec_ids.add(_rec["rec_id"])
-        # include_acknowledged=True, and the reason is a live defect (2026-08-17).
-        # The default is `action IS NULL`, so the moment a producer clicks
-        # "Download Anyway" every acknowledged card is stamped
-        # action='downloaded_anyway' and disappears from this sweep FOREVER.
-        # After that the card can never be auto-resolved - and it is not in
-        # "Reviewed" either, which requires 'dismissed' or 'resolved'. So an
-        # answered recommendation sat stranded: the fact landed, the score moved
-        # (owner's run: package 68 -> 73), and the card still rendered as open
-        # with an empty box inviting a second answer.
-        #
-        # Safe because resolution is still decided by evidence, not by this
-        # flag: the loop below only marks a row resolved when its rec_id is
-        # ABSENT from the freshly recomputed recommendations. A gap that is
-        # still live stays live. "Download Anyway" acknowledges a gap; it must
-        # not make that gap permanently unfixable.
-        _open_recs = await get_open_recommendations(
-            processing_session_id, include_acknowledged=True)
-        _score_at_resolve = (package_sqs or {}).get("package_sqs_score") or 0
-        _auto_resolved = 0
-        for _orec in _open_recs:
-            _rid = _orec.get("rec_id")
-            # Only SQS-engine recommendations are auto-resolved here. Field-QA
-            # ('fieldqa_') and field-mapping-integrity ('fieldmap_') advisory
-            # rows are NOT SQS recs - they never appear in active_rec_ids, and
-            # are managed by their own DELETE+rebuild refresh on generation/edit.
-            # Auto-resolving them here would silently clear a live contamination
-            # warning the moment a client answers any questionnaire item.
-            if _rid and (_rid.startswith("fieldmap_") or _rid.startswith("fieldqa_")):
-                continue
-            if _rid and _rid not in active_rec_ids:
-                await mark_recommendation_resolved(
-                    session_id=processing_session_id,
-                    rec_id=_rid,
-                    sqs_score_at_action=_score_at_resolve,
-                    model_version=SQS_MODEL_VERSION,
-                )
-                _auto_resolved += 1
-        if _auto_resolved:
-            logger.info(
-                f"ARQ recalc {processing_session_id}: auto-resolved "
-                f"{_auto_resolved} cleared recommendation(s)"
-            )
-    except Exception as _auto_resolve_ex:
-        logger.error(f"ARQ recalc: auto-resolve step failed (non-fatal): {_auto_resolve_ex}")
+    # §6.2 / AC2 + 1 Oct 2026: the stored cards follow the forms, through the one
+    # door (`audit_service.sync_recommendation_cards`). A card cleared by these
+    # answers is resolved; a card they RAISED - the landlord cards after a
+    # "Tenant" answer - is recorded, so the download review and the cover list
+    # it (it used to reach only the side panel); a card the system closed that is
+    # live again is reopened. Acknowledged ("Download Anyway") cards are still
+    # resolved when their gap closes: acknowledging a gap must not make it
+    # unfixable (2026-08-17). Field-QA / field-mapping rows keep their own refresh.
+    from services.audit_service import sync_recommendation_cards
+    from services.sqs_service import SQS_MODEL_VERSION
+    await sync_recommendation_cards(
+        processing_session_id, user_id, sqs_list, SQS_MODEL_VERSION,
+        score_at_action=(package_sqs or {}).get("package_sqs_score") or 0,
+    )
 
     score_after = (package_sqs or {}).get("package_sqs_score")
     delta = (score_after - score_before) if (score_before is not None and score_after is not None) else 0
@@ -6341,24 +6785,187 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         # diff could not be computed, so the UI can tell "nothing changed" apart
         # from "we don't know".
         "issue_diff":           issue_diff,
+        # The persisted package_sqs is THIS call's fresh score (not the fallback
+        # to the previous one). Before forms exist that is the door's own
+        # recipe, so resolve / reopen reuse it rather than score twice.
+        "package_rescored":     _package_rescored,
     }
 
 
+# ── Questions answered vs details checked (1 Oct 2026, Orbin point Q) ──────
+# The producer's receipt read "21 answered · 25 asked", the status panel and
+# the activity log counted a confirmation as an answer, and the audit export
+# printed "(of 25 asked)" - while the client's own summary said "21 of 21
+# questions answered" because it counts a `confirm` item ("We have this on
+# file - is it right?") apart, as CHECKED whether confirmed or corrected
+# (ClientQuestionnaire.buildReceipt). These are that definition, server side,
+# for every producer-facing count. What counts as a response is the receipt's
+# own classification (arq_receipt_service.build_receipt_payload).
+_RESPONDED_KINDS = frozenset({"answer", "schedule", "confirmed"})
+
+
+def _plural(n: int, word: str) -> str:
+    return word if n == 1 else f"{word}s"
+
+
+def response_counts(questions: Optional[Iterable[dict]],
+                    items: Optional[Iterable[dict]]) -> dict:
+    """Split a questionnaire's receipt items into real questions and check items.
+
+    `questions` is the list the client was shown (its `confirm` flags mark the
+    check items); `items` is the receipt's per-question list. Without the
+    questions (a receipt whose questionnaire row is gone) only a confirmed item
+    is known to be a check."""
+    confirm_fields = {
+        q.get("field_name") for q in (questions or [])
+        if isinstance(q, dict) and q.get("confirm") and q.get("field_name")
+    }
+    known = bool(questions)
+    q_asked = q_answered = c_asked = c_done = not_sure = 0
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        kind = it.get("kind")
+        is_check = (it.get("field_name") in confirm_fields if known
+                    else kind == "confirmed")
+        responded = kind in _RESPONDED_KINDS
+        if is_check:
+            c_asked += 1
+            c_done += int(responded)
+        else:
+            q_asked += 1
+            q_answered += int(responded)
+            not_sure += int(kind == "not_sure")
+    return {
+        "questions_asked":    q_asked,
+        "questions_answered": q_answered,
+        "checks_asked":       c_asked,
+        "checks_done":        c_done,
+        "not_sure_count":     not_sure,
+        "response_summary":   response_summary_text(q_answered, q_asked, c_done, c_asked),
+    }
+
+
+def response_summary_text(q_answered: int, q_asked: int,
+                          c_done: int, c_asked: int) -> str:
+    """"21 of 21 questions answered - 0 of 4 details checked". A part with
+    nothing asked is left out."""
+    parts = []
+    if q_asked:
+        parts.append(f"{q_answered} of {q_asked} {_plural(q_asked, 'question')} answered")
+    if c_asked:
+        parts.append(f"{c_done} of {c_asked} {_plural(c_asked, 'detail')} checked")
+    return " - ".join(parts)
+
+
+def response_counts_for_arq(arq: Optional[dict]) -> dict:
+    """`response_counts` for one questionnaire row (decoded or raw), classified
+    exactly as its receipt is. Never raises: {} when the row cannot be read."""
+    try:
+        from services.arq_receipt_service import build_receipt_payload
+        row = _decode_arq_row(dict(arq or {}))
+        payload = build_receipt_payload(row)
+        return response_counts(row.get("questions"), payload.get("items"))
+    except Exception as ex:                                   # noqa: BLE001
+        logger.warning("response counts unavailable for arq %s: %s",
+                       (arq or {}).get("id"), ex)
+        return {}
+
+
+# ── Which boxes are the client's NOW (1 Oct 2026, Orbin item 17) ───────────
+# The label a client answer leaves on a box with a value...
+_CLIENT_VALUE_LABEL = "client_arq"
+# ...and the fill-rate labels a client ABSENCE leaves on the blank box it
+# stamps ("None" -> explicit_no, "N/A" -> not_applicable; see
+# apply_arq_answers_to_session). Those labels are also written by the
+# documents' own fact states, so they count as the client's only on a box the
+# form's own client list holds.
+_CLIENT_ABSENCE_LABELS = frozenset({"explicit_no", "not_applicable"})
+
+
+def _box_value(form_data: dict, box: str) -> str:
+    state = form_data.get("field_state") or form_data.get("mapped") or {}
+    v = state.get(box) if isinstance(state, dict) else None
+    s = "" if v is None else str(v).strip()
+    return "" if s in ("null", "None") else s
+
+
+def current_client_boxes(form_data: Optional[dict]) -> List[str]:
+    """The boxes on ONE generated form whose current value is still the
+    client's - the green "Client" boxes.
+
+    The viewer used to be fed every answer KEY of every submitted
+    questionnaire, never pruned, so a box the producer retyped stayed green
+    "Client" (client, 22 Sep, item 17). A box is the client's only while its
+    label says so: `client_arq` over a value, or a client absence label over a
+    blank box the form's client list holds. A box another writer has since
+    labelled (`producer`, a document's `filled`, the AI's labels), a client box
+    the producer cleared, and an answer key that is no box on this form (the
+    canonical `total_revenue`, `schedule::...`) are not."""
+    if not isinstance(form_data, dict):
+        return []
+    conf = form_data.get("confidence") or {}
+    if not isinstance(conf, dict):
+        return []
+    listed = set(form_data.get("client_filled_fields") or [])
+    schema = form_data.get("schema") or {}
+    out = []
+    for box in sorted(listed | {b for b, l in conf.items() if l == _CLIENT_VALUE_LABEL}):
+        if isinstance(schema, dict) and schema and box not in schema:
+            continue
+        label = conf.get(box)
+        if label == _CLIENT_VALUE_LABEL:
+            if _box_value(form_data, box):
+                out.append(box)
+        elif label in _CLIENT_ABSENCE_LABELS and box in listed:
+            out.append(box)
+    return out
+
+
+def client_filled_by_form(generated_forms: Optional[dict]) -> dict:
+    """{form_id: [box, ...]} - `current_client_boxes` for every form."""
+    return {
+        fid: current_client_boxes(fd)
+        for fid, fd in (generated_forms or {}).items()
+        if isinstance(fd, dict)
+    }
+
+
+def client_filled_union(generated_forms: Optional[dict]) -> List[str]:
+    """One list for a viewer that does not say which form it shows.
+
+    A box name is shared across forms (NamedInsured_FullName_A is on most of
+    them), so a box the client owns on one form and someone else filled on
+    another is LEFT OUT: listed, it would paint the other form's value green.
+    Nothing is lost on the client's own form - its `client_arq` label paints
+    the box green there by itself."""
+    by_form = client_filled_by_form(generated_forms)
+    mine = {b for boxes in by_form.values() for b in boxes}
+    others = set()
+    for fid, fd in (generated_forms or {}).items():
+        if not isinstance(fd, dict):
+            continue
+        own = set(by_form.get(fid) or [])
+        for box in mine - own:
+            if _box_value(fd, box):
+                others.add(box)
+    return sorted(mine - others)
+
+
 # ASYNC-SAFE
-async def get_client_filled_fields(processing_session_id: str) -> List[str]:
-    async with get_pool().acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT answers FROM arq_sessions WHERE session_id=$1 AND status='submitted'",
-            processing_session_id,
-        )
-    fields = []
-    for row in rows:
-        answers = row["answers"]
-        if isinstance(answers, str):
-            answers = json.loads(answers)
-        if isinstance(answers, dict):
-            fields.extend(answers.keys())
-    return list(set(fields))
+async def get_client_filled_fields(processing_session_id: str,
+                                   proc_session: Optional[dict] = None,
+                                   form_id: Optional[str] = None) -> List[str]:
+    """The boxes the viewer paints green "Client", read off the forms as they
+    stand - never off the questionnaire answers (1 Oct 2026, item 17). With
+    `form_id`, that form's own list; without it, `client_filled_union`."""
+    if proc_session is None:
+        from repositories.session_repository import get_processing_session
+        proc_session = await get_processing_session(processing_session_id)
+    generated = (proc_session or {}).get("generated_forms") or {}
+    if form_id:
+        return current_client_boxes(generated.get(form_id))
+    return client_filled_union(generated)
 
 
 # ASYNC-SAFE

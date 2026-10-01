@@ -1755,12 +1755,13 @@ body {
 }
 
 /* ==================== TIER 2 BAR ==================== */
-/* Current Submission Readiness card on the Review step, directly above the
-   Submission integrity card - white surface + neutral border deliberately
-   mirror that card so the two read as one pair (client feedback item 11).
-   V1 H2 (2026-08-27): no percentage and no bar any more - a status label
-   (Submission Ready / Almost There / Needs Work / Major Gaps / Not Ready)
-   plus the "Key details in place" / "Key details missing" lines. */
+/* Submission Quality Score so far card on the Review step (classic layout),
+   directly above the Submission integrity card - white surface + neutral
+   border deliberately mirror that card so the two read as one pair (client
+   feedback item 11). V1 H2 (2026-08-27): no Tier 2 percentage and no bar.
+   Orbin item 2 (29 Sep 2026): the package SQS number and tier "so far"
+   ("61 / 100 - Major Gaps"), a line saying it can change when forms are
+   generated, then the "Key details in place" / "Key details missing" lines. */
 .tier2-bar {
   background: #fff;
   border: 1.5px solid #e2e8f0;

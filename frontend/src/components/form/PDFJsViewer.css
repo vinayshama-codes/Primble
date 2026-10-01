@@ -1,0 +1,80 @@
+/* Form viewer - Orbin 22 Sep item 10 (30 Sep 2026).
+   Client: "Make Edit button WAY more obvious because testers were missing it."
+   The Edit button is the one filled, primary-colour button in the viewer
+   toolbar and the largest one at every width. App.css shrinks every toolbar
+   button with !important on tablets and phones; the rules below out-rank it
+   for this one button only (class + class, also !important). */
+
+.pdfviewer-edit-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid #E61B84;
+  background: #E61B84;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(230, 27, 132, 0.35);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.pdfviewer-edit-btn:hover:not(:disabled) {
+  background: #C0157A;
+  border-color: #C0157A;
+  box-shadow: 0 2px 14px rgba(230, 27, 132, 0.5);
+}
+.pdfviewer-edit-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+/* While editing, the same button saves: a ring says "you are in edit mode".
+   Smaller than "Edit form" (owner, 30 Sep 2026): in edit mode the toolbar
+   must stay on one line. */
+.pdfviewer-edit-btn.is-editing {
+  background: #C0157A;
+  border-color: #fff;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+}
+
+/* The view-mode hint under the toolbar: where to click to edit. */
+.pdfviewer-view-hint {
+  padding: 4px 14px;
+  background: rgba(230, 27, 132, 0.07);
+  border-bottom: 1px solid rgba(230, 27, 132, 0.18);
+  display: flex;
+  align-items: center;
+}
+.pdfviewer-view-hint > span {
+  color: #f9a8d4;
+  font-size: 11px;
+}
+
+/* Tablets and laptops up to 1366px: App.css sets every toolbar button to 9px. */
+@media (min-width: 768px) and (max-width: 1366px) {
+  .pdfviewer-toolbar-actions .pdfviewer-edit-btn {
+    font-size: 12px !important;
+    padding: 5px 12px !important;
+  }
+  .pdfviewer-toolbar-actions .pdfviewer-edit-btn.is-editing {
+    font-size: 11px !important;
+    padding: 4px 9px !important;
+  }
+}
+
+/* Phones: App.css sets every toolbar button to 11px / 5px 8px. */
+@media (max-width: 767px) {
+  .pdfviewer-toolbar-actions .pdfviewer-edit-btn {
+    font-size: 13px !important;
+    padding: 7px 14px !important;
+  }
+  .pdfviewer-toolbar-actions .pdfviewer-edit-btn.is-editing {
+    font-size: 12px !important;
+    padding: 5px 10px !important;
+  }
+}

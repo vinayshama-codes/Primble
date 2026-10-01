@@ -902,7 +902,63 @@ def key_details(facts: dict, flags: dict | None = None) -> dict:
     missing = list(t1_missing) + list(t2_missing)
     satisfied = [lbl for lbl in list(t1_applicable) + list(t2_applicable)
                  if lbl not in missing]
-    return {"satisfied": satisfied, "missing": missing}
+    return {"satisfied": satisfied, "missing": missing,
+            "missing_items": _key_detail_actions(facts or {}, flags or {})}
+
+
+def _key_detail_actions(facts: dict, flags: dict) -> List[dict]:
+    """Each missing key detail with the fix the pre-form screen can open for it
+    (Orbin 22 Sep item 9, owner 30 Sep 2026: "do the action, not just mention
+    it on the screen").
+
+    Read from the SAME entries as `missing`, in the same order, so the list and
+    the action can never disagree. The fix is `answer_routing`'s declaration -
+    the one door for "can a human answer this?" - shaped as the resolution the
+    pre-form screen's existing "Open to fix" window already speaks: typed facts
+    share one window (a NAICS-or-SIC pair asks both), a table opens its editor.
+    A detail no person can type (mode none) carries no `resolution`: it is
+    listed, never offered as a dead button. Additive: `missing` is unchanged."""
+    try:
+        from services.answer_routing import answer_mode, MODE_FIELD, MODE_SCHEDULE
+    except Exception:                                          # noqa: BLE001
+        return []
+    try:
+        entries = (list(_tier1_entries(facts, flags)[1])
+                   + list(_tier2_entries(facts)[1]))
+    except Exception:                                          # noqa: BLE001
+        return []
+    out: List[dict] = []
+    for keys, label in entries:
+        typed: List[str] = []
+        schedule_key = None
+        for key in keys:
+            try:
+                mode = answer_mode(key, facts) or {}
+            except Exception:                                  # noqa: BLE001
+                continue
+            if mode.get("mode") == MODE_FIELD and mode.get("fact"):
+                typed.append(str(mode["fact"]))
+            elif mode.get("mode") == MODE_SCHEDULE and mode.get("schedule_key") and not schedule_key:
+                schedule_key = str(mode["schedule_key"])
+        if typed:
+            resolution = {"mode": MODE_FIELD, "facts": list(dict.fromkeys(typed))}
+        elif schedule_key:
+            resolution = {"mode": MODE_SCHEDULE, "schedule_key": schedule_key}
+        else:
+            resolution = None
+        # Who normally answers it - the questionnaire's own taxonomy: a client
+        # fact can also be left for "Send to Client"; NAICS / SIC are the
+        # producer's or the underwriter's (client test PART 13, 12 Aug 2026).
+        audience = "client"
+        try:
+            from services.question_classifier import classify_question
+            if keys and (classify_question(keys[0], canonical_key=keys[0]) or {}).get("bucket") != "client":
+                audience = "agency"
+        except Exception:                                      # noqa: BLE001
+            pass
+        out.append({"label": label, "facts": list(keys), "resolution": resolution,
+                    "audience": audience})
+    return out
 
 
 def validate_effective_date_window(facts: dict) -> tuple | None:
@@ -2609,6 +2665,12 @@ CONFIDENCE_SCORE = {
     "deterministic":    1.00,    # not emitted per field today; kept for fact-level callers
     "filled":           1.00,    # the label pdf_service actually emits for deterministic fills
     "client_arq":       1.00,    # producer-/client-supplied via ARQ (form_routes)
+    # A value the PRODUCER supplied: a schedule saved from the producer's table
+    # (`save_session_schedule`) and, since 29 Sep, an answer typed on a card
+    # (`apply_producer_answer_to_session`). It had no weight, so every such box
+    # scored 0.00 in the fill rate - the ai_verified defect again, missed
+    # because the anti-rot harvest did not read arq_service (it does now).
+    "producer":         1.00,
     # AI-mapped fills. The verification split is pdf_service's own contract:
     #   found word-for-word in the documents -> "ai_verified"   (pink,   AI-OK)
     #   NOT found - a guess, or a claim we
@@ -2892,8 +2954,13 @@ _LOSS_RECOMMENDATION_FIELDS: Tuple[Tuple[str, Optional[str]], ...] = (
     # The attestation states. THIS is the pair the pillar actually reads.
     ("no known losses (stated in narrative)",           "loss_history_no_prior_losses_indicator"),
     ("no loss history provided",                        "loss_history_no_prior_losses_indicator"),
-    # Already attested - only a document can raise it further.
+    # Already attested - only a document can raise it further. Still emitted
+    # when the attestation is scored (a stale flag beside a "we have had
+    # claims" answer, or corroborated claims under the 45 conflict ceiling).
     ("no known losses (attested by user)",              None),
+    # Owner 29 Sep 2026 (Orbin item 15): the attestation took the pillar out of
+    # the score. Informational - nothing to fill, nothing to earn.
+    ("no known losses attested - loss history is not applicable", None),
     # Identity of the runs: whose are they, and do the identifiers line up.
     ("loss run insured name does not match",            "applicant_name"),
     ("loss run ownership partially verified",           "fein"),
@@ -3039,6 +3106,19 @@ def _pillar_rec_field(pillar: str, action: str) -> Optional[str]:
     return None
 
 
+def _premises_recommendations(facts, flags, mapped_data) -> List[dict]:
+    """ACORD 125's one-premises asks - its interest, then a tenant's landlord -
+    built by `services.premises_interest` (the one owner of those rules). Every
+    card is unscored and worth 0 points. Fails to no card, never to a broken
+    score."""
+    try:
+        from services.premises_interest import premises_recommendations
+        return premises_recommendations(facts, flags, mapped_data)
+    except Exception as _pi_ex:                               # noqa: BLE001
+        logger.warning("premises interest cards skipped: %s", _pi_ex)
+        return []
+
+
 def _route_recommendations(recs, facts=None):
     """Stamp every recommendation with the ONE answer mode the UI must render.
 
@@ -3084,6 +3164,40 @@ _NEW_VENTURE_CONFIRM_REC = (
     "of counting against the score."
 )
 
+# The notice an attested "No Known Losses" leaves when it takes Loss History
+# out of the score (owner decision 29 Sep 2026, Orbin item 15). Informational:
+# the per-form loop gives it impact 0 / priority 3, and its wording must stay
+# clear of `_loss_doc_phrases` so it never reads as "needs a document".
+_ATTESTED_NOT_APPLICABLE_REC = (
+    "No Known Losses attested - Loss History is Not Applicable and removed "
+    "from the score (remaining pillars rescale proportionally). A carrier may "
+    "still ask for a signed no-known-loss letter before binding."
+)
+# The other two routes to the same Not Applicable pillar (C2 2.2 and Brent's
+# 2026-08-24 under-a-year ruling) leave notices of the same kind.
+_NEW_VENTURE_NOT_APPLICABLE_REC = (
+    "New Venture confirmed - no prior operations, so Loss History is "
+    "Not Applicable and removed from the score (remaining pillars "
+    "rescale proportionally)."
+)
+_UNDER_A_YEAR_NOT_APPLICABLE_REC = (
+    "Business has under a year of operating history and reports no "
+    "known losses - there are no loss runs to obtain, so Loss History "
+    "is Not Applicable and removed from the score (remaining pillars "
+    "rescale proportionally)."
+)
+# 1 Oct 2026 (Orbin, cover review): these three say what the SCORE did - the
+# pillar left it - not what the submission lacks. Each is a status note, so its
+# card is `unscored`: the underwriter cover and the cover paragraph leave it out
+# (download_routes._unscored_card_ids, cover_service) while the producer's
+# review keeps it. The underwriting advisories and the New Venture CONFLICT
+# notice are real underwriting information and are deliberately NOT here.
+_LOSS_NOT_APPLICABLE_NOTICES = frozenset({
+    _ATTESTED_NOT_APPLICABLE_REC,
+    _NEW_VENTURE_NOT_APPLICABLE_REC,
+    _UNDER_A_YEAR_NOT_APPLICABLE_REC,
+})
+
 
 def _new_venture_prompt(facts: dict, flags: dict) -> list:
     """The New Venture confirm prompt, ONLY while it is still unanswered.
@@ -3104,8 +3218,15 @@ def _new_venture_prompt(facts: dict, flags: dict) -> list:
     # Imported here, not at module scope: loss_history_state imports back into
     # this module's helpers, and the existing readers in calculate_p4_loss_history
     # take the same local-import route for that reason.
-    from services.loss_history_state import new_venture_answered
-    return [] if new_venture_answered(facts, flags) else [_NEW_VENTURE_CONFIRM_REC]
+    #
+    # Nor is it offered when the documents show a policy term that has already
+    # ENDED (29 Sep 2026): a business insured through a whole term had prior
+    # operations, so the card's own premise is false (Orbin: 07/15/2025 -
+    # 07/15/2026). The real gap - no loss history - keeps its own rec.
+    from services.loss_history_state import completed_policy_term, new_venture_answered
+    if new_venture_answered(facts, flags) or completed_policy_term(facts):
+        return []
+    return [_NEW_VENTURE_CONFIRM_REC]
 
 
 def calculate_p4_loss_history(
@@ -3131,18 +3252,29 @@ def calculate_p4_loss_history(
       unknown-date deduction ever moves it (only the contradiction CEILING
       can). Moderate 42 / possible 35 / no match 15, with recency applied only
       when a valuation date exists and -10 for a missing applicable carrier.
-    Path C - no runs: attested no-loss 60, requested/pending 50,
-      narrative-only 40, nothing 25. Known claims + pending = 50; attestation
-      + pending = 60; known claims with no runs and nothing pending = 25.
+    Path C - no runs: an attested No Known Losses is NOT APPLICABLE (owner,
+      29 Sep 2026 - see below); requested/pending 50, narrative-only 40,
+      nothing 25. Known claims + pending = 50; attestation + pending = the
+      attestation (N/A); known claims with no runs and nothing pending = 25.
+      An attestation still SCORES (60, or 85 for a 1-5 year business) only
+      where it cannot stand: beside a "we have had claims" answer, or against
+      corroborated claims, where the 45 conflict ceiling then applies.
     New venture (client 2.2): producer-confirmed and uncontradicted -> returns
       None (Not Applicable); the caller's _weighted_pillar_sum rescales the
       remaining pillars proportionally.
+    No Known Losses (owner decision 29 Sep 2026, Orbin item 15): the same
+      mechanism. Michelle: "We've confirmed No Known Losses. It should not
+      calculate against the score." An attestation nothing contradicts
+      (`loss_history_state.attested_no_losses_not_applicable`) returns None in
+      EVERY years band. Documents still outrank it: a loss-run document takes
+      the Path A / B branches before the attestation is ever read.
     Ceilings (client 2.6 + spec): no-match caps at 25; a no-loss attestation
       contradicted by actual loss-run claims caps at 45. Ceilings, never
       floors - a score already below stays its own value.
     """
     from services.loss_history_state import (
-        BAND_ESTABLISHING, BAND_YOUNG, loss_history_not_applicable,
+        BAND_ESTABLISHING, BAND_YOUNG, attested_no_losses_not_applicable,
+        loss_history_not_applicable,
         loss_runs_pending_stated, new_venture_applicable, new_venture_confirmed,
         no_runs_available_stated, parse_loss_run_status, previously_uninsured,
         prior_carrier_applicable, prior_claims_exist, prior_operations_evidence,
@@ -3208,17 +3340,8 @@ def calculate_p4_loss_history(
     # _weighted_pillar_sum, which removes the pillar and rescales the rest.
     if loss_history_not_applicable(facts, flags, has_loss_run_doc):
         if new_venture_applicable(facts, flags, has_loss_run_doc):
-            return None, [
-                "New Venture confirmed - no prior operations, so Loss History is "
-                "Not Applicable and removed from the score (remaining pillars "
-                "rescale proportionally)."
-            ]
-        return None, [
-            "Business has under a year of operating history and reports no "
-            "known losses - there are no loss runs to obtain, so Loss History "
-            "is Not Applicable and removed from the score (remaining pillars "
-            "rescale proportionally)."
-        ]
+            return None, [_NEW_VENTURE_NOT_APPLICABLE_REC]
+        return None, [_UNDER_A_YEAR_NOT_APPLICABLE_REC]
     if new_venture_confirmed(facts, flags):
         # Confirmed but contradicted (client 2.10's "unless contradictory
         # source information"): keep scoring normally and tell the producer
@@ -3327,6 +3450,15 @@ def calculate_p4_loss_history(
         # value (60 / 40) left untouched. Ordering inside every band still
         # holds 2.5's rule that attestation > pending > narrative mention.
         if _user_attested:
+            # OWNER DECISION 29 Sep 2026 (Orbin item 15): an attestation that
+            # nothing contradicts is NOT APPLICABLE, not 60 - in every band,
+            # including 1-5 years (85 before), because "not calculated" is
+            # what the client asked for. Returned BEFORE the band split and
+            # outside `_result`: the only ceilings `_result` applies (no-match,
+            # conflict) are exactly the cases the predicate refuses. `recs`
+            # carries the contradicted-New-Venture notice when there is one.
+            if attested_no_losses_not_applicable(facts, flags, has_loss_run_doc):
+                return None, list(recs) + [_ATTESTED_NOT_APPLICABLE_REC]
             if _band == BAND_ESTABLISHING:
                 return _result(85, [
                     "No Known Losses (attested by user) - satisfactory for a "
@@ -3845,6 +3977,28 @@ def _umbrella_schedule_present(facts: dict) -> bool:
         return umbrella_schedule_present(facts)
     except Exception:                                          # noqa: BLE001
         return bool(_fv(facts, "schedule_of_underlying_insurance"))
+
+
+# The Exposure Consistency buckets in plain words - the client-approved names
+# the SQS panel prints on each sub-row. ONE table (1 Oct 2026, Orbin item 19):
+# the panel's sub-rows and the Best Solutions action that names a weak bucket
+# both read it, so the action never shows an internal key ("auto completeness,
+# operations description") the panel calls something else.
+EXPOSURE_BUCKET_LABELS: Dict[str, str] = {
+    "operations_description":       "Operations",
+    "coverage_information":         "Coverage Info",
+    "payroll_employee_information": "Payroll/Employee",
+    "revenue_sales_information":    "Revenue/Sales",
+    "cross_document_consistency":   "Cross-Document Consistency",
+    "auto_completeness":            "Auto Completeness",
+    "wc_supplemental":              "WC Supplemental",
+}
+
+
+def exposure_bucket_label(key: str) -> str:
+    """The plain name of one Exposure bucket. A bucket missing from the table
+    still reads as words, never as its snake_case key."""
+    return EXPOSURE_BUCKET_LABELS.get(key) or str(key).replace("_", " ").title()
 
 
 def _calculate_exposure_consistency(
@@ -4511,6 +4665,8 @@ LOSS_HISTORY_STATE_LABELS: Dict[str, str] = {
     # C2 (2026-08-24) states.
     "new_venture_not_applicable":      "Not applicable - new venture, no prior operations",
     "no_operating_history_not_applicable": "Not applicable - under a year in business, no losses to report",
+    # Owner 29 Sep 2026 (Orbin item 15): the attestation removes the pillar.
+    "no_known_losses_not_applicable":  "Not applicable - No Known Losses attested",
     "no_loss_runs_available":          "No loss runs available",
     "prior_claims_exist":              "Prior claims known - loss runs not provided",
 }
@@ -4556,6 +4712,10 @@ CLIENT_LOSS_STATE_LABELS: Dict[str, str] = {
     "runs_requested":       "Loss runs requested",
     "runs_not_provided":    "Loss runs not provided",
     "claims_known_no_runs": "Claims known - loss runs not provided",
+    # 1 Oct 2026 (Orbin item 15): the attestation that took the pillar out of
+    # the score. "None corroborated" under "No Known Losses attested" read as
+    # "nothing was checked"; this bucket says what happened - it was attested.
+    "attested":             "Attested - no known losses",
 }
 
 _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
@@ -4567,6 +4727,11 @@ _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
     "narrative_states_no_losses":      "none_stated",
     # A formal no-loss attestation that no loss-run document yet corroborates.
     "user_states_no_losses":           "none_corroborated",
+    # The same attestation once it takes the pillar out of the score (29 Sep
+    # 2026). It reads as ATTESTED (1 Oct 2026, Orbin item 15): beside "No Known
+    # Losses attested" the old "None corroborated" looked like nothing had been
+    # checked, when the insured had answered.
+    "no_known_losses_not_applicable":  "attested",
     # Loss-run documents are attached (ownership confirmed, unconfirmed, or a
     # mismatch) but claim data has not been extracted from them yet.
     "loss_runs_uploaded":              "loss_runs_attached",
@@ -4620,6 +4785,7 @@ def _get_loss_history_state(
     # pillar is Not Applicable (same gate the scorer consults, so state and
     # score can never disagree).
     from services.loss_history_state import (
+        attested_no_losses_not_applicable,
         loss_history_not_applicable, new_venture_applicable,
         no_runs_available_stated, parse_loss_run_status, prior_claims_exist,
     )
@@ -4674,6 +4840,12 @@ def _get_loss_history_state(
     # Removed; an undocumented years value now falls through to the
     # attestation/no-info checks below like it should.
     if no_loss_attested:
+        # Owner 29 Sep 2026 (Orbin item 15): the scorer's own gate, so the
+        # label can never say "User states No Known Losses" beside a pillar
+        # the same attestation has removed. A document or a conflict returned
+        # above, so only the had-claims answer can keep the scored state here.
+        if attested_no_losses_not_applicable(facts, flags, has_loss_run_doc):
+            return "no_known_losses_not_applicable"
         return "user_states_no_losses"
     if narrative_no_loss:
         return "narrative_states_no_losses"
@@ -4894,22 +5066,14 @@ def _compute_category_breakdown(
         # hardcoded five-tuple would have hidden the two new buckets from the
         # panel while the trace and the headline both charged for them, making
         # the "100 minus every bucket" tooltip untrue.
-        _exp_labels = {
-            "operations_description":       "Operations",
-            "coverage_information":         "Coverage Info",
-            "payroll_employee_information": "Payroll/Employee",
-            "revenue_sales_information":    "Revenue/Sales",
-            "cross_document_consistency":   "Cross-Document Consistency",
-            "auto_completeness":            "Auto Completeness",
-            "wc_supplemental":              "WC Supplemental",
-        }
+        _exp_labels = EXPOSURE_BUCKET_LABELS
         # ONLY the keys the scorer actually emitted, in the table's order - a
         # payload written before a bucket existed (a stored five-bucket
         # session) must not render the missing bucket as "0%, deducted 100".
         _ordered = [k for k in _exp_labels if k in exposure_subscores] + \
                    [k for k in exposure_subscores if k not in _exp_labels]
         _exp_cats = {
-            k: _exp_cat(k, _exp_labels.get(k, k.replace("_", " ").title()))
+            k: _exp_cat(k, exposure_bucket_label(k))
             for k in _ordered
         }
     else:
@@ -5946,6 +6110,7 @@ def calculate_package_sqs(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     calculation_stage: str = "initial_extract",
+    _probe: bool = False,
 ) -> dict:
     """
     Calculate package-level SQS with 6 spec-compliant pillars (Decision Tree v2.1.0+).
@@ -6272,7 +6437,7 @@ def calculate_package_sqs(
             )
             if _weak:
                 _action = "Incomplete: " + ", ".join(
-                    k.replace("_", " ") for k, _v in _weak[:3])
+                    exposure_bucket_label(k) for k, _v in _weak[:3])
             else:
                 _action = "Improve exposure consistency"
         else:
@@ -6282,7 +6447,11 @@ def calculate_package_sqs(
         # is theirs to type or waits on the insured to send something - without
         # it, a package whose last points need a loss run reads exactly like one
         # that is a keystroke away.
-        if pillar == "loss_history_alignment" and not _has_loss_run:
+        # An attestation the producer can select closes the loss gap too (29 Sep
+        # 2026, item 15: an uncontradicted "no known losses" makes the pillar
+        # Not Applicable), so that gap is typed, not waiting on a document.
+        if (pillar == "loss_history_alignment" and not _has_loss_run
+                and _field != "loss_history_no_prior_losses_indicator"):
             _closes = "document"
         elif pillar == "narrative_quality" and not _has_narrative and not _field:
             _closes = "document"
@@ -6376,6 +6545,33 @@ def calculate_package_sqs(
     # Umbrella warning messages for low underlying limits (client Q1/Q2: warn, not block)
     _umbrella_warnings = _build_umbrella_warnings(facts, flags, p5)
 
+    # ONE NUMBER PER CARD (1 Oct 2026, Orbin item 19) - see `_unify_card_points`.
+    # Never inside a probe run: a probe asks only for the number.
+    if not _probe:
+        def _headroom(component: Optional[str]) -> Optional[float]:
+            if component not in _pillar_scores:
+                return None
+            score = _pillar_scores[component]
+            return 0.0 if score is None else _points_available(component, score)
+
+        def _rescore(probed_facts: dict) -> Optional[int]:
+            # The scorer itself, never whatever the public name is wrapped in
+            # (a caller's spy or stub): a probe is part of ONE scoring.
+            return _PACKAGE_SCORER(
+                facts=probed_facts, flags=flags, form_results=form_results,
+                cross_issues=cross_issues, hard_stops=hard_stops,
+                soft_stops=soft_stops, session_data=session_data,
+                mapped_data=mapped_data, confidence_dict=confidence_dict,
+                calculation_stage=calculation_stage, _probe=True,
+            ).get("raw_sqs_score")
+
+        try:
+            _unify_card_points(form_results, top_recs, facts, raw_uncapped,
+                               cap_applied, _headroom, _rescore)
+        except Exception as _unify_ex:                       # noqa: BLE001
+            # Never break scoring: the cards keep each form's own number.
+            logger.warning("card points not unified: %s", _unify_ex)
+
     return {
         "package_sqs_score": raw,
         # Audit trail for the cap (2026-08-16). `package_sqs_score` is what the
@@ -6463,6 +6659,11 @@ def calculate_package_sqs(
     }
 
 
+# The package scorer as defined here - what its own probes call (see
+# `_unify_card_points`), so a probe never runs through a caller's wrapper.
+_PACKAGE_SCORER = calculate_package_sqs
+
+
 # ── SPEC-COMPLIANT SQS CALCULATION (v2.1.0+) ──────────────────────────────
 
 # ── V1 H2 (client section 7, 2026-08-27): the package score BEFORE forms ────
@@ -6470,17 +6671,28 @@ def calculate_package_sqs(
 # Readiness NN%". That number is the Tier 2 completeness ratio - one CATEGORY
 # of one pillar - not the SQS, and the client's complaint was exactly that the
 # screen blurred the SQS, the submission status and information-gathering
-# progress into one figure. The screen now prints the STATUS LABEL of the
-# package SQS as it stands at that moment, and the label has to come from the
-# one scorer - never from a relabelled Tier 2 ratio (a 100% Tier 2 beside 12
-# warnings is "Almost There" at best, never "Submission Ready").
+# progress into one figure. From 27 Aug the screen printed only the STATUS
+# LABEL of the package SQS as it stands at that moment, and the label has to
+# come from the one scorer - never from a relabelled Tier 2 ratio (a 100% Tier
+# 2 beside 12 warnings is "Almost There" at best, never "Submission Ready").
+#
+# REVERSED IN PART, 29 Sep 2026 (Orbin 22 Sep, item 2; owner-approved). The
+# client: "Do not require forms to get the score." The Review screen now prints
+# the NUMBER as well, labelled "so far" because it can still move at
+# generation (C75 re-promotion, form fill rate). It is still this door's number
+# - the real, capped package SQS - never `tier2_score`.
 #
 # Before generation the package is scored the way the reclassify path (§4.2
 # item #5) always has: the per-form facts scorer over the RECOMMENDED forms,
 # then `calculate_package_sqs`. STATELESS by design - nothing is persisted, no
 # `sqs_history` entry is written and no 5.12 snapshot is taken, so the session
-# list, the score-delta baseline and the E&O record are untouched; the
-# reclassify path keeps its own persist + snapshot and simply calls this.
+# list, the score-delta baseline and the E&O record are untouched. The two
+# callers that DO persist - the reclassify path and, since 29 Sep, the
+# pre-form case of `arq_service.recalculate_session_scores` (every pre-form
+# Apply / Reopen / answer) - keep their own persist + snapshot and call this,
+# so there is ONE recipe before forms exist. The recalc used to run the 3.7
+# no-form path instead, and a shown number moved a point or two after an
+# unrelated Apply and moved back on reload (Orbin 60 vs 61).
 _PRE_GENERATION_STAGE = "initial_extract"
 
 
@@ -6514,6 +6726,7 @@ def score_package_pre_generation(
     session: dict,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    calculation_stage: str = _PRE_GENERATION_STAGE,
 ) -> dict:
     """Package SQS from the facts as they stand, with no generated forms.
 
@@ -6521,8 +6734,13 @@ def score_package_pre_generation(
     cross_form_issues, docs, underwriting) and returns the scorer's dict.
     Raises on scorer failure - the caller decides what a failure means
     (`current_package_sqs` turns it into None and names the session).
+
+    `calculation_stage` only LABELS the result (and its `sqs_history` entry);
+    it never moves the number. The default is the stage every pre-form
+    response has always shown; the pre-form recalc passes "arq_remediated".
     """
     session = session or {}
+    calculation_stage = calculation_stage or _PRE_GENERATION_STAGE
     facts = session.get("facts") or {}
     flags = session.get("flags") or {}
     hard_stops = list(session.get("hard_stops") or [])
@@ -6541,7 +6759,7 @@ def score_package_pre_generation(
                 hard_stops=hard_stops, soft_stops=soft_stops,
                 tier2_score=tier2_score, form_id=fid,
                 session_id=session_id, user_id=user_id,
-                calculation_stage=_PRE_GENERATION_STAGE,
+                calculation_stage=calculation_stage,
                 session_data=session, cross_issues_full=cross,
             ))
         except Exception as ex:                                  # noqa: BLE001
@@ -6554,8 +6772,23 @@ def score_package_pre_generation(
         facts=facts, flags=flags, form_results=per_form,
         cross_issues=cross, hard_stops=hard_stops, soft_stops=soft_stops,
         session_data=session, session_id=session_id, user_id=user_id,
-        calculation_stage=_PRE_GENERATION_STAGE,
+        calculation_stage=calculation_stage,
     )
+
+
+def is_pre_form_session(session: Optional[dict]) -> bool:
+    """True for the pre-form Review screen: no form generated AND none selected.
+
+    The one predicate for "the package is scored by `score_package_pre_generation`
+    and the Review card prints that number". The Clarity / Lite path (selected
+    ids, no generated forms) is NOT this - it keeps its own recipe and its own
+    screen - and neither is anything after generation, where the persisted,
+    credit-bearing `package_sqs` is the score. A row that is not a dict is
+    not known to be pre-form, so nothing pre-form-only is done for it.
+    """
+    if not isinstance(session, dict):
+        return False
+    return not session.get("generated_forms") and not session.get("selected_form_ids")
 
 
 def current_package_sqs(
@@ -6563,8 +6796,9 @@ def current_package_sqs(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """The package SQS as it stands RIGHT NOW, for any screen that needs the
-    status label - the one door for every pre-form response.
+    """The package SQS as it stands RIGHT NOW - the one door for every
+    pre-form response. The Review screen prints its NUMBER, labelled "so far"
+    (29 Sep 2026, Orbin item 2), and its tier.
 
     * Forms generated -> the persisted `package_sqs`. Every post-generation
       path (generate, edit, ARQ recalc, dismiss credit) maintains that key and
@@ -6572,9 +6806,14 @@ def current_package_sqs(
       second score (D33).
     * Integrity review pending -> None. Same withholding as `tier2_score`:
       nothing derived from a possibly-mixed package is shown.
-    * Otherwise -> a fresh, unpersisted pre-generation score.
+    * Otherwise -> a fresh, unpersisted pre-generation score. A pre-form
+      recalc persists this same recipe (`score_package_pre_generation`), so
+      the number a Resolve reports is the number a reload recomputes. No
+      dismissal credit is applied before forms exist: the cards that earn
+      one are shown only in the editor, and the first post-generation
+      recalculation or edit re-applies any credit still outstanding.
     * Scorer failure -> None, and the log NAMES the session (H1-G: the only
-      evidence of a vanished score is this line). The screen shows no label
+      evidence of a vanished score is this line). The screen shows no score
       rather than a stale or invented one.
     """
     session = session or {}
@@ -6820,6 +7059,16 @@ _MAX_IMPACT_SIMULATIONS = 40
 # from it - handled by falling back, never by inventing or deleting a number.
 _IMPACT_PROBE_VALUE = "Yes"
 
+# Fields where the probe IS the answer the card asks for, so a flat or falling
+# measurement is the truth rather than a probe of the wrong shape (29 Sep 2026).
+# "Yes" on the no-loss indicator is an attestation (`attested_true("Yes")`), and
+# an attestation now takes Loss History OUT of the score: the remaining pillars
+# rescale, so on a package whose other pillars average below the loss pillar's
+# current score, attesting cannot raise the number - it can lower it. The
+# fallback below would have kept the card's typed +8 and promised points that
+# attesting no longer earns.
+_IMPACT_PROBE_IS_THE_ANSWER = frozenset({"loss_history_no_prior_losses_indicator"})
+
 
 def _pillar_headroom(component: str, breakdown: dict, weights: dict) -> float:
     """The most this pillar can still add to the total score, in real points."""
@@ -6837,6 +7086,7 @@ def _measure_recommendation_impacts(
     weights: dict,
     rescore,
     facts: dict,
+    measured_out: Optional[dict] = None,
 ) -> dict:
     """{id(rec): (points, is_exact)} - what each card is really worth.
 
@@ -6860,6 +7110,9 @@ def _measure_recommendation_impacts(
       back to the declared literal (bounded, below). The probe value cannot
       satisfy a field that wants a number, and zeroing a real card because our
       probe was the wrong shape would be worse than the imprecision being fixed.
+      The one exception is a field in `_IMPACT_PROBE_IS_THE_ANSWER`, where the
+      probe is exactly the answer the card asks for: there a flat or falling
+      measurement is reported as 0, exactly (29 Sep 2026).
     * **Never promise more than exists.** Measured or fallback, the number is
       capped at the pillar's remaining headroom, so no card can offer points the
       pillar has already earned.
@@ -6868,6 +7121,11 @@ def _measure_recommendation_impacts(
 
     `is_exact` tells the UI whether it may drop the "up to" hedge. True only when
     the number came from a measurement.
+
+    `measured_out`, when given, receives {field: gain} for every field this
+    call simulated (None = could not tell). `calculate_package_sqs` reads it
+    to tell "the probe moved this form" from "the probe is the wrong shape"
+    (1 Oct 2026, item 19).
     """
     out: dict = {}
     if baseline is None:
@@ -6929,6 +7187,10 @@ def _measure_recommendation_impacts(
         if gain is not None and gain > 0:
             points = min(gain, headroom) if headroom > 0 else gain
             out[id(rec)] = (int(round(points)), True)
+        elif gain is not None and field in _IMPACT_PROBE_IS_THE_ANSWER:
+            # Measured, and the measurement is the answer: exactly zero, never
+            # the typed literal. See `_IMPACT_PROBE_IS_THE_ANSWER`.
+            out[id(rec)] = (0, True)
         elif declared > 0 and headroom > 0:
             out[id(rec)] = (int(round(min(float(declared), headroom))), False)
         elif declared > 0:
@@ -6936,7 +7198,193 @@ def _measure_recommendation_impacts(
             # though it is still worth asking for. Saying so is the honest answer.
             out[id(rec)] = (0, True)
 
+    if measured_out is not None:
+        measured_out.update(measured_by_field)
     return out
+
+
+# ── ONE NUMBER PER CARD (1 Oct 2026, Orbin 22 Sep item 19) ──────────────────
+# A card several forms show carried each FORM's measured gain: the Orbin loss
+# card read +6 / +7 / +8 / +10 depending on the form, and the Best Solutions row
+# for its pillar read +11.2 - while answering it moved the package, the score
+# the panel headline and every cover print, by +7. A card now says one thing
+# everywhere: what answering it does to the PACKAGE score, found the way
+# `_measure_recommendation_impacts` finds a form's - by asking the scorer.
+#
+# The probe is an answer a person could really give. "Yes" cannot answer a
+# percentage, an amount or a date, so a typed field is probed with the first of
+# `_PROBE_ANSWERS` its own registry validator accepts. Only then is a flat
+# measurement the truth (a card for a fact no score reads is worth nothing, and
+# says so). A table, a narrative - scored on what it SAYS - or a field whose
+# validator takes none of them cannot be stood in for, so a flat measurement
+# there keeps the bounded fallback ("up to"), as on a form.
+_PROBE_ANSWERS = ("Yes", "50", "100000", "123456789", "Answered by the producer.",
+                  "01/01/2030")
+_CONTENT_SCORED_COMPONENTS = frozenset({"narrative_quality"})
+_MAX_PACKAGE_PROBES = 40
+
+
+def _package_probe_answer(field: str) -> Tuple[str, bool]:
+    """(the value a package probe fills `field` with, whether a person could
+    really answer the field with it)."""
+    try:
+        from services.answer_routing import MODE_FIELD, answer_mode
+        if (answer_mode(field) or {}).get("mode") != MODE_FIELD:
+            return _IMPACT_PROBE_VALUE, False
+    except Exception:                                      # noqa: BLE001
+        return _IMPACT_PROBE_VALUE, False
+    try:
+        from services.fact_registry import FACT_REGISTRY
+        validate = (FACT_REGISTRY.get(field) or {}).get("validate")
+    except Exception:                                      # noqa: BLE001
+        validate = None
+    if not callable(validate):
+        return _IMPACT_PROBE_VALUE, True
+    for answer in _PROBE_ANSWERS:
+        try:
+            if validate(answer):
+                return answer, True
+        except Exception:                                  # noqa: BLE001
+            continue
+    return _IMPACT_PROBE_VALUE, False
+
+
+def _card_points(gain: Optional[float], valid: bool, declared: Optional[float],
+                 headroom: Optional[float], raw_uncapped: int,
+                 cap_applied: Optional[int]) -> Optional[Tuple[int, bool]]:
+    """(points, is_exact) for one card on the package, or None to leave it.
+
+    The refusals of a form's card (`_measure_recommendation_impacts`): a flat
+    probe of the wrong shape never zeroes a card, a FALLBACK never offers more
+    than its pillar has left, and a measured gain is exact only when no ceiling
+    holds part of it back from the score on screen. A measured gain is not cut
+    to one pillar's headroom: it is what the package score really does, and an
+    answer can move more than one pillar (an attestation that takes Loss
+    History out re-weights all the others)."""
+    if gain is not None and gain > 0:
+        points = int(round(gain))
+        exact = cap_applied is None or raw_uncapped + points <= cap_applied
+        return points, bool(exact)
+    if gain is not None and valid:
+        return 0, True
+    if not isinstance(declared, (int, float)) or isinstance(declared, bool):
+        return None
+    if declared <= 0 or (headroom is not None and headroom <= 0):
+        return 0, True
+    bound = float(declared) if headroom is None else min(float(declared), headroom)
+    return int(round(bound)), False
+
+
+def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
+                       cap_applied: Optional[int], headroom_for, rescore) -> None:
+    """Write ONE package-measured number onto every copy of every card in
+    `form_results` (in place - the per-form results are what every caller
+    persists and every surface reads), and on each Best Solutions row the gain
+    of the answer it asks for (`answer_gain`). See the block above.
+
+    Each copy keeps `declared_impact` (the typed literal, which a later call
+    reads instead of a number this call wrote) and records `impact_scope`."""
+    if raw_uncapped is None:
+        return
+    copies: Dict[str, List[dict]] = {}
+    for result in form_results or []:
+        if not isinstance(result, dict):
+            continue
+        for rec in result.get("recommendations") or []:
+            if isinstance(rec, dict) and rec.get("rec_id"):
+                copies.setdefault(str(rec["rec_id"]), []).append(rec)
+
+    gains: Dict[str, Tuple[Optional[float], bool]] = {}
+    probes = 0
+
+    def _gain(field: str) -> Tuple[Optional[float], bool]:
+        nonlocal probes
+        if field in gains:
+            return gains[field]
+        answer, valid = _package_probe_answer(field)
+        if field in _IMPACT_PROBE_IS_THE_ANSWER:
+            answer, valid = _IMPACT_PROBE_VALUE, True
+        gain = None
+        if probes < _MAX_PACKAGE_PROBES:
+            probes += 1
+            try:
+                after = rescore({**(facts or {}), field: answer})
+                gain = None if after is None else float(after) - float(raw_uncapped)
+            except Exception as ex:                        # noqa: BLE001
+                logger.debug("package probe failed for %s: %s", field, ex)
+        gains[field] = (gain, valid)
+        return gains[field]
+
+    for _rid, recs in copies.items():
+        for rec in recs:
+            if "declared_impact" not in rec:
+                rec["declared_impact"] = rec.get("score_impact")
+        declared = [r.get("declared_impact") for r in recs
+                    if isinstance(r.get("declared_impact"), (int, float))
+                    and not isinstance(r.get("declared_impact"), bool)]
+        component = next((r.get("component") for r in recs if r.get("component")), None)
+        field = next((r.get("field") for r in recs if r.get("field")), None)
+        if any(r.get("unscored") for r in recs):
+            points = (0, True)
+        else:
+            gain, valid = _gain(str(field)) if field else (None, False)
+            moved_a_form = any(r.get("impact_measured") for r in recs)
+            valid = (valid or moved_a_form) and component not in _CONTENT_SCORED_COMPONENTS
+            if field in _IMPACT_PROBE_IS_THE_ANSWER:
+                valid = True
+            points = _card_points(gain, valid, max(declared) if declared else None,
+                                  headroom_for(component), raw_uncapped, cap_applied)
+        if points is None:
+            continue
+        for rec in recs:
+            rec["score_impact"], rec["impact_is_exact"] = points
+            rec["impact_scope"] = "package"
+
+    for result in form_results or []:
+        recs = result.get("recommendations") if isinstance(result, dict) else None
+        if isinstance(recs, list) and recs and all(isinstance(r, dict) for r in recs):
+            recs.sort(key=lambda r: (r.get("priority", 99), -(r.get("score_impact") or 0)))
+
+    # A Best Solutions row is a pillar's whole gap (`points_available`); the
+    # answer it asks for can be worth less - "No known losses" takes Loss
+    # History out of the score and moves the package +7 of the row's 11.2.
+    for row in top_recs or []:
+        field = row.get("field") if isinstance(row, dict) else None
+        if not field:
+            continue
+        gain, valid = _gain(str(field))
+        valid = valid and row.get("pillar") not in _CONTENT_SCORED_COMPONENTS
+        if field in _IMPACT_PROBE_IS_THE_ANSWER:
+            valid = True
+        points = _card_points(gain, valid, None, headroom_for(row.get("pillar")),
+                              raw_uncapped, cap_applied)
+        if points is not None:
+            row["answer_gain"], row["answer_gain_is_exact"] = points
+
+
+def _page_one_carrier_printed(facts: dict, mapped_data: Optional[dict]) -> bool:
+    """Is ACORD 125 page one's CARRIER box filled? (29 Sep 2026, client item 8)
+
+    After generation the stamped box decides. Before it (no stamped form) the
+    stamper's own resolver chain decides - `pdf_service.authoritative_expected_
+    value`, the one door for "what should this box hold?" - so the card and the
+    form cannot disagree. Fails OPEN (True: no card) on any error: a missing
+    card is recoverable, a card asking for a value already printed is noise.
+    """
+    box = "Insurer_FullName_A"
+    # Only a STAMPED form holds the box. The facts-only scorer passes a mapping
+    # keyed by fact names (never this box), which must not read as "blank"
+    # (review, 29 Sep: the card then fired on every pre-form ACORD 125).
+    if isinstance(mapped_data, dict) and box in mapped_data:
+        return bool(str(mapped_data.get(box) or "").strip())
+    try:
+        from services import pdf_service as _ps
+        owned = _ps.authoritative_expected_value("ACORD_125", box, facts or {})
+        if owned is _ps._AUTH_UNOWNED:
+            return bool(str(_fv(facts, "carrier_name") or "").strip())
+        return bool(str(owned or "").strip())
+    except Exception:                                            # noqa: BLE001
+        return True
 
 
 def calculate_sqs(
@@ -7059,6 +7507,19 @@ def calculate_sqs(
                   or _fv(facts, "contact_email")), True),
             ("producer name",     "producer_name",
              bool(_fv(facts, "producer_name")),     not _prod_exempt),
+            # 29 Sep 2026 (client item 8, "no prompt to supply them"): page
+            # one's CARRIER is left blank when no company can be named (the
+            # current policies of a quote whose market is not stated). Several
+            # companies writing a renewed programme print together since 30 Sep
+            # (Orbin item 7), so this card no longer fires for them. Ask for it
+            # - worth zero points, because carrier_name is not a Tier 1 / Tier 2
+            # fact.
+            # The answer is the ADDRESSEE (`submission_carrier_name`), never
+            # `carrier_name`: the documents own that one, and a typed market
+            # written there was overwritten or held as a conflict by the next
+            # re-merge (review finding, 29 Sep).
+            ("carrier receiving this submission", "submission_carrier_name",
+             _page_one_carrier_printed(facts, mapped_data), False),
             # NOTE: the 4th element is `scored`. An UNSCORED check still raises
             # its card (we want the detail) but must advertise ZERO points - see
             # `unscored` on the recommendation below.
@@ -7085,6 +7546,10 @@ def calculate_sqs(
                 # not move at all. Live on S1, 2026-08-25.
                 "unscored": not _scored,
             })
+        # Orbin 22 Sep item 12 / G2 (29 Sep 2026): the ONE premises' interest
+        # (a confirm card that shows its evidence - never an inference) and a
+        # tenant's landlord. Unscored, 0 points; nothing here moves a score.
+        recommendations.extend(_premises_recommendations(facts, flags, mapped_data))
 
     elif fid == "ACORD_126":
         # GL class-code data may arrive in either the legacy location→codes fact
@@ -7773,9 +8238,13 @@ def calculate_sqs(
         # contradict the card's own text, and dismissing it with a reason would
         # CREDIT points an advisory can never earn back (impact measurement
         # skips field-less recs, so the literal survived un-corrected).
-        _no_impact = rec_msg.lower().startswith(
-            ("underwriting advisory", "new venture confirmed",
-             "new venture status conflicts"))
+        # The attested-N/A notice (29 Sep 2026) joins them: it describes a
+        # pillar removed from the score, so there is nothing to earn.
+        # The under-a-year notice was missing from this list and carried the
+        # typed +8 at priority 2 (found 1 Oct 2026) - matched by identity now.
+        _status_note = rec_msg in _LOSS_NOT_APPLICABLE_NOTICES
+        _no_impact = _status_note or rec_msg.lower().startswith(
+            ("underwriting advisory", "new venture status conflicts"))
         recommendations.append({
             "rec_id": _loss_rec_id(rec_msg),
             # Was hardcoded "loss_history_years" for EVERY loss message, so the
@@ -7788,6 +8257,12 @@ def calculate_sqs(
             "type": "suggestion",
             "score_impact": 0 if _no_impact else 8,
             "priority": 3 if _no_impact else 2,
+            # A status notice, not a gap: its card says so instead of asking
+            # for a document (answer_routing.NOTE_INFORMATIONAL).
+            "informational": bool(_no_impact) and not loss_recommendation_field(rec_msg),
+            # A status note about the score, not a gap (1 Oct 2026): kept off
+            # the underwriter cover. See _LOSS_NOT_APPLICABLE_NOTICES.
+            **({"unscored": True} if _status_note else {}),
             # Structured flag so requires_supporting_document detection in arq_service
             # doesn't rely on keyword scanning of message strings.
             "requires_doc": any(p in rec_msg.lower() for p in _loss_doc_phrases),
@@ -8061,6 +8536,7 @@ def calculate_sqs(
     # refuses to do. Runs before the sort so the ordering uses the real numbers -
     # the biggest genuine win leads, which the typed literals could not deliver.
     if not _simulate:
+        _rec_gains: dict = {}
         _rec_impacts = _measure_recommendation_impacts(
             recommendations, raw_uncapped, breakdown, weights,
             lambda _probed_facts: calculate_sqs(
@@ -8078,11 +8554,18 @@ def calculate_sqs(
                 _simulate=True,
             ).get("raw_sqs_score"),
             facts,
+            measured_out=_rec_gains,
         )
         for _rec in recommendations:
             _measured = _rec_impacts.get(id(_rec))
             if _measured is None:
                 continue
+            # What the package needs to put ONE number on this card (1 Oct
+            # 2026, item 19): the typed literal, and whether the probe moved
+            # THIS form - proof the probe has the right shape for the field.
+            _rec["declared_impact"] = _rec.get("score_impact")
+            _g = _rec_gains.get(_rec.get("field")) if _rec.get("field") else None
+            _rec["impact_measured"] = bool(_g is not None and _g > 0)
             _rec["score_impact"], _rec["impact_is_exact"] = _measured
             # A ceiling means the points are EARNED but may not be DISPLAYED
             # until the stop clears, so the card must keep hedging.

@@ -230,7 +230,9 @@ class TestRefillNeverWritesTheMarker:
         monkeypatch.setattr(ps, "_deterministic_map", lambda field, facts: "ACME BUILDERS LLC")
         forms = self._forms()
         arq._restamp_canonical_into_forms(forms, "applicant_name", {"applicant_name": "ACME BUILDERS LLC"})
-        assert forms["ACORD_125"]["field_state"]["NamedInsured_FullName_A"] == "ACME BUILDERS LLC"
+        # Printed as generation prints it (29 Sep 2026: the answer paths now apply
+        # the same display formatting, `pdf_service.display_value_for_box`).
+        assert forms["ACORD_125"]["field_state"]["NamedInsured_FullName_A"] == "Acme Builders LLC"
 
 
 # =============================================================================

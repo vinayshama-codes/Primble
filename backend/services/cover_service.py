@@ -7,7 +7,7 @@ import re
 import logging
 import textwrap
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import groq_chat, LLM_MODEL
 from services.extraction_service import _fv, _cache_get, _cache_set
@@ -59,6 +59,24 @@ def _cover_form_label(form_id) -> str:
     return str(form_id or "").replace("ACORD_", "ACORD ").replace("_", " ").strip()
 
 
+def _agent_name(user: Optional[dict]) -> str:
+    """The producer's name exactly as ACORD 125 prints it in its producer
+    CONTACT box - an account name saved in lower case printed that way on the
+    cover beside the formatted name on every form (owner's retest, 1 Oct 2026).
+    One rule for both: `pdf_service.display_value_for_box` (a name typed with
+    a capital prints as typed; all-lowercase typing is formatted)."""
+    name = re.sub(r"\s+", " ", str((user or {}).get("full_name") or "")).strip()
+    if not name:
+        return ""
+    try:
+        from services.pdf_service import display_value_for_box
+        shown = display_value_for_box("ACORD_125", "Producer_ContactPerson_FullName_A",
+                                      name, provenance="account")
+        return str(shown or "").strip() or name
+    except Exception:                                      # noqa: BLE001
+        return name
+
+
 def _cover_form_key(text) -> str:
     m = _COVER_FORM_RE.search(str(text or "").replace("_", " "))
     return f"{m.group(1)}{(m.group(2) or '').upper()}" if m else ""
@@ -79,7 +97,9 @@ def _deterministic_sqs_reasoning(ranked, score, is_package: bool) -> str:
     if not ranked:
         return f"The {label} is {score}/100. Scores below 75 indicate fields requiring manual review."
     hi, lo = ranked[0], ranked[-1]
-    if hi[1] == lo[1]:
+    if len(ranked) == 1:
+        spread = f"{_cover_form_label(hi[0])} scored {hi[1]}"
+    elif hi[1] == lo[1]:
         spread = f"Every form scored {hi[1]}"
     else:
         spread = (f"Form scores run from {lo[1]} ({_cover_form_label(lo[0])}) "
@@ -88,14 +108,62 @@ def _deterministic_sqs_reasoning(ranked, score, is_package: bool) -> str:
             f"Scores below 75 indicate fields requiring manual review.")
 
 
-def _checked_sqs_reasoning(text, ranked, score, is_package: bool) -> str:
+def _tier_claim_res() -> List[Tuple[str, "re.Pattern"]]:
+    """(tier, pattern) for every tier on the score ladder - read off the ladder,
+    never listed here. A tier is a claim when written as the tier's own name
+    ("Needs Work") or followed by "tier"; ordinary prose ("the narrative needs
+    work") is not one."""
+    out = []
+    for tier in sorted({grade_and_tier(n)[1] for n in range(0, 101)} - {_COVER_UNKNOWN}):
+        words = r"\s+".join(map(re.escape, tier.split()))
+        out.append((tier, re.compile(rf"\b{words}\b|(?i:\b{words}\s+tier\b)")))
+    return out
+
+
+def _routing_claim_res() -> List[Tuple[str, "re.Pattern"]]:
+    """(routing words, pattern) for every routing the app prints. A one-word
+    routing ("Hold") is a claim only beside the word "routing"."""
+    out = []
+    for words_ in sorted(set(_ROUTING_WORDS.values())):
+        parts = re.split(r"[\s-]+", words_.strip())
+        body = r"[\s-]+".join(map(re.escape, parts))
+        pat = (rf"(?i:\b{body}\b)" if len(parts) > 1
+               else rf"(?i:\b{body}\s+routing\b|\brouting\s+(?:of|to)\s+{body}\b)")
+        out.append((words_, re.compile(pat)))
+    return out
+
+
+def _routing_key(words_: Any) -> str:
+    return re.sub(r"[\s-]+", " ", str(words_ or "").strip().lower())
+
+
+def _checked_sqs_reasoning(text, ranked, score, is_package: bool, package_routing=None) -> str:
     """The model's paragraph, or the deterministic one when it contradicts the
-    scores it was handed."""
+    scores it was handed.
+
+    A sentence about the SUBMISSION (it names no form) may state only the
+    package's own tier and routing - the cover prints both in the table above
+    the paragraph (Orbin, 1 Oct 2026: "drives the package into a Needs Work tier
+    with priority review routing" under a table reading Major Gaps / Standard
+    review - the ACORD 126's tier and routing, pinned on the package). A routing
+    the caller could not supply is never stated for the package."""
     t = str(text or "").strip()
     if not t:
         return _deterministic_sqs_reasoning(ranked, score, is_package)
     if is_package and re.search(r"\baverage\b", t, re.I):
         return _deterministic_sqs_reasoning(ranked, score, is_package)
+    if is_package:
+        own_tier = grade_and_tier(score)[1]
+        own_routing = _routing_key(routing_label(package_routing)) if package_routing else None
+        for sentence in re.split(r"(?<=[.!?])\s+", t):
+            if _COVER_FORM_RE.search(sentence.replace("_", " ")):
+                continue                    # about a form - its own tier is its own
+            for tier, rx in _tier_claim_res():
+                if rx.search(sentence) and tier != own_tier:
+                    return _deterministic_sqs_reasoning(ranked, score, is_package)
+            for words_, rx in _routing_claim_res():
+                if rx.search(sentence) and _routing_key(words_) != own_routing:
+                    return _deterministic_sqs_reasoning(ranked, score, is_package)
     if ranked:
         top = {_cover_form_key(f) for f, sc in ranked if sc == ranked[0][1]}
         bottom = {_cover_form_key(f) for f, sc in ranked if sc == ranked[-1][1]}
@@ -140,6 +208,161 @@ def _moved_term_ended(facts: dict) -> bool:
     return False
 
 
+# ── What a cover prints about a score, and how it prints values (1 Oct 2026) ─
+# The Submission Brief printed "77/100 B" beside "Needs Work": the PACKAGE score
+# with the FIRST FORM's grade (81 -> B), because the brief laid the package's
+# number over that form's result. It printed the scorer's routing CODE,
+# "priority_review", which no label table knew, and revenue as "300000". A
+# grade and a tier are read off the score by the one ladder the app uses
+# (`sqs_service.tier_for_score`); a routing code is always printed as words.
+_ROUTING_WORDS = {
+    "auto_quote":      "Auto-quote",
+    "priority_review": "Priority review",
+    "standard_review": "Standard review",
+    "review":          "Light review",
+    "full_review":     "Full review",
+    "hold":            "Hold",
+}
+
+
+def routing_label(code) -> str:
+    """A routing decision in words - never a raw code."""
+    c = str(code or "").strip()
+    if not c:
+        return _COVER_UNKNOWN
+    words = _ROUTING_WORDS.get(c.lower())
+    if words:
+        return words
+    text = c.replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def grade_and_tier(score) -> tuple:
+    """(grade, tier) for a score - the one ladder, so a cover can never print a
+    grade the app does not show for the same number."""
+    try:
+        from services.sqs_service import tier_for_score
+        grade, tier, _color = tier_for_score(int(score or 0))
+        return grade, tier
+    except Exception:                                         # noqa: BLE001
+        return _COVER_UNKNOWN, _COVER_UNKNOWN
+
+
+def _money(value) -> str:
+    """A plain amount as the forms print money ("300000" -> "$300,000"); text
+    that is not a plain amount prints as it came."""
+    s = str(value or "").strip()
+    m = re.fullmatch(r"\$?\s*(\d[\d,]*)(\.\d{1,2})?", s)
+    if not m:
+        return s
+    whole = m.group(1).replace(",", "")
+    cents = m.group(2) or ""
+    if cents.strip(".0") == "":
+        cents = ""
+    elif len(cents) == 2:
+        cents += "0"                                          # ".5" -> ".50"
+    return f"${int(whole):,}{cents}"
+
+
+def _as_the_forms_print(names, facts) -> str:
+    """A company list with each company spelled as the forms print it: an
+    all-capitals printing gives way to an ordinary-case printing of the SAME
+    company that the documents also carry (ACORD 125 CARRIER's rule, 1 Oct 2026).
+    Nothing is added, dropped or reordered."""
+    text = str(names or "").strip()
+    if not text:
+        return text
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                         # noqa: BLE001
+        return text
+    best: Dict[str, str] = {}
+    for row in (_fv(facts, "coverage_lines") or []):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("carrier") or "").strip()
+        key = _ek(name) if name else None
+        if key and (key not in best or (best[key].isupper() and not name.isupper())):
+            best[key] = name
+    pieces = re.split(r"(\s*[/;]\s*)", text)
+    out = []
+    for piece in pieces:
+        if re.fullmatch(r"\s*[/;]\s*", piece or ""):
+            out.append(piece)
+            continue
+        key = _ek(piece) if piece.strip() else None
+        out.append(best.get(key, piece) if key else piece)
+    return "".join(out)
+
+
+def _true_flags(flags) -> List[str]:
+    """The risk flags that are TRUE, by name. A false flag only says a document
+    did not state something - `asserts_no_subcontractors: False` was read by the
+    model as "none are asserted" on a package that rates subcontracted work - so
+    it is not handed to the model at all."""
+    return sorted(str(k) for k, v in (flags or {}).items()
+                  if v is True and not str(k).startswith("_"))
+
+
+def _gl_classifications(facts) -> str:
+    """The GL class schedule the declarations print, one line per class."""
+    rows = _fv(facts, "gl_class_code_schedule")
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        code = str(r.get("class_code") or "").strip()
+        what = str(r.get("classification") or "").strip()
+        basis = str(r.get("premium_basis") or "").strip()
+        amount = str(r.get("exposure_amount") or "").strip()
+        if not (code or what):
+            continue
+        tail = ", ".join(p for p in (basis, amount) if p)
+        out.append(f"{code} {what}".strip() + (f" ({tail})" if tail else ""))
+    return "; ".join(out[:10]) or "Not provided"
+
+
+def a2a_block(facts: dict, flags: dict, *, org_name: str, user: Optional[dict],
+              scores: List[dict], form_ids: List[str], hard_stops=None, soft_stops=None,
+              report_type: Optional[str] = None) -> dict:
+    """The hidden carrier-AI (A2A) block - built from the package's OWN records,
+    never written by the model (1 Oct 2026: the model wrote it, so it repeated a
+    wrong grade and was asked for a FEIN and a NAICS code it was never given).
+    Every value is one the package holds; a missing one is null, never guessed."""
+    def _v(key):
+        v = _fv(facts, key)
+        return v if v not in (None, "") else None
+    block = {
+        "generated_at":       datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "agent_name":         _agent_name(user) or None,
+        "org_name":           org_name or None,
+        "applicant_name":     _v("applicant_name"),
+        "lines_of_business":  _cover_lines_of_business(facts, flags),
+        "effective_date":     _v("effective_date"),
+        "expiration_date":    _v("expiration_date"),
+        "total_revenue":      _money(_v("total_revenue")) if _v("total_revenue") else None,
+        "entity_type":        _v("entity_type"),
+        "prior_carrier":      _as_the_forms_print(_v("prior_carrier"), facts) if _v("prior_carrier") else None,
+        "forms_included":     list(form_ids or []),
+        "sqs_scores":         scores,
+        "hard_stops":         [str(s) for s in (hard_stops or []) if s],
+        "soft_stops":         [str(s) for s in (soft_stops or []) if s],
+        "risk_flags":         _true_flags(flags),
+        "primble_version":    "12.4.0",
+        "a2a_schema_version": "1.0",
+    }
+    if report_type:
+        block["report_type"] = report_type
+    return block
+
+
+def _score_entry(name: str, sqs: Optional[dict]) -> dict:
+    score = (sqs or {}).get("sqs_score", 0) or 0
+    grade, tier = grade_and_tier(score)
+    return {"form": name, "score": score, "grade": grade, "tier": tier,
+            "routing": routing_label((sqs or {}).get("routing_decision"))}
+
+
 def _cover_info_values(facts: dict, flags: dict, user: Optional[dict], org_name: str) -> Dict[str, str]:
     """The cover's submission table, as printed (live run 10, 15 Sep 2026).
     POLICY PERIOD printed "\u2014 - \u2014" once the proposed term became
@@ -158,15 +381,16 @@ def _cover_info_values(facts: dict, flags: dict, user: Optional[dict], org_name:
         period = f"To be confirmed ({_which} {moved})" if moved else "To be confirmed"
     lobs = _cover_lines_of_business(facts, flags)
     return {
-        "agent":           (user.get("full_name", "") if user else "") or _COVER_UNKNOWN,
+        "agent":           _agent_name(user) or _COVER_UNKNOWN,
         "org":             org_name or _COVER_UNKNOWN,
         "period":          period,
         "entity_type":     _v("entity_type"),
         "applicant":       _v("applicant_name"),
-        "revenue":         _v("total_revenue"),
+        "revenue":         _money(_v("total_revenue")) if _fv(facts, "total_revenue") else _COVER_UNKNOWN,
         "lines":           ", ".join(lobs) if lobs else _COVER_UNKNOWN,
         "employees":       _v("num_employees"),
-        "prior_carrier":   _v("prior_carrier"),
+        "prior_carrier":   (_as_the_forms_print(_v("prior_carrier"), facts)
+                            if _fv(facts, "prior_carrier") else _COVER_UNKNOWN),
         "mailing_address": _v("mailing_address"),
     }
 
@@ -179,6 +403,7 @@ async def generate_ai_cover_narrative(
     org_name: str,
     user: dict = None,
     package_score: int = None,
+    package_routing: Optional[str] = None,
 ) -> dict:
     """Cover-page narrative.
 
@@ -189,11 +414,16 @@ async def generate_ai_cover_narrative(
     The average survives only as a fallback for callers that have no package
     score - it is never the preferred number.
     """
+    # Grade and tier from the one ladder, routing in words (1 Oct 2026) - a
+    # routing CODE handed to the model came back in the client's summary.
+    # A card worth zero points by its own declaration (`unscored` - the landlord
+    # "kept for certificates") explains nothing about the score, so the model is
+    # never handed one: it called the landlord a "major gap" (Orbin, 1 Oct 2026).
     sqs_summary = [
-        {"form": fid, "score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
-         "tier": sqs.get("tier"), "routing": sqs.get("routing_decision"),
+        {**_score_entry(fid, sqs),
          "breakdown": sqs.get("breakdown", {}), "issues": sqs.get("issues", []),
-         "recommendations": sqs.get("recommendations", [])}
+         "recommendations": [r for r in (sqs.get("recommendations") or [])
+                             if not (isinstance(r, dict) and r.get("unscored"))]}
         for fid, sqs in sqs_results.items()
     ]
     # The submission's own score. Falls back to a per-form average ONLY when no
@@ -211,6 +441,18 @@ async def generate_ai_cover_narrative(
     _score_note = ("the submission's own score, computed independently - NOT an "
                    "average of the form scores" if _is_package
                    else "the average of the form scores")
+    # The package's own grade, tier and routing, as the cover's table prints
+    # them (1 Oct 2026): the model had only each FORM's, and gave the package
+    # the ACORD 126's "Needs Work / priority review" under a Major Gaps /
+    # Standard review row. `_checked_sqs_reasoning` holds it to them.
+    if _is_package:
+        _pg, _pt = grade_and_tier(avg_sqs)
+        _pkg_rank_line = (f"\nPackage grade / tier / routing: {_pg} / {_pt} / "
+                          f"{routing_label(package_routing)}")
+        _pkg_rank_rule = ("A tier or routing you give the submission must be the package's own, "
+                          "from the line above; a form's tier and routing describe that form only.")
+    else:
+        _pkg_rank_line, _pkg_rank_rule = "", ""
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
     _moved_term = _moved_current_term(facts)
     if _moved_term and _moved_term_ended(facts):
@@ -221,28 +463,22 @@ async def generate_ai_cover_narrative(
 Generate a professional cover page summary for this ACORD submission package.
 
 SUBMISSION DATA:
-Agent/User: {user.get('full_name', '') if user else ''}
+Agent/User: {_agent_name(user)}
 Agency/Org: {org_name}
 Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
 Lines of Business: {_cover_lines_of_business(facts, flags)}
 Proposed Effective Date: {_fv(facts, 'effective_date') or 'To be confirmed'}{_term_line}
-Prior Carrier: {_fv(facts, 'prior_carrier') or 'Not provided'}
+Prior Carrier: {_as_the_forms_print(_fv(facts, 'prior_carrier'), facts) or 'Not provided'}
 Operations: {_fv(facts, 'operations_description') or 'Not provided'}
-Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
-Forms Generated: {', '.join(form_ids)}
-{_score_label}: {avg_sqs}/100 ({_score_note})
+Revenue: {_money(_fv(facts, 'total_revenue')) or 'Not provided'}
+Forms Generated: {', '.join(_cover_form_label(f) for f in form_ids)}
+{_score_label}: {avg_sqs}/100 ({_score_note}){_pkg_rank_line}
 Form scores, highest first: {_ranked_line}
 SQS Results: {json.dumps(sqs_summary)}
 
-Respond with ONLY a valid JSON object with exactly three keys:
+Respond with ONLY a valid JSON object with exactly two keys:
 "narrative": A 3-4 paragraph professional narrative (plain text, no markdown)
-"sqs_reasoning": A single paragraph explaining the SQS score. Call the submission's score the "{_score_label}" and never an average unless it is one. If you name the strongest or weakest form, it must be the first or last form in the "Form scores, highest first" list.
-"ai_block": A machine-readable structured JSON object with: submission_id, generated_at,
-  agent_name, applicant_name, org_name, lines_of_business, effective_date, expiration_date,
-  total_revenue, total_payroll, num_employees, entity_type, fein, naics_code, prior_carrier,
-  forms_included, sqs_scores, sqs_grades, sqs_breakdowns, overall_avg_sqs,
-  overall_routing_recommendation, hard_stops, soft_stops, risk_flags,
-  primble_version: "12.4.0", a2a_schema_version: "1.0"
+"sqs_reasoning": A single paragraph explaining the SQS score. Call the submission's score the "{_score_label}" and never an average unless it is one. If you name the strongest or weakest form, it must be the first or last form in the "Form scores, highest first" list. {_pkg_rank_rule}
 
 Return ONLY the JSON object."""
     # Cached on the PROMPT ITSELF (live run 10, 15 Sep 2026). The key held only
@@ -250,9 +486,19 @@ Return ONLY the JSON object."""
     # other data - no prior carrier, the old term - was served back after the
     # data changed. Anything the model reads is now part of the key.
     _cover_cache_key = "cover_ai:" + hashlib.md5(prompt.encode()).hexdigest()
+    # The A2A block is built from the records, never by the model, and never
+    # cached - it carries its own timestamp (1 Oct 2026, see `a2a_block`).
+    _stops = lambda k: [m for s_ in sqs_results.values() for m in ((s_ or {}).get(k) or [])]
+    _block = a2a_block(facts, flags, org_name=org_name, user=user,
+                       scores=[_score_entry(fid, sq) for fid, sq in sqs_results.items()],
+                       form_ids=form_ids,
+                       hard_stops=list(dict.fromkeys(_stops("hard_stops"))),
+                       soft_stops=list(dict.fromkeys(_stops("soft_stops"))))
+    _block["package_sqs"] = ({"score": avg_sqs, "grade": grade_and_tier(avg_sqs)[0],
+                              "tier": grade_and_tier(avg_sqs)[1]} if _is_package else None)
     _cached_cover = await _cache_get(_cover_cache_key)
     if _cached_cover:
-        return _cached_cover
+        return {**_cached_cover, "ai_block": _block}
     try:
         raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         if raw.startswith("```"):
@@ -263,11 +509,11 @@ Return ONLY the JSON object."""
             result = {
                 "narrative":     result.get("narrative", ""),
                 "sqs_reasoning": _checked_sqs_reasoning(
-                    result.get("sqs_reasoning", ""), _ranked, avg_sqs, _is_package),
-                "ai_block":      result.get("ai_block", {}),
+                    result.get("sqs_reasoning", ""), _ranked, avg_sqs, _is_package,
+                    package_routing),
             }
             await _cache_set(_cover_cache_key, result)
-            return result
+            return {**result, "ai_block": _block}
     except Exception as ex:
         logger.error(f"Cover page AI generation failed: {ex}")
 
@@ -282,15 +528,7 @@ Return ONLY the JSON object."""
             f"The submission has been reviewed for completeness and quality using the Submission Quality Score (SQS) system."
         ),
         "sqs_reasoning": _deterministic_sqs_reasoning(_ranked, avg_sqs, _is_package),
-        "ai_block": {
-            "agent_name": (user.get("full_name", "") if user else ""),
-            "org_name": org_name,
-            "applicant_name": applicant,
-            "forms_included": form_ids,
-            "overall_avg_sqs": avg_sqs,
-            "primble_version": "12.4.0",
-            "a2a_schema_version": "1.0",
-        },
+        "ai_block": _block,
     }
 
 
@@ -304,43 +542,47 @@ async def generate_lite_cover_narrative(
     user: dict = None,
 ) -> dict:
     score   = sqs.get("sqs_score", 0)
-    grade   = sqs.get("grade", "—")
-    routing = sqs.get("routing_decision", "—")
-    _lite_applicant = _fv(facts, 'applicant_name') or 'Unknown'
-    _lite_cache_key = "cover_lite:" + hashlib.md5(
-        f"{_lite_applicant}|{score}|{org_name}|{','.join(sorted(str(x) for x in hard_stops))}".encode()
-    ).hexdigest()
-    _cached_lite = await _cache_get(_lite_cache_key)
-    if _cached_lite:
-        return _cached_lite
+    # The ladder's grade and the routing in words (1 Oct 2026) - the brief used
+    # to pass the FIRST FORM's grade and the raw code "priority_review", and the
+    # summary repeated both.
+    grade, tier = grade_and_tier(score)
+    routing = routing_label(sqs.get("routing_decision"))
+    _revenue = _money(_fv(facts, "total_revenue")) if _fv(facts, "total_revenue") else "Not provided"
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
 Generate a professional pre-submission SQS summary for a producer who has uploaded their package for analysis.
 This is NOT a full ACORD package — no forms have been generated. The purpose is to flag issues before the producer
 proceeds with their platform of choice.
 
 SUBMISSION DATA:
-Agent/User: {user.get('full_name', '') if user else ''}
+Agent/User: {_agent_name(user)}
 Agency/Org: {org_name}
 Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
 Lines of Business: {_cover_lines_of_business(facts, flags)}
 Effective Date: {_fv(facts, 'effective_date') or 'Not specified'}
 Operations: {_fv(facts, 'operations_description') or 'Not provided'}
-Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
-SQS Score: {score}/100 (Grade: {grade}, Routing: {routing})
+GL Classifications (as the declarations print them): {_gl_classifications(facts)}
+Revenue: {_revenue}
+SQS Score: {score}/100 (Grade: {grade}, Tier: {tier}, Routing: {routing})
 Hard Stops (critical blockers): {hard_stops}
 Soft Stops (warnings): {soft_stops}
-Risk Flags: {flags}
+Risk Flags that are TRUE (a flag not listed is simply not established): {_true_flags(flags)}
 
-Respond with ONLY a valid JSON object with exactly three keys:
+Respond with ONLY a valid JSON object with exactly two keys:
 "narrative": 2-3 paragraphs focused on what the producer should watch out for, what information is missing,
   and how to strengthen this submission before proceeding. Plain text, no markdown.
 "sqs_reasoning": One paragraph explaining the SQS score in context of the hard/soft stops found.
-"ai_block": A machine-readable structured JSON object with: submission_id, generated_at,
-  agent_name, applicant_name, org_name, lines_of_business, effective_date,
-  total_revenue, entity_type, sqs_score, sqs_grade, sqs_routing, hard_stops, soft_stops, risk_flags,
-  primble_version: "12.4.0", a2a_schema_version: "1.0", report_type: "lite_pre_submission"
 
 Return ONLY the JSON object."""
+    # Cached on the PROMPT ITSELF (C93's rule): anything the model reads is part
+    # of the key. The A2A block is never cached - it carries its own timestamp.
+    _lite_cache_key = "cover_lite:" + hashlib.md5(prompt.encode()).hexdigest()
+    _block = a2a_block(facts, flags, org_name=org_name, user=user,
+                       scores=[_score_entry("Pre-Submission Analysis", sqs)], form_ids=[],
+                       hard_stops=hard_stops, soft_stops=soft_stops,
+                       report_type="lite_pre_submission")
+    _cached_lite = await _cache_get(_lite_cache_key)
+    if _cached_lite:
+        return {**_cached_lite, "ai_block": _block}
     try:
         raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         if raw.startswith("```"):
@@ -351,10 +593,9 @@ Return ONLY the JSON object."""
             result = {
                 "narrative":     result.get("narrative", ""),
                 "sqs_reasoning": result.get("sqs_reasoning", ""),
-                "ai_block":      result.get("ai_block", {}),
             }
             await _cache_set(_lite_cache_key, result)
-            return result
+            return {**result, "ai_block": _block}
     except Exception as ex:
         logger.error(f"Lite cover narrative generation failed: {ex}")
 
@@ -373,18 +614,7 @@ Return ONLY the JSON object."""
             f"{'Hard stops were identified that will block this submission. ' if hard_stops else ''}"
             f"Scores below 75 indicate fields or conditions requiring attention before proceeding."
         ),
-        "ai_block": {
-            "agent_name": (user.get("full_name", "") if user else ""),
-            "org_name": org_name,
-            "applicant_name": applicant,
-            "sqs_score": score,
-            "sqs_grade": grade,
-            "hard_stops": hard_stops,
-            "soft_stops": soft_stops,
-            "report_type": "lite_pre_submission",
-            "primble_version": "12.4.0",
-            "a2a_schema_version": "1.0",
-        },
+        "ai_block": _block,
     }
 
 
@@ -402,6 +632,8 @@ def build_cover_page_pdf(
     soft_stops: list = None,
     file_manifest: list = None,
     package_checksum: str = None,
+    package_sqs: Optional[dict] = None,
+    package_label: str = "Total Package Score",
 ) -> bytes:
     generated_at = datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")
 
@@ -503,7 +735,8 @@ def build_cover_page_pdf(
 
         # ── SUBMISSION INFO TABLE ────────────────────────────────────────────
         _info      = _cover_info_values(facts, flags, user, org_name)
-        forms_list = ", ".join(form_ids) if form_ids else "Pre-Submission SQS Analysis (Lite)"
+        forms_list = (", ".join(_cover_form_label(f) for f in form_ids) if form_ids
+                      else "Pre-Submission SQS Analysis (Lite)")
 
         info_rows = [
             [Paragraph("AGENT / USER",      label_s), Paragraph(_info["agent"],           val_s),
@@ -536,13 +769,8 @@ def build_cover_page_pdf(
         story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
         story.append(Spacer(1, 0.06*inch))
 
-        # No emoji — plain text routing labels only
-        routing_labels = {
-            "auto_quote":  "Auto-Quote",
-            "review":      "Light Review",
-            "full_review": "Full Review",
-            "hold":        "Hold",
-        }
+        # Plain words only: a routing CODE never prints, and the grade and tier
+        # are read off the score by the one ladder (see `grade_and_tier`).
         sqs_header = [
             Paragraph(f"<b>{h}</b>", S("TH", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold"))
             for h in ["Form", "Score", "Grade", "Tier", "Routing"]
@@ -553,12 +781,8 @@ def build_cover_page_pdf(
             for fid, sqs in sqs_results.items():
                 score   = sqs.get("sqs_score", 0) if sqs else 0
                 sc      = sqs_color(score)
-                routing = routing_labels.get(
-                    sqs.get("routing_decision", "") if sqs else "",
-                    sqs.get("routing_decision", "—") if sqs else "—",
-                )
-                grade   = sqs.get("grade", "—") if sqs else "—"
-                tier    = sqs.get("tier", "—") if sqs else "—"
+                routing = routing_label(sqs.get("routing_decision") if sqs else None)
+                grade, tier = grade_and_tier(score)
                 sqs_rows.append([
                     Paragraph(fid.replace("_", " "),  S("Cell", fontSize=8,  fontName="Helvetica")),
                     Paragraph(f"<b>{score}/100</b>",   S("Cell", fontSize=9,  fontName="Helvetica-Bold", textColor=sc)),
@@ -566,7 +790,25 @@ def build_cover_page_pdf(
                     Paragraph(tier,                     S("Cell", fontSize=7,  fontName="Helvetica")),
                     Paragraph(routing,                  S("Cell", fontSize=7,  fontName="Helvetica")),
                 ])
-        else:
+        # THE SCORE THE APP SHOWS (1 Oct 2026, owner: "score during download should
+        # be exactly same on the cover page of individual form or whole package as
+        # of the sqs section"). The table listed each form's score, and the TOTAL
+        # PACKAGE SCORE the SQS panel headlines appeared only inside the model's
+        # paragraph. The same stored number now prints as its own row, labelled
+        # as the panel labels it, on every cover that has one.
+        _pkg_score = (package_sqs or {}).get("package_sqs_score")
+        if _pkg_score is not None and package_label not in (sqs_results or {}):
+            sc = sqs_color(_pkg_score)
+            grade, tier = grade_and_tier(_pkg_score)
+            sqs_rows.append([
+                Paragraph(f"<b>{package_label}</b>", S("Cell", fontSize=8,  fontName="Helvetica-Bold")),
+                Paragraph(f"<b>{_pkg_score}/100</b>", S("Cell", fontSize=9,  fontName="Helvetica-Bold", textColor=sc)),
+                Paragraph(grade,                       S("Cell", fontSize=8,  fontName="Helvetica-Bold", textColor=sc)),
+                Paragraph(tier,                        S("Cell", fontSize=7,  fontName="Helvetica")),
+                Paragraph(routing_label((package_sqs or {}).get("routing_decision")),
+                          S("Cell", fontSize=7,  fontName="Helvetica")),
+            ])
+        if len(sqs_rows) == 1:
             sqs_rows.append([
                 Paragraph("No SQS data", S("Cell", fontSize=8, fontName="Helvetica")),
                 Paragraph("—", S("Cell", fontSize=8, fontName="Helvetica")),
@@ -785,13 +1027,13 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
             f"Agency: {org_name}",
             f"Effective Date: {_fv(facts, 'effective_date') or '---'}",
             f"Lines of Business: {', '.join(_cover_lines_of_business(facts, flags)) or '---'}",
-            f"Forms: {', '.join(form_ids)}",
+            f"Forms: {', '.join(_cover_form_label(f) for f in form_ids)}",
             "",
             "SQS SCORES:",
         ]
         for fid, sqs in (sqs_results or {}).items():
             score = sqs.get("sqs_score", 0) if sqs else 0
-            grade = sqs.get("grade", "?") if sqs else "?"
+            grade = grade_and_tier(score)[0]
             lines.append(f"  {fid}: {score}/100 ({grade})")
         lines += ["", "SUMMARY:", (narrative or "No narrative available.")[:800]]
 

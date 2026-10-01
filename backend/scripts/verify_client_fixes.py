@@ -90,17 +90,32 @@ async def main(sid: str) -> int:
 
         pillar_now, _ = calculate_p4_loss_history(facts, flags)
         w = SPEC_PILLAR_WEIGHTS["loss_history_alignment"]
-        # Once the producer has attested, the live card is the NEXT tier up
-        # (60 -> 100, "attach loss runs"), so the 45/25 -> 60 arithmetic the
-        # client quoted no longer applies. Check whichever target is live rather
-        # than reporting a false failure on an already-answered submission.
-        target = 100 if pillar_now >= 60 else 60
-        expected = round(max(0, (target - pillar_now)) * w)
         shown = {r.get("score_impact") for _f, r in loss_cards}
+        if pillar_now is None:
+            # Not Applicable - a New Venture, a young business, or (owner,
+            # 29 Sep 2026) an attested No Known Losses. Nothing is left to earn.
+            expected, rule = [0], "pillar Not Applicable -> 0 pts"
+        elif pillar_now >= 60:
+            # A SCORED attestation (it cannot stand: a claims answer or a
+            # corroborated claim) - the live card is the next tier up, 60 -> 100.
+            expected = [round((100 - pillar_now) * w)]
+            rule = f"(100-{pillar_now}) x {w} = ~{expected[0]} pts"
+        else:
+            # Attesting now takes the pillar OUT of the score (29 Sep 2026), so
+            # the card is worth the other pillars rescaled minus the score as it
+            # stands, per form - never below 0. It was (60 - current) x weight.
+            from services.sqs_service import _weighted_pillar_sum
+            expected = []
+            for fid, _r in loss_cards:
+                fs = (forms.get(fid) or {}).get("sqs") or {}
+                bd, raw = fs.get("breakdown") or {}, fs.get("raw_sqs_score")
+                if bd and raw is not None:
+                    expected.append(max(0, _weighted_pillar_sum(
+                        {**bd, "loss_history_alignment": None}, SPEC_PILLAR_WEIGHTS) - raw))
+            rule = f"remaining pillars rescaled minus the score = ~{sorted(set(expected))} pts"
         check("the printed value matches the published formula",
-              any(abs(int(s) - expected) <= 1 for s in shown if s is not None),
-              f"pillar now {pillar_now} -> {target} is ({target}-{pillar_now}) x {w} "
-              f"= ~{expected} pts; cards show {sorted(shown)}")
+              any(abs(int(s) - e) <= 1 for s in shown if s is not None for e in expected),
+              f"pillar now {pillar_now}: {rule}; cards show {sorted(shown)}")
 
         check("cards say whether the number is exact or a ceiling",
               all("impact_is_exact" in r for _f, r in loss_cards),

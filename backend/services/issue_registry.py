@@ -653,6 +653,12 @@ def _tier1_label_to_facts() -> Dict[str, tuple]:
         # applies whichever the producer actually types, same as every other
         # multi-fact _r_field() rule such as minimum_viable_cope_missing).
         mapping["Contact information"] = TIER1_CONTACT
+        # The proposed term is a PAIR (29 Sep 2026, live Orbin run: the producer
+        # typed the effective date and nothing asked for the expiration). The
+        # effective date is applied first; the expiration then follows it by the
+        # policy's own term (`follow_proposed_expiration`) unless the producer
+        # types one here, which wins. Only the effective date satisfies Tier 1.
+        mapping["Proposed effective date"] = ("effective_date", "expiration_date")
         _tier1_label_to_facts_cache = mapping
     return _tier1_label_to_facts_cache
 

@@ -126,7 +126,13 @@ def test_loss_history_without_a_loss_run_says_it_needs_a_document():
     loss = next((r for r in _recs(pkg)
                  if r["pillar"] == "loss_history_alignment"), None)
     if loss is not None:          # None = Not Applicable, which is not a gap
-        assert loss["closes_with"] == "document"
+        # 29 Sep 2026 (Orbin item 15): when the gap's own answer is the "no
+        # known losses" attestation, selecting it closes the gap (the pillar
+        # becomes Not Applicable) - so it is typed, not waiting on a document.
+        if loss.get("field") == "loss_history_no_prior_losses_indicator":
+            assert loss["closes_with"] == "type"
+        else:
+            assert loss["closes_with"] == "document"
 
 
 def test_an_na_pillar_is_never_listed_as_a_gap():

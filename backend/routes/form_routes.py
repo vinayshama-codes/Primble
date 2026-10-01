@@ -9,7 +9,8 @@ from fastapi import Request
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query, Form
 from fastapi.responses import JSONResponse, Response
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 
 from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL, FREE_PACKAGE_LIMIT
@@ -40,9 +41,14 @@ from services.form_service import (
     process_single_form, score_extra_forms,
 )
 from services.ocr_service import extract_text, extract_zip
+# A signed form is served with the producer's signature on the producer's
+# boxes only (1 Oct 2026); unsigned forms go through pdf_service unchanged.
+from services.signature_boxes import (
+    SIGNATURE_SCOPE as _SIGNATURE_SCOPE, regenerate_pdf_for_form, signer_of as _signer_of,
+)
 from services.pdf_service import (
-    extract_form_fields_with_positions, get_page_dims_pikepdf, regenerate_pdf_for_form,
-    fill_pdf, _is_signature_field, _load_fieldmap,
+    extract_form_fields_with_positions, get_page_dims_pikepdf,
+    fill_pdf, _load_fieldmap,
     apply_acord125_missing_field_highlights,
     apply_acord126_missing_field_highlights,
     extract_form_schema, compute_form_gaps, combined_gap_fill,
@@ -59,9 +65,8 @@ from services.issue_registry import (
     build_grouped_view, build_structured_from_sources, make_issue, normalize_issue_type,
 )
 from services.audit_service import (
-    log_recommendations_presented,
+    sync_recommendation_cards,
     log_field_change,
-    mark_recommendation_resolved,
     log_integrity_assessed,
     log_integrity_resolution,
     log_document_reclassified,
@@ -179,14 +184,18 @@ async def _pre_form_status(
     session_row: Optional[dict] = None,
 ) -> tuple:
     """V1 H2 (client section 7, 2026-08-27): what the pre-form Review screen
-    prints instead of a percentage - `(package_sqs, key_details)`.
+    prints instead of the old Tier 2 percentage - `(package_sqs, key_details)`.
 
     * `package_sqs` is the package SQS AS IT STANDS (the persisted one once
-      forms exist, a fresh unpersisted pre-generation score before that) -
-      the screen shows only its `tier` label. One door:
-      `sqs_service.current_package_sqs`.
+      forms exist, a fresh unpersisted pre-generation score before that). One
+      door: `sqs_service.current_package_sqs`. The screen prints its NUMBER,
+      labelled "so far" because generation can still move it, and its tier
+      (Orbin 22 Sep item 2, 29 Sep 2026 - until then it showed only the tier).
     * `key_details` is the Tier 1 + Tier 2 checklist split into "in place" /
       "missing", from the same lists the score is built from.
+
+    Also the helper `audit_routes` uses after a pre-form resolve / reopen, so
+    those two responses report exactly what these five do.
 
     Both are withheld while a Submission Integrity review is pending - the
     same rule `tier2_score` has always followed on every one of these
@@ -584,10 +593,11 @@ async def upload_declaration(
         # which is what powers the "proceed anyway" banner. See C75.
         _final_soft_stops = soft_stops
 
-        # V1 H2 (client section 7): the status label's score and the key-
-        # details split for the pre-form screen. Withheld exactly as
-        # tier2_score is below. Scored BEFORE the grouped view so any 60-cap the
-        # package scorer holds privately can be rendered as the hard stop it is.
+        # V1 H2 (client section 7): the score so far (number + tier, Orbin
+        # item 2) and the key-details split for the pre-form screen. Withheld
+        # exactly as tier2_score is below. Scored BEFORE the grouped view so
+        # any 60-cap the package scorer holds privately can be rendered as the
+        # hard stop it is.
         _pkg_now, _key_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
         _grouped_issues = _grouped_with_package_caps(
             structured_issues, hard_stops, _final_soft_stops, _pkg_now)
@@ -604,7 +614,8 @@ async def upload_declaration(
             # review clears.
             "tier2_score": None if integrity.get("review_required") else tier2_score,
             "tier2_missing": [] if integrity.get("review_required") else tier2_missing,
-            # V1 H2: the package SQS as it stands (label only is shown) and the
+            # V1 H2: the package SQS as it stands (its number is printed "so
+            # far", with its tier - Orbin item 2, 29 Sep 2026) and the
             # Tier 1 + Tier 2 "in place" / "missing" split. Not persisted here.
             "package_sqs": _pkg_now,
             "key_details": _key_now,
@@ -826,7 +837,7 @@ async def submission_integrity_resolve(
     )
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = result.get("soft_stops") or []
-    # V1 H2: status label + key details, same withholding as tier2_score.
+    # V1 H2: the score so far + key details, same withholding as tier2_score.
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
@@ -939,7 +950,7 @@ async def document_reclassify(
     try:
         # V1 H2 (2026-08-27): the pre-generation recipe that used to live
         # inline here is now `sqs_service.current_package_sqs`, the one door
-        # every pre-form response reads - so the label the producer sees
+        # every pre-form response reads - so the score the producer sees
         # after a reclassify is the same score the upload and reload paths
         # show. Two things changed with the move, both deliberate: the
         # cross-form input is the pipeline's own `cross_form_issues` with
@@ -1139,7 +1150,7 @@ async def underwriting_confirm_value(
     )
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = result.get("soft_stops") or []
-    # V1 H2: status label + key details, same withholding as tier2_score.
+    # V1 H2: the score so far + key details, same withholding as tier2_score.
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
@@ -1457,16 +1468,10 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         # advisory. cross_issues_deduped stays pure for SQS scoring below.
         _display_cross = cross_issues_deduped + _stamp_issues
 
-        await upd_processing_session(req.session_id, {
-            "selected_form_ids": combined_ids, "generated_forms": results,
-            "active_form_id": combined_ids[0] if combined_ids else None,
-            "cross_issues_last": _display_cross,
-            "underwriting_stamp_consistency": _stamp_check,
-            # Fig 8: generation finished - clear the in-progress marker so a
-            # reopen loads the editor directly rather than the resume overlay.
-            "generation_job_id": None,
-        })
-
+        # Scored BEFORE the forms are saved (1 Oct 2026, item 19): the package
+        # scorer writes ONE number onto every copy of a card (what answering it
+        # does to the package), and the saved forms must carry that number - the
+        # same objects are persisted just below.
         summary = {}
         for fid, r in results.items():
             summary[fid] = {"form_id": r["form_id"], "form_name": r["form_name"], "form": r["form"],
@@ -1497,6 +1502,16 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 f"forms={combined_ids} trace={get_trace_id()}]: {_pkg_ex}",
                 exc_info=True)
             package_sqs = None
+
+        await upd_processing_session(req.session_id, {
+            "selected_form_ids": combined_ids, "generated_forms": results,
+            "active_form_id": combined_ids[0] if combined_ids else None,
+            "cross_issues_last": _display_cross,
+            "underwriting_stamp_consistency": _stamp_check,
+            # Fig 8: generation finished - clear the in-progress marker so a
+            # reopen loads the editor directly rather than the resume overlay.
+            "generation_job_id": None,
+        })
 
         # Persist so the async (202) refetch path and page reloads can recover it.
         #
@@ -1558,18 +1573,14 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             from services.usage_service import count_session_usage
             await count_session_usage(str(current_user["id"]), req.session_id)
 
-        for fid, r in results.items():
-            sqs_data = r.get("sqs")
-            if sqs_data and sqs_data.get("recommendations"):
-                try:
-                    await log_recommendations_presented(
-                        session_id=req.session_id,
-                        user_id=str(current_user["id"]),
-                        sqs_result=sqs_data,
-                        model_version=SQS_MODEL_VERSION,
-                    )
-                except Exception as _audit_ex:
-                    logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
+        # The cards every generated form shows, recorded for the download review
+        # and the cover - through the one door a save and an answer also use.
+        await sync_recommendation_cards(
+            req.session_id, str(current_user["id"]),
+            [r.get("sqs") for r in results.values()],
+            SQS_MODEL_VERSION,
+            score_at_action=(package_sqs or {}).get("package_sqs_score"),
+        )
 
         # Form-level field QA (Figure 26): check every mapped field against its
         # source fact + confidence threshold and surface fails/reviews in the
@@ -1580,6 +1591,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             session.get("facts") or {}, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
             flags=session.get("flags") or {},
+            docs=session.get("docs"),
         )
 
         # Field-mapping integrity warnings (Figure 33): carrier/policy data in an
@@ -1742,6 +1754,19 @@ async def get_form_fields(
     _loop   = asyncio.get_event_loop()
     fields    = await _loop.run_in_executor(None, extract_form_fields_with_positions, tpl)
     page_dims = await _loop.run_in_executor(None, get_page_dims_pikepdf, tpl)
+    # Orbin 22 Sep item 18 (30 Sep): mark the Yes / No boxes and send each
+    # one's printed answer cell, so the viewer can make the whole Y/N cell
+    # editable and show which boxes answer a question. Additive - on any
+    # failure the list goes out exactly as before.
+    try:
+        from services.pdf_service import (
+            annotate_viewer_fields as _annotate_viewer_fields,
+            viewer_form_schema as _viewer_form_schema,
+        )
+        _schema = await _loop.run_in_executor(None, _viewer_form_schema, form_id, r.get("schema"))
+        fields = await _loop.run_in_executor(None, _annotate_viewer_fields, fields, _schema, tpl)
+    except Exception as _ex:                                        # noqa: BLE001
+        logger.warning("get_form_fields: Y/N annotation skipped for %s: %s", form_id, _ex)
     field_state = r.get("field_state") or r.get("mapped", {})
     confidence  = dict(r.get("confidence", {}))
     client_filled = set(r.get("client_filled_fields", []))
@@ -1770,6 +1795,7 @@ async def get_form_fields(
         form_id, proc_session.get("facts", {}), field_state, confidence
     )
 
+    _sig_schema = r.get("schema") if isinstance(r.get("schema"), dict) else {}
     for f in fields:
         name = f["name"]
         if name in field_state:
@@ -1779,6 +1805,16 @@ async def get_form_fields(
             f["value"] = ""
         f["confidence_label"] = confidence.get(name, "")
         f["client_filled"]    = name in client_filled
+        # Whose box a signature / date / initials box is (1 Oct 2026): the Sign
+        # button paints the producer's boxes only, so only those carry a
+        # stamped signature to remove. Additive; absent on every other box.
+        try:
+            _tip = str(((_sig_schema.get(name) or {}).get("tu")) or f.get("tooltip") or "")
+            _who = _signer_of(name, _tip)
+            if _who:
+                f["signer"] = _who
+        except Exception:                                           # noqa: BLE001
+            pass
     return JSONResponse({"success": True, "fields": fields, "page_dims": page_dims})
 
 
@@ -1880,7 +1916,73 @@ def _prior_provenance(prev_facts: dict, fact_key, highlight_label):
     return highlight_label or None
 
 
+# A plain amount as a person types one: "3418", "$3418", "3,418.50". Text with
+# words, a percent sign or a scale ("Included", "5%", "1M") is not one.
+_TYPED_AMOUNT_RE = re.compile(r"^\$?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$")
+# ACORD's own declared type for a money box ("Enter amount:", "Enter limit:",
+# "Enter deductible:" - 900 boxes across the 17 schemas).
+_MONEY_TOOLTIP_PREFIXES = ("enter amount", "enter limit", "enter deductible")
+
+
 # ASYNC-SAFE
+def printed_typed_amounts(form_id: str, field_updates: dict, schema: Optional[dict]) -> dict:
+    """{box: printed} for amounts a person typed into a MONEY box, formatted
+    exactly as the stamper prints a document's amount there
+    (`pdf_service.display_value_for_box`) - 1 Oct 2026: a typed premium printed
+    "3418" beside the stamped "3,954".
+
+    A money box is one ACORD declares as an amount, limit or deductible AND
+    the stamper formats as money (`category_for_field`) - both from the form,
+    never a list. Only a plain amount is formatted; "Included", "See schedule",
+    "5%" and "1M" print as typed. The typed text itself is untouched: it is
+    what the fact write-back and the audit read."""
+    out: Dict[str, str] = {}
+    try:
+        from services.display_canonicalizer import category_for_field
+        from services.pdf_service import display_value_for_box
+    except Exception:                                      # noqa: BLE001
+        return out
+    for field, value in (field_updates or {}).items():
+        if not isinstance(field, str) or field.startswith("__") or not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not _TYPED_AMOUNT_RE.match(text):
+            continue
+        meta = (schema or {}).get(field)
+        tip = str((meta or {}).get("tu") or "").strip().lower() if isinstance(meta, dict) else ""
+        if not tip.startswith(_MONEY_TOOLTIP_PREFIXES) or category_for_field(field) != "currency":
+            continue
+        try:
+            printed = display_value_for_box(form_id, field, text, provenance="producer")
+        except Exception:                                  # noqa: BLE001
+            continue
+        if isinstance(printed, str) and printed.strip() and printed != value:
+            out[field] = printed
+    return out
+
+
+# ASYNC-SAFE
+def label_producer_edits(confidence: dict, client_filled: set, field_updates: dict) -> None:
+    """The labels a producer's box edits leave behind, in place.
+
+    A value the PRODUCER typed is the producer's (30 Sep 2026; the rule Orbin
+    item 17 set for card answers). It used to keep the box's old label "so pink
+    highlights persist": a Y typed over an AI box stayed `low_confidence` -
+    painted "AI, verify" and scored at half weight - and a client box the
+    producer retyped stayed the client's green. `producer` is also immune to the
+    stale-"filled" correction in `update_pdf` / `get_form_fields`, which
+    re-labels a "filled" box the AI can map as AI on every read.
+    A CLEARED box keeps the old rule: low_confidence, unless the client filled
+    it or the form requires it."""
+    for k, v in (field_updates or {}).items():
+        val = str(v).strip() if v is not None else ""
+        if val and val not in ("null", "None"):
+            confidence[k] = "producer"
+            client_filled.discard(k)
+        elif confidence.get(k) not in ("client_arq", "missing_required"):
+            confidence[k] = "low_confidence"
+
+
 @router.post("/api/update-pdf")
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
     import hashlib, json
@@ -1921,7 +2023,28 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # audit's generated-value-override classification - never for display.
         prev_confidence = dict(r.get("confidence", {}))
         prev_facts_for_audit = dict(session.get("facts") or {})
+        # Orbin 22 Sep item 18 (30 Sep): "yes" / "no" typed into a one-letter
+        # Y/N box is stored as ACORD's own "Y" / "N", before the audit, the
+        # fact write-back and the PDF read it. Unreadable input is kept as typed.
+        try:
+            from services.pdf_service import (
+                normalize_yes_no_box_edits as _norm_yn_edits,
+                viewer_form_schema as _viewer_form_schema,
+            )
+            _yn_schema = _viewer_form_schema(form_id, r.get("schema"))
+            req.field_updates.update(_norm_yn_edits(req.field_updates, _yn_schema))
+        except Exception as _ex:                                    # noqa: BLE001
+            logger.warning("update_pdf: Y/N normalisation skipped for %s: %s", form_id, _ex)
         current_state.update(req.field_updates)
+        # A typed amount prints like the amounts beside it (1 Oct 2026). The
+        # box shows the formatted amount; the typed text stays in
+        # `req.field_updates` for the fact write-back and the audit below.
+        try:
+            from services.pdf_service import viewer_form_schema as _vfs
+            current_state.update(printed_typed_amounts(
+                form_id, req.field_updates, _vfs(form_id, r.get("schema"))))
+        except Exception as _ex:                                    # noqa: BLE001
+            logger.warning("update_pdf: amount formatting skipped for %s: %s", form_id, _ex)
         confidence = dict(r.get("confidence", {}))
 
         # Correct stale "filled" labels for AI-mapped fields before applying edits.
@@ -1933,18 +2056,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 if has_val:
                     confidence[field_name] = "low_confidence"
 
-        for k, v in req.field_updates.items():
-            val = str(v).strip() if v is not None else ""
-            if val and val not in ("null", "None"):
-                # Only promote missing_required → filled when user fills the field.
-                # Leave low_confidence fields as-is so pink highlights persist —
-                # AI-guessed fields stay pink until explicitly reviewed/refreshed.
-                if confidence.get(k) == "missing_required":
-                    confidence[k] = "filled"
-            else:
-                # Field cleared — demote to low_confidence unless ARQ-filled
-                if confidence.get(k) not in ("client_arq", "missing_required"):
-                    confidence[k] = "low_confidence"
+        _client_filled = set(r.get("client_filled_fields") or [])
+        label_producer_edits(confidence, _client_filled, req.field_updates)
 
         confidence = apply_acord125_missing_field_highlights(
             form_id, session.get("facts", {}), current_state, confidence
@@ -2127,6 +2240,10 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             facts=updated_facts, flags=fresh_flags,
             mapped_data=current_state, form_schema=r.get("schema", {}),
             selected_form_ids=session.get("selected_form_ids", []),
+            # The form being saved. Without it the scorer takes the FIRST
+            # selected form (1 Oct 2026, Orbin G2 live run: a save on the 127
+            # scored it by the 125's rules and showed the 125's cards there).
+            form_id=form_id,
             # SQS design: cross-form stops cap the PACKAGE only, never individual
             # forms - so per-form SQS uses field-level (global) stops only. The
             # cross-form stops (_cf_*) still cap the package score recomputed below.
@@ -2158,15 +2275,17 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     )
                 sig = decrypt_field(dict(row).get("signature_data")) if row else None
                 if sig:
-                    from services.pdf_service import inject_signature_into_pdf
+                    # The producer's boxes only (1 Oct 2026): the applicant's
+                    # signature line is theirs to sign (services/signature_boxes.py).
+                    from services.signature_boxes import (
+                        inject_producer_signature, mark_producer_boxes_signed,
+                    )
                     field_data_for_sig = dict(current_state)
-                    for fn in list(field_data_for_sig.keys()):
-                        if _is_signature_field(fn) and fn not in cleared_sig_fields:
-                            field_data_for_sig[fn] = ""
-                            confidence[fn] = "filled"
+                    mark_producer_boxes_signed(form_id, r, field_data_for_sig, confidence,
+                                               skip=cleared_sig_fields)
                     try:
                         new_pdf_bytes   = await _pdf_loop.run_in_executor(
-                            None, inject_signature_into_pdf, tpl, field_data_for_sig, confidence, sig
+                            None, inject_producer_signature, tpl, field_data_for_sig, confidence, sig
                         )
                         new_sig_applied = True
                     except Exception as ex:
@@ -2222,28 +2341,12 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             except Exception as _fe:
                 logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
 
-        old_rec_ids = {
-            r2.get("rec_id") for r2 in (r.get("sqs") or {}).get("recommendations", [])
-            if isinstance(r2, dict) and r2.get("rec_id")
-        }
-        new_rec_ids = {
-            r2.get("rec_id") for r2 in sqs.get("recommendations", [])
-            if isinstance(r2, dict) and r2.get("rec_id")
-        }
-        for resolved_rec_id in old_rec_ids - new_rec_ids:
-            try:
-                await mark_recommendation_resolved(
-                    session_id=req.session_id,
-                    rec_id=resolved_rec_id,
-                    sqs_score_at_action=sqs.get("sqs_score") or 0,
-                    model_version=SQS_MODEL_VERSION,
-                )
-            except Exception as _re:
-                logger.warning(f"mark_recommendation_resolved failed for {resolved_rec_id}: {_re}")
-
         generated[form_id].update({
             "field_state": current_state, "confidence": confidence, "sqs": sqs,
             "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
+            # Which boxes the signature in `pdf_bytes` covers (1 Oct 2026).
+            "signature_scope": _SIGNATURE_SCOPE if new_sig_applied else None,
+            "client_filled_fields": sorted(_client_filled),
         })
 
         # Recompute package SQS from the now-updated per-form SQS results so
@@ -2378,6 +2481,20 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "underwriting_stamp_consistency": _stamp_check,
         }, delete_facts=_cleared_fact_keys or None)
 
+        # The stored cards follow the forms: a card this save raised is recorded,
+        # one it closed is resolved - judged over the WHOLE package, so a card
+        # another form still shows stays open (it used to be resolved when it
+        # left this form alone). After the package is scored (1 Oct 2026, item
+        # 19): the stored card carries the one number the package scorer put on
+        # every copy of it.
+        await sync_recommendation_cards(
+            req.session_id, str(current_user["id"]),
+            [(_fr or {}).get("sqs") for _fr in generated.values()],
+            SQS_MODEL_VERSION,
+            score_at_action=((pkg_sqs or {}).get("package_sqs_score")
+                             or sqs.get("sqs_score") or 0),
+        )
+
         # E&O 5.12: snapshot the score when a field edit materially moved it.
         try:
             from services.audit_service import log_sqs_snapshot_if_changed
@@ -2394,6 +2511,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             updated_facts, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
             flags=session.get("flags") or {},
+            docs=session.get("docs"),
         )
 
         # Field-mapping integrity warnings (Figure 33): refresh after the edit so
@@ -2485,7 +2603,7 @@ async def get_extraction_result(
     # into structured_issues, so without it every one of them lands in
     # build_grouped_view's uncoded safety net and collapses into a single
     # "Other validations" cluster instead of its real one.
-    # V1 H2: status label + key details. The row is already loaded; once
+    # V1 H2: the score so far + key details. The row is already loaded; once
     # forms exist this returns the persisted, credit-bearing score. Scored
     # BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(

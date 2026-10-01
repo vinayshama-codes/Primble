@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { gradeColor, sqsGradeFromScore, lineLabel } from "../../../utils/formatters";
+import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar } from "../../../utils/formatters";
+import KeyDetailsMissing from "./KeyDetailsMissing";
 import "./ReviewRailLayout.css";
 
 // The "rail" layout of the pre-form Review step - the default layout
@@ -217,10 +218,10 @@ export default function ReviewRailLayout(props) {
     groupedIssues, hardStops, softStops, issueStatuses, reviewIssueCounts, hasHardStops, hasWarnings,
     renderItemActions, renderClusterRollup,
     issueDiff, canProceedWithWarning, warningStops,
-    openItemCount, onContinue,
+    openItemCount, onContinue, onFixKeyDetail,
   } = props;
   const {
-    IssueLine, BareStopRow, HoverTip, ScoreNeutralNote, RemediationDiffBand, IntegritySeverityChip,
+    IssueLine, BareStopRow, HoverTip, RemediationDiffBand, IntegritySeverityChip,
     CONFIDENCE_META, DOC_ACTION_TIPS, clusterIdOf, issueIdOf,
   } = helpers;
 
@@ -342,6 +343,9 @@ export default function ReviewRailLayout(props) {
   const tierName = packageSqs?.tier || null;
   const tierIndex = tierName ? TIER_LADDER.findIndex((t) => t.name === tierName) : -1;
   const tierColor = tierName ? gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) : "#64748b";
+  // The package SQS so far (Orbin item 2, 29 Sep 2026): the one door's number,
+  // printed with the gauge and in the rail footer. Null means "Not scored yet".
+  const soFar = scoreSoFar(packageSqs);
 
   const integrityStatus = integrity?.status;
   const integrityContent = renderIntegrityStatus();
@@ -468,6 +472,11 @@ export default function ReviewRailLayout(props) {
             <div className="rr-ready">
               <div className="rr-gauge">
                 <Gauge tierIndex={tierIndex} />
+                {soFar && (
+                  <div className="rr-gauge__score" style={{ color: tierColor }}>
+                    {soFar.score}<span className="rr-gauge__of"> / 100</span>
+                  </div>
+                )}
                 <div className="rr-gauge__tier" style={{ color: tierColor }}>{tierName || "Not scored yet"}</div>
               </div>
               <div className="rr-ready__copy">
@@ -476,7 +485,9 @@ export default function ReviewRailLayout(props) {
                     {(keyDetails?.satisfied || []).length} of {(keyDetails?.satisfied || []).length + (keyDetails?.missing || []).length} key details in place
                   </div>
                 )}
-                <div className="rr-ready__note">Your Submission Quality Score is calculated after forms are generated.</div>
+                {soFar && (
+                  <div className="rr-ready__note">Submission Quality Score so far. It can change when forms are generated.</div>
+                )}
                 <div className="rr-ladder">
                   {TIER_LADDER.map((t, i) => (
                     <div key={t.name} className={`rr-ladder__row${i === tierIndex ? " is-current" : ""}`}>
@@ -513,7 +524,7 @@ export default function ReviewRailLayout(props) {
         {(keyDetails?.satisfied?.length > 0 || keyDetails?.missing?.length > 0) && (
           <Panel title="Key details" right={<span className="rr-panel__meta rr-panel__meta--inline">Used to calculate readiness</span>}>
             {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok rr-key-line">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
-            {keyDetails?.missing?.length > 0 && <div className="tier2-missing rr-key-line">Key details missing: {keyDetails.missing.join(" · ")}</div>}
+            <KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail} onShowSection={onSectionChange} className="tier2-missing rr-key-line" />
           </Panel>
         )}
         <RemediationDiffBand diff={issueDiff} />
@@ -801,11 +812,12 @@ export default function ReviewRailLayout(props) {
     </>
   );
 
-  const importantClusters = groupedIssues?.important || [];
+  // No "Important" tab or preview (client, 22 Sep, item 3): it repeated the
+  // top clusters of the tiers below and read as duplicate items. The backend
+  // still sends `important`; nothing here renders it.
   const warningTabs = hasWarnings && groupedIssues?.warnings
     ? [
       { id: "all", label: "All", count: reviewIssueCounts.warningCount },
-      ...(importantClusters.length > 0 ? [{ id: "important", label: "Important", count: importantClusters.length }] : []),
       ...WARNING_TIERS
         .filter((t) => (groupedIssues.warnings[t] || []).length > 0)
         .map((t) => ({
@@ -816,35 +828,6 @@ export default function ReviewRailLayout(props) {
     ]
     : [];
   const activeWarnTab = warningTabs.some((t) => t.id === warnTab) ? warnTab : "all";
-
-  const renderImportant = () => {
-    if (importantClusters.length === 0) return null;
-    const key = "important";
-    const open = foldOpen(key, true);
-    return (
-      <section className="rr-panel">
-        <FoldButton className="rr-panel__head rr-panel__head--button" open={open} onToggle={() => toggleFold(key, true)}>
-          <span className="rr-panel__head-text">
-            <span className="rr-panel__title rr-panel__title--pink">Important</span>
-            <span className="rr-panel__meta">The warnings to look at first. Their actions are in the groups below.</span>
-          </span>
-        </FoldButton>
-        {open && (
-          <div className="rr-rows">
-            {importantClusters.map((c, i) => (
-              <div className="rr-issue" key={i}>
-                <IssueLine
-                  message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
-                  className="stop-item stop-item-soft rr-issue__line"
-                />
-                <ScoreNeutralNote show={c.score_neutral} />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    );
-  };
 
   const renderTier = (tier, fallbackOpen) => {
     const clusters = groupedIssues.warnings[tier] || [];
@@ -883,12 +866,9 @@ export default function ReviewRailLayout(props) {
         {!hasWarnings && <EmptyState title="No warnings." sub="Nothing is holding your score at 85." />}
         {hasWarnings && !groupedIssues?.warnings && renderBareStops(softStops, "soft")}
         {hasWarnings && groupedIssues?.warnings && (
-          activeWarnTab === "all" ? (
-            <>
-              {renderImportant()}
-              {WARNING_TIERS.map((t) => renderTier(t, t === "required"))}
-            </>
-          ) : activeWarnTab === "important" ? renderImportant() : renderTier(activeWarnTab, true)
+          activeWarnTab === "all"
+            ? WARNING_TIERS.map((t) => renderTier(t, t === "required"))
+            : renderTier(activeWarnTab, true)
         )}
       </div>
     </>
@@ -920,8 +900,8 @@ export default function ReviewRailLayout(props) {
           {navItems.slice(2).map(renderNavItem)}
         </nav>
         <div className="rr-rail-foot">
-          <div className="rr-rail-foot__label">Submission readiness</div>
-          <div className="rr-rail-foot__tier" style={{ color: tierName ? tierColor : "#a1a1aa" }}>{tierName || "Not scored yet"}</div>
+          <div className="rr-rail-foot__label">Score so far</div>
+          <div className="rr-rail-foot__tier" style={{ color: soFar ? tierColor : "#a1a1aa" }}>{soFar ? soFar.text : "Not scored yet"}</div>
           <div className="rr-rail-foot__sub">{openItems > 0 ? `${plural(openItems, "item")} to go` : "Everything handled"}</div>
           <div className="rr-rail-foot__bar"><i style={{ width: `${progressPct}%` }} /></div>
         </div>

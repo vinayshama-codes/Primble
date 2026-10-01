@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../../config/constants";
 import SaveStageOverlay from "../overlays/SaveStageOverlay";
+import usePdfFieldFocus from "./usePdfFieldFocus";
 import UseSignaturePrompt from "../signature/UseSignaturePrompt";
 import NoSignaturePrompt from "../signature/NoSignaturePrompt";
+import { boxPixelRect, hitTestBox, isBlankBoxValue, isClientValueBox, isYesNoQuestionBlank, normalizeYesNoEntry } from "../../utils/viewerBoxes";
+import "./PDFJsViewer.css";
 
 const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -22,6 +25,13 @@ const _pdfAuthHeaders = () => {
 };
 
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
+// Orbin 22 Sep item 18 (30 Sep): in edit mode a Yes / No question box wears the
+// edit-mode amber - an outline always, and a tint while the question is unanswered.
+// The tint is SOLID (the same amber at 15% over white): a see-through tint let
+// the saved answer printed on the page image show through a box the producer
+// had just emptied, so a deleted "Y" looked undeleted until the save (1 Oct).
+const YN_EDGE     = "#f59e0b";
+const YN_BLANK_BG = "rgb(253,240,218)";
 const CONTAINER_PADDING = 24;
 
 const getMobileRenderWidth = (avail) => {
@@ -35,9 +45,13 @@ export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
   savedSignature, isSigned, onSignApplied, onOpenSignatureModal,
   clientFilledFields = [],
+  focusField = null,   // { field, nonce } - jump to and flash one box (needs-attention list)
   onRefreshFields,
   onSqsUpdate,
   onPendingEditsChange,
+  // Item 10 (1 Oct 2026): a ref the parent reads to save typed edits before it
+  // replaces this viewer - { hasUnsaved(), save() }. See `saveEdits`.
+  editsRef = null,
 }) {
   const canvasRef              = useRef(null);
   const containerRef           = useRef(null);
@@ -53,12 +67,26 @@ export default function PDFJsViewer({
   const manuallyRenderedRef    = useRef({ doc: null, pageNum: -1 });
   const editModeRef            = useRef(false);
   const isSignedLocalRef       = useRef(isSigned);
-  const clientFilledRef        = useRef([]);
   const renderScaleRef         = useRef(1);
+  // Item 10: the save in flight (one at a time), and the latest exit-save.
+  const saveInFlightRef        = useRef(null);
+  const exitSaveRef            = useRef(null);
+  // Item 10: the box a view-mode double-click asked for, focused once edit mode draws it.
+  const pendingFocusRef        = useRef(null);
+  // THE PICTURE AND ITS BOXES SHOW ONE PAGE (owner, 30 Sep 2026: the toolbar
+  // read 2/5, the canvas showed page 1 and page 2's yellow boxes sat on it).
+  // `renderSeqRef` is a ticket: only the newest render may paint the canvas.
+  // `shownPageRef` is the page the canvas REALLY shows - the only page the
+  // overlay is ever built for. `pageNumRef` is the page the reader is on now,
+  // for renders that finish after a page turn (the save and sign redraws).
+  const renderSeqRef           = useRef(0);
+  const shownPageRef           = useRef({ doc: null, page: 0 });
+  const pageNumRef             = useRef(1);
 
   const [pdfjsReady,    setPdfjsReady]    = useState(!!window.pdfjsLib);
   const [pdfDoc,        setPdfDoc]        = useState(null);
   const [pageNum,       setPageNum]       = useState(1);
+  pageNumRef.current = pageNum;
   const [totalPages,    setTotalPages]    = useState(0);
   const [rendering,     setRendering]     = useState(false);
   const [loadError,     setLoadError]     = useState(false);
@@ -67,7 +95,7 @@ export default function PDFJsViewer({
   const [pageDims,      setPageDims]      = useState([]);
   const [fieldValues,   setFieldValues]   = useState({});
   const [saveStatus,    setSaveStatus]    = useState("idle");
-  const [pendingEdits,  setPendingEdits]  = useState(false);
+  const [,              setPendingEdits]  = useState(false);
   const [fieldsLoaded,  setFieldsLoaded]  = useState(false);
   const [isSignedLocal, setIsSignedLocal] = useState(isSigned);
   const [showSignPrompt,setShowSignPrompt]= useState(null);
@@ -82,7 +110,6 @@ export default function PDFJsViewer({
   // phantom mouseenter that would fight the click.
   const canHover = typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(hover: hover)").matches;
 
-  useEffect(() => { clientFilledRef.current = clientFilledFields; }, [clientFilledFields]);
   useEffect(() => { editModeRef.current = editMode; }, [editMode]);
   useEffect(() => { isSignedLocalRef.current = isSignedLocal; }, [isSignedLocal]);
   useEffect(() => { setIsSignedLocal(isSigned); }, [formId]); // eslint-disable-line
@@ -112,6 +139,11 @@ export default function PDFJsViewer({
     clearedSigFieldsRef.current = new Set();
     manuallyRenderedRef.current = { doc: null, pageNum: -1 };
     renderScaleRef.current = 1;
+    pendingFocusRef.current = null;
+    // A render of the previous form must never paint this one.
+    renderSeqRef.current += 1;
+    shownPageRef.current = { doc: null, page: 0 };
+    if (renderTask.current) { try { renderTask.current.cancel(); } catch (_) {} renderTask.current = null; }
     setHighlightCounts({ verified: 0, review: 0, yellow: 0, green: 0 });
   }, [formId]);
 
@@ -132,53 +164,79 @@ export default function PDFJsViewer({
     return () => { try { task.destroy(); } catch (_) {} };
   }, [formId, pdfjsReady, pdfRefreshKey]); // eslint-disable-line
 
-  // Render page to canvas
+  // The page-fit scale every render uses.
+  const _fitScale = (page) => {
+    const avail = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
+    return Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
+  };
+
+  const _blankCanvas = (vp) => {
+    const off = document.createElement("canvas");
+    off.width = vp.width; off.height = vp.height;
+    const ctx = off.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height);
+    return off;
+  };
+
+  // Swap a finished off-screen page onto the visible canvas in ONE step, record
+  // which page it is, and draw that page's boxes at once - so there is no frame
+  // where the canvas shows one page and the overlay another.
+  const _showRenderedPage = (off, doc, page) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    canvas.width = off.width; canvas.height = off.height;
+    canvas.getContext("2d").drawImage(off, 0, 0);
+    shownPageRef.current = { doc, page };
+    // Fields not loaded yet: the overlay effect draws them once they are.
+    if (fieldsRef.current.length > 0) rebuildOverlay();
+    return true;
+  };
+
+  // Render page to canvas.
+  //
+  // Two renders used to paint one canvas at once: the cancel ran BEFORE
+  // `getPage`, so a render still waiting for its page was never cancelled and
+  // whichever finished last won - while the overlay followed the toolbar's page
+  // number. Now each render takes a ticket, paints OFF screen, and only the
+  // newest ticket may swap its page in.
   useEffect(() => {
     if (!pdfDoc || !canvasRef.current) return;
     const mr = manuallyRenderedRef.current;
-    if (mr.doc === pdfDoc && mr.pageNum === pageNum) { setLoadingStage("idle"); return; }
+    const shown = shownPageRef.current;
+    if (mr.doc === pdfDoc && mr.pageNum === pageNum && shown.doc === pdfDoc && shown.page === pageNum) {
+      setRendering(false); setLoadingStage("idle"); return;
+    }
+    const seq = ++renderSeqRef.current;
     const doRender = async () => {
       setRendering(true);
       setLoadingStage(s => (s === "loading" ? "rendering" : s));
-      if (renderTask.current) { try { renderTask.current.cancel(); } catch (_) {} }
+      if (renderTask.current) { try { renderTask.current.cancel(); } catch (_) {} renderTask.current = null; }
       try {
-        const page   = await pdfDoc.getPage(pageNum);
-        const canvas = canvasRef.current; if (!canvas) return;
-        const avail  = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale  = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
-        const vp     = page.getViewport({ scale });
-        canvas.width = vp.width; canvas.height = vp.height;
-        renderScaleRef.current = scale;
-        const ctx    = canvas.getContext("2d");
-        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const t = page.render({ canvasContext: ctx, viewport: vp, renderInteractiveForms: false });
+        const page = await pdfDoc.getPage(pageNum);
+        if (seq !== renderSeqRef.current) return;        // a newer render owns the canvas
+        const vp  = page.getViewport({ scale: _fitScale(page) });
+        const off = _blankCanvas(vp);
+        const t   = page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false });
         renderTask.current = t;
         await t.promise;
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const pd = pageDimsRef.current[pageNum - 1];
-            const resolvedScale = pd ? vp.width / pd.width : scale;
-            renderScaleRef.current = resolvedScale;
-            // Only rebuild overlay if field data has been loaded; if not, the
-            // overlay rebuild useEffect will fire once fieldsLoaded becomes true.
-            if (fieldsRef.current.length > 0) {
-              buildOverlay(resolvedScale, vp.width, vp.height, fieldValuesRef.current);
-            }
-          });
-        });
+        if (renderTask.current === t) renderTask.current = null;
+        if (seq !== renderSeqRef.current) return;
+        _showRenderedPage(off, pdfDoc, pageNum);
       } catch (e) {
-        if (e?.name !== "RenderingCancelledException") setLoadError(true);
-      } finally { setRendering(false); setLoadingStage("idle"); }
+        if (e?.name !== "RenderingCancelledException" && seq === renderSeqRef.current) setLoadError(true);
+      } finally {
+        // Only the newest render clears the busy state: an abandoned one must
+        // not report "done" while the page the reader asked for still draws.
+        if (seq === renderSeqRef.current) { setRendering(false); setLoadingStage("idle"); }
+      }
     };
     doRender();
   }, [pdfDoc, pageNum]); // eslint-disable-line
 
-  // Rebuild overlay when state changes - always use renderScaleRef so scale matches canvas
+  // Rebuild overlay when state changes - for the page the canvas shows.
   useEffect(() => {
     if (!canvasRef.current || !overlayRef.current || !fieldsLoaded) return;
-    const canvas = canvasRef.current;
-    if (canvas.width === 0) return;
-    buildOverlay(renderScaleRef.current, canvas.width, canvas.height, fieldValuesRef.current);
+    rebuildOverlay(fieldValuesRef.current);
   }, [pageNum, editMode, isSignedLocal, fields, fieldsLoaded, pageDims, clientFilledFields]); // eslint-disable-line
 
   // ── fetchFields (used by handleRefresh) ────────────────────────────────
@@ -191,9 +249,6 @@ export default function PDFJsViewer({
         (data.fields || []).forEach(f => {
           vals[f.name]       = f.value            || "";
           confLabels[f.name] = f.confidence_label || "";
-          if (f.client_filled) {
-            clientFilledRef.current = [...new Set([...clientFilledRef.current, f.name])];
-          }
         });
         fieldsRef.current          = data.fields    || [];
         pageDimsRef.current        = data.page_dims || [];
@@ -210,18 +265,13 @@ export default function PDFJsViewer({
         clearedSigFieldsRef.current = new Set();
         _syncPending();
         setFieldsLoaded(true);
-        updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
+        updateHighlightCounts(data.fields || [], confLabels, vals);
         // If the canvas is already painted (e.g. refresh), rebuild the overlay immediately.
         // If not, the useEffect([..., fields, fieldsLoaded, ...]) fires once canvas is ready.
-        requestAnimationFrame(() => {
-          const canvas = canvasRef.current;
-          if (!canvas || canvas.width === 0) return;
-          const pd = (data.page_dims || [])[pageNum - 1];
-          const sc = pd ? canvas.width / pd.width : renderScaleRef.current;
-          renderScaleRef.current = sc;
-          buildOverlay(sc, canvas.width, canvas.height, vals);
-        });
+        requestAnimationFrame(() => rebuildOverlay(vals));
       });
+
+  usePdfFieldFocus({ focusField, fieldsLoaded, fieldsRef, overlayRef, pageNum, setPageNum });
 
   // ── Initial fields fetch on mount ──────────────────────────────────────
   useEffect(() => {
@@ -235,9 +285,6 @@ export default function PDFJsViewer({
         (data.fields || []).forEach(f => {
           vals[f.name]       = f.value            || "";
           confLabels[f.name] = f.confidence_label || "";
-          if (f.client_filled) {
-            clientFilledRef.current = [...new Set([...clientFilledRef.current, f.name])];
-          }
         });
         fieldsRef.current         = data.fields    || [];
         pageDimsRef.current       = data.page_dims || [];
@@ -254,27 +301,21 @@ export default function PDFJsViewer({
         clearedSigFieldsRef.current = new Set();
         _syncPending();
         setFieldsLoaded(true);
-        updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
-        requestAnimationFrame(() => {
-          const canvas = canvasRef.current;
-          if (!canvas || canvas.width === 0) return;
-          const pd = (data.page_dims || [])[0]; // pageNum is always 1 on initial load
-          const sc = pd ? canvas.width / pd.width : renderScaleRef.current;
-          renderScaleRef.current = sc;
-          buildOverlay(sc, canvas.width, canvas.height, vals);
-        });
+        updateHighlightCounts(data.fields || [], confLabels, vals);
+        requestAnimationFrame(() => rebuildOverlay(vals));
       })
       .catch(err => { if (err?.name !== "AbortError") console.error("Fields fetch error:", err); });
     return () => controller.abort();
   }, [sessionId, formId]); // eslint-disable-line
 
-  const updateHighlightCounts = (fieldList, confLabels, clientFilled, vals) => {
+  const updateHighlightCounts = (fieldList, confLabels, vals) => {
     let verified = 0, review = 0, yellow = 0, green = 0;
     fieldList.forEach(f => {
       const name = f.name;
       const val  = (vals[name] || f.value || "").toString().trim();
       const conf = confLabels[name];
-      if (clientFilled.includes(name) || conf === "client_arq") { green++; return; }
+      // Item 17: the same rule as the box's own colour (`_getHighlight`).
+      if (isClientValueBox(conf, vals[name] ?? f.value ?? "", originalFieldValuesRef.current[name])) { green++; return; }
       if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
       if ((conf === "missing_required" || conf === "extraction_error") && (!val || val === "null" || val === "None")) { yellow++; return; }
       if (conf === "ai_verified" && val && val !== "null" && val !== "None") { verified++; return; }
@@ -285,12 +326,12 @@ export default function PDFJsViewer({
 
   const handleRefresh = async () => {
     if (!sessionId || !formId) return;
+    // Item 10 (1 Oct 2026): Refresh re-reads every box from the server, so typed
+    // edits are saved first; if that save fails they stay in the boxes.
+    if (hasUnsavedEdits() && !(await saveEdits({ redraw: false }))) return;
     setLoadingStage("loading");
     try {
-      if (onRefreshFields) {
-        const freshClientFilled = await onRefreshFields();
-        if (Array.isArray(freshClientFilled)) clientFilledRef.current = freshClientFilled;
-      }
+      if (onRefreshFields) await onRefreshFields();
       await fetchFields();
       manuallyRenderedRef.current = { doc: null, pageNum: -1 };
       setPdfRefreshKey(k => k + 1);
@@ -307,7 +348,10 @@ export default function PDFJsViewer({
 
   const _getHighlight = (fieldName, val) => {
     const conf = fieldConfLabelRef.current[fieldName];
-    if (clientFilledRef.current.includes(fieldName) || conf === "client_arq") return "green";
+    // Item 17 (1 Oct 2026): green only while the client's value is in the box,
+    // read off the box's CURRENT label - never off the client-filled list,
+    // which still named a box the producer had retyped.
+    if (isClientValueBox(conf, val, originalFieldValuesRef.current[fieldName])) return "green";
     const v    = (val || "").toString().trim();
     if (YELLOW_REQUIRED.has(fieldName)) {
       if (!v || v === "null" || v === "None") return "yellow";
@@ -327,23 +371,68 @@ export default function PDFJsViewer({
     return curEdit ? "rgba(255,255,255,0.97)" : "transparent";
   };
 
-  const buildOverlay = (scale, canvasW, canvasH, liveValues) => {
+  // A box's background. The confidence highlight wins; with none, an unanswered
+  // Yes / No question is tinted in edit mode so it can be found (item 18).
+  const _boxBg = (field, val, curEdit) => {
+    const hl = _getHighlight(field.name, val);
+    if (!hl && curEdit && field.yn_question
+        && isYesNoQuestionBlank(field, fieldsRef.current, { ...fieldValuesRef.current, [field.name]: val })) {
+      return YN_BLANK_BG;
+    }
+    return _highlightBg(hl, curEdit);
+  };
+
+  // One answer changes whether its whole question is answered - repaint every
+  // box of that question on this page (a Yes / No checkbox pair is two boxes).
+  const _repaintYesNoGroup = (field, curEdit) => {
+    const overlay = overlayRef.current;
+    if (!overlay || !field.yn_question) return;
+    const group = field.yn_group || field.name;
+    Array.from(overlay.children).forEach(el => {
+      const f = el._ynField;
+      if (f && (f.yn_group || f.name) === group) {
+        el.style.background = _boxBg(f, fieldValuesRef.current[f.name] ?? f.value ?? "", curEdit);
+      }
+    });
+  };
+
+  // The ONE way the overlay is (re)built: for the page the canvas shows, at the
+  // canvas's own scale - never for the page the toolbar is heading to.
+  const rebuildOverlay = (liveValues = fieldValuesRef.current) => {
+    const canvas = canvasRef.current;
+    const page = shownPageRef.current.page;
+    if (!canvas || !canvas.width || !page) return;
+    const pd = pageDimsRef.current[page - 1];
+    const sc = pd ? canvas.width / pd.width : renderScaleRef.current;
+    renderScaleRef.current = sc;
+    buildOverlay(sc, canvas.width, canvas.height, liveValues, page);
+  };
+
+  const buildOverlay = (scale, canvasW, canvasH, liveValues, page = shownPageRef.current.page) => {
     const overlay = overlayRef.current;
     if (!overlay) return;
+    // Which box had the cursor before this rebuild (restored at the end).
+    const _activeEl = typeof document !== "undefined" ? document.activeElement : null;
+    const _keepFocusName = (_activeEl && overlay.contains(_activeEl) && _activeEl.closest)
+      ? (_activeEl.closest("[data-field-name]")?.dataset?.fieldName || null) : null;
+    // ...and where its cursor was, so a rebuild mid-typing never moves it.
+    let _keepSel = null;
+    try {
+      if (_keepFocusName && _activeEl.type === "text") _keepSel = [_activeEl.selectionStart, _activeEl.selectionEnd];
+    } catch { /* not a text box */ }
     overlay.innerHTML    = "";
     overlay.style.width  = canvasW + "px";
     overlay.style.height = canvasH + "px";
-    const pd         = pageDimsRef.current[pageNum - 1];
+    if (!page) return;
+    const pd         = pageDimsRef.current[page - 1];
     const pageHeight = pd ? pd.height : canvasH / scale;
-    const pageFields = fieldsRef.current.filter(f => f.page === pageNum - 1);
+    const pageFields = fieldsRef.current.filter(f => f.page === page - 1);
     const curEdit    = editModeRef.current;
+    const focusTargets = {};
 
     pageFields.forEach(field => {
-      const { x, y, width, height } = field.rect;
-      const cx  = x * scale;
-      const cy  = (pageHeight - y - height) * scale;
-      const cw  = Math.max(width  * scale, 18);
-      const ch  = Math.max(height * scale, 14);
+      // One geometry for the overlay and the double-click hit test (viewerBoxes).
+      const { left: cx, top: cy, width: cw, height: ch } = boxPixelRect(field.rect, scale, pageHeight);
       const fs  = Math.max(7, Math.min(ch * 0.58, 12));
       const val = liveValues[field.name] ?? field.value ?? "";
       const hl  = _getHighlight(field.name, val);
@@ -351,12 +440,19 @@ export default function PDFJsViewer({
       // Highlighted fields use fully-opaque pastel fills so the PDF canvas text
       // underneath is completely hidden - preventing the double-text ghost effect.
       // Non-highlighted edit fields use a near-opaque white for the same reason.
-      let bg = _highlightBg(hl, curEdit);
+      let bg = _boxBg(field, val, curEdit);
 
       const wrap = document.createElement("div");
+      wrap.dataset.fieldName = field.name;   // usePdfFieldFocus finds the box by name
       // Inset by 1px on all sides so the highlight sits strictly inside the field
       // boundary - prevents sub-pixel bleed at the edges regardless of scale.
       wrap.style.cssText = `position:absolute;left:${cx+1}px;top:${cy+1}px;width:${Math.max(cw-2,4)}px;height:${Math.max(ch-2,4)}px;pointer-events:${curEdit?"all":"none"};border:none;border-radius:1px;background:${bg};box-sizing:border-box;overflow:hidden;`;
+      wrap.dataset.field = field.name;
+      if (field.yn_question) {
+        wrap._ynField = field;
+        // Item 18: every Yes / No question box is outlined while editing.
+        if (curEdit) wrap.style.boxShadow = `inset 0 0 0 1px ${YN_EDGE}`;
+      }
 
       const isSigF = _isSigField(field.name);
 
@@ -370,10 +466,24 @@ export default function PDFJsViewer({
           cb.addEventListener("change", e => {
             const nextVal = e.target.checked ? "Yes" : "Off";
             triggerSave(field.name, nextVal);
-            wrap.style.background = _highlightBg(_getHighlight(field.name, nextVal), curEdit);
-            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+            // A Yes / No checkbox pair answers ONE question: ticking one box
+            // clears its partner, so a question never carries both answers.
+            if (e.target.checked && field.yn_group && field.yn_group !== field.name) {
+              fieldsRef.current.forEach(g => {
+                if (g === field || g.type !== "checkbox" || g.yn_group !== field.yn_group) return;
+                if (isBlankBoxValue(fieldValuesRef.current[g.name])) return;
+                triggerSave(g.name, "Off");
+                const el = Array.from(overlay.children).find(c => c._ynField === g);
+                const other = el && el.querySelector('input[type="checkbox"]');
+                if (other) other.checked = false;
+              });
+            }
+            wrap.style.background = _boxBg(field, nextVal, curEdit);
+            _repaintYesNoGroup(field, curEdit);
+            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
           });
           wrap.appendChild(cb);
+          focusTargets[field.name] = cb;
         } else if (isChecked && hl) {
           // View mode with highlight (opaque background hides PDF canvas): draw a
           // tick so the checkmark is visible over the highlight colour.
@@ -398,32 +508,54 @@ export default function PDFJsViewer({
             inp.addEventListener("input", e => {
               triggerSave(field.name, e.target.value);
               wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
-              updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+              updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
             });
             wrap.appendChild(inp); inp.focus();
           });
           wrap.appendChild(btn);
+          focusTargets[field.name] = btn;
         } else if (showTextInp) {
           const inp = document.createElement("input"); inp.type = "text"; inp.value = val; inp.placeholder = "Type name…";
           inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.85);border:1px solid rgba(230,0,122,0.4);outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
           inp.addEventListener("input", e => {
             triggerSave(field.name, e.target.value);
             wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
-            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
           });
           wrap.appendChild(inp);
+          focusTargets[field.name] = inp;
         }
       } else if (curEdit) {
         const inp = document.createElement("input"); inp.type = "text"; inp.value = val;
         // background:transparent lets the wrap's bg (highlight or white) show through;
         // no additional layer means no double-text artifact in edit mode.
         inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:transparent;border:none;outline:none;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#000;padding:1px 3px;cursor:text;`;
+        // Item 18: a one-letter Y/N box takes Y or N ("yes" / "no" become the
+        // letter, a stray key keeps the answer) and selects itself on focus so
+        // typing replaces the answer.
+        let lastYn = val;
+        if (field.yes_no) {
+          inp.title = "Type Y or N";
+          inp.autocomplete = "off";
+          inp.spellcheck = false;
+          inp.style.textAlign = "center";
+          inp.style.fontWeight = "700";
+          inp.addEventListener("focus", () => { try { inp.select(); } catch { /* not selectable */ } });
+        }
         inp.addEventListener("input", e => {
-          triggerSave(field.name, e.target.value);
-          wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
-          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+          let next = e.target.value;
+          if (field.yes_no) {
+            next = normalizeYesNoEntry(next, lastYn, e.target.selectionStart);
+            if (e.target.value !== next) e.target.value = next;
+            lastYn = next;
+          }
+          triggerSave(field.name, next);
+          wrap.style.background = _boxBg(field, next, curEdit);
+          _repaintYesNoGroup(field, curEdit);
+          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
         });
         wrap.appendChild(inp);
+        focusTargets[field.name] = inp;
       } else if (hl && val && val !== "null" && val !== "None") {
         // Render value as DOM text over the opaque highlight background.
         // The wrap's fully-opaque bg already hides the PDF canvas text beneath.
@@ -432,8 +564,59 @@ export default function PDFJsViewer({
         txt.textContent = val;
         wrap.appendChild(txt);
       }
+      // Item 18: ACORD draws many Y/N boxes as a strip at the top of a taller
+      // answer cell (126 / 127). A click anywhere in that printed cell edits
+      // the box - the server sends the cell only where no other box is in it.
+      // Appended BEFORE the box, so the box itself stays on top.
+      if (curEdit && field.yes_no && field.answer_rect && focusTargets[field.name]) {
+        const cell = boxPixelRect(field.answer_rect, scale, pageHeight);
+        const target = focusTargets[field.name];
+        const hit = document.createElement("div");
+        hit.title = "Type Y or N";
+        hit.style.cssText = `position:absolute;left:${cell.left}px;top:${cell.top}px;width:${cell.width}px;height:${cell.height}px;pointer-events:all;cursor:text;background:transparent;`;
+        hit.addEventListener("mousedown", ev => {
+          ev.preventDefault();
+          try { target.focus(); if (target.select) target.select(); } catch { /* detached */ }
+        });
+        overlay.appendChild(hit);
+      }
       overlay.appendChild(wrap);
     });
+    // The overlay is rebuilt after every page draw; keep the cursor on the box
+    // that had it (review, 30 Sep: a needs-attention jump to another page in
+    // edit mode focused the box, then the final rebuild threw the input away).
+    if (curEdit && _keepFocusName && !pendingFocusRef.current && focusTargets[_keepFocusName]) {
+      const t = focusTargets[_keepFocusName];
+      requestAnimationFrame(() => {
+        try {
+          t.focus({ preventScroll: true });
+          if (_keepSel && t.type === "text" && typeof t.setSelectionRange === "function") t.setSelectionRange(_keepSel[0], _keepSel[1]);
+        } catch { /* detached */ }
+      });
+    }
+    // Item 10: a view-mode double-click asked for this box - focus it now that
+    // edit mode has drawn it. Focus only: a checkbox is never toggled by it.
+    // The cursor goes to the END of what the box holds with nothing selected
+    // (owner, 30 Sep 2026): a selected value is replaced by the first stray key,
+    // and one keystroke must never wipe a filled box. A one-letter Y/N box keeps
+    // its own select-on-focus - there, typing is meant to replace the answer.
+    const want = pendingFocusRef.current;
+    if (curEdit && want) {
+      pendingFocusRef.current = null;
+      const target = focusTargets[want];
+      const wantField = pageFields.find(f => f.name === want);
+      if (target) {
+        requestAnimationFrame(() => {
+          try {
+            target.focus();
+            if (target.type === "text" && !(wantField && wantField.yes_no) && typeof target.setSelectionRange === "function") {
+              const end = (target.value || "").length;
+              target.setSelectionRange(end, end);
+            }
+          } catch { /* detached */ }
+        });
+      }
+    }
   };
 
   // ── Unsaved-edit tracking ──────────────────────────────────────────────
@@ -466,104 +649,185 @@ export default function PDFJsViewer({
 
   const handleApplySignature = async () => {
     setShowSignPrompt(null); setApplyingSign(true); setApplySigStage("applying");
+    let signedOnServer = false;
     try {
       const res = await fetch(`${API_BASE}/api/apply-signature/${sessionId}/${formId}`, { method: "POST", credentials: "include" });
       if (res.ok) {
+        signedOnServer = true;
         setApplySigStage("rendering");
         const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
         const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise;
-        const page     = await newDoc.getPage(pageNum);
-        const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale    = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
-        const vp       = page.getViewport({ scale });
-        const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
-        const offCtx   = off.getContext("2d"); offCtx.fillStyle = "#fff"; offCtx.fillRect(0,0,off.width,off.height);
-        await page.render({ canvasContext: offCtx, viewport: vp, renderInteractiveForms: false }).promise;
-        const canvas = canvasRef.current;
-        if (canvas) { canvas.width = off.width; canvas.height = off.height; canvas.getContext("2d").drawImage(off,0,0); }
-        manuallyRenderedRef.current = { doc: newDoc, pageNum };
-        setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
-        setIsSignedLocal(true); clearedSigFieldsRef.current = new Set();
-        onSignApplied(formId);
-        if (canvas) {
-          const pd2 = pageDimsRef.current[pageNum - 1];
-          if (pd2) {
-            const s2 = canvas.width / pd2.width;
-            renderScaleRef.current = s2;
-            buildOverlay(s2, canvas.width, canvas.height, fieldValuesRef.current);
-          }
+        // The page the reader is on NOW, and a ticket: a page turn while the
+        // signed form was drawing must not be painted over by the old page.
+        const seq      = ++renderSeqRef.current;
+        const pg       = pageNumRef.current;
+        const page     = await newDoc.getPage(pg);
+        const vp       = page.getViewport({ scale: _fitScale(page) });
+        const off      = _blankCanvas(vp);
+        await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;
+        setIsSignedLocal(true); isSignedLocalRef.current = true; clearedSigFieldsRef.current = new Set();
+        if (seq === renderSeqRef.current && pg === pageNumRef.current && _showRenderedPage(off, newDoc, pg)) {
+          manuallyRenderedRef.current = { doc: newDoc, pageNum: pg };
+          setRendering(false);
         }
+        // Otherwise the newer page is drawn from the signed form by the render
+        // effect when the document swaps in below.
+        setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
+        onSignApplied(formId);
       } else { const d = await res.json().catch(() => ({})); console.error("Sig apply failed:", d.detail); }
-    } catch (e) { console.error("Sig apply failed:", e); }
+    } catch (e) {
+      console.error("Sig apply failed:", e);
+      if (signedOnServer) {
+        // The form IS signed; only the redraw failed, possibly after it took the
+        // render ticket. Reload the form so the current page is drawn and the
+        // busy state clears - never a stale page with the page buttons disabled.
+        setIsSignedLocal(true); isSignedLocalRef.current = true; clearedSigFieldsRef.current = new Set();
+        manuallyRenderedRef.current = { doc: null, pageNum: -1 };
+        setPdfRefreshKey(k => k + 1);
+        onSignApplied(formId);
+      }
+    }
     finally { setApplyingSign(false); setApplySigStage("idle"); }
   };
 
   const handleSignClick = () => setShowSignPrompt(savedSignature ? "use" : "none");
 
   const handleToggleEditMode = async () => {
-    if (editMode) {
-      const allValues = fieldValuesRef.current;
-      const hasChanges = hasUnsavedEdits();
-      if (hasChanges) {
-        setSaveStatus("saving");
-        try {
-          const clearedSigFields = Array.from(clearedSigFieldsRef.current);
-          const changedValues = {};
-          Object.keys(allValues).forEach(k => {
-            if (allValues[k] !== (originalFieldValuesRef.current[k] ?? "")) changedValues[k] = allValues[k];
-          });
-          clearedSigFields.forEach(k => { changedValues[k] = ""; });
-          const res = await fetch(`${API_BASE}/api/update-pdf`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, field_updates: { ...changedValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
-            // The panel's score is current again as of this response. Cleared
-            // only on OK - a failed save leaves the edits genuinely pending.
-            _syncPending();
-            const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
-            if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
-            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues, groupedCrossIssues: data.grouped_cross_issues });
-            // Sync confidence labels from backend so overlay reflects the post-save state
-            // (e.g. user-edited fields become "filled", not "low_confidence").
-            if (data?.confidence) {
-              fieldConfLabelRef.current = { ...fieldConfLabelRef.current, ...data.confidence };
-              updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, allValues);
-            }
-            setSaveStatus("generating");
-            _loadPdfInBackground(allValues);
-          } else { setSaveStatus("error"); }
-        } catch { setSaveStatus("error"); }
-      }
-    }
+    // Item 10 (1 Oct 2026): a failed save keeps edit mode on and the typed
+    // values in their boxes ("Failed" in the toolbar) - it used to leave edit
+    // mode as if the edits had gone through.
+    if (editMode && hasUnsavedEdits() && !(await saveEdits())) return;
     setEditMode(m => !m);
   };
 
-  const _loadPdfInBackground = (currentValues) => {
+  // The request body of the ONE save - the changed boxes, the signed flag and
+  // the cleared signature boxes. Read off the refs at call time.
+  const _editsPayload = () => {
+    const allValues = fieldValuesRef.current;
+    const clearedSigFields = Array.from(clearedSigFieldsRef.current);
+    const changedValues = {};
+    Object.keys(allValues).forEach(k => {
+      if (allValues[k] !== (originalFieldValuesRef.current[k] ?? "")) changedValues[k] = allValues[k];
+    });
+    clearedSigFields.forEach(k => { changedValues[k] = ""; });
+    const body = JSON.stringify({ session_id: sessionId, field_updates: { ...changedValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } });
+    return { allValues, clearedSigFields, body };
+  };
+
+  // THE save of typed edits (Orbin item 10, 1 Oct 2026). "Done editing - save"
+  // and every path that would replace this viewer - a form switch, an "Open to
+  // fix" re-stamp, a download, Refresh - go through it, so a typed edit is
+  // never silently dropped. Resolves true when nothing is left unsaved; false
+  // when the save failed, with the edits kept in their boxes. One save at a
+  // time: a second caller waits for the one in flight. `redraw: false` skips
+  // the background redraw when the caller reloads or replaces the viewer anyway.
+  const saveEdits = ({ redraw = true } = {}) => {
+    // A save already running carried the boxes as they were when it started;
+    // anything typed since is saved straight after it, so "saved" always means
+    // every edit on screen.
+    if (saveInFlightRef.current) {
+      return saveInFlightRef.current.then((ok) => (ok && hasUnsavedEdits() ? saveEdits({ redraw }) : ok));
+    }
+    if (!hasUnsavedEdits()) return Promise.resolve(true);
+    const run = (async () => {
+      setSaveStatus("saving");
+      try {
+        const { allValues, clearedSigFields, body } = _editsPayload();
+        const res = await fetch(`${API_BASE}/api/update-pdf`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (!res.ok) { setSaveStatus("error"); return false; }
+        const data = await res.json();
+        setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
+        // The panel's score is current again as of this response. Cleared
+        // only on OK - a failed save leaves the edits genuinely pending.
+        _syncPending();
+        const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
+        if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
+        if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues, groupedCrossIssues: data.grouped_cross_issues });
+        // Sync confidence labels from backend so overlay reflects the post-save state
+        // (e.g. user-edited fields become "filled", not "low_confidence").
+        if (data?.confidence) {
+          fieldConfLabelRef.current = { ...fieldConfLabelRef.current, ...data.confidence };
+          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, allValues);
+        }
+        if (redraw) { setSaveStatus("generating"); _loadPdfInBackground(); }
+        else { setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000); }
+        return true;
+      } catch { setSaveStatus("error"); return false; }
+      finally { saveInFlightRef.current = null; }
+    })();
+    saveInFlightRef.current = run;
+    return run;
+  };
+
+  // Last resort for a way out nothing could wait on - the page closing after
+  // the browser's own "Leave site?" prompt, or the viewer unmounting on a path
+  // that did not save first: the same request, sent so it outlives the page.
+  const _saveOnExit = () => {
+    if (saveInFlightRef.current || !hasUnsavedEdits() || !sessionId || !formId) return;
+    try {
+      fetch(`${API_BASE}/api/update-pdf`, {
+        method: "POST", credentials: "include", keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: _editsPayload().body,
+      }).catch(() => {});
+    } catch { /* the page is going away */ }
+  };
+  exitSaveRef.current = _saveOnExit;
+
+  // The parent's handle (AcordModal saves before it replaces this viewer).
+  useEffect(() => {
+    if (!editsRef) return undefined;
+    const handle = { hasUnsaved: () => hasUnsavedEdits() || !!saveInFlightRef.current, save: () => saveEdits() };
+    editsRef.current = handle;
+    return () => { if (editsRef.current === handle) editsRef.current = null; };
+  });
+
+  // Unsaved edits: the browser asks before the tab closes or reloads, and if
+  // the producer leaves anyway - or this viewer unmounts with edits still in
+  // its boxes - the exit save sends them.
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (!hasUnsavedEdits() && !saveInFlightRef.current) return undefined;
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+    const onPageHide = () => { if (exitSaveRef.current) exitSaveRef.current(); };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
+      if (exitSaveRef.current) exitSaveRef.current();
+    };
+  }, []);
+
+  const _loadPdfInBackground = () => {
     if (!pdfjsReady) return;
     window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise
       .then(async newDoc => {
+        // The saved form redraws the page the reader is on NOW - not the page
+        // they were on when they clicked save (they can turn pages, or jump
+        // from the needs-attention list, while the form regenerates).
+        const seq = ++renderSeqRef.current;
+        const pg  = pageNumRef.current;
         try {
-          const page    = await newDoc.getPage(pageNum);
-          const avail   = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-          const scale   = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
-          const vp      = page.getViewport({ scale });
-          const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
+          const page = await newDoc.getPage(pg);
+          const vp   = page.getViewport({ scale: _fitScale(page) });
+          const off  = _blankCanvas(vp);
           await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;
-          const vc = canvasRef.current;
-          if (vc) { vc.width = off.width; vc.height = off.height; vc.getContext("2d").drawImage(off, 0, 0); }
-          manuallyRenderedRef.current = { doc: newDoc, pageNum };
-          setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
-          const pd = pageDimsRef.current[pageNum - 1];
-          if (pd) {
-            const s2 = off.width / pd.width;
-            renderScaleRef.current = s2;
-            buildOverlay(s2, off.width, off.height, currentValues);
+          if (seq === renderSeqRef.current && pg === pageNumRef.current && _showRenderedPage(off, newDoc, pg)) {
+            manuallyRenderedRef.current = { doc: newDoc, pageNum: pg };
+            setRendering(false);
           }
+          // Otherwise a newer render or page turn owns the canvas; the swap
+          // below makes the render effect draw the current page of the saved form.
+          setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
           setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000);
         } catch { setPdfDoc(newDoc); setTotalPages(newDoc.numPages); setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000); }
       })
@@ -571,6 +835,33 @@ export default function PDFJsViewer({
   };
 
   const goPage = n => { if (n >= 1 && n <= totalPages) setPageNum(n); };
+
+  // Item 10 (client, 22 Sep): "producers will want to click directly on the
+  // form to fix fields". In VIEW mode a double-click on a box turns edit mode on
+  // and focuses that box. It never changes a value itself - a checkbox is only
+  // focused, never ticked - and it waits whenever the Edit button would.
+  const editBusy = saveStatus === "saving" || saveStatus === "generating";
+  const handleCanvasDoubleClick = (e) => {
+    if (editModeRef.current || editBusy || applyingSign || loadingStage !== "idle" || !fieldsLoaded) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !canvas.width) return;
+    const box = canvas.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const px = (e.clientX - box.left) * (canvas.width / box.width);
+    const py = (e.clientY - box.top) * (canvas.height / box.height);
+    const scale = renderScaleRef.current;
+    // Hit-test the page the canvas SHOWS - during a page turn the toolbar is
+    // already on the next page while this one is still on screen.
+    const shown = shownPageRef.current.page;
+    if (!shown) return;
+    const pd = pageDimsRef.current[shown - 1];
+    const pageHeight = pd ? pd.height : canvas.height / scale;
+    const hit = hitTestBox(fieldsRef.current, shown - 1, px, py, scale, pageHeight);
+    if (!hit) return;
+    e.preventDefault();
+    pendingFocusRef.current = hit.name;
+    setEditMode(true);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#181c27", borderRadius: 8, overflow: "hidden" }}>
@@ -606,7 +897,7 @@ export default function PDFJsViewer({
           {fieldsLoaded && (
             <>
               {highlightCounts.yellow  > 0 && <span title="Required fields that are still empty - fill before sending." style={{ background: "rgb(254,243,199)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} Required</span>}
-              {highlightCounts.review  > 0 && <span title="AI-filled but NOT found in your uploaded documents - verify before download." style={{ background: "rgb(254,215,170)", color: "#9a3412", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.review} Verify</span>}
+              {highlightCounts.review  > 0 && <span title="Filled by the AI or calculated by us, and not confirmed in your uploaded documents - verify before download." style={{ background: "rgb(254,215,170)", color: "#9a3412", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.review} Verify</span>}
               {highlightCounts.verified > 0 && <span title="AI-filled and confirmed present in your uploaded documents." style={{ background: "rgb(254,226,226)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.verified} AI-OK</span>}
               {highlightCounts.green   > 0 && <span title="Filled by your client via the questionnaire." style={{ background: "rgb(187,247,208)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} Client</span>}
               {(highlightCounts.yellow + highlightCounts.review + highlightCounts.verified + highlightCounts.green) > 0 && (
@@ -643,18 +934,12 @@ export default function PDFJsViewer({
         </div>
 
         <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-          {/* A highlight repaints the instant a field changes; the score does not
-              move until this edit is saved. Say so, next to the button that saves. */}
-          {pendingEdits && saveStatus !== "saving" && saveStatus !== "generating" && (
-            <span title="Field highlights update as you type. The score is recalculated by the server when you click Done Editing."
-                  style={{ display: "flex", alignItems: "center", gap: 4, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}>
-              <span style={{ width: 6, height: 6, background: "#f59e0b", borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />
-              Unsaved - score updates on Done Editing
-            </span>
-          )}
+          {/* The toolbar's "Unsaved" marker was removed (owner, 30 Sep 2026: it
+              wrapped the toolbar onto two lines). The side panel still says the
+              score is from the last save while edits are pending (AcordModal). */}
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
+          {saveStatus === "error"   && <span title="Your edits are still in their boxes. Save again before leaving this form." style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Save failed - edits kept</span>}
 
           <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
             title="Refresh - picks up client-submitted answers and shows green highlights"
@@ -662,9 +947,20 @@ export default function PDFJsViewer({
             Refresh
           </button>
 
-          <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
-            {editMode ? "Done Editing" : "Edit Fields"}
+          {/* Item 10 (client, 22 Sep): "Make Edit button WAY more obvious". The
+              one filled, primary-colour, largest button in the toolbar. Same
+              handler, same disabled / wait states as before. */}
+          <button onClick={handleToggleEditMode} disabled={editBusy}
+            className={`pdfviewer-edit-btn${editMode ? " is-editing" : ""}`}
+            aria-pressed={editMode}
+            title={editMode ? "Save your edits and update the score" : "Edit the boxes on this form"}
+            style={{ cursor: editBusy ? "wait" : "pointer", opacity: editBusy ? 0.7 : 1 }}>
+            {editMode ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            )}
+            {editMode ? "Done editing - save" : "Edit form"}
           </button>
 
           <button onClick={handleSignClick} disabled={applyingSign}
@@ -690,11 +986,18 @@ export default function PDFJsViewer({
 
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit - "Done Editing" saves all changes</span>
+          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any box to edit - "Done editing - save" saves all changes</span>
+          {fields.some(f => f.yn_question) && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: YN_BLANK_BG, boxShadow: `inset 0 0 0 1px ${YN_EDGE}`, borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Yes / No question - type Y or N</span></span>}
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,243,199)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,215,170)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Verify (not found in docs)</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,226,226)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>AI-OK (found in docs)</span></span>
           {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(187,247,208)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Client-filled</span></span>}
+        </div>
+      )}
+
+      {!editMode && fieldsLoaded && pdfDoc && !loadError && (
+        <div className="pdfviewer-edit-hint pdfviewer-view-hint">
+          <span>Double-click any box to edit it</span>
         </div>
       )}
 
@@ -706,7 +1009,7 @@ export default function PDFJsViewer({
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
           </div>
         ) : (
-          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
+          <div className="pdfviewer-canvas-wrapper" onDoubleClick={handleCanvasDoubleClick} style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
             <canvas ref={canvasRef} style={{ display: "block" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (

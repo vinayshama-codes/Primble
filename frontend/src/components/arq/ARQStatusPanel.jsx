@@ -95,7 +95,15 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
                       )}
 
                       {/* §6.2 / Req 2: client-filled fields notification */}
-                      {fieldsCount > 0 && (
+                      {/* Point Q (1 Oct 2026): the client's questions answered and
+                          details checked, counted apart, as their receipt shows
+                          them. Older rows without the split keep the field count. */}
+                      {arq.response_summary ? (
+                        <div style={{ fontSize: 11, color: "#047857", display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 }} />
+                          {arq.response_summary} - answers are highlighted in green on the form
+                        </div>
+                      ) : fieldsCount > 0 && (
                         <div style={{ fontSize: 11, color: "#047857", display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 }} />
                           {fieldsCount} field{fieldsCount !== 1 ? "s" : ""} filled by client - highlighted in green on the form

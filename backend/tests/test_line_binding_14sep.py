@@ -396,13 +396,21 @@ def test_a_stated_renewal_still_counts(text):
 def test_orbin_keeps_the_term_its_policies_print(merged):
     # The printed term is KEPT - as the current policy's term, in prior_*, no
     # longer as the proposed one (owner, 15 Sep 2026, following Brent's ACORD
-    # 125 answer key: it ended 07/15/26, so the proposal is asked, never a
-    # renewal-shifted date). The cancellation clause still makes no renewal.
+    # 125 answer key). The cancellation clause still makes no renewal.
+    # 29 Sep 2026 (client items 4 / 11): the ended term now PROPOSES the next
+    # one - effective = its expiration, one term later - instead of asking.
+    # The fixture is the live Orbin text, so once the next term is within the
+    # stale window (30 days before 07/15/2027) the dates are asked again.
+    from datetime import datetime, timedelta
     mf, _docs = merged
     assert not es._fv(mf, "is_renewal")
     assert es._fv(mf, "prior_effective_date") == "07/15/25"
     assert es._fv(mf, "prior_expiration_date") == "07/15/26"
-    assert not es._fv(mf, "effective_date") and not es._fv(mf, "expiration_date")
+    if datetime.now() + timedelta(days=es._STALE_PROPOSAL_GRACE_DAYS) < datetime(2027, 7, 15):
+        assert es._fv(mf, "effective_date") == "07/15/2026"
+        assert es._fv(mf, "expiration_date") == "07/15/2027"
+    else:
+        assert not es._fv(mf, "effective_date") and not es._fv(mf, "expiration_date")
 
 
 # ── 5. THE VEHICLE'S OWN CLASS AND TERRITORY, READ BESIDE ITS OWN VIN ────────

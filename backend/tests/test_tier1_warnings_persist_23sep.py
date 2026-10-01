@@ -109,7 +109,9 @@ def test_each_row_carries_its_own_fix():
     it reaches the display through. The safety-net (message) route is the one
     that had no answer for a dynamically-coded rule."""
     for label, expected in (
-        ("Proposed effective date", ["effective_date"]),
+        # 29 Sep 2026: the proposed term is a pair - the expiration box rides
+        # along (it follows the effective date unless the producer types one).
+        ("Proposed effective date", ["effective_date", "expiration_date"]),
         ("Contact information", list(TIER1_CONTACT)),
         ("Business entity type", ["entity_type"]),
     ):

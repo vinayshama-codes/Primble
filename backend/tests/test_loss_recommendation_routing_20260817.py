@@ -39,8 +39,10 @@ def test_the_no_known_losses_card_targets_the_attestation_not_a_year_count():
 
 
 def test_confirming_no_known_losses_actually_moves_the_pillar():
-    """40 -> 60, via the field the card now targets. This is the whole point.
-    (Narrative-only is 40 since C2 2.5; it was 45 before 2026-08-24.)"""
+    """40 -> Not Applicable, via the field the card now targets. This is the
+    whole point. (Narrative-only is 40 since C2 2.5; it was 45 before
+    2026-08-24. The confirmation scored 60 until the owner's 29 Sep 2026
+    decision took an attested pillar out of the score.)"""
     before, _ = calculate_p4_loss_history({}, {"narrative_states_no_losses": True})
     assert before == 40
 
@@ -49,11 +51,12 @@ def test_confirming_no_known_losses_actually_moves_the_pillar():
         "attach loss runs or a signed no-known-loss letter to corroborate the "
         "statement"
     )
-    after, _ = calculate_p4_loss_history(
+    after, recs = calculate_p4_loss_history(
         {field: {"value": "no losses", "confidence": "filled", "source": "producer"}},
         {"narrative_states_no_losses": True},
     )
-    assert after == 60, "the producer's confirmation must raise the pillar"
+    assert after is None, "the producer's confirmation must take the pillar out"
+    assert any("not applicable" in r.lower() for r in recs)
 
 
 def test_the_old_field_still_moves_nothing_which_is_why_it_was_wrong():
@@ -138,6 +141,13 @@ def _harvest_every_loss_message() -> set:
         # conflict: an attestation contradicted by real claims
         ({"num_claims": 3, "total_incurred": 50000}, {"no_prior_losses": True},
          True, "strong"),
+        # Since 29 Sep 2026 the plain attestation above is Not Applicable, so
+        # the SCORED attestation messages are reached only where it cannot
+        # stand: corroborated claims with no loss run (the 45 ceiling), in the
+        # 5+ / unknown band and in the 1-5 band.
+        ({"num_claims": "2"}, {"no_prior_losses": True}, False, "no_loss_run"),
+        ({"num_claims": "2", "years_in_business": "3"}, {"no_prior_losses": True},
+         False, "no_loss_run"),
     ]
     for facts, flags, has_doc, match in scenarios:
         _, recs = calculate_p4_loss_history(

@@ -5,6 +5,18 @@ from config.settings import FRONTEND_URL
 
 logger = logging.getLogger(__name__)
 
+# The line under "Primble" in the client-facing e-mails (questionnaire
+# invitation and reminder). Client, 22 Sep: "Commercial Insurance Submission
+# Platform", not just "Commercial Insurance Platform".
+_EMAIL_TAGLINE = "Commercial Insurance Submission Platform"
+
+# The plain-text sign-off of the same client e-mails. A mail client that shows
+# the text part (or a spam filter that reads it) used to see "The Insurance
+# Team" and no tagline (client G1, 1 Oct 2026): the text part now signs off as
+# the HTML header reads - Primble, then the tagline. One copy, used by every
+# client e-mail that prints the tagline in its HTML.
+_CLIENT_TEXT_SIGNOFF = f"Thank you,\nPrimble\n{_EMAIL_TAGLINE}"
+
 
 def _sanitize_header(value: str) -> str:
     """Strip CR/LF characters that could inject additional SMTP headers."""
@@ -47,7 +59,7 @@ def send_arq_email(
         f"Please click the link below to answer some simple questions. This will only take a couple of minutes.\n\n"
         f"{arq_link}\n\n"
         f"This link will expire in 7 days.\n\n"
-        f"Thank you,\nThe Insurance Team"
+        f"{_CLIENT_TEXT_SIGNOFF}"
     )
     body_html = f"""
     <!DOCTYPE html>
@@ -57,7 +69,7 @@ def send_arq_email(
       <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
           <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;letter-spacing:-0.5px;">Primble</p>
-          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
+          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">{_EMAIL_TAGLINE}</p>
         </div>
         <div style="padding:32px;">
           <p style="font-size:16px;color:#1e293b;font-weight:600;margin:0 0 12px 0;">{greeting}</p>
@@ -104,7 +116,7 @@ def send_arq_reminder_email(
         f"to complete your commercial insurance application.\n\n"
         f"Please click the link below to answer a few simple questions.\n\n"
         f"{arq_link}\n\n"
-        f"Thank you,\nThe Insurance Team"
+        f"{_CLIENT_TEXT_SIGNOFF}"
     )
     body_html = f"""
     <!DOCTYPE html>
@@ -114,7 +126,7 @@ def send_arq_reminder_email(
       <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
           <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;">Primble</p>
-          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
+          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">{_EMAIL_TAGLINE}</p>
         </div>
         <div style="padding:32px;">
           <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
@@ -158,8 +170,14 @@ def send_arq_submitted_notification(
     fields_filled: int,
     session_id: str = "",          # ADD THIS PARAM
     frontend_url: str = "",        # ADD THIS PARAM
+    response_summary: str = "",
 ) -> bool:
-    """Notify producer that client has submitted the ARQ — includes link back to session."""
+    """Notify producer that client has submitted the ARQ — includes link back to session.
+
+    `response_summary` ("21 of 21 questions answered - 0 of 4 details
+    checked") is the split the producer's receipt shows (point Q, 1 Oct 2026);
+    when given it replaces the bare field count, which never said what the
+    client did."""
     import os
     if not frontend_url:
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -167,11 +185,19 @@ def send_arq_submitted_notification(
     # Deep link: frontend reads ?resume_session=<id> on load to reopen editor
     session_link = f"{frontend_url}?resume_session={session_id}" if session_id else frontend_url
 
+    _summary = (response_summary or "").strip()
+    count_txt = (f"{_summary}. Their answers have been applied to your ACORD forms."
+                 if _summary else
+                 f"{fields_filled} field(s) have been updated in your ACORD forms.")
+    count_html = (f"<strong>{_summary}</strong>. Their answers have been applied to your ACORD forms."
+                  if _summary else
+                  f"<strong>{fields_filled}</strong> field(s) have been automatically updated in your ACORD forms.")
+
     subject   = f"Client Submitted Insurance Questionnaire — {client_name or client_email}"
     body_txt  = (
         f"Hi {producer_name or 'there'},\n\n"
         f"{client_name or client_email} has submitted answers to your insurance questionnaire.\n\n"
-        f"{fields_filled} field(s) have been updated in your ACORD forms.\n\n"
+        f"{count_txt}\n\n"
         f"Click the link below to review and continue editing:\n{session_link}\n\n"
         f"The Primble Team"
     )
@@ -193,7 +219,7 @@ def send_arq_submitted_notification(
           </p>
           <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px 0;">
             <strong style="color:#1e293b;">{client_name or client_email}</strong> has submitted answers to your insurance questionnaire.
-            <strong>{fields_filled}</strong> field(s) have been automatically updated in your ACORD forms.
+            {count_html}
           </p>
           <div style="text-align:center;margin:24px 0;">
             <a href="{session_link}"

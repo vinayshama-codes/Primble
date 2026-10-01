@@ -193,8 +193,13 @@ def test_loss_run_presence_floors_loss_history():
 
 
 def test_attested_no_losses_credited():
-    score, _ = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
-    assert score >= 50
+    """Credited by leaving the score, not by a number: an attested No Known
+    Losses makes Loss History Not Applicable (owner, 29 Sep 2026 - it scored
+    60). What must never happen is the attestation reading as no information."""
+    score, recs = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
+    assert score is None
+    assert any("not applicable" in r.lower() for r in recs)
+    assert sq.calculate_p4_loss_history({}, {})[0] == 25
 
 
 def test_present_doc_types_skips_excluded():

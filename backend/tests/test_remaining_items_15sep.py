@@ -89,17 +89,78 @@ def _term_docs(eff, exp, role="dec_page"):
     return [{"doc_type": role, "facts": {"effective_date": eff, "expiration_date": exp}}]
 
 
+def _year_shift(dt, years):
+    try:
+        return dt.replace(year=dt.year + years)
+    except ValueError:                                   # 29 Feb -> 28 Feb
+        return dt.replace(year=dt.year + years, day=28)
+
+
+def _orbin_like_term(days_since_end=76):
+    """An annual term that ended `days_since_end` days ago (Orbin: 76 days before
+    29 Sep 2026), printed with two-digit years like the live facts. Relative, so
+    the "next term not over yet" condition never ages out of the test."""
+    exp_d = datetime.now() - timedelta(days=days_since_end)
+    if exp_d.month == 2 and exp_d.day == 29:
+        exp_d -= timedelta(days=1)
+    return _year_shift(exp_d, -1), exp_d
+
+
 class TestProposedTerm:
-    def test_the_orbin_term_ended_so_it_is_prior_and_the_proposal_is_asked(self):
-        mf = _term_facts("07/15/25", "07/15/26")          # the live facts' own printing
-        es._route_renewal_dates(mf, _term_docs("07/15/25", "07/15/26"))
-        assert "effective_date" not in mf and "expiration_date" not in mf
-        assert _v(mf["prior_effective_date"]) == "07/15/25"
-        assert _v(mf["prior_expiration_date"]) == "07/15/26"
+    def test_the_orbin_term_ended_so_the_next_term_is_proposed(self):
+        # 29 Sep 2026 (client items 4 / 11) REVERSES the 15 Sep rule that asked
+        # both dates here: the dec's expiration is the proposed effective date,
+        # and the proposed term repeats the dec's own term.
+        eff_d, exp_d = _orbin_like_term()
+        eff, exp = eff_d.strftime("%m/%d/%y"), exp_d.strftime("%m/%d/%y")
+        mf = _term_facts(eff, exp)
+        es._route_renewal_dates(mf, _term_docs(eff, exp))
+        assert _v(mf["prior_effective_date"]) == eff
+        assert _v(mf["prior_expiration_date"]) == exp
         assert mf["prior_expiration_date"]["routed_from"] == "current_term"
         assert mf["renewal_dates_routed"] is True
-        assert "effective_date" in mf[es.REJECTED_FACTS_KEY]
+        assert _v(mf["effective_date"]) == exp_d.strftime("%m/%d/%Y")
+        assert mf["effective_date"]["source"] == "derived"
+        assert mf["effective_date"]["confidence"] == "low_confidence"
+        assert mf["effective_date"]["derivation"]["rule"] == "next_term_after_current_policy"
+        assert _v(mf["expiration_date"]) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+        assert not (mf.get(es.REJECTED_FACTS_KEY) or {})
         assert "renewal_lines_expiring" not in mf       # never a "Renewal:" warning here
+
+    @pytest.mark.parametrize("renewal", [None, "yes"])
+    def test_a_stale_dec_asks_both_dates(self, renewal):
+        # The term after the dec's own term has ALSO ended: the documents are out
+        # of date. A renewal used to derive that already-ended term; both ask now.
+        eff, exp = _d(-800), _d(-435)
+        mf = _term_facts(eff, exp, renewal=renewal)
+        es._route_renewal_dates(mf, _term_docs(eff, exp))
+        assert "effective_date" not in mf and "expiration_date" not in mf
+        assert _v(mf["prior_effective_date"]) == eff and _v(mf["prior_expiration_date"]) == exp
+        assert mf["renewal_dates_routed"] is True
+        reason = mf[es.REJECTED_FACTS_KEY]["effective_date"]
+        assert "out of date" in reason and "—" not in reason
+
+    @pytest.mark.parametrize("next_ends_in, asked", [(-1, True), (29, True), (31, False), (200, False)])
+    def test_the_stale_boundary(self, next_ends_in, asked):
+        # A next term that ends within 30 days is not a proposal (grace window).
+        exp_d = datetime.now() + timedelta(days=next_ends_in - 365)
+        if exp_d.month == 2 and exp_d.day == 29:
+            exp_d -= timedelta(days=1)
+        eff_d = _year_shift(exp_d, -1)
+        eff, exp = eff_d.strftime("%m/%d/%Y"), exp_d.strftime("%m/%d/%Y")
+        mf = _term_facts(eff, exp)
+        es._route_renewal_dates(mf, _term_docs(eff, exp))
+        assert ("effective_date" not in mf) is asked
+        if not asked:
+            assert _v(mf["effective_date"]) == exp
+
+    def test_a_term_we_would_not_repeat_is_still_asked(self):
+        # Six months is not a length repeated on faith (300-400 day guard).
+        eff, exp = _d(-300), _d(-118)
+        mf = _term_facts(eff, exp)
+        es._route_renewal_dates(mf, _term_docs(eff, exp))
+        assert "effective_date" not in mf and "expiration_date" not in mf
+        assert "effective_date" in mf[es.REJECTED_FACTS_KEY]
 
     def test_an_in_force_current_term_proposes_the_next_one(self):
         eff, exp = _d(-60), _d(305)
@@ -182,7 +243,9 @@ class TestProposedTerm:
         es._route_renewal_dates(mf, _term_docs(eff, exp))
         assert mf["prior_effective_date"] == "01/01/2020"
         assert mf["prior_expiration_date"] == "01/01/2021"
-        assert "effective_date" not in mf
+        # 29 Sep 2026: the ended term still proposes the next one.
+        assert _v(mf["effective_date"]) == exp
+        assert mf["effective_date"]["source"] == "derived"
 
     @pytest.mark.parametrize("junk", [None, "", "not a date", {"value": None}, 7, ["x"]])
     def test_junk_dates_never_raise(self, junk):
@@ -217,6 +280,8 @@ class TestPageOneMarking:
         return mf
 
     def test_a_policy_only_package_marks_all_three(self):
+        # No proposed effective date is known here, so the dec is NOT presumed
+        # to renew (29 Sep 2026) and the 15 Sep marks all stand.
         mf = self._mf()
         assert es._mark_page_one_current_policy(mf, [_dec_doc()]) == ["carrier", "premium"]
         assert mf["carrier_is_current_policy"] is True
@@ -419,19 +484,27 @@ class TestPriorCarrierGrid:
 
 
 # ── 2d. Through the merge: the live Orbin package's shape ────────────────────
-def test_through_the_merge_the_orbin_package_asks_for_its_proposed_term():
+def test_through_the_merge_the_orbin_package_proposes_its_next_term():
+    # 29 Sep 2026 (client items 4 / 11): was "...asks_for_its_proposed_term".
+    eff_d, exp_d = _orbin_like_term()
+    eff, exp = eff_d.strftime("%m/%d/%y"), exp_d.strftime("%m/%d/%y")
     doc = {"doc_type": "dec_page", "filename": "orbin_policy.pdf", "text": "",
            "facts": {"applicant_name": "ORBIN CONTRACTING LLC",
-                     "effective_date": "07/15/25", "expiration_date": "07/15/26",
+                     "effective_date": eff, "expiration_date": exp,
                      "carrier_name": EMCC, "total_policy_premium": "$10,663",
                      "coverage_lines": copy.deepcopy(_LINES)},
            "flags": {}}
     mf, _flags = es.merge_facts([doc], doc)
-    assert not _v(mf.get("effective_date")) and not _v(mf.get("expiration_date"))
-    assert _v(mf["prior_expiration_date"]) == "07/15/26"
+    assert _v(mf.get("effective_date")) == exp_d.strftime("%m/%d/%Y")
+    assert _v(mf.get("expiration_date")) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+    assert _v(mf["prior_expiration_date"]) == exp
     assert mf.get("renewal_dates_routed") is True
+    # 29 Sep 2026 (client items 7 / 8): a dec-only upload renews its programme.
+    # Two companies write Orbin's policies, so CARRIER stays an owned blank (and
+    # a card asks for it); the dec's premiums now print.
+    assert mf.get("renews_current_programme") is True
     assert mf.get("carrier_is_current_policy") is True
-    assert mf.get("premium_is_current_policy") is True
+    assert "premium_is_current_policy" not in mf
 
 
 # ── 2e. A certificate documents the EXISTING policy (own-diff review) ────────

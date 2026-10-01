@@ -1,0 +1,954 @@
+[
+  {
+    "page": 1,
+    "fact": "Carrier",
+    "expected": "Granite Peak Casualty Company",
+    "acord125_field": "Insurer_FullName_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Carrier NAIC",
+    "expected": "99887",
+    "acord125_field": "Insurer_NAICCode_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Program name",
+    "expected": "Contractors Advantage Program",
+    "acord125_field": "Insurer_ProductDescription_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Program code",
+    "expected": "CAP-27",
+    "acord125_field": "Insurer_ProductCode_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Underwriter",
+    "expected": "Marisol Vance",
+    "acord125_field": "Insurer_Underwriter_FullName_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Underwriter office",
+    "expected": "SEA-02 (Seattle Regional)",
+    "acord125_field": "Insurer_Underwriter_OfficeIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Producer",
+    "expected": "Northsound Insurance Brokers LLC",
+    "acord125_field": "Producer_FullName_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Producer contact",
+    "expected": "Renee Castillo",
+    "acord125_field": "Producer_ContactPerson_FullName_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Producer phone",
+    "expected": "(253) 555-0100",
+    "acord125_field": "Producer_ContactPerson_PhoneNumber_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Producer fax",
+    "expected": "(253) 555-0101",
+    "acord125_field": "Producer_FaxNumber_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Producer email",
+    "expected": "rcastillo@northsound-ins.example.com",
+    "acord125_field": "Producer_ContactPerson_EmailAddress_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Agency code",
+    "expected": "44-1187",
+    "acord125_field": "Insurer_ProducerIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Sub code",
+    "expected": "07",
+    "acord125_field": "Insurer_SubProducerIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Named insured",
+    "expected": "Harborline Plumbing & Mechanical, LLC",
+    "acord125_field": "NamedInsured_FullName_A",
+    "note": "DBA Harborline Mechanical also printed"
+  },
+  {
+    "page": 1,
+    "fact": "FEIN",
+    "expected": "91-4478123",
+    "acord125_field": "NamedInsured_TaxIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "SIC",
+    "expected": "1711",
+    "acord125_field": "NamedInsured_SICCode_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "NAICS",
+    "expected": "238220",
+    "acord125_field": "NamedInsured_NAICSCode_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Business phone",
+    "expected": "(253) 555-0142",
+    "acord125_field": "NamedInsured_Primary_PhoneNumber_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Website",
+    "expected": "www.harborline-mech.example.com",
+    "acord125_field": "NamedInsured_Primary_WebsiteAddress_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Entity type",
+    "expected": "LLC",
+    "acord125_field": "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Members/managers",
+    "expected": "2",
+    "acord125_field": "NamedInsured_LegalEntity_MemberManagerCount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Current term effective",
+    "expected": "10/15/2025",
+    "acord125_field": "",
+    "note": "printed in 3 formats"
+  },
+  {
+    "page": 1,
+    "fact": "Current term expiration",
+    "expected": "10/15/2026",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Proposed effective (next term)",
+    "expected": "10/15/2026",
+    "acord125_field": "Policy_EffectiveDate_A",
+    "note": "renewal: next term"
+  },
+  {
+    "page": 1,
+    "fact": "Proposed expiration",
+    "expected": "10/15/2027",
+    "acord125_field": "Policy_ExpirationDate_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Transaction",
+    "expected": "Renewal",
+    "acord125_field": "Policy_Status_RenewIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "LOB: GL / Auto / Property / Umbrella",
+    "expected": "ticked",
+    "acord125_field": "Policy_LineOfBusiness_* indicators",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "GL premium",
+    "expected": "38,640",
+    "acord125_field": "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Property premium",
+    "expected": "14,980",
+    "acord125_field": "CommercialPropertyLineOfBusiness_PremiumAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Auto premium",
+    "expected": "26,310",
+    "acord125_field": "CommercialVehicleLineOfBusiness_PremiumAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Umbrella premium",
+    "expected": "9,450",
+    "acord125_field": "CommercialUmbrellaLineOfBusiness_PremiumAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Policy premium total",
+    "expected": "89,380",
+    "acord125_field": "Policy_Payment_EstimatedTotalAmount_A",
+    "note": "IM $3,275 excluded - separate policy, not in submission"
+  },
+  {
+    "page": 1,
+    "fact": "Billing plan",
+    "expected": "Direct",
+    "acord125_field": "Policy_Payment_DirectBillIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Payment plan",
+    "expected": "Quarterly",
+    "acord125_field": "Policy_Payment_PaymentScheduleCode_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Method of payment",
+    "expected": "ACH / EFT",
+    "acord125_field": "Policy_PaymentMethod_MethodDescription_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Deposit",
+    "expected": "22,345",
+    "acord125_field": "Policy_Payment_DepositAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Minimum premium",
+    "expected": "1,000",
+    "acord125_field": "Policy_Payment_MinimumPremiumAmount_A",
+    "note": ""
+  },
+  {
+    "page": 1,
+    "fact": "Audit",
+    "expected": "Annual",
+    "acord125_field": "Policy_Audit_FrequencyCode_A",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "Subcontracted cost",
+    "expected": "310,000",
+    "acord125_field": "",
+    "note": "for ACORD 126"
+  },
+  {
+    "page": 2,
+    "fact": "GL each occurrence",
+    "expected": "1,000,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL general aggregate",
+    "expected": "2,000,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL products/completed ops aggregate",
+    "expected": "2,000,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "Personal & advertising injury",
+    "expected": "1,000,000",
+    "acord125_field": "",
+    "note": "printed as $1M"
+  },
+  {
+    "page": 2,
+    "fact": "Damage to rented premises",
+    "expected": "300,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "Medical expense",
+    "expected": "10,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL deductible",
+    "expected": "2,500 per claim BI/PD",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL code (primary)",
+    "expected": "98483",
+    "acord125_field": "NamedInsured_GeneralLiabilityCode_A",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL class 98483 payroll",
+    "expected": "1,860,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL class 98482 payroll",
+    "expected": "420,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL class 68707 area",
+    "expected": "4,000 sq ft",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "GL class 61217 area",
+    "expected": "2,400 sq ft",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 2,
+    "fact": "Stop Gap EL limits",
+    "expected": "1,000,000 / 1,000,000 / 1,000,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 3,
+    "fact": "Hired auto cost of hire",
+    "expected": "12,000",
+    "acord125_field": "",
+    "note": "for ACORD 127/137"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle schedule attached",
+    "expected": "Yes (6 owned vehicles)",
+    "acord125_field": "Policy_SectionAttached_VehicleScheduleIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 3,
+    "fact": "Driver schedule attached",
+    "expected": "Yes (6 drivers)",
+    "acord125_field": "Policy_SectionAttached_DriverInformationScheduleIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 3,
+    "fact": "Auto CSL",
+    "expected": "1,000,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 3,
+    "fact": "Auto symbols",
+    "expected": "Liab 1; UM 2; Med 2; Comp/Coll 7; Hired 8; Non-owned 9",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 1 VIN / cost new",
+    "expected": "1FTBR2C85PKA10427 / 52,400",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 2 VIN / cost new",
+    "expected": "1FTBR2C84NKA38815 / $49,900",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 3 VIN / cost new",
+    "expected": "1GC4YLE71MF211903 / 57,300.00",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 4 VIN / cost new",
+    "expected": "3C6LRVDG5RE104462 / 54,150",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 5 VIN / cost new",
+    "expected": "54DC4W1B8KS801244 / 71,800",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 3,
+    "fact": "Vehicle 6 VIN / cost new",
+    "expected": "1FDUF5HT3LDA22917 / 96,500",
+    "acord125_field": "",
+    "note": "for ACORD 127"
+  },
+  {
+    "page": 4,
+    "fact": "Loc 1 / 2 / 3 roof year",
+    "expected": "2016 / 2012 / 2019",
+    "acord125_field": "",
+    "note": "for ACORD 140"
+  },
+  {
+    "page": 4,
+    "fact": "Loc 1 construction / year / sq ft",
+    "expected": "Joisted masonry / 1978 / 18,000 (bldg)",
+    "acord125_field": "Construction_BuildingArea_A",
+    "note": "total building area 18,000"
+  },
+  {
+    "page": 4,
+    "fact": "Loc 2 construction / year / sq ft",
+    "expected": "Non-combustible / 1996 / 4,000",
+    "acord125_field": "Construction_BuildingArea_B",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Loc 3 construction / year / sq ft",
+    "expected": "Frame / 1954 / 2,400",
+    "acord125_field": "Construction_BuildingArea_C",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Loc 2 building limit",
+    "expected": "1,150,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Loc 3 building limit",
+    "expected": "620,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Loc 1 BPP",
+    "expected": "380,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee name",
+    "expected": "Cascadia Community Bank",
+    "acord125_field": "AdditionalInterest_FullName_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee address",
+    "expected": "950 Pacific Ave, Tacoma WA 98402",
+    "acord125_field": "AdditionalInterest_MailingAddress_*_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee loan #",
+    "expected": "CCB-77-40981",
+    "acord125_field": "AdditionalInterest_AccountNumberIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee loan amount",
+    "expected": "780,000",
+    "acord125_field": "AdditionalInterest_LoanAmount_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee interest end",
+    "expected": "11/30/2033",
+    "acord125_field": "AdditionalInterest_InterestEndDate_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee phone",
+    "expected": "(253) 555-0300",
+    "acord125_field": "AdditionalInterest_Primary_PhoneNumber_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee email",
+    "expected": "loans@cascadiacb.example.com",
+    "acord125_field": "AdditionalInterest_Primary_EmailAddress_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Mortgagee applies to",
+    "expected": "Location 2, Building 1",
+    "acord125_field": "AdditionalInterest_Item_LocationProducerIdentifier_A",
+    "note": ""
+  },
+  {
+    "page": 4,
+    "fact": "Loc 3 area leased to others",
+    "expected": "Y",
+    "acord125_field": "CommercialStructure_Question_ABBCode_C",
+    "note": ""
+  },
+  {
+    "page": 5,
+    "fact": "Umbrella limit",
+    "expected": "5,000,000 each occurrence / aggregate",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 5,
+    "fact": "Umbrella SIR",
+    "expected": "10,000",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 5,
+    "fact": "Workers comp",
+    "expected": "WA state fund (L&I) - no private WC policy",
+    "acord125_field": "",
+    "note": ""
+  },
+  {
+    "page": 5,
+    "fact": "Drones",
+    "expected": "N / N",
+    "acord125_field": "CommercialPolicy_Question_KANCode_A / KAOCode_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Other named insured",
+    "expected": "Harborline Equipment Holdings LLC",
+    "acord125_field": "NamedInsured_FullName_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "ONI FEIN",
+    "expected": "91-4478124",
+    "acord125_field": "NamedInsured_TaxIdentifier_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "ONI SIC / NAICS / GL",
+    "expected": "7359 / 532412 / 97111",
+    "acord125_field": "NamedInsured_SICCode_B / NAICSCode_B / GeneralLiabilityCode_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "ONI address",
+    "expected": "2210 Port of Tacoma Rd Ste 4C, Tacoma WA 98421",
+    "acord125_field": "NamedInsured_MailingAddress_*_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "ONI phone",
+    "expected": "(253) 555-0143",
+    "acord125_field": "NamedInsured_Primary_PhoneNumber_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "ONI entity / members",
+    "expected": "LLC / 1",
+    "acord125_field": "NamedInsured_LegalEntity_*_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact A type / name",
+    "expected": "Inspection / Dale Okafor",
+    "acord125_field": "NamedInsured_Contact_ContactDescription_A / FullName_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact A primary phone",
+    "expected": "(253) 555-0187 cell",
+    "acord125_field": "NamedInsured_Contact_PrimaryPhoneNumber_A + PrimaryCellPhoneIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact A secondary phone",
+    "expected": "(253) 555-0142 business",
+    "acord125_field": "NamedInsured_Contact_SecondaryPhoneNumber_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact A emails",
+    "expected": "dokafor@... / field@...",
+    "acord125_field": "NamedInsured_Contact_PrimaryEmailAddress_A / SecondaryEmailAddress_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact B type / name",
+    "expected": "Accounting / Priya Raman",
+    "acord125_field": "NamedInsured_Contact_ContactDescription_B / FullName_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact B primary phone",
+    "expected": "(253) 555-0150 business",
+    "acord125_field": "NamedInsured_Contact_PrimaryPhoneNumber_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact B secondary phone",
+    "expected": "(253) 555-0151 cell",
+    "acord125_field": "NamedInsured_Contact_SecondaryPhoneNumber_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Contact B emails",
+    "expected": "ap@... / praman@...",
+    "acord125_field": "NamedInsured_Contact_PrimaryEmailAddress_B / SecondaryEmailAddress_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Parent company",
+    "expected": "Harborline Group, Inc. - 75%",
+    "acord125_field": "BusinessInformation_ParentOrganizationName_A / Subsidiary_ParentOwnershipPercent_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Subsidiary",
+    "expected": "Harborline Equipment Holdings LLC - 100%",
+    "acord125_field": "Subsidiary_OrganizationName_A / Subsidiary_ParentOwnershipPercent_B",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Q4 other insurance with this company",
+    "expected": "Y - Inland Marine IM-3301877-02",
+    "acord125_field": "CommercialPolicy_Question_AAHCode_A / OtherPolicy_*_A",
+    "note": ""
+  },
+  {
+    "page": 6,
+    "fact": "Q13 other business ventures",
+    "expected": "Y - Sound Backflow Testing LLC",
+    "acord125_field": "CommercialPolicy_Question_KAMCode_A",
+    "note": ""
+  },
+  {
+    "page": 7,
+    "fact": "Loss history years",
+    "expected": "5",
+    "acord125_field": "LossHistory_InformationYearCount_A",
+    "note": ""
+  },
+  {
+    "page": 7,
+    "fact": "Total losses",
+    "expected": "32,030 paid (38,030 incurred)",
+    "acord125_field": "LossHistory_TotalAmount_A",
+    "note": "ambiguous by design"
+  },
+  {
+    "page": 7,
+    "fact": "Loss A",
+    "expected": "02/11/2026 GL, claim 02/13/2026, paid 18,750, reserve 6,000, subro Y, open Y",
+    "acord125_field": "LossHistory_*_A",
+    "note": ""
+  },
+  {
+    "page": 7,
+    "fact": "Loss B",
+    "expected": "07/22/2025 Auto, claim 07/23/2025, paid 3,420, reserve 0, subro N, open N",
+    "acord125_field": "LossHistory_*_B",
+    "note": ""
+  },
+  {
+    "page": 7,
+    "fact": "Loss C",
+    "expected": "12/03/2024 Property, claim 12/04/2024, paid 9,860, reserve 0, subro N, open N",
+    "acord125_field": "LossHistory_*_C",
+    "note": ""
+  },
+  {
+    "page": 7,
+    "fact": "Loss D (4th claim - beyond 3 rows)",
+    "expected": "05/16/2022 GL Olympic Mutual, denied, 0",
+    "acord125_field": "",
+    "note": "belongs on loss summary / ACORD 101"
+  },
+  {
+    "page": 7,
+    "fact": "Q6 abuse / discrimination / negligent hiring",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_AADCode_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Replaced vehicle (sold)",
+    "expected": "2016 Ford Transit VIN 1FTYR2CM6GKA90312 - must NOT appear in schedule",
+    "acord125_field": "",
+    "note": "TRAP"
+  },
+  {
+    "page": 8,
+    "fact": "Mailing address (current, after endorsement)",
+    "expected": "PO Box 11820, Tacoma, WA 98411-0820",
+    "acord125_field": "NamedInsured_MailingAddress_*_A",
+    "note": "TRAP: page 1 shows the old street address"
+  },
+  {
+    "page": 8,
+    "fact": "Prior carrier year 1 (2025)",
+    "expected": "Granite Peak: GL CPP-4418820-03 38,640 / Auto BA-4418821-03 26,310 / Prop CPP-4418820-03 14,980 / Umb UMB-7720145-03 9,450; 10/15/2025-10/15/2026",
+    "acord125_field": "PriorCoverage_*_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Prior carrier year 2 (2024)",
+    "expected": "Granite Peak -02 numbers: 36,120 / 24,880 / 14,210 / 8,900; 10/15/2024-10/15/2025",
+    "acord125_field": "PriorCoverage_*_B",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Prior carrier year 3 (2023)",
+    "expected": "Granite Peak -01 numbers: 33,870 / 23,400 / 13,560 / 8,300; 10/15/2023-10/15/2024",
+    "acord125_field": "PriorCoverage_*_C",
+    "note": "2022-23 Olympic Mutual is a 4th year - no room on 125"
+  },
+  {
+    "page": 8,
+    "fact": "Q5 declined/cancelled/non-renewed",
+    "expected": "Y - Non-renewal (Olympic Mutual, 10/15/2023, carrier exited class)",
+    "acord125_field": "CommercialPolicy_Question_AACCode_A + CancelNonRenew_NonRenewalIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Q7 fraud/arson",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_KABCode_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Q8 fire/safety violations",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_AAFCode_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Q9 foreclosure/bankruptcy",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_KAKCode_A",
+    "note": ""
+  },
+  {
+    "page": 8,
+    "fact": "Q10 judgement/lien",
+    "expected": "Y - 06/12/2024 Rainier Pipe Supply lien, resolved 09/30/2024 (paid, released)",
+    "acord125_field": "CommercialPolicy_Question_KALCode_A + JudgementOrLien_*_A",
+    "note": ""
+  },
+  {
+    "page": 9,
+    "fact": "Q1a subsidiary of another entity",
+    "expected": "Y - Harborline Group, Inc., 75%",
+    "acord125_field": "CommercialPolicy_Question_AAICode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q1b has subsidiaries",
+    "expected": "Y - Harborline Equipment Holdings LLC, 100%",
+    "acord125_field": "CommercialPolicy_Question_AAJCode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q2 safety program",
+    "expected": "Y - manual, safety position, monthly meetings, OSHA",
+    "acord125_field": "CommercialPolicy_Question_KAACode_A + FormalSafetyProgram_*",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q3 flammables",
+    "expected": "Y - propane cylinders + pipe cement/primer in flammables cabinet",
+    "acord125_field": "CommercialPolicy_Question_ABCCode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q11 trust",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_ABBCode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q12 foreign operations",
+    "expected": "N",
+    "acord125_field": "CommercialPolicy_Question_KACCode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Q14/Q15 drones",
+    "expected": "N / N",
+    "acord125_field": "CommercialPolicy_Question_KANCode_A / KAOCode_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Business start date",
+    "expected": "03/01/2011",
+    "acord125_field": "NamedInsured_BusinessStartDate_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Installation/service/repair %",
+    "expected": "100%",
+    "acord125_field": "CommercialStructure_InstallationRepairWorkPercent_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 9,
+    "fact": "Off-premises %",
+    "expected": "95%",
+    "acord125_field": "CommercialStructure_InstallationRepairWorkOffPremisesPercent_A",
+    "note": "scanned + handwritten"
+  },
+  {
+    "page": 10,
+    "fact": "Premises A",
+    "expected": "2210 Port of Tacoma Rd Ste 4B, Tacoma, Pierce, WA 98421; Inside; Tenant; 22; 2; 5,400,000; 6,500; 400; 18,000; N",
+    "acord125_field": "CommercialStructure_PhysicalAddress_*_A, city limits, interest, BusinessInformation_Full/PartTimeEmployeeCount_A, CommercialStructure_AnnualRevenueAmount_A, BuildingOccupancy_OccupiedArea_A, OpenToPublicArea_A, Construction_BuildingArea_A, Question_ABBCode_A",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Premises B",
+    "expected": "8801 Canyon Rd E, Puyallup, Pierce, WA 98371; Outside; Owner; 6; 1; 1,250,000; 4,000; 0; 4,000; N",
+    "acord125_field": "CommercialStructure_PhysicalAddress_*_B, city limits, interest, BusinessInformation_Full/PartTimeEmployeeCount_B, CommercialStructure_AnnualRevenueAmount_B, BuildingOccupancy_OccupiedArea_B, OpenToPublicArea_B, Construction_BuildingArea_B, Question_ABBCode_B",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Premises C",
+    "expected": "305 W Main St, Auburn, King, WA 98001; Inside; Owner; 0; 0; 0; 1,200; 0; 2,400; Y",
+    "acord125_field": "CommercialStructure_PhysicalAddress_*_C, city limits, interest, BusinessInformation_Full/PartTimeEmployeeCount_C, CommercialStructure_AnnualRevenueAmount_C, BuildingOccupancy_OccupiedArea_C, OpenToPublicArea_C, Construction_BuildingArea_C, Question_ABBCode_C",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Nature of business",
+    "expected": "Contractor",
+    "acord125_field": "BusinessInformation_BusinessType_ContractorIndicator_A",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Description of primary operations",
+    "expected": "Plumbing, hydronic heating & HVAC install/service/repair, commercial & residential",
+    "acord125_field": "CommercialPolicy_OperationsDescription_A",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Description of other named insured ops",
+    "expected": "Equipment Holdings owns vehicles/equipment, leases only to applicant",
+    "acord125_field": "CommercialPolicy_OperationsDescription_B",
+    "note": ""
+  },
+  {
+    "page": 10,
+    "fact": "Status of transaction",
+    "expected": "Quote (renewal)",
+    "acord125_field": "Policy_Status_QuoteIndicator_A / RenewIndicator_A",
+    "note": "document says renewal AND requests a quote"
+  },
+  {
+    "page": 10,
+    "fact": "Umbrella requested limit",
+    "expected": "5,000,000",
+    "acord125_field": "",
+    "note": ""
+  }
+]

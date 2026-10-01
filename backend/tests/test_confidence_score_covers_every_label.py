@@ -27,14 +27,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Every module that assigns a per-field confidence label into the dict the
 # fill-rate reads. Add a module here if a new one starts writing
 # ``confidence[<field>] = "<label>"``.
+#
+# arq_service joined on 29 Sep: it writes per-field labels too (the questionnaire
+# and producer re-stamps, the producer's schedule save) through a local named
+# `conf`. Its "producer" label had no weight - every producer-saved schedule
+# cell scored 0.00 - and this harvest could not see it.
 _LABEL_WRITERS = (
     ROOT / "services" / "pdf_service.py",
     ROOT / "routes" / "form_routes.py",
+    ROOT / "services" / "arq_service.py",
 )
 
-# ``confidence[field] = "label"`` and the ternary form
-# ``confidence[field] = "a" if cond else "b"``.
-_ASSIGN_RE = re.compile(r'confidence\[[^\]]+\]\s*=\s*"([a-z_]+)"(?:\s+if\b[^\n]*?\belse\s+"([a-z_]+)")?')
+# ``confidence[field] = "label"`` (or ``conf[field] = ...``) and the ternary
+# form ``confidence[field] = "a" if cond else "b"``.
+_ASSIGN_RE = re.compile(r'(?:confidence|conf)\[[^\]]+\]\s*=\s*"([a-z_]+)"(?:\s+if\b[^\n]*?\belse\s+"([a-z_]+)")?')
 
 
 def _harvest_labels() -> set:
@@ -130,6 +136,11 @@ def test_the_gate_label_is_an_explicit_zero_not_a_default():
     assert CONFIDENCE_SCORE["missing_required_gate"] == 0.0
 
 
-@pytest.mark.parametrize("label", ["filled", "client_arq"])
+@pytest.mark.parametrize("label", ["filled", "client_arq", "producer"])
 def test_human_and_deterministic_fills_are_full_weight(label):
     assert CONFIDENCE_SCORE[label] == 1.0
+
+
+def test_the_harvester_reads_the_answer_service():
+    """The producer label is assigned in arq_service; the harvest must see it."""
+    assert "producer" in _harvest_labels()

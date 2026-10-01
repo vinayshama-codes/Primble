@@ -458,12 +458,19 @@ def test_the_five_live_clipped_values_now_fit():
         "UnderlyingPolicy_Automobile_InsurerFullName_A": "EMPLOYERS MUTUAL CASUALTY COMPANY",
         "BusinessInformation_OperationsDescription_A": _OPS})
     for field in (f125["Policy_Audit_FrequencyCode_A"],
-                  f125["BuildingOccupancy_OperationsDescription_A"],
                   f126["GeneralLiability_OtherDeductibleDescription_A"],
                   f131["CommercialStructure_PhysicalAddress_PostalCode_A"],
-                  f131["UnderlyingPolicy_Automobile_InsurerFullName_A"],
-                  f131["BusinessInformation_OperationsDescription_A"]):
+                  f131["UnderlyingPolicy_Automobile_InsurerFullName_A"]):
         assert _size(field) < 8 and _fits(field), (field["name"], _size(field))
+    # The two ONE-LINE operations boxes no longer shrink the whole ";"-joined
+    # value (29 Sep 2026, client item: the premises description printed at the
+    # 3.5pt floor). They print its first whole item at a readable size - the
+    # same "leading whole sentences" rule as 24 Sep, with "; " now a break.
+    # Still no clipping, which is what this test exists to prove.
+    for field in (f125["BuildingOccupancy_OperationsDescription_A"],
+                  f131["BusinessInformation_OperationsDescription_A"]):
+        assert field["value"] == _EXEC, (field["name"], field["value"])
+        assert _size(field) >= ps._FIT_READABLE_PT and _fits(field), (field["name"], _size(field))
 
 
 def test_a_value_that_fits_and_a_multiline_box_keep_their_size():
@@ -653,5 +660,12 @@ def test_a_repeated_box_is_listed_once_with_its_count():
                          merged_facts={}, confirmations={})
     msg = [r["message"] for r in fq.to_recommendation_rows(qa)
            if "left blank on purpose" in (r["message"] or "")][0]
-    assert "3 fields" in msg and "AdditionalInterest FullName (x3)" in msg
-    assert msg.count("AdditionalInterest FullName") == 1
+    # 30 Sep 2026 (owner, retest part 2): review rows speak the form's words,
+    # never the internal field name - the count rule is unchanged.
+    # 1 Oct 2026: the label is the form's own tooltip wording, and ACORD 126
+    # prints rows B and C as a different box ("company to whom employees are
+    # leased") from row A - two boxes, the repeated one listed once with x2.
+    assert "3 fields" in msg
+    assert "Additional interest's full name (company to whom employees are leased) (x2)" in msg
+    assert msg.count("(company to whom employees are leased)") == 1
+    assert "AdditionalInterest" not in msg

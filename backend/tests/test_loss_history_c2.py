@@ -130,16 +130,19 @@ def test_path_b_missing_applicable_carrier_minus_10_no_bonus():
 
 # ── 2.5 Path C: no loss runs ─────────────────────────────────────────────────
 
-def test_path_c_states_60_50_40_25():
-    assert _p4({}, {"no_prior_losses": True})[0] == 60          # attested
+def test_path_c_states_na_50_40_25():
+    # Owner 29 Sep 2026 (Orbin item 15): an attested No Known Losses is Not
+    # Applicable - the pillar leaves the score. It was 60 (client 2.5).
+    assert _p4({}, {"no_prior_losses": True})[0] is None         # attested
     assert _p4({"loss_run_status": "pending"})[0] == 50         # requested/pending
     assert _p4({}, {"narrative_states_no_losses": True})[0] == 40   # narrative only
     assert _p4({}, {})[0] == 25                                  # nothing provided
 
 
 def test_path_c_combination_states():
-    # Attestation + runs pending = 60 (attestation outranks pending).
-    assert _p4({"loss_run_status": "requested"}, {"no_prior_losses": True})[0] == 60
+    # Attestation + runs pending = the attestation (it outranks pending), which
+    # is Not Applicable since 29 Sep 2026 (60 before).
+    assert _p4({"loss_run_status": "requested"}, {"no_prior_losses": True})[0] is None
     # Known prior claims + runs pending = 50 until runs arrive.
     assert _p4({"num_claims": "2", "loss_run_status": "pending"})[0] == 50
     # Known prior claims + no runs and nothing pending = 25.
@@ -152,8 +155,9 @@ def test_no_loss_runs_available_state():
     facts = {"loss_run_status": "No loss runs are available"}
     assert _p4(facts)[0] == 25
     assert sq._get_loss_history_state(facts, {}) == "no_loss_runs_available"
-    # An attestation still wins (60) - availability does not degrade it.
-    assert _p4(facts, {"no_prior_losses": True})[0] == 60
+    # An attestation still wins - availability does not degrade it. Since
+    # 29 Sep 2026 winning means Not Applicable (it was 60).
+    assert _p4(facts, {"no_prior_losses": True})[0] is None
 
 
 def test_caps_are_ceilings_never_floors():
@@ -386,8 +390,10 @@ def test_new_rec_messages_route_to_writable_fields():
 ])
 def test_every_way_of_saying_no_losses_attests(answer):
     assert lhs.attested_true(answer) is True, answer
+    # Every phrasing lands on the attestation, which takes the pillar out of
+    # the score since 29 Sep 2026 (owner, Orbin item 15; it scored 60).
     assert _p4({"loss_history_no_prior_losses_indicator": answer,
-                "years_in_business": "9"})[0] == 60
+                "years_in_business": "9"})[0] is None
 
 
 @pytest.mark.parametrize("answer", [
@@ -545,18 +551,30 @@ def test_a_young_business_that_says_nothing_still_scores():
 
 
 def test_a_young_business_contradicted_by_evidence_still_scores():
-    facts = {"years_in_business": "1", "prior_carrier": "Travelers"}
-    assert _p4(facts, {"no_prior_losses": True})[0] is not None
+    """The contradiction guard on the under-a-year route. Pinned through a
+    NON-attestation input (runs pending): since 29 Sep 2026 an attestation is
+    Not Applicable in every band on its own, so it can no longer show whether
+    the young-business route honours the guard."""
+    facts = {"years_in_business": "1", "prior_carrier": "Travelers",
+             "loss_run_status": "pending"}
+    assert lhs.too_young_for_loss_runs(facts, {}) is False
+    assert lhs.loss_history_not_applicable(facts, {}) is False
+    assert _p4(facts)[0] == 50
+    # Control: the same young business with nothing contradicting it IS N/A.
+    uncontradicted = {"years_in_business": "1", "loss_run_status": "pending"}
+    assert _p4(uncontradicted)[0] is None
 
 
 def test_brent_1_to_5_years_no_known_losses_is_satisfactory():
     """'a satisfactory answer would be no known losses ... to get through a
-    submission'."""
-    assert _p4({"years_in_business": "3"}, {"no_prior_losses": True})[0] == 85
-    # 5+ years keeps the client's own 2.5 value - runs are "pretty much required".
-    assert _p4({"years_in_business": "9"}, {"no_prior_losses": True})[0] == 60
-    # Unknown years must never manufacture a penalty: 2.5's value, unchanged.
-    assert _p4({}, {"no_prior_losses": True})[0] == 60
+    submission'. Owner 29 Sep 2026 (Orbin item 15) went further: an attested No
+    Known Losses is NOT APPLICABLE in every band - it was 85 at 1-5 years and
+    60 at 5+ or unknown. Scores on a 1-5 year business can go DOWN as a result
+    (D6); the owner saw the table."""
+    assert _p4({"years_in_business": "3"}, {"no_prior_losses": True})[0] is None
+    assert _p4({"years_in_business": "9"}, {"no_prior_losses": True})[0] is None
+    # Unknown years never manufacture a penalty, and never a band either.
+    assert _p4({}, {"no_prior_losses": True})[0] is None
 
 
 def test_brent_1_to_5_years_pending_and_no_runs_available_lift_too():
@@ -571,14 +589,17 @@ def test_brent_1_to_5_years_pending_and_no_runs_available_lift_too():
 
 
 def test_the_2_5_ordering_survives_in_every_band():
-    """Attestation > pending > narrative-only > nothing, whatever the band."""
+    """Pending > narrative-only > nothing, whatever the band. The attestation
+    sat on top of that ladder until 29 Sep 2026; it now leaves the score
+    entirely (Not Applicable), in every band."""
     for yrs in ("3", "9", None):
         f = {} if yrs is None else {"years_in_business": yrs}
         attested = _p4(dict(f), {"no_prior_losses": True})[0]
         pending = _p4({**f, "loss_run_status": "pending"}, {})[0]
         narrative = _p4(dict(f), {"narrative_states_no_losses": True})[0]
         nothing = _p4(dict(f), {})[0]
-        assert attested > pending > narrative > nothing, (yrs, attested, pending, narrative, nothing)
+        assert attested is None, (yrs, attested)
+        assert pending > narrative > nothing, (yrs, pending, narrative, nothing)
 
 
 def test_brent_previously_uninsured_takes_no_carrier_deduction():

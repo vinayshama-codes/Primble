@@ -157,6 +157,17 @@ AGREED_VALUE_OPTIONS = _with_other(
     "No - coinsurance applies",
 )
 
+# ADDED 29 Sep 2026 (Orbin 22 Sep item 12). The ONE premises' insured interest,
+# as ACORD 125 prints it: OWNER / TENANT / OTHER. Each label LEADS with its
+# interest word - `premises_interest.kind_of_answer` reads the label, and the
+# document wording rule reads the same leading word. WORDING TRAP: the Tenant
+# label must never offer alternatives ("rents OR leases") - the wording rule
+# reads a phrase naming two interests joined by "or" as undetermined.
+PREMISES_INTEREST_OPTIONS = _with_other(
+    "Tenant - the business rents its space",
+    "Owner - the business owns the building",
+)
+
 # ── Coverage terms ──────────────────────────────────────────────────────────
 GL_FORM_TYPE_OPTIONS = _with_other(
     "Occurrence",
@@ -292,6 +303,7 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "fire_protection_class":       (FIRE_PROTECTION_CLASS_OPTIONS, False),
     "period_of_restoration":       (PERIOD_OF_RESTORATION_OPTIONS, False),
     "agreed_value_endorsement":    (AGREED_VALUE_OPTIONS, False),
+    "premises_interest":           (PREMISES_INTEREST_OPTIONS, False),
     "gl_form_type":                (GL_FORM_TYPE_OPTIONS, False),
     # The umbrella's OWN trigger (extraction v21) - one basis vocabulary, so
     # the tick door can read the ACORD 131 umbrella Occurrence / Claims-Made boxes.

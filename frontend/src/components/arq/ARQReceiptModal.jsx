@@ -130,12 +130,27 @@ export default function ARQReceiptModal({ arqId, clientLabel, onClose }) {
           {!loading && receipt && !receipt.unreadable && (
             <>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: "#475569", marginBottom: 12 }}>
-                <span><strong style={{ color: "#0f172a" }}>{receipt.answered_count}</strong> answered</span>
-                <span><strong style={{ color: "#0f172a" }}>{receipt.item_count}</strong> asked</span>
+                {/* Point Q (1 Oct 2026): questions answered and details checked,
+                    counted apart - "21 answered · 25 asked" counted the 4 check
+                    items as questions. Older payloads without the split keep the
+                    recorded counts. */}
+                {typeof receipt.questions_asked === "number" ? (
+                  <>
+                    <span><strong style={{ color: "#0f172a" }}>{receipt.questions_answered} of {receipt.questions_asked}</strong> {receipt.questions_asked === 1 ? "question" : "questions"} answered</span>
+                    {receipt.checks_asked > 0 && (
+                      <span><strong style={{ color: "#0f172a" }}>{receipt.checks_done} of {receipt.checks_asked}</strong> {receipt.checks_asked === 1 ? "detail" : "details"} checked</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span><strong style={{ color: "#0f172a" }}>{receipt.answered_count}</strong> answered</span>
+                    <span><strong style={{ color: "#0f172a" }}>{receipt.item_count}</strong> asked</span>
+                  </>
+                )}
                 {receipt.not_sure_count > 0 && (
                   <span style={{ color: "#92400e" }}><strong>{receipt.not_sure_count}</strong> not sure</span>
                 )}
-                {receipt.confirmed_count > 0 && (
+                {receipt.confirmed_count > 0 && typeof receipt.questions_asked !== "number" && (
                   <span style={{ color: "#065f46" }}><strong>{receipt.confirmed_count}</strong> confirmed as correct</span>
                 )}
                 {receipt.review_count > 0 && (

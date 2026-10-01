@@ -12107,3 +12107,75 @@ Full account: `improving125-21sep.md` "ROUND 2 - TEST 3 RESULTS"; the run itself
   Suite `-p no:randomly`: **10,289 passed / 1 failed / 19 skipped** (the pre-existing
   `test_arq_acord125_missing_only`).
 
+
+### 29 Sep 2026 - Orbin client feedback (22 Sep test document), Step 1 fixed
+- Source: `Orbin_Testing_09_22_2026.pdf` (Michelle, 19 items). Baseline: the owner re-ran
+  the client's own dec (session 8992d874, ACORD 125 only) - recorded in `25sepChanges.md`
+  BEFORE any change, with each item checked against the dec's text and the run.
+- Dec facts that settle several items: no insured contact, no SIC / NAICS, no producer
+  e-mail and no "tenant" anywhere in the 271 pages; GL classes 91580 / 91585 ARE printed.
+- Step 1 (clear bugs, no decision needed), all in `25sepChanges.md` section 6:
+  - "Important" preview removed; the Fix-line splitter pairs the bracket it opened;
+  - the driver-table card opens whatever forms are chosen;
+  - GL CODE from the policy's own class schedule;
+  - producer-typed boxes are the producer's, not green "Client";
+  - the questionnaire summary counts check items apart from questions;
+  - the e-mail tagline;
+  - question 4 names each policy by its own declarations;
+  - a ";"-joined one-line description prints readable;
+  - no New Venture card after a completed policy term.
+- Latent bug found on the way: the "producer" field label had no fill-rate weight, so
+  producer-saved schedule cells scored 0.00. Now 1.00, and the anti-rot test reads
+  `arq_service`. **D6: fill rate goes UP on forms with producer-saved schedules - tell Brent.**
+- Dropped from Step 1 on purpose: carrier-name casing (V1 H5: printed as the policy prints
+  it) and Exposure "Not provided" wording (C3: rows must add up to the pillar).
+- Replayed: Orbin 8992d874 changes exactly 3 boxes (GL CODE, two Q4 names); FR125 v2 test 8
+  stays 312 / 0 made up. Tests: `tests/test_orbin_feedback_29sep.py` (36).
+- One outdated test corrected: `test_live_run6_fixes_15sep` used "shrunk below 8pt" as its proof
+  of "no clipping". The one-line operations boxes now print the first whole item at a readable size.
+  Suite `-p no:randomly`: **10,327 passed / 1 failed / 19 skipped** (the pre-existing
+  `test_arq_acord125_missing_only`).
+- **Waiting on the owner:** Step 2 decisions (proposed dates, page-one carrier / premiums,
+  dec agency phone, tenant / revenue, contacts, no-known-losses scoring, pre-form score).
+
+### 29 Sep 2026 (later) - Step 1 live check (session 67e5ccf1) and two fixes
+- Live: question 4 names, readable premises line, no New Venture item, drivers table offered
+  - all confirmed. The browser still ran the old screen code (dev server not restarted), so
+  the "Important" removal was not seen.
+- This upload re-read the document (not from cache) and the fresh reading produced two wrong
+  values, neither from Step 1:
+  - **GL CODE "7383"** - extraction stated the Subaru's auto rating class ("PRIV PASSENGER -
+    COMM CLASS: 7383") as the applicant's GL code. `pdf_service._code_is_another_lines` (reads
+    the existing `_line_code_witnesses`): a stated code the documents give ONLY to another line
+    is not the GL code - the GL schedule's classes print, else an owned blank.
+  - **FEIN "27-0272601" invented by gap fill** - nowhere in the 271 pages; it also retired the
+    questionnaire's FEIN question. `_drop_ungrounded_identifiers`: an AI value in an "Enter
+    identifier:" box (223 boxes, all 17 forms) must appear in the documents, else blank.
+- `scripts/replay_125_run.py` now honours "DROP_...: field=" guard lines; it had been
+  restoring values those guards deliberately dropped.
+- Replayed: 67e5ccf1 changes exactly those 2 boxes; 8992d874 unchanged beyond Step 1; FR125
+  test 8 312 / 0 made up; FR125 tests 3-7 untouched by the new rules. Suite `-p no:randomly`:
+  **10,342 passed / 1 failed / 19 skipped** (the pre-existing `test_arq_acord125_missing_only`).
+- Second live check (session 15f42b1d): passed on every visible point. The GL fix fired live
+  (the fresh reading again said 7383; the form printed 91580, 91585). The FEIN stayed blank: gap
+  fill tried the EMC account number 0482854 this time and an older guard removed it. Not tried
+  yet: driver "Open to fix", the green-label test, the questionnaire e-mail/summary.
+
+## 29 Sep 2026 - Orbin client feedback, Step 2 (owner decisions) - FIXED offline
+
+Full record, root causes, replays and D6 tables: `25sepChanges.md` "Step 2". In one line each:
+- Items 4 / 11: an ended dec term proposes the next term (Orbin 07/15/2026 - 07/15/2027); a stale dec (next term over or
+  within 30 days) and a term outside 300-400 days are asked. A person's effective date takes its expiration with it.
+  Reverses the 15 Sep "ended -> ask" rule.
+- Items 7 / 8: a dec / policy / binder / endorsement upload with no quote, application, new-business statement or other
+  addressee renews its programme: page-one premiums print; one writing company prints as CARRIER; several writing
+  companies get an unscored "carrier receiving this submission" card. Reverses Brent's key "premium blank unless known"
+  for dec-only renewals - tell Brent.
+- Item 5: a contact name alone keeps the phone and e-mail questions pre-ticked. Question for Michelle recorded.
+- Item 15: an uncontradicted "no known losses" attestation makes Loss History Not Applicable. Scores UP on healthy
+  packages, DOWN on weak ones and some 1-5 year businesses (Brent's 85 band) - tell Brent.
+- Item 2: the pre-form screen shows the score number "so far"; one pre-form scoring recipe.
+- Items 12 / G2: "own or rent?" card (Tenant pre-selected only on two agreeing signals), one-location revenue = the
+  business revenue (never $0), landlord asked when Tenant (not printed yet).
+Verification: FR125 312 of 312 with stamps byte-identical; Orbin replay moves only the 2 dates and 5 premiums; D6 panel
+0 of 12 moved; suite 10,544 / 1 (known) / 19 after the review fixes. Nothing committed.

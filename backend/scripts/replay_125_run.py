@@ -26,6 +26,23 @@ facts = {**d["merged_facts"], **(d.get("flags") or {})}
 if isinstance(d.get("dec_page_entries"), list):
     facts["dec_page_entries"] = d["dec_page_entries"]
 raw = d.get("raw_text") or ""
+# 30 Sep 2026: what a fresh upload now does before stamping - each dec entry's
+# policy-number tag is checked against the pages (`_verify_dec_entries`), the
+# coverage lines are repaired from the entries, and the per-policy records are
+# rebuilt from the repaired lines (Orbin live run 17351800: the Common
+# Declarations page tagged the GL premium with the inland marine number).
+if isinstance(facts.get("dec_page_entries"), list) and raw:
+    facts["dec_page_entries"] = es._verify_dec_entries(facts["dec_page_entries"], raw)
+    _cl = facts.get("coverage_lines")
+    _lines = _cl["value"] if isinstance(_cl, dict) and "value" in _cl else _cl
+    if isinstance(_lines, list):
+        _tmp = {k: (v.get("value") if isinstance(v, dict) and "value" in v else v)
+                for k, v in facts.items()}
+        _tmp["coverage_lines"] = _lines
+        es._repair_coverage_lines_from_entries(_tmp)
+        es._build_scoped_fact_store(_tmp, [dict(x, text="") for x in d.get("documents") or []])
+        if _tmp.get(es.LINE_RECORDS_KEY):
+            facts[es.LINE_RECORDS_KEY] = _tmp[es.LINE_RECORDS_KEY]
 es._repair_emails_from_text(facts, raw)
 es._prefer_submission_terms(facts, raw)
 es._backfill_payment_method(facts, raw)
@@ -33,6 +50,26 @@ es._backfill_prior_coverage_from_entries(facts)
 es._mark_submission_remark(facts, raw)
 es._mark_stated_new_business(facts, raw)
 docs = [dict(x, text="") for x in d.get("documents") or []]
+# Re-run the date routing (29 Sep): undo a stored routing of the current term and
+# route it again, so a change to `_route_renewal_dates` is measured. Skipped when
+# a person supplied the proposed dates (the live merge restores those anyway).
+_px = facts.get("prior_expiration_date")
+if (isinstance(_px, dict) and _px.get("routed_from") == "current_term"
+        and not any(isinstance(facts.get(k), dict)
+                    and str(facts[k].get("source") or "") not in ("", "derived", "ai")
+                    for k in ("effective_date", "expiration_date"))):
+    for _prior, _cur in (("prior_effective_date", "effective_date"),
+                         ("prior_expiration_date", "expiration_date")):
+        _env = facts.pop(_prior, None)
+        facts[_cur] = ({k: v for k, v in _env.items() if k != "routed_from"}
+                       if isinstance(_env, dict) else _env)
+    for _k in ("renewal_dates_routed", "renewal_lines_expiring"):
+        facts.pop(_k, None)
+    _rej = facts.get(es.REJECTED_FACTS_KEY)
+    if isinstance(_rej, dict):
+        for _k in ("effective_date", "expiration_date"):
+            _rej.pop(_k, None)
+    es._route_renewal_dates(facts, docs)
 es._mark_page_one_current_policy(facts, docs)
 es._validate_submission_carrier(facts, raw)
 es._reconcile_disclosure_conflicts(facts, raw)
@@ -50,7 +87,13 @@ mapped, _conf = ps.map_facts_to_form(facts, schema, "ACORD_125", raw_text=raw,
 # dump does not keep; without them the gate drops them here. Restore those.
 restored = []
 import re as _re
-_guarded = set(_re.findall(r"blanked=([A-Za-z0-9_]+)", open(out + ".log").read()))
+# A value a GUARD blanked is a verdict, not a missing quote: never restore it.
+# Guards log it two ways - "blanked=<field>" and "DROP_<REASON>: field=<field>"
+# (the ungrounded code / identifier guards). Reading only the first put an
+# invented FEIN straight back into the 29 Sep replay.
+_log = open(out + ".log").read()
+_guarded = set(_re.findall(r"blanked=([A-Za-z0-9_]+)", _log))
+_guarded |= set(_re.findall(r"DROP_[A-Z_]+: field=([A-Za-z0-9_]+)", _log))
 _, _still_call2, _ = ps.compute_form_gaps("ACORD_125", schema, dict(facts))
 for f, v in gpt.items():
     if not (mapped.get(f) or None) and f not in _guarded and f in _still_call2:

@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from config.database import get_pool
 from models.schemas import (
@@ -102,6 +102,203 @@ async def log_recommendations_presented(
     logger.info(f"Logged {len(recommendations)} recommendations for session {session_id}")
 
 
+# ── The stored cards follow the forms (1 Oct 2026, Orbin G2 live run) ─────────
+# `sqs_recommendation_audit` is what the download review, the download gate and
+# the cover page's Red Flags read. Cards used to be recorded only when forms were
+# generated, so a card first raised LATER - the landlord cards an answered
+# "Tenant" raises - reached the side panel but never the review or the cover. And
+# a card the system had closed stayed closed when its gap came back, while the
+# panel showed it again. One door keeps the rows in step with the cards the forms
+# show NOW; every path that scores forms (generation, the async worker, a form
+# save, the recalculation after an answer) calls it.
+
+# Rows that are not recommendation cards - field-QA and field-mapping findings -
+# are rebuilt by their own delete-and-insert refresh and never touched here.
+_NOT_A_CARD_PREFIXES = ("fieldqa_", "fieldmap_")
+
+
+def _card_id(rec) -> Optional[str]:
+    """The rec_id a card is stored under - exactly the one
+    `log_recommendations_presented` writes (a plain string or a dict with no id
+    is keyed by its message)."""
+    if isinstance(rec, str):
+        return _fallback_rec_id(rec)
+    if isinstance(rec, dict):
+        return rec.get("rec_id") or _fallback_rec_id(rec.get("message") or "")
+    return None
+
+
+def live_card_ids(form_results) -> set:
+    """Every card the given form scores show now, across all forms (a card two
+    forms show is ONE row)."""
+    live = set()
+    for sqs in form_results or []:
+        if not isinstance(sqs, dict):
+            continue
+        for rec in sqs.get("recommendations") or []:
+            rid = _card_id(rec)
+            if rid:
+                live.add(rid)
+    return live
+
+
+def live_card_points(form_results) -> dict:
+    """{rec_id: points} - the number each live card shows now. The package
+    scorer writes ONE number on every copy of a card (1 Oct 2026, item 19), so
+    the first copy speaks for all; a card with no number is left out."""
+    points: dict = {}
+    for sqs in form_results or []:
+        if not isinstance(sqs, dict):
+            continue
+        for rec in sqs.get("recommendations") or []:
+            if not isinstance(rec, dict):
+                continue
+            rid = _card_id(rec)
+            pts = rec.get("score_impact")
+            if (rid and rid not in points and isinstance(pts, (int, float))
+                    and not isinstance(pts, bool)):
+                points[rid] = int(round(pts))
+    return points
+
+
+def plan_card_sync(rows, live: set, live_points: Optional[dict] = None) -> dict:
+    """What must change so the stored cards match the live ones. Pure.
+
+    `rows`: the session's stored rows ({rec_id, action, producer_answer,
+    score_impact}).
+      reopen  - live, but closed by the SYSTEM earlier ('resolved' with no
+                answer): the gap is back, and the side panel already shows the
+                card again (it hides only dismissed and answered cards).
+      resolve - stored open (never acted on, or acknowledged by "Download
+                Anyway") and shown on no form any more: the gap is closed.
+      repoint - live and open (or being reopened), stored with a number other
+                than the one the card shows now (`live_points`): the download
+                review and the cover read the stored number, so it follows the
+                panel's (1 Oct 2026, item 19).
+    A dismissed or answered row is the producer's own act and is never touched
+    - a dismissal's credit is the number it was dismissed at. New cards are
+    recorded by `log_recommendations_presented`, whose insert already skips a
+    stored row."""
+    reopen, resolve, repoint = [], [], []
+    for row in rows or []:
+        rid = str((row or {}).get("rec_id") or "")
+        if not rid or rid.startswith(_NOT_A_CARD_PREFIXES):
+            continue
+        action = row.get("action")
+        answered = row.get("producer_answer") not in (None, "")
+        if rid in live:
+            if action == "resolved" and not answered:
+                reopen.append(rid)
+            open_now = action in (None, "downloaded_anyway") or (
+                action == "resolved" and not answered)
+            if (open_now and live_points and rid in live_points
+                    and row.get("score_impact") != live_points[rid]):
+                repoint.append(rid)
+        elif action in (None, "downloaded_anyway"):
+            resolve.append(rid)
+    return {"reopen": sorted(reopen), "resolve": sorted(resolve),
+            "repoint": sorted(repoint)}
+
+
+async def _stored_card_rows(session_id: str) -> List[dict]:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT rec_id, action, producer_answer, score_impact "
+            "FROM sqs_recommendation_audit WHERE session_id=$1",
+            session_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def _repoint_open_cards(session_id: str, points: dict) -> None:
+    """Give open cards the number they show now - and ONLY open ones: the WHERE
+    clause repeats the plan's test, so a card the producer dismissed or answered
+    in between keeps the number its credit was recorded at."""
+    if not points:
+        return
+    async with get_pool().acquire() as conn:
+        for rid, pts in sorted(points.items()):
+            await conn.execute(
+                """UPDATE sqs_recommendation_audit SET score_impact=$3
+                    WHERE session_id=$1 AND rec_id=$2
+                      AND (action IS NULL OR action='downloaded_anyway')""",
+                session_id, rid, int(pts),
+            )
+
+
+async def _reopen_system_closed_cards(session_id: str, rec_ids: List[str]) -> None:
+    """Reopen cards the system closed - and ONLY those: the WHERE clause repeats
+    the plan's test, so a card the producer answered or dismissed in between
+    stays as they left it."""
+    if not rec_ids:
+        return
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """UPDATE sqs_recommendation_audit
+                  SET action=NULL, action_at=NULL, sqs_score_at_action=NULL
+                WHERE session_id=$1 AND rec_id = ANY($2::text[])
+                  AND action='resolved'
+                  AND (producer_answer IS NULL OR producer_answer = '')""",
+            session_id, list(rec_ids),
+        )
+
+
+# ASYNC-SAFE
+async def sync_recommendation_cards(
+    session_id: str,
+    user_id: Optional[str],
+    form_results,
+    model_version: str,
+    score_at_action=None,
+) -> dict:
+    """Record every card the forms show now, reopen a system-closed card that is
+    live again, give every open card the number it shows now, and resolve a
+    stored open card no form shows any more.
+
+    `form_results`: EVERY form's current score (the whole package, not just the
+    form just scored - a card another form still shows is still open). Nothing
+    scored means no evidence: the rows are left exactly as they are. Never
+    raises; a failure is logged and the caller carries on."""
+    results = [s for s in (form_results or []) if isinstance(s, dict)]
+    out = {"presented": 0, "reopened": 0, "resolved": 0, "repointed": 0}
+    if not results:
+        return out
+    try:
+        rows = await _stored_card_rows(session_id)
+        stored = {r.get("rec_id") for r in rows}
+        # Only the cards not stored yet: one insert per NEW card, not one per
+        # live card on every save and answer (~25 round trips on a 5-form
+        # package). The first form to show a card names it.
+        for sqs in results:
+            new = [rec for rec in (sqs.get("recommendations") or [])
+                   if _card_id(rec) and _card_id(rec) not in stored]
+            if new:
+                await log_recommendations_presented(
+                    session_id=session_id, user_id=user_id,
+                    sqs_result={**sqs, "recommendations": new}, model_version=model_version,
+                )
+                stored.update(_card_id(rec) for rec in new)
+                out["presented"] += len(new)
+        points = live_card_points(results)
+        plan = plan_card_sync(rows, live_card_ids(results), points)
+        await _reopen_system_closed_cards(session_id, plan["reopen"])
+        out["reopened"] = len(plan["reopen"])
+        await _repoint_open_cards(session_id, {rid: points[rid] for rid in plan["repoint"]})
+        out["repointed"] = len(plan["repoint"])
+        for rid in plan["resolve"]:
+            if await mark_recommendation_resolved(
+                session_id=session_id, rec_id=rid,
+                sqs_score_at_action=score_at_action or 0,
+                model_version=model_version,
+            ):
+                out["resolved"] += 1
+        if out["reopened"] or out["resolved"]:
+            logger.info("cards synced for session %s: %s", session_id, out)
+    except Exception as ex:                                  # noqa: BLE001
+        logger.error(f"sync_recommendation_cards failed for session {session_id}: {ex}")
+    return out
+
+
 # ASYNC-SAFE
 async def sync_field_qa_findings(
     session_id: str,
@@ -168,8 +365,11 @@ async def run_and_log_field_qa(
     confirmations: Optional[dict],
     enabled: bool,
     flags: Optional[dict] = None,
+    docs: Any = None,
 ) -> None:
     """Run form-level field QA and refresh its pre-download advisory rows.
+    `docs`: the session's documents, so a "Please verify" row can say truly
+    whether the documents print its value (1 Oct 2026); optional.
 
     Single entry point used by every generation path (sync route, field-edit
     route, async worker) so the behavior can't drift between them. No-op unless
@@ -194,8 +394,22 @@ async def run_and_log_field_qa(
             confirmations=confirmations or {},
             flags=flags or {},
         )
+        # The rows the pre-download review records name each form and box
+        # through the ONE needs-attention door, so the record and the side
+        # panel can never count differently (Orbin 22 Sep item 19). A failure
+        # there keeps the legacy summary rows rather than losing the findings.
+        attention = None
+        try:
+            from services.needs_attention import needs_attention_for_session
+            attention = await asyncio.to_thread(
+                needs_attention_for_session, generated_forms, merged_facts or {},
+                flags=flags or {}, docs=docs,
+            )
+        except Exception as _na_ex:                       # noqa: BLE001
+            logger.warning(f"needs_attention skipped for session {session_id}: {_na_ex}")
         await sync_field_qa_findings(
-            session_id, user_id, to_recommendation_rows(qa), FIELD_QA_MODEL_VERSION,
+            session_id, user_id, to_recommendation_rows(qa, attention=attention),
+            FIELD_QA_MODEL_VERSION,
         )
     except Exception as ex:
         logger.warning(f"run_and_log_field_qa skipped for session {session_id}: {ex}")
@@ -662,6 +876,45 @@ def dismiss_earned_credit(override_reason, score_impact) -> bool:
     )
 
 
+# The card an attested "No Known Losses" used to leave while it SCORED the
+# pillar ("... attach loss runs or a signed no-known-loss letter to fully
+# confirm"), matched on its message and on the stable rec_id `_loss_rec_id`
+# derives from that message.
+_ATTESTED_LOSS_CARD_PHRASE = "no known losses (attested by user)"
+_ATTESTED_LOSS_CARD_REC_ID = "rec_loss_no_known_losses_attested_by_user"
+
+
+def _credit_retired_by_attested_not_applicable(row: dict, facts: Optional[dict]) -> bool:
+    """Owner decision 29 Sep 2026 (Orbin item 15): an attested "No Known
+    Losses" takes Loss History out of the score, so the credit for dismissing
+    the attested card has nothing left to stand in for.
+
+    That credit compensated for the attested pillar sitting short of 100. Once
+    the same attestation makes the pillar Not Applicable the gap no longer
+    exists - and the card carries no field, so the "field is now filled"
+    retirement below can never reach it. Left alone it would stack on top of
+    the rescale.
+
+    Reads FACTS only, which is what every caller passes; the attestation lives
+    on `loss_history_no_prior_losses_indicator`, which every flag writer
+    mirrors. The scorer never emits this card when a loss-run document is on
+    file either, so retiring it there too is the same truth. Fails toward
+    KEEPING the credit: no facts, or any error, changes nothing.
+    """
+    msg = str(row.get("message") or "").lower()
+    rec_id = str(row.get("rec_id") or "")
+    if (_ATTESTED_LOSS_CARD_PHRASE not in msg
+            and not rec_id.startswith(_ATTESTED_LOSS_CARD_REC_ID)):
+        return False
+    if not isinstance(facts, dict):
+        return False
+    try:
+        from services.loss_history_state import attested_no_losses_not_applicable
+        return attested_no_losses_not_applicable(facts, {}, False)
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 async def active_score_credits(
     session_id: str,
     facts: Optional[dict] = None,
@@ -711,6 +964,13 @@ async def active_score_credits(
         _fieldless: list = []
         for row in await get_dismissed_recommendations(session_id):
             if not dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
+                continue
+            if _credit_retired_by_attested_not_applicable(row, facts):
+                logger.info(
+                    "credit retired: session=%s rec=%s - No Known Losses "
+                    "attested, Loss History is Not Applicable",
+                    session_id, row.get("rec_id"),
+                )
                 continue
             field = row.get("field")
             if _filled(field):
@@ -1762,7 +2022,8 @@ async def get_unresolved_recommendations(session_id: str) -> List[dict]:
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                """SELECT rec_id, field, recommendation_type, message, score_impact, action
+                """SELECT rec_id, field, recommendation_type, message, score_impact, action,
+                          form_id
                    FROM sqs_recommendation_audit
                    WHERE session_id=$1 AND action IS DISTINCT FROM 'resolved'
                                        AND action IS DISTINCT FROM 'dismissed'
@@ -1773,6 +2034,73 @@ async def get_unresolved_recommendations(session_id: str) -> List[dict]:
     except Exception as ex:
         logger.error(f"Failed to get unresolved recommendations: {ex}")
         return []
+
+
+def with_live_attention_rows(rows: List[dict], attention: Optional[dict]) -> List[dict]:
+    """`rows` (stored, unresolved) with each form's needs-attention rows taken
+    from `attention`, the live list - the rule the download review applies
+    (`withoutSupersededRecs`, frontend utils/needsAttention.js): a stored row the
+    live list shows better is dropped unless the live list could not read its
+    form. The live rows keep a stored row's action, so an item acknowledged with
+    "Download Anyway" still says so in the E&O record."""
+    if not isinstance(attention, dict):
+        return list(rows or [])
+    from services.field_qa import row_superseded_by_attention
+    from services.needs_attention import attention_recommendation_rows
+    forms = [f for f in (attention.get("forms") or []) if isinstance(f, dict)]
+    failed = {f.get("form_id") for f in forms if f.get("ok", True) is False}
+
+    def _superseded(row: dict) -> bool:
+        if not row_superseded_by_attention(row):
+            return False
+        fid = row.get("form_id")
+        return (fid not in failed) if fid else not failed
+
+    stored = [r for r in (rows or []) if isinstance(r, dict)]
+    actions = {r.get("rec_id"): r.get("action") for r in stored}
+    kept = [r for r in stored if not _superseded(r)]
+    live = [{
+        "rec_id": row["rec_id"],
+        "field": row.get("field"),
+        "recommendation_type": row.get("type") or "suggestion",
+        "message": row.get("message"),
+        "score_impact": row.get("score_impact"),
+        "action": actions.get(row["rec_id"]),
+        "form_id": row.get("component"),
+    } for row in attention_recommendation_rows(
+        {"forms": [f for f in forms if f.get("ok", True) is not False]})]
+    return kept + live
+
+
+# ASYNC-SAFE
+async def current_unresolved_recommendations(session_id: str,
+                                             session: Optional[dict] = None) -> List[dict]:
+    """The unresolved rows as the download review shows them NOW - the source for
+    the cover's Red Flags and the download's E&O record.
+
+    The stored needs-attention rows are rebuilt only when forms are generated or
+    a form is saved, so after a card answer the cover still listed the answered
+    box (Orbin, 1 Oct 2026: "ACORD 125 - Missing (10)" with the building-interest
+    question answered minutes before, beside the review's 9). They are taken from
+    the live list instead - the same door the review reads, at the same moment.
+    No generated forms, or a failure: the stored rows, as before."""
+    rows = await get_unresolved_recommendations(session_id)
+    generated = (session or {}).get("generated_forms") or {}
+    if not generated:
+        return rows
+    try:
+        import asyncio
+        from services.needs_attention import needs_attention_for_session
+        attention = await asyncio.to_thread(
+            needs_attention_for_session, generated, (session or {}).get("facts") or {},
+            flags=(session or {}).get("flags") or {},
+            package_sqs=(session or {}).get("package_sqs") or None,
+            docs=(session or {}).get("docs"),
+        )
+        return with_live_attention_rows(rows, attention)
+    except Exception as ex:                                  # noqa: BLE001
+        logger.warning(f"live needs-attention rows skipped for session {session_id}: {ex}")
+        return rows
 
 
 # ASYNC-SAFE

@@ -118,6 +118,10 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     "expiration_date",
     "audit_period",
     "billing_plan",
+    # The carrier this submission goes to (29 Sep 2026, Orbin item 8): which
+    # market the producer is placing with is the producer's call, never the
+    # insured's.
+    "submission_carrier_name",
 
     # `gl_form_type` - "Is your GL policy written on an 'occurrence' or
     # 'claims-made' basis?" reached the CLIENT. That is the definition of policy
@@ -384,6 +388,23 @@ def _contact_requirement_already_met(facts: Optional[dict],
                for f in TIER1_CONTACT if f != canonical_key)
 
 
+def _only_contact_name_known(facts: Optional[dict]) -> bool:
+    """True when the contact NAME is answered and neither a phone nor an e-mail
+    is (29 Sep 2026). Same predicate and field set as the scorer
+    (`answer_semantics.fact_answered`, `sqs_service.TIER1_CONTACT`).
+    Fail-closed: anything unreadable returns False (today's behaviour)."""
+    try:
+        from services.answer_semantics import fact_answered
+        from services.sqs_service import TIER1_CONTACT
+    except Exception:                                         # noqa: BLE001
+        return False
+    if not isinstance(facts, dict) or "contact_name" not in TIER1_CONTACT:
+        return False
+    if not fact_answered(facts.get("contact_name")):
+        return False
+    return not any(fact_answered(facts.get(f)) for f in TIER1_CONTACT if f != "contact_name")
+
+
 def _states(facts: Optional[dict], canonical_key: Optional[str]) -> tuple:
     """(value_state, evidence_state) for a fact, or (None, None) when unknowable.
 
@@ -549,6 +570,13 @@ def overlay_for(
             _impact["labels"] = [lbl for lbl in (_impact.get("labels") or [])
                                  if lbl != "Submission readiness"]
             out["score_impact"] = _impact
+        # A NAME IS NOT A WAY TO REACH ANYONE (29 Sep 2026, client item 5; owner:
+        # "phone and e-mail stay asked"). When the only contact item known is the
+        # name, the phone and e-mail questions stay demoted - Tier 1 is met, so
+        # they carry no readiness points - but stay PRE-TICKED. A known phone or
+        # e-mail keeps the H4 behaviour above exactly.
+        if canon in ("contact_phone", "contact_email") and _only_contact_name_known(facts):
+            out["force_preselect"] = True
         return out
 
     # ── STEP 4 - UNABLE TO DETERMINE, recorded but NOT suppressed ────────────

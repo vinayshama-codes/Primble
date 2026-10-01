@@ -243,7 +243,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         from services.form_service import process_single_form
         from services.sqs_service import cross_validate, calculate_package_sqs, SQS_MODEL_VERSION
         from services.audit_service import (
-            log_recommendations_presented, run_and_log_field_qa, run_and_log_field_mapping_check,
+            sync_recommendation_cards, run_and_log_field_qa, run_and_log_field_mapping_check,
         )
         import os as _os
 
@@ -455,19 +455,13 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         except Exception as _snap_ex:
             logger.warning("Job %s: sqs snapshot skipped: %s", job_id, _snap_ex)
 
-        # Log audit recommendations
-        for fid, r in results.items():
-            sqs_data = r.get("sqs")
-            if sqs_data and sqs_data.get("recommendations"):
-                try:
-                    await log_recommendations_presented(
-                        session_id=session_id,
-                        user_id=user_id,
-                        sqs_result=sqs_data,
-                        model_version=SQS_MODEL_VERSION,
-                    )
-                except Exception as ex:
-                    logger.warning("Job %s: audit log failed for %s: %s", job_id, fid, ex)
+        # The cards every generated form shows: parity with the sync route (the
+        # one door a save and an answer also use).
+        await sync_recommendation_cards(
+            session_id, user_id, [r.get("sqs") for r in results.values()],
+            SQS_MODEL_VERSION,
+            score_at_action=(package_sqs or {}).get("package_sqs_score"),
+        )
 
         # Form-level field QA (Figure 26): parity with the sync route. Advisory
         # only - never blocks the download.

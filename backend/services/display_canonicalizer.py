@@ -274,9 +274,11 @@ def canonicalize_date(value: Any) -> str:
 # "$1M", "$1.5 million", "$500K". A digit run glued to letters ("6E7", "07A")
 # is not an amount, and a scale word must end the token - "1,000 MED" is a
 # thousand, not a thousand million.
+# `(?!\.\d)`: "3.14.15" (a dotted date in a money box) is not the amount 3.14 -
+# no amount at all, so it prints exactly as written.
 _CURRENCY_TOKEN_RE = re.compile(
     r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?"
-    r"(?:\s*(k|m|mm|mil|million|thousand|b|bn|billion))?(?!\w)",
+    r"(?:\s*(k|m|mm|mil|million|thousand|b|bn|billion))?(?!\w)(?!\.\d)",
     re.IGNORECASE,
 )
 _CURRENCY_SCALE = {
@@ -421,11 +423,15 @@ _DISPATCH = {
 }
 
 
+# A bare domain ENDS in a name - ".com", ".co.uk", ".io". An amount with cents
+# ("3418.50", "2500000.00") is one dotted token too, and was read as a domain,
+# so a typed or printed premium with cents was never formatted (1 Oct 2026,
+# found by the fix round's fuzz tests). The last label must start with a letter.
 _MACHINE_TOKEN_RE = re.compile(
     r"""^\s*(?:
           [^\s@]+@[^\s@]+\.[A-Za-z]{2,}      # an e-mail address
         | (?:https?://|www\.)\S+             # an explicit URL
-        | [A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+   # a bare domain, foo.bar.com
+        | [A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z0-9-]*   # a bare domain, foo.bar.com
         )\s*$""", re.X)
 
 

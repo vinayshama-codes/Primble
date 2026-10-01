@@ -11,6 +11,15 @@ category of one pillar) as "Submission Readiness NN%". A 100% Tier 2 beside
 the facts as they stand, and lists the Tier 1 + Tier 2 checklist as "in place"
 / "missing" from the same item lists the score is built from.
 
+REVERSED IN PART, 29 Sep 2026 (Orbin 22 Sep item 2, owner-approved). The
+client: "Do not require forms to get the score." The Review screen now prints
+the package SQS NUMBER as well, labelled "so far" (it can move at generation),
+and drops "Your Submission Quality Score is calculated after forms are
+generated." Everything pinned here still holds - the number is this door's
+number, never `tier2_score`. The screen-side pins and the one-recipe rule
+before forms (the pre-form recalc persists what this door recomputes) live in
+tests/test_step2_orbin_29sep.py, "Item 2".
+
 Sections:
   1. key_details is the score's own checklist, split - never a second copy
   2. check_tier1 / check_tier2 are byte-identical after the refactor (C3 pins)
@@ -143,7 +152,10 @@ def test_a_human_no_answer_counts_as_in_place():
 
 
 def test_key_details_never_raises_on_bad_input():
-    assert sq.key_details(None, None) == {"satisfied": [], "missing": ALL_T1_LABELS + ALL_T2_LABELS}
+    kd = sq.key_details(None, None)
+    assert {k: kd[k] for k in ("satisfied", "missing")} == {"satisfied": [], "missing": ALL_T1_LABELS + ALL_T2_LABELS}
+    # 30 Sep (Orbin item 9): each missing detail also carries its fix, in the same order.
+    assert [it["label"] for it in kd["missing_items"]] == kd["missing"]
 
 
 # ── 2. the refactor left the scorers byte-identical ──────────────────────────

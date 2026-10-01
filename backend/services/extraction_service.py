@@ -7301,6 +7301,10 @@ def _consolidate_property_locations(facts: dict) -> None:
     concepts - see pdf_service._SCHEDULE_REGISTRY) stamps from.
     """
     from services.normalization import normalize_address
+    from services.premises_interest import (
+        OTHER as _PREMISES_OTHER, OWNER as _PREMISES_OWNER,
+        TENANT as _PREMISES_TENANT, interest_from_wording,
+    )
     from utils.helpers import _parse_address
 
     raw_objs  = facts.get("property_locations") or []
@@ -7729,44 +7733,20 @@ def _consolidate_property_locations(facts: dict) -> None:
         # will independently re-guess an interest for a row already resolved
         # here, producing a contradictory PDF (e.g. Tenant=Yes AND Other=Yes
         # with a redundant description on the same row).
-        ownership = str(obj.get("ownership") or "").strip()
-        ownership_l = ownership.lower()
-        # A sentence naming SEVERAL interests is not a determination of one.
-        # Live 25-page run: the dec says "This location is owned, rented or
-        # occupied by the named insured" - deliberately non-committal - and
-        # that whole phrase was written into the ACORD "Other" interest box
-        # with the sentence as its description. Owner, tenant and other are
-        # mutually exclusive; a phrase that lists two of them tells us the
-        # document did not say which, so all three stay unknown and the
-        # question goes to the client.
-        # The tell is the document offering ALTERNATIVES ("owned, rented OR
-        # occupied"), not the length of the phrase: "Tenant (leased office
-        # space)" and "Licensee under a shared-use agreement" are single,
-        # determinate answers and must still resolve.
-        _interest_words = len({
-            w for w in ("own", "rent", "occup", "tenant", "lease", "licens")
-            if w in ownership_l
-        })
-        if _interest_words > 1 and re.search(r"\bor\b", ownership_l):
-            logger.info(
-                "consolidate_locations: ambiguous ownership %r - left unknown",
-                ownership[:60],
-            )
-            ownership_l = ""
-        if ownership_l.startswith("owner"):
-            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = True, False, False
-            obj["other_interest_description"] = None
-        elif ownership_l.startswith("tenant"):
-            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = False, True, False
-            obj["other_interest_description"] = None
-        elif ownership_l:
-            # A real signal that is neither "owner" nor "tenant" - a genuine
-            # "Other" interest (e.g. licensee, easement holder).
-            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = False, False, True
-            obj["other_interest_description"] = ownership
-        else:
+        # The wording rule itself (a sentence naming SEVERAL interests - "owned,
+        # rented or occupied" - determines none) moved to
+        # `premises_interest.interest_from_wording` on 29 Sep 2026, unchanged,
+        # so a person's typed answer is read by the same rule as a document.
+        _interest = interest_from_wording(obj.get("ownership"))
+        if _interest is None:
             obj["is_owner"] = obj["is_tenant"] = obj["is_other_interest"] = None
             obj["other_interest_description"] = None
+        else:
+            _kind, _desc = _interest
+            obj["is_owner"] = _kind == _PREMISES_OWNER
+            obj["is_tenant"] = _kind == _PREMISES_TENANT
+            obj["is_other_interest"] = _kind == _PREMISES_OTHER
+            obj["other_interest_description"] = _desc
 
         city_limits = obj.get("inside_city_limits")
         if isinstance(city_limits, bool):
@@ -7960,15 +7940,60 @@ def _entry_is_printed(n_text: str, hay: str) -> bool:
     return _tokens_printed_in_order(significant, hay)
 
 
+def _dec_pages(full_text: str) -> List[Tuple[str, str]]:
+    """Each printed page as (dec-normalised text, alphanumeric-only text), in
+    order. Empty when the text carries no [Document page N] markers (a
+    one-page document, a plain-text upload): there is then no page to test."""
+    parts = re.split(r"\[Document page \d+\]", full_text or "")
+    if len(parts) < 3:
+        return []
+    return [(_dec_norm(body), _norm_policy_number(body)) for body in parts[1:]]
+
+
+def _entry_number_shares_a_page(policy_number: str, n_value: str,
+                                pages: List[Tuple[str, str]],
+                                cache: Dict[str, List[int]]) -> bool:
+    """Is this entry's policy number printed on a page that also prints the
+    entry's value? The model tags every entry with the number of the policy it
+    believes the entry belongs to, and nothing checked that tag: on the Orbin
+    live run of 30 Sep 2026 the whole Common Declarations page - which prints
+    NO policy number - came back tagged with the NEXT page's inland marine
+    number, so "Section 2 Liability $3,954" became evidence that the GL line
+    was policy 6C7-40-02---26. The GL's own declarations print BBC7263 - 26.
+
+    A tag is refused only on a CONTRADICTION: the number is printed on some
+    pages, and none of them prints this value. A number printed nowhere (an
+    OCR split, a spelling the pages do not carry) gives no opinion and the tag
+    stays - the canonicalisation below elects among printings as before."""
+    key = _norm_policy_number(policy_number)
+    if len(key) < 5 or not n_value or not pages:
+        return True
+    idx = cache.get(key)
+    if idx is None:
+        idx = [i for i, (_n, alnum) in enumerate(pages) if key in alnum]
+        cache[key] = idx
+    if not idx:
+        return True
+    return any(_entry_is_printed(n_value, pages[i][0]) for i in idx)
+
+
 def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
     """The verified subset of `entries`: label AND value literally present.
 
     No text to check against means nothing can be verified, and unverifiable
     entries are dropped - blank over wrong, same as everywhere else.
+
+    The entry's `policy_number` TAG is verified too (30 Sep 2026): it is kept
+    only when a page printing that number also prints the entry's value
+    (`_entry_number_shares_a_page`). The entry itself always survives - only
+    an attribution its own pages contradict is removed.
     """
     if not isinstance(entries, list) or not entries or not (full_text or "").strip():
         return []
     hay = _dec_norm(full_text)
+    pages = _dec_pages(full_text)
+    number_pages: Dict[str, List[int]] = {}
+    dropped_number_tags = 0
     kept: List[dict] = []
     seen: set = set()
     dropped_unverified = dropped_malformed = 0
@@ -8022,13 +8047,20 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
                 logger.info("dec_entries SECTION_DROPPED %r - not printed in the "
                             "uploaded text", section[:60])
             section, n_section = "", ""
+        _pn_tag = (str(item.get("policy_number")).strip()
+                   if item.get("policy_number") else None)
+        if _pn_tag and not _entry_number_shares_a_page(_pn_tag, n_value, pages, number_pages):
+            dropped_number_tags += 1
+            logger.info("dec_entries NUMBER_TAG_DROPPED label=%r value=%r number=%r - "
+                        "no page printing that number prints this value",
+                        label[:60], value[:60], _pn_tag)
+            _pn_tag = None
         kept_item = {
             "label": label,
             "value": value,
             "section": section or None,
             "owner": owner if owner in _DEC_ENTRY_OWNERS else "other",
-            "policy_number": (str(item.get("policy_number")).strip()
-                              if item.get("policy_number") else None),
+            "policy_number": _pn_tag,
             "line_of_business": (str(item.get("line_of_business")).strip()
                                  if item.get("line_of_business") else None),
         }
@@ -8042,8 +8074,9 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
         kept.append(kept_item)
     if kept or dropped_unverified or dropped_malformed:
         logger.info(
-            "dec_entries VERIFIED kept=%d dropped_unverified=%d dropped_malformed=%d",
-            len(kept), dropped_unverified, dropped_malformed,
+            "dec_entries VERIFIED kept=%d dropped_unverified=%d dropped_malformed=%d "
+            "number_tags_dropped=%d",
+            len(kept), dropped_unverified, dropped_malformed, dropped_number_tags,
         )
     return kept
 
@@ -8501,6 +8534,449 @@ def _backfill_empty_facts_from_entries(facts: dict, entries: List[dict]) -> None
         )
     if filled:
         logger.info("dec_entries BACKFILL filled %d empty fact(s)", filled)
+
+
+# ── A LINE'S LIMIT IS WHAT ITS OWN DECLARATIONS PRINT (1 Oct 2026) ───────────
+# Orbin demo run 69687a55: ACORD 126 and the 131's underlying GL row printed
+# $3,000,000 each occurrence / aggregate / personal & advertising - the
+# COMMERCIAL UMBRELLA's limit - labelled "filled". The GL's own declarations
+# print $1,000,000 / $2,000,000 / $1,000,000, and the run before on the same
+# dec (359b36b0) came out right. Both runs extracted BOTH figures for every one
+# of those facts (the stored `_merge_rejected` holds $1,000,000 in one run and
+# $3,000,000 in the other): the merge elects by repetition, so whichever
+# coverage part the chunks happened to quote more often won. The C23 checks act
+# only on a near-tie and trust the composite, which is elected the same way -
+# when the umbrella out-voted the GL outright, neither ran.
+#
+# Repetition cannot say WHOSE limit a figure is. The verified declarations
+# entries can: each was checked verbatim and carries the coverage part it was
+# printed for (its line, its section heading, its own label). After the vote:
+#   * the line's own declarations state ONE amount for the limit -> that amount
+#     (correcting the vote, or filling a blank);
+#   * they state several -> the voted amount if it is one of them, else blank;
+#   * they state none, the voted amount is printed only by ANOTHER coverage part,
+#     and a different amount competes with it (that part prints one too, or the
+#     vote had a printed rival) -> blank: the witnesses conflict and nothing
+#     separates them (right-or-blank);
+#   * otherwise nothing proves it wrong -> unchanged.
+# Set arithmetic over the entries: the same answer whichever chunk spoke first.
+# Scope is the C23 family (`_CURRENCY_COMPOSITE_PARENT`) - the limits an
+# umbrella / excess part prints under the same names as the GL's.
+_LIMIT_EXCLUSION_TAIL_RE = re.compile(r"\b(?:other than|except|excluding)\b.*$")
+
+
+def _limit_label_core(label: Any) -> str:
+    """A limit label without its qualifiers: parenthesised text and an exclusion
+    tail name a DIFFERENT limit than the one printed ("General Aggregate Limit
+    (Other Than Products-Completed Operations)" is the general aggregate)."""
+    s = _dec_norm(re.sub(r"\([^)]*\)", " ", str(label or "")))
+    return _LIMIT_EXCLUSION_TAIL_RE.sub(" ", s).strip()
+
+
+def _limit_kind_tokens(key: str) -> List[str]:
+    """The words of a line-scoped limit key that say WHICH limit it is
+    (`gl_each_occurrence` -> ['each', 'occurrence']). The leading words that
+    name the line are the line, not the limit; a key whose line cannot be read
+    has no kind and is never judged."""
+    try:
+        from services.lob_canon import fact_line_family
+        family = fact_line_family(key)
+    except Exception:                                     # noqa: BLE001
+        family = None
+    if not family:
+        return []
+    toks = re.findall(r"[a-z0-9]+", str(key or "").lower())
+    while toks and _canon_line(toks[0]) == family:
+        toks = toks[1:]
+    return [t for t in toks if len(t) >= 3]
+
+
+def _limit_kinds(keys: Any) -> Dict[str, List[List[str]]]:
+    """{limit key: [word sets that name it]} for `keys` AND every other limit
+    the registry declares on the same line, each with its printed names
+    (`dec_labels`). The others only COMPETE for a label - "Damage To Premises
+    Rented To You Each Occurrence Limit" is the premises limit, not the each-
+    occurrence one - they are never settled here. Composites name no single
+    limit and are left out."""
+    try:
+        from services.fact_registry import FACT_REGISTRY, _is_currency
+        from services.lob_canon import fact_line_family
+    except Exception:                                     # noqa: BLE001
+        return {}
+    keys = [k for k in (keys or ()) if isinstance(k, str)]
+    families = {fact_line_family(k) for k in keys} - {None}
+    pool = set(keys) | {k for k, meta in FACT_REGISTRY.items()
+                        if (meta or {}).get("validate") is _is_currency
+                        and fact_line_family(k) in families}
+    out: Dict[str, List[List[str]]] = {}
+    for k in sorted(pool - set(_CURRENCY_COMPOSITES)):
+        sets = [_limit_kind_tokens(k)] + [
+            [t for t in _limit_label_core(name).split() if len(t) >= 3]
+            for name in ((FACT_REGISTRY.get(k) or {}).get("dec_labels") or ())]
+        sets = [ws for ws in sets if ws]
+        if sets:
+            out[k] = sets
+    return out
+
+
+def _entry_limit_key(label: Any, kinds: Dict[str, List[List[str]]]) -> Optional[str]:
+    """The ONE limit fact a printed label names, or None. The most specific
+    match wins ("Products-Completed Operations Aggregate" names the products
+    aggregate, not the general one); two equally specific matches are no
+    answer."""
+    toks = [t for t in _limit_label_core(label).split() if len(t) >= 3]
+    if not toks or not isinstance(kinds, dict):
+        return None
+    hits: Dict[str, int] = {}
+    for k, sets in kinds.items():
+        for ws in sets or ():
+            if ws and all(any(_dec_entry_token_match(t, lt) for lt in toks) for t in ws):
+                hits[k] = max(hits.get(k, 0), len(ws))
+    if not hits:
+        return None
+    best = max(hits.values())
+    top = [k for k, n in hits.items() if n == best]
+    return top[0] if len(top) == 1 else None
+
+
+def _limit_entry_line(entry: dict, home: Dict[str, set]) -> Optional[str]:
+    """The ONE coverage part a verified entry was printed for, or None.
+
+    Its line tag, its section heading and its own label are three witnesses;
+    two that name DIFFERENT lines make it unattributable - the umbrella's
+    schedule of underlying insurance prints "Products-Completed Operations
+    Aggregate" on the umbrella's pages, which is neither the umbrella's own
+    limit nor the GL's declarations. The contract is the fourth: an entry
+    filed under a policy whose own pages are another line's (a GL tag on the
+    umbrella's 6J7) is unattributable too. An entry naming no line takes its
+    contract's, when that contract's own pages name exactly one."""
+    named = {x for x in (_canon_line(entry.get("line_of_business")),
+                         _canon_line(entry.get("section")),
+                         _canon_line(_limit_label_core(entry.get("label"))))
+             if x}
+    lines = home.get(_norm_policy_number(entry.get("policy_number")), set())
+    if len(named) == 1:
+        line = next(iter(named))
+        return line if not lines or line in lines else None
+    if named:
+        return None
+    return next(iter(lines)) if len(lines) == 1 else None
+
+
+def _line_limit_witnesses(facts: dict, entries: List[dict],
+                          keys: Any) -> Tuple[Dict[str, dict], Dict[str, set]]:
+    """({limit key: witnesses}, {line: every single amount its own entries print}).
+
+    Per key: "own" / "own_prior" {amount: printed value} from the key's own
+    line (a prior-term contract kept apart, used only when nothing current
+    speaks), "other" {line: {amount: value}}, "unknown" {amount}."""
+    try:
+        from services.fact_registry import _is_currency
+        from services.lob_canon import fact_line_family
+    except Exception:                                     # noqa: BLE001
+        return {}, {}
+    kinds = _limit_kinds(keys)
+    settled = [k for k in keys if k in kinds]
+    if not settled:
+        return {}, {}
+    family_of = {k: fact_line_family(k) for k in settled}
+    home = _entry_home_lines(entries)
+    try:
+        prior = prior_term_policy_numbers(facts)
+    except Exception:                                     # noqa: BLE001
+        prior = set()
+    wit = {k: {"own": {}, "own_prior": {}, "other": {}, "unknown": set()} for k in settled}
+    family_amounts: Dict[str, set] = {}
+
+    def _keep(slot: dict, amt: int, value: str) -> None:
+        # One printing per amount, chosen by its characters - never by which
+        # entry arrived first.
+        old = slot.get(amt)
+        if old is None or (old.count(" "), old) > (value.count(" "), value):
+            slot[amt] = value
+
+    for e in entries:
+        if not isinstance(e, dict) or _entry_denies_its_line(e):
+            continue
+        if str(e.get("owner") or "") not in ("applicant", "policy"):
+            continue                       # a producer's or carrier's figure
+        value = _backfill_value_for(_is_currency, e.get("value"))
+        amt = _amount_key(value) if value else None
+        if amt is None:
+            continue                       # no ONE amount in the cell
+        line = _limit_entry_line(e, home)
+        if line:
+            family_amounts.setdefault(line, set()).add(amt)
+        key = _entry_limit_key(e.get("label"), kinds)
+        if key not in wit:
+            continue                       # names no limit, or one not settled here
+        slot = wit[key]
+        if line and line == family_of[key]:
+            bucket = ("own_prior" if _norm_policy_number(e.get("policy_number")) in prior
+                      else "own")
+            _keep(slot[bucket], amt, value)
+        elif line:
+            _keep(slot["other"].setdefault(line, {}), amt, value)
+        else:
+            slot["unknown"].add(amt)
+    return wit, family_amounts
+
+
+def _line_limit_envelope(prev: Any, value: str, rule: str, replaced: str = "") -> dict:
+    """The settled fact: the printed amount, verified, with what it replaced."""
+    env = dict(prev) if isinstance(prev, dict) else {"confidence": "ai_low"}
+    for stale in ("reconciled", "reconcile_method", "derivation"):
+        env.pop(stale, None)
+    derivation = {"rule": rule, "inputs": ["dec_page_entries"]}
+    if replaced:
+        derivation["replaced"] = replaced[:80]
+    env.update({"value": value, "source": "dec_entry", "verified_in_text": True,
+                "evidence_state": "source_verified", "derivation": derivation})
+    env.setdefault("confidence", "ai_low")
+    return env
+
+
+def _settle_line_limits(facts: dict, entries: Any,
+                        rejected: Optional[dict] = None) -> List[str]:
+    """Settle each C23-family limit by its own line's verified entries (see the
+    block comment above). Mutates `facts`; returns what changed. Never raises."""
+    try:
+        if not isinstance(facts, dict) or not isinstance(entries, list) or not entries:
+            return []
+        wit, family_amounts = _line_limit_witnesses(
+            facts, entries, tuple(_CURRENCY_COMPOSITE_PARENT))
+        if not wit:
+            return []
+        if not isinstance(rejected, dict):
+            rejected = facts.get("_merge_rejected")
+            rejected = rejected if isinstance(rejected, dict) else {}
+        try:
+            from services.lob_canon import fact_line_family
+        except Exception:                                 # noqa: BLE001
+            return []
+        changes: List[str] = []
+        tainted: Dict[str, set] = {}
+        judged: set = set()
+
+        def _person(key: str) -> bool:
+            held = facts.get(key)
+            return isinstance(held, dict) and held.get("source") in _PERSON_FACT_SOURCES
+
+        def _blank(key: str, current: str, why: str) -> None:
+            facts.pop(key, None)
+            _record_fact_rejection(facts, key, why)
+            changes.append(f"{key}: {current!r} -> blank")
+            logger.warning("line limit %s=%r BLANKED - %s", key, current[:40], why)
+
+        for key in sorted(wit):
+            if _person(key):
+                continue                   # a person's answer is never re-read
+            slot = wit[key]
+            parent = _CURRENCY_COMPOSITE_PARENT.get(key)
+            raw = _fv(facts, key)
+            current = (str(raw).strip()
+                       if raw is not None and not isinstance(raw, (list, dict, bool)) else "")
+            mk = _amount_key(current) if current else None
+            own = slot["own"] or slot["own_prior"]
+            if own:
+                judged.add(parent)
+                if len(own) == 1:
+                    amt, printed = next(iter(own.items()))
+                    if current and mk == amt:
+                        continue
+                    facts[key] = _line_limit_envelope(
+                        facts.get(key), printed, "own_line_declarations", current)
+                    if mk is not None:
+                        tainted.setdefault(parent, set()).add(mk)
+                    changes.append(f"{key}: {current or '(blank)'!r} -> {printed!r}")
+                    (logger.warning if current else logger.info)(
+                        "line limit %s=%r -> %r: the %s declarations print it "
+                        "(the vote is not ownership)", key, current[:40], printed,
+                        fact_line_family(key))
+                elif current and mk not in own:
+                    if mk is not None:
+                        tainted.setdefault(parent, set()).add(mk)
+                    _blank(key, current, "the line's own declarations print other "
+                                         "amounts for this limit, not this one")
+                continue
+            if mk is None or mk in slot["unknown"]:
+                continue                   # nothing to judge, or an unplaced printing
+            witnessing = [ln for ln in sorted(slot["other"]) if mk in slot["other"][ln]]
+            if not witnessing:
+                continue
+            printed_anywhere = (set(slot["unknown"]) | set(slot["own_prior"])
+                                | {a for amts in slot["other"].values() for a in amts})
+            rivals = {a for ln in witnessing for a in slot["other"][ln]} - {mk}
+            for cand in (rejected.get(key) or []):
+                a = _amount_key(cand)
+                if a is not None and a != mk and a in printed_anywhere:
+                    rivals.add(a)
+            if not rivals:
+                continue                   # nothing competes - nothing proves it wrong
+            tainted.setdefault(parent, set()).add(mk)
+            _blank(key, current, f"this amount is printed for the "
+                                 f"{'/'.join(witnessing)} coverage, not this line, "
+                                 f"and a different amount competes for it")
+
+        children = _CURRENCY_COMPOSITE_CHILDREN
+        for parent in sorted(_CURRENCY_COMPOSITES):
+            if _person(parent):
+                continue
+            raw = _fv(facts, parent)
+            current = (str(raw).strip()
+                       if raw is not None and not isinstance(raw, (list, dict, bool)) else "")
+            amts = {int(a) for a in _money_amounts(current)}
+            if not amts:
+                continue
+            kids = children.get(parent) or []
+            family = fact_line_family(kids[0]) if kids else None
+            if parent in judged:
+                foreign = amts - family_amounts.get(family, set())
+                elsewhere = {a for k in kids for amts_ in (wit.get(k) or {}).get("other", {}).values()
+                             for a in amts_}
+                suspect = foreign & (elsewhere | tainted.get(parent, set()))
+            else:
+                suspect = amts & tainted.get(parent, set())
+            if not suspect:
+                continue
+            parts = [str(_fv(facts, k) or "").strip() for k in kids]
+            if parts and parts[0]:
+                # Each amount says which limit it is (the key's own words), so
+                # four bare figures never read as "occurrence / aggregate"; the
+                # each-occurrence figure stays first, as every reader assumes.
+                rebuilt = " / ".join(
+                    f"{p} {' '.join(_limit_kind_tokens(k))}".strip()
+                    for k, p in zip(kids, parts) if p)
+                env = _line_limit_envelope(
+                    facts.get(parent), rebuilt, "composite_of_own_line_limits", current)
+                # Assembled from the settled limits, so it is derived, not read.
+                env.pop("verified_in_text", None)
+                env.update({"source": "derived", "evidence_state": "derived"})
+                env["derivation"]["inputs"] = list(kids)
+                facts[parent] = env
+                changes.append(f"{parent}: {current!r} -> {rebuilt!r}")
+                logger.warning("line limit %s=%r rebuilt as %r - it carried another "
+                               "coverage part's figure", parent, current[:60], rebuilt)
+            else:
+                _blank(parent, current, "it carried another coverage part's figure "
+                                        "and the line's own limits are not known")
+        return changes
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("line limit settle skipped: %s", exc)
+        return []
+
+
+# ── A CODE ANOTHER LINE OWNS IS NOT THIS LINE'S (1 Oct 2026) ─────────────────
+# Orbin runs 69687a55 and 8739a72a stored `applicant_gl_class_code = 7383` - the
+# Subaru's rating class ("PRIV PASSENGER - COMM CLASS: 7383" on the AUTO
+# declarations). The 125 stamper already refused it (`pdf_service.
+# _code_is_another_lines`), but the FACT stayed: it reached gap fill as an
+# extracted fact and came back in the SIC / NAICS boxes, which the guards then
+# listed as "AI held back - Found 7383". The fact is checked here with the
+# stamper's own witness test, so the two layers cannot disagree.
+#
+# Which facts: any whose NAME says it is one line's code - a code / class /
+# territory word plus a line ("applicant_gl_class_code", and the
+# "gl_class_code" column of `named_insured_details`). Removal only, and only
+# when the documents give the code to another line and never to this one; a
+# line's own schedule is its own witness, so it can never be emptied.
+def _code_name_line(name: Any) -> Optional[str]:
+    """The line a CODE fact or column is named for, or None."""
+    try:
+        from services.pdf_service import _CODE_SUBKEY_RE
+    except Exception:                                     # noqa: BLE001
+        return None
+    text = str(name or "")
+    if not text or not _CODE_SUBKEY_RE.search(text):
+        return None
+    return _canon_line(text.replace("_", " "))
+
+
+def _drop_codes_another_line_owns(facts: dict, entries: Any = None) -> List[str]:
+    """Remove line-named code facts / cells whose code the documents give only
+    to ANOTHER line's rating. `entries` (verified) replaces the facts' own when
+    given. Mutates `facts`; returns what was removed. Never raises."""
+    try:
+        if not isinstance(facts, dict):
+            return []
+        from services.pdf_service import _code_is_another_lines, _line_code_witnesses
+        view = facts if entries is None else dict(facts, dec_page_entries=entries)
+        witnesses = None
+        out: List[str] = []
+
+        def _owners(code: Any) -> str:
+            nonlocal witnesses
+            if witnesses is None:
+                witnesses = _line_code_witnesses(view)
+            tok = re.sub(r"[^a-z0-9]", "", str(code or "").lower())
+            return "/".join(sorted(_DEC_LINE_DISPLAY.get(o, o) for o in witnesses.get(tok) or ()))
+
+        for key in sorted(k for k in facts if isinstance(k, str)):
+            if key.startswith("_") or key == "dec_page_entries":
+                continue
+            held = facts.get(key)
+            if isinstance(held, dict) and held.get("source") in _PERSON_FACT_SOURCES:
+                continue
+            val = held.get("value") if isinstance(held, dict) and "value" in held else held
+            if isinstance(val, list):
+                rows, changed = [], False
+                for row in val:
+                    if isinstance(row, dict):
+                        new_row = dict(row)
+                        for sub, cell in row.items():
+                            line = _code_name_line(sub)
+                            if (line and isinstance(cell, (str, int)) and not isinstance(cell, bool)
+                                    and str(cell).strip()
+                                    and _code_is_another_lines(cell, view, line)):
+                                new_row[sub] = None
+                                changed = True
+                                out.append(f"{key}[].{sub}={cell!r} ({_owners(cell)})")
+                        row = new_row
+                    rows.append(row)
+                if changed:
+                    facts[key] = dict(held, value=rows) if isinstance(held, dict) and "value" in held else rows
+                continue
+            if isinstance(val, bool) or not isinstance(val, (str, int)) or not str(val).strip():
+                continue
+            line = _code_name_line(key)
+            if not line or not _code_is_another_lines(val, view, line):
+                continue
+            owners = _owners(val)
+            facts.pop(key, None)
+            _record_fact_rejection(
+                facts, key, f"{str(val).strip()} is printed as the {owners} rating "
+                            f"class, not as this line's")
+            out.append(f"{key}={str(val).strip()!r} ({owners})")
+        if out:
+            logger.warning("line codes removed - the documents give them to another "
+                           "line's rating only: %s", "; ".join(out[:6]))
+        return out
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("line code check skipped: %s", exc)
+        return []
+
+
+def _settle_document_line_facts(doc: Any) -> List[str]:
+    """One document's GL limits and line-named codes, settled by that
+    document's OWN verified entries - before the merge reads it, so the
+    per-document copy (the "Review extracted data" popup, the Data Consistency
+    witnesses) and the merged facts tell one story. Never raises."""
+    try:
+        if not isinstance(doc, dict):
+            return []
+        facts, text = doc.get("facts"), str(doc.get("text") or "")
+        raw = facts.get("dec_page_entries") if isinstance(facts, dict) else None
+        if not isinstance(raw, list) or not raw or not text.strip():
+            return []
+        entries = _verify_dec_entries(raw, text)
+        if not entries:
+            return []
+        _canonicalise_dec_entry_keys(entries)
+        return (_settle_line_limits(facts, entries)
+                + _drop_codes_another_line_owns(facts, entries))
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("document line-fact settle skipped: %s", exc)
+        return []
 
 
 # ACORD's billing method is a TWO-VALUE vocabulary: a policy is direct bill or
@@ -10860,6 +11336,7 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
                 e["naic"] = None
             e["carrier"] = name
     repaired = cleared = kept = 0
+    touched: List[dict] = []          # rows whose number this repair changed
     for e in lines:
         if not isinstance(e, dict):
             continue
@@ -10891,24 +11368,69 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
             # applies). There is nothing to repair here.
             kept += 1
             continue
-        if candidates and len(candidates) == 1:
-            new_pn = next(iter(candidates))
-            if raw != new_pn:
-                e["policy_number"] = new_pn
+        # One contract printed two ways ('BBC7263' / 'BBC7263 - 26') is ONE
+        # candidate, not a choice (Orbin live run, 30 Sep 2026: the GL row was
+        # cleared instead of re-paired because its own contract had two
+        # printings). Its fullest printing is the one kept.
+        single = (next(iter(candidates)) if candidates and len(candidates) == 1
+                  else _one_contract_printing(candidates, same) if candidates else None)
+        if single:
+            if raw != single:
+                e["policy_number"] = single
                 repaired += 1
+                touched.append(e)
         else:
             # The document cannot settle this line's policy number. Blank beats
             # a number belonging to a different coverage part.
             if e.get("policy_number") is not None:
                 e["policy_number"] = None
                 cleared += 1
+    # ONE CONTRACT, ONE CARRIER. A row whose number was just re-paired kept
+    # the carrier of the WRONG contract it had been paired with (Orbin: the
+    # GL row re-paired to BBC7263 - 26 still said Employers Mutual, while the
+    # GL's own row prints EMC Property & Casualty Company for that policy).
+    # The carrier is taken only from an untouched row of the same line that
+    # prints the same contract, and only when exactly one such carrier exists.
+    touched_ids = {id(t) for t in touched}
+    recarried = 0
+    for e in touched:
+        canon, pn = _canon_line(e.get("line")), str(e.get("policy_number") or "")
+        if not canon or not pn:
+            continue
+        donors = {str(o.get("carrier")).strip() for o in lines
+                  if isinstance(o, dict) and id(o) not in touched_ids
+                  and _canon_line(o.get("line")) == canon
+                  and o.get("policy_number") and same(str(o.get("policy_number")), pn)
+                  and str(o.get("carrier") or "").strip()}
+        if len(donors) != 1:
+            continue
+        name = next(iter(donors))
+        if _entity(str(e.get("carrier") or "")) != _entity(name):
+            if e.get("naic"):
+                e["naic"] = None
+            e["carrier"] = name
+            recarried += 1
     logger.warning(
         "coverage_lines REPAIRED from verified dec entries: one policy number "
         "was attached to several different lines of business - %d line(s) "
-        "re-paired to their own policy number, %d cleared as unresolvable, "
-        "%d kept (the document prints them for their own line)",
-        repaired, cleared, kept,
+        "re-paired to their own policy number (%d took that contract's carrier), "
+        "%d cleared as unresolvable, %d kept (the document prints them for "
+        "their own line)",
+        repaired, recarried, cleared, kept,
     )
+
+
+def _one_contract_printing(candidates: Any, same) -> Optional[str]:
+    """The fullest printing when every candidate is ONE contract printed
+    several ways ('BBC7263' / 'BBC7263 - 26'); None when they are different
+    contracts - which stays a real choice nobody may make silently."""
+    cs = [str(c) for c in (candidates or []) if c]
+    if not cs:
+        return None
+    first = cs[0]
+    if all(same(first, c) for c in cs[1:]):
+        return max(cs, key=lambda c: (len(_norm_policy_number(c)), len(c), c))
+    return None
 
 
 # ── A conflict INSIDE one document is still a conflict (client 2026-08-15) ───
@@ -12395,6 +12917,9 @@ def _build_line_records(mf: dict, docs: Any = None) -> List[dict]:
     by_line: Dict[str, List[dict]] = {}
     for r in rows:
         by_line.setdefault(r["canon"], []).append(r)
+    _held = mf.get("dec_page_entries")
+    headings = _declarations_heading_names(
+        _held.get("value") if isinstance(_held, dict) and "value" in _held else _held)
 
     records: List[dict] = []
     for canon in sorted(by_line):
@@ -12431,7 +12956,7 @@ def _build_line_records(mf: dict, docs: Any = None) -> List[dict]:
                 else:
                     buckets.append([r])
         for bucket in buckets:
-            rec = _merge_line_record(canon, bucket, docs)
+            rec = _merge_line_record(canon, bucket, docs, headings)
             if rec:
                 records.append(rec)
     return policy_line_records(records)
@@ -12506,8 +13031,64 @@ def line_record_has_identity(rec: dict) -> bool:
         "carrier_name", "carrier_naic", "policy_number", "effective_date", "expiration_date"))
 
 
-def _merge_line_record(canon: str, bucket: List[dict], docs: Any) -> Optional[dict]:
-    """Collapse the rows of ONE (line, contract) into the client's chain."""
+def _line_row_premium(value: Any) -> Optional[float]:
+    """A coverage row's premium as a number ("$2,991.00" -> 2991.0), or None."""
+    text = re.sub(r"[^\d.]", "", str(value or ""))
+    if not text or text.count(".") > 1:
+        return None
+    try:
+        amount = float(text)
+    except ValueError:
+        return None
+    return amount if amount > 0 else None
+
+
+def _declarations_heading_names(entries: Any) -> List[Tuple[str, str, str]]:
+    """(line, policy number, line name) read off each contract's OWN
+    declarations headings (1 Oct 2026).
+
+    Question 4 named the umbrella "Umbrella" on one run and "Commercial
+    Umbrella" on the next, from the same dec: the name was the longest ACORD
+    line name among the summary rows extraction happened to emit, and the rows
+    differ run to run. The policy's own declarations heading does not - every
+    Orbin run recorded "COMMERCIAL UMBRELLA DECLARATIONS" under 6J7. A verified
+    entry whose section heading and line tag name the SAME line gives its
+    contract the shortest ACORD line name its heading begins with ("COMMERCIAL
+    AUTO DECLARATIONS - BUSINESS AUTO" -> "Commercial Auto"). A heading naming
+    another line (the umbrella's schedule of the GL policy) gives nothing."""
+    out: List[Tuple[str, str, str]] = []
+    if not isinstance(entries, list) or not entries:
+        return out
+    try:
+        from services.pdf_service import _names_a_standard_line
+    except Exception:                                         # noqa: BLE001
+        return out
+    seen: set = set()
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        pn = str(e.get("policy_number") or "").strip()
+        heading = str(e.get("section") or "").strip()
+        if not pn or not heading or (pn, heading) in seen:
+            continue
+        seen.add((pn, heading))
+        line = _canon_line(heading)
+        lob = _canon_line(e.get("line_of_business"))
+        if not line or (lob and lob != line):
+            continue
+        words = heading.split()
+        for n in range(1, len(words) + 1):
+            name = " ".join(words[:n]).strip(" -:,.;")
+            if name and _names_a_standard_line(name) and _canon_line(name) == line:
+                out.append((line, pn, name.title() if name.isupper() else name))
+                break
+    return out
+
+
+def _merge_line_record(canon: str, bucket: List[dict], docs: Any,
+                       headings: Any = None) -> Optional[dict]:
+    """Collapse the rows of ONE (line, contract) into the client's chain.
+    `headings`: `_declarations_heading_names` of the verified entries."""
     if not bucket:
         return None
     printings: Dict[str, List[str]] = {}
@@ -12525,8 +13106,13 @@ def _merge_line_record(canon: str, bucket: List[dict], docs: Any) -> Optional[di
                 seen.append(val)
 
     def _fullest(key: str) -> Optional[str]:
+        # Equal-length printings ("EMPLOYERS MUTUAL CASUALTY COMPANY" and its
+        # ordinary-case twin) went to whichever row came first, so the record
+        # flipped with chunk order (1 Oct 2026). Ties now go by the characters:
+        # ordinary case (current_policy_writer_names' rule), then alphabetical.
         vals = printings.get(key) or []
-        return max(vals, key=lambda s: (len(_contract_key(s)), len(s))) if vals else None
+        return max(vals, key=lambda s: (len(_contract_key(s)), len(s), not s.isupper(), s)
+                   ) if vals else None
 
     numbers = {p for p in (printings.get("policy_number") or [])}
     canonical_no = _fullest("policy_number")
@@ -12539,7 +13125,26 @@ def _merge_line_record(canon: str, bucket: List[dict], docs: Any) -> Optional[di
         standard = [n for n in names if _names_a_standard_line(n)]
     except Exception:                                         # noqa: BLE001
         standard = []
-    printed = max(standard or names, key=len, default="")
+    # ...plus the name the contract's OWN declarations heading prints, so the
+    # choice no longer hangs on which summary rows this run emitted (1 Oct 2026,
+    # see _declarations_heading_names). Ties go by the characters - ordinary
+    # case, then alphabetical - never by row order.
+    if numbers and headings:
+        _same = _contract_matcher()
+        standard += [name for line, pn, name in headings
+                     if line == canon and any(_same(pn, n) for n in numbers)]
+    if standard:
+        printed = max(standard, key=lambda n: (len(n), not n.isupper(), n))
+    else:
+        # No ACORD line name among the printings (Orbin live run, 30 Sep 2026:
+        # only "Automobile" $2,991 and "COVERED AUTOS LIABILITY" $1,496, and the
+        # longest - the coverage PART - named the auto policy in question 4).
+        # The policy's own name is the one printed beside its FULL premium; a
+        # coverage part carries a slice of it. No premiums: longest, as before.
+        priced = [(amt, r["printed"]) for r in bucket if r["printed"]
+                  for amt in [_line_row_premium(r["entry"].get("premium"))] if amt is not None]
+        printed = max(priced)[1] if priced else max(
+            names, key=lambda n: (len(n), not n.isupper(), n), default="")
     granted = any(_line_entry_grants_coverage(r["entry"]) for r in bucket)
     rec = {
         "id":             f"{canon}#{_contract_key(canonical_no) or 'unnumbered'}",
@@ -12924,6 +13529,14 @@ def merge_facts(docs: List[dict], primary: dict,
                             _cd.get("filename"), _based)
         except Exception as exc:  # noqa: BLE001 - never block the pipeline
             logger.warning("merge_facts: coverage-basis normalisation failed: %s", exc)
+        # A GL limit is what the GL's own declarations print, and a code another
+        # line rates is not this line's (1 Oct 2026, Orbin demo run) - per
+        # DOCUMENT, by its own verified entries, for the same reason as above.
+        # See _settle_line_limits / _drop_codes_another_line_owns.
+        _settled_doc = _settle_document_line_facts(_cd)
+        if _settled_doc:
+            logger.info("merge_facts: %s - line facts settled by its own declarations: %s",
+                        _cd.get("filename"), _settled_doc[:6])
 
     non_primary = [d for d in docs if d["filename"] != primary["filename"]]
 
@@ -13303,6 +13916,15 @@ def merge_facts(docs: List[dict], primary: dict,
             logger.info("merge_facts: operations description from the applicant's own words - %r", _ops[:60])
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: operations description preference failed: %s", exc)
+    # The same two checks on the MERGED facts, over every document's verified
+    # entries (1 Oct 2026): one document's GL declarations settle a limit
+    # another document's chunks voted for. After the vehicle rows above (their
+    # class codes are witnesses) and while `_merge_rejected` still exists.
+    _settled = (_settle_line_limits(mf, mf.get("dec_page_entries"))
+                + _drop_codes_another_line_owns(mf))
+    if _settled:
+        logger.info("merge_facts: line facts settled by their own declarations - %s",
+                    _settled[:8])
 
     # -- A FORM NUMBER IS NOT A POLICY NUMBER, KILLED AT THE SOURCE ----------
     # Client 2026-09-11 item 3. The shape test was applied at a dozen
@@ -13761,6 +14383,110 @@ _PERSON_FACT_SOURCES = frozenset({"producer", "client_arq", "client", "human",
                                   "user_confirmed", "cross_form_conflict"})
 
 
+# Documents that print the current programme and, uploaded with no quote or
+# application, mean the producer is renewing it (29 Sep 2026, client items 7 /
+# 8). A certificate, a loss run or a narrative describes coverage; it is not the
+# programme's own paperwork, so it never carries this presumption.
+_RENEWAL_PRESUMPTION_ROLES = frozenset({"dec_page", "policy", "binder", "endorsement"})
+
+
+def _current_policy_writers(rows: Any) -> List[str]:
+    """The companies that WRITE a current policy: every coverage row with a
+    carrier and a policy number or a non-zero premium, as strict entity keys in
+    alphabetical order (1 Oct 2026 - see `current_policy_writer_names`). One
+    door for the page-one marker and the renewal presumption."""
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                         # noqa: BLE001
+        _ek = _norm_name_key
+    out: set = set()
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict) or not str(r.get("carrier") or "").strip():
+            continue
+        if not (str(r.get("policy_number") or "").strip()
+                or re.search(r"[1-9]", str(r.get("premium") or ""))):
+            continue
+        k = _ek(r.get("carrier"))
+        if k:
+            out.add(k)
+    return sorted(out)
+
+
+def current_policy_writer_names(rows: Any) -> List[str]:
+    """The companies that write a current policy, as the documents PRINT them:
+    the display face of `_current_policy_writers` - the same rows, the same
+    order, one name per company. Where the documents print one company both in
+    capitals and in ordinary case (Orbin: "EMPLOYERS MUTUAL CASUALTY COMPANY"
+    and "Employers Mutual Casualty Company"), the ordinary printing is used;
+    both are the policy's own wording (30 Sep 2026, Orbin item 7).
+
+    ORDER IS FIXED, NOT FIRST-SEEN (1 Oct 2026). The 125 CARRIER line printed
+    "EMC Property & Casualty Company; Employers Mutual Casualty Company" on one
+    run and the reverse on the next, from the same dec: row order is whatever
+    order the extraction chunks happened to list the lines in. ACORD's "company
+    name(s)" gives co-writers no precedence, so the companies are listed
+    alphabetically by legal name (case and punctuation ignored) and each name's
+    printing is chosen by its characters - ordinary case, then the fuller name,
+    then alphabetical - never by which row came first."""
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                         # noqa: BLE001
+        _ek = _norm_name_key
+    writers = set(_current_policy_writers(rows))
+    printings: Dict[str, set] = {}
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        name = str(r.get("carrier") or "").strip()
+        k = _ek(name) if name else None
+        if k in writers:
+            printings.setdefault(k, set()).add(name)
+    return [min(printings[k], key=lambda n: (n.isupper(), -len(n), n))
+            for k in sorted(writers) if printings.get(k)]
+
+
+def _renews_current_programme(mf: dict, docs: Any) -> bool:
+    """True when the upload is the current programme's own paperwork and nothing
+    says the submission goes anywhere else - so the producer is renewing it with
+    the company that writes it (29 Sep 2026, client items 7 / 8: "carrier
+    information not auto-filled", "premiums did not attach").
+
+    All required: at least one live dec / policy / binder / endorsement and no
+    quote or application; no statement that this is new business; a carrier
+    that writes a current policy; no addressee naming another company; and a
+    known proposed effective date (a stale or odd-length dec, whose dates are
+    asked, is not presumed to renew at its old premiums). Deliberately does NOT
+    need `is_renewal`: a dec rarely says "renewal" (Orbin's never does).
+    Never raises."""
+    try:
+        if not isinstance(mf, dict):
+            return False
+        live = [d for d in docs if isinstance(d, dict) and not d.get("excluded")] \
+            if isinstance(docs, list) else []
+        roles = {str(d.get("doc_type") or "").strip().lower() for d in live}
+        if not (roles & _RENEWAL_PRESUMPTION_ROLES) or (roles & _PROPOSAL_ROLES):
+            return False
+        if mf.get("submission_is_new_business") is True:
+            return False
+        if not str(_fv(mf, "effective_date") or "").strip():
+            return False
+        from services.normalization import strict_entity_key as _ek
+        key = _ek(str(_fv(mf, "carrier_name") or ""))
+        if not key:
+            return False
+        writers = _current_policy_writers(_fv(mf, "coverage_lines"))
+        if key not in writers:
+            return False
+        # An addressee (a document's "TO:" line, or the producer's answer to the
+        # page-one card) must be one of the companies that write the current
+        # policies: going to another market is not a renewal, and the dec's
+        # premiums are not that market's.
+        addressee = _ek(str(_fv(mf, "submission_carrier_name") or ""))
+        return not addressee or addressee in writers
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 def _mark_page_one_current_policy(mf: dict, docs: Any) -> List[str]:
     """Which ACORD 125 page-one facts are only the CURRENT policy's.
 
@@ -13780,9 +14506,27 @@ def _mark_page_one_current_policy(mf: dict, docs: Any) -> List[str]:
         and no person entered one;
       * current_term_rows_ok - no quote / application added coverage rows of
         its own, so every policy the package holds is the current programme's.
+
+    A DECLARATIONS UPLOAD RENEWS ITS PROGRAMME (29 Sep 2026, client items 7 /
+    8 - reverses the 15 Sep rule for this shape). When the package is only the
+    current programme's own paperwork (`_renews_current_programme`), the
+    producer is renewing it: the dec's line premiums and total print on page
+    one, and so does the carrier when ONE company writes every policy. Several
+    writing companies (Orbin: EMCC and EMC Property & Casualty) are ALL named
+    (30 Sep 2026, owner - ACORD's "company name(s)"): the flag below still
+    marks the scalar carrier as the current policy's, and `pdf_service.
+    _resolve_page_one_receiving_carrier` prints every writing company instead,
+    NAIC and POLICY NUMBER blank. Naming ONE would misattribute another's
+    policy. Recorded as the plain bool `renews_current_programme`.
+
+    Idempotent: every flag is recomputed from scratch, so a re-run on stored
+    facts (a replay, a re-merge) reflects the current rule.
     Returns what it marked."""
     if not isinstance(mf, dict):
         return []
+    for _flag in ("carrier_is_current_policy", "premium_is_current_policy",
+                  "current_term_rows_ok", "renews_current_programme"):
+        mf.pop(_flag, None)
     live = [d for d in docs if isinstance(d, dict) and not d.get("excluded")] \
         if isinstance(docs, list) else []
     proposal = [d for d in live
@@ -13801,18 +14545,15 @@ def _mark_page_one_current_policy(mf: dict, docs: Any) -> List[str]:
     except Exception:                                         # noqa: BLE001
         _ek = _norm_name_key
     marked: List[str] = []
+    presumed = _renews_current_programme(mf, docs)
+    if presumed:
+        mf["renews_current_programme"] = True
     carrier = str(_fv(mf, "carrier_name") or "").strip()
     if carrier and not _person("carrier_name"):
         key = _ek(carrier)
         named_by_proposal = any(
             _ek(_fv(d.get("facts") or {}, "carrier_name") or "") == key for d in proposal)
-        writers = {
-            _ek(r.get("carrier")) for r in _rows(mf)
-            if str(r.get("carrier") or "").strip()
-            and (str(r.get("policy_number") or "").strip()
-                 or re.search(r"[1-9]", str(r.get("premium") or "")))
-        }
-        writers.discard("")
+        writers = set(_current_policy_writers(_rows(mf)))
         # A document that states the submission is NEW BUSINESS is not a
         # renewal with its own writer, whatever the incumbent's decs say.
         renewal = (str(_fv(mf, "is_renewal") or "").strip().lower() in (
@@ -13823,10 +14564,11 @@ def _mark_page_one_current_policy(mf: dict, docs: Any) -> List[str]:
         # page-one carrier, whatever else holds.
         addressee = _ek(str(_fv(mf, "submission_carrier_name") or ""))
         elsewhere = bool(addressee) and addressee != key
-        if elsewhere or (not named_by_proposal and not (renewal and writers == {key})):
+        if elsewhere or (not named_by_proposal
+                         and not ((renewal or presumed) and writers == {key})):
             mf["carrier_is_current_policy"] = True
             marked.append("carrier")
-    if not _person("total_policy_premium"):
+    if not _person("total_policy_premium") and not presumed:
         priced = any(
             str(_fv(d.get("facts") or {}, "total_policy_premium") or "").strip()
             or any(re.search(r"[1-9]", str(r.get("premium") or "")) for r in _rows(d.get("facts")))
@@ -14280,6 +15022,62 @@ def _derive_from_dec_entries_h1(mf: dict) -> None:
         logger.warning("x-mod derivation skipped: %s", exc)
 
 
+PROPOSED_TERM_RULES: frozenset = frozenset({
+    "renewal_routing_prior_expiration", "next_term_after_current_policy",
+    "renewal_routing_prior_term_length", "proposed_expiration_follows_effective"})
+
+
+def is_derived_proposed_term(held: Any) -> bool:
+    """A proposed date WE derived (never a document's or a person's)."""
+    return (isinstance(held, dict) and str(held.get("source") or "") == "derived"
+            and (held.get("derivation") or {}).get("rule") in PROPOSED_TERM_RULES)
+
+
+def follow_proposed_expiration(facts: dict) -> bool:
+    """The proposed expiration follows the proposed effective date by the
+    policy's own term (29 Sep 2026, live finding on the Orbin run: the producer
+    typed the effective date and the expiration stayed blank, with no card).
+
+    Follows only an effective date a PERSON supplied or confirmed, or one we
+    derived - never a document's date on its own (a document that states an
+    effective date and no expiration is left exactly as before). Writes only
+    over a blank or over an expiration WE derived; a stated or typed
+    expiration is never touched. The term is the prior term's own length
+    (`_next_term_end`: 300-400 days, whole months by months). Returns True
+    when it wrote."""
+    if not isinstance(facts, dict):
+        return False
+    from datetime import datetime
+    from services.fact_state import DERIVED, USER_CONFIRMED, derive_evidence_state
+    eff = normalize_date(str(_fv(facts, "effective_date") or ""))
+    if not eff:
+        return False
+    if derive_evidence_state(facts.get("effective_date"))[0] not in (USER_CONFIRMED, DERIVED):
+        return False
+    if _fv(facts, "expiration_date") and not is_derived_proposed_term(facts.get("expiration_date")):
+        return False
+    p_eff = normalize_date(str(_fv(facts, "prior_effective_date") or ""))
+    p_exp = normalize_date(str(_fv(facts, "prior_expiration_date") or ""))
+    if not (p_eff and p_exp):
+        return False
+    try:
+        start = datetime.strptime(eff, "%Y-%m-%d")
+        end = _next_term_end(start, datetime.strptime(p_eff, "%Y-%m-%d"),
+                             datetime.strptime(p_exp, "%Y-%m-%d"))
+    except ValueError:
+        return False
+    if end is None or end <= start:
+        return False
+    value = end.strftime("%m/%d/%Y")
+    if normalize_date(str(_fv(facts, "expiration_date") or "")) == end.strftime("%Y-%m-%d"):
+        return False
+    facts["expiration_date"] = {
+        "value": value, "confidence": "low_confidence", "source": "derived",
+        "derivation": {"rule": "proposed_expiration_follows_effective",
+                       "inputs": ["effective_date", "prior_effective_date",
+                                  "prior_expiration_date"]}}
+    return True
+
 # ── Whose term is it? (15 Sep 2026, Brent's ACORD 125 answer key) ────────────
 def _term_document_roles(mf: dict, docs: Any) -> set:
     """Roles of the uploaded documents that print the term the merge chose."""
@@ -14344,17 +15142,11 @@ def _park_ended_current_term(mf: dict, iso: str) -> None:
         "asked", iso)
 
 
-def _renewed_term_end(prev_eff: Any, prev_exp: Any) -> Optional[Any]:
-    """When the term that starts at `prev_exp` ends, if it repeats the expiring
-    term `prev_eff` -> `prev_exp`. None when that term is not an ordinary annual
-    one (300-400 days), which is not a length to repeat on faith.
-
-    A term of whole CALENDAR months renews by the same months, not by the same
-    day count (17 Sep 2026): 08/01/2026-08/01/2027 is 365 days, 365 days after
-    08/01/2027 is 07/31/2028 because the next term crosses 29 Feb, and ACORD
-    125 printed a proposed expiration one day short. A term that is not whole
-    months (29 Feb -> 28 Feb) keeps its day count.
-    """
+def _next_term_end(start: Any, prev_eff: Any, prev_exp: Any) -> Optional[Any]:
+    """When a term that starts at `start` ends, if it repeats the term
+    `prev_eff` -> `prev_exp`. None when that term is not an ordinary annual one
+    (300-400 days). A whole-calendar-month term repeats by months (29 Feb safe);
+    any other keeps its day count."""
     from datetime import timedelta
     import calendar
     term_days = (prev_exp - prev_eff).days
@@ -14362,11 +15154,35 @@ def _renewed_term_end(prev_eff: Any, prev_exp: Any) -> Optional[Any]:
         return None
     months = (prev_exp.year - prev_eff.year) * 12 + (prev_exp.month - prev_eff.month)
     if prev_exp.day == prev_eff.day and 10 <= months <= 14:
-        y, m = divmod(prev_exp.month - 1 + months, 12)
-        y, m = prev_exp.year + y, m + 1
-        return prev_exp.replace(year=y, month=m,
-                                day=min(prev_exp.day, calendar.monthrange(y, m)[1]))
-    return prev_exp + timedelta(days=term_days)
+        y, m = divmod(start.month - 1 + months, 12)
+        y, m = start.year + y, m + 1
+        return start.replace(year=y, month=m,
+                             day=min(start.day, calendar.monthrange(y, m)[1]))
+    return start + timedelta(days=term_days)
+
+
+def _renewed_term_end(prev_eff: Any, prev_exp: Any) -> Optional[Any]:
+    """When the term that starts at `prev_exp` ends (see `_next_term_end`)."""
+    return _next_term_end(prev_exp, prev_eff, prev_exp)
+
+
+# A derived next term that ends within this many days is treated as ended: a
+# proposal about to expire is not the term being applied for (29 Sep 2026).
+_STALE_PROPOSAL_GRACE_DAYS = 30
+
+
+def _park_stale_term(mf: dict, iso: str, next_iso: str) -> None:
+    """The current term ended AND the term after it has ended too (or ends
+    within _STALE_PROPOSAL_GRACE_DAYS): the documents are out of date, so both
+    proposed dates are asked."""
+    _move_current_term_to_prior(mf)
+    reason = (f"the policy term in the documents ended on {iso} and the term after it "
+              f"ends on {next_iso}; the documents are out of date, so the proposed "
+              "term must be supplied")
+    for key in ("effective_date", "expiration_date"):
+        mf.pop(key, None)
+        _record_fact_rejection(mf, key, reason)
+    mf["renewal_dates_routed"] = True
 
 
 def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
@@ -14397,10 +15213,21 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     policies in the prior-carrier grid). With `docs`, a term that only the
     CURRENT policy's own documents print is routed too once it has started:
     in force, the proposal is the next term (derived below, flagged for
-    confirmation); ended on a non-renewal, nothing states when the new policy
-    starts, so both dates are asked. A quote's or an application's term IS the
-    proposal and never moves. Without `docs` only the renewal rule runs, exactly
-    as before.
+    confirmation). A quote's or an application's term IS the proposal and never
+    moves. Without `docs` only the renewal rule runs, exactly as before.
+
+    AN ENDED TERM PROPOSES THE NEXT ONE (29 Sep 2026, client items 4 / 11 -
+    reverses the 15 Sep "ended on a non-renewal -> ask both dates" rule). The
+    client: the proposed effective date is the dec's expiration date. So an
+    ended current-policy term (or an ended renewal term) derives the next term:
+    effective = the old expiration, expiration = one repeat of the old term.
+    Asked instead when:
+      * the next term has ALSO ended, or ends within
+        _STALE_PROPOSAL_GRACE_DAYS - the documents are out of date
+        (`_park_stale_term`; this now applies to renewals too, which used to
+        derive a term that was already over);
+      * the old term is not one we repeat (outside 300-400 days) on a
+        non-renewal (`_park_ended_current_term`, the 15 Sep behaviour).
     """
     renewal = str(_fv(mf, "is_renewal") or "").strip().lower() in (
         "yes", "y", "true", "1", "renewal", "renew")
@@ -14422,10 +15249,32 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
         # proposed term. Only the in-force term of the CURRENT policy moves.
         if not (current_policy and _term_has_started(mf, now)):
             return
-    elif not renewal:
-        if current_policy:
-            _park_ended_current_term(mf, iso)
+    elif not (renewal or current_policy):
         return
+    else:
+        # ENDED (29 Sep 2026, client items 4 / 11): the next term follows the
+        # ended one, unless it has ended too - then the documents are stale.
+        # A next term within _STALE_PROPOSAL_GRACE_DAYS of its end counts as
+        # ended: a proposal about to expire is not the term being applied for.
+        from datetime import timedelta
+        _eff_prev = normalize_date(_fv(mf, "effective_date") or "")
+        _next = None
+        if _eff_prev:
+            try:
+                _next = _renewed_term_end(datetime.strptime(_eff_prev, "%Y-%m-%d"), exp_d)
+            except ValueError:
+                _next = None
+        if _next is not None and _next <= now + timedelta(days=_STALE_PROPOSAL_GRACE_DAYS):
+            _park_stale_term(mf, iso, _next.strftime("%Y-%m-%d"))
+            return
+        if _next is None and (not renewal or exp_d + timedelta(
+                days=400 + _STALE_PROPOSAL_GRACE_DAYS) <= now):
+            # Not a term we would repeat: keep the 15 Sep behaviour (ask). A
+            # renewal still derives its effective date from such a term - unless
+            # the term ended more than a year and a month ago, when that date
+            # would itself be long past (review, 29 Sep).
+            _park_ended_current_term(mf, iso)
+            return
     # Move the whole stored entries (value+confidence envelope intact) into the
     # prior namespace - as a PAIR, and only when BOTH prior slots are empty.
     # Audit 2026-08-15 #7: with a genuinely-extracted prior_effective_date of

@@ -257,8 +257,10 @@ def test_r17_open_issues_are_captured_in_the_audit_event():
     assert "override_reason" in payload
 
     # And the open items really are recomputed for the log, not read from a
-    # possibly-stale snapshot.
-    assert "get_unresolved_recommendations" in src
+    # possibly-stale snapshot. Since 1 Oct 2026 through the door that also takes
+    # the needs-attention rows live (the stored ones are rebuilt only on
+    # generation and saves - a card answer left the cover one item stale).
+    assert "current_unresolved_recommendations" in src
 
 
 def test_r17_user_and_timestamp_are_retained():

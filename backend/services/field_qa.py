@@ -57,6 +57,7 @@ FIELD_QA_MODEL_VERSION = "1.0.0"
 _CONF_VERDICT = {
     "filled": "pass",
     "client_arq": "pass",
+    "producer": "pass",          # the producer supplied it (card answer or schedule)
     "ai_verified": "pass",       # AI value confirmed present in the documents
     "low_confidence": "review",
     "missing_required": "fail",
@@ -157,6 +158,16 @@ def _humanize_field(field: str) -> str:
     if len(base) > 2 and base[-2] == "_" and base[-1].isalpha():
         base = base[:-2]
     return base.replace("_", " ").strip()
+
+
+_EXPLANATION_NAME_RE = re.compile(r"(?:Explanation|ExplanationDescription)(?:_[A-Z])?$")
+
+
+def _is_explanation_box(field: str, tooltip: Optional[str]) -> bool:
+    """A box that explains a Yes answer ("Enter text: An explanation of ..."),
+    read off its own name or ACORD's own instruction."""
+    tip = str(tooltip or "").lower()
+    return bool(_EXPLANATION_NAME_RE.search(field or "")) or "an explanation" in tip[:60]
 
 
 _SPARE_ROW_RE = re.compile(r"^(?P<base>.+)_(?P<row>[B-N])$")
@@ -282,6 +293,22 @@ def run_field_qa(
             except Exception:                             # noqa: BLE001
                 return False
 
+        # A box a guard emptied was ANSWERED - the AI gave a value and a guard
+        # refused it. It is never also "left blank by the AI": that double
+        # listing is what Michelle's item 19 showed ("AdditionalInterest
+        # FullName" as both "found but removed" and "no value found"). The
+        # needs-attention list judges a refused value.
+        _guard_fields = {str(g.get("field")) for g in (fr.get("guard_blanks") or [])
+                         if isinstance(g, dict) and g.get("field")}
+
+        def _form_words(field: str, _schema=schema, _fid=form_id) -> str:
+            # The box as the FORM prints it, never its internal name (item 19).
+            try:
+                from services.needs_attention import form_box_label
+                return form_box_label(_fid, field, _schema) or _humanize_field(field)
+            except Exception:                             # noqa: BLE001
+                return _humanize_field(field)
+
         for field in all_fields:
             val = mapped.get(field)
             has_val = _has_value(val)
@@ -311,13 +338,13 @@ def run_field_qa(
                     results.append({
                         "form_id":     form_id,
                         "field":       field,
-                        "field_label": _humanize_field(field),
+                        "field_label": _form_words(field),
                         "fact_key":    None,
                         "verdict":     "fail",
                         "reason_code": "placeholder_value",
                         "high_impact": high_impact,
                         "message": (
-                            f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                            f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
                             f"contains a placeholder value (\"{val}\"), not real data. "
                             "Fix: Re-generate the form or enter the correct value manually - "
                             "this blocks a clean download."
@@ -365,13 +392,13 @@ def run_field_qa(
                     results.append({
                         "form_id":     form_id,
                         "field":       field,
-                        "field_label": _humanize_field(field),
+                        "field_label": _form_words(field),
                         "fact_key":    fact_key,
                         "verdict":     "fail",
                         "reason_code": "value_mismatch",
                         "high_impact": high_impact,
                         "message": (
-                            f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                            f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
                             f"shows \"{val}\" but the source value is \"{expected}\". "
                             "Fix: Re-confirm the correct value so it applies uniformly."
                         ),
@@ -392,13 +419,13 @@ def run_field_qa(
                 results.append({
                     "form_id":     form_id,
                     "field":       field,
-                    "field_label": _humanize_field(field),
+                    "field_label": _form_words(field),
                     "fact_key":    None,
                     "verdict":     "fail",
                     "reason_code": "missing_required_gate" if _is_gate else "missing_required",
                     "high_impact": high_impact,
                     "message": (
-                        f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
                         + (
                             "is required for this section (a related field was already "
                             "filled) but empty. Fix: Provide a value before sending - this "
@@ -416,13 +443,13 @@ def run_field_qa(
                 results.append({
                     "form_id":     form_id,
                     "field":       field,
-                    "field_label": _humanize_field(field),
+                    "field_label": _form_words(field),
                     "fact_key":    None,
                     "verdict":     "review",
                     "reason_code": "low_confidence",
                     "high_impact": high_impact,
                     "message": (
-                        f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
                         + (
                             "is a high-impact question that was AI-inferred (not copied "
                             "verbatim from a document). Fix: Confirm this value against the "
@@ -440,6 +467,28 @@ def run_field_qa(
                     continue                  # decided empty - the AI was never asked
                 if _spare_row_of_an_answered_group(field, mapped):
                     continue                  # an empty extra row, not a question
+                if field in _guard_fields:
+                    continue                  # answered, then refused - see above
+                # An explanation box follows its question: it is needed only once
+                # the question is answered Yes, so an empty one is not a
+                # high-impact gap by itself (Michelle's item 19: "high-impact
+                # questions" listed explanation boxes, which are not questions).
+                _is_question = False
+                try:
+                    from services.needs_attention import is_question_box
+                    _is_question = bool(is_question_box(schema, field))
+                except Exception:                         # noqa: BLE001
+                    pass
+                if high_impact and not _is_question and _is_explanation_box(field, _tu):
+                    high_impact = False
+                # An unticked OPTION of a choice ("interest is a leaseback owner",
+                # "non-owned liability pertains to volunteers") is the normal
+                # state of every option but one - never a gap by itself.
+                _meta = schema.get(field) if isinstance(schema.get(field), dict) else {}
+                if high_impact and not _is_question and (_meta or {}).get("ft") == "/Btn":
+                    high_impact = False
+                _words = _form_words(field)
+                _kind_word = "question" if _is_question else "box"
                 # NOT-ANSWERED: the field was a fillable gap-fill candidate (no
                 # deterministic rule) that the AI returned null/omitted for. It is
                 # not required, so it produces NO signal anywhere else: pink needs
@@ -453,19 +502,20 @@ def run_field_qa(
                 results.append({
                     "form_id":     form_id,
                     "field":       field,
-                    "field_label": _humanize_field(field),
+                    "field_label": _words,
                     "fact_key":    None,
                     "verdict":     "review",
                     "reason_code": "not_answered",
                     "high_impact": high_impact,
+                    "is_question": _is_question,
                     "message": (
-                        f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_words}\" "
                         + (
-                            "is a high-impact question the AI left blank (no value found "
-                            "in the documents). Fix: Answer it manually if it applies."
+                            f"is a high-impact {_kind_word} the AI left blank (no value found "
+                            "in the documents). Fix: Answer it on the form if it applies."
                             if high_impact else
                             "was left blank by the AI (no value found in the documents). "
-                            "Fix: Answer it manually if it applies."
+                            "Fix: Answer it on the form if it applies."
                         )
                     ),
                     "stamped":  None,
@@ -583,20 +633,29 @@ def run_field_qa(
                 _copies += 1
                 continue
             review += 1
+            # The box as the FORM prints it, and the same reason the
+            # needs-attention list gives - never an internal name, never an
+            # invented value quoted as "found" (Orbin item 19, 30 Sep 2026).
+            _gschema = (fr or {}).get("schema") or {}
+            try:
+                from services.needs_attention import form_box_label, held_back_reason
+                _glabel = form_box_label(form_id, gb.get("field"), _gschema) or _humanize_field(gb.get("field"))
+                _greason = held_back_reason(_gschema, gb.get("field"), gb.get("removed_value"),
+                                            merged_facts, gb.get("kind"), gb.get("in_documents"))
+            except Exception:                             # noqa: BLE001
+                _glabel = _humanize_field(gb.get("field"))
+                _greason = "A value was left blank because it did not fit this box."
             results.append({
                 "form_id":     form_id,
                 "field":       gb.get("field"),
-                "field_label": _humanize_field(gb.get("field")),
+                "field_label": _glabel,
                 "fact_key":    None,
                 "verdict":     "review",
                 "reason_code": "guard_removed_value",
                 "high_impact": False,
                 "message": (
-                    f"{_humanize_field(gb.get('field'))} was left blank on "
-                    f"purpose: the value found for it "
-                    f"(\"{str(gb.get('removed_value') or '')[:80]}\") could not "
-                    "be true for that box, so it was removed rather than "
-                    "stamped. Fix: Check the source document and enter the "
+                    f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_glabel}\" was left blank on "
+                    f"purpose. {_greason} Fix: Check the source document and enter the "
                     "correct value if there is one."
                 ),
                 "stamped":     None,
@@ -643,7 +702,19 @@ def _base_field_for_grouping(field: str) -> str:
     return _ROW_SUFFIX_STRIP_RE.sub("", field or "")
 
 
-def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
+# The QA codes the needs-attention door (services/needs_attention.py) owns once
+# it is handed to `to_recommendation_rows`: an empty required box, an
+# AI-inferred value, a refused value and an unanswered question are each ONE
+# row per box there, with one status. Value mismatches, placeholders, the
+# download hard-block and schedule-row defects are different findings and stay
+# exactly as they were.
+_ATTENTION_OWNED_CODES = frozenset({
+    "missing_required", "low_confidence", "not_answered", "guard_removed_value",
+})
+
+
+def to_recommendation_rows(qa_result: Optional[dict],
+                           attention: Optional[dict] = None) -> List[dict]:
     """Translate a run_field_qa() result into rows for the existing pre-download
     review (sqs_recommendation_audit / DownloadPreflightModal).
 
@@ -680,9 +751,27 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     n_blank = 0
     high_impact_groups: Dict[tuple, dict] = {}
     guard_by_form: Dict[str, List[dict]] = {}
+    # Forms the door actually read; a form it could not read keeps these rows.
+    attention_forms = {
+        f.get("form_id") for f in ((attention or {}).get("forms") or [])
+        if isinstance(f, dict) and f.get("ok", True)
+    }
+    attention_boxes = {
+        (f.get("form_id"), r.get("field"))
+        for f in ((attention or {}).get("forms") or []) if isinstance(f, dict)
+        for r in (f.get("rows") or []) if isinstance(r, dict)
+    }
 
     for item in qa_result.get("results") or []:
         code = item.get("reason_code")
+        if code in _ATTENTION_OWNED_CODES and item.get("form_id") in attention_forms:
+            # An unanswered HIGH-IMPACT question the list does not name stays
+            # (Figure 33: a high-impact gap is never buried - review, 30 Sep).
+            # A box the list names is never also reported here, which is what
+            # removed the "found but removed" + "no value found" double listing.
+            if not (code == "not_answered" and item.get("high_impact")
+                    and (item.get("form_id"), item.get("field")) not in attention_boxes):
+                continue      # the needs-attention rows below name these boxes
         if code == "guard_removed_value":
             # ONE row per form, not one per field. The client's 2026-08-12
             # feedback ("repeated values are there a lot") applies here more
@@ -728,8 +817,13 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             form_id = item.get("form_id")
             field = item.get("field") or ""
             key = (form_id, _base_field_for_grouping(field), code)
-            grp = high_impact_groups.setdefault(key, {"fields": [], "message": item.get("message")})
+            grp = high_impact_groups.setdefault(key, {"fields": [], "message": item.get("message"),
+                                                      "label": item.get("field_label"),
+                                                      "non_questions": 0})
             grp["fields"].append(field)
+            # Only a result that SAYS it is not a question makes the row say
+            # "boxes"; an older result without the flag keeps "questions".
+            grp["non_questions"] += 1 if item.get("is_question") is False else 0
         elif code in ("schedule_row_missing", "schedule_row_invalid"):
             # Individual driver-schedule row issues (Figure 32) - surfaced like
             # value_mismatch rather than rolled into the summary count, since
@@ -809,7 +903,7 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             if n == 1:
                 message = grp["message"]
             else:
-                label = _humanize_field(base_field)
+                label = grp.get("label") or _humanize_field(base_field)
                 if code == "low_confidence":
                     verb = "were AI-inferred (not copied verbatim from a document)"
                     action = "Confirm each against the source before sending."
@@ -833,7 +927,10 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             continue
 
         # >= 2 distinct questions on one form for one reason -> one named row.
-        labels = [_humanize_field(base_field) for base_field, _ in groups]
+        # The boxes as the FORM prints them (item 19: "AdditionalInterest
+        # FullName" was an internal name, not something the producer can find).
+        labels = [grp.get("label") or _humanize_field(base_field) for base_field, grp in groups]
+        all_questions = not any(grp.get("non_questions") for _b, grp in groups)
         shown = ", ".join(labels[:3]) + (
             f", +{len(labels) - 3} more" if len(labels) > 3 else ""
         )
@@ -841,8 +938,9 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             what = "high-impact answers were AI-inferred (not copied verbatim from a document)"
             action = "Confirm each against the source before sending."
         elif code == "not_answered":
-            what = "high-impact questions were left blank by the AI (no value found in the documents)"
-            action = "Answer them manually if they apply."
+            what = ("high-impact " + ("questions" if all_questions else "boxes")
+                    + " were left blank by the AI (no value found in the documents)")
+            action = "Answer them on the form if they apply."
         else:  # missing_required
             what = "high-impact required fields are empty"
             action = "Provide values before sending."
@@ -881,7 +979,41 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             "component":    None,
             "score_impact": None,
         })
+    if attention is not None:
+        # Orbin 22 Sep item 19d: "the Field QA summary says 4 required fields
+        # are empty and 7 AI-inferred fields need verification, but I can't
+        # tell which forms or questions it's referring to." One row per form
+        # per status, naming each box as the form prints it.
+        from services.needs_attention import attention_recommendation_rows
+        rows.extend(attention_recommendation_rows(attention))
     return rows
+
+
+def row_superseded_by_attention(rec: Optional[dict]) -> bool:
+    """True for a stored pre-download row the live needs-attention list shows
+    better: its own `fieldqa_attn_` rows, and the legacy rows this module wrote
+    for the same boxes before 30 Sep 2026 (still in the table until the
+    session's next generation or edit re-syncs it). Read from the SHAPES the
+    legacy branches above emit - pinned by tests/test_needs_attention_30sep.py
+    against real `to_recommendation_rows` output. Hard-block, mismatch and
+    schedule rows are never superseded."""
+    if not isinstance(rec, dict):
+        return False
+    rid = str(rec.get("rec_id") or "")
+    if not rid.startswith("fieldqa_") or "hardblock" in rid:
+        return False
+    if rid.startswith("fieldqa_attn_") or rid == "fieldqa_summary":
+        return True
+    msg = str(rec.get("message") or "")
+    # "left blank by the AI" (unanswered high-impact questions) is NOT here:
+    # those rows stay in the review (Figure 33), see to_recommendation_rows.
+    return any(marker in msg for marker in (
+        "left blank on purpose",                 # guard_removed_value group
+        "was AI-inferred", "were AI-inferred",   # low_confidence (one / many)
+        "answers were AI-inferred",
+        "is required but empty", "are required but empty",
+        "high-impact required fields are empty",
+    ))
 
 
 # ── Download-time hard-block gate ───────────────────────────────────────────

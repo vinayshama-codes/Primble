@@ -43,19 +43,37 @@ def _rec(result, field):
     return None
 
 
+# An ordinary submission whose other pillars are healthy. Since the owner's
+# 29 Sep 2026 decision, attesting No Known Losses takes Loss History OUT of the
+# score, so what the loss card is worth depends on the pillars that remain: on
+# an EMPTY package (the fixture these tests used before) they average below 25,
+# attesting cannot raise the number, and the card honestly measures 0 - pinned
+# in tests/test_step2_orbin_29sep.py. These tests keep their intent on a
+# package where the card does move the score.
+_HEALTHY = {
+    "applicant_name": "Acme Roofing LLC", "mailing_address": "1 Main St, Troy, MI 48083",
+    "entity_type": "LLC", "contact_name": "Jo", "producer_name": "Broker Inc",
+    "fein": "12-3456789", "num_employees": "40", "years_in_business": "12",
+    "operations_description": "Residential roofing contractor with 12 crews",
+    "total_revenue": "2000000", "naics_code": "238160", "effective_date": "07/15/2026",
+}
+_GL = {"has_general_liability": True}
+
+
 # ── The client's reconciliation ──────────────────────────────────────────────
 
 def test_the_loss_card_no_longer_promises_a_flat_eight():
-    r = _rec(_score({}, {}), "loss_history_no_prior_losses_indicator")
+    r = _rec(_score(dict(_HEALTHY), dict(_GL)), "loss_history_no_prior_losses_indicator")
     assert r is not None, "the loss card must still be raised"
     assert r["score_impact"] != 8, "still the hand-typed constant"
     assert 0 < r["score_impact"] <= 15, "must sit inside the pillar's own ceiling"
+    assert r["impact_is_exact"] is True, "a measured number drops the hedge"
 
 
 def test_the_same_card_is_worth_less_from_a_better_starting_point():
-    """25 -> 60 is a bigger gain than 45 -> 60. The old constant said 8 for both."""
-    nothing = _rec(_score({}, {}), "loss_history_no_prior_losses_indicator")
-    stated  = _rec(_score({}, {"narrative_states_no_losses": True}),
+    """25 -> N/A is a bigger gain than 40 -> N/A. The old constant said 8 for both."""
+    nothing = _rec(_score(dict(_HEALTHY), dict(_GL)), "loss_history_no_prior_losses_indicator")
+    stated  = _rec(_score(dict(_HEALTHY), {**_GL, "narrative_states_no_losses": True}),
                    "loss_history_no_prior_losses_indicator")
     assert nothing and stated
     assert stated["score_impact"] < nothing["score_impact"], (
@@ -64,12 +82,19 @@ def test_the_same_card_is_worth_less_from_a_better_starting_point():
 
 
 def test_the_measured_number_matches_the_published_formula():
-    """(target - current) x pillar weight, to the point."""
-    w = SPEC_PILLAR_WEIGHTS["loss_history_alignment"]
-    r = _rec(_score({}, {"narrative_states_no_losses": True}),
-             "loss_history_no_prior_losses_indicator")
+    """To the point, by the published rule. Until 29 Sep 2026 that was
+    (target - current) x pillar weight with a target of 60. An attestation is
+    now Not Applicable, and the published N/A rule is that the remaining
+    pillars rescale - so the card is worth the rescaled score minus the score
+    as it stands."""
+    res = _score(dict(_HEALTHY), {**_GL, "narrative_states_no_losses": True})
+    r = _rec(res, "loss_history_no_prior_losses_indicator")
     assert r is not None
-    assert r["score_impact"] == pytest.approx(round((60 - 45) * w), abs=1)
+    assert res["breakdown"]["loss_history_alignment"] == 40
+    rescaled = sq._weighted_pillar_sum(
+        {**res["breakdown"], "loss_history_alignment": None}, SPEC_PILLAR_WEIGHTS)
+    assert r["score_impact"] == pytest.approx(rescaled - res["raw_sqs_score"], abs=1)
+    assert r["score_impact"] > 0
 
 
 # ── The three refusals ───────────────────────────────────────────────────────

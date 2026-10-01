@@ -513,11 +513,19 @@ def test_years_in_business_carries_its_derivation():
 
 
 def test_renewal_routed_proposed_date_carries_its_derivation():
+    from datetime import datetime, timedelta
     from services.extraction_service import _route_renewal_dates
+    # Relative dates (29 Sep 2026): a renewal term that ended a month ago. The
+    # old literal 07/15/2024-07/15/2025 is now a STALE dec - the term after it
+    # ended too - and a stale dec asks for its dates instead of deriving them.
+    _exp = datetime.now() - timedelta(days=31)
+    if (_exp.month, _exp.day) == (2, 29):
+        _exp -= timedelta(days=1)
+    _eff = _exp.replace(year=_exp.year - 1)
     mf = {"is_renewal": {"value": "yes", "confidence": "ai_high", "source": "ai"},
-          "effective_date": {"value": "07/15/2024", "confidence": "ai_high",
+          "effective_date": {"value": _eff.strftime("%m/%d/%Y"), "confidence": "ai_high",
                              "source": "ai"},
-          "expiration_date": {"value": "07/15/2025", "confidence": "ai_high",
+          "expiration_date": {"value": _exp.strftime("%m/%d/%Y"), "confidence": "ai_high",
                               "source": "ai"}}
     _route_renewal_dates(mf)
     env = mf.get("effective_date")

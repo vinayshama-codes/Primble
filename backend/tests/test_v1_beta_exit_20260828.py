@@ -286,7 +286,9 @@ def test_an_empty_row_never_manufactures_a_claim():
     ):
         facts = dict(_ESTABLISHED, loss_history=rows)
         assert asserted_claims(facts) == (0, 0.0), "invented a claim"
-        assert _p4(facts, _ATTESTED) == 60, "false conflict"
+        # The attestation stands: Not Applicable since 29 Sep 2026 (owner,
+        # Orbin item 15; it scored 60) - never the 45 a false conflict gives.
+        assert _p4(facts, _ATTESTED) is None, "false conflict"
 
 
 def test_a_partial_row_still_counts_when_it_says_something_real():

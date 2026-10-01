@@ -99,6 +99,13 @@ def _real_loss_cells():
 
 # ── Part 1 - the real-world states ───────────────────────────────────────────
 
+# The pillar is Not Applicable (the scorer returns None). A distinct marker,
+# because None in the table below means "not checked". An attestation takes
+# Loss History out of the score since the owner's 29 Sep 2026 decision (Orbin
+# item 15); those rows expected 60 before.
+NA = "N/A"
+
+
 def part1() -> None:
     print("\nPART 1  the states a real submission lands in")
     print("        (yellow = Required cells INSIDE the claim grid)\n")
@@ -110,23 +117,23 @@ def part1() -> None:
         ("THE SCREENSHOT: narrative + 5y",{YEARS: "5"},                       {}, {"narrative_states_no_losses": True}, 0, None, 40),
         ("...and TOTAL LOSSES $0",        {YEARS: "5", TOTAL: "0"},           {}, {"narrative_states_no_losses": True}, 0, None, 40),
         ("producer TICKS the box",        {TICK: "Yes", YEARS: "5"},
-         {"loss_history_no_prior_losses_indicator": {"value": "Yes", "source": "producer"}}, {},        0, "Yes", 60),
+         {"loss_history_no_prior_losses_indicator": {"value": "Yes", "source": "producer"}}, {},        0, "Yes", NA),
         ("producer UNTICKS it",           {TICK: "No", YEARS: "5"},
          {"loss_history_no_prior_losses_indicator": {"value": "No", "source": "producer"}}, {},         0, "No", 25),
         ("client ARQ: no claims in 5 yrs", {TICK: "Yes"},
          {"loss_history_no_prior_losses_indicator":
           {"value": "No - no claims or losses in the past 5 years", "source": "client_arq"}},
-         {"no_prior_losses": True},                                                                     0, "Yes", 60),
+         {"no_prior_losses": True},                                                                     0, "Yes", NA),
         ("client ARQ: we have had claims", {TICK: "No"},
          {"loss_history_no_prior_losses_indicator":
           {"value": "Yes - we have had claims or losses", "source": "client_arq"}}, {},                 0, "No", 25),
         ("attestation from an uploaded ACORD", {TICK: "Yes"},
-         {"loss_history_no_prior_losses_indicator": "Yes"}, {},                                         0, "Yes", 60),
+         {"loss_history_no_prior_losses_indicator": "Yes"}, {},                                         0, "Yes", NA),
         ("TOTAL LOSSES stated, no rows",  {TOTAL: "48500"},                   {}, {},                   0, None, 25),
         ("one real claim in row A",       {"LossHistory_OccurrenceDate_A": "03/14/2024"},
          {"num_claims": 1, "total_incurred": 12000}, {},                                                6, "No", None),
         ("real claim + producer ticks",   {"LossHistory_OccurrenceDate_A": "03/14/2024", TICK: "Yes"},
-         {"loss_history_no_prior_losses_indicator": {"value": "Yes", "source": "producer"}}, {},        0, "Yes", 60),
+         {"loss_history_no_prior_losses_indicator": {"value": "Yes", "source": "producer"}}, {},        0, "Yes", NA),
         ("claims in rows A and B",        {"LossHistory_OccurrenceDate_A": "03/14/2024",
                                           "LossHistory_PaidAmount_B": "5000"},
          {"num_claims": 2, "total_incurred": 41900}, {},                                               12, "No", None),
@@ -140,6 +147,8 @@ def part1() -> None:
         got_pillar = None
         if want_pillar is not None:
             got_pillar, _ = calculate_p4_loss_history(dict(facts), dict(flags))
+            if got_pillar is None:
+                got_pillar = NA
         good = got_yellow == want_yellow and got_box == want_box and (
             want_pillar is None or got_pillar == want_pillar)
         detail = (f"yellow={got_yellow} (want {want_yellow})  "

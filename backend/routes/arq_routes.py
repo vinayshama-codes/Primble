@@ -22,6 +22,9 @@ from services.arq_service import (
     get_arq_notifications,
     get_arq_sessions_for_user,
     get_client_filled_fields,
+    client_filled_by_form,
+    response_counts,
+    response_counts_for_arq,
     get_session_schedules,
     mark_arq_viewed,
     mark_notifications_read,
@@ -680,6 +683,13 @@ async def submit_arq(token: str, request: Request):
             # told scores are stale rather than assuming remediation took effect.
             score_update = {"ok": False}
 
+    # Point Q (1 Oct 2026): answers and checks counted apart, off the row the
+    # server stored - the same split the receipt and the client summary use.
+    # `updated_fields` (what was stored) remains the fallback.
+    _submitted_arq = await get_arq_by_id(arq["id"]) or arq
+    _counts = response_counts_for_arq(_submitted_arq)
+    _answers_count = _counts.get("questions_answered", len(updated_fields))
+
     # §6.2: persist remediation status + answer count so the producer sees them
     # in the ARQ panel without re-running the recalculation.
     if score_update.get("ok") and score_update.get("status"):
@@ -691,9 +701,10 @@ async def submit_arq(token: str, request: Request):
                     # Was `len(sanitized_answers)`, i.e. the size of the posted
                     # map. The questionnaire posts EVERY question back, blanks
                     # included, so this number has always just been the question
-                    # count wearing a different label. `updated_fields` is what
-                    # the server actually accepted and stored.
-                    len(updated_fields),
+                    # count wearing a different label. Then `updated_fields`,
+                    # which counted a confirmed check item as an answer (point
+                    # Q, 1 Oct 2026). Now the real questions answered.
+                    _answers_count,
                     arq["id"],
                 )
         except Exception as _persist_ex:
@@ -707,7 +718,6 @@ async def submit_arq(token: str, request: Request):
     # (post-normalization, with the "I'm not sure" list and the review flags
     # split out), which is the thing worth recording. Falls back to the
     # pre-read row if that re-read fails, so a receipt is still written.
-    _submitted_arq = await get_arq_by_id(arq["id"]) or arq
     receipt_id     = await create_receipt(_submitted_arq)
 
     await create_arq_notification(arq["id"], arq["user_id"], "submitted")
@@ -727,6 +737,7 @@ async def submit_arq(token: str, request: Request):
                 fields_filled=len(applied_fields),
                 session_id=arq["session_id"],
                 frontend_url=FRONTEND_URL,
+                response_summary=_counts.get("response_summary", ""),
             )
     except Exception as ex:
         logger.error(f"ARQ submit: notification email failed: {ex}")
@@ -747,7 +758,12 @@ async def submit_arq(token: str, request: Request):
         # actually accepted and stored. Found by audit 2026-09-08 - one copy of
         # a rule got fixed and its twin did not, which is the shape that let
         # several earlier defects here survive their first fix.
-        {"client_first": _cf, "fields": len(updated_fields),
+        # ...and `updated_fields` counted a confirmed check item as an answer;
+        # "fields" is now the real questions answered, the checks ride apart
+        # (point Q, 1 Oct 2026).
+        {"client_first": _cf, "fields": _answers_count,
+         "checks_done": _counts.get("checks_done", 0),
+         "checks_asked": _counts.get("checks_asked", 0),
          "receipt_id": receipt_id, "arq_id": arq["id"]},
     )
     if apply_ok:
@@ -1075,6 +1091,11 @@ async def get_arq_receipt(
             "reason":  "not_submitted" if arq.get("status") != "submitted" else "no_receipt",
         })
 
+    # Point Q (1 Oct 2026): "21 answered · 25 asked" counted the 4 check items
+    # as questions. The stored counts stay as recorded (the receipt is
+    # immutable); the split is read off its items and the questions shown.
+    _split = (response_counts(arq.get("questions"), receipt.get("items"))
+              if not receipt.get("unreadable") else {})
     return JSONResponse({
         "success": True,
         "receipt": {
@@ -1089,6 +1110,7 @@ async def get_arq_receipt(
             "review_count":   receipt.get("review_count", 0),
             "unreadable":     bool(receipt.get("unreadable")),
             "items":          receipt.get("items", []),
+            **{k: v for k, v in _split.items() if k != "not_sure_count"},
         },
     })
 
@@ -1106,7 +1128,7 @@ async def list_arqs(
     async with get_pool().acquire() as conn:
         try:
             rows = await conn.fetch(
-                _BASE_COLS + ", not_sure_fields, review_fields, "
+                _BASE_COLS + ", not_sure_fields, review_fields, questions, answers, "
                 "(draft_answers IS NOT NULL AND draft_answers::text <> '{}') AS has_draft "
                 "FROM arq_sessions WHERE session_id=$1 AND user_id=$2 ORDER BY created_at DESC",
                 session_id, current_user["id"],
@@ -1151,6 +1173,13 @@ async def list_arqs(
         # Present even on the degraded fallback path above, so the UI never has
         # to distinguish "no draft" from "column missing".
         d.setdefault("has_draft", False)
+        # Point Q (1 Oct 2026): questions answered and details checked, counted
+        # apart - the client's own summary's definition. The questions and the
+        # answers are read only to count; they are not sent with the list.
+        if "questions" in d:
+            d.update(response_counts_for_arq(d))
+        d.pop("questions", None)
+        d.pop("answers", None)
         sessions.append(d)
 
     return JSONResponse({"success": True, "arq_sessions": sessions})
@@ -1371,11 +1400,22 @@ async def decode_vin(request: Request):
 @router.get("/client-filled/{session_id}")
 async def get_client_filled(
     session_id: str,
+    form_id: str = "",
     current_user: dict = Depends(get_current_user),
 ):
+    """The green "Client" boxes, read off the forms as they stand (1 Oct 2026,
+    Orbin item 17): a box the producer retyped is no longer listed.
+    `client_filled_by_form` gives each form its own list; `form_id` narrows
+    `client_filled_fields` to one form."""
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     check_payment_access(current_user.get("payment_status", "ok"), "form")
-    fields = await get_client_filled_fields(session_id)
-    return JSONResponse({"success": True, "client_filled_fields": fields})
+    fields = await get_client_filled_fields(
+        session_id, proc_session=proc_session, form_id=(form_id or None))
+    return JSONResponse({
+        "success": True,
+        "client_filled_fields": fields,
+        "client_filled_by_form": client_filled_by_form(
+            proc_session.get("generated_forms") or {}),
+    })

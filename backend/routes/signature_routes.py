@@ -10,7 +10,9 @@ from config.settings import TEMPLATE_DIR
 from models.schemas import SaveSignatureRequest
 from repositories.session_repository import get_processing_session, upd_processing_session
 from services.auth_service import get_current_user
-from services.pdf_service import _is_signature_field, inject_signature_into_pdf
+from services.signature_boxes import (
+    SIGNATURE_SCOPE, inject_producer_signature, mark_producer_boxes_signed,
+)
 from utils.crypto import decrypt_field, encrypt_field
 from utils.helpers import safe_join, check_payment_access
 
@@ -107,19 +109,24 @@ async def apply_signature(
     field_data = dict(r.get("field_state") or r.get("mapped", {}))
     confidence = dict(r.get("confidence", {}))
 
-    for field_name in list(field_data.keys()):
-        if _is_signature_field(field_name):
-            field_data[field_name] = ""
-            confidence[field_name] = "filled"
+    # The Sign button signs for the PRODUCER (1 Oct 2026): it painted the
+    # producer's signature into every signature box, the applicant's line on
+    # 125 / 126 / 127 / 131 / 137 included. The applicant's signature, date and
+    # initials boxes keep their value and label (services/signature_boxes.py).
+    mark_producer_boxes_signed(form_id, r, field_data, confidence)
 
-    # Use the already-filled PDF bytes so values are never lost on re-generation
-    existing_bytes = r.get("pdf_bytes")
+    # Use the already-filled PDF bytes so values are never lost on re-generation.
+    # Not a PDF that is already signed: one signed before 1 Oct 2026 carries the
+    # producer's signature on the applicant's line, and a signed PDF has no
+    # signature boxes left to paint. `field_data` is the whole form, so a fresh
+    # fill loses nothing.
+    existing_bytes = None if r.get("signature_applied") else r.get("pdf_bytes")
     if existing_bytes is not None and not isinstance(existing_bytes, bytes):
         existing_bytes = bytes(existing_bytes)
 
     try:
         signed_pdf = await asyncio.get_event_loop().run_in_executor(
-            None, inject_signature_into_pdf, tpl, field_data, confidence, sig, existing_bytes
+            None, inject_producer_signature, tpl, field_data, confidence, sig, existing_bytes
         )
     except Exception as ex:
         logger.error(f"apply-signature error form={form_id}: {ex}", exc_info=True)
@@ -136,6 +143,7 @@ async def apply_signature(
     generated[form_id]["_pdf_cache_hash"]   = state_hash
     generated[form_id]["signature_applied"] = True
     generated[form_id]["signature_b64"]     = sig
+    generated[form_id]["signature_scope"]   = SIGNATURE_SCOPE
 
     await upd_processing_session(session_id, {"generated_forms": generated})
 

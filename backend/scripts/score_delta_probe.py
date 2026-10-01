@@ -245,6 +245,22 @@ def build_panel():
         _n, _f, _g, _fm, _d = _pkg(_label, _extra, _fl, _forms)
         panel.append((_n, _f, _g, _fm, _d, _uw, [_bv_warn]))
 
+    # ── No loss runs, No Known Losses attested (Orbin item 15, 29 Sep 2026) ──
+    # The ordinary healthy GL package, except the insured attests instead of
+    # sending runs: the loss-run document and every loss-run fact are removed
+    # and the questionnaire's own option is stored, with the flag its apply
+    # path sets. Before 29 Sep the attestation scored Loss History 60; the
+    # owner's decision makes it Not Applicable, so this row is where that
+    # change shows up.
+    _n, _f, _g, _fm, _d = _pkg("GL only - no loss runs, No Known Losses attested",
+                               {}, {"no_prior_losses": True},
+                               ["ACORD_125", "ACORD_126"])
+    for _k in _LOSS:
+        _f.pop(_k, None)
+    _f["loss_history_no_prior_losses_indicator"] = F(
+        "No - no claims or losses in the past 5 years", "client_arq")
+    panel.append((_n, _f, _g, _fm, [d for d in _d if d.get("doc_type") != "loss_run"]))
+
     live = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "sess.json")
     if os.path.exists(live):

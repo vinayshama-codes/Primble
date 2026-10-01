@@ -15,11 +15,14 @@ from repositories.session_repository import get_processing_session, upd_processi
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user, is_acord_license_current
 from services.cover_service import generate_ai_cover_narrative, build_cover_page_pdf
-from services.pdf_service import regenerate_pdf_for_form, apply_draft_watermark
+from services.pdf_service import apply_draft_watermark
+# A signed form downloads with the producer's signature on the producer's boxes
+# only, never the applicant's line (1 Oct 2026).
+from services.signature_boxes import regenerate_pdf_for_form
 from services.field_qa import check_hard_block
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
-from services.sqs_service import calculate_sqs
-from services.audit_service import get_unresolved_recommendations
+from services.sqs_service import calculate_sqs, current_package_sqs, tier_for_score
+from services.audit_service import current_unresolved_recommendations
 from utils.crypto import decrypt_field, decrypt_field_soft
 from utils.rate_limiter import check_download_rate_limit
 from utils.helpers import check_payment_access
@@ -175,7 +178,8 @@ async def _acquire_download_lock(user_id: str, session_id: str, form_ids_hash: s
     return True
 
 
-def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict) -> str:
+def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict,
+                     package_score=None) -> str:
     applicant = facts.get("applicant_name")
     if isinstance(applicant, dict):
         applicant = applicant.get("value", "")
@@ -185,9 +189,23 @@ def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict
         str(applicant or "")
         + str(sorted(form_ids))
         + str(avg_score)
+        # The package score is part of what the paragraph says (1 Oct 2026): a
+        # cached paragraph must never quote an older package score.
+        + f"|pkg={package_score}"
         + str(sorted((k, str(v)) for k, v in flags.items()))
     )
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _package_score_now(proc_session: dict, session_id: str, user_id) -> dict:
+    """The package SQS exactly as the SQS panel shows it (1 Oct 2026, owner: the
+    cover's score must be exactly the SQS section's). The one door
+    (`sqs_service.current_package_sqs`); {} when there is none."""
+    try:
+        return current_package_sqs(proc_session, session_id, str(user_id)) or {}
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("cover: package score unavailable for %s: %s", session_id, exc)
+        return {}
 
 
 def _compute_manifest(pdf_map: dict) -> tuple:
@@ -205,19 +223,69 @@ def _compute_manifest(pdf_map: dict) -> tuple:
     return manifest, rollup
 
 
-def _split_open_recs(open_recs: list) -> tuple:
+def _unscored_card_ids(generated_forms: dict) -> set:
+    """The cards the forms show that are worth zero points by their own
+    declaration (`unscored`) - asks such as the landlord "kept for certificates"
+    (Orbin G2). Read off the live form scores: a stored row does not carry the
+    flag, and a stored 0 is no proof (a scored card whose pillar is full stores 0
+    too)."""
+    out = set()
+    for fr in (generated_forms or {}).values():
+        for rec in (((fr or {}).get("sqs") or {}).get("recommendations") or []):
+            if isinstance(rec, dict) and rec.get("unscored") and rec.get("rec_id"):
+                out.add(rec["rec_id"])
+    return out
+
+
+def _live_card_points(generated_forms: dict) -> dict:
+    """{rec_id: (points, is_exact)} - the number and hedge each card shows on
+    the panel NOW (one number per card since 1 Oct 2026, item 19). The stored
+    row keeps the number but not whether it is exact, so the cover printed
+    "up to +7 pts" beside the panel's "+7 pts" (owner's retest, 1 Oct)."""
+    out: dict = {}
+    for fr in (generated_forms or {}).values():
+        for rec in (((fr or {}).get("sqs") or {}).get("recommendations") or []):
+            if not isinstance(rec, dict) or not rec.get("rec_id") or rec["rec_id"] in out:
+                continue
+            pts = rec.get("score_impact")
+            if isinstance(pts, (int, float)) and not isinstance(pts, bool):
+                out[rec["rec_id"]] = (int(round(pts)), rec.get("impact_is_exact") is True)
+    return out
+
+
+def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None) -> tuple:
     """Split open (unresolved) recommendations into hard-stop and soft-warning strings
-    for the cover page's Red Flags & Warnings section."""
+    for the cover page's Red Flags & Warnings section.
+
+    The cover is the underwriter's page: real gaps only (owner, 30 Sep 2026). A
+    producer to-do row and a zero-point card (`unscored_ids`) stay in the
+    producer's review and the E&O record, never here. `live_points`
+    (`_live_card_points`) gives each card the number and hedge the panel shows;
+    a card no form shows any more keeps its stored number, hedged."""
     hard, soft = [], []
+    try:
+        from services.needs_attention import is_producer_todo_row
+    except Exception:                                      # noqa: BLE001
+        is_producer_todo_row = lambda _rid: False          # noqa: E731
     for r in open_recs or []:
         msg = (r.get("message") or "").strip()
         if not msg:
             continue
+        # The cover page is the underwriter's: real gaps only. "AI held back"
+        # and "Please verify" are the producer's to-dos (owner, 30 Sep 2026).
+        if is_producer_todo_row(r.get("rec_id")):
+            continue
+        if r.get("rec_id") in unscored_ids and r.get("recommendation_type") != "hard_stop":
+            continue
         imp = r.get("score_impact")
+        exact = False
+        if live_points and r.get("rec_id") in live_points:
+            imp, exact = live_points[r["rec_id"]]
         if r.get("recommendation_type") == "hard_stop":
             hard.append(f"{msg} (-{imp} pts)" if imp else msg)
         else:
-            soft.append(f"{msg} (up to +{imp} pts)" if imp else msg)
+            soft.append((f"{msg} (+{imp} pts)" if exact else f"{msg} (up to +{imp} pts)")
+                        if imp else msg)
     return hard, soft
 
 
@@ -291,14 +359,16 @@ async def download_pdf(
     flags       = proc_session.get("flags", {})
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
+    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
+    _pkg_score = _pkg_now.get("package_sqs_score")
 
     # Substantively unresolved recommendations: never reviewed OR acknowledged via
     # "Download Anyway" but not actually fixed. Deliberately broader than the
     # pre-download gate's own query (which stops re-prompting once overridden) -
     # here we want the override to still show up in the audit trail.
-    unresolved_recs = await get_unresolved_recommendations(session_id)
+    unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
 
-    _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
+    _ck = _cover_cache_key(facts, [form_id], sqs_results, flags, _pkg_score)
     _loop = asyncio.get_event_loop()
 
     if include_cover:
@@ -313,7 +383,9 @@ async def download_pdf(
         else:
             pdf_bytes, ai_content = await asyncio.gather(
                 _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
-                generate_ai_cover_narrative(facts, flags, sqs_results, [form_id], org_name, fresh),
+                generate_ai_cover_narrative(facts, flags, sqs_results, [form_id], org_name, fresh,
+                                            package_score=_pkg_score,
+                                            package_routing=_pkg_now.get("routing_decision")),
             )
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
@@ -321,12 +393,15 @@ async def download_pdf(
         if is_draft:
             pdf_bytes = await _loop.run_in_executor(None, apply_draft_watermark, pdf_bytes)
         file_manifest, package_checksum = _compute_manifest({f"{form_id}_{_file_suffix}.pdf": pdf_bytes})
-        hard_stops, soft_stops = _split_open_recs(unresolved_recs)
+        hard_stops, soft_stops = _split_open_recs(
+            unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
+            _live_card_points(proc_session.get("generated_forms")))
         cover_pdf = await _loop.run_in_executor(
-            None, build_cover_page_pdf,
-            facts, flags, sqs_results, [form_id], org_name,
-            ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
-            hard_stops, soft_stops, file_manifest, package_checksum,
+            None, lambda: build_cover_page_pdf(
+                facts, flags, sqs_results, [form_id], org_name,
+                ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
+                hard_stops, soft_stops, file_manifest, package_checksum,
+                package_sqs=_pkg_now),
         )
 
         def _build_zip():
@@ -382,7 +457,11 @@ async def download_pdf(
     else:
         logger.info("download_pdf: already counted — skipping for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
-    _score_at_dl = (sqs_results.get(form_id) or {}).get("sqs_score")
+    # The score the producer saw (the post-download panel prints the PACKAGE
+    # score), so the E&O record states the same number; the form's own score
+    # only for a session with no package score.
+    _score_at_dl = (_pkg_score if _pkg_score is not None
+                    else (sqs_results.get(form_id) or {}).get("sqs_score"))
     if is_draft:
         # Distinct action + payload from a normal "download": logs exactly what
         # was overridden and the producer's typed reason, never conflated with
@@ -504,13 +583,18 @@ async def download_all(
     # Substantively unresolved recommendations (never reviewed OR overridden via
     # "Download Anyway" without a fix) + per-file integrity manifest, for the cover
     # and the download audit record.
-    unresolved_recs = await get_unresolved_recommendations(session_id)
-    hard_stops, soft_stops = _split_open_recs(unresolved_recs)
+    unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
+    hard_stops, soft_stops = _split_open_recs(
+        unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
+        _live_card_points(proc_session.get("generated_forms")))
     file_manifest, package_checksum = _compute_manifest(
         {f"{fid}_{_file_suffix}.pdf": pb for fid, pb in acord_pdfs.items()}
     )
 
-    _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
+    # The package score exactly as the SQS panel shows it (1 Oct 2026).
+    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
+    _pkg_score = _pkg_now.get("package_sqs_score")
+    _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags, _pkg_score)
     ai_content = _COVER_CACHE.get(_ck)
     if ai_content is None:
         # Pass the submission's OWN score so the cover page states the same
@@ -519,13 +603,13 @@ async def download_all(
         ai_content = await generate_ai_cover_narrative(
             facts=facts, flags=flags, sqs_results=sqs_results,
             form_ids=list(generated.keys()), org_name=org_name, user=fresh,
-            package_score=(proc_session.get("package_sqs") or {}).get("package_sqs_score"),
+            package_score=_pkg_score, package_routing=_pkg_now.get("routing_decision"),
         )
         _COVER_CACHE[_ck] = ai_content
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
     else:
         logger.debug(f"cover narrative cache hit {_ck[:8]}")
-    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum)
+    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum, package_sqs=_pkg_now)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -564,9 +648,13 @@ async def download_all(
     else:
         logger.info("download_all: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
+    # The score the producer saw - the package score the SQS panel and the cover
+    # print (1 Oct 2026); the old average of the form scores only for a session
+    # that has no package score.
     _scores = [(v or {}).get("sqs_score") for v in sqs_results.values()]
     _scores = [s for s in _scores if s is not None]
-    _avg_score = round(sum(_scores) / len(_scores), 1) if _scores else None
+    _avg_score = (_pkg_score if _pkg_score is not None
+                  else (round(sum(_scores) / len(_scores), 1) if _scores else None))
     if is_draft:
         # Distinct action + payload from a normal "download_zip": logs exactly what
         # was overridden and the producer's typed reason, never conflated with the
@@ -701,8 +789,16 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     # different things, and neither matched the score shown in the app
     # (2026-08-16 audit). The average survives only for a legacy session that
     # has generated forms but no stored package score.
-    _pkg = proc_session.get("package_sqs") or {}
-    if clarity_result.get("sqs_combined"):
+    # Once forms exist, the brief prints the TOTAL PACKAGE SCORE exactly as the SQS
+    # panel does (1 Oct 2026) - the one door, never the Clarity snapshot taken at
+    # the first analysis, which goes stale as soon as the forms are edited. Before
+    # forms, the Lite screen's own source stands (Clarity, then the facts scorer).
+    _pkg = (_package_score_now(proc_session, session_id, current_user["id"])
+            if generated_forms else {}) or {}
+    _row_label = "Pre-Submission Analysis"
+    if _pkg.get("package_sqs_score") is not None:
+        _row_label = "Total Package Score"
+    if clarity_result.get("sqs_combined") and _pkg.get("package_sqs_score") is None:
         sqs = clarity_result["sqs_combined"]
     elif _pkg.get("package_sqs_score") is not None:
         _first = next((r["sqs"] for r in generated_forms.values() if r.get("sqs")), {})
@@ -715,6 +811,9 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
             "breakdown":     _pkg.get("pillars", _first.get("breakdown", {})),
             "tier":          _pkg.get("tier", _first.get("tier")),
             "routing_decision": _pkg.get("routing_decision", _first.get("routing_decision")),
+            # The PACKAGE score's own grade (1 Oct 2026): the first form's grade
+            # rode along above and printed "77/100 B" where the app shows C.
+            "grade":         tier_for_score(_pkg["package_sqs_score"])[0],
         }
     elif generated_forms:
         sqs_list  = [r["sqs"] for r in generated_forms.values() if r.get("sqs")]
@@ -728,14 +827,17 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
             selected_form_ids=selected_ids,
             hard_stops=hard_stops, soft_stops=soft_stops,
             tier2_score=tier2_score,
+            # The brief's one row is the first selected form - named, as every
+            # scorer call must name the form it scores (1 Oct 2026).
+            form_id=selected_ids[0],
             session_data=proc_session,
         )
-    sqs_results = {"Pre-Submission Analysis": sqs}
+    sqs_results = {_row_label: sqs}
 
     # Same "still unresolved" definition used on the real ACORD-package cover, so an
     # Essentials-tier producer sees the same open items whether they get a Lite
     # cover sheet or a full package.
-    unresolved_recs = await get_unresolved_recommendations(session_id)
+    unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
 
     from services.cover_service import generate_lite_cover_narrative
     ai_content = await generate_lite_cover_narrative(

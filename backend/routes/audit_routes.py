@@ -1043,7 +1043,8 @@ def _grouped_cross_issues_for_panel(cross_issues: list):
         return None
 
 
-def _form_selection_view(sess: dict, cross_issues: list) -> dict:
+def _form_selection_view(sess: dict, cross_issues: list,
+                         package_sqs: Optional[dict] = None) -> dict:
     """The Select Forms (pre-form Review) banner payload for a session.
 
     THE GROUPED VIEW TRAVELS WITH THE STOPS - ALWAYS. The review screen draws
@@ -1066,6 +1067,11 @@ def _form_selection_view(sess: dict, cross_issues: list) -> dict:
 
     Best-effort: a display-computation failure must never fail a write that has
     already succeeded, so it falls back to the raw stored lists.
+
+    `package_sqs` is the score whose privately-held caps are folded into the
+    cards. The callers pass the score the response reports - before forms
+    exist that is the door's (`current_package_sqs`), so the cards match the
+    number the Review screen prints. Omitted, the persisted score is used.
     """
     hard = sess.get("hard_stops") or []
     soft = sess.get("soft_stops") or []
@@ -1089,7 +1095,7 @@ def _form_selection_view(sess: dict, cross_issues: list) -> dict:
         grouped = grouped_with_package_caps(
             sess.get("structured_issues") or [],
             hard, soft,
-            sess.get("package_sqs") or {},
+            package_sqs if package_sqs is not None else (sess.get("package_sqs") or {}),
             cross_issues=cross_issues,
         )
     except Exception as _fgx:                                  # noqa: BLE001
@@ -1101,6 +1107,81 @@ def _form_selection_view(sess: dict, cross_issues: list) -> dict:
         "can_proceed_with_warning":  can_proceed,
         "warning_stops":            warning_stops,
     }
+
+
+async def _pre_form_readiness(sess: dict, session_id: str,
+                              current_user: dict,
+                              scored: Optional[dict] = None) -> Optional[dict]:
+    """The pre-form Review card after a resolve / reopen: `{"package_sqs",
+    "key_details"}`, or None when the session is not pre-form.
+
+    Orbin 22 Sep item 2 (29 Sep 2026): the Review screen prints the package
+    SQS NUMBER "so far" and the key-details lines. Resolve and reopen refreshed
+    neither - the card merged a bare score from the persisted row, and "Key
+    details missing" still listed a fact the producer had just supplied. Both
+    now come through `form_routes._pre_form_status`, the SAME helper the five
+    form_routes pre-form responses use, so the withholding (integrity review
+    pending -> both None) and the failure rule (None, session named in the
+    log) cannot drift between the two modules.
+
+    Pre-form means `sqs_service.is_pre_form_session` - nothing generated and
+    nothing selected. The editor and Clarity / Lite get None, so their
+    responses carry nothing new. Never raises: a failure here returns None and
+    the response keeps its previous shape.
+
+    `scored` is the package the recalculation that just ran persisted, passed
+    only when it reports `package_rescored` - before forms exist that is the
+    door's own recipe on this very row, so it is reused rather than scored a
+    second time (about a second on an eight-form package). Same withholding.
+    """
+    try:
+        from services.sqs_service import is_pre_form_session, key_details
+        if not is_pre_form_session(sess):
+            return None
+        if (isinstance(scored, dict) and scored
+                and not (sess.get("integrity") or {}).get("review_required")):
+            return {"package_sqs": scored,
+                    "key_details": key_details(sess.get("facts") or {},
+                                               sess.get("flags") or {})}
+        from routes.form_routes import _pre_form_status
+        pkg, kd = await _pre_form_status(
+            session_id, sess.get("facts") or {}, sess.get("flags") or {},
+            sess.get("integrity") or {}, current_user, session_row=sess,
+        )
+        return {"package_sqs": pkg, "key_details": kd}
+    except Exception as _px:                                   # noqa: BLE001
+        logger.error(f"pre-form readiness unavailable [session={session_id}]: {_px}",
+                     exc_info=True)
+        return None
+
+
+def _editor_score_refresh(sess: dict) -> dict:
+    """The editor's whole recomputed package payload after a resolve / reopen:
+    `{"editor_package_sqs": {...}}`, or `{}` off the editor.
+
+    Orbin 22 Sep item 16 (30 Sep 2026). The editor merged only the package
+    HEADLINE (`new_package_sqs_score` / `new_package_tier`) into the panel, so
+    the cap fields the side panel's red HARD STOPS block reads (`cap_applied`,
+    `cap_reason`, `cap_hard_stops`, `cap_hard_stop_items`) kept their
+    pre-fix values. Fixing the stop through "Open to fix" moved the number to
+    84 while the block still said "Caps the package ... at 60" over the stop
+    just fixed - the client's screenshot. The answer route has shipped the
+    whole package since C2-C for the same reason; this is its twin.
+
+    Editor only (forms generated). Pre-form already gets the door's
+    `package_sqs`; Clarity / Lite keep their headline merge. The payload is the
+    PERSISTED, credit-bearing row the recalculation just wrote - exactly what a
+    reload shows - so no score moves (D6). Never raises.
+    """
+    try:
+        if not (sess.get("generated_forms") or {}):
+            return {}
+        pkg = sess.get("package_sqs")
+        if isinstance(pkg, dict) and pkg.get("package_sqs_score") is not None:
+            return {"editor_package_sqs": pkg}
+    except Exception as _ex:                                   # noqa: BLE001
+        logger.warning(f"editor score refresh unavailable: {_ex}")
+    return {}
 
 
 def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
@@ -1482,12 +1563,30 @@ async def resolve_issue(
                 "new_grade":      g,
                 "new_tier":       t,
                 "new_tier_color": c,
+                # Item 16: the whole recomputed form score, so the
+                # side panel's per-form HARD STOPS block reads the
+                # cap this fix left, not the one it replaced. Same
+                # key and shape the answer route ships (C2-C).
+                "new_sqs":        fdata.get("sqs"),
             }
     except Exception as _re:
         logger.error(f"resolve_issue: score read-back failed: {_re}")
 
     cross_issues = sess.get("cross_issues_last") or []
     package_sqs  = sess.get("package_sqs") or {}
+    _new_pkg_score = package_sqs.get("package_sqs_score", impact.get("score_after"))
+    _new_pkg_tier  = package_sqs.get("tier") or impact.get("tier")
+    # PRE-FORM ONLY (Orbin item 2, 29 Sep 2026): the Review card's number and
+    # key details, from the one door. The reported score is the door's, so it
+    # is the number a reload prints (the recalc above persisted that same
+    # recipe). None on the editor and Clarity / Lite - nothing changes there.
+    _review_card = await _pre_form_readiness(
+        sess, req.session_id, current_user,
+        scored=package_sqs if impact.get("package_rescored") else None)
+    if _review_card is not None:
+        package_sqs    = _review_card["package_sqs"] or {}
+        _new_pkg_score = package_sqs.get("package_sqs_score")
+        _new_pkg_tier  = package_sqs.get("tier")
 
     # Form-selection (recommendations-step) view: the hard/soft split +
     # grouped_issues that the confirm-value / marketing-reason routes return, so an
@@ -1502,7 +1601,7 @@ async def resolve_issue(
     # severity silently FLIPPED BACK to warning the moment you resolved anything.
     # Best-effort: a display-computation failure must never fail the resolve that
     # already succeeded server-side, so we fall back to the raw stored lists.
-    _fs_view = _form_selection_view(sess, cross_issues)
+    _fs_view = _form_selection_view(sess, cross_issues, package_sqs=package_sqs)
     _fs_hard = _fs_view["hard_stops"]
     _fs_soft = _fs_view["soft_stops"]
     _fs_grouped = _fs_view["grouped_issues"]
@@ -1540,8 +1639,8 @@ async def resolve_issue(
         "success":               True,
         "applied":               applied,
         "updated_forms":         updated_forms,
-        "new_package_sqs_score": package_sqs.get("package_sqs_score", impact.get("score_after")),
-        "new_package_tier":      package_sqs.get("tier") or impact.get("tier"),
+        "new_package_sqs_score": _new_pkg_score,
+        "new_package_tier":      _new_pkg_tier,
         "cross_issues":          cross_issues,
         "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
         "hard_stops":            _fs_hard,
@@ -1564,6 +1663,11 @@ async def resolve_issue(
         # True only when a fact the producer can still type is on THIS screen.
         "note_settle_here":         bool(_note_settle_here),
         "note_settle_facts":        _note_settle_here,
+        # Pre-form only: `package_sqs` (the whole door payload) and
+        # `key_details`. Absent on the editor and Clarity / Lite.
+        **(_review_card or {}),
+        # Editor only (item 16): the whole package, cap fields included.
+        **_editor_score_refresh(sess),
     })
 
 
@@ -1714,7 +1818,9 @@ async def reopen_issue(
             "success": True, "cleared": False, "still_live": _still_live,
         })
 
-    await recalculate_session_scores(req.session_id)
+    _impact = await recalculate_session_scores(req.session_id)
+    if not isinstance(_impact, dict):
+        _impact = {}
     sess = await get_processing_session(req.session_id)
 
     updated_forms: dict = {}
@@ -1731,12 +1837,24 @@ async def reopen_issue(
                 "new_grade":      g,
                 "new_tier":       t,
                 "new_tier_color": c,
+                # Item 16: the whole recomputed form score, so the
+                # side panel's per-form HARD STOPS block reads the
+                # cap this fix left, not the one it replaced. Same
+                # key and shape the answer route ships (C2-C).
+                "new_sqs":        fdata.get("sqs"),
             }
     except Exception as _re:
         logger.error(f"reopen_issue: score read-back failed: {_re}")
 
     cross_issues = sess.get("cross_issues_last") or []
     package_sqs  = sess.get("package_sqs") or {}
+    # Pre-form only - the Review card's number and key details, from the one
+    # door, exactly as resolve_issue reports them (Orbin item 2, 29 Sep 2026).
+    _review_card = await _pre_form_readiness(
+        sess, req.session_id, current_user,
+        scored=package_sqs if _impact.get("package_rescored") else None)
+    if _review_card is not None:
+        package_sqs = _review_card["package_sqs"] or {}
 
     return JSONResponse({
         "success":               True,
@@ -1750,7 +1868,11 @@ async def reopen_issue(
         # so they get the whole view - not just the raw arrays. Handing over the
         # arrays alone made that screen fall back to printing bare sentences
         # with no fix, no Resolve and no Dismiss (2026-09-08).
-        **_form_selection_view(sess, cross_issues),
+        **_form_selection_view(sess, cross_issues, package_sqs=package_sqs),
+        # Pre-form only: `package_sqs` + `key_details`. Absent elsewhere.
+        **(_review_card or {}),
+        # Editor only (item 16): the whole package, cap fields included.
+        **_editor_score_refresh(sess),
     })
 
 
@@ -1787,7 +1909,49 @@ async def get_open_recs(
     # download flow; the non-download callers of get_open_recommendations keep the
     # default (action IS NULL) behavior.
     recs = await get_open_recommendations(session_id, include_acknowledged=True)
+    # Rows the live needs-attention list (GET /api/needs-attention) shows box by
+    # box are MARKED, never dropped: the review hides them only when that list
+    # loaded, so a failed fetch still shows every finding.
+    try:
+        from services.field_qa import row_superseded_by_attention
+        for r in recs:
+            if isinstance(r, dict) and row_superseded_by_attention(r):
+                r["attention_superseded"] = True
+    except Exception as _ex:                              # noqa: BLE001
+        logger.warning(f"attention marker skipped for session {session_id}: {_ex}")
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
+
+
+@router.get("/api/needs-attention/{session_id}")
+async def get_needs_attention(
+    session_id: str,
+    form_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Every box that still needs a human, per generated form, with ONE status
+    each - Missing / AI held back / Please verify (Orbin 22 Sep items 9, 19).
+    Read-only and recomputed from the stored forms on every call, so the side
+    panel and the pre-download review always show the same current list."""
+    # Same owner check as `_verify_session_owner`, on the one session read this
+    # route needs anyway.
+    try:
+        session = await get_processing_session(session_id)
+    except HTTPException:
+        raise HTTPException(404, "Session not found")
+    if str(session.get("user_id", "")) != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+    generated = session.get("generated_forms") or {}
+    if form_id and form_id not in generated:
+        raise HTTPException(404, f"Form '{form_id}' not found")
+    import asyncio
+    from services.needs_attention import needs_attention_for_session
+    result = await asyncio.to_thread(
+        needs_attention_for_session, generated, session.get("facts") or {},
+        flags=session.get("flags") or {},
+        package_sqs=session.get("package_sqs") or None,
+        form_ids=[form_id] if form_id else None,
+    )
+    return JSONResponse({"success": True, **result})
 
 
 # ── Issue-rail resolution status (pure work-tracking, no SQS scoring) ───────────
@@ -1895,7 +2059,27 @@ async def export_audit_trail(
     user who owns the session."""
     await _verify_session_owner(session_id, current_user)
     export = await get_audit_trail_export(session_id)
+    await _split_receipt_counts(export.get("client_receipts") or [])
     return JSONResponse({"success": True, **export})
+
+
+async def _split_receipt_counts(receipts: list) -> None:
+    """Point Q (1 Oct 2026): the export printed "(of 25 asked)" over a list
+    with 4 check items in it. Each receipt gains the questions-answered /
+    details-checked split the producer's receipt shows, read off its items and
+    the questions its questionnaire showed. In place; never raises - a receipt
+    that cannot be split keeps its recorded counts."""
+    from services.arq_service import get_arq_by_id, response_counts
+    for rc in receipts:
+        if not isinstance(rc, dict) or rc.get("unreadable"):
+            continue
+        try:
+            arq = await get_arq_by_id(str(rc.get("arq_id") or "")) if rc.get("arq_id") else None
+            split = response_counts((arq or {}).get("questions"), rc.get("items"))
+            rc.update({k: v for k, v in split.items() if k != "not_sure_count"})
+        except Exception as ex:                                # noqa: BLE001
+            logger.warning("audit export: receipt split skipped for %s: %s",
+                           rc.get("arq_id"), ex)
 
 
 @router.get("/api/sqs/narrative/{session_id}")
