@@ -342,7 +342,9 @@ def test_the_overlay_is_built_for_the_page_the_canvas_shows():
     rebuild = src[src.index("const rebuildOverlay"):src.index("const buildOverlay")]
     assert "const page = shownPageRef.current.page;" in rebuild
     build = src[src.index("const buildOverlay"):src.index("// ── Unsaved-edit tracking")]
-    assert "fieldsRef.current.filter(f => f.page === page - 1)" in build
+    # Orbin item 14 (1 Oct 2026 - the TEST changed): a box the client's signature
+    # was painted into is skipped too; the page is still the one shown.
+    assert "fieldsRef.current.filter(f => f.page === page - 1 && !f.painted)" in build
     assert "pageNum - 1" not in build
 
 

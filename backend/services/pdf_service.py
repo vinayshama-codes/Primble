@@ -1133,21 +1133,34 @@ def landlord_interest_row(facts: dict, form_id: Optional[str] = None) -> Optiona
         return None
     try:
         from services.premises_interest import (
-            LANDLORD_ADDRESS_FACT, LANDLORD_NAME_FACT, TENANT,
-            one_premises_row, single_premises_interest,
+            LANDLORD_ADDRESS_FACT, LANDLORD_NAME_FACT, ROW_LANDLORD_ADDRESS_KEY,
+            ROW_LANDLORD_NAME_KEY, TENANT, located_landlords, one_premises_row,
+            single_premises_interest,
         )
     except Exception:                                     # noqa: BLE001
         return None
     row = one_premises_row(facts)
-    if row is None or single_premises_interest(facts) != TENANT:
-        return None
-    name = str(_fv(facts, LANDLORD_NAME_FACT) or "").strip()
+    if row is not None:
+        if single_premises_interest(facts) != TENANT:
+            return None
+        name = str(_fv(facts, LANDLORD_NAME_FACT) or "").strip()
+        address = str(_fv(facts, LANDLORD_ADDRESS_FACT) or "").strip()
+    else:
+        # Two or more locations (1 Oct 2026): each rented location's landlord
+        # is recorded on its own row. The form has ONE interest row, so it
+        # prints a landlord only when exactly one location has one - several
+        # are kept for certificates, never squeezed into one row.
+        landlords = located_landlords(facts)
+        if len(landlords) != 1:
+            return None
+        row = landlords[0][1]
+        name = str(row.get(ROW_LANDLORD_NAME_KEY) or "").strip()
+        address = str(row.get(ROW_LANDLORD_ADDRESS_KEY) or "").strip()
     if not _states_a_party(name):
         return None
     if any(_states_a_party((facts or {}).get(k))
            for k in ("additional_interests", "loss_payee_name", "mortgagee_name")):
         return None
-    address = str(_fv(facts, LANDLORD_ADDRESS_FACT) or "").strip()
     parts = _parse_address(address) if _states_a_party(address) else {}
     location = str(row.get("location_number") or "").strip() or None
     return {

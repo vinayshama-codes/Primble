@@ -133,6 +133,17 @@ class JobRepository(JobQueue):
             )
 
     # ASYNC-SAFE
+    async def touch(self, job_id: str) -> None:
+        """The heartbeat of a long run: updated_at = now, only while the job is
+        still processing - one statement, so it can never overwrite a status
+        written by the run's own end (services/generation_state.py)."""
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                "UPDATE jobs SET updated_at = $1 WHERE job_id = $2 AND status = 'processing'",
+                _now_iso(), job_id,
+            )
+
+    # ASYNC-SAFE
     async def count_user_active_jobs(self, user_id: str) -> int:
         async with get_pool().acquire() as conn:
             # Jobs older than 30 minutes are considered dead (crashed/timed out) and excluded.

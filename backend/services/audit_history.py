@@ -98,14 +98,19 @@ EVENT_ARQ_SUBMITTED         = "questionnaire_submitted"
 EVENT_ANSWERS_APPLIED       = "answers_applied"
 EVENT_REMINDER_SENT         = "reminder_sent"
 EVENT_DOWNLOAD              = "download"
+# Orbin item 14 (1 Oct 2026): the applicant signs through a link.
+EVENT_SIGNATURE_REQUESTED   = "signature_requested"
+EVENT_APPLICANT_SIGNED      = "applicant_signed"
 
-# Exactly the nine types the navbar Activity Log has always shown. A new event
-# is E&O-only unless it is added here deliberately - the Activity Log is a
-# producer-facing feed, not a firehose.
+# The types the navbar Activity Log shows. A new event is E&O-only unless it
+# is added here deliberately - the Activity Log is a producer-facing feed, not
+# a firehose. The two signature events were added on purpose (Orbin item 14):
+# "sent for signature" and "the client signed" are where a package stands.
 PRODUCT_VISIBLE_EVENTS = frozenset({
     EVENT_FORMS_GENERATED, EVENT_SQS_SCORED, EVENT_ARQ_SENT, EVENT_ARQ_OPENED,
     EVENT_ARQ_IN_PROGRESS, EVENT_ARQ_SUBMITTED, EVENT_ANSWERS_APPLIED,
     EVENT_REMINDER_SENT, EVENT_DOWNLOAD,
+    EVENT_SIGNATURE_REQUESTED, EVENT_APPLICANT_SIGNED,
 })
 
 # The client's section 12 list, for the anti-rot test. Every one of these must

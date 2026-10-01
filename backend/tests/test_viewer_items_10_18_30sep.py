@@ -523,7 +523,8 @@ def test_double_click_enters_edit_mode_and_never_changes_a_value():
     body = src[src.index("const handleCanvasDoubleClick"):src.index("return (\n")]
     assert "if (editModeRef.current || editBusy || applyingSign" in body   # view mode only, never while busy
     # the page the canvas SHOWS, not the page the toolbar is heading to
-    assert "hitTestBox(fieldsRef.current, shown - 1" in body
+    # (Orbin item 14, 1 Oct 2026 - the TEST changed: a painted applicant box is not a hit)
+    assert "hitTestBox(fieldsRef.current.filter(f => !f.painted), shown - 1" in body
     assert "const shown = shownPageRef.current.page;" in body
     assert "pendingFocusRef.current = hit.name;" in body and "setEditMode(true);" in body
     for forbidden in ("triggerSave", ".checked", "fieldValuesRef.current[", "setFieldValues"):
@@ -535,20 +536,24 @@ def test_double_click_enters_edit_mode_and_never_changes_a_value():
     assert "Double-click any box to edit it" in src
 
 
-def test_the_overlay_marks_yes_no_questions_only_in_edit_mode():
+def test_a_yes_no_question_is_highlighted_only_when_answered_in_its_own_colour():
+    """Owner, 1 Oct night (the TEST changed through the night): a Y/N box is
+    highlighted ONLY when it holds an answer, in that answer's own colour
+    (client green, AI-OK pink, verify orange) - no Y/N colour of its own. A
+    blank one is plain, even when required, and is not counted. Typing
+    repaints through the same rule; all stay editable."""
     src = _src(VIEWER)
     build = src[src.index("const _boxBg"):src.index("const buildOverlay")]
-    assert "if (!hl && curEdit && field.yn_question" in build
-    assert "if (curEdit) wrap.style.boxShadow = `inset 0 0 0 1px ${YN_EDGE}`;" in src
-    # reuses the edit-mode amber, no new colour - the tint is that amber at 15%
-    # over white, SOLID (1 Oct: a see-through tint showed the page image's old
-    # answer through a box the producer had just emptied)
-    assert 'const YN_EDGE     = "#f59e0b";' in src
-    assert 'const YN_BLANK_BG = "rgb(253,240,218)";' in src
+    assert "if (field.yn_question && isBlankBoxValue(val)) return _highlightBg(null, curEdit);" in build
+    assert "return _highlightBg(_getHighlight(field.name, val), curEdit);" in build
+    for gone in ("YN_ANSWERED_BG", "YN_BLANK_BG", "219,234,254", "Yes / No answered",
+                 "Yes / No question not answered yet"):
+        assert gone not in src, gone
+    assert "if (f.yn_question && isBlankBoxValue(vals[name] ?? f.value)) return;" in src
+    assert src.count("wrap.style.background = _boxBg(field, e.target.value, curEdit);") == 2
     # a Y/N box normalises through the shared helper and the ONE save path
     assert "next = normalizeYesNoEntry(next, lastYn, e.target.selectionStart);" in src
     assert "triggerSave(field.name, next);" in src
-    # the answer cell only focuses the box
     cell = src[src.index("if (curEdit && field.yes_no && field.answer_rect"):]
     cell = cell[:cell.index("overlay.appendChild(wrap);")]
     assert "target.focus()" in cell and "triggerSave" not in cell
@@ -584,6 +589,5 @@ def test_no_em_dashes_in_the_viewer_ui_text():
     src = _src(VIEWER)
     ui = src[src.index("return (\n"):]
     assert not any(d in ui for d in _EM_DASHES)
-    for text in ("Done editing - save", "Edit form", "Double-click any box to edit it",
-                 "Yes / No question - type Y or N", "Type Y or N"):
+    for text in ("Done editing - save", "Edit form", "Double-click any box to edit it", "Type Y or N"):
         assert text in src

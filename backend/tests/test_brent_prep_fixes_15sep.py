@@ -277,9 +277,15 @@ class TestSubmittingAccountLookup:
         monkeypatch.setattr(ur, "get_user_by_id", ok)
         # 24 Sep 2026: the account also carries the producer's OWN contact, so
         # the separated producer block is no longer a name and nothing else.
+        # 1 Oct 2026: ...and its Agency Address (Account Settings), "" when unset.
         assert asyncio.run(ep._submitting_account_for("u1")) == {
             "organization_name": "ThinkSmith Agency LLC", "full_name": "Michelle Smith",
-            "email": "michelle@thinksmith.example", "phone": "(303) 555-0142"}
+            "email": "michelle@thinksmith.example", "phone": "(303) 555-0142", "address": ""}
+
+        async def with_address(uid):
+            return {**(await ok(uid)), "agency_address": " 1 Main St, Denver, CO 80202 "}
+        monkeypatch.setattr(ur, "get_user_by_id", with_address)
+        assert asyncio.run(ep._submitting_account_for("u1"))["address"] == "1 Main St, Denver, CO 80202"
         assert asyncio.run(ep._submitting_account_for(None)) is None
 
 

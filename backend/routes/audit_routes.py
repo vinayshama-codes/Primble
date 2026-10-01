@@ -414,14 +414,29 @@ async def _apply_dismiss_score_credit(
         return {"updated_forms": {}, "new_package_sqs_score": None}
 
 
-async def _verify_session_owner(session_id: str, current_user: dict) -> None:
-    """Raise 403 if the session does not belong to current_user."""
+async def _verify_session_owner(session_id: str, current_user: dict) -> dict:
+    """Raise 403 if the session does not belong to current_user; the session."""
     try:
         session = await get_processing_session(session_id)
     except HTTPException:
         raise HTTPException(404, "Session not found")
     if str(session.get("user_id", "")) != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    return session
+
+
+async def _refuse_while_generating(session: dict) -> None:
+    """409 while a form generation is live and no forms exist yet (Orbin item
+    1): the run stamps its forms from the facts it read when it started, so a
+    fix written now would sit in the facts with no box showing it, and the
+    run's package score would ignore it."""
+    if (session or {}).get("generated_forms"):
+        return
+    from routes.form_routes import _generation_state_for
+    from services.generation_state import STATE_RUNNING, forms_locked_reason
+    state, _job = await _generation_state_for(session)
+    if state == STATE_RUNNING:
+        raise HTTPException(409, forms_locked_reason(session, STATE_RUNNING))
 
 
 @router.post("/api/audit/dismiss")
@@ -1184,6 +1199,26 @@ def _editor_score_refresh(sess: dict) -> dict:
     return {}
 
 
+def _package_page_key_details(sess: dict) -> dict:
+    """`{"key_details": ...}` after generation, `{}` before it.
+
+    Orbin item 1 (1 Oct 2026): the package page is reachable once forms exist,
+    and its Key Details list keeps its "Open to fix" links. A fix there goes
+    through this route (it stamps the forms and re-scores the package), but the
+    pre-form card is withheld once forms exist, so the list kept naming the
+    detail just supplied until a reload. Same reader as the pre-form card
+    (`sqs_service.key_details` on the row's facts and flags). Never raises.
+    """
+    try:
+        if not (sess.get("generated_forms") or {}):
+            return {}
+        from services.sqs_service import key_details
+        return {"key_details": key_details(sess.get("facts") or {}, sess.get("flags") or {})}
+    except Exception as _ex:                                   # noqa: BLE001
+        logger.warning(f"package page key details unavailable: {_ex}")
+        return {}
+
+
 def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
     """Problems the session currently reports that THIS fact participates in.
 
@@ -1349,7 +1384,7 @@ async def resolve_issue(
     route would have meant a second copy of the response builder, and the two
     would have drifted the first time either changed.
     """
-    await _verify_session_owner(req.session_id, current_user)
+    await _refuse_while_generating(await _verify_session_owner(req.session_id, current_user))
     if not ENABLE_PRODUCER_ANSWERS:
         return JSONResponse({
             "success": False, "disabled": True,
@@ -1668,6 +1703,8 @@ async def resolve_issue(
         **(_review_card or {}),
         # Editor only (item 16): the whole package, cap fields included.
         **_editor_score_refresh(sess),
+        # After generation: the package page's Key Details list (item 1).
+        **_package_page_key_details(sess),
     })
 
 
@@ -1729,7 +1766,7 @@ async def reopen_issue(
     Those two modes (and `none`) just flip the status marker, exactly as
     Resolve/Dismiss already do.
     """
-    await _verify_session_owner(req.session_id, current_user)
+    await _refuse_while_generating(await _verify_session_owner(req.session_id, current_user))
 
     from services.issue_registry import resolution_for
     from services.arq_service import (
@@ -1873,6 +1910,8 @@ async def reopen_issue(
         **(_review_card or {}),
         # Editor only (item 16): the whole package, cap fields included.
         **_editor_score_refresh(sess),
+        # After generation: the package page's Key Details list (item 1).
+        **_package_page_key_details(sess),
     })
 
 

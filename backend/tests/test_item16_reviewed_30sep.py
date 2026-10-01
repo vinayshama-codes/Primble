@@ -244,8 +244,11 @@ def test_the_editor_reply_ships_the_whole_package_and_form_scores(capped):
     form = out["updated_forms"]["ACORD_125"]
     assert form["new_sqs"] == capped.store["generated_forms"]["ACORD_125"]["sqs"]
     assert form["new_sqs_score"] == form["new_sqs"]["sqs_score"]
-    # the pre-form key stays pre-form only (Step 2, item 2)
-    assert "package_sqs" not in out and "key_details" not in out
+    # the pre-form score stays pre-form only (Step 2, item 2); the Key Details
+    # list now rides along after generation, for the package page (Orbin item
+    # 1, 1 Oct 2026 - the TEST changed)
+    assert "package_sqs" not in out
+    assert "key_details" in out
 
 
 def test_the_editor_reopen_reply_ships_them_too(capped):

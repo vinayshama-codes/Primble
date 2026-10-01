@@ -10080,12 +10080,13 @@ def _route_producer_party(mf: dict, docs: list,
     def _same(a: str, b: str) -> bool:
         return _norm_name_key(a) == _norm_name_key(b) or same_agency(a, b) is True
 
-    acct_name = acct_person = acct_email = acct_phone = ""
+    acct_name = acct_person = acct_email = acct_phone = acct_address = ""
     if isinstance(account, dict):
         acct_name = _usable_account_agency(account.get("organization_name"))
         acct_person = str(account.get("full_name") or "").strip()
         acct_email = str(account.get("email") or "").strip()
         acct_phone = str(account.get("phone") or "").strip()
+        acct_address = str(account.get("address") or "").strip()
     # A USER is submitting but which agency cannot be read. Then an agency the
     # expiring programme also prints is the INCUMBENT wherever it appears - a
     # narrative "placed through Commercial Risk Solutions" names the current
@@ -10176,7 +10177,8 @@ def _route_producer_party(mf: dict, docs: list,
             filled: List[str] = []
             for key, val in (("producer_name", acct_name), ("producer_contact_name", acct_person),
                              ("producer_contact_email", acct_email),
-                             ("producer_contact_phone", acct_phone)):
+                             ("producer_contact_phone", acct_phone),
+                             ("producer_address", acct_address)):
                 if val and not _producer_text(mf.get(key)):
                     mf[key] = _account_producer_envelope(val)
                     filled.append(f"{key}<-account")
@@ -10202,6 +10204,9 @@ def _route_producer_party(mf: dict, docs: list,
             block["producer_contact_email"] = _account_producer_envelope(acct_email)
         if "producer_contact_phone" not in block and acct_phone:
             block["producer_contact_phone"] = _account_producer_envelope(acct_phone)
+        # ...and the agency's mailing address from Account Settings (1 Oct 2026).
+        if "producer_address" not in block and acct_address:
+            block["producer_address"] = _account_producer_envelope(acct_address)
 
     moved: List[str] = []
     for key in _PRODUCER_IDENTITY_KEYS:

@@ -90,6 +90,9 @@ _ZIP3_RANGES = [
 ]
 
 
+_US_ZIP_STATES = frozenset(_st for _lo, _hi, _st in _ZIP3_RANGES)
+
+
 def _state_from_zip(zip_str: str) -> Optional[str]:
     """Return the expected 2-letter US state code for a ZIP code, or None if unknown."""
     if not zip_str:
@@ -289,8 +292,13 @@ def _parse_address(addr: str) -> dict:
     # wrong state when the document contains multiple addresses from different
     # states (e.g. insured in CO, premises in MO). ZIP codes are unambiguous;
     # if they conflict with the parsed state, the ZIP wins.
+    # Only a US ZIP against a US state, though: "UP 201301" (an Indian PIN in an
+    # agency's address, 1 Oct 2026) read its first three digits as a DC prefix
+    # and printed DC.
     if result.get("state") and result.get("zip"):
-        _expected = _state_from_zip(result["zip"])
+        _us_zip = re.fullmatch(r"\d{5}(?:-\d{4})?", str(result["zip"]).strip())
+        _us_state = str(result["state"]).strip().upper() in _US_ZIP_STATES
+        _expected = _state_from_zip(result["zip"]) if (_us_zip and _us_state) else None
         if _expected and _expected != result["state"].upper():
             result["state"] = _expected
     return result

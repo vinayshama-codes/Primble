@@ -135,6 +135,17 @@ async def apply_signature(
     if not signed_pdf or len(signed_pdf) == 0:
         raise HTTPException(500, "Signature injection produced an empty PDF")
 
+    # Orbin item 14: a form the applicant has already signed keeps their
+    # signature when the producer signs.
+    from services.signature_boxes import applicant_signature_for, add_applicant_signature
+    _applicant = applicant_signature_for(proc_session, form_id, field_data)
+    if _applicant:
+        try:
+            signed_pdf = await asyncio.get_event_loop().run_in_executor(
+                None, add_applicant_signature, signed_pdf, tpl, _applicant)
+        except Exception as ex:
+            logger.error(f"apply-signature: applicant signature re-paint failed form={form_id}: {ex}")
+
     state_hash = hashlib.md5(signed_pdf).hexdigest()
 
     generated[form_id]["field_state"]       = field_data
@@ -144,6 +155,7 @@ async def apply_signature(
     generated[form_id]["signature_applied"] = True
     generated[form_id]["signature_b64"]     = sig
     generated[form_id]["signature_scope"]   = SIGNATURE_SCOPE
+    generated[form_id]["_applicant_render"] = None
 
     await upd_processing_session(session_id, {"generated_forms": generated})
 

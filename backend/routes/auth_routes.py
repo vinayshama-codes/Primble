@@ -786,6 +786,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "full_name": current_user.get("full_name", ""),
         "phone": current_user.get("phone", "") or "",
         "organization_name": current_user.get("organization_name", ""),
+        "agency_address": current_user.get("agency_address", "") or "",
         "subscription_tier": sub,
         "billing_cycle": current_user.get("billing_cycle", "monthly") or "monthly",
         "downloads_remaining": max(0, FREE_PACKAGE_LIMIT - used) if sub == "free" else -1,
@@ -828,6 +829,13 @@ async def update_profile(
         if raw_phone and not re.fullmatch(r"[0-9+()\-.\s]{7,32}", raw_phone):
             raise HTTPException(400, "Enter a valid phone number.")
         updates["phone"] = raw_phone
+    if req.agency_address is not None:
+        # One line of plain address text ("Street, City, State ZIP"): it prints
+        # on the forms, so no markup and no control characters. Empty clears it.
+        raw_addr = re.sub(r"\s+", " ", req.agency_address).strip()[:200]
+        if raw_addr and (re.search(r"[<>{}\\]", raw_addr) or not re.search(r"[A-Za-z]", raw_addr)):
+            raise HTTPException(400, "Enter a valid mailing address.")
+        updates["agency_address"] = raw_addr
     if not updates:
         raise HTTPException(400, "No fields to update.")
     set_clause = ", ".join(f"{k}=${i+1}" for i, k in enumerate(updates))
@@ -957,9 +965,15 @@ async def delete_account(
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute("DELETE FROM sessions            WHERE user_id = $1", user_id)
+            # A rendered PDF may carry a signature; it goes with its package.
+            await conn.execute(
+                "DELETE FROM session_pdf_bytes WHERE session_id IN "
+                "(SELECT id FROM processing_sessions WHERE user_id = $1)", user_id)
             await conn.execute("DELETE FROM processing_sessions WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM applied_overage_sessions WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM arq_sessions        WHERE user_id = $1", user_id)
+            # the client's signature images (Orbin item 14) go with the account
+            await conn.execute("DELETE FROM signature_requests  WHERE user_id = $1", user_id)
             # Anonymize audit log rows rather than deleting (preserves the deletion record)
             await conn.execute(
                 """UPDATE acord_audit_log

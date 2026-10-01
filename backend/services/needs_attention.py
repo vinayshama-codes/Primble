@@ -692,6 +692,9 @@ def _signature_kind(field: str, tooltip: str) -> Optional[str]:
         return None
 
 
+# The form changed after the applicant signed it (Orbin item 14).
+APPLICANT_SIGNATURE_STALE = "Signature no longer matches - send for signature again."
+
 _APPLICANT_WHAT: Dict[Optional[str], str] = {
     "signature": "The applicant signs here before the form is sent.",
     "date": "The applicant dates this when signing.",
@@ -803,6 +806,14 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
     # A signed form no longer needs the PRODUCER's signature boxes
     # (apply-signature stores them blank and sets `signature_applied`).
     signed = bool(fr.get("signature_applied"))
+    # The applicant's signature (Orbin item 14): "signed" while the form still
+    # holds what they signed - their signature and date are done; "stale" once a
+    # value changed - the rows stay and say to send for signature again.
+    try:
+        from services.signature_boxes import applicant_signature_state
+        applicant_state = applicant_signature_state(fr, mapped)
+    except Exception:                                      # pragma: no cover
+        applicant_state = None
 
     try:
         from services.field_qa import _printed_value_keys, _is_printed_copy
@@ -851,6 +862,9 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
         # back, never the producer's to fill in. The Sign button signs for the
         # producer only, so a signed form still lists them.
         applicant_step = _is_applicant_step(field, tip)
+        if (applicant_step and applicant_state == "signed"
+                and _signature_kind(field, tip) in ("signature", "date")):
+            continue                                       # the applicant signed it
         status = reason = None
         found = None
         required = label in _REQUIRED_LABELS or field in VIEWER_ALWAYS_REQUIRED
@@ -899,7 +913,9 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             what = "Answer it on the form if it applies."
             reason = "An underwriting question your documents do not answer."
         elif status == STATUS_MISSING:
-            if applicant_step:
+            if applicant_step and applicant_state == "stale" and _signature_kind(field, tip) in ("signature", "date"):
+                what = APPLICANT_SIGNATURE_STALE
+            elif applicant_step:
                 what = _APPLICANT_WHAT.get(_signature_kind(field, tip), _APPLICANT_WHAT[None])
             elif is_box:
                 what = "Tick it on the form if it applies."

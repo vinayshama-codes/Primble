@@ -36,7 +36,11 @@ from services.arq_service import (
 from services.arq_service import recalculate_session_scores
 from services.arq_receipt_service import create_receipt, get_receipt_for_arq
 from services import confirm_known
+from services.follow_ups import (
+    FOLLOW_UP_OF_KEY, SHOW_IF_KEY, ordered_follow_ups, sanitize_show_if, without_orphans,
+)
 from services import schedule_capture
+from services import applicant_signing
 from services.question_classifier import (
     AUDIENCE_CLIENT,
     AUDIENCE_DO_NOT_SEND,
@@ -210,6 +214,12 @@ async def generate_questions(
         cf_merged = len(cf_questions) - len(new_cf)
         questions = new_cf + questions
 
+    # Orbin item 14: the applicant signs the forms as ONE question here, offered
+    # (never pre-ticked) whenever a generated form has an applicant line.
+    _sig_q = applicant_signing.signature_question(proc_session)
+    if _sig_q:
+        questions = [q for q in questions if q.get("field_name") != applicant_signing.SIGNATURE_FIELD] + [_sig_q]
+
     # Re-apply the curated default-selection policy across the FULL merged list so
     # the soft cap on pre-selected questions is global, not per-generator
     # (Beta Report §8.2 item 3 + §11 #20).
@@ -287,6 +297,13 @@ async def send_arq(
         if (q.get("field_type") == "schedule"
                 and schedule_capture.is_producer_only(str(q.get("schedule_key") or ""))):
             continue
+        # Orbin item 14: the signature question is rebuilt from the session,
+        # never from the request body; at most one goes out.
+        if applicant_signing.is_signature_question(q) or q.get("field_name") == applicant_signing.SIGNATURE_FIELD:
+            _sig = applicant_signing.signature_question(proc_session)
+            if _sig and not any(applicant_signing.is_signature_question(c) for c in clean_questions):
+                clean_questions.append(dict(_sig))
+            continue
         si = q.get("score_impact") if isinstance(q.get("score_impact"), dict) else {}
         q_entry = {
             "field_name":    _sanitize_str(q.get("field_name", ""), 128),
@@ -330,6 +347,13 @@ async def send_arq(
         _clean_sugg = _sanitize_suggestions(q.get("suggestions"))
         if _clean_sugg:
             q_entry["suggestions"] = _clean_sugg
+
+        # A follow-up (G2, 1 Oct 2026: the landlord, shown once the client
+        # answers that they rent) keeps its condition - bounded, never trusted.
+        _cond = sanitize_show_if(q.get(SHOW_IF_KEY))
+        if _cond:
+            q_entry[SHOW_IF_KEY] = _cond
+            q_entry[FOLLOW_UP_OF_KEY] = _cond["field"]
 
         # Chat 5 - confirm-or-correct. A confirm question carries the value we
         # already hold so the client can say "that is right" or fix it. The
@@ -383,8 +407,18 @@ async def send_arq(
 
         clean_questions.append(q_entry)
 
+    # A follow-up goes straight after its parent, and never without it.
+    clean_questions = ordered_follow_ups(without_orphans(clean_questions))
     if not clean_questions:
         raise HTTPException(400, "At least one valid question is required")
+
+    # Orbin item 14: a signature question gets its own signing request (the
+    # image travels on its own endpoint; the token rides the stored question).
+    for _q in clean_questions:
+        if applicant_signing.is_signature_question(_q):
+            _req = await applicant_signing.create_request(
+                session_id, str(current_user["id"]), client_email, client_name, _q["form_ids"])
+            _q["sign_token"] = _req["token"]
 
     arq_data = await create_arq_session(
         processing_session_id=session_id,
@@ -505,6 +539,18 @@ async def client_view(token: str, request: Request):
                     q_item.pop("source_labels", None)
         if q.get("field_type") == "select" and isinstance(q.get("options"), list):
             q_item["options"] = q["options"]
+        # Orbin item 14: the signature question carries its signing token; the
+        # page reads the forms and signs through /api/applicant-sign.
+        if applicant_signing.is_signature_question(q):
+            if not applicant_signing.valid_token(q.get("sign_token")):
+                continue
+            q_item["sign_token"] = q["sign_token"]
+        # A follow-up's condition (G2, 1 Oct 2026) - the page shows it only
+        # while the parent's answer is one of these.
+        _cond = sanitize_show_if(q.get(SHOW_IF_KEY))
+        if _cond:
+            q_item[SHOW_IF_KEY] = _cond
+            q_item[FOLLOW_UP_OF_KEY] = _cond["field"]
         # Figure 20: unconfirmed NAICS / SIC candidates for the chip row. Kept
         # out of `current_value` on purpose - a suggestion must never arrive
         # pre-filled. Re-validated here rather than trusted, because the ARQ
@@ -669,6 +715,20 @@ async def submit_arq(token: str, request: Request):
         arq_id=arq["id"],
         processing_session_id=arq["session_id"],
     )
+
+    # Orbin item 14: a signature given in this questionnaire is recorded on the
+    # forms now - after the answers - so it covers the forms as they print.
+    for _q in arq.get("questions") or []:
+        if not applicant_signing.is_signature_question(_q):
+            continue
+        try:
+            _done = await applicant_signing.finalize(_q.get("sign_token"))
+            if _done:
+                await record_event(arq["user_id"], arq["session_id"], "applicant_signed",
+                                   {"client_first": (_done["signer_name"] or "").split()[0] if _done["signer_name"] else "",
+                                    "form_count": len(_done["forms"]), "form_ids": _done["forms"]})
+        except Exception as _sig_ex:
+            logger.error(f"ARQ submit: applicant signature not recorded: {_sig_ex}", exc_info=True)
 
     # Recalculate scores/stops/readiness so the producer sees the impact of the
     # client's answers on next view (Beta Report §6.2 / §8.2.7). Pure-Python and

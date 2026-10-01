@@ -35,14 +35,11 @@
 
 - **"Verified live" means:** on the owner's localhost, with the client's own 271-page dec. Part 2 generated ACORD 125,
   126, 127, 131 and 186. Michelle has not re-tested anything.
-- **Nothing is committed and nothing is deployed.** 91 paths carry local changes (63 edited, 28 new) on top of `c69b4cc`,
-  and `c69b4cc` itself (28 Sep) is not pushed: the remote branch is at `8b005ad` (27 Sep). **The client's server shows
-  none of this work** until it is committed, pushed and deployed. **Add every new file explicitly** - three are imported
-  by running code and a commit without them breaks the backend at start: `backend/services/signature_boxes.py`,
-  `backend/services/needs_attention.py`, `backend/services/premises_interest.py` (and the frontend's new
-  `utils/keyDetailCards.js`, `utils/viewerBoxes.js`, `utils/reviewedStops.js`, `utils/needsAttention.js`,
-  `review/KeyDetailsMissing.jsx`, `NeedsAttentionPanel.jsx`, `usePdfFieldFocus.js`, `PDFJsViewer.css`).
-- Full backend suite: **11,534 passed / 1 failed / 19 skipped** (1 Oct, after the R1-R5 fixes; the one failure is the
+- **Committed and pushed as `4f7e7db` (1 Oct) on `ready-for-deployment-V1`.** Not yet committed: the owner's build of
+  1 Oct night - 24 paths, including 3 NEW files the running code imports (`backend/services/follow_ups.py`,
+  `frontend/src/utils/followUps.js`, plus `backend/tests/test_owner_asks_1oct.py`); add them explicitly. Whether Render
+  has deployed `4f7e7db` is not verified here - check the Render dashboard before telling Michelle anything is live.
+- Full backend suite: **11,612 passed / 1 failed / 19 skipped** (1 Oct night, after the owner's build; the one failure is the
   known, pre-existing `test_arq_acord125_missing_only`). The frontend builds clean, with no new lint warning.
 - The board below gives each point's verdict, what is true today and what is still open.
 
@@ -66,28 +63,28 @@ below names the retest ID; anything else is proven offline only (tests, replays 
 
 | # | Client's point (short) | Verdict (audit) | What is true today | Still open |
 |---|---|---|---|---|
-| 1 | Opening a package should land on the package profile ("Continue where you left off") | **Not started** (owner: not yet) | Before forms the dashboard opens the review page; once a form exists it opens the editor and the review page cannot be reached again | Plan (Michelle Q1): profile, "Continue where you left off", started forms under Key Details |
-| 2 | A score before forms are generated | **Partly done** | The pre-form screen shows "NN / 100" and the tier "so far" (seen live) | The wording is still forms-first ("It can change when forms are generated", "continue to form selection", dashboard "SQS -"); the score moves at generation (64 -> 66) with no input. Not in this round |
+| 1 | Opening a package should land on the package profile ("Continue where you left off") | **Done, seen working on localhost** (owner's retest, 1 Oct night - R8) | A package click always opens the package page; "Continue where you left off" (editor on the LAST form open, or the progress screen) once forms exist or are generating; "Generation didn't finish" for a dead run; "Total Package Score" after generation; the forms listed under Key Details with Open; the re-reading actions locked (screen + server 409) | - |
+| 2 | A score before forms are generated | **Done** (owner, 1 Oct night: the forms-first wording is left as is) | The pre-form screen shows "NN / 100" and the tier "so far" (seen live) | The wording is still forms-first ("It can change when forms are generated", "continue to form selection", dashboard "SQS -"); the score moves at generation (64 -> 66) with no input. Not in this round |
 | 3 | Remove the "Important" block | **Done, seen working** | A missing key detail that has its own card is said ONCE, on the card; the key-details line counts it ("1 more under Warnings") - seen live on `bfa8711d` (U2) | - |
 | 4 | Proposed dates from the dec | **Done, seen working** | A calculated box (the proposed term) is "Please verify": "Calculated, not read from your documents" - seen live on `bfa8711d` (P3) | The effective date is already past on a QUOTE (an older dec; the owner's 29 Sep rule) |
 | 5 | "Contacts are in the dec" | **Declined - explain** | The dec prints no insured contact (all 271 pages) | Ask Michelle whose contact she means (Erin Royal? the producer?) |
 | 6 | "Open to fix" on the driver warning | **Done, seen working** | Fix round: an offline end-to-end proof (125 alone: the card's table is served, one saved driver is stored, the warning clears) | - |
-| 7 | Page-one carrier; the dec agency's phone | **Partly done** | Both EMC companies print on CARRIER; fix round: always in the same order (alphabetical) | Brent has not approved two carriers. Michelle's account has NO Contact Phone (set it before her run). Producer mailing address blank |
+| 7 | Page-one carrier; the dec agency's phone | **Partly done** (1 Oct build: phone formatted, Agency Address in Account Settings - R7a) | Both EMC companies print on CARRIER; fix round: always in the same order (alphabetical) | Brent has not approved two carriers. Michelle's account has NO Contact Phone (set it before her run). Producer mailing address blank |
 | 8 | Premiums did not attach, no prompt | **Done, seen working** | Line premiums and POLICY PREMIUM print; a blank one is a Missing row. Fix round: the list opens by default; a typed premium prints "3,418" (with cents too) | They are the EXPIRING premiums (Brent not asked) |
 | 9 | Missing / required / verify in the side panel, earlier | **Done, seen working** (moved up 1 Oct) | Side panel per form; pre-form key details clickable. "AI held back" never repeats a refused answer - seen live on `bfa8711d` (P2). After the retest (owner): both lists start CLOSED like every other section; the applicant's steps are their own group | R2: the owner's layout change, not yet seen |
 | 10 | Make Edit obvious; double-click to edit | **Done, seen working** | Typed edits are saved before a form switch, a fix window, a download or a new package; closing the tab asks first and still sends them - seen live on `bfa8711d` (E1-E4). The pending-edits note now reads "... from the last save. Save to update." (owner) | R3: the note's new words |
 | 11 | Policy period and premium | **Done, seen working** | As 4 and 8 | As 4 and 8 |
 | 12 | Tenant, not owner; revenue "$0" | **Declined - explain** | Tenant is a producer card; "$0" not built (ACORD asks for the location's revenue) | Tell Michelle why; INSIDE city limits is never filled |
 | 13 | GL code, SIC, NAICS; FEIN | **Partly done** | GL CODE 91580, 91585; the auto class 7383 appears nowhere on the 125 and in no "AI held back" row - seen live on `bfa8711d` (W7) | SIC / NAICS are not in the dec (ask Michelle which page); LLC members blank |
-| 14 | Send the 125 to the client; applicant signature | **Not started** | The Sign button signs the PRODUCER's box only, on all 17 forms - seen live on `bfa8711d` (G1-G3); the applicant's lines stay blank, are listed as "To be signed by the applicant" (now in the side panel too) and never reach the cover | E-signature: Brent |
+| 14 | Send the 125 to the client; applicant signature | **Done, seen working on localhost** (signature prints after the client submits; download and edit-after-signing tried; the producer cannot edit the client's signature) (owner: built in, same draw / upload pad, as a PRE-TICKED questionnaire question asking ONLY for the signature - R9) | A question in Send to Client; the client draws or uploads their signature; recorded after their answers apply; the signature prints on the application's signature lines only (read off the printed forms - never initials, never 130's Minnesota attestation), dated; locked to what was signed; stored encrypted | Live retest R9; Brent never asked whether carriers accept a built-in signature; the cover prints no "signed" line |
 | 15 | "No known losses" still counts | **Done, seen working** | Loss History becomes Not Applicable and reads "Attested - no known losses"; unticked it reads "Unknown", never "Prior claims known" - seen live on `bfa8711d` (C1, C2) | Lowers weak and some 1-5 year packages: tell Brent |
 | 16 | A resolved hard stop moves to Reviewed | **Done, seen working** | Fix round: a handled stop's sentence prints once, on its Reviewed row | Live retest |
 | 17 | Green "Client" boxes filled by the producer | **Partly done** | A box is green only while the client's value is in it - the client's FEIN printed green on `bfa8711d` (Q5) | The retype half (green goes away) not yet reported |
-| 18 | Yes / No not editable on 126 / 127 | **Partly done** | Every Y/N question is outlined and clickable in edit mode | The client half was declined (owner); about 181 of 190 Y/N answers open blank |
+| 18 | Yes / No not editable on 126 / 127 | **Done, seen working on localhost** (owner, 1 Oct night: a Y/N box is highlighted ONLY when it holds an answer, in that answer's own colour - R10b passed) | Every Y/N question is editable (owner checked); an answered one wears its answer's colour (client green, AI-OK pink, verify orange); a blank one is plain and not counted; no Y/N colour of its own | The client half was declined (owner); about 181 of 190 Y/N answers open blank |
 | 19 | Each item: what, how, score effect | **Done, seen working** (moved up 1 Oct) | Every box in the form's words with what to do and its score effect; ONE number per card - the loss card +7 on all five forms and "Answering this adds +7 pts" in Best Solutions, seen live on `bfa8711d` (P5, P6); the wrong Emcasco row is gone (W3). After the retest: the cover prints each card with the panel's own number and hedge | D1 (the download review window) not yet reported; R4 |
 | G1 | E-mail tagline | **Done, seen working** | Also in the plain-text part of both client e-mails; the heading seen again on `bfa8711d` (Q2) | Deploy |
-| G2 | Landlord name and address | **Partly done** | Prints on 125 ADDITIONAL INTEREST row A; fix round: as typed ("CBRE Group Inc", not "Cbre") | The client path never ran live; not on the ACORD 25 holder; nothing with 2+ locations |
-| Q | Questions vs check items | **Partly done** | Counted apart everywhere - the client's end summary read "1 of 7 questions answered - 3 of 4 details checked" on `bfa8711d` (Q3) | The client's header / ring / chips and the producer's receipt not yet reported |
+| G2 | Landlord name and address | **Done, seen working on localhost** (1 Oct night: client picks Tenant -> landlord asked -> prints on 125 page 3) | Prints on 125 ADDITIONAL INTEREST row A; fix round: as typed ("CBRE Group Inc", not "Cbre") | The client path never ran live; not on the ACORD 25 holder; nothing with 2+ locations |
+| Q | Questions vs check items | **Done, seen working on localhost** (owner, 1 Oct night: header, check items, Tenant follow-ups and the end summary all counted apart) | Counted apart everywhere - the client's end summary read "1 of 7 questions answered - 3 of 4 details checked" on `bfa8711d` (Q3) | The client's header / ring / chips and the producer's receipt not yet reported |
 
 **Fixes and decisions outside the client's list:**
 
@@ -1883,6 +1880,307 @@ hard-refresh the browser (Cmd+Shift+R).
 | R6g (cover) | After R6a, open `00_Primble_Cover_Page.pdf` | The SQS Score Explanation never gives the package a tier or routing other than its table row (Major Gaps / Standard review) |
 | R6h (products) | New package from the same dec, generate the 126 (the fix acts when a form is stamped) | Page 2 PRODUCTS / COMPLETED OPERATIONS table is empty: no 91580 / 91585, no $1,198 / $803, no 12 / 12 or "COVERAGE FORM" |
 
+#### The owner's build of 1 Oct (after grading the 22 points) - DONE OFFLINE, retest R7 next
+
+The owner picked three of the five "fix cleanly without their input" items (16 and 2's wording / dashboard: leave as
+they are):
+
+1. **Item 7 - the producer block.** The account's Contact Phone printed as typed ("7983789751"). The display formatter
+   had no phone rule at all: now a BARE run of 10 digits (or 1 + 10) prints `798-378-9751` in every phone / fax box on
+   every form (17 box families); anything written with separators, "+", or an extension prints exactly as written.
+   **Account Settings gains "Agency Address"** (Street, City, State ZIP): stored on the account (`users.agency_address`,
+   created and migrated by `init_db`), read with the account at extraction, and printed through the existing producer
+   mailing block (line one / two, city, state, ZIP). A document's own producer address for the login's agency still
+   wins; another agency's is recorded as the expiring one. Found on the way: an Indian PIN in an address ("UP 201301")
+   printed state **DC** - the address parser let a ZIP "correct" the state; it now does so only for a US ZIP against a
+   US state (the MO -> CO correction still works).
+2. **Item 18 - Yes / No questions highlighted while viewing.** An unanswered question is tinted and outlined in view
+   mode too (it was edit mode only), with a legend chip "Yes / No question not answered yet" beside "Double-click any
+   box to edit it". Edit mode is unchanged.
+3. **G2 - the landlord, as a follow-up, for each location.** Before: asked only when Tenant had been confirmed before
+   sending, and only on a one-location 125. Now:
+   - the landlord's name and address go out as FOLLOW-UPS of the "own or rent?" question: hidden until the client
+     picks Tenant, gone again if they pick Owner (`services/follow_ups.py`, its JS twin `utils/followUps.js`);
+   - with two or more locations, each location whose interest is unknown is asked by its own address, with its own
+     landlord follow-ups; a location already known to be rented is asked its landlord directly;
+   - the producer's Send to Client list shows the follow-ups under their parent ("If the answer is Tenant, also asks:
+     ..."), never as separate ticks; they go with a ticked parent, straight after it;
+   - one rule decides what the client saw, for the page, the receipt and its counts, the send and the apply step: a
+     hidden follow-up is not validated, not counted, not on the receipt and never applied, whatever a payload says;
+   - per-location answers are written onto that location's row; only that row's interest boxes re-stamp (labelled the
+     client's), never the documents' addresses; ACORD 125's one ADDITIONAL INTEREST row prints the landlord when exactly
+     one location has one (with its LOC #) - several are kept for certificates, not squeezed into one row.
+
+**Evidence (offline):** `tests/test_owner_asks_1oct.py` (78: phones on all 17 box families, the profile route with a
+stubbed database, the account load, the producer routing, the address in its boxes, the ZIP rule, follow-up rule /
+bounds / 30 seeded orderings, one location and four-location question sets, the receipt, the real apply step end to end
+for two locations and for one, the node twin); switching the follow-up gate off fails 3 of them. Two old pins updated
+with the owner's reversal (`test_viewer_items_10_18_30sep.py`: Y/N tint "only in edit mode"; `test_step2_orbin_29sep.py`:
+"only the interest question"). Replay of 34 stored sessions plus today's two: **3 boxes change, all bare-digit phones
+now formatted (798-378-9751, 112-233-4455); 0 scores, 0 side-panel counts.** FR125: its two rented locations (rows 1, 3)
+now get optional landlord questions; its forms are untouched. Lint 74 = baseline, 0 errors; build clean. Full suite:
+**11,612 passed / 1 failed / 19 skipped** (the known `test_arq_acord125_missing_only`). The run first showed
+11,611 / 2: the second was `test_brent_prep_fixes_15sep` pinning the account profile's exact keys - the new `address`
+key is intended, so the pin was updated (and now also checks a stored address); re-run, it passes.
+
+**Retest R7 (restart the backend; hard-refresh):**
+
+| ID | Do | Pass when |
+|---|---|---|
+| R7a | Account Settings: Agency Address `1450 Larimer St, Suite 210, Denver, CO 80202` (any real address), Contact Phone as digits only; Save. Then a NEW package from the dec, generate the 125 | Page 1 AGENCY block: the address in its boxes (line, suite, city, state, ZIP) and the phone as `798-378-9751` |
+| R7b | (superseded 1 Oct night - the owner removed the Y/N highlight; see R10a) | - |
+| R7c | Same package: Send to Client. Find "Premises interest - owner or tenant" | The card says "If the answer is Tenant, also asks: ..." and the landlord is NOT a separate tick |
+| R7d | Tick it, send to yourself, open the link | Choose **Owner**: no landlord questions. Choose **Tenant**: two landlord questions appear just below, indented. The header count moves with them |
+| R7e | Answer Tenant, a landlord name and `100 Main St, Austin, TX 78701`, submit; back in the editor, Refresh | The client's summary lists exactly what was shown. 125 page 2: the premises TENANT box ticked (green). 125 page 3 ADDITIONAL INTEREST row A: the landlord, OTHER "Landlord", CERTIFICATE ticked, LOC # 1 |
+| R7f (optional) | A package with two or more locations | Each location with no stated interest is asked by its address, each with its own landlord follow-ups |
+
+### Items 1 and 14 - built 1 Oct 2026 night (owner's approvals of 1 Oct), offline; retest R8 / R9 below
+
+**Item 1 - a package click lands on the package page.** Owner's decisions: the page always opens first; its button is
+"Continue where you left off" once forms exist or are being generated, else "Continue to form selection"; after
+generation the score reads "Total Package Score" (no "It can change when forms are generated"); before, "so far"; the
+re-reading actions are off once forms exist, with "Forms are generated - make changes in the form editor."; a run that
+did not finish says "Generation didn't finish"; the generated forms are listed under Key Details with an Open link.
+- **One door for "is this package's generation running?":** `services/generation_state.py`. A live run proves it is
+  alive with a heartbeat (the sync route and the worker re-stamp the job every 30 s through `JobQueue.touch`, which never
+  touches a finished job); a processing job silent for 5 minutes died with its process. Until now a dead sync run left
+  its job "processing" forever: every reopen spun for 5 minutes, then dropped the producer on the upload screen (the
+  restore was handed a signal the 20 s timer had already aborted - fixed too). A crashed run now marks its job FAILED.
+- GET /api/session returns `generation_state`, `form_order` (the producer's order; the row's JSONB sorts ACORD_25
+  before ACORD_125) and `active_form_id` - the form LAST OPEN, recorded on every form switch
+  (POST /api/session/{id}/active-form, one owner-scoped JSONB key, `updated_at` untouched). The earlier claim "the
+  session already stores it" was wrong: it held the first form only, written once at generation.
+- **Server locks (409), mirroring marketing-reason:** reclassify / exclude / supporting-only, confirm-value, integrity
+  resolve and select-forms-bulk refuse once forms exist or while a run is live (`_refuse_once_forms_exist`). They re-read
+  the documents and never touch existing forms; on a generated package they also emptied `selected_form_ids`. An
+  interrupted run is not live, so "Continue to form selection" can generate again. The editor's add-form path
+  (resolve-issue `add_form`) is untouched; the package page's "Add form" row button now opens it after generation
+  (it used to jump to form selection - also from the editor).
+- A fix made on the package page after generation refreshes its Key Details list (`_package_page_key_details`).
+- Frontend: `utils/packageGeneration.js` holds the states and the wording for both layouts (rail and classic).
+  The URL path into a package (the "client answered" e-mail, sign-in return) still opens the forms - on the last form.
+  Essentials / lite untouched.
+
+**Item 14 - the applicant signs through a link.** Owner: built in, the same draw-or-upload pad the producer uses.
+- The producer: "Send for Signature" under "Send to Client" in the editor (shown when a generated form has an applicant
+  line). Pick the forms, the client's e-mail; the client gets "Review and Sign". One live link per package (a new one
+  replaces any pending). The side panel's "Applicant Signature" section shows each form: "Signed on 10/01/2026 by
+  ...", "Not signed yet", or "Signature no longer matches - send for signature again."
+- The client (/sign/<token>, no sign-in): opens each form (read-only PDF), ticks "I have reviewed these forms ... true,
+  correct and complete ...", types their full name, draws or uploads (PNG/JPG, 2 MB). Sign is enabled only after every
+  form is opened. Signs once; expired / replaced / already signed say so.
+- **Which lines get the signature, read off the printed forms (no list):** an applicant signature box whose own cell
+  label says SIGNATURE, dated in the applicant date box on the same row. All 13 applicant forms; never initials (each
+  is a legal choice - UM rejection, credit notice); never ACORD 130's Signature_A, which is the Minnesota "I have no
+  employees and an estimated exposure of zero" attestation under the same tooltip as the real line (Signature_B).
+  The date is the signer's local date (browser offset, bounded).
+- **Locked to what was signed:** each form records the fingerprint of its values (signature boxes excluded) as the
+  client reviewed it. A save with no change keeps the signature; any changed value (an edit, a questionnaire answer, a
+  fix) stops painting it and the producer is told to send again. The client page refuses to sign forms changed after
+  it was opened ("Please review them again").
+- **Stored encrypted** (signature_requests row and the session row), checked (real PNG / JPEG by magic bytes, size,
+  pixel cap, not blank), re-encoded as PNG and trimmed to its ink (a 440 x 140 pad signature fills the 12 pt line).
+  Never in plaintext, never in an answer, never counted as a question. Account deletion deletes the requests.
+- Painted by the one render door every view and download already uses, plus the save and the producer's Sign button,
+  so neither drops it. The viewer draws nothing over a painted box; the side panel's "To be signed by the applicant"
+  rows go once signed.
+- Activity Log: "Sent for signature", "Client signed" (added to the producer's feed on purpose). E-mails: the client's
+  request and the producer's "signed" notice (names escaped).
+- The shared pad also fixes strokes landing off the finger on a phone (the producer's pad had the same bug).
+
+**Not done / decisions left:** Brent has not been asked whether carriers accept a built-in signature (the owner chose
+built-in). Initials and the 130 Minnesota line stay for the applicant to complete by hand. The cover page does not
+print a "signed" line.
+
+**Evidence (offline):**
+- New tests: `tests/test_package_page_1oct.py` (64: the state door on every job state and timestamp shape, the heartbeat
+  on the real queue backends - never overwriting a finished job, the 409 locks on all five writers and their order,
+  GET /api/session order / last form / the raced completed job, the active-form endpoint and its SQL, the frontend
+  helper run in node, both layouts) and `tests/test_applicant_signature_1oct.py` (70: the lines on all 17 REAL
+  templates, 130's Minnesota line, row pairing, the fingerprint, picture checks, the signing date, one-time signing
+  with every refusal writing nothing, painting on the real 125 / 130 / 131 / 137_CO with and without the producer,
+  stale forms, the side panel, the HTTP edge, the screens).
+- The new SQL ran on the real Postgres inside a rolled-back transaction (temp table): the claim is atomic - a second
+  sign on the same link returns nothing; the active-form UPDATE and the heartbeat UPDATE plan cleanly (EXPLAIN).
+- Tests changed on purpose (each says so in place): `test_step2_orbin_29sep.py` (the rail footer label is now
+  `scoreHeading(...)`; an editor reply now carries Key Details), `test_item16_reviewed_30sep.py` (same),
+  `test_h7_audit_history.py` (the Activity Log shows 11 event types - the two signature events added on purpose),
+  `test_final_run_fixes_30sep.py` / `test_viewer_items_10_18_30sep.py` (the overlay and double-click skip a painted box).
+- Full suite after the question rework and the review fixes: **11,762 passed / 1 failed / 19 skipped** (after the owner's 1 Oct night round, incl. the G2 and Y/N fixes; the known
+  `test_arq_acord125_missing_only`; `test_owner_asks_1oct.py` pinned the old submit line - the marker is added on
+  purpose, the TEST changed). Lint 74 = baseline, 0 errors; build clean.
+
+**Retest R8 - item 1 (restart the backend; hard-refresh):**
+
+| ID | Do | Pass when |
+|---|---|---|
+| R8a | Dashboard: click a package that HAS generated forms | The package page opens (not the editor). Button: "Continue where you left off". The score card reads "Total Package Score" with no "It can change when forms are generated". Under Key details: "Your forms", each with its score and an Open link |
+| R8b | Click Open on the 3rd form. In the editor switch to another form, go back to the dashboard, click the package, then "Continue where you left off" | The editor opens on the form you were last on (not the first form) |
+| R8c | On that package page: Documents, then Data Consistency (if it has conflicts) | The type picker, Exclude / Include and Supporting only are greyed with "Forms are generated - make changes in the form editor."; Confirm is off. Review data still works. A hard stop's "Open to fix" still works |
+| R8d | Click a package with NO forms yet | Exactly as before: "Continue to form selection", the score "so far" with its note |
+| R8e | Start generating a package, open the dashboard in a second tab and click that package while it runs | The page says "Your forms are being generated."; "Continue where you left off" shows the progress screen and then the editor |
+| R8f | Start generating, stop the backend (Ctrl+C) mid-run, start it again with `GENERATION_STALE_AFTER_SECONDS=60`, wait a minute, click the package | "Generation didn't finish. Continue to form selection to generate the forms again." - never a spinner; generating again works |
+
+**Retest R9 - item 14, as a questionnaire question (RESTART the backend - it creates `signature_requests`; hard-refresh):**
+
+| ID | Do | Pass when |
+|---|---|---|
+| R9a | Editor: Send to Client | Applicant Information lists "Please sign your insurance application." - **ticked by default**. No "Send for Signature" button anywhere |
+| R9b | Send it to your own e-mail, open the link (also once on a phone) | The question shows ONLY the signature pad (Draw / Upload Image) - no forms list, no consent box, no name. Drawing follows the finger; a phone photo uploads |
+| R9c | Draw a signature, answer one other question, Submit | "Thank You!"; the summary lists the signature question as "Signed" and counts it as a question |
+| R9d | Editor: refresh; open the 125's last page | Side panel "Applicant Signature": "Signed on <date> by <the name you sent the questionnaire to>". APPLICANT'S SIGNATURE shows the signature, DATE the date - even though your other answer changed the form; the producer's line is untouched; no "To be signed by the applicant" rows |
+| R9e | Download the 125 | The signature and the date are in the PDF |
+| R9f | Change any value on the 125 and save | The signature disappears; the panel says "Signature no longer matches - send for signature again." |
+| R9g | Send another questionnaire, leave the signature BLANK, submit | Nothing is signed; the earlier signature (if still valid) stays |
+
+**Owner, 1 Oct night: "i dont need a new send for signature button, we need to send it as a question along with
+other questions" - DONE.** The signature is now ONE question in Send to Client ("Please review your completed
+application forms and sign them."), offered (not pre-ticked) whenever a generated form has an applicant line. The
+"Send for Signature" button, its window, the standalone /sign page and the request e-mail are gone; the side panel's
+"Applicant Signature" status stays.
+- Send: the question is rebuilt from the session (never trusted from the request) and gets its own signing request;
+  its token rides the stored question (`arq_routes.send_arq`, `client_view`).
+- The client: the question shows the forms (View form), the consent box, their name and the pad (draw / upload).
+  Submit sends the signature FIRST (its own endpoint - an image cannot ride a 500-character answer), then the
+  answers with the "signed" marker. The marker is kept only when the signature is really stored; it is never
+  stamped on a form box; the receipt shows "Signed" and it counts as a question.
+- **The signature is recorded on the forms AFTER the client's answers are applied** (`applicant_signing.finalize`
+  in the submit route), so it covers the forms as they print with the client's own answers in - signing before the
+  answers would have made every signature stale at once. Recorded once: a later call never re-validates.
+
+**Owner's live check, 1 Oct night (session `55325284`) - three changes and one bug:**
+- **The bug: the drawn signature never reached the form.** The stored data showed why: the signing request was still
+  `pending` and the questionnaire answers carried no signature - the client page counted the signature as ready only
+  once every form was opened, the consent box ticked, a name typed AND a signature drawn, and with any one missing
+  Submit went ahead WITHOUT it, silently. The question is now just the pad (below), so a drawn signature is always
+  sent. Replayed offline on that session's real 125: signed, painted on APPLICANT'S SIGNATURE, dated 10/01/2026.
+- **Pre-ticked** like the critical questions (`force_preselect`, the owner-decision flag the selector already reads).
+- **Only the signature** (owner: "remove this section, just ask for signature, either to draw or to upload pic"): no
+  forms list, no consent box, no name. The signer is recorded as the person the questionnaire was sent to; a consent
+  is recorded only if a page sends one. The two public "view" endpoints (forms list, form PDF) went with it - only
+  `POST /api/applicant-sign/sign/{token}` stays public.
+- **Yes / No boxes are no longer highlighted** (owner: "why are all these y/n fields highlighted, remove it") - no
+  tint, no outline, no legend, in either mode. They stay editable. Reverses the item 18 view-mode highlight (R7b).
+
+**Adversarial review (5 reviewers + 5 skeptics): 38 findings, 29 confirmed, all fixed or logged.**
+Fixed:
+- A failed / refused Generate re-reads the package (a run still going opens the progress screen, a finished one the
+  editor) instead of inviting a retry the server refuses; the e-mail / URL resume does the same.
+- While a run is live, resolve-issue / reopen-issue refuse with 409 (the run stamps from older facts; a fix would
+  sit in the facts with no box showing it).
+- A run that made no forms keeps its marker ("Generation didn't finish"); the heartbeat beats on the wall clock (a
+  sleeping Mac no longer reads a live run as dead).
+- No dead "Fix in Data Consistency" / "Add form" once forms exist or are generating; locked items are not counted as
+  "needs your input"; the running copy; no "Review Before Generating" banner after generation; a missing package
+  score no longer leaves the pre-generation "so far" number on screen.
+- Initials (UM rejection, credit notice) now count in the signed-form fingerprint - initialled after signing, the
+  signature no longer matches. "Signed" is reported only when the image can be painted (another key / a rotation
+  reads "send again").
+- The client's review copy never shows an earlier signer's signature; it renders off the event loop; a deleted
+  package reads "not found". Signature images are never retired from the session.
+- Deleting a package deletes its signing requests and its PDFs - and only the OWNER's: the PDF delete used to run
+  for any session id (pre-existing). Account deletion also deletes the rendered PDFs (they can carry signatures).
+- The pad keeps its shape (a stretched canvas distorted the stored signature); a phone photo is scaled down to
+  1600 px in the browser (the server's 4000 px cap was hit only at Sign).
+- After a save, the viewer re-reads its boxes and the panel its signature status.
+Logged, not fixed: `scripts/rekey_encryption.py` does not re-key the two new signature stores (after a key rotation
+they read "send again"); ACORD 130's always-required applicant box is still the Minnesota line in the side panel and
+the viewer's yellow (pre-existing - the PAINTING is right).
+
+**Owner's retest, 1 Oct night (localhost): PASSED** - the client's drawn signature prints on the 125's applicant
+line after a refresh (R9c-d), and no Yes / No box is highlighted (R10a). Item 1 (the package page, R8) also verified
+working by the owner. Not yet reported: R9e-g (download, the stale message after an edit, a blank signature).
+
+**Retest R10 (same restart):**
+
+| ID | Do | Pass when |
+|---|---|---|
+| R10a | (superseded by R10b - the owner wants answered ones highlighted) | - |
+| R10b | Open the 126 (or any form with Yes / No questions); then Edit form, type Y in a blank one, then clear it | A blank Y/N box is plain (no yellow, no amber), an answered one wears its answer's colour (green / pink / orange), no blue anywhere; the toolbar's Required count does not include blank Y/N boxes; Y/N boxes stay editable |
+
+### Grade of Michelle's 22 points - 1 Oct 2026, late night (after items 1 and 14 verified on localhost)
+
+- **Done (8):** 1, 2, 3, 6, 9, 10, 16, G1. (18 seen working too - listed with its catch below.)
+- **Done, with a catch (7):** 4 (the proposed effective date is already past on an older dec); 8 and 11 (the premiums
+  are the EXPIRING ones - Brent not asked); 14 (tried live incl. download and edit-after-signing; the producer cannot
+  edit the client's signature. Catch: Brent not asked whether carriers accept a built-in signature; initials and 130's
+  Minnesota line stay manual); 15 (lowers weak and some 1-5 year packages - Brent not told); 18 (a Y/N box is highlighted
+  only when answered, in its answer's colour, all editable - seen working; catch: the client never answers Y/N in the
+  questionnaire, owner's call); 19 (the
+  download review seen live; catch: the premises "own or rent?" is asked twice there).
+- **G2 is done too** (seen working 1 Oct night; catch: several landlords on one 125 and the ACORD 25 holder are not
+  built). **Q is done** (client side seen working 1 Oct night; the producer's receipt should read the same numbers).
+  **Left (5):** 7 (tell Brent); 13 (confirm with Brent); 17 (retype half - check: on session `55325284` retype the
+  landlord ZIP 7870 -> 78701 on 125 page 3; the box loses its green, "12 Client" -> "11 Client"); was: Q (the client's header / ring and the producer's receipt not yet reported); 5 and 12 declined (tell
+  Michelle - above).
+- **Fixed from the download window (1 Oct night):** a FALSE "shows 798-378-9751 but the source value is 7983789751" -
+  `field_qa._value_matches` compares a phone / fax by its digits now. Checked, NOT a defect: "Prior claims are known"
+  - the client answered "Yes - we have had claims or losses".
+- Everything is localhost only: nothing since `4f7e7db` is committed or deployed, so Michelle sees none of it.
+
+### Owner's decisions on the open points - 1 Oct 2026, late night
+
+- **2:** done - the forms-first wording stays for now.
+- **7:** tell Brent (two writing companies printed on page-one CARRIER, "; "-joined; Michelle's ThinkSmith account has
+  no Contact Phone - set it before her run).
+- **13:** SIC / NAICS are entered by the producer and are not on dec pages - confirm once more with Brent.
+- **18:** built - a Y/N box is highlighted only when answered, in its answer's own colour (no blue), blank ones plain,
+  all editable (R10b). Tell Michelle the colours.
+- **5, 12:** declined - tell Michelle why (below).
+
+**How to check 17 (green "Client" boxes - the producer-retype half):**
+1. Open a package whose client answered the questionnaire (session `bfa8711d` - its FEIN `42-3456790` prints green on
+   the 125, page 1).
+2. Note the toolbar's "N Client" count. Press Edit form, type a different FEIN (e.g. `42-1111111`) over the green box,
+   Done editing - save.
+3. Pass: the box is no longer green (a plain producer value), the "Client" count drops by one, and after Refresh it
+   stays that way; the side panel does not call it the client's. (Typing back the client's exact value is not an edit:
+   it stays green.)
+
+**G2 live check, 1 Oct night (session `55325284`) - FAILED, fixed offline:** the client picked Tenant and nothing
+appeared, and the producer's card had no "If the answer is Tenant, also asks" line. Cause: the list already held "own
+or rent?" from another question generator, and `_maybe_inject_premises_questions` added the landlord follow-ups ONLY
+when it created that question itself - so on this package they were never generated. They now attach to the interest
+question whoever added it (one-location and per-location alike); replayed on `55325284`: `landlord_name` /
+`landlord_address` now go out as follow-ups of `premises_interest`. Test:
+`test_the_landlord_follows_an_interest_question_another_generator_already_added`. **A questionnaire sent BEFORE the
+fix keeps its old questions - send a new one to re-check.** **Re-checked live the same night: PASSED** - Tenant showed
+the two landlord questions; after submit the 125 printed TENANT (green) on page 2 and, on page 3 row A, CBRE Group Inc /
+100 Main St / Austin TX, OTHER "Landlord", CERTIFICATE, LOCATION 1. Notes: the ZIP printed "7870" because the client
+typed four digits (a landlord ZIP is not length-checked); the client's "You may also need to provide supporting
+documents" is correct here - the client had answered "Yes - we have had claims or losses", so loss runs are owed.
+
+**How to check G2 (the landlord, from the client):**
+1. Send to Client with "Premises interest - owner or tenant" ticked (Locations group). Its card says "If the answer is
+   Tenant, also asks: ...", and the landlord is NOT a separate tick.
+2. Open the link: pick **Owner** - no landlord questions; pick **Tenant** - "landlord's name" and "landlord's address"
+   appear just below, indented.
+3. Answer Tenant, `CBRE Group Inc`, `100 Main St, Austin, TX 78701`; submit; in the editor press Refresh on the 125.
+4. Pass: page 2 premises TENANT ticked (green); page 3 ADDITIONAL INTEREST row A prints the landlord, OTHER "Landlord",
+   CERTIFICATE ticked, LOC # 1.
+5. Two or more locations (needs a package with 2+ premises): each location is asked by its address with its own
+   landlord follow-ups (R7f). Correction to the earlier grade: per-location asking IS built; what is not built is
+   printing several landlords on the 125 (one row prints only when exactly one location has a landlord) and the
+   ACORD 25 certificate holder.
+
+**For Brent:** (1) two writing companies on 125 page-one CARRIER, NAIC / POLICY NUMBER blank; (2) the page-one premiums
+are the EXPIRING ones on a dec renewal; (3) SIC / NAICS are producer-entered (confirm); (4) "No known losses" lowers
+weak and some 1-5 year packages; (5) carriers accepting the built-in applicant signature; (6) the D6 note on card
+numbers and dismissal credits.
+
+**For Michelle:**
+- **Item 5 ("contacts are in the dec"):** all 271 pages were read: the dec prints no insured contact person, phone or
+  e-mail. The only person named is ERIN ROYAL under the auto "NAMES OF INDIVIDUALS" (a drive-other-car listing, not a
+  contact), and the only phone numbers are your agency's (303-996-7800) and EMC's claim lines. Erin's 303-521-0561 and
+  erin@orbin.com came from the questionnaire. Ask which page she means.
+- **Item 12 ("tenant; revenue $0"):** the dec never calls Orbin a tenant (the word appears only in policy wording), so
+  Primble asks the client "own or rent?" (and the landlord when they rent). The 125's ANNUAL REVENUES box asks for
+  "the annual revenue amount for this location" - the business's revenue at that premises, not the building's - so a
+  one-location business prints its total revenue there, never $0.
+- **Item 18 (Y/N colours):** a Yes / No question is highlighted only once it has an answer, in the colour of who
+  answered it - green the client, pink AI-filled and found in your documents, orange AI-filled to verify; an
+  unanswered one is plain; double-click any box to change it.
+
 ### Where it all stands - 1 Oct 2026, after the owner's retest (`bfa8711d`)
 
 - **The retest passed** on every audit wrong value (W1-W9), typed edits (E1-E4), the Sign button (G1-G3), the side
@@ -1898,6 +2196,7 @@ hard-refresh the browser (Cmd+Shift+R).
   on Render with her account; (4) send the pending questions (Michelle: 5, 12, 13; Brent: two carriers, expiring
   premiums, No Known Losses, 14, and the D6 note on card numbers and dismissal credits); (5) items 1 and 14 and the
   remaining halves (2's wording, 18's client half, G2's client path and the ACORD 25 holder).
-- **Not touched (on purpose):** items 1 and 14 (owner: not yet), 5 and 12 (need Michelle), item 2's forms-first
-  wording, item 18's client half (owner declined), the location-table edit that wipes LOC # / county / revenue
-  (logged), and the question 4 policy order.
+- **Items 1 and 14 built (1 Oct night, owner's approvals)** - see "Items 1 and 14" above; retest R8 / R9 / R10. Item 14
+  is a pre-ticked questionnaire question asking only for the signature; the Y/N highlight is removed (owner).
+- **Not touched (on purpose):** 5 and 12 (need Michelle), item 2's forms-first wording, item 18's client half (owner
+  declined), the location-table edit that wipes LOC # / county / revenue (logged), and the question 4 policy order.

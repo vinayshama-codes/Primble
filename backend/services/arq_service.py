@@ -2672,35 +2672,53 @@ LANDLORD_FIELDS = ("landlord_name", "landlord_address")
 
 def _maybe_inject_premises_questions(questions: List[dict], facts: dict, flags: dict,
                                      form_ids, generated_forms: Optional[dict] = None) -> None:
-    """Orbin 22 Sep item 12 / G2 (29 Sep 2026): the ONE premises' interest, and
-    a tenant's landlord - OPTIONAL client questions, never pre-selected.
+    """Orbin 22 Sep item 12 / G2: each premises' interest, and a tenant's
+    landlord - OPTIONAL client questions, never pre-selected. Only when ACORD 125
+    is in the package (services/premises_interest.py).
 
-    Asked only when ACORD 125 is in the package and it has exactly one location
-    (services/premises_interest.py):
-      * the interest, when neither the row nor a person has stated it and the
-        form shows no ticked interest box. The insured sees the plain question
-        and the three choices - never the producer card's evidence;
-      * the landlord's full name and address, only once the interest is TENANT.
-    Two or more locations, or any other package: nothing is added.
-    """
+    ONE location (29 Sep 2026): the interest, when neither the row nor a person
+    has stated it and the form shows no ticked interest box - the insured sees
+    the plain question and the three choices, never the producer card's
+    evidence. TWO OR MORE (1 Oct 2026): the same question for every location
+    whose row states no interest, naming its address.
+
+    The landlord's full name and address are asked for a location already known
+    to be rented, and - 1 Oct 2026, the owner - as FOLLOW-UPS of the interest
+    question itself: shown to the client the moment they answer that the
+    business rents the space (`services/follow_ups.py`). Before, the landlord
+    was asked only when Tenant had been confirmed before sending."""
     if "ACORD_125" not in {str(f) for f in (form_ids or []) if f}:
         return
     try:
         from services import premises_interest as _pi
         from services.answer_options import options_for
+        from services.follow_ups import show_if as _show_if
     except Exception:                                         # noqa: BLE001
         return
     facts = facts or {}
-    if _pi.one_premises_row(facts) is None:
+    rows = _pi.premises_rows(facts)
+    if not rows:
         return
     asked = {q.get("field_name") for q in questions} | \
             {q.get("_canonical_key") for q in questions}
+    tenant_labels = _pi.tenant_option_labels()
 
-    def _append(field_name: str, options=None) -> None:
+    def _interest_asked(field_name: str) -> bool:
+        """The interest question goes out - added here, or already in the list
+        from another generator. Either way its landlord follow-ups go with it:
+        they used to be added only when THIS function created the question, so
+        a package whose list already held it never asked the landlord (the
+        owner's live run, 1 Oct night)."""
+        return field_name in asked
+
+    def _append(field_name: str, base: str, *, question: Optional[str] = None,
+                options=None, follow_up_of: Optional[str] = None) -> bool:
+        if field_name in asked:
+            return False
         q = {
             "field_name":         field_name,
-            "question":           _FIELD_QUESTION_MAP[field_name],
-            "hint":               _FIELD_HINT_MAP.get(field_name, ""),
+            "question":           question or _FIELD_QUESTION_MAP[base],
+            "hint":               _FIELD_HINT_MAP.get(base, ""),
             "forms":              "",
             "form_ids":           [],
             "field_type":         "select" if options else "text",
@@ -2711,20 +2729,59 @@ def _maybe_inject_premises_questions(questions: List[dict], facts: dict, flags: 
         }
         if options:
             q["options"] = list(options)
+        if follow_up_of:
+            if not tenant_labels:
+                return False                  # nothing could ever show it
+            q["show_if"] = _show_if(follow_up_of, tenant_labels)
+            q["follow_up_of"] = follow_up_of
         questions.append(q)
+        asked.add(field_name)
+        return True
 
-    kind = _pi.single_premises_interest(facts)
-    if kind is None:
-        _form = (generated_forms or {}).get("ACORD_125") or {}
-        _state = _form.get("field_state") or _form.get("mapped") or {}
-        if (PREMISES_INTEREST_FIELD not in asked
-                and not _pi.fact_is_answered(facts, PREMISES_INTEREST_FIELD)
-                and not _pi.form_shows_interest(_state)):
-            _append(PREMISES_INTEREST_FIELD, options_for(PREMISES_INTEREST_FIELD))
-    elif kind == _pi.TENANT:
-        for field_name in LANDLORD_FIELDS:
-            if field_name not in asked and not _pi.fact_is_answered(facts, field_name):
-                _append(field_name)
+    def _landlord(name_field: str, address_field: str, have_name: bool, have_address: bool,
+                  where: str, follow_up_of: Optional[str]) -> None:
+        if not have_name:
+            _append(name_field, LANDLORD_FIELDS[0], follow_up_of=follow_up_of, question=(
+                f"What is the full name of your landlord at {where} (the owner of the "
+                f"building you rent)?" if where else None))
+        if not have_address:
+            _append(address_field, LANDLORD_FIELDS[1], follow_up_of=follow_up_of, question=(
+                f"What is your landlord's full mailing address for {where}? "
+                f"(Street, City, State, ZIP)" if where else None))
+
+    if len(rows) == 1:
+        kind = _pi.single_premises_interest(facts)
+        have = [_pi.fact_is_answered(facts, f) for f in LANDLORD_FIELDS]
+        if kind is None:
+            _form = (generated_forms or {}).get("ACORD_125") or {}
+            _state = _form.get("field_state") or _form.get("mapped") or {}
+            if (not _pi.fact_is_answered(facts, PREMISES_INTEREST_FIELD)
+                    and not _pi.form_shows_interest(_state)):
+                _append(PREMISES_INTEREST_FIELD, PREMISES_INTEREST_FIELD,
+                        options=options_for(PREMISES_INTEREST_FIELD))
+            if _interest_asked(PREMISES_INTEREST_FIELD):
+                _landlord(*LANDLORD_FIELDS, *have, "", PREMISES_INTEREST_FIELD)
+        elif kind == _pi.TENANT:
+            _landlord(*LANDLORD_FIELDS, *have, "", None)
+        return
+
+    for pos, row in enumerate(rows, start=1):
+        where = _pi.premises_address(row) or f"location {pos}"
+        name_f = _pi.location_field(LANDLORD_FIELDS[0], pos)
+        addr_f = _pi.location_field(LANDLORD_FIELDS[1], pos)
+        have = (_pi.row_states(row, _pi.ROW_LANDLORD_NAME_KEY),
+                _pi.row_states(row, _pi.ROW_LANDLORD_ADDRESS_KEY))
+        got = _pi.row_interest(row)
+        if got is None:
+            interest_f = _pi.location_field(PREMISES_INTEREST_FIELD, pos)
+            _append(interest_f, PREMISES_INTEREST_FIELD,
+                    options=options_for(PREMISES_INTEREST_FIELD),
+                    question=(f"Does your business own the building at {where}, "
+                              f"or rent the space it uses?"))
+            if _interest_asked(interest_f):
+                _landlord(name_f, addr_f, *have, where, interest_f)
+        elif got[0] == _pi.TENANT:
+            _landlord(name_f, addr_f, *have, where, None)
 
 
 # ---------------------------------------------------------------------------
@@ -4476,6 +4533,21 @@ async def submit_arq_answers(
         field_name = q["field_name"]
         raw_val    = raw_answers.get(field_name, "")
 
+        # Orbin item 14: the signature question's answer is the "signed" marker,
+        # kept only when its signing request really holds a stored signature -
+        # a crafted payload cannot claim one. Never applied to a form box.
+        if q.get("field_type") == "signature":
+            if str(raw_val or "").strip() == "__SIGNED__":
+                try:
+                    from services import applicant_signing as _asg
+                    _row = await _asg.get_by_token(q.get("sign_token")) if _asg.valid_token(q.get("sign_token")) else None
+                except Exception:                                   # noqa: BLE001
+                    _row = None
+                if _row and _row.get("status") == _asg.STATUS_SIGNED:
+                    cleaned[field_name] = "__SIGNED__"
+                    updated_fields.append(field_name)
+            continue
+
         # Explicit client "I'm not sure" — recorded as a follow-up item, never as
         # an answer. Iterating over `questions` (not over client-supplied keys)
         # also bounds this list to fields that were actually sent, so a crafted
@@ -4930,6 +5002,62 @@ def _refresh_acord125_landlord(generated: dict, before: Optional[dict], after: d
     return touched
 
 
+_LOCATION_INTEREST_SUBKEYS = frozenset({
+    "is_owner", "is_tenant", "is_other_interest", "other_interest_description"})
+
+
+def _restamp_location_interest(generated: dict, facts: dict) -> List[str]:
+    """The premises INTEREST boxes after a per-location interest answer (G2,
+    1 Oct 2026). Only the interest columns of `property_locations` are replayed
+    through the stamper's own row resolver, and only a box whose value CHANGED
+    takes the client's label - unlike `_restamp_schedule_into_forms`, which
+    labels every cell of a table the client sent, and would have relabelled the
+    documents' addresses as the client's. Returns the forms it changed."""
+    touched: List[str] = []
+    try:
+        from services.pdf_service import (
+            _SCHED_ROW_RE, _SCHED_SKIP, _SCHEDULE_REGISTRY, _resolve_schedule_row,
+        )
+    except Exception as ex:                                   # pragma: no cover
+        logger.warning("location interest restamp skipped: %s", ex)
+        return touched
+    for fid, form_data in (generated or {}).items():
+        schema = (form_data or {}).get("schema") or {}
+        state = form_data.get("field_state") or form_data.get("mapped") or {}
+        conf = form_data.get("confidence") or {}
+        cff = set(form_data.get("client_filled_fields") or [])
+        ctx = {**(facts or {}), "_form_id": fid}
+        changed = False
+        for box in schema:
+            m = _SCHED_ROW_RE.match(box)
+            sdef = _SCHEDULE_REGISTRY.get(m.group(1)) if m else None
+            if (sdef is None or getattr(sdef, "list_key", None) != "property_locations"
+                    or getattr(sdef, "sub_key", None) not in _LOCATION_INTEREST_SUBKEYS):
+                continue
+            val = _resolve_schedule_row(box, ctx)
+            if val is _SCHED_SKIP:
+                continue
+            val = "" if val is None or str(val).strip() in ("", "None", "null") else val
+            if str(state.get(box) or "").strip() == str(val).strip():
+                continue
+            state[box] = val
+            if val:
+                conf[box] = "client_arq"
+                cff.add(box)
+            else:
+                conf.pop(box, None)
+                cff.discard(box)
+            changed = True
+        if changed:
+            form_data["field_state"] = state
+            form_data["confidence"] = conf
+            form_data["client_filled_fields"] = list(cff)
+            form_data["_pdf_cache_hash"] = ""
+            form_data["pdf_bytes"] = None
+            touched.append(fid)
+    return touched
+
+
 def _mark_client_filled(cff: set, schema_field: str, provenance: str) -> None:
     """Only a CLIENT answer belongs on the client-filled list; any other
     supplier's value for the same box takes it off (it replaced the client's)."""
@@ -5216,7 +5344,9 @@ async def apply_arq_answers_to_session(
     field_to_forms: dict = {}
     for q in questions:
         fn = q["field_name"]
-        if fn in answers:
+        # The signature question (Orbin item 14) is recorded by the signing
+        # door after this apply, never stamped as a value.
+        if fn in answers and q.get("field_type") != "signature":
             field_to_forms[fn] = q.get("form_ids", [])
 
     try:
@@ -5252,8 +5382,37 @@ async def apply_arq_answers_to_session(
     confirmed_this_run: List[str] = []
     _questions_by_field = {q.get("field_name"): q for q in questions if isinstance(q, dict)}
 
+    from services.follow_ups import follow_up_shown as _follow_up_shown
+    from services import premises_interest as _pi_rows
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
+
+        # A FOLLOW-UP the client never saw (its parent's answer did not show
+        # it - e.g. the landlord after "we own the building") is not theirs to
+        # give, whatever a payload says (G2, 1 Oct 2026, services/follow_ups.py).
+        if not _follow_up_shown(_questions_by_field.get(field_name) or {}, answers):
+            logger.info("ARQ apply: %s was a hidden follow-up - not applied", field_name)
+            continue
+
+        # ONE LOCATION OF SEVERAL (G2, 1 Oct 2026): "premises_interest@loc2",
+        # "landlord_name@loc2" are cells of that location's row, never the
+        # one-premises facts. Written onto the row; the interest boxes re-stamp
+        # from it, and the 125 landlord row is refreshed after the loop.
+        _loc = _pi_rows.parse_location_field(field_name)
+        if _loc:
+            _base, _pos = _loc
+            if _pi_rows.write_location_answer(facts, _base, _pos, new_val):
+                _c5_change_log.append({
+                    "field": field_name, "fact_key": f"property_locations[{_pos}].{_base}",
+                    "previous": "", "new": str(new_val)[:200],
+                })
+                if _base == PREMISES_INTEREST_FIELD:
+                    for _fid in _restamp_location_interest(generated, facts):
+                        if _fid not in updated:
+                            updated.append(_fid)
+            if field_name not in updated:
+                updated.append(field_name)
+            continue
 
         # Chat 5 - "This is correct". A confirmation writes PROVENANCE and
         # nothing else: no box is stamped, no value changes, nothing is held. The
@@ -5534,7 +5693,8 @@ async def apply_arq_answers_to_session(
                 updated.append(_fid)
     # The client's landlord prints on ACORD 125's additional-interest row at once
     # (G2, 30 Sep 2026); a held (contradicting) answer never reached `facts`.
-    if any(_canonical_key(str(_f)) in _LANDLORD_ROW_FACTS for _f in (answers or {})):
+    if any(_canonical_key(str(_f)) in _LANDLORD_ROW_FACTS
+           or _pi_rows.parse_location_field(_f) for _f in (answers or {})):
         for _fid in _refresh_acord125_landlord(generated, _facts_before_answers, facts,
                                                "client_arq"):
             if _fid not in updated:

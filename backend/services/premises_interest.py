@@ -358,6 +358,104 @@ def premises_address(row: Any) -> str:
     return str(row.get("address") or street).strip()
 
 
+# ── Every premises: asked one location at a time (G2, 1 Oct 2026) ───────────
+# With two or more locations each one is asked its own interest - naming its
+# address - and, once the client answers that the business rents it, that
+# location's landlord. Those answers live ON THE ROW (its three interest
+# columns, `landlord_name` / `landlord_address`), never in the one-premises
+# facts above, which keep meaning exactly what they meant. Field names carry the
+# location's position: "premises_interest@loc2" is the second row.
+ROW_LANDLORD_NAME_KEY = "landlord_name"
+ROW_LANDLORD_ADDRESS_KEY = "landlord_address"
+_LOCATION_FIELD_RE = re.compile(
+    rf"^({PREMISES_INTEREST_FACT}|{LANDLORD_NAME_FACT}|{LANDLORD_ADDRESS_FACT})@loc(\d{{1,3}})$")
+
+
+def location_field(base: str, position: int) -> str:
+    return f"{base}@loc{int(position)}"
+
+
+def parse_location_field(field_name: Any) -> Optional[Tuple[str, int]]:
+    """(base fact, 1-based location position) for a per-location field name."""
+    m = _LOCATION_FIELD_RE.match(str(field_name or ""))
+    if not m or int(m.group(2)) < 1:
+        return None
+    return m.group(1), int(m.group(2))
+
+
+def premises_rows(facts: Any) -> List[dict]:
+    rows = _fact_value(facts, "property_locations")
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def tenant_option_labels() -> List[str]:
+    """The interest options that mean "the business rents" - what a landlord
+    follow-up is shown on."""
+    try:
+        from services.answer_options import PREMISES_INTEREST_OPTIONS
+    except Exception:                                         # noqa: BLE001
+        return []
+    kinds = _option_kinds()
+    return [label for label in PREMISES_INTEREST_OPTIONS if kinds.get(_norm(label)) == TENANT]
+
+
+def row_states(row: Any, key: str) -> bool:
+    """The row holds a usable value for `key` ("none" / "N/A" are answers too)."""
+    if not isinstance(row, dict):
+        return False
+    try:
+        from services.answer_semantics import fact_answered
+        return fact_answered(row.get(key))
+    except Exception:                                         # noqa: BLE001
+        return str(row.get(key) or "").strip() != ""
+
+
+def write_location_answer(facts: dict, base: str, position: int, value: Any) -> bool:
+    """Write one per-location answer onto its `property_locations` row. True
+    when the row changed. An interest answer that names no interest ("Yes",
+    blank) writes nothing; the list keeps its envelope."""
+    if not isinstance(facts, dict):
+        return False
+    held = facts.get("property_locations")
+    rows = _unwrap(held)
+    idx = int(position) - 1
+    if not isinstance(rows, list) or not (0 <= idx < len(rows)) or not isinstance(rows[idx], dict):
+        return False
+    row = dict(rows[idx])
+    before = dict(row)
+    if base == PREMISES_INTEREST_FACT:
+        got = kind_of_answer(value)
+        if got is None:
+            return False
+        kind, desc = got
+        for key, k in _KIND_OF_ROW_KEY.items():
+            row[key] = True if k == kind else None
+        row["other_interest_description"] = desc if kind == OTHER else None
+    elif base in (LANDLORD_NAME_FACT, LANDLORD_ADDRESS_FACT):
+        text = str(_unwrap(value) or "").strip()
+        row[base] = text or None
+    else:
+        return False
+    if row == before:
+        return False
+    new_rows = list(rows)
+    new_rows[idx] = row
+    facts["property_locations"] = ({**held, "value": new_rows}
+                                   if isinstance(held, dict) and "value" in held else new_rows)
+    return True
+
+
+def located_landlords(facts: Any) -> List[Tuple[int, dict]]:
+    """(1-based position, row) for every rented location whose row names a
+    landlord - the per-location record behind the one ACORD 125 interest row."""
+    out = []
+    for pos, row in enumerate(premises_rows(facts), start=1):
+        got = row_interest(row)
+        if got and got[0] == TENANT and row_states(row, ROW_LANDLORD_NAME_KEY):
+            out.append((pos, row))
+    return out
+
+
 # ── The producer's cards (ACORD 125's per-form SQS) ──────────────────────────
 
 def premises_recommendations(facts: Any, flags: Any = None,

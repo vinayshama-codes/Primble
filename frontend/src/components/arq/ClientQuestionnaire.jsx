@@ -1,7 +1,9 @@
 // ClientQuestionnaire.jsx - Final version without restore prompt and error message
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { API_BASE } from '../../config/constants';
 import ScheduleTable from './ScheduleTable';
+import SignatureQuestion from './SignatureQuestion';
+import { answersForShown, shownQuestions } from '../../utils/followUps';
 import { isBlankRow } from '../../utils/scheduleImport';
 // BUG-01: the progress rule lives in one pure module so the ring, the badge,
 // the per-question styling and the submission receipt cannot disagree.
@@ -154,6 +156,8 @@ export default function ClientQuestionnaire({ token }) {
   const [expiresAt, setExpiresAt]     = useState(null);
   const [clientName, setClientName]   = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  // Orbin item 14: the signature question's draft (kept out of the answers and the saved draft).
+  const [sigDrafts, setSigDrafts]     = useState({});
   const [answers, setAnswersState]    = useState({});
   const [scoreUpdate, setScoreUpdate] = useState(null);  // §6.2 post-remediation feedback
   // Figure 21: frozen snapshot of what the client actually submitted, built at
@@ -275,16 +279,20 @@ export default function ClientQuestionnaire({ token }) {
     }
   }, []);
 
+  // Follow-ups (G2, 1 Oct 2026): a question whose parent's answer does not show
+  // it is not on the page - not validated, not counted, not submitted.
+  const visibleQuestions = useMemo(() => shownQuestions(questions, answers), [questions, answers]);
+
   const validateAnswers = useCallback(() => {
     const errors = {};
-    questions.forEach((q) => {
+    visibleQuestions.forEach((q) => {
       const val = (answers[q.field_name] || '').trim();
       // "I'm not sure" is a valid, deliberate response - never validate it as if
       // it were a typed answer (it would fail every format rule below).
       if (val === NOT_SURE || val === CONFIRMED) return;
       // Schedules validate per cell inside the table itself, and a partly-filled
       // fleet is deliberately still submittable - so they are never blocked here.
-      if (q.field_type === 'schedule') return;
+      if (q.field_type === 'schedule' || q.field_type === 'signature') return;
       if (!val || q.field_type === 'checkbox' || q.field_type === 'select') return;
       const ft = q.field_type || 'text';
       const fn = q.field_name;
@@ -313,7 +321,7 @@ export default function ClientQuestionnaire({ token }) {
       }
     });
     return errors;
-  }, [questions, answers]);
+  }, [visibleQuestions, answers]);
 
   const sendChatMessage = async () => {
     const msg = chatInput.trim();
@@ -498,10 +506,22 @@ export default function ClientQuestionnaire({ token }) {
   // One call, one rule (see `utils/questionnaireProgress`). "I'm not sure" is
   // split out because it is a response but not an answer: both move the bar,
   // and saying which is which is the whole point of showing the split.
-  const hasResponded = (q) =>
-    respondedTo(q, answers[q.field_name], seedRef.current[q.field_name], touched);
+  // Orbin item 14: the signature question is answered once its draft is
+  // complete (forms opened, consent, name, signature) - or signed already.
+  // Never stored as a typed answer, never in the saved draft.
+  const sigAnswers = useMemo(() => {
+    const out = {};
+    Object.keys(sigDrafts).forEach((k) => { if (sigDrafts[k]) out[k] = '__SIGNED__'; });
+    return out;
+  }, [sigDrafts]);
+  const effAnswers = useMemo(() => ({ ...answers, ...sigAnswers }), [answers, sigAnswers]);
+  const effTouched = useMemo(() => new Set([...touched, ...Object.keys(sigAnswers)]), [touched, sigAnswers]);
 
-  const progress = progressCounts(questions, answers, seedRef.current, touched, NOT_SURE);
+  const hasResponded = (q) => (q.field_type === 'signature'
+    ? !!sigDrafts[q.field_name]
+    : respondedTo(q, answers[q.field_name], seedRef.current[q.field_name], touched));
+
+  const progress = progressCounts(visibleQuestions, effAnswers, seedRef.current, effTouched, NOT_SURE);
   const {
     notSure:   notSureCount,
     responded: respondedCount,
@@ -549,16 +569,22 @@ export default function ClientQuestionnaire({ token }) {
     let answeredItems = 0;
     let notSureItems  = 0;
     let checkedItems  = 0;
-    const totalConfirms = questions.filter((q) => !!q.confirm).length;
+    const totalConfirms = visibleQuestions.filter((q) => !!q.confirm).length;
     const credit = (q) => { if (q.confirm) checkedItems += 1; else answeredItems += 1; };
 
-    questions.forEach((q) => {
+    visibleQuestions.forEach((q) => {
       const raw = answers[q.field_name];
 
       // Built from `hasResponded`, the SAME rule the progress counter uses, so
       // the receipt can never credit the client for a table we pre-filled and
       // they never opened.
       if (!hasResponded(q)) return;
+
+      if (q.field_type === 'signature') {
+        credit(q);
+        items.push({ key: q.field_name, label: q.question, value: 'Signed', kind: 'answer' });
+        return;
+      }
 
       // Chat 5: "This is correct" on a value or table we already held.
       if (raw === CONFIRMED) {
@@ -606,7 +632,7 @@ export default function ClientQuestionnaire({ token }) {
 
     return {
       items, answeredItems, notSureItems, checkedItems, totalConfirms,
-      total: questions.length - totalConfirms,
+      total: visibleQuestions.length - totalConfirms,
     };
   };
 
@@ -638,6 +664,35 @@ export default function ClientQuestionnaire({ token }) {
     setFieldErrors({});
     setSubmitting(true);
     setError(null);
+    // Orbin item 14: a signature goes first, on its own endpoint (an image
+    // cannot ride an answer); its answer is then the "signed" marker. A link
+    // signed on an earlier attempt (a retried submit) counts as signed.
+    const signed = {};
+    for (const q of visibleQuestions) {
+      if (q.field_type !== 'signature') continue;
+      const d = sigDrafts[q.field_name];
+      if (!d) continue;
+      try {
+        const sr = await fetch(`${API_BASE}/api/applicant-sign/sign/${encodeURIComponent(q.sign_token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...d, tz_offset_minutes: -new Date().getTimezoneOffset() }),
+        });
+        const sb = await sr.json().catch(() => ({}));
+        if ((sr.ok && sb.success) || sb.error === 'already_signed') {
+          signed[q.field_name] = '__SIGNED__';
+          continue;
+        }
+        setError(sb.message || 'Your signature could not be saved. Please try again.');
+        document.getElementById(`q-${q.field_name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setSubmitting(false);
+        return;
+      } catch {
+        setError('Network error while saving your signature. Please try again.');
+        setSubmitting(false);
+        return;
+      }
+    }
     try {
       const res  = await fetch(`${API_BASE}/api/arq/submit/${token}`, {
         method: 'POST',
@@ -648,7 +703,7 @@ export default function ClientQuestionnaire({ token }) {
         // seed, so a payload that omits or fakes the list cannot mislabel
         // provenance - this only adds the cases the seed cannot see (a table
         // emptied, or restored to identical values).
-        body: JSON.stringify({ answers, touched: Array.from(touched) }),
+        body: JSON.stringify({ answers: { ...answersForShown(questions, answers), ...signed }, touched: Array.from(touched) }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -975,7 +1030,7 @@ export default function ClientQuestionnaire({ token }) {
 
           {/* Questions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {questions.map((q) => {
+            {visibleQuestions.map((q) => {
               const fieldType  = q.field_type || 'text';
               const isCheckbox = fieldType === 'checkbox';
               const isSelect   = fieldType === 'select';
@@ -1017,6 +1072,8 @@ export default function ClientQuestionnaire({ token }) {
                     border: `1px solid ${hasError ? '#fca5a5' : notSure ? '#fde68a' : isAnswered ? '#bbf7d0' : '#e2e8f0'}`,
                     borderRadius: 10,
                     padding: '12px 14px',
+                    // A follow-up sits under the answer that opened it.
+                    marginLeft: q.show_if ? 18 : 0,
                     background: hasError ? '#fff5f5' : notSure ? '#fffbeb' : isAnswered ? '#f0fdf4' : '#fff',
                     transition: 'border-color 0.2s, background 0.2s',
                   }}
@@ -1131,7 +1188,10 @@ export default function ClientQuestionnaire({ token }) {
                     </div>
 
                     <div>
-                      {isSchedule && isConfirmedAns ? (
+                      {fieldType === 'signature' ? (
+                        <SignatureQuestion
+                          onChange={(d) => setSigDrafts((prev) => ({ ...prev, [q.field_name]: d }))} />
+                      ) : isSchedule && isConfirmedAns ? (
                         // Chat 5: the client confirmed the list we sent.
                         <div style={{
                           padding: '10px 12px', borderRadius: 7, background: '#f0fdf4',
@@ -1455,7 +1515,7 @@ export default function ClientQuestionnaire({ token }) {
                       )}
                       {/* Not offered on a confirm item either: its escape hatch is
                           simply leaving it - nothing is lost, we keep what we hold. */}
-                      {!isSchedule && !q.confirm && (
+                      {!isSchedule && !q.confirm && fieldType !== 'signature' && (
                         <button
                           type="button"
                           onClick={() => toggleNotSure(q.field_name)}

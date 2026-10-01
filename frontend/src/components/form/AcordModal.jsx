@@ -1,5 +1,5 @@
 ﻿//AcordModal.jsx
-import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
@@ -18,6 +18,13 @@ import { useToasts } from "../../hooks/useToasts";
 import { getReviewLayout } from "../../utils/reviewLayout";
 import { packageCapReasons, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
 import ReviewRailLayout from "./review/ReviewRailLayout";
+import { SignatureStatusList } from "../signature/ApplicantSignature";
+import { fetchSignatureStatus } from "../../utils/applicantSignature";
+import {
+  GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED,
+  generationStateOf, inProducerOrder, formToOpen, lockedReason, continueLabel, scoreHeading, formRows,
+  GENERATION_DIDNT_FINISH, GENERATION_DIDNT_FINISH_NEXT, GENERATION_RUNNING_TEXT,
+} from "../../utils/packageGeneration";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -1472,7 +1479,16 @@ function SchedulePreload({ sessionId }) {
 }
 
 // ── ARQ Modal ─────────────────────────────────────────────────────────────
-function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) {
+function ARQModal({ sessionId, token, questions: allQuestions, summary, onClose, onSuccess }) {
+  // Follow-ups (G2, 1 Oct 2026: the landlord, asked once the client answers that
+  // they rent) are not picked on their own - they go with their parent question
+  // and are listed under it. Everything below counts and selects parents only.
+  const questions = useMemo(() => (allQuestions || []).filter(q => !q.follow_up_of), [allQuestions]);
+  const followUpsOf = useMemo(() => {
+    const m = {};
+    (allQuestions || []).forEach(q => { if (q.follow_up_of) (m[q.follow_up_of] = m[q.follow_up_of] || []).push(q); });
+    return m;
+  }, [allQuestions]);
   const [clientEmail, setClientEmail] = useState("");
   const [clientName, setClientName] = useState("");
   const [selectedQuestions, setSelectedQuestions] = useState({});
@@ -1519,7 +1535,9 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
       topic,
       label: ARQ_TOPIC_LABELS[topic] || "Other",
       items: clientQuestions
-        .filter(q => (q.topic_group || "other") === topic)
+        // A topic this list does not know goes under "Other" - counted AND shown,
+        // never counted in the header but drawn nowhere.
+        .filter(q => (ARQ_TOPIC_ORDER.includes(q.topic_group) ? q.topic_group : "other") === topic)
         .sort((a, b) => (ARQ_PRIORITY_RANK[a.priority] ?? 2) - (ARQ_PRIORITY_RANK[b.priority] ?? 2)),
     }))
     .filter(g => g.items.length);
@@ -1557,7 +1575,9 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
     if (!canSend) return;
     setEmailTouched(true);
     setSending(true); setError("");
-    let selectedList = questions.filter(q => selectedQuestions[q.field_name]);
+    // Generation order, each follow-up riding with its selected parent.
+    let selectedList = (allQuestions || []).filter(q => (q.follow_up_of
+      ? !!selectedQuestions[q.follow_up_of] : !!selectedQuestions[q.field_name]));
 
     // Figure 15 fix: `questions` is a prop fetched ONCE when this modal opened
     // (before the producer may have used "Fill schedules yourself" below to
@@ -1659,6 +1679,11 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             </p>
           )}
           {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
+          {(followUpsOf[q.field_name] || []).length > 0 && (
+            <p style={{ margin: "3px 0 0", fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+              If the answer is Tenant, also asks: {followUpsOf[q.field_name].map(f => f.question).join(" ")}
+            </p>
+          )}
           {/* Chat 5: a confirm item shows the client what we already hold, from
               the documents, to confirm or correct - it asks for nothing new. */}
           {q.confirm && (
@@ -3072,6 +3097,12 @@ const AcordModal = forwardRef(function AcordModal({
   const [showAddForms, setShowAddForms] = useState(false);
   const [generatedForms, setGeneratedForms] = useState({});
   const [activeFormId, setActiveFormId] = useState(null);
+  // Orbin item 1 (1 Oct 2026): clicking a package lands on its package page,
+  // which needs to know whether its forms were never generated, are being
+  // generated, exist, or did not finish (utils/packageGeneration.js). `data` is
+  // the GET /api/session payload it was read from (the progress screen's ETA).
+  const [pkgGen, setPkgGen] = useState({ state: GEN_NONE, order: [], lastOpen: null, data: null });
+  const lastRecordedFormRef = useRef(null);
   // Figure 10: close any open provenance popover when the active form changes.
   useEffect(() => { setProvCard(null); }, [activeFormId]);
   const [crossIssues, setCrossIssues] = useState([]);
@@ -3131,6 +3162,8 @@ const AcordModal = forwardRef(function AcordModal({
   const [vertaforeLoading, setVertaforeLoading] = useState(false);
   const [vertaforeSuccess, setVertaforeSuccess] = useState(false);
   const [showARQModal, setShowARQModal] = useState(false);
+  // Orbin item 14: the applicant signs the forms through a link.
+  const [sigStatus, setSigStatus] = useState(null);
   const [arqQuestions, setArqQuestions] = useState([]);
   const [arqSummary, setArqSummary] = useState(null);
   const [arqLoadingQ, setArqLoadingQ] = useState(false);
@@ -3261,6 +3294,42 @@ const AcordModal = forwardRef(function AcordModal({
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [step]);
 
+  // The editor's state from a GET /api/session payload (Orbin item 1). One
+  // place, so every way into the editor - a reopened package, "Continue where
+  // you left off", an Open link, a finished generation - lists the forms in the
+  // producer's order and opens the same form: the one asked for, else the one
+  // last open, else the first. Returns the form it opened.
+  const _loadEditorState = (d, preferredFormId = null) => {
+    const forms = inProducerOrder(d.generated_forms || {}, d.form_order);
+    setGeneratedForms(forms); setCrossIssues(d.cross_issues || []);
+    setCrossGrouped(d.grouped_cross_issues || null);
+    setIssueDiff(d.issue_diff || null);
+    setClientAnswerReview(d.client_answer_review || []);
+    // Replace, never keep: a missing package score must not leave the
+    // pre-generation "so far" number on screen as the Total Package Score.
+    setPackageSqs(d.package_sqs || null);
+    const open = formToOpen(forms, d.form_order, preferredFormId, d.active_form_id);
+    setActiveFormId(open);
+    const readyMap = {}; Object.keys(forms).forEach(fid => { readyMap[fid] = false; });
+    setPdfLoading(readyMap);
+    return open;
+  };
+
+  const _pkgGenFrom = (d) => ({
+    state: generationStateOf(d),
+    order: Array.isArray(d?.form_order) ? d.form_order : [],
+    lastOpen: d?.active_form_id || null,
+    data: d || null,
+  });
+
+  // A fresh 20 s limit for one request. The caller's own controller may have
+  // spent its 20 s already (a resume that polled a generation first), and an
+  // aborted signal made the package-page restore fail at once and drop the
+  // producer on the upload screen.
+  const _freshSignal = () => {
+    try { return AbortSignal.timeout(20000); } catch { return undefined; }
+  };
+
   // Restore a session that has NOT generated forms yet — i.e. one paused at the
   // Submission Integrity review or sitting on the review (pre-scoring) / SQS step.
   // A resumed session always re-enters at "review", never at "form_selection":
@@ -3347,29 +3416,35 @@ const AcordModal = forwardRef(function AcordModal({
         const isEssentials = user?.subscription_tier === "essentials";
         if (isEssentials && data?.session_id) {
           setSessionId(resumeSessionId); setStep("lite");
-        } else if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
-          setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
-          setCrossGrouped(data.grouped_cross_issues || null);
-          setIssueDiff(data.issue_diff || null);
-          setClientAnswerReview(data.client_answer_review || []);
-          if (data.package_sqs) setPackageSqs(data.package_sqs);
-          const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
-          const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
-          setPdfLoading(readyMap); setStep("editor");
-        } else if (!isEssentials && data && data.generation_job_id) {
+        } else if (!isEssentials && data && generationStateOf(data) === GEN_DONE) {
+          // A link into a package (the "client answered" e-mail, a sign-in
+          // return) opens its forms - the last one open.
+          setPkgGen(_pkgGenFrom(data));
+          _loadEditorState(data); setStep("editor");
+        } else if (!isEssentials && data && generationStateOf(data) === GEN_RUNNING) {
           // Reopened mid-generation (forms not persisted yet): resume the same
           // progress overlay with the remaining time and poll until the server
-          // finishes (Fig 8). Fall back to the recommendations restore if the
-          // run already failed while we were away.
+          // finishes (Fig 8). If the run did not finish, the package page says
+          // so (Orbin item 1).
+          setPkgGen(_pkgGenFrom(data));
           const done = await _resumeGeneration(resumeSessionId, data);
           if (!done) {
-            const ok = await _restoreFromExtraction(resumeSessionId, ctrl.signal);
+            // Ask the server what happened rather than guess: a network blip
+            // leaves a live run live, and a finished one opens its forms.
+            const after = await _readPackage(resumeSessionId);
+            if (after && generationStateOf(after) === GEN_DONE) {
+              setPkgGen(_pkgGenFrom(after)); _loadEditorState(after); setStep("editor");
+              return;
+            }
+            setPkgGen(after ? _pkgGenFrom(after) : (p => ({ ...p, state: GEN_INTERRUPTED })));
+            const ok = await _restoreFromExtraction(resumeSessionId, _freshSignal());
             if (!ok) { setStep("dashboard"); setSessionId(null); }
           }
         } else if (!isEssentials && data) {
           // In-progress submission (no forms yet) → land on the integrity review
           // or the recommendations/SQS step rather than dropping to the dashboard.
-          const ok = await _restoreFromExtraction(resumeSessionId, ctrl.signal);
+          setPkgGen(_pkgGenFrom(data));
+          const ok = await _restoreFromExtraction(resumeSessionId, _freshSignal());
           if (!ok) { setStep("dashboard"); setSessionId(null); }
         } else { setStep("dashboard"); setSessionId(null); }
       })
@@ -3557,9 +3632,17 @@ const AcordModal = forwardRef(function AcordModal({
     ...(allAvailableForms || []).map((f) => f.form_id),
   ].filter(Boolean));
 
+  // Once forms exist (the package page reopened after generation, or the
+  // editor) a form is added to the PACKAGE through the editor's own add-form
+  // window (ResolutionModal, resolve-issue `add_form`) - never by ticking it
+  // for a second generation, which the server now refuses (Orbin item 1).
+  const formsGenerated = Object.keys(generatedForms || {}).length > 0;
+
   const pendingAddForms = (it) => {
     const list = it?.resolution?.add_forms;
     if (!Array.isArray(list) || !list.length) return [];
+    if (formsGenerated) return list.filter((f) => f && !Object.prototype.hasOwnProperty.call(generatedForms, f));
+    if (lockedReason(pkgGen.state)) return [];          // a run is generating the forms now
     const tickable = tickableFormIds();
     return list.filter((f) => tickable.has(f) && !checkedFormIds.has(f));
   };
@@ -3574,6 +3657,7 @@ const AcordModal = forwardRef(function AcordModal({
   const tickedAddForms = (it) => {
     const list = it?.resolution?.add_forms;
     if (!Array.isArray(list) || !list.length) return [];
+    if (formsGenerated) return [];
     return list.filter((f) => checkedFormIds.has(f));
   };
 
@@ -3583,6 +3667,7 @@ const AcordModal = forwardRef(function AcordModal({
   // the editor, where there is no list to go back to.
   const addFormBeforeGeneration = (formId) => {
     if (!formId) return;
+    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
     setCheckedFormIds((prev) => new Set(prev).add(formId));
     setStep("form_selection");
   };
@@ -3593,7 +3678,9 @@ const AcordModal = forwardRef(function AcordModal({
     //    reconciled there, not by the inline modal - so route the producer up to
     //    that row. Checked first: it is the purpose-built path for these.
     const dcKey = issueFactKey(it);
-    const inDataConsistency = !!dcKey && (underwriting?.fields || []).some(
+    // Not once forms exist or are generating: the picker is locked then
+    // (confirm-value refuses), so the button would lead nowhere.
+    const inDataConsistency = !!dcKey && !formsGenerated && !lockedReason(pkgGen.state) && (underwriting?.fields || []).some(
       (f) => f.fact_key === dcKey && f.status === "conflict"
     );
     // 2) Otherwise, a cross-form issue carrying an inline-resolution descriptor.
@@ -3661,7 +3748,9 @@ const AcordModal = forwardRef(function AcordModal({
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
           {addable.map((fid) => (
-            <AddFormButton key={fid} formId={fid} onClick={() => addFormBeforeGeneration(fid)} />
+            <AddFormButton key={fid} formId={fid} onClick={() => (formsGenerated
+              ? openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })
+              : addFormBeforeGeneration(fid))} />
           ))}
           {itemStatusControl(it, forms)}
         </div>
@@ -3724,6 +3813,7 @@ const AcordModal = forwardRef(function AcordModal({
 
   const refreshArqData = async () => {
     if (!sessionId) return [];
+    refreshSigStatus();
     // Await the ARQ list so we can detect submitted sessions before deciding
     // whether to re-fetch session scores (§6.2 live score update requirement).
     let arqList = [];
@@ -3791,6 +3881,8 @@ const AcordModal = forwardRef(function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setIssueDiff(null);
+    setPkgGen({ state: GEN_NONE, order: [], lastOpen: null, data: null }); lastRecordedFormRef.current = null;
+    setSigStatus(null);
     // Asked upfront on the upload screen now, so it MUST be cleared here - a
     // leftover answer would otherwise be applied to the next submission.
     setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
@@ -3806,6 +3898,8 @@ const AcordModal = forwardRef(function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setIssueDiff(null);
+    setPkgGen({ state: GEN_NONE, order: [], lastOpen: null, data: null }); lastRecordedFormRef.current = null;
+    setSigStatus(null);
     // Same reason as in resetToUpload above.
     setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
     _resetSqsState();
@@ -3821,32 +3915,26 @@ const AcordModal = forwardRef(function AcordModal({
       .then(r => r.ok ? r.json() : null)
       .then(async data => {
         const isEssentials = user?.subscription_tier === "essentials";
-        if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
-          setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
-          setCrossGrouped(data.grouped_cross_issues || null);
-          setIssueDiff(data.issue_diff || null);
-          setClientAnswerReview(data.client_answer_review || []);
-          if (data.package_sqs) setPackageSqs(data.package_sqs);
-          const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
-          const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
-          setPdfLoading(readyMap); setStep("editor");
-        } else if (isEssentials && data?.session_id) {
+        if (isEssentials && data?.session_id) {
           setSessionId(sid); setStep("lite");
-        } else if (!isEssentials && data && data.generation_job_id) {
-          // Reopened mid-generation (forms not persisted yet): resume the same
-          // progress overlay with the remaining time and poll until the server
-          // finishes (Fig 8). Fall back to the recommendations restore if the
-          // run already failed while we were away.
-          const done = await _resumeGeneration(sid, data);
-          if (!done) {
-            const ok = await _restoreFromExtraction(sid, ctrl.signal);
-            if (!ok) { setStep("upload"); setSessionId(null); }
-          }
         } else if (!isEssentials && data) {
-          // In-progress submission (no forms yet) → land on the integrity review
-          // or the recommendations/SQS step rather than dropping to upload.
-          const ok = await _restoreFromExtraction(sid, ctrl.signal);
-          if (!ok) { setStep("upload"); setSessionId(null); }
+          // Orbin item 1 (client, 22 Sep): a package click ALWAYS lands on the
+          // package page - forms generated, generating, or not yet. Its button
+          // then reads "Continue where you left off" (the editor, or the
+          // progress screen) or "Continue to form selection".
+          const gen = _pkgGenFrom(data);
+          setPkgGen(gen);
+          if (gen.state === GEN_DONE) _loadEditorState(data);
+          else setGeneratedForms({});
+          const ok = await _restoreFromExtraction(sid, _freshSignal());
+          if (!ok) {
+            if (gen.state === GEN_DONE) {
+              // The package page could not load; the forms still can.
+              setStep("editor");
+            } else if (gen.state === GEN_RUNNING && await _resumeGeneration(sid, data)) {
+              // reached the editor
+            } else { setStep("upload"); setSessionId(null); }
+          }
         } else { setStep("upload"); setSessionId(null); }
       })
       .catch(() => { setError("Could not load session. Please try again."); setStep("upload"); setSessionId(null); })
@@ -4274,6 +4362,9 @@ const AcordModal = forwardRef(function AcordModal({
       const job = await res.json();
       if (job.status === "completed") return job;
       if (job.status === "failed") throw new Error(job.error || "Processing failed on the server");
+      // Orbin item 1: the run's heartbeat stopped - its process died (restart,
+      // deploy, crash). Waiting longer only spins (services/generation_state).
+      if (job.stale) throw new Error(GENERATION_DIDNT_FINISH);
     }
     throw new Error("Processing timed out. Please try again.");
   };
@@ -4295,16 +4386,14 @@ const AcordModal = forwardRef(function AcordModal({
     setResumeGenEta(Math.max(30, Math.round(totalEta - elapsed)));
     setShowGenerateOverlay(true);
     try {
-      if (data.generation_job_id) await _pollJobStatus(data.generation_job_id);
+      // A live run keeps its job fresh (heartbeat), so wait as long as it lives -
+      // up to an hour - instead of giving up at five minutes on a big package.
+      if (data.generation_job_id) await _pollJobStatus(data.generation_job_id, 1200);
       const r = await fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include" });
       const d = r.ok ? await r.json() : null;
-      if (d && d.generated_forms && Object.keys(d.generated_forms).length > 0) {
-        setGeneratedForms(d.generated_forms); setCrossIssues(d.cross_issues || []);
-        setCrossGrouped(d.grouped_cross_issues || null);
-        if (d.package_sqs) setPackageSqs(d.package_sqs);
-        const firstId = Object.keys(d.generated_forms)[0]; setActiveFormId(firstId);
-        const readyMap = {}; Object.keys(d.generated_forms).forEach(fid => { readyMap[fid] = false; });
-        setPdfLoading(readyMap); setStep("editor");
+      if (d && generationStateOf(d) === GEN_DONE) {
+        setPkgGen(_pkgGenFrom(d));
+        _loadEditorState(d); setStep("editor");
         return true;
       }
       return false;
@@ -4314,6 +4403,80 @@ const AcordModal = forwardRef(function AcordModal({
       setShowGenerateOverlay(false); setResumeGenEta(null);
     }
   };
+
+  // ── The package page once forms exist (Orbin item 1) ──────────────────────
+  // Re-read the package, so the editor opens on what the server holds now (a
+  // fix made on the package page has re-stamped the forms since it loaded).
+  const _readPackage = async (sid) => {
+    try {
+      const r = await fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include" });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
+  };
+
+  // "Open" beside a form in the package page's list, and "Continue where you
+  // left off" once forms exist (formId null = the form last open).
+  const openFormFromPackage = async (formId = null) => {
+    if (!sessionId) return;
+    setLoading(true); setProcessingStage("Opening your forms...");
+    try {
+      const d = await _readPackage(sessionId);
+      if (d && generationStateOf(d) === GEN_DONE) {
+        setPkgGen(_pkgGenFrom(d));
+        _loadEditorState(d, formId); setStep("editor");
+      } else {
+        if (d) setPkgGen(_pkgGenFrom(d));
+        setError("Could not open the forms. Please try again.");
+      }
+    } finally { setLoading(false); setProcessingStage(""); }
+  };
+
+  // The package page's main button. Forms exist -> the editor, on the form last
+  // open. Forms are generating -> the progress screen, until the run finishes
+  // (-> the editor) or turns out not to have (-> "Generation didn't finish").
+  // Otherwise -> form selection, exactly as before.
+  const handleContinueFromPackage = async () => {
+    if (pkgGen.state === GEN_DONE) { await openFormFromPackage(null); return; }
+    if (pkgGen.state !== GEN_RUNNING || !sessionId) { setStep("form_selection"); return; }
+    const d = (await _readPackage(sessionId)) || pkgGen.data;
+    const state = generationStateOf(d);
+    if (state === GEN_DONE) { setPkgGen(_pkgGenFrom(d)); _loadEditorState(d); setStep("editor"); return; }
+    if (state !== GEN_RUNNING) { setPkgGen(d ? _pkgGenFrom(d) : (p => ({ ...p, state }))); return; }
+    if (await _resumeGeneration(sessionId, d)) return;
+    // The wait ended without forms. Ask the server what happened rather than
+    // guess: a network blip leaves a live run live.
+    const after = await _readPackage(sessionId);
+    if (after) {
+      setPkgGen(_pkgGenFrom(after));
+      if (generationStateOf(after) === GEN_DONE) { _loadEditorState(after); setStep("editor"); }
+      else if (generationStateOf(after) === GEN_RUNNING) setError("Your forms are still being generated. Check back in a minute.");
+    } else {
+      setError("Could not check on your forms. Please try again.");
+    }
+  };
+
+  // Orbin item 14: where the applicant's signature stands on each form.
+  const refreshSigStatus = () => { if (sessionId) fetchSignatureStatus(sessionId).then(setSigStatus); };
+  useEffect(() => {
+    if (step !== "editor" || !sessionId) return;
+    let live = true;
+    fetchSignatureStatus(sessionId).then((st) => { if (live) setSigStatus(st); });
+    return () => { live = false; };
+  }, [step, sessionId]);
+
+  // Remember the form the producer has open, so "Continue where you left off"
+  // reopens it - on the server, so it holds across devices and sign-ins.
+  useEffect(() => {
+    if (step !== "editor" || !sessionId || !activeFormId) return;
+    const key = `${sessionId}:${activeFormId}`;
+    if (lastRecordedFormRef.current === key) return;
+    lastRecordedFormRef.current = key;
+    setPkgGen(p => (p.lastOpen === activeFormId ? p : { ...p, lastOpen: activeFormId }));
+    fetch(`${API_BASE}/api/session/${sessionId}/active-form`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ form_id: activeFormId }),
+    }).catch(() => { /* best effort - the next switch records it */ });
+  }, [step, sessionId, activeFormId]);
 
   // Resume polling for an active job left in localStorage after a page reload.
   // Silent: doesn't show overlays - when the job finishes we notify via browser
@@ -4345,6 +4508,7 @@ const AcordModal = forwardRef(function AcordModal({
 
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
+    setPkgGen({ state: GEN_NONE, order: [], lastOpen: null, data: null });
     await _requestNotificationPermission();
     _markJobStart();
     // Figure 1: a client-generated token keys the live progress side-channel. The
@@ -4443,6 +4607,7 @@ const AcordModal = forwardRef(function AcordModal({
   // action: "remove_documents" (drop selected docs, re-assess) | "continue_anyway".
   const handleResolveIntegrity = async (action) => {
     if (!sessionId) return;
+    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
     if (action === "remove_documents" && removeDocIds.size === 0) {
       setError("Select at least one document to remove."); return;
     }
@@ -4514,6 +4679,7 @@ const AcordModal = forwardRef(function AcordModal({
   // "set_type" (with newType) | "exclude" | "include". Re-runs scoring server-side.
   const handleReclassify = async (docId, action, newType = null, busyBtn = null) => {
     if (!sessionId || !docId) return;
+    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
     setReclassDocId(docId); setReclassBusyBtn(busyBtn); setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/document/reclassify`, {
@@ -4736,6 +4902,7 @@ const AcordModal = forwardRef(function AcordModal({
   // otherwise, which is the behaviour this endpoint has always had.
   const handleConfirmUnderwriting = async (factKey, value, scope) => {
     if (!sessionId || !factKey) return;
+    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
     const v = (value ?? "").toString().trim();
     if (!v) { setError("Enter or select a value to confirm."); return; }
     setUnderwritingBusy(factKey); setError(null);
@@ -4766,6 +4933,22 @@ const AcordModal = forwardRef(function AcordModal({
     } finally {
       setUnderwritingBusy(null);
     }
+  };
+
+  // After a Generate that failed or was refused: is a run still going, or did
+  // it finish? Open the forms / the progress screen; false when neither.
+  const _settleAfterGenerate = async () => {
+    const d = sessionId ? await _readPackage(sessionId) : null;
+    if (!d) return false;
+    const st = generationStateOf(d);
+    if (st !== GEN_DONE && st !== GEN_RUNNING) return false;
+    setPkgGen(_pkgGenFrom(d)); setError(null);
+    if (st === GEN_DONE) { _loadEditorState(d); setStep("editor"); return true; }
+    if (await _resumeGeneration(sessionId, d)) return true;
+    const after = await _readPackage(sessionId);
+    if (after) setPkgGen(_pkgGenFrom(after));
+    setStep("review");
+    return true;
   };
 
   const handleGenerateAll = async () => {
@@ -4808,19 +4991,26 @@ const AcordModal = forwardRef(function AcordModal({
           setError(detail.message || "Building values differ across the submitted documents. Confirm the correct value before generating forms.");
           return;
         }
+        // Orbin item 1: the server refuses a second run beside a live one, and
+        // a re-generation over existing forms, with a sentence of its own.
+        if (typeof d.detail === "string" && d.detail) {
+          if (await _settleAfterGenerate()) return;
+          setError(d.detail); return;
+        }
         setError(detail.message || "Submission cannot proceed. Please review your documents."); return;
       }
       let data;
       if (res.status === 202) {
         const queued = await res.json();
         _persistActiveJob(queued.job_id, "generate");
-        try { await _pollJobStatus(queued.job_id); }
+        try { await _pollJobStatus(queued.job_id, 1200); }
         finally { _clearActiveJob(); }
         _notifyJobDone("generate", true);
         const sessRes = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
         if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
         const sessData = await sessRes.json();
-        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, grouped_cross_issues: sessData.grouped_cross_issues, package_sqs: sessData.package_sqs || null };
+        const _ordered = inProducerOrder(sessData.generated_forms || {}, sessData.form_order);
+        data = { success: true, generated: _ordered, form_ids: Object.keys(_ordered), cross_issues: sessData.cross_issues, grouped_cross_issues: sessData.grouped_cross_issues, package_sqs: sessData.package_sqs || null };
       } else {
         data = await res.json();
       }
@@ -4835,12 +5025,16 @@ const AcordModal = forwardRef(function AcordModal({
       // existed.
       setPackageSqs(data.package_sqs || null);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
+      setPkgGen({ state: GEN_DONE, order: data.form_ids || [], lastOpen: firstId, data: null });
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
       // Generating forms now consumes a credit for the free tier (client
       // 2026-07-01: count at generation, not only at download), so refresh the
       // user to keep the remaining-usage display accurate.
       refreshUser().catch(() => {});
     } catch (e) {
+      // The run may still be going (or done) on the server: never invite a
+      // retry the server would refuse.
+      if (await _settleAfterGenerate()) return;
       if (e.message === "Failed to fetch" || e.name === "TypeError") {
         setError("Generation failed: could not reach the server. Your documents are still loaded - click Generate again to retry.");
       } else {
@@ -4928,7 +5122,9 @@ const AcordModal = forwardRef(function AcordModal({
   const openConflicts = (underwriting?.fields || []).filter(f => f.status === "conflict");
   // The package's line records, for naming a line by what the policy prints.
   const dcLineRecords = (underwriting?.fields || []).map(f => f.line_records).find(r => (r || []).length) || [];
-  const openItemCount = docsNeedingReview.length + openConflicts.length;
+  // Locked once forms exist or are generating (Orbin item 1): those items
+  // cannot be acted on here, so they are not "needing your input".
+  const openItemCount = lockedReason(pkgGen.state) ? 0 : docsNeedingReview.length + openConflicts.length;
 
   // Workstream 6 §9.1 - what the Hard Stops / Warnings sections actually have to
   // show, from the same helper the completion toast uses (grouped view first,
@@ -5788,6 +5984,8 @@ const AcordModal = forwardRef(function AcordModal({
     answers_applied: "Answers applied to forms",
     reminder_sent: "Reminder sent to client",
     download: "Package downloaded",
+    signature_requested: "Sent to the client for signature",
+    applicant_signed: "Client signed the forms",
   };
   const _historyLabel = (t) => _HISTORY_EVENT_LABEL[t] || t;
   // Per-event detail line. Carries over the bespoke wording the old EVENT LOG
@@ -6189,6 +6387,7 @@ const AcordModal = forwardRef(function AcordModal({
       {showContactSales && <ContactModal user={user} onClose={() => setShowContactSales(false)} />}
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} summary={arqSummary} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
+
       {/* "Review extracted data" panel (Beta Report §4.2 item #6) */}
       {reviewData && (
         <div
@@ -7154,8 +7353,14 @@ const AcordModal = forwardRef(function AcordModal({
             canProceedWithWarning={canProceedWithWarning}
             warningStops={warningStops}
             openItemCount={openItemCount}
-            onContinue={() => setStep("form_selection")}
+            onContinue={handleContinueFromPackage}
             onFixKeyDetail={openKeyDetailFix}
+            packageGen={{
+              state: pkgGen.state,
+              forms: pkgGen.state === GEN_DONE ? formRows(generatedForms, pkgGen.order) : [],
+              lastOpen: pkgGen.lastOpen,
+              onOpenForm: openFormFromPackage,
+            }}
           />
         )}
 
@@ -7163,7 +7368,10 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="modal-step modal-step-wide">
             <div className="step-header">
               <h2 className="step-title" style={{ color: "#1e293b" }}>Review Your Submission</h2>
-              <p className="step-subtitle">Resolve what needs your input, then continue to form selection.</p>
+              <p className="step-subtitle">{pkgGen.state === GEN_DONE
+                ? "Your forms are generated. Open one below to make changes."
+                : pkgGen.state === GEN_RUNNING ? GENERATION_RUNNING_TEXT
+                : "Resolve what needs your input, then continue to form selection."}</p>
             </div>
             {/* Workstream 6 §9.1 - "what to do next" guidance. Never says "Ready"
                 while hard stops remain (acceptance criteria). */}
@@ -7188,9 +7396,20 @@ const AcordModal = forwardRef(function AcordModal({
                 if (n > 0 && advisory)  text = `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below, plus ${advisory} to review`;
                 else if (n > 0)         text = `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below`;
                 else if (advisory)      text = `Review ${advisory} below before continuing`;
+                else if (pkgGen.state === GEN_DONE || pkgGen.state === GEN_RUNNING)
+                                        text = "Nothing needs your attention - continue where you left off";
                 else                    text = "Nothing needs your attention - continue to form selection";
                 return <NextStepBanner text={text} />;
               })()}
+              {/* Orbin item 1: what happened to the package's forms. */}
+              {pkgGen.state === GEN_RUNNING && (
+                <div style={{ marginTop: 8, fontSize: 12.5, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "8px 11px" }}>{GENERATION_RUNNING_TEXT}</div>
+              )}
+              {pkgGen.state === GEN_INTERRUPTED && (
+                <div style={{ marginTop: 8, fontSize: 12.5, color: "#78350f", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 11px" }}>
+                  <strong>{GENERATION_DIDNT_FINISH}.</strong> {GENERATION_DIDNT_FINISH_NEXT}
+                </div>
+              )}
             </div>
             {/* Submission Quality Score so far (V1 H2, client section 7,
                 2026-08-27; the number restored 29 Sep 2026 - Orbin 22 Sep
@@ -7222,14 +7441,41 @@ const AcordModal = forwardRef(function AcordModal({
                   {soFar && (
                     <>
                       <div className="tier2-header">
-                        <span className="tier2-label">Submission Quality Score so far</span>
+                        <span className="tier2-label">{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score so far"}</span>
                         <span className="tier2-status" style={{ color: gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) }}>{soFar.text}</span>
                       </div>
-                      <div className="tier2-detail">It can change when forms are generated.</div>
+                      {pkgGen.state !== GEN_DONE && <div className="tier2-detail">It can change when forms are generated.</div>}
                     </>
                   )}
                   {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
                   <KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix} />
+                </div>
+              );
+            })()}
+            {/* Orbin item 1: the generated forms, each with its own score and an
+                Open link, right under the key details. */}
+            {pkgGen.state === GEN_DONE && (() => {
+              const rows = formRows(generatedForms, pkgGen.order);
+              if (!rows.length) return null;
+              return (
+                <div className="tier2-bar">
+                  <div className="tier2-header">
+                    <span className="tier2-label">Your forms</span>
+                    <span className="tier2-detail" style={{ margin: 0 }}>Each form&apos;s own score</span>
+                  </div>
+                  {rows.map((f) => (
+                    <div key={f.formId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "7px 0", borderTop: "1px solid #f1f5f9", fontSize: 12.5 }}>
+                      <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 600, color: "#1e293b" }}>{f.label}</span>
+                      <span style={{ fontWeight: 700, color: f.score != null ? gradeColor(f.grade || sqsGradeFromScore(f.score)) : "#94a3b8" }}>
+                        {f.score != null ? `${f.score}${f.grade ? ` ${f.grade}` : ""}` : "Not scored"}
+                      </span>
+                      <span style={{ color: "#94a3b8", fontSize: 11.5, minWidth: 96 }}>{f.tier || ""}</span>
+                      <button type="button" onClick={() => openFormFromPackage(f.formId)}
+                        style={{ font: "inherit", fontWeight: 600, background: "none", border: "none", padding: 0, color: "#E61B84", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" }}>
+                        Open
+                      </button>
+                    </div>
+                  ))}
                 </div>
               );
             })()}
@@ -7263,6 +7509,7 @@ const AcordModal = forwardRef(function AcordModal({
                   doc_summary (pre-UX-04 sessions). Collapsed-by-default used to
                   hide this case; now that the section always opens, say why it
                   is empty instead of showing a blank panel. */}
+              {lockedReason(pkgGen.state) && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{lockedReason(pkgGen.state)}</div>}
               {docSummary.length === 0 && (
                 <div style={{ fontSize: 11, color: "#64748b" }}>
                   No document details are available for this submission.
@@ -7283,6 +7530,8 @@ const AcordModal = forwardRef(function AcordModal({
                   // the same snapshot before either persists → last-write-wins drops
                   // the first change. Block other docs' controls while one is active.
                   const anyReclassBusy = reclassDocId !== null;
+                  // Orbin item 1: off once forms exist or are generating.
+                  const reclassLocked = !!lockedReason(pkgGen.state);
                   const reviewBusy = reviewLoadingId === d.doc_id;
                   const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
                   // Figure 3 relabel: this pill answers "how sure are we about the
@@ -7315,10 +7564,10 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                           <select
                             value={docType}
-                            disabled={anyReclassBusy}
+                            disabled={anyReclassBusy || reclassLocked}
                             onChange={(e) => { if (e.target.value && e.target.value !== docType) handleReclassify(d.doc_id, "set_type", e.target.value, "type"); }}
                             title="Correct the document type"
-                            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: `1px solid ${busy && reclassBusyBtn === "type" ? "#E61B84" : "#cbd5e1"}`, background: "#fff", color: "#334155", cursor: anyReclassBusy ? "wait" : "pointer", opacity: busy && reclassBusyBtn === "type" ? 0.7 : 1 }}
+                            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: `1px solid ${busy && reclassBusyBtn === "type" ? "#E61B84" : "#cbd5e1"}`, background: "#fff", color: "#334155", cursor: reclassLocked ? "not-allowed" : anyReclassBusy ? "wait" : "pointer", opacity: reclassLocked ? 0.55 : busy && reclassBusyBtn === "type" ? 0.7 : 1 }}
                           >
                             {availableDocTypes.map((t) => (
                               <option key={t.value} value={t.value}>{t.label}</option>
@@ -7335,9 +7584,9 @@ const AcordModal = forwardRef(function AcordModal({
                       <HoverTip text={excluded ? DOC_ACTION_TIPS.include : DOC_ACTION_TIPS.exclude} style={{ width: "auto", display: "inline-flex" }}>
                         <button
                           type="button"
-                          disabled={anyReclassBusy}
+                          disabled={anyReclassBusy || reclassLocked}
                           onClick={() => handleReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}
-                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
+                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: reclassLocked ? "not-allowed" : anyReclassBusy ? "wait" : "pointer", ...(reclassLocked ? { opacity: 0.55 } : {}), display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
                         >
                           {busy && reclassBusyBtn === "toggle"
                             ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{excluded ? "Include" : "Exclude"}</>
@@ -7349,9 +7598,9 @@ const AcordModal = forwardRef(function AcordModal({
                         <HoverTip text={supportingOnly ? DOC_ACTION_TIPS.supporting_undo : DOC_ACTION_TIPS.supporting_only} style={{ width: "auto", display: "inline-flex" }}>
                           <button
                             type="button"
-                            disabled={anyReclassBusy}
+                            disabled={anyReclassBusy || reclassLocked}
                             onClick={() => handleReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}
-                            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: reclassLocked ? "not-allowed" : anyReclassBusy ? "wait" : "pointer", ...(reclassLocked ? { opacity: 0.55 } : {}), display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
                           >
                             {busy && reclassBusyBtn === "supporting"
                               ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{supportingOnly ? "Supporting only ✓" : "Supporting only"}</>
@@ -7404,6 +7653,7 @@ const AcordModal = forwardRef(function AcordModal({
                   marginBottom={0}
                   titleRight={<ReviewCountBadge count={openConflicts.length} clearLabel="All confirmed" />}
                 >
+                {lockedReason(pkgGen.state) && openConflicts.length > 0 && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{lockedReason(pkgGen.state)}</div>}
                 {underwritingBusy !== null && (
                   <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
                     Confirming and updating everything this value affects - you can prepare any other item, confirming it will apply once this finishes.
@@ -7539,8 +7789,8 @@ const AcordModal = forwardRef(function AcordModal({
                     // so letting two race dropped confirmations (the "click
                     // multiple, none applied" lag). anyConfirmInFlight covers
                     // just the Confirm button; it never disables radios/text.
-                    const rowDisabled = busy;
-                    const anyConfirmInFlight = underwritingBusy !== null;
+                    const rowDisabled = busy || !!lockedReason(pkgGen.state);
+                    const anyConfirmInFlight = underwritingBusy !== null || !!lockedReason(pkgGen.state);
                     const picked = underwritingPicks[f.fact_key] ?? "";
                     // SYS-06: exactly one coverage line in dispute -> the
                     // answer belongs to THAT line. Two or more (or none) and
@@ -7782,7 +8032,7 @@ const AcordModal = forwardRef(function AcordModal({
                 )}
               </div>
             )}
-            {canProceedWithWarning && warningStops.length > 0 && (
+            {canProceedWithWarning && warningStops.length > 0 && !lockedReason(pkgGen.state) && (
               <div className="stops-banner stops-warning" style={{ margin: "8px 0", padding: "12px 16px", background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 8 }}>
                 <div className="stops-title" style={{ color: "#9d0f5a", fontWeight: 600, marginBottom: 6 }}>
                   Incomplete Submission - Review Before Generating
@@ -7821,9 +8071,9 @@ const AcordModal = forwardRef(function AcordModal({
               )}
               <button
                 className="btn btn-modal-primary btn-block btn-large"
-                onClick={() => setStep("form_selection")}
+                onClick={handleContinueFromPackage}
               >
-                Continue to form selection
+                {continueLabel(pkgGen.state)}
               </button>
             </div>
           </div>
@@ -9082,6 +9332,14 @@ const AcordModal = forwardRef(function AcordModal({
                       </CollapsibleSection>
                     )}
 
+                    {/* Orbin item 14: the applicant's signature on each form that has a line for it
+                        (asked in the client questionnaire). */}
+                    {(sigStatus?.forms?.some(f => f.state !== "unsigned") || sigStatus?.requests?.length > 0) && (
+                      <CollapsibleSection resetKey={activeFormId} title="Applicant Signature" tooltip="Where the client's signature stands on each form.">
+                        <SignatureStatusList status={sigStatus} onRefresh={refreshSigStatus} />
+                      </CollapsibleSection>
+                    )}
+
                   </div>
                 </>
               )}
@@ -9101,6 +9359,7 @@ const AcordModal = forwardRef(function AcordModal({
                   }
                 </button>
                 </HoverTip>
+
 
                 {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
@@ -9263,6 +9522,7 @@ const AcordModal = forwardRef(function AcordModal({
                 onSqsUpdate={(fid, newSqs, extras) => {
                   // A score has arrived for the saved state, so nothing is stale.
                   setPendingEdits(false);
+                  refreshSigStatus();        // a save can end an applicant signature (Orbin item 14)
                   setGeneratedForms(prev => ({
                     ...prev,
                     [fid]: { ...prev[fid], sqs: newSqs }

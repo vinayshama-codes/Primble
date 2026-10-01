@@ -327,7 +327,9 @@ def test_the_nine_product_event_names_are_unchanged():
           ).read_text(encoding="utf-8", errors="replace")
     for event in sorted(AH.PRODUCT_VISIBLE_EVENTS):
         assert f"{event}:" in ui, f"{event} is not rendered by the Activity Log"
-    assert len(AH.PRODUCT_VISIBLE_EVENTS) == 9
+    # Nine, plus the two signature events added deliberately for Orbin item 14
+    # (1 Oct 2026 - the TEST changed: the feed gained two types on purpose).
+    assert len(AH.PRODUCT_VISIBLE_EVENTS) == 11
 
 
 def test_activity_service_still_exports_every_constant_its_callers_import():

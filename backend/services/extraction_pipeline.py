@@ -450,6 +450,8 @@ async def _submitting_account_for(user_id):
             # half-empty producer section on every separated package.
             "email": str(row.get("email") or "").strip(),
             "phone": str(row.get("phone") or "").strip(),
+            # ...and its mailing address (1 Oct 2026: blank for every producer).
+            "address": str(row.get("agency_address") or "").strip(),
         }
     logger.warning("submitting account unavailable for user %s (no agency on the "
                    "account) - an agency named only by expiring documents will not "

@@ -246,6 +246,24 @@ async def get_processing_session(sid: str, include_pdf: bool = False) -> dict:
 
 
 # ASYNC-SAFE
+async def set_active_form(sid: str, user_id: str, form_id: str) -> bool:
+    """Record the form the producer has open (Orbin item 1: "Continue where you
+    left off" reopens it). One key in one statement, only on the owner's
+    session and only for a form that session generated - so it never races a
+    save's merge of the rest of the row. `updated_at` is left alone: opening a
+    form is not activity that should reorder the dashboard. False when nothing
+    matched."""
+    async with get_pool().acquire() as conn:
+        status = await conn.execute(
+            "UPDATE processing_sessions"
+            " SET data = jsonb_set(data, '{active_form_id}', to_jsonb($3::text), true)"
+            " WHERE id = $1 AND user_id = $2 AND (data->'generated_forms') ? $3",
+            sid, str(user_id), str(form_id),
+        )
+    return str(status or "").strip().endswith(" 1")
+
+
+# ASYNC-SAFE
 async def upd_processing_session(
     sid: str,
     updates: dict,

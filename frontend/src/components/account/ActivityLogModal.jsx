@@ -12,6 +12,8 @@ const EVENT_META = {
   answers_applied:           { title: "Answers applied to forms", dot: "#16a34a" },
   reminder_sent:             { title: "Reminder sent",           dot: "#d97706" },
   download:                  { title: "Package downloaded",      dot: "#0891b2" },
+  signature_requested:       { title: "Sent for signature",      dot: "#4f7cff" },
+  applicant_signed:          { title: "Client signed",           dot: "#16a34a" },
 };
 
 function detailFor(ev) {
@@ -33,6 +35,10 @@ function detailFor(ev) {
       return `${d.fields_updated || 0} field${(d.fields_updated || 0) !== 1 ? "s" : ""} updated${d.scores_updated ? ", scores refreshed" : ""}`;
     case "reminder_sent":
       return `${d.reminder_count ? `Reminder #${d.reminder_count}` : "Reminder"}${d.client_first ? ` to ${d.client_first}` : ""}`;
+    case "signature_requested":
+      return `${d.client_first ? `Sent to ${d.client_first}` : "Sent to client"}${d.form_count ? ` - ${d.form_count} form${d.form_count !== 1 ? "s" : ""}` : ""}`;
+    case "applicant_signed":
+      return `${d.client_first ? `${d.client_first} signed` : "Client signed"}${d.form_count ? ` ${d.form_count} form${d.form_count !== 1 ? "s" : ""}` : ""}`;
     case "download":
       return d.kind === "all"
         ? `${d.form_count || "All"} forms downloaded`

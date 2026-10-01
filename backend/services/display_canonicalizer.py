@@ -348,6 +348,19 @@ def canonicalize_address(value: Any) -> str:
     return _canon_phrase(value, street=True)
 
 
+# A phone number written as a BARE run of digits ("7983789751" - an account's
+# Contact Phone, typed without separators) printed exactly that way on ACORD
+# 125's producer block (Orbin, 1 Oct 2026). Only that shape is touched: ten
+# digits, or a leading 1 and ten. Anything already written with separators,
+# a "+" country code or an extension is the source's own printing and stays.
+_BARE_PHONE_RE = re.compile(r"^\s*1?(\d{3})(\d{3})(\d{4})\s*$")
+
+
+def canonicalize_phone(value: Any) -> Any:
+    m = _BARE_PHONE_RE.match(str(value or ""))
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else value
+
+
 def canonicalize_entity_type(value: Any) -> str:
     """Map an entity-type value to its canonical display form. Unknown unchanged."""
     s = _s(value)
@@ -364,7 +377,7 @@ def category_for_field(field_name: str) -> Optional[str]:
     """Infer the value type of an ACORD field from its NAME shape.
 
     Returns one of {"date","currency","state","city","address","name",
-    "entity"} or None (leave the value untouched). Order matters: the more
+    "entity","phone"} or None (leave the value untouched). Order matters: the more
     specific address sub-fields (postal / state / city) are resolved before the
     generic address / name checks so a "...MailingAddress_CityName_A" is treated
     as a city, not an address or a name.
@@ -375,6 +388,8 @@ def category_for_field(field_name: str) -> Optional[str]:
     # Postal codes and numeric identifiers are left exactly as extracted.
     if "postalcode" in fl or "zipcode" in fl or "postalcodeextension" in fl:
         return None
+    if "phonenumber" in fl or "faxnumber" in fl:
+        return "phone"
     if "stateorprovince" in fl or "state_code" in fl or fl.endswith("statecode"):
         return "state"
     if "cityname" in fl or fl.endswith("_city") or fl.endswith("cityname"):
@@ -420,6 +435,7 @@ _DISPATCH = {
     "address": canonicalize_address,
     "name": canonicalize_name,
     "entity": canonicalize_entity_type,
+    "phone": canonicalize_phone,
 }
 
 

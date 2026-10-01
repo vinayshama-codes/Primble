@@ -3,7 +3,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from services.job_queue import get_job_queue
+from services.job_queue import get_job_queue, JOB_TYPE_FORM_GENERATION
+from services.generation_state import job_is_stale
 from services.auth_service import get_current_user
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -26,4 +27,8 @@ async def get_job_status(
         "progress_message": job.get("progress_message"),
         "error": job.get("error_message"),
         "result": job.get("result"),
+        # Orbin item 1: a form generation whose heartbeat stopped died with its
+        # process (restart / deploy / crash). The progress screen stops waiting
+        # on it. Only form generation heartbeats, so only it can be stale.
+        "stale": job.get("job_type") == JOB_TYPE_FORM_GENERATION and job_is_stale(job),
     })

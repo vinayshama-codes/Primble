@@ -4,7 +4,7 @@ import SaveStageOverlay from "../overlays/SaveStageOverlay";
 import usePdfFieldFocus from "./usePdfFieldFocus";
 import UseSignaturePrompt from "../signature/UseSignaturePrompt";
 import NoSignaturePrompt from "../signature/NoSignaturePrompt";
-import { boxPixelRect, hitTestBox, isBlankBoxValue, isClientValueBox, isYesNoQuestionBlank, normalizeYesNoEntry } from "../../utils/viewerBoxes";
+import { boxPixelRect, hitTestBox, isBlankBoxValue, isClientValueBox, normalizeYesNoEntry } from "../../utils/viewerBoxes";
 import "./PDFJsViewer.css";
 
 const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -25,13 +25,11 @@ const _pdfAuthHeaders = () => {
 };
 
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
-// Orbin 22 Sep item 18 (30 Sep): in edit mode a Yes / No question box wears the
-// edit-mode amber - an outline always, and a tint while the question is unanswered.
-// The tint is SOLID (the same amber at 15% over white): a see-through tint let
-// the saved answer printed on the page image show through a box the producer
-// had just emptied, so a deleted "Y" looked undeleted until the save (1 Oct).
-const YN_EDGE     = "#f59e0b";
-const YN_BLANK_BG = "rgb(253,240,218)";
+// Orbin 22 Sep item 18 (owner, 1 Oct night): a Yes / No question box is
+// highlighted ONLY when it holds an answer, in that answer's own colour -
+// green the client's, pink AI-filled and found, orange verify. A blank one is
+// plain, even when required (every blank lighting up was the complaint). All of
+// them stay editable.
 const CONTAINER_PADDING = 24;
 
 const getMobileRenderWidth = (avail) => {
@@ -312,6 +310,9 @@ export default function PDFJsViewer({
     let verified = 0, review = 0, yellow = 0, green = 0;
     fieldList.forEach(f => {
       const name = f.name;
+      if (f.applicant_signed) return;            // the client signed it (Orbin item 14)
+      // A blank Yes / No question is plain on the form, so it is not counted (item 18).
+      if (f.yn_question && isBlankBoxValue(vals[name] ?? f.value)) return;
       const val  = (vals[name] || f.value || "").toString().trim();
       const conf = confLabels[name];
       // Item 17: the same rule as the box's own colour (`_getHighlight`).
@@ -346,12 +347,26 @@ export default function PDFJsViewer({
            .some(p => fn.includes(p));
   };
 
+  // Orbin item 14: boxes on a form the CLIENT signed (`applicant_signed` from
+  // /api/fields). `painted` ones carry the signature or its date in the PDF
+  // itself, so nothing is drawn over them; none of them is "still to sign".
+  const applicantSignedRef = useRef({ list: null, names: new Set() });
+  const _applicantSigned = (fieldName) => {
+    const c = applicantSignedRef.current;
+    if (c.list !== fieldsRef.current) {
+      c.list = fieldsRef.current;
+      c.names = new Set((fieldsRef.current || []).filter(f => f.applicant_signed).map(f => f.name));
+    }
+    return c.names.has(fieldName);
+  };
+
   const _getHighlight = (fieldName, val) => {
     const conf = fieldConfLabelRef.current[fieldName];
     // Item 17 (1 Oct 2026): green only while the client's value is in the box,
     // read off the box's CURRENT label - never off the client-filled list,
     // which still named a box the producer had retyped.
     if (isClientValueBox(conf, val, originalFieldValuesRef.current[fieldName])) return "green";
+    if (_applicantSigned(fieldName)) return null;
     const v    = (val || "").toString().trim();
     if (YELLOW_REQUIRED.has(fieldName)) {
       if (!v || v === "null" || v === "None") return "yellow";
@@ -371,15 +386,11 @@ export default function PDFJsViewer({
     return curEdit ? "rgba(255,255,255,0.97)" : "transparent";
   };
 
-  // A box's background. The confidence highlight wins; with none, an unanswered
-  // Yes / No question is tinted in edit mode so it can be found (item 18).
+  // A box's background: its confidence highlight, nothing else (a Yes / No
+  // question is no longer tinted - owner, 1 Oct night).
   const _boxBg = (field, val, curEdit) => {
-    const hl = _getHighlight(field.name, val);
-    if (!hl && curEdit && field.yn_question
-        && isYesNoQuestionBlank(field, fieldsRef.current, { ...fieldValuesRef.current, [field.name]: val })) {
-      return YN_BLANK_BG;
-    }
-    return _highlightBg(hl, curEdit);
+    if (field.yn_question && isBlankBoxValue(val)) return _highlightBg(null, curEdit);
+    return _highlightBg(_getHighlight(field.name, val), curEdit);
   };
 
   // One answer changes whether its whole question is answered - repaint every
@@ -426,7 +437,7 @@ export default function PDFJsViewer({
     if (!page) return;
     const pd         = pageDimsRef.current[page - 1];
     const pageHeight = pd ? pd.height : canvasH / scale;
-    const pageFields = fieldsRef.current.filter(f => f.page === page - 1);
+    const pageFields = fieldsRef.current.filter(f => f.page === page - 1 && !f.painted);
     const curEdit    = editModeRef.current;
     const focusTargets = {};
 
@@ -448,11 +459,7 @@ export default function PDFJsViewer({
       // boundary - prevents sub-pixel bleed at the edges regardless of scale.
       wrap.style.cssText = `position:absolute;left:${cx+1}px;top:${cy+1}px;width:${Math.max(cw-2,4)}px;height:${Math.max(ch-2,4)}px;pointer-events:${curEdit?"all":"none"};border:none;border-radius:1px;background:${bg};box-sizing:border-box;overflow:hidden;`;
       wrap.dataset.field = field.name;
-      if (field.yn_question) {
-        wrap._ynField = field;
-        // Item 18: every Yes / No question box is outlined while editing.
-        if (curEdit) wrap.style.boxShadow = `inset 0 0 0 1px ${YN_EDGE}`;
-      }
+      if (field.yn_question) wrap._ynField = field;
 
       const isSigF = _isSigField(field.name);
 
@@ -507,7 +514,7 @@ export default function PDFJsViewer({
             inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.95);border:1px solid #ef4444;outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
             inp.addEventListener("input", e => {
               triggerSave(field.name, e.target.value);
-              wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
+              wrap.style.background = _boxBg(field, e.target.value, curEdit);
               updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
             });
             wrap.appendChild(inp); inp.focus();
@@ -519,7 +526,7 @@ export default function PDFJsViewer({
           inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.85);border:1px solid rgba(230,0,122,0.4);outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
           inp.addEventListener("input", e => {
             triggerSave(field.name, e.target.value);
-            wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
+            wrap.style.background = _boxBg(field, e.target.value, curEdit);
             updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, fieldValuesRef.current);
           });
           wrap.appendChild(inp);
@@ -745,7 +752,7 @@ export default function PDFJsViewer({
         // The panel's score is current again as of this response. Cleared
         // only on OK - a failed save leaves the edits genuinely pending.
         _syncPending();
-        const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
+        const allSigF = fieldsRef.current.filter(f => _isSigField(f.name) && !f.painted).map(f => f.name);
         if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
         if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues, groupedCrossIssues: data.grouped_cross_issues });
         // Sync confidence labels from backend so overlay reflects the post-save state
@@ -754,6 +761,9 @@ export default function PDFJsViewer({
           fieldConfLabelRef.current = { ...fieldConfLabelRef.current, ...data.confidence };
           updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, allValues);
         }
+        // Orbin item 14: a save can end the client's signature on this form;
+        // re-read the boxes so a no-longer-painted line is drawn and counted.
+        if (fieldsRef.current.some(f => f.applicant_signed)) fetchFields().catch(() => {});
         if (redraw) { setSaveStatus("generating"); _loadPdfInBackground(); }
         else { setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000); }
         return true;
@@ -856,7 +866,7 @@ export default function PDFJsViewer({
     if (!shown) return;
     const pd = pageDimsRef.current[shown - 1];
     const pageHeight = pd ? pd.height : canvas.height / scale;
-    const hit = hitTestBox(fieldsRef.current, shown - 1, px, py, scale, pageHeight);
+    const hit = hitTestBox(fieldsRef.current.filter(f => !f.painted), shown - 1, px, py, scale, pageHeight);
     if (!hit) return;
     e.preventDefault();
     pendingFocusRef.current = hit.name;
@@ -987,7 +997,6 @@ export default function PDFJsViewer({
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any box to edit - "Done editing - save" saves all changes</span>
-          {fields.some(f => f.yn_question) && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: YN_BLANK_BG, boxShadow: `inset 0 0 0 1px ${YN_EDGE}`, borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Yes / No question - type Y or N</span></span>}
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,243,199)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,215,170)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Verify (not found in docs)</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,226,226)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>AI-OK (found in docs)</span></span>

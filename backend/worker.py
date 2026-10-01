@@ -237,7 +237,13 @@ async def _process_form_generation_job(job: dict, queue) -> None:
 
     await queue.update_status(job_id, "processing", progress_message="Generating ACORD forms…")
 
+    # Orbin item 1: the run proves it is alive while it works, so a reopened
+    # package can tell it from a run a restart killed - and the stuck-job
+    # watchdog stops re-queueing a long live run (services/generation_state.py).
+    from services.generation_state import GenerationHeartbeat
+    _heartbeat = GenerationHeartbeat(queue, job_id)
     try:
+        await _heartbeat.start()
         from config.settings import TEMPLATE_DIR, ENABLE_FIELD_QA
         from repositories.session_repository import get_processing_session, upd_processing_session
         from services.form_service import process_single_form
@@ -502,6 +508,8 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             await queue.update_status(job_id, "failed", error=err)
         except Exception:
             pass
+    finally:
+        await _heartbeat.stop()
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

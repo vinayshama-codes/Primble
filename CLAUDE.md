@@ -748,6 +748,54 @@ replayed: 0 boxes, 0 scores changed.
 - Cover: the score paragraph gets the package's own grade / tier / routing (`package_routing`, both routes) and
   `cover_service._checked_sqs_reasoning` replaces it when a sentence naming no form states another tier or routing
   (improving-ll.md C101 addendum). The pending-edits note is plain pink text (owner). Suite 11,534 / 1 / 19.
+**The owner's build of 1 Oct (`25sepChanges.md` "The owner's build of 1 Oct"; retest R7):**
+- Phones: `display_canonicalizer` has a `phone` category (every PhoneNumber / FaxNumber box); only a BARE 10-digit run
+  (or 1 + 10) is formatted NNN-NNN-NNNN, anything else prints as written. Replay: 3 boxes changed, all such phones.
+- Account Settings "Agency Address" (`users.agency_address`, init_db) -> the account profile's `address` ->
+  `producer_address` in `extraction_service._route_producer_party` (same door as the account phone / e-mail) -> the
+  existing producer mailing resolver. `utils.helpers._parse_address` lets a ZIP correct the state only for a US ZIP
+  and a US state (an Indian PIN printed DC).
+- `PDFJsViewer`: Y/N questions are NOT tinted or outlined in either mode (owner, 1 Oct night: "remove it" -
+  reverses the view-mode highlight built earlier that day); they stay editable.
+- G2 follow-ups: `services/follow_ups.py` (`show_if` / `follow_up_of`; JS twin `utils/followUps.js`) is the ONE rule
+  for what the client saw - client page (one `visibleQuestions` list), receipt, send (`ordered_follow_ups(
+  without_orphans(...))`) and apply (hidden answers never applied). `arq_service._maybe_inject_premises_questions`:
+  the landlord is a follow-up of "own or rent?"; 2+ locations ask each by address (`premises_interest.
+  location_field`: "premises_interest@loc2"), written onto the row (`write_location_answer`) - only that row's
+  interest boxes re-stamp (`_restamp_location_interest`), never the documents' cells. `pdf_service.
+  landlord_interest_row` prints one landlord when exactly one location has one. The producer modal lists follow-ups
+  under their parent, never as ticks. Tests: `tests/test_owner_asks_1oct.py` (78). Suite 11,612 / 1 / 19.
+
+**Items 1 and 14 (1 Oct night, owner's approvals; `25sepChanges.md` "Items 1 and 14", retest R8 / R9) - offline:**
+- **Item 1, the package page.** A dashboard click ALWAYS lands on the review (package) page; "Continue where you left
+  off" opens the editor on the LAST form open (`POST /api/session/{id}/active-form`, `session_repository.
+  set_active_form` - one owner-scoped JSONB key) or the progress screen; "Total Package Score" after generation.
+  **One door for "is generation running?": `services/generation_state.py`** - the sync route and the worker beat
+  (`GenerationHeartbeat` -> `JobQueue.touch`, which never touches a finished job); a processing job silent 5 min
+  (`GENERATION_STALE_AFTER_SECONDS`) died with its process; GET /api/session returns `generation_state`,
+  `form_order`, `active_form_id`; `/api/jobs/{id}/status` returns `stale`. A crashed sync run marks its job FAILED.
+  Reclassify / confirm-value / integrity resolve / select-forms-bulk refuse with 409 once forms exist or a run is
+  live (`form_routes._refuse_once_forms_exist`) - they re-read documents and never touch existing forms. Frontend:
+  `utils/packageGeneration.js`; `AcordModal._loadEditorState` is the one way into the editor. After generation the
+  "Add form" row button opens the editor's add-form window (resolve-issue `add_form`), never form selection.
+- **Item 14, the applicant signs as a PRE-TICKED QUESTION in Send to Client that asks ONLY for the signature (draw or
+  upload)** (owner: no separate button, no forms list / consent / name; the only public route is
+  `POST /api/applicant-sign/sign/{token}`) -
+  `applicant_signing.signature_question` (field `__applicant_signature__`, type `signature`), rebuilt server-side in
+  `send_arq` with its own `signature_requests` row (token on the stored question); the client page
+  (`arq/SignatureQuestion.jsx`) signs FIRST via `/api/applicant-sign/sign/{token}`, then submits the answers with the
+  `__SIGNED__` marker (kept only if the row is signed, never stamped); `applicant_signing.finalize` records it on the
+  forms in the submit route AFTER the answers apply, once. The pad is ONE component, `SignaturePad.jsx`, shared with
+  the producer's `SignatureModal`. The image goes ONLY on the application's signature lines -
+  `signature_boxes.applicant_signature_lines`, read off the printed form (cell label says SIGNATURE; date paired by
+  row): never initials, never ACORD 130's `NamedInsured_Signature_A` (the Minnesota "no employees" attestation). It is
+  painted only while `form_fingerprint` (values minus the signature block) matches what was signed -
+  `applicant_signature_state` signed / stale; stale says "Signature no longer matches - send for signature again".
+  Stored encrypted (row + session `applicant_signature_images`); painted by the render door
+  (`signature_boxes.regenerate_pdf_for_form` -> `_render_with_applicant`), `update_pdf` and apply-signature. Not a
+  questionnaire answer, never counted as a question.
+An adversarial review (38 findings, 29 confirmed) was fixed the same night - `25sepChanges.md` "Items 1 and 14".
+Tests: `tests/test_package_page_1oct.py` (68), `tests/test_applicant_signature_1oct.py` (82). Suite 11,762 / 1 / 19.
 
 ### Policy Number By Line - Live Kit Fixes - SHIPPED 2026-09-17
 **Read `v1-20AUG.md` "Policy number by line - the live kit run" before touching
@@ -2818,7 +2866,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **11,534 passed, 1 failed, 19 skipped** (~11 min; 1 Oct 2026, after the R1-R5 fixes). **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **11,762 passed, 1 failed, 19 skipped** (~11 min; 1 Oct 2026 night, after items 1 and 14). **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

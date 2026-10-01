@@ -1,88 +1,24 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { API_BASE } from "../../config/constants";
+import SignaturePad from "./SignaturePad";
+
+// The producer's saved signature. The pad (draw or upload) is shared with the
+// client's signing page (SignaturePad, Orbin item 14).
+// The server takes a data URL of up to 5,000,000 characters
+// (signature_routes.save_signature): about 3.7 MB of picture.
+const PRODUCER_MAX_BYTES = 3_700_000;
 
 export default function SignatureModal({ token, onClose, onSaved, existingSignature }) {
-  const canvasRef                             = useRef(null);
-  const [mode, setMode]                       = useState("draw");
-  const [drawing, setDrawing]                 = useState(false);
-  const [hasDrawn, setHasDrawn]               = useState(false);
-  const [uploadPreview, setUploadPreview]     = useState(null);
+  const [signature, setSignature]             = useState(null);
   const [saving, setSaving]                   = useState(false);
   const [error, setError]                     = useState("");
   const [clearingSignature, setClearingSignature] = useState(false);
 
-  useEffect(() => {
-    if (mode !== "draw") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth   = 2.5;
-    ctx.lineCap     = "round";
-    ctx.lineJoin    = "round";
-  }, [mode]);
-
-  const getPos = (e, canvas) => {
-    const r   = canvas.getBoundingClientRect();
-    const src = e.touches ? e.touches[0] : e;
-    return { x: src.clientX - r.left, y: src.clientY - r.top };
-  };
-
-  const startDraw = (e) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const pos = getPos(e, canvas);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setDrawing(true);
-  };
-
-  const draw = (e) => {
-    e.preventDefault();
-    if (!drawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const pos = getPos(e, canvas);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-    setHasDrawn(true);
-  };
-
-  const stopDraw = () => setDrawing(false);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    setHasDrawn(false);
-  };
-
-  const handleUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setUploadPreview(ev.target.result);
-    reader.readAsDataURL(file);
-  };
-
   const handleSave = async () => {
     setSaving(true);
     setError("");
-    let base64 = null;
-    if (mode === "draw") {
-      if (!hasDrawn) { setError("Please draw your signature first."); setSaving(false); return; }
-      base64 = canvasRef.current.toDataURL("image/png");
-    } else {
-      if (!uploadPreview) { setError("Please upload a signature image."); setSaving(false); return; }
-      base64 = uploadPreview;
-    }
+    if (!signature) { setError("Please draw your signature or upload a signature image."); setSaving(false); return; }
+    const base64 = signature;
     try {
       const res  = await fetch(`${API_BASE}/api/auth/save-signature`, {
         method: "POST",
@@ -132,23 +68,6 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
           <p className="step-subtitle" style={{ marginBottom: 20 }}>
             Saved once, auto-applied to ACORD forms when you choose to sign.
           </p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            {["draw", "upload"].map((m) => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setUploadPreview(null); }}
-                style={{
-                  flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid",
-                  borderColor: mode === m ? "#E61B84" : "#e2e8f0",
-                  background: mode === m ? "rgba(230,0,122,0.06)" : "#fff",
-                  color: mode === m ? "#E61B84" : "#64748b",
-                  fontWeight: mode === m ? 700 : 500, fontSize: 13, cursor: "pointer",
-                }}
-              >
-                {m === "draw" ? "Draw" : "Upload Image"}
-              </button>
-            ))}
-          </div>
           {existingSignature && (
             <div style={{ marginBottom: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>Current saved signature:</div>
@@ -165,31 +84,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
               </button>
             </div>
           )}
-          {mode === "draw" && (
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Draw your signature below:</div>
-              <canvas
-                ref={canvasRef} width={440} height={140}
-                onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
-                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw}
-                style={{ width: "100%", height: 140, border: "1.5px solid #e2e8f0", borderRadius: 8, cursor: "crosshair", touchAction: "none", background: "#fff", boxShadow: "inset 0 1px 4px rgba(0,0,0,0.06)" }}
-              />
-              <button onClick={clearCanvas} style={{ marginTop: 6, fontSize: 12, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
-                Clear
-              </button>
-            </div>
-          )}
-          {mode === "upload" && (
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Upload a PNG or JPG of your signature:</div>
-              <input type="file" accept="image/png,image/jpeg,image/jpg" onChange={handleUpload} style={{ fontSize: 13, marginBottom: 12 }} />
-              {uploadPreview && (
-                <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, border: "1px solid #e2e8f0", textAlign: "center" }}>
-                  <img src={uploadPreview} alt="Preview" style={{ maxHeight: 80, maxWidth: "100%", objectFit: "contain" }} />
-                </div>
-              )}
-            </div>
-          )}
+          <SignaturePad onChange={setSignature} maxBytes={PRODUCER_MAX_BYTES} />
           {error && <div className="alert alert-error" style={{ marginTop: 12 }}><span>{error}</span></div>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button className="btn btn-modal-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>

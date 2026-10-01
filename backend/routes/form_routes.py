@@ -22,10 +22,11 @@ from models.schemas import (
     BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest,
     SubmissionIntegrityResolveRequest, DocumentReclassifyRequest,
     UnderwritingConfirmRequest, MarketingReasonRequest,
-    ClientAnswerResolveRequest,
+    ClientAnswerResolveRequest, ActiveFormRequest,
 )
 from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
+    set_active_form,
 )
 from services.auth_service import get_current_user
 from services.extraction_pipeline import (
@@ -173,6 +174,44 @@ def _document_fact_rows(facts: dict) -> list:
         })
     rows.sort(key=lambda f: f["label"])
     return rows
+
+
+async def _generation_state_for(session: dict) -> tuple:
+    """(state, job) for a package through the one door,
+    services.generation_state - at most one job read. A job that cannot be
+    read counts as RUNNING: refusing a write is the safe side, and the progress
+    screen's own poll then reports the run as not finished."""
+    from services.generation_state import generation_state, STATE_RUNNING
+    jid = session.get("generation_job_id")
+    if not jid or session.get("generated_forms"):
+        return generation_state(session, None), None
+    try:
+        job = await get_job_queue().get_status(str(jid))
+    except Exception as ex:
+        logger.warning("generation state: job %s unreadable: %s", jid, ex)
+        return STATE_RUNNING, None
+    return generation_state(session, job), job
+
+
+async def _mark_generation_failed(queue, job_id: str, error: str) -> None:
+    """Best effort: a generation that ended without storing forms is FAILED on
+    its job. Never raises - the caller is already reporting the failure."""
+    try:
+        await queue.update_status(job_id, STATUS_FAILED, error=(error or "generation_failed")[:500])
+    except Exception as ex:
+        logger.warning("could not mark generation job %s failed: %s", job_id, ex)
+
+
+async def _refuse_once_forms_exist(session: dict) -> None:
+    """409 for a pre-form action once forms exist or are being generated
+    (Orbin item 1). These actions re-read the documents and never touch forms
+    that already exist, so the forms - and their score - would keep the old
+    values; a run in flight would race their wholesale writes."""
+    from services.generation_state import forms_locked_reason
+    state, _job = await _generation_state_for(session)
+    reason = forms_locked_reason(session, state)
+    if reason:
+        raise HTTPException(409, reason)
 
 
 async def _pre_form_status(
@@ -789,6 +828,7 @@ async def submission_integrity_resolve(
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    await _refuse_once_forms_exist(session)
 
     if req.action not in ("remove_documents", "continue_anyway", "create_separate_submissions"):
         raise HTTPException(
@@ -900,6 +940,7 @@ async def document_reclassify(
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    await _refuse_once_forms_exist(session)
 
     try:
         result = await reclassify_document(
@@ -1095,6 +1136,7 @@ async def underwriting_confirm_value(
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    await _refuse_once_forms_exist(session)
 
     try:
         result = await confirm_underwriting_value(
@@ -1234,6 +1276,11 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    # Orbin item 1: never a second run beside a live one, and never a
+    # re-generation over forms the producer may have edited - forms are added
+    # from the editor (resolve-issue `add_form`). An INTERRUPTED run is not
+    # live, so "Continue to form selection" can generate again.
+    await _refuse_once_forms_exist(session)
 
     # Submission Integrity gate (Beta Report §4.1): do not generate forms on a
     # package that may belong to multiple insureds until the user has reviewed.
@@ -1286,12 +1333,18 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     _sem_token = None
     results      = {}
     combined_ids = req.form_ids
+    # Orbin item 1: the run proves it is alive while it works, so a reopened
+    # package can tell this run from one a restart or a deploy killed
+    # (services/generation_state.py). Stopped in the `finally` below.
+    from services.generation_state import GenerationHeartbeat
+    _heartbeat = GenerationHeartbeat(_queue, _job_id)
     # The package is what THIS request generates, not the analyze step's
     # recommendations still sitting on the row (28 Sep 2026).
     from services.form_service import bind_generation_package
     bind_generation_package(session, combined_ids)
 
     try:
+        await _heartbeat.start()
         loop = asyncio.get_event_loop()
 
         # ── Stages 4-6: Combined cross-form gap fill (opt-in via flag) ───────
@@ -1414,13 +1467,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             logger.warning("dec index coverage report skipped: %s", _cov_ex)
 
         if not results:
-            await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
-            # Fig 8: clear the in-progress marker so a reopen restores the
-            # recommendations screen instead of polling this dead job.
-            try:
-                await upd_processing_session(req.session_id, {"generation_job_id": None})
-            except Exception:
-                pass
+            # The job is marked FAILED by the handler below and the marker STAYS,
+            # so a reopened package says "Generation didn't finish" (Orbin item
+            # 1) - it used to be cleared here, which read as never generated.
             raise HTTPException(400, "No forms could be generated")
 
         # ── §4.3 item 2: post-generation cross-form consistency assertion ────
@@ -1613,12 +1662,18 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "package_sqs": package_sqs,
             "stamp_consistency": _stamp_check,
         })
-    except HTTPException:
+    except HTTPException as hex_:
+        # The run ended without storing forms: say so on the job, so a reopened
+        # package reads "Generation didn't finish" at once instead of waiting
+        # out the heartbeat window. The marker stays for that message.
+        await _mark_generation_failed(_queue, _job_id, str(hex_.detail))
         raise
     except Exception as ex:
         logger.error(f"select_forms_bulk error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        await _mark_generation_failed(_queue, _job_id, type(ex).__name__)
         raise HTTPException(500, "Form generation failed. Please try again.")
     finally:
+        await _heartbeat.stop()
         # _sem_token is None in the new flow; release_heavy is a no-op then.
         # Kept for safety in case future code paths re-acquire it.
         if _sem_token:
@@ -1796,8 +1851,20 @@ async def get_form_fields(
     )
 
     _sig_schema = r.get("schema") if isinstance(r.get("schema"), dict) else {}
+    # The applicant's signed boxes (Orbin item 14): `painted` boxes carry the
+    # client's signature or its date in the PDF itself, so the viewer draws
+    # nothing over them; every applicant signature / date box on a signed form
+    # drops its "still to sign" highlight.
+    try:
+        from services.signature_boxes import signed_applicant_boxes
+        _applicant_boxes = signed_applicant_boxes(proc_session, form_id)
+    except Exception:                                               # noqa: BLE001
+        _applicant_boxes = {}
     for f in fields:
         name = f["name"]
+        if name in _applicant_boxes:
+            f["applicant_signed"] = True
+            f["painted"] = bool(_applicant_boxes[name])
         if name in field_state:
             sv = field_state[name]
             f["value"] = str(sv) if sv is not None and str(sv) not in ("null", "None") else ""
@@ -2290,6 +2357,17 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                         new_sig_applied = True
                     except Exception as ex:
                         logger.error(f"update_pdf: signature re-injection failed: {ex}")
+            # Orbin item 14: the applicant's signature stays on a save that
+            # leaves the form as they signed it. Any changed value ends it
+            # (services/signature_boxes.applicant_signature_state).
+            from services.signature_boxes import applicant_signature_for, add_applicant_signature
+            _applicant = applicant_signature_for(session, form_id, current_state)
+            if _applicant and new_pdf_bytes:
+                try:
+                    new_pdf_bytes = await _pdf_loop.run_in_executor(
+                        None, add_applicant_signature, new_pdf_bytes, tpl, _applicant)
+                except Exception as ex:
+                    logger.error(f"update_pdf: applicant signature re-paint failed: {ex}")
 
         cache_hash = hashlib.md5(new_pdf_bytes).hexdigest() if new_pdf_bytes else None
 
@@ -2347,6 +2425,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             # Which boxes the signature in `pdf_bytes` covers (1 Oct 2026).
             "signature_scope": _SIGNATURE_SCOPE if new_sig_applied else None,
             "client_filled_fields": sorted(_client_filled),
+            # this PDF is not the door's applicant render; the next serve
+            # renders it afresh (signature_boxes._render_with_applicant)
+            "_applicant_render": None,
         })
 
         # Recompute package SQS from the now-updated per-form SQS results so
@@ -2541,7 +2622,22 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     check_payment_access(current_user.get("payment_status", "ok"), "form")
-    generated = proc_session.get("generated_forms", {})
+    # Orbin item 1: the package page says whether a generation is running, has
+    # finished, or did not finish - through the one door.
+    from services.generation_state import STATE_RUNNING, STATE_DONE, STATE_INTERRUPTED
+    gen_state, gen_job = await _generation_state_for(proc_session)
+    if gen_state == STATE_RUNNING and isinstance(gen_job, dict) and gen_job.get("status") == "completed":
+        # The job finished between the two reads; its forms are stored by now.
+        proc_session = await get_processing_session(session_id)
+        gen_state = STATE_DONE if proc_session.get("generated_forms") else STATE_INTERRUPTED
+    generated = proc_session.get("generated_forms", {}) or {}
+    # The producer's order (the JSONB row sorts keys: ACORD_25 before ACORD_125)
+    # and the form they last had open.
+    form_order = [f for f in (proc_session.get("selected_form_ids") or []) if f in generated]
+    form_order += [f for f in generated if f not in form_order]
+    active_form_id = proc_session.get("active_form_id")
+    if active_form_id not in generated:
+        active_form_id = form_order[0] if form_order else None
     # Omit the full `form` field data — it can be megabytes and is not needed to
     # restore the editor shell. The PDF viewer fetches form data lazily per-form.
     summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
@@ -2570,7 +2666,24 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                          # resume the progress overlay with the remaining time.
                          "generation_job_id": proc_session.get("generation_job_id"),
                          "generation_started_at": proc_session.get("generation_started_at"),
-                         "generation_form_count": proc_session.get("generation_form_count")})
+                         "generation_form_count": proc_session.get("generation_form_count"),
+                         "generation_state": gen_state,
+                         "form_order": form_order,
+                         "active_form_id": active_form_id})
+
+
+@router.post("/api/session/{session_id}/active-form")
+async def set_session_active_form(session_id: str, req: ActiveFormRequest,
+                                  current_user: dict = Depends(get_current_user)):
+    """Remember the form the producer has open, so "Continue where you left
+    off" reopens it (Orbin item 1). Owner-only; a form the package did not
+    generate is refused."""
+    form_id = str(req.form_id or "").strip()
+    if not form_id or len(form_id) > 64:
+        raise HTTPException(400, "Unknown form.")
+    if not await set_active_form(session_id, str(current_user["id"]), form_id):
+        raise HTTPException(404, "Form not found in this package.")
+    return JSONResponse({"success": True, "active_form_id": form_id})
 
 
 @router.get("/api/session/{session_id}/extraction-result")
@@ -2795,13 +2908,22 @@ async def list_sessions(
 async def delete_session(session_id: str, current_user: dict = Depends(get_current_user)):
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
-        await conn.execute(
+        status = await conn.execute(
             "DELETE FROM processing_sessions WHERE id = $1 AND user_id = $2",
             session_id, str(current_user["id"]),
         )
-        await conn.execute(
-            "DELETE FROM session_pdf_bytes WHERE session_id = $1", session_id
-        )
+        # Only the OWNER's package takes its PDFs (they may carry signatures)
+        # and its signing requests (an encrypted signature image, the signer's
+        # name, IP and e-mail - Orbin item 14) with it. The PDF delete used to
+        # run for any session id, owned or not.
+        if str(status or "").strip().endswith(" 1"):
+            await conn.execute(
+                "DELETE FROM session_pdf_bytes WHERE session_id = $1", session_id
+            )
+            await conn.execute(
+                "DELETE FROM signature_requests WHERE session_id = $1 AND user_id = $2",
+                session_id, str(current_user["id"]),
+            )
     return JSONResponse({"success": True})
 
 

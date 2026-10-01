@@ -5,6 +5,7 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
   const [fullName, setFullName] = useState(user?.full_name || "");
   const [orgName, setOrgName] = useState(user?.organization_name || "");
   const [phone, setPhone] = useState(user?.phone || "");
+  const [agencyAddress, setAgencyAddress] = useState(user?.agency_address || "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -28,6 +29,7 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
           // input initializes empty, and sending "" would silently wipe a saved
           // number. null makes an untouched field a no-op.
           phone: phone.trim() || null,
+          agency_address: agencyAddress.trim() || null,
         }),
       });
       const data = await res.json();
@@ -98,7 +100,7 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
                   maxLength={32}
                 />
                 <span style={{ fontSize: 11.5, color: "#94a3b8", fontWeight: 500 }}>
-                  Optional. Shown to clients on their questionnaire so they can reach you if they get stuck.
+                  Optional. Printed as the producer phone on your ACORD forms and shown to clients on their questionnaire.
                 </span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -120,6 +122,20 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
                   onChange={e => setOrgName(e.target.value)}
                   placeholder="Your organization name"
                 />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 700, color: "#475569" }}>Agency Address</label>
+                <input
+                  className="acct-input"
+                  type="text"
+                  value={agencyAddress}
+                  onChange={e => setAgencyAddress(e.target.value)}
+                  placeholder="Street, City, State ZIP"
+                  maxLength={200}
+                />
+                <span style={{ fontSize: 11.5, color: "#94a3b8", fontWeight: 500 }}>
+                  Optional. Printed as the producer mailing address on your ACORD forms.
+                </span>
               </div>
               {saveError && (
                 <div className="alert alert-error"><span>{saveError}</span></div>

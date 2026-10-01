@@ -99,7 +99,27 @@ def _value_matches(fact_key: str, stamped: Any, expected: Any) -> bool:
     ev = normalize_value(fact_key, expected)
     if not sv or not ev:
         return True
-    return sv == ev
+    if sv == ev:
+        return True
+    # A phone / fax is the same number however it is punctuated: the display
+    # formatter prints a bare 7983789751 as 798-378-9751 (1 Oct 2026), and that
+    # read as "shows X but the source is Y" in the download review.
+    if _is_phone_key(fact_key):
+        sd, ed = _phone_digits(stamped), _phone_digits(expected)
+        return bool(sd) and sd == ed
+    return False
+
+
+_PHONE_KEY_RE = re.compile(r"(?:^|_)(?:phone|fax|telephone|mobile|cell)(?:_|$)", re.IGNORECASE)
+
+
+def _is_phone_key(fact_key: Any) -> bool:
+    return bool(_PHONE_KEY_RE.search(str(fact_key or "")))
+
+
+def _phone_digits(value: Any) -> str:
+    d = re.sub(r"\D", "", str(value if value is not None else ""))
+    return d[1:] if len(d) == 11 and d.startswith("1") else d
 
 
 # ── "Is this refused value already printed on the form?" ─────────────────────

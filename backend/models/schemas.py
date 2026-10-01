@@ -399,6 +399,12 @@ class ClientAnswerResolveRequest(BaseModel):
     choice: str
 
 
+class ActiveFormRequest(BaseModel):
+    """The form the producer has open in the editor (Orbin item 1: "Continue
+    where you left off" reopens it). session_id is taken from the URL path."""
+    form_id: str
+
+
 class MarketingReasonRequest(BaseModel):
     """Producer-answerable "Why are you marketing this account?" captured on the
     form recommendation screen (DOUBTS-Workstream4 / Brent).
@@ -465,6 +471,9 @@ class UpdateProfileRequest(BaseModel):
     # Optional producer contact phone surfaced to the client on the ARQ
     # "Contact Your Broker" card. Empty string clears it.
     phone: Optional[str] = None
+    # The agency's mailing address, printed as the producer's address on the
+    # ACORD forms. Empty string clears it.
+    agency_address: Optional[str] = None
 
 
 # ── Audit API request / response models ───────────────────────────────────────

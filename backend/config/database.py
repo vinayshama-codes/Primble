@@ -96,6 +96,7 @@ async def init_db() -> None:
                 full_name                     TEXT,
                 phone                         TEXT,
                 organization_name             TEXT,
+                agency_address                TEXT,
                 auth_provider                 TEXT DEFAULT 'email',
                 google_id                     TEXT UNIQUE,
                 email_verified                INTEGER DEFAULT 0,
@@ -127,6 +128,9 @@ async def init_db() -> None:
             # Producer contact phone — shown to the client on the questionnaire's
             # "Contact Your Broker" card. Optional; blank simply hides the line.
             ("phone",                        "TEXT"),
+            # The agency's mailing address - printed as the producer's address on
+            # the ACORD forms (Orbin, 1 Oct 2026: blank for every producer).
+            ("agency_address",               "TEXT"),
             ("acord_disclaimer_accepted",    "INTEGER DEFAULT 0"),
             ("acord_disclaimer_accepted_at", "TEXT"),
             ("acord_license_confirmed",      "INTEGER DEFAULT 0"),
@@ -260,6 +264,36 @@ async def init_db() -> None:
                 last_reminder_at TEXT
             )
         """)
+
+        # Orbin item 14 (1 Oct 2026): the applicant signs the generated forms
+        # through a link (services/applicant_signing.py). One row per request;
+        # the signature image is stored ENCRYPTED (utils.crypto) and only after
+        # the client signs. `form_versions` holds each form's fingerprint as the
+        # client reviewed it.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS signature_requests (
+                id             TEXT PRIMARY KEY,
+                session_id     TEXT NOT NULL,
+                user_id        TEXT NOT NULL,
+                token          TEXT UNIQUE NOT NULL,
+                email          TEXT NOT NULL,
+                client_name    TEXT DEFAULT '',
+                status         TEXT DEFAULT 'pending',
+                form_ids       JSONB NOT NULL,
+                form_versions  JSONB,
+                signer_name    TEXT,
+                signature_data TEXT,
+                consent_text   TEXT,
+                signer_ip      TEXT,
+                signer_agent   TEXT,
+                expires_at     TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                viewed_at      TEXT,
+                signed_at      TEXT
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signature_requests_session ON signature_requests(session_id)")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS arq_notifications (

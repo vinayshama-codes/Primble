@@ -97,6 +97,16 @@ class JobQueue(ABC):
     ) -> None:
         """Update status and optional fields on an existing job."""
 
+    async def touch(self, job_id: str) -> None:
+        """Mark a PROCESSING job alive - its updated_at becomes now and nothing
+        else changes. A job that has already finished (or is not processing) is
+        never touched, so a heartbeat can never overwrite a terminal status. The
+        heartbeat of a long run (services/generation_state.py). Backends override
+        this with an atomic version; this default reads then writes."""
+        job = await self.get_status(job_id)
+        if job and job.get("status") == STATUS_PROCESSING:
+            await self.update_status(job_id, STATUS_PROCESSING)
+
     async def list_pending(self, limit: int = 10) -> List[dict]:
         """Return up to `limit` jobs with status=pending."""
         return []
@@ -158,6 +168,11 @@ class InMemoryJobQueue(JobQueue):
             job["error_message"] = error
         if progress_message is not None:
             job["progress_message"] = progress_message
+
+    async def touch(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)          # no await between read and write
+        if job is not None and job.get("status") == STATUS_PROCESSING:
+            job["updated_at"] = _now_iso()
 
     async def list_pending(self, limit: int = 10) -> List[dict]:
         return [
@@ -244,6 +259,20 @@ class LocalFileJobQueue(JobQueue):
             job["error_message"] = error
         if progress_message is not None:
             job["progress_message"] = progress_message
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(job, fh, default=str)
+
+    async def touch(self, job_id: str) -> None:
+        path = self._path(job_id)              # no await between read and write
+        try:
+            with open(path, encoding="utf-8") as fh:
+                job = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return
+        if job.get("status") != STATUS_PROCESSING:
+            return
+        job["updated_at"] = _now_iso()
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(job, fh, default=str)

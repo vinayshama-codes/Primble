@@ -100,11 +100,16 @@ def build_receipt_payload(arq: dict) -> dict:
     items: List[dict] = []
     answered = 0
 
+    from services.follow_ups import follow_up_shown
     for q in questions:
         if not isinstance(q, dict):
             continue
         field_name = q.get("field_name")
         if not field_name:
+            continue
+        # A follow-up the client never saw (G2, 1 Oct 2026: the landlord after
+        # "we own the building") was not asked - it is not an unanswered item.
+        if not follow_up_shown(q, answers):
             continue
 
         item = {
@@ -165,6 +170,9 @@ def build_receipt_payload(arq: dict) -> dict:
 
         item["kind"]  = KIND_ANSWER
         item["value"] = _clip(val, _MAX_VALUE_LEN)
+        # Orbin item 14: the signature question's stored answer is a marker.
+        if q.get("field_type") == "signature" and val == "__SIGNED__":
+            item["value"] = "Signed"
         if field_name in review_by_field:
             item["review_reason"] = review_by_field[field_name]
         answered += 1

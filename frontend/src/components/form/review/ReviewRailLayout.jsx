@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar } from "../../../utils/formatters";
 import KeyDetailsMissing from "./KeyDetailsMissing";
+import {
+  GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED, lockedReason, continueLabel, scoreHeading,
+  GENERATION_DIDNT_FINISH, GENERATION_DIDNT_FINISH_NEXT, GENERATION_RUNNING_TEXT,
+} from "../../../utils/packageGeneration";
 import "./ReviewRailLayout.css";
 
 // The "rail" layout of the pre-form Review step - the default layout
@@ -16,13 +20,18 @@ import "./ReviewRailLayout.css";
 // All six sections stay mounted and inactive ones are hidden, so collapse
 // choices, typed values and the Data Consistency jump target survive switching.
 
+const FIX_GROUP = "Fix before selecting forms";
+// Once forms exist (or are being generated) there is no form selection ahead
+// of the producer, so the same group is named for what it still is.
+const FIX_GROUP_AFTER_FORMS = "Needs your input";
+
 const SECTIONS = [
   { id: "overview", label: "Overview", group: "Review" },
   { id: "documents", label: "Documents", group: "Review" },
-  { id: "integrity", label: "Submission Integrity", group: "Fix before selecting forms" },
-  { id: "consistency", label: "Data Consistency", group: "Fix before selecting forms" },
-  { id: "hardstops", label: "Hard Stops", group: "Fix before selecting forms" },
-  { id: "warnings", label: "Warnings", group: "Fix before selecting forms" },
+  { id: "integrity", label: "Submission Integrity", group: FIX_GROUP },
+  { id: "consistency", label: "Data Consistency", group: FIX_GROUP },
+  { id: "hardstops", label: "Hard Stops", group: FIX_GROUP },
+  { id: "warnings", label: "Warnings", group: FIX_GROUP },
 ];
 
 // The backend tier ladder (sqs_service.tier_for_score) and the grade colour
@@ -75,7 +84,8 @@ function progressText({ open, done }) {
 }
 
 // The live next-step sentence (AcordModal review step), verbatim.
-function nextStepText(openItemCount, hardStopCount, warningCount) {
+// `afterForms`: forms exist or are being generated (Orbin item 1).
+function nextStepText(openItemCount, hardStopCount, warningCount, afterForms = false) {
   const advisory = [
     hardStopCount > 0 ? plural(hardStopCount, "hard stop") : null,
     warningCount > 0 ? plural(warningCount, "warning") : null,
@@ -84,7 +94,9 @@ function nextStepText(openItemCount, hardStopCount, warningCount) {
   if (n > 0 && advisory) return `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below, plus ${advisory} to review`;
   if (n > 0) return `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below`;
   if (advisory) return `Review ${advisory} below before continuing`;
-  return "Nothing needs your attention - continue to form selection";
+  return afterForms
+    ? "Nothing needs your attention - continue where you left off"
+    : "Nothing needs your attention - continue to form selection";
 }
 
 // Live Data Consistency date normaliser: one format per table.
@@ -133,12 +145,13 @@ function Badge({ tone, children }) {
   return <span className={`rr-badge rr-badge--${tone}`}>{children}</span>;
 }
 
-function PageHead({ id, title, description, right }) {
+function PageHead({ id, title, description, right, afterForms = false }) {
   const section = SECTIONS.find((s) => s.id === id);
+  const group = afterForms && section.group === FIX_GROUP ? FIX_GROUP_AFTER_FORMS : section.group;
   return (
     <header className="rr-page-head">
       <div className="rr-page-head__text">
-        <div className="rr-eyebrow">{section.group}</div>
+        <div className="rr-eyebrow">{group}</div>
         <h2 className="rr-page-title">{title}</h2>
         {description && <p className="rr-page-desc">{description}</p>}
       </div>
@@ -219,6 +232,7 @@ export default function ReviewRailLayout(props) {
     renderItemActions, renderClusterRollup,
     issueDiff, canProceedWithWarning, warningStops,
     openItemCount, onContinue, onFixKeyDetail,
+    packageGen,
   } = props;
   const {
     IssueLine, BareStopRow, HoverTip, RemediationDiffBand, IntegritySeverityChip,
@@ -334,8 +348,12 @@ export default function ReviewRailLayout(props) {
   const hardOpen = hasHardStops ? hardTally.open : 0;
   const warnOpen = hasWarnings ? warnTally.open : 0;
 
-  const docsOpen = docsNeedingReview.length;
-  const totalItems = docsOpen + openConflicts.length + confirmedCount + (hasHardStops ? hardTally.total : 0) + (hasWarnings ? warnTally.total : 0);
+  // Locked once forms exist or are generating (Orbin item 1): a document or a
+  // value that cannot be acted on here is not an item "needing your input".
+  const preFormLocked = packageGen?.state === "done" || packageGen?.state === "running";
+  const docsOpen = preFormLocked ? 0 : docsNeedingReview.length;
+  const conflictsOpen = preFormLocked ? 0 : openConflicts.length;
+  const totalItems = docsOpen + conflictsOpen + confirmedCount + (hasHardStops ? hardTally.total : 0) + (hasWarnings ? warnTally.total : 0);
   const handledItems = confirmedCount + (hasHardStops ? hardTally.done : 0) + (hasWarnings ? warnTally.done : 0);
   const openItems = Math.max(0, totalItems - handledItems);
   const progressPct = totalItems > 0 ? Math.round((handledItems / totalItems) * 100) : 100;
@@ -346,6 +364,17 @@ export default function ReviewRailLayout(props) {
   // The package SQS so far (Orbin item 2, 29 Sep 2026): the one door's number,
   // printed with the gauge and in the rail footer. Null means "Not scored yet".
   const soFar = scoreSoFar(packageSqs);
+
+  // Orbin item 1 (1 Oct 2026): the package page is reachable after generation.
+  // Once forms exist the number IS the Total Package Score (the backend returns
+  // the editor's persisted score), the actions that re-read the documents are
+  // off - they never update forms that already exist - and the button goes
+  // back to where the producer left off.
+  const genState = packageGen?.state || GEN_NONE;
+  const formsExist = genState === GEN_DONE;
+  const afterForms = formsExist || genState === GEN_RUNNING;
+  const lockText = lockedReason(genState);
+  const genForms = formsExist && Array.isArray(packageGen?.forms) ? packageGen.forms : [];
 
   const integrityStatus = integrity?.status;
   const integrityContent = renderIntegrityStatus();
@@ -464,9 +493,16 @@ export default function ReviewRailLayout(props) {
   const overview = (
     <>
       <PageHead id="overview" title="Review Your Submission"
-        description="Resolve what needs your input, then continue to form selection."
+        description={formsExist
+          ? "Your forms are generated. Open one below to make changes."
+          : genState === GEN_RUNNING ? GENERATION_RUNNING_TEXT
+          : "Resolve what needs your input, then continue to form selection."}
         right={openItems > 0 ? <Badge tone="blue">In Progress</Badge> : <Badge tone="green">All handled</Badge>} />
       <div className="rr-stack">
+        {genState === GEN_RUNNING && <div className="rr-note rr-note--blue rr-gen-note">{GENERATION_RUNNING_TEXT}</div>}
+        {genState === GEN_INTERRUPTED && (
+          <div className="rr-note rr-note--amber rr-gen-note"><strong>{GENERATION_DIDNT_FINISH}.</strong> {GENERATION_DIDNT_FINISH_NEXT}</div>
+        )}
         <div className="rr-overview-grid">
           <Panel title="Submission Readiness" right={<span className="rr-panel__meta rr-panel__meta--inline">Updates as you fix items</span>}>
             <div className="rr-ready">
@@ -485,9 +521,9 @@ export default function ReviewRailLayout(props) {
                     {(keyDetails?.satisfied || []).length} of {(keyDetails?.satisfied || []).length + (keyDetails?.missing || []).length} key details in place
                   </div>
                 )}
-                {soFar && (
-                  <div className="rr-ready__note">Submission Quality Score so far. It can change when forms are generated.</div>
-                )}
+                {soFar && (formsExist
+                  ? <div className="rr-ready__note">Total Package Score</div>
+                  : <div className="rr-ready__note">Submission Quality Score so far. It can change when forms are generated.</div>)}
                 <div className="rr-ladder">
                   {TIER_LADDER.map((t, i) => (
                     <div key={t.name} className={`rr-ladder__row${i === tierIndex ? " is-current" : ""}`}>
@@ -498,7 +534,7 @@ export default function ReviewRailLayout(props) {
               </div>
             </div>
           </Panel>
-          <Panel title="Your Progress" meta={nextStepText(openItemCount, reviewIssueCounts.hardStopCount, reviewIssueCounts.warningCount)}>
+          <Panel title="Your Progress" meta={nextStepText(openItemCount, reviewIssueCounts.hardStopCount, reviewIssueCounts.warningCount, afterForms)}>
             <div className="rr-progress">
               <b>{handledItems} of {totalItems}</b><span>items handled</span>
             </div>
@@ -512,8 +548,8 @@ export default function ReviewRailLayout(props) {
               <button type="button" className={`rr-stat${hardOpen ? "" : " is-done"}`} onClick={() => onSectionChange("hardstops")}>
                 <i />{hardOpen ? `${plural(hardOpen, "blocker")} left` : "No blockers left"}<span className="rr-stat__go"><ArrowIcon /></span>
               </button>
-              <button type="button" className={`rr-stat${openConflicts.length ? "" : " is-done"}`} onClick={() => onSectionChange("consistency")}>
-                <i />{openConflicts.length ? `${plural(openConflicts.length, "value")} to confirm` : "All values confirmed"}<span className="rr-stat__go"><ArrowIcon /></span>
+              <button type="button" className={`rr-stat${conflictsOpen ? "" : " is-done"}`} onClick={() => onSectionChange("consistency")}>
+                <i />{conflictsOpen ? `${plural(conflictsOpen, "value")} to confirm` : (preFormLocked && openConflicts.length ? (formsExist ? "Values are changed in the form editor" : "Waiting for the forms") : "All values confirmed")}<span className="rr-stat__go"><ArrowIcon /></span>
               </button>
               <button type="button" className={`rr-stat${warnOpen ? "" : " is-done"}`} onClick={() => onSectionChange("warnings")}>
                 <i />{warnOpen ? `${plural(warnOpen, "warning")} to review` : "All warnings handled"}<span className="rr-stat__go"><ArrowIcon /></span>
@@ -527,8 +563,22 @@ export default function ReviewRailLayout(props) {
             <KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail} onShowSection={onSectionChange} className="tier2-missing rr-key-line" />
           </Panel>
         )}
+        {genForms.length > 0 && (
+          <Panel title="Your forms" right={<span className="rr-panel__meta rr-panel__meta--inline">Each form&apos;s own score</span>} bodyClassName="rr-rows">
+            {genForms.map((f) => (
+              <div key={f.formId} className="rr-form-row">
+                <span className="rr-form-row__name">{f.label}</span>
+                <span className="rr-form-row__score" style={{ color: f.score != null ? gradeColor(f.grade || sqsGradeFromScore(f.score)) : "#94a3b8" }}>
+                  {f.score != null ? `${f.score}${f.grade ? ` ${f.grade}` : ""}` : "Not scored"}
+                </span>
+                <span className="rr-form-row__tier">{f.tier || ""}</span>
+                <button type="button" className="rr-form-row__open" onClick={() => packageGen?.onOpenForm?.(f.formId)}>Open</button>
+              </div>
+            ))}
+          </Panel>
+        )}
         <RemediationDiffBand diff={issueDiff} />
-        {canProceedWithWarning && warningStops.length > 0 && (
+        {canProceedWithWarning && warningStops.length > 0 && !afterForms && (
           <div className="stops-banner stops-warning rr-incomplete">
             <div className="stops-title rr-incomplete__title">Incomplete Submission - Review Before Generating</div>
             {warningStops.map((s, i) => (
@@ -549,6 +599,7 @@ export default function ReviewRailLayout(props) {
         description="Check how each document was classified. Exclude files that don't belong, or keep one as supporting only."
         right={docsOpen > 0 ? <Badge tone="pink">{docsOpen} to fix</Badge> : <Badge tone="green">All clear</Badge>} />
       <div className="rr-stack">
+        {lockText && <div className="rr-note rr-note--blue rr-gen-note">{lockText}</div>}
         <Panel title={`Documents Processed (${docSummary.length})`} meta="Type, match strength and how each file is used" bodyClassName="rr-rows">
           {docSummary.length === 0 && (
             <div className="rr-doc-empty">No document details are available for this submission.</div>
@@ -585,11 +636,11 @@ export default function ReviewRailLayout(props) {
                     <span className="rr-doc__type">
                       <select
                         value={docType}
-                        disabled={anyReclassBusy}
+                        disabled={anyReclassBusy || !!lockText}
                         onChange={(e) => { if (e.target.value && e.target.value !== docType) onReclassify(d.doc_id, "set_type", e.target.value, "type"); }}
                         title="Correct the document type"
                         aria-label={`Document type for ${d.filename}`}
-                        className={`rr-select${busy && reclassBusyBtn === "type" ? " is-busy" : ""}`}
+                        className={`rr-select${busy && reclassBusyBtn === "type" ? " is-busy" : ""}${lockText ? " is-locked" : ""}`}
                       >
                         {availableDocTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                       </select>
@@ -597,14 +648,14 @@ export default function ReviewRailLayout(props) {
                     </span>
                   )}
                   <HoverTip text={excluded ? DOC_ACTION_TIPS.include : DOC_ACTION_TIPS.exclude} style={{ width: "auto", display: "inline-flex" }}>
-                    <button type="button" className="rr-mini-btn rr-mini-btn--wide" disabled={anyReclassBusy}
+                    <button type="button" className={`rr-mini-btn rr-mini-btn--wide${lockText ? " is-locked" : ""}`} disabled={anyReclassBusy || !!lockText}
                       onClick={() => onReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}>
                       {busy && reclassBusyBtn === "toggle" && <Spinner />}{excluded ? "Include" : "Exclude"}
                     </button>
                   </HoverTip>
                   {!excluded && (
                     <HoverTip text={supportingOnly ? DOC_ACTION_TIPS.supporting_undo : DOC_ACTION_TIPS.supporting_only} style={{ width: "auto", display: "inline-flex" }}>
-                      <button type="button" className={`rr-mini-btn${supportingOnly ? " is-on" : ""}`} disabled={anyReclassBusy}
+                      <button type="button" className={`rr-mini-btn${supportingOnly ? " is-on" : ""}${lockText ? " is-locked" : ""}`} disabled={anyReclassBusy || !!lockText}
                         onClick={() => onReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}>
                         {busy && reclassBusyBtn === "supporting" && <Spinner />}{supportingOnly ? "Supporting only ✓" : "Supporting only"}
                       </button>
@@ -631,7 +682,7 @@ export default function ReviewRailLayout(props) {
 
   const integritySection = (
     <>
-      <PageHead id="integrity" title="Submission Integrity"
+      <PageHead id="integrity" afterForms={afterForms} title="Submission Integrity"
         description="Checks that every uploaded document belongs to the same insured."
         right={integrityStatus === "low" ? <IntegritySeverityChip severity="hard_stop" />
           : integrityStatus === "medium" ? <IntegritySeverityChip severity="warning" />
@@ -644,7 +695,7 @@ export default function ReviewRailLayout(props) {
 
   const consistency = (
     <>
-      <PageHead id="consistency" title="Data Consistency"
+      <PageHead id="consistency" afterForms={afterForms} title="Data Consistency"
         description={openConflicts.length > 0
           ? "Your documents disagree on these values. Confirm the correct one and it is used on every form."
           : dcNeedsConfirm
@@ -653,6 +704,7 @@ export default function ReviewRailLayout(props) {
         right={openConflicts.length > 0 ? <Badge tone="pink">{openConflicts.length} to fix</Badge>
           : <Badge tone="green">{dcNeedsConfirm ? "All confirmed" : "Nothing to confirm"}</Badge>} />
       <div className="rr-stack" ref={dcSectionRef}>
+        {lockText && openConflicts.length > 0 && <div className="rr-note rr-note--blue rr-gen-note">{lockText}</div>}
         {!dcHasContent && <EmptyState title="Your documents agree." sub="There are no values to confirm." />}
         {underwritingBusy !== null && (
           <div className="rr-busy-note">
@@ -665,7 +717,7 @@ export default function ReviewRailLayout(props) {
               const isConflict = f.status === "conflict";
               const isConfirmed = f.status === "confirmed";
               const busy = underwritingBusy === f.fact_key;
-              const rowDisabled = busy;
+              const rowDisabled = busy || !!lockText;
               const anyConfirmInFlight = underwritingBusy !== null;
               const picked = underwritingPicks[f.fact_key] ?? "";
               const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
@@ -726,7 +778,7 @@ export default function ReviewRailLayout(props) {
                             aria-label={`Type a value for ${f.label}`}
                             onChange={(e) => setUnderwritingPicks((p) => ({ ...p, [f.fact_key]: e.target.value }))}
                           />
-                          <button type="button" className="rr-conf__btn" disabled={anyConfirmInFlight || !picked}
+                          <button type="button" className="rr-conf__btn" disabled={anyConfirmInFlight || !picked || !!lockText}
                             onClick={() => onConfirmUnderwriting(f.fact_key, picked, lineScope)}>
                             {busy ? "Confirming…" : (lineScopeLabel ? `Confirm for ${lineScopeLabel}` : "Confirm")}
                           </button>
@@ -798,7 +850,7 @@ export default function ReviewRailLayout(props) {
 
   const hardStopsSection = (
     <>
-      <PageHead id="hardstops" title="Hard Stops"
+      <PageHead id="hardstops" afterForms={afterForms} title="Hard Stops"
         description="Required before submission - Caps your Submission Quality Score (SQS) at 60"
         right={hasHardStops
           ? <Badge tone={hardTally.open > 0 ? "pink" : "green"}>{progressText(hardTally)}</Badge>
@@ -848,7 +900,7 @@ export default function ReviewRailLayout(props) {
 
   const warningsSection = (
     <>
-      <PageHead id="warnings" title="Warnings" description="Caps your Submission Quality Score (SQS) at 85"
+      <PageHead id="warnings" afterForms={afterForms} title="Warnings" description="Caps your Submission Quality Score (SQS) at 85"
         right={hasWarnings
           ? <Badge tone={warnTally.open > 0 ? "pink" : "green"}>{progressText(warnTally)}</Badge>
           : <Badge tone="green">Clear</Badge>} />
@@ -896,11 +948,11 @@ export default function ReviewRailLayout(props) {
         <nav className="rr-nav" ref={navRef}>
           <div className="rr-nav__group">Review</div>
           {navItems.slice(0, 2).map(renderNavItem)}
-          <div className="rr-nav__group">Fix before selecting forms</div>
+          <div className="rr-nav__group">{afterForms ? FIX_GROUP_AFTER_FORMS : FIX_GROUP}</div>
           {navItems.slice(2).map(renderNavItem)}
         </nav>
         <div className="rr-rail-foot">
-          <div className="rr-rail-foot__label">Score so far</div>
+          <div className="rr-rail-foot__label">{scoreHeading(genState)}</div>
           <div className="rr-rail-foot__tier" style={{ color: soFar ? tierColor : "#a1a1aa" }}>{soFar ? soFar.text : "Not scored yet"}</div>
           <div className="rr-rail-foot__sub">{openItems > 0 ? `${plural(openItems, "item")} to go` : "Everything handled"}</div>
           <div className="rr-rail-foot__bar"><i style={{ width: `${progressPct}%` }} /></div>
@@ -924,7 +976,7 @@ export default function ReviewRailLayout(props) {
               </span>
             )}
             <button type="button" className="btn btn-modal-primary btn-block btn-large" onClick={onContinue}>
-              Continue to form selection
+              {continueLabel(genState)}
             </button>
           </div>
         </div>

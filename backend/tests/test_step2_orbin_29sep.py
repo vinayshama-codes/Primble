@@ -949,8 +949,13 @@ def test_the_rail_prints_the_number_with_the_gauge_and_in_the_footer():
     assert '{tierName || "Not scored yet"}' in gauge
     # the note replaces the old line, only when there is a score
     assert "{soFar && (" in src and _RAIL_NOTE in src
-    # the rail footer
-    assert '<div className="rr-rail-foot__label">Score so far</div>' in src
+    # the rail footer. Its label is "Score so far" before generation and "Total
+    # Package Score" once forms exist (Orbin item 1, owner, 1 Oct 2026 - the
+    # TEST changed: the label used to be fixed text). `scoreHeading` is run for
+    # real in tests/test_package_page_1oct.py.
+    assert '<div className="rr-rail-foot__label">{scoreHeading(genState)}</div>' in src
+    pg = (_FRONTEND_SRC / "utils" / "packageGeneration.js").read_text(encoding="utf-8")
+    assert 'state === GEN_DONE ? "Total Package Score" : "Score so far"' in pg
     assert 'soFar ? soFar.text : "Not scored yet"' in src
     assert "Submission readiness</div>" not in src
     # kept: the panel title, the key-details lines, the tier ladder, Progress
@@ -1277,10 +1282,20 @@ def test_editor_and_clarity_responses_carry_nothing_new(over):
     out = _resolve(s, mode="field", field="contact_phone", value="303-555-0100",
                    code=_CONTACT, issue_id="iss-contact")
     after_resolve = s.store["package_sqs"]["package_sqs_score"]
+    kd_resolve = sq.key_details(s.store.get("facts") or {}, s.store.get("flags") or {})
     back = _reopen(s, code=_CONTACT, issue_id="iss-contact")
     after_reopen = s.store["package_sqs"]["package_sqs_score"]
-    for body, persisted in ((out, after_resolve), (back, after_reopen)):
-        assert "package_sqs" not in body and "key_details" not in body
+    kd_reopen = sq.key_details(s.store.get("facts") or {}, s.store.get("flags") or {})
+    assert kd_resolve != kd_reopen          # the list really moves both ways
+    for body, persisted, kd in ((out, after_resolve, kd_resolve), (back, after_reopen, kd_reopen)):
+        assert "package_sqs" not in body
+        # Orbin item 1 (1 Oct 2026 - the TEST changed): the package page is
+        # reachable after generation, so an editor-side reply also carries its
+        # Key Details list; before forms exist (clarity) it still carries none.
+        if over.get("generated_forms"):
+            assert body["key_details"] == kd
+        else:
+            assert "key_details" not in body
         # the persisted, credit-bearing score, exactly as before
         assert body["new_package_sqs_score"] == persisted
 
@@ -1866,8 +1881,15 @@ def _pi_questions(facts, forms=("ACORD_125",), flags=None):
 
 
 def test_the_insured_is_asked_optionally_with_no_evidence():
+    """1 Oct 2026 (owner): the landlord now rides along as FOLLOW-UPS of the
+    interest question, shown to the client only once they answer Tenant - it
+    was asked only when Tenant had been confirmed before sending."""
     qs = _pi_questions(_pi_facts())
-    assert set(qs) == {"premises_interest"}
+    assert set(qs) == {"premises_interest", "landlord_name", "landlord_address"}
+    for f in ("landlord_name", "landlord_address"):
+        assert qs[f]["show_if"] == {"field": "premises_interest", "any_of": [_PI_TENANT_OPT]}
+        assert qs[f]["follow_up_of"] == "premises_interest" and qs[f]["default_selected"] is False
+    assert "show_if" not in qs["premises_interest"]
     q = qs["premises_interest"]
     assert q["field_type"] == "select"
     assert q["options"] == [_PI_TENANT_OPT, _PI_OWNER_OPT, "Other"]
@@ -1876,10 +1898,19 @@ def test_the_insured_is_asked_optionally_with_no_evidence():
     assert "d13" not in text and "evidence" not in text and "property coverage" not in text
 
 
-def test_no_question_without_acord_125_or_with_two_locations():
+def test_no_question_without_acord_125_and_two_locations_are_asked_one_by_one():
     assert _pi_questions(_pi_facts(), forms=("ACORD_126",)) == {}
     two = _pi_facts(property_locations=[_pi_row(), copy.deepcopy(_PI_SECOND_ROW)])
+    # never the one-premises facts (1 Oct 2026: each location by its own name)
     assert _pi_questions(two) == {}
+    qs = arq.generate_arq_questions_from_facts(copy.deepcopy(two), dict(_PI_ORBIN_FLAGS),
+                                               ["ACORD_125"], [], [])
+    loc = {q["field_name"]: q for q in qs if _pi.parse_location_field(q["field_name"])}
+    asked = {f for f in loc if f.startswith("premises_interest@")}
+    assert asked and all(loc[f]["field_type"] == "select" for f in asked)
+    for f in asked:
+        n = f.split("@loc")[1]
+        assert loc[f"landlord_name@loc{n}"]["show_if"]["field"] == f
 
 
 def test_the_landlord_is_asked_only_of_a_tenant():
@@ -1918,6 +1949,12 @@ def test_the_fr125_package_gets_no_new_question():
     facts, flags = d["merged_facts"], d.get("flags") or {}
     assert _pi.one_premises_row(facts) is None               # eight rows
     assert _pi_questions(facts, flags=flags) == {}
+    # 1 Oct 2026: each RENTED location (rows 1 and 3 state Tenant) is asked its
+    # landlord; the owned and "leased" (Other) locations are asked nothing.
+    qs = arq.generate_arq_questions_from_facts(copy.deepcopy(facts), dict(flags),
+                                               ["ACORD_125"], [], [])
+    assert {q["field_name"] for q in qs if _pi.parse_location_field(q["field_name"])} == {
+        "landlord_name@loc1", "landlord_address@loc1", "landlord_name@loc3", "landlord_address@loc3"}
     _res, recs = _pi_card(facts, flags=flags)
     assert not any(k in recs for k in ("rec_premises_interest", "rec_landlord_name",
                                        "rec_landlord_address"))

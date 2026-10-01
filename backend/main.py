@@ -49,6 +49,7 @@ from routes.assistant_routes import router as assistant_router
 from routes.audit_routes import router as audit_router
 from routes.job_routes import router as job_router
 from routes.admin_routes import router as admin_router
+from routes.applicant_sign_routes import router as applicant_sign_router
 
 _DEV_ROUTES_ENABLED = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
 _ENVIRONMENT        = os.getenv("ENVIRONMENT", "development").lower()
@@ -231,6 +232,7 @@ app.include_router(assistant_router)
 app.include_router(audit_router)
 app.include_router(job_router)
 app.include_router(admin_router)
+app.include_router(applicant_sign_router)
 
 if _IS_PROD and _DEV_ROUTES_ENABLED:
     raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")

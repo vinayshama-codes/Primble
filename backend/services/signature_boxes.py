@@ -39,7 +39,8 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -217,11 +218,15 @@ def _walk_fields(arr) -> Iterable[Any]:
             yield from _walk_fields(kids)
 
 
-def _hide_other_signature_boxes(pdf_bytes: bytes) -> Tuple[bytes, Dict[str, Tuple[str, Optional[str]]]]:
-    """Rename every signature box that is NOT the producer's, so the painter
-    (which decides by name) passes it by and keeps it in the AcroForm. A /Sig
-    box is shown to it as /Tx for the same reason. Returns the new bytes and
+def _hide_other_signature_boxes(pdf_bytes: bytes,
+                                keep: Optional[Callable[[str, str, str], bool]] = None,
+                                ) -> Tuple[bytes, Dict[str, Tuple[str, Optional[str]]]]:
+    """Rename every signature box `keep` does not accept (by default: every box
+    that is NOT the producer's), so the painter (which decides by name) passes
+    it by and keeps it in the AcroForm. A /Sig box is shown to it as /Tx for the
+    same reason. Returns the new bytes and
     {placeholder: (original name, original /FT or None)}."""
+    keep = keep or is_producer_signature
     import pikepdf
     from services.pdf_service import _is_signature_field
     held: Dict[str, Tuple[str, Optional[str]]] = {}
@@ -247,7 +252,7 @@ def _hide_other_signature_boxes(pdf_bytes: bytes) -> Tuple[bytes, Dict[str, Tupl
             if not _is_signature_field(name, ft):
                 continue
             tu = str(item.get("/TU") or "")
-            if is_producer_signature(name, tu, ft):
+            if keep(name, tu, ft):
                 continue
             while f"{_HOLD_PREFIX}{n}" in taken:
                 n += 1
@@ -318,6 +323,14 @@ def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = Fals
     from services.pdf_service import regenerate_pdf_for_form as _regenerate
     generated = (proc_session or {}).get("generated_forms") or {}
     r = generated.get(form_id)
+    # Orbin item 14: the applicant's signature, painted while the form still
+    # holds what they signed. A cached PDF painted for a signature that is no
+    # longer valid is never served again.
+    applicant = applicant_signature_for(proc_session, form_id) if isinstance(r, dict) else None
+    if applicant:
+        return _render_with_applicant(r, form_id, force, user_signature, applicant)
+    if isinstance(r, dict) and r.pop(APPLICANT_RENDER_KEY, None):
+        force = True
     if not isinstance(r, dict) or not r.get("signature_applied"):
         return _regenerate(proc_session, form_id, force, user_signature)
     sig_b64 = r.get("signature_b64") or user_signature
@@ -335,4 +348,267 @@ def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = Fals
     r["pdf_bytes"] = pdf_bytes
     r["_pdf_cache_hash"] = hashlib.md5(json.dumps(field_data, sort_keys=True).encode()).hexdigest()
     r["signature_scope"] = SIGNATURE_SCOPE
+    return pdf_bytes
+
+
+# ── The applicant's signature (Orbin item 14, 1 Oct 2026) ─────────────────────
+#
+# The client signs through a link (services/applicant_signing.py). Their image
+# goes ONLY on the application's signature lines - never on initials (each is a
+# legal choice: "I reject UM coverage in its entirety", the credit-scoring
+# notice) and never on a conditional attestation. Which lines those are is read
+# off the PRINTED form, not a list: a line is an applicant signature box whose
+# own cell label - the words printed directly above it, within its width - says
+# SIGNATURE. On all 17 templates that is every "APPLICANT'S SIGNATURE" /
+# "SIGNATURE (MUST BE AN OFFICER, OWNER OR PARTNER)" line, and NOT ACORD 130's
+# NamedInsured_Signature_A, whose cell carries the Minnesota "I have no
+# employees and an estimated exposure of zero" attestation under the same
+# tooltip as the real line (NamedInsured_Signature_B). The date box beside a
+# line is paired by the row it shares, not its letter: 130's SignatureDate_A
+# sits beside Signature_B.
+#
+# The signature belongs to the form AS SIGNED. `form_fingerprint` is taken over
+# the form's values when the client signs; once any value changes, the image is
+# no longer painted and the producer is told to send for signature again.
+
+APPLICANT_SIGNATURE_KEY = "applicant_signature"            # on a generated form
+APPLICANT_IMAGES_KEY = "applicant_signature_images"        # on the session row
+APPLICANT_RENDER_KEY = "_applicant_render"                 # cache marker on a form
+
+STATE_SIGNED = "signed"
+STATE_STALE = "stale"
+
+_LABEL_BAND = 16.0          # points above a box that hold its printed cell label
+_LABEL_SLACK = 6.0          # the label starts a hair left of the box
+_LINE_WORD = "SIGNATURE"
+
+
+def _widgets(pdf) -> Iterable[Tuple[int, str, str, str, List[float]]]:
+    """(page index, name, tooltip, /FT, rect) for every widget in a template."""
+    for pi, page in enumerate(pdf.pages):
+        for annot in list(page.get("/Annots") or []):
+            try:
+                parent = annot.get("/Parent")
+                t = annot.get("/T") if annot.get("/T") is not None else (parent.get("/T") if parent is not None else None)
+                if t is None:
+                    continue
+                tu = annot.get("/TU") if annot.get("/TU") is not None else (parent.get("/TU") if parent is not None else None)
+                ft = annot.get("/FT") if annot.get("/FT") is not None else (parent.get("/FT") if parent is not None else None)
+                rect = [float(v) for v in annot.get("/Rect")]
+                yield pi, str(t), str(tu or ""), str(ft or ""), rect
+            except Exception:                                  # noqa: BLE001
+                continue
+
+
+@lru_cache(maxsize=64)
+def _applicant_lines_cached(template_path: str, mtime: float) -> Tuple[Tuple[str, Optional[str]], ...]:
+    import pdfplumber
+    import pikepdf
+    sigs, dates = [], []
+    pdf = pikepdf.open(template_path)
+    try:
+        for pi, name, tu, ft, rect in _widgets(pdf):
+            box = signature_box(name, tu, ft)
+            if not box or box[1] != SIGNER_APPLICANT:
+                continue
+            if box[0] == KIND_SIGNATURE:
+                sigs.append((pi, name, rect))
+            elif box[0] == KIND_DATE:
+                dates.append((pi, name, rect))
+    finally:
+        pdf.close()
+    if not sigs:
+        return ()
+    lines: List[Tuple[str, Optional[str]]] = []
+    used = set()
+    with pdfplumber.open(template_path) as plumb:
+        for pi, name, (x0, y0, x1, y1) in sorted(sigs, key=lambda s: (s[0], -s[2][3], s[2][0])):
+            page = plumb.pages[pi]
+            top = page.height - y1
+            band = page.within_bbox((max(0.0, x0 - _LABEL_SLACK), max(0.0, top - _LABEL_BAND),
+                                     min(page.width, x1), min(page.height, top + 1.0)))
+            label = " ".join((band.extract_text() or "").split()).upper()
+            if _LINE_WORD not in label:
+                continue
+            best, best_gap = None, None
+            for dpi, dname, (dx0, dy0, dx1, dy1) in dates:
+                if dpi != pi or dname in used:
+                    continue
+                overlap = min(y1, dy1) - max(y0, dy0)
+                if overlap < 0.5 * min(y1 - y0, dy1 - dy0) or dx0 < x1 - 2.0:
+                    continue
+                gap = dx0 - x1
+                if best_gap is None or gap < best_gap:
+                    best, best_gap = dname, gap
+            if best:
+                used.add(best)
+            lines.append((name, best))
+    return tuple(lines)
+
+
+def applicant_signature_lines(template_path: str) -> List[Dict[str, Optional[str]]]:
+    """The application's signature lines on this printed form, each with the
+    applicant date box on its row: [{"signature": name, "date": name|None}].
+    Empty for a form the applicant does not sign (ACORD 25, 28, 101, 186), and
+    for a template that cannot be read."""
+    try:
+        mtime = os.path.getmtime(template_path)
+        return [{"signature": s, "date": d} for s, d in _applicant_lines_cached(template_path, mtime)]
+    except Exception as ex:                                     # noqa: BLE001
+        logger.warning("applicant signature lines unavailable for %s: %s", template_path, ex)
+        return []
+
+
+def template_path_for(generated_form: dict) -> Optional[str]:
+    try:
+        from config.settings import TEMPLATE_DIR
+        return os.path.join(TEMPLATE_DIR, (generated_form or {})["form"]["template_file"])
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def form_fingerprint(field_data: Optional[dict], schema: Optional[dict] = None) -> str:
+    """The form's content as signed: every non-empty value except the
+    signature and date boxes, which signing itself fills (initials and printed
+    names count - they are not signing's to change). Order-free and stable
+    across saves that change nothing."""
+    items = []
+    for k, v in (field_data or {}).items():
+        text = "" if v is None else str(v).strip()
+        if not text:
+            continue
+        box = signature_box(str(k), _tooltip(schema, str(k)), _field_type(schema, str(k)))
+        # Only the boxes signing itself fills (the signatures, their dates) are
+        # left out. Initials stay IN: each is a legal choice (a UM rejection)
+        # that must not change under a signature; so does a printed name.
+        if box is not None and box[0] in (KIND_SIGNATURE, KIND_DATE):
+            continue
+        items.append((str(k), text))
+    items.sort()
+    raw = json.dumps(items, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _field_data_of(generated_form: dict) -> dict:
+    return (generated_form or {}).get("field_state") or (generated_form or {}).get("mapped") or {}
+
+
+def applicant_signature_state(generated_form: Any, field_data: Optional[dict] = None) -> Optional[str]:
+    """"signed" while the form still holds exactly what the applicant signed,
+    "stale" once anything on it changed, None when it was never signed."""
+    if not isinstance(generated_form, dict):
+        return None
+    meta = generated_form.get(APPLICANT_SIGNATURE_KEY)
+    if not isinstance(meta, dict) or not meta.get("fingerprint"):
+        return None
+    fd = field_data if field_data is not None else _field_data_of(generated_form)
+    schema = generated_form.get("schema") if isinstance(generated_form.get("schema"), dict) else None
+    return STATE_SIGNED if meta["fingerprint"] == form_fingerprint(fd, schema) else STATE_STALE
+
+
+def applicant_signature_for(proc_session: Any, form_id: str,
+                            field_data: Optional[dict] = None) -> Optional[dict]:
+    """What to paint for the applicant on this form - {"image", "date",
+    "lines", "request_id"} - or None: never signed, changed since, no line on
+    the printed form, or an image this server cannot read (blank over wrong)."""
+    try:
+        gen = ((proc_session or {}).get("generated_forms") or {}).get(form_id)
+        if applicant_signature_state(gen, field_data) != STATE_SIGNED:
+            return None
+        meta = gen[APPLICANT_SIGNATURE_KEY]
+        enc = ((proc_session or {}).get(APPLICANT_IMAGES_KEY) or {}).get(meta.get("request_id"))
+        if not enc:
+            return None
+        from utils.crypto import decrypt_field_soft
+        image = decrypt_field_soft(enc)
+        tpl = template_path_for(gen)
+        lines = applicant_signature_lines(tpl) if tpl else []
+        if not image or not lines:
+            return None
+        return {"image": image, "date": str(meta.get("signed_date") or ""),
+                "lines": lines, "request_id": meta.get("request_id")}
+    except Exception as ex:                                     # noqa: BLE001
+        logger.warning("applicant signature unavailable for %s: %s", form_id, ex)
+        return None
+
+
+def signed_applicant_boxes(proc_session: Any, form_id: str) -> Dict[str, bool]:
+    """{box: painted} for the viewer: every applicant signature / date box on a
+    form the applicant has signed, True for the ones the signing painted or
+    dated. Empty when the form is not (or no longer) signed."""
+    gen = ((proc_session or {}).get("generated_forms") or {}).get(form_id)
+    if applicant_signature_for(proc_session, form_id) is None:
+        return {}
+    tpl = template_path_for(gen)
+    lines = applicant_signature_lines(tpl) if tpl else []
+    painted = {l["signature"] for l in lines} | {l["date"] for l in lines if l["date"]}
+    schema = _schema_for(form_id, gen.get("schema"))
+    out = {}
+    for f in (schema or {}):
+        box = signature_box(f, _tooltip(schema, f), _field_type(schema, f))
+        if box and box[1] == SIGNER_APPLICANT and box[0] in (KIND_SIGNATURE, KIND_DATE):
+            out[f] = f in painted
+    for f in painted:
+        out[f] = True
+    return out
+
+
+def add_applicant_signature(pdf_bytes: bytes, template_path: str, applicant: dict) -> bytes:
+    """Date the applicant's lines and paint their signature on them - on an
+    already rendered (and maybe producer-signed) PDF. Every other signature box
+    is hidden from the painter and restored. If the image cannot be painted,
+    the PDF comes back exactly as it went in: never a date without a signature."""
+    from services.pdf_service import inject_signature_into_pdf, _fill_and_highlight
+    import pikepdf
+    lines = (applicant or {}).get("lines") or []
+    sig_names = {l["signature"] for l in lines if l.get("signature")}
+    date_vals = {l["date"]: applicant.get("date") for l in lines if l.get("date") and applicant.get("date")}
+    if not sig_names or not applicant.get("image"):
+        return pdf_bytes
+    dated = pdf_bytes
+    if date_vals:
+        pdf = pikepdf.open(io.BytesIO(pdf_bytes))
+        try:
+            acro = pdf.Root.get("/AcroForm")
+            if acro is not None:
+                _fill_and_highlight(acro.get("/Fields", []), date_vals, {}, [0], pdf)
+            out = io.BytesIO()
+            pdf.save(out)
+            dated = out.getvalue()
+        finally:
+            pdf.close()
+    hidden, held = _hide_other_signature_boxes(dated, keep=lambda name, _tu, _ft: name in sig_names)
+    painted = inject_signature_into_pdf(template_path, {}, {}, applicant["image"], hidden)
+    if painted is hidden:
+        logger.error("applicant signature could not be painted on %s", template_path)
+        return pdf_bytes
+    return _restore_held_boxes(painted, held) if held else painted
+
+
+def _render_with_applicant(r: dict, form_id: str, force: bool,
+                           user_signature: Optional[str], applicant: dict) -> bytes:
+    """A form the applicant signed: filled, producer-signed when the producer
+    has signed, then dated and signed on the applicant's lines. Cached against
+    the field values AND the signature it carries."""
+    from services.pdf_service import fill_pdf
+    tpl = template_path_for(r)
+    field_data = _field_data_of(r)
+    confidence = r.get("confidence", {})
+    producer_sig = (r.get("signature_b64") or user_signature) if r.get("signature_applied") else None
+    state_hash = hashlib.md5(json.dumps(field_data, sort_keys=True).encode()).hexdigest()
+    render_key = f"{applicant.get('request_id')}|{'p' if producer_sig else '-'}"
+    if (not force and r.get("pdf_bytes") and r.get("_pdf_cache_hash") == state_hash
+            and r.get(APPLICANT_RENDER_KEY) == render_key):
+        cached = r["pdf_bytes"]
+        return cached if isinstance(cached, bytes) else bytes(cached)
+    if producer_sig:
+        base = inject_producer_signature(tpl, field_data, confidence, producer_sig)
+    else:
+        base = fill_pdf(tpl, field_data, confidence)
+    pdf_bytes = add_applicant_signature(base, tpl, applicant)
+    r["pdf_bytes"] = pdf_bytes
+    r["_pdf_cache_hash"] = state_hash
+    r[APPLICANT_RENDER_KEY] = render_key
+    if producer_sig:
+        r["signature_scope"] = SIGNATURE_SCOPE
     return pdf_bytes
