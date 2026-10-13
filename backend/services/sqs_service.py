@@ -1383,6 +1383,95 @@ GL_CLASS_CODE_HOMES: Tuple[str, ...] = ("gl_class_codes_by_location", "gl_class_
 _GL_CODE_SUBKEY_RE = re.compile(r"^(?:(?:gl_)?class_?codes?|codes?)$", re.I)
 _GL_CODE_TOKEN_RE = re.compile(r"\b\d{4,6}\b")
 
+# ── A GL class code read out of TEXT (14 Oct 2026, review of run b117f010) ────
+# The "no class codes" card is a free-text box, and the producer questionnaire
+# asks this fact as "What type of work does your business perform at each
+# location?". Every 4-6 digit token used to count, so "Electrical contracting
+# at 4800 Pecos St, Denver CO 80221" printed 80221 (the ZIP) as ACORD 125's
+# GL CODE and 4800 / 80221 on the 126 grid, and "since 2015", an SIC, a WC or
+# a NAICS code printed as GL class codes. This reader decides what PRINTS
+# (`pdf_service._gl_code_only_rows`, the 125 and the 126); whether the card is
+# ANSWERED stays `_gl_code_tokens` (any number, a description counts) - no
+# score moves by it. An ISO GL class code is five digits
+# (ACORD 125's own rule, `pdf_service._ISO_GL_CLASS_CODE_RE`), and a number
+# counts only where it STANDS as a code: an item (split on , ; : / |, new lines,
+# "and", "&") that starts with it once a location label ("Loc 1") and a code label
+# ("GL class code") are read past - "92478 electrical", "92478 & 91580" - or
+# an item whose one number it is ("Electrical work 92478"), never a ZIP after
+# a state, an amount after a money word or "$", or a street number.
+_TEXT_ITEM_SPLIT_RE = re.compile(r"[;,:/|\n]+|\s+(?:and|&)\s+", re.I)
+_TEXT_LOC_LABEL_RE = re.compile(
+    r"^\s*(?:loc(?:ation)?|bldg|building|prem(?:ise)?s?|site)\.?\s*(?:#|no\.?)?\s*\d{1,4}\b\s*[.)\-–]?\s*",
+    re.I)
+_TEXT_CODE_LABEL_RE = re.compile(
+    r"^\s*(?:(?:iso|cgl|gl|general\s+liability)\s+)?(?:class(?:ification)?\s*)?"
+    r"(?:codes?|#|no\.?)?\s*[#\-–]?\s*", re.I)
+_TEXT_ISO_CODE_RE = re.compile(r"(?<![\d$.,])\d{5}(?![\d,]|\.\d|-\d)")
+_TEXT_CODE_RUN_RE = re.compile(r"\s*(?:&|\+|and\b)?\s*(\d{5})(?![\d,]|\.\d|-\d)", re.I)
+_TEXT_STREET_AFTER_RE = re.compile(
+    r"^\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.']+(?:\s+[A-Za-z0-9.']+)?\s+"
+    r"(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pl|place"
+    r"|pkwy|parkway|hwy|highway|cir|circle|ter|terrace|trl|trail)\b", re.I)
+_TEXT_NOT_A_CODE_BEFORE_RE = re.compile(
+    r"(?:\$\s*|\b(?:payroll|sales|revenues?|receipts|cost|premiums?|limits?|deductibles?|amounts?"
+    r"|area|sq|ft|feet|zip|postal|phone|fax|policy|years?|since|employees|units|miles)\b"
+    r"[\s:#]*(?:\S+\s+){0,2})$", re.I)
+
+
+def _text_state_before(before: str) -> bool:
+    """Does `before` END with a US state (code or name)? - a ZIP follows one.
+    A two-letter code that is also an English word ("in", "or", "me") counts
+    only in capitals ("IN 46204"); "work in 92478" is a code."""
+    words = re.sub(r"[^A-Za-z ]", " ", before).split()
+    if not words:
+        return False
+    try:
+        from services.normalization import _US_STATE_NAME_PHRASES
+    except Exception:                                         # noqa: BLE001
+        return False
+    last = words[-1]
+    if len(last) == 2 and last.lower() in {a for _p, a in _US_STATE_NAME_PHRASES}:
+        return last.isupper() or last.lower() not in _STATE_CODE_WORDS
+    tail = " ".join(w.lower() for w in words[-2:])
+    return any(tail == p or tail.endswith(" " + p) for p, _a in _US_STATE_NAME_PHRASES)
+
+
+_STATE_CODE_WORDS = frozenset({"in", "or", "me", "oh", "ok", "hi", "de", "id", "la", "pa",
+                               "ma", "mo", "al", "ne", "ms"})
+
+
+def gl_code_tokens_in_text(text: Any) -> List[str]:
+    """The ISO GL class codes a piece of TEXT gives as codes, in order (see
+    above). [] when none stands as a code."""
+    out: List[str] = []
+    for item in _TEXT_ITEM_SPLIT_RE.split(str(text or "")):
+        rest = _TEXT_LOC_LABEL_RE.sub("", item, count=1)
+        rest = _TEXT_CODE_LABEL_RE.sub("", rest, count=1)
+        lead = re.match(r"(\d{5})(?![\d,]|\.\d|-\d)", rest)
+        if lead and not _TEXT_STREET_AFTER_RE.match(rest[lead.end():]):
+            pos, found = 0, []
+            while True:
+                m = _TEXT_CODE_RUN_RE.match(rest, pos)
+                if not m or _TEXT_STREET_AFTER_RE.match(rest[m.end():]):
+                    break
+                found.append(m.group(1))
+                pos = m.end()
+            out += [c for c in found if c not in out]
+            continue
+        # One number in the item, and it is a code by where it sits.
+        if len(re.findall(r"\d+", item)) != 1:
+            continue
+        m = _TEXT_ISO_CODE_RE.search(item)
+        if not m:
+            continue
+        before, after = item[:m.start()], item[m.end():]
+        if (_TEXT_NOT_A_CODE_BEFORE_RE.search(before) or _text_state_before(before)
+                or _TEXT_STREET_AFTER_RE.match(after)):
+            continue
+        if m.group(0) not in out:
+            out.append(m.group(0))
+    return out
+
 
 def _gl_code_tokens(raw: Any) -> Tuple[List[str], bool]:
     """(code tokens, shape understood) for one GL home. A shape this reader
@@ -1412,6 +1501,9 @@ def _gl_code_tokens(raw: Any) -> Tuple[List[str], bool]:
                     # A code cell is a code even when it is not all digits.
                     tokens += hits if hits else [s]
         elif isinstance(item, (str, int)):
+            # PRESENCE reads any number, on purpose: the questionnaire asks this
+            # fact as "what type of work at each location?", so a description
+            # answers it. What PRINTS reads `gl_code_tokens_in_text` (below).
             hits = _GL_CODE_TOKEN_RE.findall(str(item))
             if hits:
                 tokens += hits

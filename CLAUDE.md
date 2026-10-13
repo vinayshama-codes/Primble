@@ -777,6 +777,20 @@ premiums print nowhere on the 125 (asked Brent); Michelle not yet told about ite
 amount (`coverage_evidence._labelled_amounts` - typed limits are stored "1000000"); a person's value is evidence only for
 the question they answered (`ai_answer_guards.person_value_facts` / `box_question_facts`); `_COPE_ATTRIBUTE_BOXES` adds
 exposure distances and towing. 611 stored packages: 19 junk values refused, 0 correct lost; 94: 0 score changes.
+Deployed as `2e4dd44` with four review corrections (`state_auto_grid.box_facts`, `answer_text` read first, `UnderlyingPolicy_`
+never the auto cell, cents = premium). **A deploy does not re-stamp old forms** - adding a document re-stamps only boxes
+whose FACTS change; code fixes show on forms generated after the deploy.
+**Review of Z13 (part Z14, 14 Oct):** an answer given AFTER generation now reaches every box the engine derives from it
+(`arq_service._restamp_boxes_the_answer_decides` -> `_restamp_changed_boxes`, both answer doors; one facts view per form
++ `_engine_memo`, 4.1 s -> 1.8 s; **a re-stamp now runs its moves through `_enforce_post_fill_guards`** - a per-box
+`_deterministic_map` skips generation's post-fill guards, so an employee count reached the 131's rows B-F); a GL code is read out of free text only where it stands as a code
+(`sqs_service.gl_code_tokens_in_text` - never a ZIP / payroll / year; PRESENCE still reads any number, no score moves); a
+person's GL code beats an AI-read `applicant_gl_class_code` (`_person_gl_codes`); a GL schedule row is another line's
+only when another line claims its code AND it is not five digits (`pdf_service._gl_row_is_another_lines` - the shape
+half came from three kits whose GL row extraction copied into `wc_class_codes`). Measured: 560 stored packages - 24
+boxes in 2, both intended (a NAICS code off the 126; a grid with no GL code an owned blank); 94 - 0 score changes; the
+re-stamp door identical on 16 of 16 runs (6.4 s -> 3.9 s). Open (D6): the 126 per-form Exposure block reads one GL
+home (a full schedule scores 60); the score's "no class codes" warning fires on the three misfiled kits (shape-blind).
 **Re-run `2076fe35` (part T2): round 10 verified live, item 9 PASS. Status 10 Oct (board): 14 done, 7 built and waiting for a live look (2, 12, 13, 16, 17, 19, 24) plus our parts of 18 / 26 / 27, 6 waiting on Brent, 0 UI left.** Three more, offline:
 `extraction_service.derive_property_values_from_premises` (an empty building / BPP value from the premises rows of a
 document whose ROLE may state it - never a certificate's limit, D23); `scoped_evidence.trigger_values` (an AI
@@ -954,9 +968,14 @@ every reader; it was a false "two policies on one line" conflict that blanked th
 header. (3) `arq_service._refill_value`: a post-generation re-fill never writes the fill
 engine's "UNMATCHED" marker. (4) `render.yaml` matches the dashboard. **Render facts
 worth knowing:** `SCHEDULER_ENABLED` is unset and production defaults it off, and only
-`main.py` starts the scheduler - so retention clean-up, facts retention, audit-log
-retention, the payment lifecycle and questionnaire reminders run NOWHERE (owner decision
-pending). Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Suite 10,104 / 1 / 19.
+`main.py` starts the scheduler - so on RENDER retention clean-up, facts retention, audit-log
+retention, the payment lifecycle and questionnaire reminders do not run. **CORRECTED 14 Oct:
+they DO run on the owner's Mac** - off production `SCHEDULER_ENABLED` defaults to TRUE, the local
+uvicorn takes the advisory lock, and local and Render share ONE database: at 03:00 IST
+`run_retention_cleanup` deleted every session untouched for 180+ days (51 with forms on 14 Oct);
+09:00 payment lifecycle and 10:00 questionnaire reminder e-mails run from the Mac too.
+`SCHEDULER_ENABLED=false` in the local `.env` stops it (owner's call, 25sepChanges.md Z14).
+Tests: `tests/test_policy_history_and_refill_27sep.py` (29). Suite 10,104 / 1 / 19.
 
 ### FR125 v2 Runs (Round 2 Tests 3-8) - 220 -> 312 of 312 by test 8, 28 Sep 2026 (extraction v25)
 **Read `improving125-21sep.md` "ROUND 2 - TEST 3 RESULTS" before touching the 125 status
@@ -3300,7 +3319,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **14,022 passed, 1 failed, 19 skipped** (~17 min; 14 Oct 2026, after part Z12) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **14,102 passed, 1 failed, 19 skipped** (~16 min; 14 Oct 2026, after part Z14; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -5189,6 +5190,22 @@ def _form_is_another_lines(form_id: str, scope: Optional[str]) -> bool:
     return bool(families) and str(scope) not in families
 
 
+@contextlib.contextmanager
+def _engine_memo():
+    """The stamp's grid memo (`pdf_service._GRID_MEMO`) for one re-stamp pass,
+    as `map_facts_to_form` runs it: a grid built once per facts view."""
+    try:
+        from services.pdf_service import _GRID_MEMO
+    except Exception:                                         # pragma: no cover
+        yield
+        return
+    token = _GRID_MEMO.set({})
+    try:
+        yield
+    finally:
+        _GRID_MEMO.reset(token)
+
+
 def _restamp_changed_boxes(
     generated: dict,
     facts_before: dict,
@@ -5231,8 +5248,8 @@ def _restamp_changed_boxes(
     """
     try:
         from services.pdf_service import (
-            _deterministic_map, _is_nonfillable_field, _schema_context,
-            display_value_for_box,
+            _deterministic_map, _enforce_post_fill_guards, _is_nonfillable_field,
+            _schema_context, display_value_for_box,
         )
     except Exception as ex:                                  # noqa: BLE001
         logger.warning(f"_restamp_changed_boxes: pdf_service import failed: {ex}")
@@ -5273,12 +5290,18 @@ def _restamp_changed_boxes(
         # package forms: another line's insurer box released from a withheld
         # conflict prints its OWN carrier, even when the name is the same.
         _others_line = _form_is_another_lines(_fbase, scope)
-        with _schema_context(schema):
+        # One view per side per form, as `map_facts_to_form` runs the engine,
+        # and the stamp's grid memo: the 125's prior-carrier grid was rebuilt
+        # for every box (3 s of a 4 s re-stamp; 14 Oct 2026). Same answers.
+        _view_a = {**_fa, "_form_id": _fbase}
+        _view_b = {**_fb, "_form_id": _fbase}
+        planned: List[tuple] = []
+        with _schema_context(schema), _engine_memo():
             for box in schema.keys():
                 if _is_nonfillable_field(box):
                     continue
                 try:
-                    raw_new = _deterministic_map(box, {**_fa, "_form_id": _fbase})
+                    raw_new = _deterministic_map(box, _view_a)
                 except Exception as ex:                       # noqa: BLE001
                     logger.debug("_restamp_changed_boxes: %s/%s skipped (%s)", fid, box, ex)
                     continue
@@ -5307,7 +5330,7 @@ def _restamp_changed_boxes(
                 # only a box whose answer CHANGED is formatted for print (the
                 # first format of a form reads its template: seconds, cold).
                 try:
-                    raw_old = _deterministic_map(box, {**_fb, "_form_id": _fbase})
+                    raw_old = _deterministic_map(box, _view_b)
                 except Exception as ex:                       # noqa: BLE001
                     logger.debug("_restamp_changed_boxes: %s/%s skipped (%s)", fid, box, ex)
                     continue
@@ -5331,22 +5354,43 @@ def _restamp_changed_boxes(
                         continue                      # edited since generation
                 elif keep_edited_own and _box_norm(cur) != _box_norm(old):
                     continue                          # changed after it was printed
-                field_state[box] = new
-                if new:
-                    # The producer's label goes on what they confirmed: the
-                    # fact's own box, or a box this change moved that prints
-                    # the confirmed value or a piece of it (an address line, a
-                    # ZIP, an amount). A consequence - the next term's dates,
-                    # question 4's order - is the engine's.
-                    _n = _box_norm(new)
-                    _confirmed_piece = bool(not _others_line and own_norm and _n
-                                            and (_n == own_norm or _n in own_norm))
-                    conf[box] = provenance if (is_own or _confirmed_piece) else "filled"
-                    _mark_client_filled(cff, box, conf[box])
-                else:
-                    conf.pop(box, None)
-                    cff.discard(box)
-                values_moved = True
+                planned.append((box, new, is_own))
+            # A re-stamp prints only what GENERATION would print (14 Oct 2026):
+            # the engine answers box by box, but generation then runs the
+            # post-fill guards over the whole form - an employee count answered
+            # after forms printed on ACORD 131's named-insured rows B-F, which
+            # the row de-dup guard blanks because they repeat row A. The moves
+            # run through the same guards; one they refuse prints blank.
+            if planned:
+                _trial = dict(field_state)
+                for box, new, _own in planned:
+                    _trial[box] = new
+                try:
+                    _enforce_post_fill_guards(_trial, schema, dict(_view_a), gpt_filled_set=set())
+                except Exception as ex:                       # noqa: BLE001
+                    logger.debug("_restamp_changed_boxes: guards skipped on %s (%s)", fid, ex)
+                    _trial = None
+                for box, new, is_own in planned:
+                    if _trial is not None and new and not str(_trial.get(box) or "").strip():
+                        new = ""
+                        if not str(field_state.get(box) or "").strip():
+                            continue                  # already the blank generation printed
+                    field_state[box] = new
+                    if new:
+                        # The producer's label goes on what they confirmed: the
+                        # fact's own box, or a box this change moved that prints
+                        # the confirmed value or a piece of it (an address line, a
+                        # ZIP, an amount). A consequence - the next term's dates,
+                        # question 4's order - is the engine's.
+                        _n = _box_norm(new)
+                        _confirmed_piece = bool(not _others_line and own_norm and _n
+                                                and (_n == own_norm or _n in own_norm))
+                        conf[box] = provenance if (is_own or _confirmed_piece) else "filled"
+                        _mark_client_filled(cff, box, conf[box])
+                    else:
+                        conf.pop(box, None)
+                        cff.discard(box)
+                    values_moved = True
         if values_moved or labels_moved:
             form_data["field_state"] = field_state
             form_data["confidence"] = conf
@@ -5356,6 +5400,32 @@ def _restamp_changed_boxes(
             form_data["pdf_bytes"] = None
             touched.append(fid)
     return touched
+
+
+def _restamp_boxes_the_answer_decides(generated: dict, facts_before: dict, facts_after: dict,
+                                      answered: Any, value: Optional[str],
+                                      provenance: str) -> List[str]:
+    """ONE ANSWER, EVERY BOX IT DECIDES (14 Oct 2026, review of run b117f010).
+
+    The answer doors re-stamp through `_restamp_canonical_into_forms`, which
+    reaches only boxes whose canonical key IS the answered fact. A box a
+    RESOLVER derives from it stayed as generation left it: the "no class
+    codes" card's answer (`gl_class_codes_by_location`) closed the card and
+    counted in the score while ACORD 125's GL CODE and the 126 hazard grid
+    stayed blank. This asks generation's own engine, box by box, what each box
+    prints before and after (`_restamp_changed_boxes`, the confirm path's door
+    since 5 Oct): only boxes the answer moves, never a box a person typed.
+    Runs after the canonical re-stamp, so the answered fact's own boxes are
+    already done. Never raises; no forms = nothing to do."""
+    if not generated or not answered:
+        return []
+    try:
+        return _restamp_changed_boxes(generated, facts_before, facts_after,
+                                      own_keys=set(answered), own_value=value,
+                                      provenance=provenance)
+    except Exception as ex:                                  # noqa: BLE001
+        logger.warning("answer re-stamp of derived boxes skipped (%s)", ex)
+        return []
 
 
 def propagate_fact_edits(
@@ -6182,6 +6252,12 @@ async def apply_arq_answers_to_session(
                                                "client_arq"):
             if _fid not in updated:
                 updated.append(_fid)
+    _answered = {k for k, v in facts.items()
+                 if not str(k).startswith("_") and _facts_before_answers.get(k) is not v}
+    for _fid in _restamp_boxes_the_answer_decides(generated, _facts_before_answers, facts,
+                                                  _answered, None, "client_arq"):
+        if _fid not in updated:
+            updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts,
                        "client_answer_conflicts": held_conflicts}
     if flags_changed:
@@ -6736,6 +6812,10 @@ async def apply_producer_answer_to_session(
         for _fid in _restamp_canonical_into_forms(generated, _dk, facts, provenance="filled"):
             if _fid not in updated:
                 updated.append(_fid)
+    for _fid in _restamp_boxes_the_answer_decides(generated, _facts_before_answer, facts,
+                                                  {canon}, new_val, "producer"):
+        if _fid not in updated:
+            updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts}
     if flags_changed:
         _update_payload["flags"] = flags

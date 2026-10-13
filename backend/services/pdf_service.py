@@ -7058,14 +7058,55 @@ def _gl_schedule_rows(facts: dict) -> List[dict]:
 def _gl_hazard_rows(facts: dict) -> list:
     """The rows the ACORD 126 hazard grid prints: the schedule's classifications,
     else the legacy `gl_class_codes` list's, else the codes a person gave
-    (`_gl_code_only_rows`)."""
+    (`_gl_code_only_rows`). Another line's row is not a GL hazard (14 Oct 2026,
+    `_gl_row_is_another_lines`): the WC classes a combined package files under
+    GL printed as 126 hazards with "State Act" classifications, beside a score
+    that had dropped them."""
+    elsewhere = None
     for key in ("gl_class_code_schedule", "gl_class_codes"):
         rows = _fv(facts, key)
         if isinstance(rows, list):
             kept = [r for r in rows if _names_a_classification(r)]
             if kept:
-                return kept
+                if elsewhere is None:
+                    elsewhere = _gl_codes_owned_elsewhere(facts)
+                own = [r for r in kept if not _gl_row_is_another_lines(r, elsewhere)]
+                if own:
+                    return own
     return _gl_code_only_rows(facts)
+
+
+def _gl_row_code_key(row: Any) -> str:
+    code = row.get("class_code") if isinstance(row, dict) else row
+    return re.sub(r"[^a-z0-9]", "", str(code or "").lower())
+
+
+def _gl_row_is_another_lines(row: Any, elsewhere: set) -> bool:
+    """A GL schedule row is another line's when its code is witnessed only by
+    another line's rating AND is not an ISO GL class code's five digits. The
+    shape half is measured, not assumed: three stored kits (26-27 Aug) had the
+    GL hazard row copied INTO `wc_class_codes` as well ("91580 Heating and Air
+    Conditioning Systems", payroll beside it), so the WC table claimed a real GL
+    code; a five-digit code another line's table repeats is that misfile, and
+    the row stays GL - exactly as before. Choice Electric's 5190 / 8742 / 8810
+    (four-digit WC classes) are another line's rows."""
+    code = str((row.get("class_code") if isinstance(row, dict) else row) or "").strip()
+    return (bool(code) and not _ISO_GL_CLASS_CODE_RE.match(code)
+            and _gl_row_code_key(row) in elsewhere)
+
+
+def _gl_codes_owned_elsewhere(facts: dict) -> set:
+    """Normalised codes the documents give ONLY to another line's rating - the
+    score's own rule (`sqs_service.gl_class_codes`), read WITHOUT the GL homes,
+    so a WC row copied into the GL schedule cannot vouch for itself."""
+    try:
+        from services.sqs_service import GL_CLASS_CODE_HOMES
+    except Exception:                                         # noqa: BLE001
+        return set()
+    if not isinstance(facts, dict):
+        return set()
+    others = _line_code_witnesses({k: v for k, v in facts.items() if k not in GL_CLASS_CODE_HOMES})
+    return {tok for tok, owners in others.items() if owners and "general_liab" not in owners}
 
 
 # ── A GL class code with no rating schedule still prints (13 Oct 2026) ────────
@@ -7073,22 +7114,23 @@ def _gl_hazard_rows(facts: dict) -> list:
 # found" card writes its answer to `gl_class_codes_by_location` ("92478"), the
 # score counted it, and the 126 grid - which read only the rating schedule -
 # never printed it: an answer given before forms, lost on the form. One row per
-# code, through the score's own reader (`sqs_service.gl_class_codes`, which drops
-# a code another line's rating owns). A code-only row holds the code (and the
+# code the text gives AS a code (`sqs_service.gl_code_tokens_in_text`, 14 Oct
+# 2026 - never a ZIP, a payroll or a year), minus a code another line's rating
+# owns (the score's rule, `_gl_codes_owned_elsewhere`). A code-only row holds the code (and the
 # location a row names) and nothing else: every other cell of it is an owned
 # blank, never gap fill - the documents print no GL schedule to read it from.
 _CODE_ONLY = "_code_only"
 
 
-def _gl_code_only_rows(facts: dict) -> list:
+def _gl_code_only_rows(facts: dict, keep_elsewhere: bool = False) -> list:
     raw = _fv(facts, "gl_class_codes_by_location") if isinstance(facts, dict) else None
     if raw in (None, "", [], {}):
         return []
     try:
-        from services.sqs_service import _GL_CODE_TOKEN_RE, gl_class_codes
-        allowed = {re.sub(r"[^a-z0-9]", "", c.lower()) for c in gl_class_codes(facts)}
+        from services.sqs_service import gl_code_tokens_in_text
     except Exception:                                         # noqa: BLE001
         return []
+    elsewhere = set() if keep_elsewhere else _gl_codes_owned_elsewhere(facts)
     rows: list = []
     seen: set = set()
     for item in (raw if isinstance(raw, list) else [raw]):
@@ -7100,9 +7142,11 @@ def _gl_code_only_rows(facts: dict) -> list:
             vals = [item]
         for v in vals:
             for one in (v if isinstance(v, list) else [v]):
-                for tok in _GL_CODE_TOKEN_RE.findall(str(one or "")):
+                # An ISO code standing as a code (14 Oct 2026): never the ZIP,
+                # the payroll or the year of a sentence typed into the card.
+                for tok in gl_code_tokens_in_text(one):
                     key = re.sub(r"[^a-z0-9]", "", tok.lower())
-                    if key not in allowed or (key, loc) in seen:
+                    if key in elsewhere or (key, loc) in seen:
                         continue
                     seen.add((key, loc))
                     rows.append({"class_code": tok, _CODE_ONLY: True, **({"location": loc} if loc else {})})
@@ -7645,6 +7689,13 @@ def _resolve_applicant_row_a_scalar(field_name: str, facts: dict):
         if field_name == "NamedInsured_GeneralLiabilityCode_A":
             return _applicant_gl_codes_from_schedule(facts)
         return _SCHED_SKIP          # no fact - leave today's behaviour alone
+    if field_name == "NamedInsured_GeneralLiabilityCode_A":
+        # The code a PERSON gave beats one the documents were read for (14 Oct
+        # 2026): the 126 grid prints the person's answer, so the 125 printing
+        # the model's reading would give one applicant two GL codes.
+        theirs = _person_gl_codes(facts, key)
+        if theirs:
+            return theirs
     if (field_name == "NamedInsured_GeneralLiabilityCode_A"
             and _code_is_another_lines(val, facts, "general_liab")):
         # Live 29 Sep (session 67e5ccf1): a fresh extraction stated the
@@ -7696,15 +7747,38 @@ _GL_CODE_BOX_MAX_CODES = 3
 _ISO_GL_CLASS_CODE_RE = re.compile(r"^\d{5}$")
 
 
+def _person_gl_codes(facts: dict, stated_key: str) -> Optional[str]:
+    """The GL codes a PERSON gave (the "no class codes" card's answer), for the
+    125 GL CODE box - only when the box's own stated fact is not a person's."""
+    def _persons(k):
+        held = facts.get(k) if isinstance(facts, dict) else None
+        return isinstance(held, dict) and str(held.get("source") or "").lower() in _PERSON_SOURCES
+    if _persons(stated_key) or not _persons("gl_class_codes_by_location"):
+        return None
+    codes: List[str] = []
+    for row in _gl_code_only_rows(facts):
+        code = str(row.get("class_code") or "").strip()
+        if _ISO_GL_CLASS_CODE_RE.match(code) and code not in codes:
+            codes.append(code)
+    if not codes or len(codes) > _GL_CODE_BOX_MAX_CODES:
+        return None
+    return ", ".join(codes)
+
+
 def _applicant_gl_codes_from_schedule(facts: dict):
     others = _fv(facts, "additional_named_insureds")
     if isinstance(others, list) and any(o not in (None, "", {}, []) for o in others):
         return _SCHED_SKIP
     codes: List[str] = []
+    elsewhere = None
     for row in _gl_schedule_rows(facts):
         code = str(row.get("class_code") or "").strip()
         if not code:
             continue
+        if elsewhere is None:
+            elsewhere = _gl_codes_owned_elsewhere(facts)
+        if _gl_row_is_another_lines(row, elsewhere):
+            continue                  # another line's class filed under GL (14 Oct 2026)
         if not _ISO_GL_CLASS_CODE_RE.match(code):
             return _SCHED_SKIP
         if code not in codes:
@@ -15777,14 +15851,36 @@ def _gl_schedule_evidence(facts: dict) -> bool:
     """
     if not isinstance(facts, dict):
         return False
+    elsewhere = None
     for key, raw in facts.items():
         if str(key).startswith("_"):
             continue
         if _canon_from_name(key) != "general_liab":
             continue
+        if key == "gl_class_codes_by_location":
+            # This home is evidence only through an ISO GL code it gives AS a
+            # code (14 Oct 2026). A row holding only a NAICS ("531120"), a
+            # location or the word "GL" left the grid open, and gap fill asked
+            # about classifications that do not exist reaches for the nearest
+            # table - the 11 Sep defect below. Another line's claim on the code
+            # does not unmake the evidence (measured: kits whose GL code was
+            # copied into wc_class_codes kept their grid open, as before).
+            if _gl_code_only_rows(facts, keep_elsewhere=True):
+                return True
+            continue
         rows = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
-        if isinstance(rows, list) and any(
-                _names_a_classification(r) for r in rows if r not in (None, "", {}, [])):
+        if not isinstance(rows, list):
+            continue
+        rows = [r for r in rows if r not in (None, "", {}, []) and _names_a_classification(r)]
+        if not rows:
+            continue
+        # A row whose code the documents give only to another line's rating is
+        # that line's, not GL evidence (14 Oct 2026): the WC classes a combined
+        # package files under GL left the grid "open", and gap fill reaches for
+        # the nearest table - the WC schedule.
+        if elsewhere is None:
+            elsewhere = _gl_codes_owned_elsewhere(facts)
+        if any(not _gl_row_is_another_lines(r, elsewhere) for r in rows):
             return True
     return False
 
@@ -27630,6 +27726,14 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                 _cc = re.sub(r"[^a-z0-9]", "", str(_r.get("class_code") or "").lower())
                 if _cc:
                     _gl_codes.add(_cc)
+    # ...and the codes a person gave (14 Oct 2026): the card stores its answer
+    # as text, which this guard never read, so an AI copy of the person's GL
+    # code into a 127 rating box survived where the schedule's was blanked.
+    try:
+        for _r in _gl_code_only_rows(facts):
+            _gl_codes.add(_gl_row_code_key(_r))
+    except Exception:                                         # noqa: BLE001
+        pass
 
     def _norm_tok(v):
         return re.sub(r"[^a-z0-9]", "", str(v or "").lower())

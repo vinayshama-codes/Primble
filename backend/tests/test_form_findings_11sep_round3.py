@@ -84,7 +84,12 @@ class TestR1AGridWithNoEvidenceForItsOwnLine:
 
     def test_gl_evidence_is_derived_from_the_fact_key_not_a_list(self):
         assert ps._gl_schedule_evidence({"gl_class_code_schedule": [{"class_code": "1"}]}) is True
-        assert ps._gl_schedule_evidence({"gl_class_codes_by_location": [{"codes": "1"}]}) is True
+        # The by-location home holds CODES only, so it is evidence through a GL
+        # code (14 Oct 2026): a NAICS "531120" or the word "GL" left the grid
+        # open to gap fill on an auto package - this very defect.
+        assert ps._gl_schedule_evidence({"gl_class_codes_by_location": [{"codes": "91580"}]}) is True
+        assert ps._gl_schedule_evidence({"gl_class_codes_by_location": [{"codes": ["531120"]}]}) is False
+        assert ps._gl_schedule_evidence({"gl_class_codes_by_location": [{"location": "India", "codes": ["GL"]}]}) is False
         assert ps._gl_schedule_evidence({"auto_vin_schedule": [{"vin": VIN_A}]}) is False
         assert ps._gl_schedule_evidence({"gl_class_code_schedule": []}) is False
         assert ps._gl_schedule_evidence({}) is False

@@ -877,8 +877,98 @@ items are Brent #22 ("addressable prior to (and independently of) the forms") an
 (property), "type of work subcontracted" from the narrative, products row = the business description; 130 rating /
 anniversary dates 01/01/2025 (W15), "Item 3A State: CO", the contact as accounting / claims / inspection contact; 131
 underlying description "The Schedule of Underlying Insurance is part of Policy No."; 125 contact type "Accounting"
-(W3); 127 garaging with no vehicles (auto policy not yet uploaded). Next live step: add the Business Auto Policy
-(item 25) - it re-stamps the forms in place, so the fixes show on this package without regenerating.
+(W3); 127 garaging with no vehicles (auto policy not yet uploaded). ~~Next live step: add the Business Auto Policy
+(item 25) - it re-stamps the forms in place, so the fixes show on this package without regenerating.~~ **WRONG
+(corrected in Z14):** a document added after forms re-stamps only boxes whose FACTS change
+(`session_documents.restamp_forms` -> `_restamp_changed_boxes`); these were CODE changes, so the forms generated before
+the deploy keep their old boxes. Adding the auto policy still tests item 25 / 8; the Z13 fixes show on forms generated
+on the new build.
+
+### Z14. The Z13 deploy checked + an adversarial review of Z13 (14 Oct 2026, offline after the deploy of `2e4dd44`)
+
+**Deploy:** `2e4dd44` ("fixed bugs") carries Z13 AND the four same-night corrections the first review found:
+`state_auto_grid.box_facts` (a person's UM / med pay answer stays on the 138 / 137), `_human_liability_reading` reads the
+envelope's `answer_text` first (split limits typed in words stay split), `UnderlyingPolicy_` boxes are never the auto
+limit cell (the 131 OTHER row), a bare amount with cents is a premium, not a limit. Full suite on it: 14,037 / 1 / 19.
+**`b117f010` was not touched after the deploy** - and Z13's "add the auto policy and the fixes show" was WRONG (see the
+Z13 correction): forms generated before a deploy keep their boxes until they are generated again.
+
+**The second reviewer (FIX 1, the GL code) - four real defects, all fixed (each reproduced first):**
+1. **An answer given AFTER generation reached neither the 125 GL CODE nor the 126 grid** - the card closed, the score
+   counted the code, both forms stayed blank. Every answer door re-stamps through `_restamp_canonical_into_forms`,
+   which reaches only boxes whose canonical key IS the fact; these two are derived by resolvers. New
+   `arq_service._restamp_boxes_the_answer_decides` runs `_restamp_changed_boxes` (the confirm path's door since 5 Oct)
+   after the canonical re-stamp in `apply_producer_answer_to_session` (cards, resolve-issue, a held client answer) and
+   `apply_arq_answers_to_session`: generation's engine, box by box, before and after; a person's box never moves.
+   `_restamp_changed_boxes` now builds one facts view per form and runs under the stamp's grid memo
+   (`_engine_memo`): the 125's prior-carrier grid was rebuilt for every box - 4.1 s -> 1.8 s warm on `b117f010`'s 8
+   forms; on 8 stored packages x 2 answer changes the new door moved exactly the same boxes to the same values as
+   the deployed one (16 of 16, 209 boxes on the wider 25-package run, 44 of 44), mean 6.4 s -> 3.9 s. **And a re-stamp
+   now prints only what GENERATION's post-fill guards allow** - the engine answers
+   box by box, generation then runs `_enforce_post_fill_guards` over the form; replaying ten common answers on
+   `b117f010`'s stored forms showed an employee count landing on the 131's named-insured rows B-F, which the row
+   de-dup guard blanks. The moves now pass the same guards (a refused one prints blank). Same replay, what the new
+   pass moves beyond the canonical one, every box correct: mailing address line + ZIP on 125 / 130 (they kept the old
+   address), gross receipts on 131 / 131 Excess, years in business on 130, the Excess 131's effective date, the 125
+   GL CODE; contact, FEIN, auto limit, operations: nothing extra.
+2. **A ZIP / payroll / year / SIC / NAICS in the card's free text printed as the GL code** ("Electrical contracting at
+   4800 Pecos St, Denver CO 80221" -> 125 GL CODE 80221; the producer questionnaire asks this fact as "what type of work
+   at each location?"). `sqs_service.gl_code_tokens_in_text`: an ISO code (five digits) that STANDS as a code - leading
+   an item after a location / code label, or the one number of a short item - never after a state, a money word or "$",
+   never a street number. `_gl_code_only_rows` (125 and 126 alike) reads it. **Presence is unchanged on purpose**
+   (`_gl_code_tokens`: any number, a description answers the question) - no score moves by this.
+3. **An AI-read `applicant_gl_class_code` beat the person's answer on the 125** while the 126 printed the answer
+   (two GL codes for one applicant): `_person_gl_codes` - a person's code wins unless the stated code is a person's too.
+4. **WC classes a combined package files under GL printed as 126 hazards** and the 125 stopped at the first non-ISO
+   code before reaching the person's answer. `_gl_row_is_another_lines`: a schedule row is another line's when its code
+   is witnessed only by another line (the score's own rule, `_gl_codes_owned_elsewhere`) AND is not five digits;
+   applied in `_gl_hazard_rows`, the 125 box and `_gl_schedule_evidence` (a grid left with no GL row is an owned blank,
+   the 11 Sep rule, never gap fill reaching for the WC table). The by-location home counts as GL evidence only
+   through an ISO code it gives AS a code (`_gl_code_only_rows(keep_elsewhere=True)`): a row holding a NAICS code
+   ("531120"), a location or the word "GL" no longer leaves the grid open to gap fill; a real GL code another line's
+   table repeats still does (first cut blanked six May / June kits whose GL code extraction copied into
+   `wc_class_codes` - their stored grids printed nothing either way, narrowed anyway so nothing else moves). **The shape half came from the measurement:** the first
+   cut (shape-blind) blanked real GL codes on three stored kits (`1dcc1a9d`, `cda0d536`, `26412d4b`) whose extraction
+   had copied the GL hazard row INTO `wc_class_codes`; a five-digit code another line's table repeats is that misfile.
+Also: Guard 2e (127 rating-box borrows) now knows a person's GL code (`_gl_code_only_rows`), not only the schedule's.
+
+**Measured (read-only, deployed tree vs this one):** 560 stored packages with forms (99 Render-keyed skipped), the
+125 GL CODE and every 126 hazard box through the engine: **24 boxes in 2 packages move, both intended** - `5a0c962f`'s
+126 no longer prints a NAICS code (531120) as the GL class code, `65dfbf52`'s grid (by-location code "GL") is an
+owned blank instead of open to gap fill (its stored grid printed nothing). The 125 GL CODE moves on none.
+**Score corpus:** 94 stored packages, 0 changes (before forms, after forms, without forms).
+
+**Found, NOT changed (D6 / owner calls):**
+- ACORD 126 per-form Exposure reads only `gl_class_codes_by_location` and gives +10 only to a LIST: a full rating
+  schedule scores 60, a typed answer 85, a list 100 (per-form panel and covers; the package is unaffected, D29). Two
+  lines through `gl_class_codes_present` - moves 126 per-form scores UP.
+- The score's "no class codes" warning (85 cap) fires on packages whose documents state the applicant's GL code
+  (`applicant_gl_class_code`) and on the three kits above (the score's other-line rule is shape-blind). Counted on 926
+  stored packages: a stated applicant code - 18 state one, the warning fires on **0**; the misfiled GL row - **3** (the kits
+  `26412d4b`, `1dcc1a9d`, `cda0d536`). Low priority.
+- A document added after a person's one-amount auto answer prints split limits: the person's CSL stands (the one-door
+  order, 5 Oct). Brent: should it raise a "New document says" conflict instead?
+- On a two-family auto package (symbols 1 + 41) a person's UM answer now prints on the Business Auto page while the
+  grid leaves that section to the document - owner's call if it should stay document-only.
+- Pre-existing, low: a compound split answer stores only its first number (`words_to_number`), which the umbrella
+  checks read; a box EDIT of the 125 GL CODE does not carry to the 126 (`propagate_fact_edits` reaches canonical boxes
+  only); the legacy (receipt-less) clear does not clear derived boxes.
+
+**The owner's local backend runs the production crons against the SHARED database.** `main.py`: `SCHEDULER_ENABLED`
+defaults to TRUE off production, and the Mac's uvicorn (no --reload, up since 00:00) holds the advisory lock. At 03:00
+IST `run_retention_cleanup` deleted every session untouched for 180+ days (policy `SESSION_RETENTION_DAYS`; 51 with
+forms tonight, all April / Render-keyed; every recent test session intact). 03:30 audit retention (365 d) and 04:00
+facts retention (180 d, same cutoff) do nothing tonight; **09:00 payment lifecycle and 10:00 questionnaire reminder
+e-mails would also run from the Mac.** The CLAUDE.md line "retention ... run NOWHERE" was wrong. Owner's call:
+`SCHEDULER_ENABLED=false` in the local `.env`.
+
+**Live check (after this round is deployed):** on `b117f010`, BEFORE adding a document (a fix's undo receipt refuses
+once the document set changes) - package page -> the "GL coverage detected but no class codes" row under Resolved ->
+Open again (the 126 row clears, the warning returns) -> Open to fix -> 92478 -> Save: ACORD 125 GL CODE and 126 hazard
+row A both print 92478 labelled producer (fix 1, on the existing forms). Then add the Business Auto Policy (item 25 / 8).
+Z13 / Z14's other fixes show on a NEW package (same 6 PDFs): 125 GL CODE 92478, 131 auto CSL 1,000,000, 140 fire
+station / exposure distances blank, 137 UM / towing blank. Tests: `tests/test_gl_code_answers_14oct.py` (65); `test_form_findings_11sep_round3` updated (its by-location fixture
+held a dummy code "1" - the TEST was outdated: the home now needs a GL code). Suite 14,102 / 1 / 19.
 
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
