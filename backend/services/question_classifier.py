@@ -483,8 +483,9 @@ def derive_topic(field_name: str, form_ids: Optional[Iterable[str]] = None) -> s
     for topic, needles in _TOPIC_FIELD_RULES:
         if _matches_any(fn, needles):
             return topic
+    from services.form_instances import base_form_id
     for fid in (form_ids or []):
-        t = _FORM_TOPIC.get(fid)
+        t = _FORM_TOPIC.get(base_form_id(fid))     # a form's second copy is its form
         if t:
             return t
     return TOPIC_OTHER

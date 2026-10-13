@@ -22,9 +22,10 @@ All rules here are additive - they never remove or modify existing
 stops returned by evaluate_stops() or check_doc_consistency().
 """
 
+import functools
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # The shared word-boundary door. Safe at module level BY CONSTRUCTION: it is
 # stdlib-only and imports nothing from services/, so it cannot participate in
@@ -47,12 +48,13 @@ def _fv(facts: dict, key: str, default=None):
 
 
 def _to_float(v) -> Optional[float]:
-    if v is None:
-        return None
-    try:
-        return float(re.sub(r"[^\d.]", "", str(v)))
-    except Exception:
-        return None
+    # ONE PARSER (5 Oct 2026). This was a bare digit-strip, so "$18.6MM" read as
+    # 18.6 and the WC rule printed "payroll is 26442473% of total revenue ($19)"
+    # (CH125). `_to_int` below already delegated; this one never did. The sqs
+    # parser expands magnitude shorthand (MM / M / K / million / billion) and
+    # otherwise falls back to exactly the digit-strip this used to do.
+    from services.sqs_service import _to_float as _sqs_to_float
+    return _sqs_to_float(v)
 
 
 def _to_int(v) -> Optional[int]:
@@ -61,6 +63,23 @@ def _to_int(v) -> Optional[int]:
     # sqs_service indirectly through extraction_pipeline).
     from services.sqs_service import _to_int as _sqs_to_int
     return _sqs_to_int(v)
+
+
+def _to_percent(v) -> Optional[float]:
+    """A percentage, never a money amount - `sqs_service._to_percent`, the one
+    reader (imported lazily, as `_to_float` is)."""
+    from services.sqs_service import _to_percent as _sqs_to_percent
+    return _sqs_to_percent(v)
+
+
+def _is_trueish(value: Any) -> bool:
+    """A flag that is genuinely on: True, or a yes-word ("Y", "yes", "true", "1").
+    An envelope is unwrapped. None / False / "N" / "" are off."""
+    if isinstance(value, dict) and "value" in value:
+        value = value.get("value")
+    if value is True:
+        return True
+    return str(value or "").strip().lower() in {"y", "yes", "true", "1"}
 
 
 def _dates_differ(a: Any, b: Any) -> bool:
@@ -72,11 +91,135 @@ def _dates_differ(a: Any, b: Any) -> bool:
     not a parseable date we fall back to a trimmed raw-string compare so two
     genuinely different non-date values still differ.
     """
-    from services.normalization import normalize_date
-    na, nb = normalize_date(a), normalize_date(b)
+    na, nb = _norm_date_lenient(a), _norm_date_lenient(b)
     if na is not None and nb is not None:
         return na != nb
+    # One side a date and the other unreadable ("Dec. 1, 2025" before the
+    # pre-clean, "TBD"): we cannot say they differ, and a stop needs to (G2
+    # audit). Two non-dates still compare as text.
+    if (na is None) != (nb is None):
+        return False
     return str(a).strip() != str(b).strip()
+
+
+_TIME_OF_DAY_RE = re.compile(
+    r"(?:\s+|T)\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\s*(?:[ap]\.?\s?m\.?)?"
+    r"(?:\s*(?:z|utc|gmt|[+-]\d{2}:?\d{2}|[ecmp][sd]?t|(?:eastern|central|mountain|pacific|"
+    r"standard|daylight|local)(?:\s+(?:standard|daylight))?(?:\s+time)?))?\.?\s*$", re.I)
+# "2026.01.01" / "01.01.2026" - a dotted date.
+_DOTTED_ISO_RE = re.compile(r"^\s*(\d{4})[.](\d{1,2})[.](\d{1,2})\s*$")
+_DOTTED_US_RE = re.compile(r"^\s*(\d{1,2})[.](\d{1,2})[.](\d{4})\s*$")
+_MONTH_DOT_RE = re.compile(r"\b(jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.", re.I)
+_OCR_DATE_RE = re.compile(r"\b[\dlIoO]{1,2}/[\dlIoO]{1,2}/[\dlIoO]{2,4}\b")
+
+
+def _norm_date_lenient(value: Any) -> Optional[str]:
+    """`normalization.normalize_date`, after setting aside what it cannot read
+    on a printed date: a time of day or ISO time part, "Dec." / "Sept", and OCR
+    letters inside a numeric date ("12/0l/2025"). None when still unreadable."""
+    from services.normalization import normalize_date
+    if value is None:
+        return None
+    s_ = str(value.get("value") if isinstance(value, dict) else value).strip()
+    if not s_:
+        return None
+    direct = normalize_date(s_)
+    if direct:
+        return direct
+    s_ = _TIME_OF_DAY_RE.sub("", s_)
+    s_ = _MONTH_DOT_RE.sub(lambda m: m.group(1)[:3], s_)
+    s_ = re.sub(r"\bsept\b", "Sep", s_, flags=re.I)
+    s_ = _OCR_DATE_RE.sub(lambda m: m.group(0).translate(str.maketrans("lIoO", "1100")), s_)
+    m_ = _DOTTED_ISO_RE.match(s_)
+    if m_:
+        s_ = f"{m_.group(1)}-{int(m_.group(2)):02d}-{int(m_.group(3)):02d}"
+    m_ = _DOTTED_US_RE.match(s_)
+    if m_:
+        s_ = f"{m_.group(1)}/{m_.group(2)}/{m_.group(3)}"
+    return normalize_date(s_)
+
+
+def _mmdd(d) -> str:
+    return f"{d.month:02d}/{d.day:02d}"
+
+
+def _anniversary(d):
+    """(month, day) of a policy date - 29 Feb counts as 28 Feb."""
+    return (d.month, 28 if (d.month == 2 and d.day == 29) else d.day)
+
+
+def _misaligned_message(which: str, umb_date: Any, other_date: Any, label: str, tail: str) -> str:
+    """The misalignment sentence, comparing like with like: in the same policy
+    year the two dates; across years (an in-force umbrella beside a proposed
+    term) the ANNIVERSARIES - "12/09/2025 beside 12/01/2026" read as a year
+    apart, and a year apart is not the problem."""
+    a, b = _iso_date(umb_date), _iso_date(other_date)
+    if a and b and a.year != b.year:
+        return (f"Umbrella {which} date ({umb_date}) does not match the {label} anniversary "
+                f"({_mmdd(b)}; the {label} term runs from {_mmdd(b)}/{b.year}). {tail}")
+    return (f"Umbrella {which} date ({umb_date}) does not match {label} {which} date "
+            f"({other_date}). {tail}")
+
+
+def umbrella_term_misalignment(umb_eff: Any, umb_exp: Any,
+                               other_eff: Any, other_exp: Any) -> Tuple[bool, bool, str]:
+    """(effective misaligned, expiration misaligned, note) between the umbrella
+    term and an underlying term - by POLICY ANNIVERSARY (5 Oct 2026, G2 skeptic).
+
+    Comparing full dates set an in-force umbrella (12/01/2025 - 12/01/2026)
+    beside the PROPOSED GL term (12/01/2026 - 12/01/2027) and called the year a
+    misalignment; every attempt to pick "the comparable term" (expiring, current,
+    proposed) broke on another chronology (a renewal dec issued early, an
+    umbrella renewal beside a GL still in force, a proposed row in the coverage
+    lines). The anniversary is what alignment MEANS: an umbrella on the GL's
+    month and day is aligned in every policy year; one a week off is not, in
+    every year. A term shorter than ~11 months (an umbrella added mid-term,
+    co-terminous with the GL) is aligned by its END - its start is not an
+    anniversary. A date that cannot be read is no comparison (never a stop).
+    """
+    ue, ux, oe, ox = (_iso_date(umb_eff), _iso_date(umb_exp),
+                      _iso_date(other_eff), _iso_date(other_exp))
+
+    def _short(a, b):
+        return bool(a and b and (b - a).days < 330)
+
+    eff_bad = bool(ue and oe and not _short(ue, ux) and not _short(oe, ox)
+                   and _anniversary(ue) != _anniversary(oe))
+    exp_bad = bool(ux and ox and _anniversary(ux) != _anniversary(ox))
+    note = ""
+    if eff_bad:
+        note = f" (anniversaries {_mmdd(ue)} vs {_mmdd(oe)})"
+    elif exp_bad:
+        note = f" (anniversaries {_mmdd(ux)} vs {_mmdd(ox)})"
+    return eff_bad, exp_bad, note
+
+
+@functools.lru_cache(maxsize=1)
+def rule_codes() -> frozenset:
+    """Every code this validator can emit - each `_issue(type, "<code>", ...)`
+    call in this file, read off its own source once.
+
+    The ONE answer to "is this persisted issue a cross-form rule's copy?" -
+    `issue_registry.retire_stopped_cross_form_issues` uses it to drop the copy
+    of a rule that no longer fires (8 Oct 2026: an answered occupancy kept its
+    "Minimum Viable COPE: occupancy type" card through every recalculation).
+    Every call passes a literal code (pinned by test_choice_electric_run7_8oct),
+    so this list is complete. Fail-safe: an unreadable source gives an empty
+    set, and nothing is retired.
+    """
+    try:
+        import ast
+        with open(__file__, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+    except Exception:                                     # noqa: BLE001
+        return frozenset()
+    return frozenset(
+        node.args[1].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_issue"
+        and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    )
 
 
 def _issue(issue_type: str, code: str, message: str, forms: List[str],
@@ -198,7 +341,7 @@ def _check_wc_payroll_reconciliation(
 
     # Contractor subcontracting check against WC payroll
     if "ACORD_186" in triggered_ids and flags.get("is_contractor"):
-        pct_sub = _to_float(_fv(facts, "percent_subcontracted"))
+        pct_sub = _to_percent(_fv(facts, "percent_subcontracted"))
         if pct_sub and pct_sub > 50:
             wc_ref = wc_pay or tot_pay
             tot_rev = _to_float(_fv(facts, "total_revenue"))
@@ -348,6 +491,18 @@ def _check_location_address_reconciliation(
     locs_140 = _fv(facts, "property_locations")
 
     if not isinstance(locs_125, list) or not isinstance(locs_140, list):
+        return issues
+    # ONE LIST PRINTS BOTH FORMS (6 Oct 2026). ACORD 125's premises rows and
+    # ACORD 140's building sections are both stamped from `property_locations`
+    # (pdf_service._SCHEDULE_REGISTRY), and the loose `locations` list is only
+    # a copy derived from it (extraction_service.location_list_from_rows). So
+    # when the canonical schedule holds rows, the two forms cannot disagree -
+    # what this rule found was the COPY gone stale: Choice Electric deleted the
+    # vehicle garaging row from the table, `locations` kept it, and the package
+    # was told "ACORD 125 lists 3 location(s) but ACORD 140 has 2" (ceiling 85,
+    # Exposure -5) while the 125 printed two. Every table writer now re-derives
+    # the copy; a session stored before that is not penalised for it either.
+    if any(isinstance(r, dict) for r in locs_140):
         return issues
     if not locs_125 or not locs_140:
         return issues
@@ -517,28 +672,23 @@ def _check_umbrella_attachment_stack(
                  if (_dates_explained or _proposed_package_term_is_derived(facts))
                  else "hard_stop")
 
-    if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
+    _eff_bad, _exp_bad, _ann = umbrella_term_misalignment(umb_eff, umb_exp, gl_eff, gl_exp)
+    if _eff_bad:
         issues.append(_issue(
             _date_sev,
             "umbrella_gl_period_misaligned",
-            (
-                f"Umbrella effective date ({umb_eff}) does not match "
-                f"{_term_label} effective date ({gl_eff}). Policy periods must "
-                "align or be explained via ACORD 101."
-            ),
+            _misaligned_message("effective", umb_eff, gl_eff, _term_label,
+                                "Policy periods must align or be explained via ACORD 101."),
             ["ACORD_125", "ACORD_131"],
             add_forms=["ACORD_101"],
         ))
 
-    if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
+    if _exp_bad:
         issues.append(_issue(
             _date_sev,
             "umbrella_gl_expiration_misaligned",
-            (
-                f"Umbrella expiration date ({umb_exp}) does not match "
-                f"{_term_label} expiration date ({gl_exp}). Periods must align "
-                "or be explained via ACORD 101."
-            ),
+            _misaligned_message("expiration", umb_exp, gl_exp, _term_label,
+                                "Periods must align or be explained via ACORD 101."),
             ["ACORD_125", "ACORD_131"],
             add_forms=["ACORD_101"],
         ))
@@ -617,6 +767,21 @@ def _check_inland_marine_deduplication(
 
     if "ACORD_160" not in triggered_ids:
         return issues
+    # 5 Oct 2026: double-counting needs inland marine IN the submission. The
+    # recommender suggests ACORD 160 from bare keywords ("installation
+    # floater"), including a floater the documents say is NOT requested
+    # (CH125), so the pair of forms alone is no evidence of an overlap.
+    # A flag that SAYS no (False / "no" - including a line the submission
+    # declines) silences it; a MISSING flag does not - a legacy session or an
+    # extraction that never set it still has its stated IM values (G2 audit).
+    _im_flag = flags.get("has_inland_marine")
+    if isinstance(_im_flag, dict) and "value" in _im_flag:
+        _im_flag = _im_flag.get("value")
+    if _im_flag is None:
+        if not (_fv(facts, "inland_marine_total_value") or _fv(facts, "inland_marine_items")):
+            return issues
+    elif not _is_trueish(_im_flag):
+        return issues
 
     im_value   = _to_float(_fv(facts, "inland_marine_total_value"))
     prop_value = _to_float(
@@ -651,6 +816,12 @@ def _check_property_bi_period_of_restoration(
 
     if not flags.get("has_property_coverage"):
         return issues
+    # 5 Oct 2026: form-scoped like its ACORD 140 siblings. Unscoped, it was the
+    # one rule that fired on a package with no ACORD 140 at all (CH125: 125 /
+    # 126 / 127), and after generation its hard stop would cap the package at
+    # 60 over a box that is on no form the producer is sending.
+    if not ({"ACORD_140", "ACORD_160"} & set(triggered_ids or ())):
+        return issues                     # property (140) or BOP (160) only - G2 audit
 
     bi_limit = _fv(facts, "business_income_limit")
     bi_por   = _fv(facts, "period_of_restoration")
@@ -1205,8 +1376,15 @@ def _check_auto_symbol_to_exposure_alignment(
 
     # Check liability coverage structure
     liability_struct = _fv(facts, "auto_liability_structure")
-    if liability_struct in ("split", "combined"):
-        if liability_struct == "split":
+    # Case-blind (G1 audit): "Split" / "Split Limits" never entered this check;
+    # and a "not split" label is not split (skeptic G1) - the structure is read
+    # by the door's own reader, never by a substring.
+    from services.coverage_evidence import auto_limits_are_split, _structure_reading
+    _ls = _structure_reading(liability_struct)
+    if _ls:
+        # 5 Oct 2026: the same door as the legacy engine - an AI "split"
+        # structure beside a CSL stated in words is an extraction artefact.
+        if _ls == "split" and auto_limits_are_split(facts, flags):
             # Must have all three components. THE REAL KEYS (H1 audit,
             # 2026-08-26): this read the unprefixed `bi_per_person` family,
             # which nothing writes - the extractor, registry and stamper use
@@ -1361,7 +1539,7 @@ def _check_acord186_subcontracting_vs_gl_wc(
     if "ACORD_130" not in triggered_ids and not flags.get("has_workers_comp"):
         return issues
 
-    pct_sub = _to_float(_fv(facts, "percent_subcontracted"))
+    pct_sub = _to_percent(_fv(facts, "percent_subcontracted"))
     wc_pay  = _to_float(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll"))
     tot_rev = _to_float(_fv(facts, "total_revenue"))
 
@@ -1531,13 +1709,134 @@ def _package_period_on_umbrella_footing(facts: dict):
     The sibling Auto/WC check needs none of this - those dates come off their
     own dec pages, so they share the umbrella's footing by construction.
     """
-    if _fv(facts, "renewal_dates_routed") and not _umbrella_dates_are_proposed(facts):
-        return (_fv(facts, "prior_effective_date"),
-                _fv(facts, "prior_expiration_date"),
-                "expiring GL/policy")
+    if _umbrella_dates_are_proposed(facts):
+        return (_fv(facts, "effective_date"), _fv(facts, "expiration_date"), "GL/policy")
+    # THE UMBRELLA'S OWN DEC TERM, compared on ITS footing (5 Oct 2026; rebuilt
+    # after the generality audit G2). A routed renewal and a new-business
+    # package (CH125: in-force 12/01/2025 - 12/01/2026 beside a proposed
+    # 12/01/2026 - 12/01/2027) both put the umbrella's CURRENT term beside the
+    # PROPOSED package term, and no answer clears the stop. The comparable term
+    # is the current GL policy's own (the coverage lines); else the expiring
+    # term, but only when it really meets the proposal - FR125 / Meridian store
+    # the year BEFORE in prior_* (2024-25 beside a 2025-26 umbrella), and
+    # comparing with it only moved the false warning onto other dates. Neither
+    # known: stand down (the caller needs both dates).
+    #
+    # Known limit: dates alone cannot tell an in-force dec term from a QUOTE
+    # printed a year early - that data error is no longer reported here.
+    # An umbrella that runs PAST the proposed start (off-anniversary) is NOT the
+    # expiring programme: it really is out of step with the proposal, so it is
+    # compared with the proposed term below - the spec's "misaligned periods"
+    # rule, cleared by an ACORD 101 explanation or the proposed umbrella term
+    # (tests/test_review_screen_warnings_20260816 pins this).
+    if _fv(facts, "renewal_dates_routed") or _umbrella_term_is_current(facts):
+        current = _current_gl_term(facts)
+        if current:
+            return (current[0], current[1], "current GL policy")
+        if _date_meets(_fv(facts, "prior_expiration_date"), _fv(facts, "effective_date")):
+            return (_fv(facts, "prior_effective_date"),
+                    _fv(facts, "prior_expiration_date"),
+                    "expiring GL/policy")
+        # Neither known: the PROPOSED term. The comparison is by anniversary
+        # (`umbrella_term_misalignment`), so an in-force umbrella on the GL's
+        # month and day is aligned with it - and one three days off is not,
+        # which standing down here used to hide (G2 skeptic, 5 Oct night).
+        return (_fv(facts, "effective_date"), _fv(facts, "expiration_date"), "GL/policy")
     return (_fv(facts, "effective_date"),
             _fv(facts, "expiration_date"),
             "GL/policy")
+
+
+def _umbrella_term_is_current(facts: dict) -> bool:
+    """The extracted umbrella term is the EXPIRING programme's, not the one
+    proposed: it began before the proposed effective date AND ends by the time
+    the proposal starts (a week's grace) - or only one of its dates was read
+    and that one says so.
+
+    An in-force umbrella that runs PAST the proposed start (an off-anniversary
+    umbrella, 06/01 - 06/01 beside a 03/15 programme) is not the expiring
+    programme: it really is out of step with the proposal, the spec's
+    "misaligned periods" rule applies, and an ACORD 101 explanation or the
+    proposed umbrella term clears it (generality audit G2)."""
+    from datetime import timedelta
+    umb_eff = _iso_date(_fv(facts, "umbrella_effective_date"))
+    umb_exp = _iso_date(_fv(facts, "umbrella_expiration_date"))
+    pkg_eff = _iso_date(_fv(facts, "effective_date"))
+    if not pkg_eff:
+        return False
+    grace = pkg_eff + timedelta(days=_EXPIRING_TERM_GRACE_DAYS)
+    if umb_eff and umb_exp:
+        return umb_eff < pkg_eff and umb_exp <= grace
+    if umb_eff:
+        return umb_eff < pkg_eff
+    return bool(umb_exp and umb_exp <= grace)
+
+
+def _current_gl_term(facts: dict):
+    """(effective, expiration) of the ONE current GL policy the coverage lines
+    print with both dates; None when there is none, or more than one term."""
+    try:
+        from services.lob_canon import canon_line
+    except Exception:                                          # noqa: BLE001
+        return None
+    terms = set()
+    pkg_eff = _iso_date(_fv(facts, "effective_date"))
+    for row in (_fv(facts, "coverage_lines") or []):
+        if not isinstance(row, dict) or row.get("_set_aside"):
+            continue
+        if canon_line(row.get("line")) != "general_liab":
+            continue
+        eff, exp = _iso_date(row.get("effective_date")), _iso_date(row.get("expiration_date"))
+        # A row starting on or after the proposed term is the PROPOSED policy
+        # (a renewal dec, quote or application table), never the current one.
+        if eff and exp and not (pkg_eff and eff >= pkg_eff):
+            terms.add((eff, exp, row.get("effective_date"), row.get("expiration_date")))
+    if len({(a, b) for a, b, _c, _d in terms}) != 1:
+        return None
+    _a, _b, raw_eff, raw_exp = next(iter(terms))
+    return (raw_eff, raw_exp)
+
+
+_EXPIRING_TERM_GRACE_DAYS = 7
+
+
+def _iso_date(value):
+    from datetime import date
+    iso = _norm_date_lenient(value)
+    try:
+        return date.fromisoformat(iso) if iso else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _date_meets(end, start) -> bool:
+    """`end` falls within the grace window of `start` (a term ending where the
+    next begins). Unparseable or missing dates never meet."""
+    from datetime import timedelta
+    a, b = _iso_date(end), _iso_date(start)
+    return bool(a and b and abs(a - b) <= timedelta(days=_EXPIRING_TERM_GRACE_DAYS))
+
+
+def _umbrella_term_precedes_package(facts: dict) -> bool:
+    """True when the umbrella dates describe the term BEFORE the package term:
+    the umbrella began before the package effective date and ends on or before
+    it (a week's grace for a mid-term rewrite or a typed day). Unparseable or
+    missing dates are never 'preceding' - silence keeps today's comparison."""
+    from datetime import date, timedelta
+    from services.normalization import normalize_date
+
+    def _d(key):
+        iso = normalize_date(_fv(facts, key))
+        try:
+            return date.fromisoformat(iso) if iso else None
+        except (TypeError, ValueError):
+            return None
+
+    umb_eff, umb_exp, pkg_eff = (_d("umbrella_effective_date"), _d("umbrella_expiration_date"),
+                                 _d("effective_date"))
+    if not (umb_eff and umb_exp and pkg_eff):
+        return False
+    return umb_eff < pkg_eff and umb_exp <= pkg_eff + timedelta(days=_EXPIRING_TERM_GRACE_DAYS)
 
 
 def _fact_source(facts: Optional[dict], key: str) -> str:
@@ -1641,7 +1940,9 @@ def _check_umbrella_period_vs_auto_wc(
         auto_eff = _fv(facts, "auto_effective_date")
         auto_exp = _fv(facts, "auto_expiration_date")
 
-        if umb_eff and auto_eff and _dates_differ(umb_eff, auto_eff):
+        _a_eff_bad, _a_exp_bad, _a_ann = umbrella_term_misalignment(umb_eff, umb_exp,
+                                                                    auto_eff, auto_exp)
+        if _a_eff_bad:
             issues.append(_issue(
                 _date_sev,
                 "umbrella_auto_period_misaligned",
@@ -1654,7 +1955,7 @@ def _check_umbrella_period_vs_auto_wc(
                 add_forms=["ACORD_101"],
             ))
 
-        if umb_exp and auto_exp and _dates_differ(umb_exp, auto_exp):
+        if _a_exp_bad:
             issues.append(_issue(
                 _date_sev,
                 "umbrella_auto_expiration_misaligned",
@@ -1672,7 +1973,7 @@ def _check_umbrella_period_vs_auto_wc(
         wc_eff = _fv(facts, "wc_effective_date")
         wc_exp = _fv(facts, "wc_expiration_date")
 
-        if umb_eff and wc_eff and _dates_differ(umb_eff, wc_eff):
+        if umbrella_term_misalignment(umb_eff, umb_exp, wc_eff, wc_exp)[0]:
             issues.append(_issue(
                 _date_sev,
                 "umbrella_wc_period_misaligned",
@@ -2003,7 +2304,7 @@ def _check_acord101_triggers(
         reason_parts.append("WC and GL class codes indicate different exposure levels")
 
     # High subcontracting with WC payroll present (explanation needed)
-    pct_sub = _to_float(_fv(facts, "percent_subcontracted"))
+    pct_sub = _to_percent(_fv(facts, "percent_subcontracted"))
     wc_pay  = _to_float(_fv(facts, "wc_payroll"))
     if pct_sub and pct_sub > 50 and wc_pay:
         needs_101 = True
@@ -2074,6 +2375,34 @@ def _check_acord101_triggers(
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
+_DEDUCTIBLE_BASIS_SHOWN_RE = re.compile(
+    r"[$\u20ac\u00a3]|%|\bper\s*cent\b|\bpercent\b|\bpct\b|\bdollars?\b|\busd\b", re.I)
+
+
+# A deductible that states no amount AND no basis because it does not apply:
+# it answers nothing, and asks nothing.
+_DEDUCTIBLE_NOT_APPLICABLE_RE = re.compile(
+    r"^\W*(?:excluded|not\s+covered|no\s+coverage|none|n\s*/?\s*a|not\s+applicable|included|"
+    r"same\s+as\s+(?:aop|all\s+other\s+perils?)|nil)\W*$", re.I)
+_SPELLED_AMOUNT_RE = re.compile(
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|fifty)\s+"
+    r"(?:hundred|thousand|million)\b", re.I)
+
+
+def _deductible_basis_evident(value: str, *, peril: bool = False) -> bool:
+    """The deductible's own printing says flat dollar or percentage: a "$" /
+    "%" / "dollars" / "percent", an amount of 100 or more (a percentage
+    deductible is never 100 or more), a spelled-out amount, or - on a WIND /
+    EARTHQUAKE / FLOOD deductible - a small bare number ("2", "1-1/2"), which
+    is that peril's percentage column."""
+    if _DEDUCTIBLE_BASIS_SHOWN_RE.search(value) or _SPELLED_AMOUNT_RE.search(value):
+        return True
+    amount = _to_float(value)
+    if amount is not None and amount >= 100:
+        return True
+    return bool(peril and re.fullmatch(r"\s*\d{1,2}(?:\.\d+)?(?:\s*-\s*\d/\d)?\s*", value or ""))
+
+
 def _check_property_deductible_structure(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -2138,6 +2467,24 @@ def _check_property_deductible_structure(
         basis = (_fv(facts, "deductible_basis")
                  or _fv(facts, "deductible_application")
                  or _fv(facts, "property_deductible_basis"))
+        # The question is "flat dollar or percentage", and a deductible printed
+        # "$5,000" or "1%" ANSWERS it. Live 5 Oct (CH125 b601fad1): $5,000 AOP
+        # and 1% wind / hail, and the warning still asked. Only a stated amount
+        # whose printing shows neither ("5000", "see schedule") leaves it open.
+        # G2/G3 audit: "Excluded" / "Included" / "Same as AOP" / "N/A" state no
+        # amount and answer nothing about one, so they are not counted; a bare
+        # amount of 100 or more ("5,000", "5K") is a flat dollar amount - a
+        # percentage always carries its "%". Only a small number with no unit
+        # ("2") is genuinely ambiguous.
+        # Every deductible that applies must show its basis: "See Schedule",
+        # "Varies by location" or "TBD" beside a "2%" wind deductible leaves
+        # the AOP basis unknown (G3 skeptic). One that does not apply
+        # ("Excluded", "Same as AOP") is left out.
+        applies = [(str(v), peril) for v, peril in ((aop_ded, False), (has_wind, True),
+                                                     (has_earth, True), (has_flood, True))
+                   if v and not _DEDUCTIBLE_NOT_APPLICABLE_RE.match(str(v))]
+        if applies and all(_deductible_basis_evident(v, peril=peril) for v, peril in applies):
+            basis = basis or "shown on the deductible"
         if not basis:
             issues.append(_issue(
                 "soft_warning",
@@ -2187,7 +2534,9 @@ def _check_property_coinsurance_enforcement(
     elif coinsurance_pct:
         # Validate coinsurance percentage is reasonable (typically 80-100%)
         try:
-            coinspct_val = float(re.sub(r"[^\d.]", "", str(coinsurance_pct)))
+            coinspct_val = _to_percent(coinsurance_pct)
+            if coinspct_val is None:
+                raise ValueError("no percentage")
             if coinspct_val < 60 or coinspct_val > 100:
                 issues.append(_issue(
                     "soft_warning",
@@ -2685,6 +3034,14 @@ def run_cross_form_validation(
     List of issue dicts - each has keys: type, code, message, forms.
     """
     all_issues: List[dict] = []
+    # Every rule is keyed by FORM: a form's second copy ("ACORD_131__excess",
+    # 7 Oct 2026) counts as its form, once. Plain ids are unchanged.
+    try:
+        from services.form_instances import base_form_ids as _base_form_ids, is_instance
+        if any(is_instance(f) for f in (triggered_ids or ())):
+            triggered_ids = set(_base_form_ids(list(triggered_ids)))
+    except Exception:                                         # noqa: BLE001
+        pass
 
     for rule_fn in _RULE_FUNCTIONS:
         try:
@@ -2732,6 +3089,35 @@ def _filter_add_forms(issues: List[dict], triggered_ids: set) -> None:
             res["add_forms"] = remaining
         else:
             res.pop("add_forms", None)
+
+
+# ── A FORM CHOICE IS NOT A GAP IN THE SUBMISSION (owner + Brent, 13 Oct 2026) ─
+# "The SQS can exist without the forms": before any form is generated the score
+# reads only the package's information. A check whose ONLY fix is adding a form
+# ("A certificate holder was detected but ACORD 25 is not in the selected
+# forms") has no answer on the review screen - the pre-form score reads the
+# RECOMMENDED forms, so ticking ACORD 25 never cleared it, and 22 of 94 stored
+# packages sat capped at 85 by it before forms. Before forms it is DEFERRED:
+# typed `advisory` (outside the stop lists, outside the number) and marked
+# `form_choice`, so the review lists it where forms are chosen. After
+# generation the same rule runs on the generated forms at full force - the
+# editor's add-form window answers it there. Declared, not listed: mode `none`
+# plus a remaining `add_forms` is the shape (`_filter_add_forms` above already
+# removed any form the package has).
+def is_form_choice(issue: Any) -> bool:
+    """Is this issue's only fix choosing a form?"""
+    if not isinstance(issue, dict):
+        return False
+    res = issue.get("resolution")
+    return (isinstance(res, dict) and bool(res.get("add_forms"))
+            and str(res.get("mode") or "none") == "none")
+
+
+def defer_form_choices(issues: List[dict]) -> List[dict]:
+    """Before forms: each form-choice issue as an advisory marked
+    `form_choice` (a copy); every other issue unchanged."""
+    return [dict(i, type="advisory", form_choice=True) if is_form_choice(i) else i
+            for i in (issues or [])]
 
 
 def split_cross_form_issues(

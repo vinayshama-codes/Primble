@@ -451,8 +451,18 @@ class TestPriorCarrierGrid:
         assert _cell(f, "PriorCoverage_PolicyYear_A") is None
 
     def test_a_form_number_is_never_a_policy(self):
+        # 6 Oct 2026 (Choice Electric item 20): a row stands on its carrier, its
+        # term and its number OR premium - the form number is still never the
+        # NUMBER, and a row with neither a real number nor a premium is not a
+        # row. Until then this pinned "no number -> no row", which emptied the
+        # grid on a redacted package (the TEST, not the code, changed).
         recs = [dict(_RECORDS[1], policy_number="IM 7100 06 04")]
-        assert _cell(_grid_facts(recs), "PriorCoverage_GeneralLiability_InsurerFullName_A") is None
+        f = _grid_facts(recs)
+        assert _cell(f, "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A") is None
+        assert _cell(f, "PriorCoverage_GeneralLiability_InsurerFullName_A") == EMCPC
+        assert _cell(f, "PriorCoverage_GeneralLiability_TotalPremiumAmount_A") == "$3,954.00"
+        unpriced = _grid_facts(recs, coverage_lines=[])
+        assert _cell(unpriced, "PriorCoverage_GeneralLiability_InsurerFullName_A") is None
 
     def test_a_stated_prior_coverage_schedule_still_wins(self):
         f = _grid_facts(prior_coverage_by_line=[
@@ -501,10 +511,11 @@ def test_through_the_merge_the_orbin_package_proposes_its_next_term():
     assert mf.get("renewal_dates_routed") is True
     # 29 Sep 2026 (client items 7 / 8): a dec-only upload renews its programme.
     # Two companies write Orbin's policies, so CARRIER stays an owned blank (and
-    # a card asks for it); the dec's premiums now print.
+    # a card asks for it); since Brent's 8 Oct answer the dec's EXPIRING
+    # premiums stay off page one too (they print in Prior Carrier Information).
     assert mf.get("renews_current_programme") is True
     assert mf.get("carrier_is_current_policy") is True
-    assert "premium_is_current_policy" not in mf
+    assert mf.get("premium_is_current_policy") is True
 
 
 # ── 2e. A certificate documents the EXISTING policy (own-diff review) ────────

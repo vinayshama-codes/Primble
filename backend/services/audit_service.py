@@ -161,11 +161,29 @@ def live_card_points(form_results) -> dict:
     return points
 
 
-def plan_card_sync(rows, live: set, live_points: Optional[dict] = None) -> dict:
+def live_card_messages(form_results) -> dict:
+    """{rec_id: message} - the words each live card shows now (the first copy
+    speaks for all, as `live_card_points`). A card whose words are its id (a
+    plain string) is left out: new words are a new card."""
+    messages: dict = {}
+    for sqs in form_results or []:
+        if not isinstance(sqs, dict):
+            continue
+        for rec in sqs.get("recommendations") or []:
+            if not isinstance(rec, dict) or not rec.get("rec_id"):
+                continue
+            msg = rec.get("message")
+            if rec["rec_id"] not in messages and isinstance(msg, str) and msg.strip():
+                messages[rec["rec_id"]] = msg
+    return messages
+
+
+def plan_card_sync(rows, live: set, live_points: Optional[dict] = None,
+                   live_messages: Optional[dict] = None) -> dict:
     """What must change so the stored cards match the live ones. Pure.
 
     `rows`: the session's stored rows ({rec_id, action, producer_answer,
-    score_impact}).
+    score_impact, message}).
       reopen  - live, but closed by the SYSTEM earlier ('resolved' with no
                 answer): the gap is back, and the side panel already shows the
                 card again (it hides only dismissed and answered cards).
@@ -175,11 +193,16 @@ def plan_card_sync(rows, live: set, live_points: Optional[dict] = None) -> dict:
                 than the one the card shows now (`live_points`): the download
                 review and the cover read the stored number, so it follows the
                 panel's (1 Oct 2026, item 19).
+      reword  - live and open, stored with other words than the card shows
+                now (`live_messages`) - the same reason, for the words (12 Oct
+                2026: the building card kept "street address, occupancy,
+                construction type, and building or BPP value" after it learned
+                to name only what is missing).
     A dismissed or answered row is the producer's own act and is never touched
     - a dismissal's credit is the number it was dismissed at. New cards are
     recorded by `log_recommendations_presented`, whose insert already skips a
     stored row."""
-    reopen, resolve, repoint = [], [], []
+    reopen, resolve, repoint, reword = [], [], [], []
     for row in rows or []:
         rid = str((row or {}).get("rec_id") or "")
         if not rid or rid.startswith(_NOT_A_CARD_PREFIXES):
@@ -194,16 +217,19 @@ def plan_card_sync(rows, live: set, live_points: Optional[dict] = None) -> dict:
             if (open_now and live_points and rid in live_points
                     and row.get("score_impact") != live_points[rid]):
                 repoint.append(rid)
+            if (open_now and not answered and live_messages and rid in live_messages
+                    and "message" in row and row.get("message") != live_messages[rid]):
+                reword.append(rid)
         elif action in (None, "downloaded_anyway"):
             resolve.append(rid)
     return {"reopen": sorted(reopen), "resolve": sorted(resolve),
-            "repoint": sorted(repoint)}
+            "repoint": sorted(repoint), "reword": sorted(reword)}
 
 
 async def _stored_card_rows(session_id: str) -> List[dict]:
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT rec_id, action, producer_answer, score_impact "
+            "SELECT rec_id, action, producer_answer, score_impact, message "
             "FROM sqs_recommendation_audit WHERE session_id=$1",
             session_id,
         )
@@ -223,6 +249,23 @@ async def _repoint_open_cards(session_id: str, points: dict) -> None:
                     WHERE session_id=$1 AND rec_id=$2
                       AND (action IS NULL OR action='downloaded_anyway')""",
                 session_id, rid, int(pts),
+            )
+
+
+async def _reword_open_cards(session_id: str, messages: dict) -> None:
+    """Give open, unanswered cards the words they show now - the WHERE clause
+    repeats the plan's test, like `_repoint_open_cards`."""
+    if not messages:
+        return
+    async with get_pool().acquire() as conn:
+        for rid, msg in sorted(messages.items()):
+            await conn.execute(
+                """UPDATE sqs_recommendation_audit SET message=$3
+                    WHERE session_id=$1 AND rec_id=$2
+                      AND (action IS NULL OR action='downloaded_anyway'
+                           OR action='resolved')
+                      AND (producer_answer IS NULL OR producer_answer = '')""",
+                session_id, rid, str(msg),
             )
 
 
@@ -280,11 +323,13 @@ async def sync_recommendation_cards(
                 stored.update(_card_id(rec) for rec in new)
                 out["presented"] += len(new)
         points = live_card_points(results)
-        plan = plan_card_sync(rows, live_card_ids(results), points)
+        messages = live_card_messages(results)
+        plan = plan_card_sync(rows, live_card_ids(results), points, messages)
         await _reopen_system_closed_cards(session_id, plan["reopen"])
         out["reopened"] = len(plan["reopen"])
         await _repoint_open_cards(session_id, {rid: points[rid] for rid in plan["repoint"]})
         out["repointed"] = len(plan["repoint"])
+        await _reword_open_cards(session_id, {rid: messages[rid] for rid in plan["reword"]})
         for rid in plan["resolve"]:
             if await mark_recommendation_resolved(
                 session_id=session_id, rec_id=rid,
@@ -1821,6 +1866,12 @@ async def get_audit_trail_export(session_id: str) -> dict:
 # scoring or dismiss-credit - it only records that a broker marked an issue
 # open / resolved / dismissed on this submission. Keyed by the durable issue_id.
 
+# The review page a status is filed under (`severity`): the page whose Resolved
+# list shows it once it stops being listed. "recommendation" (13 Oct 2026) is a
+# fixed "Raise your score" / "Your forms will need" row, keyed "rec:..." by the
+# screen (frontend utils/recommendations.js).
+ISSUE_STATUS_PAGES = ("hard", "warning", "recommendation")
+
 # ASYNC-SAFE
 async def set_issue_status(
     session_id: str,
@@ -1833,16 +1884,22 @@ async def set_issue_status(
     rule_code: Optional[str] = None,
     source_fact: Optional[str] = None,
     message: Optional[str] = None,
+    severity: Optional[str] = None,
 ) -> bool:
     now = datetime.now(timezone.utc).isoformat()
+    # Only the review pages that keep a Resolved list - Hard Stops, Warnings and
+    # Recommendations (owner, 13 Oct 2026); anything else is not recorded (never
+    # guessed).
+    severity = severity if severity in ISSUE_STATUS_PAGES else None
     try:
         async with get_pool().acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO submission_issue_status (
                     id, session_id, user_id, issue_id, form_id, field,
-                    rule_code, source_fact, message, status, reason, updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    rule_code, source_fact, message, status, reason, updated_at,
+                    severity
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 ON CONFLICT (session_id, issue_id) DO UPDATE
                     SET status=EXCLUDED.status,
                         reason=EXCLUDED.reason,
@@ -1851,11 +1908,12 @@ async def set_issue_status(
                         field=COALESCE(EXCLUDED.field, submission_issue_status.field),
                         rule_code=COALESCE(EXCLUDED.rule_code, submission_issue_status.rule_code),
                         source_fact=COALESCE(EXCLUDED.source_fact, submission_issue_status.source_fact),
-                        message=COALESCE(EXCLUDED.message, submission_issue_status.message)
+                        message=COALESCE(EXCLUDED.message, submission_issue_status.message),
+                        severity=COALESCE(EXCLUDED.severity, submission_issue_status.severity)
                 """,
                 f"iss_status_{uuid.uuid4().hex}",
                 session_id, user_id, issue_id, form_id, field,
-                rule_code, source_fact, message, status, reason, now,
+                rule_code, source_fact, message, status, reason, now, severity,
             )
         logger.info(f"Issue {issue_id} status={status} (session {session_id})")
     except Exception as ex:
@@ -1893,7 +1951,7 @@ async def get_issue_statuses(session_id: str) -> List[dict]:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
                 """SELECT issue_id, status, reason, form_id, field, rule_code,
-                          source_fact, message, updated_at, user_id
+                          source_fact, message, updated_at, user_id, severity
                    FROM submission_issue_status
                    WHERE session_id=$1
                    ORDER BY updated_at ASC""",

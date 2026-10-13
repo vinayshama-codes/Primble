@@ -83,7 +83,29 @@ def salvage_truncated_json(text: str) -> Optional[dict]:
         cut, cut_stack = (shallower or commas)[-1]
 
         candidate = s[:cut] + "".join(reversed(cut_stack))
-        parsed = json.loads(candidate)
-        return parsed if isinstance(parsed, dict) and parsed else None
+        try:
+            parsed = json.loads(candidate)
+            return parsed if isinstance(parsed, dict) and parsed else None
+        except ValueError:
+            pass
+
+        # A COMPLETE REPLY WITH ONE BAD CHARACTER (8 Oct 2026). The model can
+        # finish its reply and still slip once - the Choice Electric WC dec came
+        # back with `..."growth_trends":{...},{"target_markets":{...}}}}`, a stray
+        # "{" four closers from the end. That is not a truncation, so the cut
+        # chosen above lands AFTER the slip and cannot parse, and this function
+        # used to give up. Its caller then fell through to an LLM repair fed the
+        # first 3,000 characters - which kept 75 of 201 facts and dropped the
+        # WC class table on every run. Rewinding comma by comma until the text
+        # parses keeps everything written BEFORE the slip; only the element
+        # holding it is lost. Tried after the first cut, so every reply this
+        # function already recovered is recovered exactly as before.
+        for cut, cut_stack in reversed(commas):
+            try:
+                parsed = json.loads(s[:cut] + "".join(reversed(cut_stack)))
+            except ValueError:
+                continue
+            return parsed if isinstance(parsed, dict) and parsed else None
+        return None
     except Exception:                                      # pragma: no cover
         return None

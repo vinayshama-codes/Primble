@@ -113,16 +113,72 @@ def generation_state(session: Any, job: Any, now: Optional[float] = None) -> str
 
 
 def forms_locked_reason(session: Any, state: Optional[str] = None) -> Optional[str]:
-    """Why the package's pre-form actions (reclassify, exclude, confirm a
-    value, resolve integrity, generate again) must refuse, or None. Those
+    """Why the package's PRE-FORM actions (resolve integrity, confirm a value
+    through the pre-form route, generate again) must refuse, or None. Those
     actions re-read the documents and never touch forms that already exist, so
-    after generation they would leave the forms on the old values."""
+    after generation they would leave the forms on the old values.
+
+    Documents are no longer among them (Choice Electric #25, 7 Oct 2026):
+    adding a document, or changing one's type / exclusion / supporting-only,
+    goes through the documents door (`services/session_documents`), which
+    re-stamps the forms - see `documents_locked_reason`."""
     session = session if isinstance(session, dict) else {}
     if session.get("generated_forms"):
         return "Forms are generated - make changes in the form editor."
     if state == STATE_RUNNING:
         return "Forms are being generated - wait for them to finish."
     return None
+
+
+def documents_locked_reason(session: Any, state: Optional[str] = None) -> Optional[str]:
+    """Why a package's DOCUMENTS cannot change right now, or None. Only a run
+    in progress locks them - it stamps its forms from the facts it read when it
+    started. Before forms and after forms the documents door handles a change.
+    After forms, the AI reading of an added document (C103,
+    `session_documents.run_new_document_fill`) locks them too while it is alive:
+    it writes its answers onto the forms the documents door left."""
+    session = session if isinstance(session, dict) else {}
+    if state == STATE_RUNNING and not session.get("generated_forms"):
+        return "Forms are being generated - wait for them to finish."
+    if document_fill_running(session):
+        return DOCUMENT_FILL_LOCKED
+    return None
+
+
+# ── The AI reading of a document added after forms (C103, 7 Oct 2026) ───────
+# Its status rides the session row (`session_documents` writes it); the run
+# beats `DOCUMENT_FILL_BEAT_KEY` the way a generation job beats its row. A run
+# whose beat went silent for STALE_AFTER_SECONDS died with its process: it is
+# reported "interrupted" and no longer locks anything - its forms are exactly
+# as the documents door left them (the run writes the forms once, at the end).
+DOCUMENT_FILL_KEY = "document_ai_fill"
+DOCUMENT_FILL_BEAT_KEY = "document_ai_fill_beat_at"
+DOCUMENT_FILL_RUNNING = "running"
+DOCUMENT_FILL_INTERRUPTED = "interrupted"
+DOCUMENT_FILL_LOCKED = ("Your forms are being updated from a document you added - "
+                        "wait for it to finish.")
+
+
+def document_fill_status(session: Any, now: Optional[float] = None) -> Optional[dict]:
+    """The stored status of the latest AI reading of an added document, with a
+    run that stopped beating reported as "interrupted". None when none ran."""
+    session = session if isinstance(session, dict) else {}
+    status = session.get(DOCUMENT_FILL_KEY)
+    if not isinstance(status, dict) or not status.get("state"):
+        return None
+    out = dict(status)
+    if out.get("state") == DOCUMENT_FILL_RUNNING:
+        last = max([t for t in (_epoch(session.get(DOCUMENT_FILL_BEAT_KEY)),
+                                _epoch(out.get("started_at"))) if t is not None] or [0.0])
+        now = time.time() if now is None else float(now)
+        if last and (now - last) > STALE_AFTER_SECONDS:
+            out["state"] = DOCUMENT_FILL_INTERRUPTED
+    return out
+
+
+def document_fill_running(session: Any, now: Optional[float] = None) -> bool:
+    status = document_fill_status(session, now)
+    return bool(status and status.get("state") == DOCUMENT_FILL_RUNNING)
 
 
 class GenerationHeartbeat:

@@ -1,5 +1,6 @@
 import { API_BASE } from "../../config/constants";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createHeaderAutoHide, HIDE_AFTER } from "../../utils/headerAutoHide";
 import AdminNavDropdown from "./AdminNavDropdown";
 
 const ChevronDown = ({ rotated }) => (
@@ -419,34 +420,49 @@ export default function Header({
   const headerRef = useRef(null);
 
   useEffect(() => {
-    const scrollPositions = new WeakMap();
+    // How a scroll is measured lives in utils/headerAutoHide (13 Oct 2026): an
+    // element's first event is its starting point, an upward scroll adds up
+    // from where the last downward run ended, the top of the page shows it.
+    const autoHide = createHeaderAutoHide();
+    // Any overlay drawn fixed over the page (a confirm, a receipt, sign-in): its
+    // scroll is not the page's. Remembered per element - an element's ancestry
+    // does not change while it scrolls.
+    const fixedLayer = new WeakMap();
+    const insideFixedLayer = (el) => {
+      if (fixedLayer.has(el)) return fixedLayer.get(el);
+      let inside = false;
+      for (let n = el; n && n.nodeType === 1 && n !== document.body; n = n.parentElement) {
+        if (window.getComputedStyle(n).position === "fixed") { inside = true; break; }
+      }
+      fixedLayer.set(el, inside);
+      return inside;
+    };
     let hiddenLocal = false;
     let lockUntil = 0;
 
     const handleScroll = (e) => {
       const t = e.target;
       // A region that scrolls on its own (the Review step's section rail) must
-      // not hide the header or collapse its space.
-      if (t && t.nodeType === 1 && t.closest && t.closest('[data-header-autohide="off"]')) return;
+      // not hide the header or collapse its space - nor anything inside a window
+      // or dialog: the page did not move (owner, 13 Oct 2026: scrolling a long fix
+      // window hid AND collapsed the header; the window closed, nothing released
+      // it, and the page sat 83px short of the screen's bottom - a white band
+      // under its footer).
+      if (t && t.nodeType === 1 && t.closest
+          && (t.closest('[data-header-autohide="off"], [role="dialog"], [aria-modal="true"], .modal-overlay')
+              || insideFixedLayer(t))) return;
       const isWindowScroll = t === document || t === document.documentElement || t === document.body;
       const el = isWindowScroll ? (document.scrollingElement || document.documentElement) : t;
       if (!el || typeof el.scrollTop !== "number") return;
 
-      const currentY = el.scrollTop;
-      const lastY = scrollPositions.get(el) ?? 0;
-      const delta = currentY - lastY;
-      if (Math.abs(delta) < 4) return;
-      scrollPositions.set(el, currentY);
-
       // Asymmetric thresholds: easy to hide, deliberate to show.
-      // This filters out reflow-induced and trackpad-jitter reverse deltas.
-      let shouldHide = hiddenLocal;
-      if (!hiddenLocal && delta > 6 && currentY > 80) shouldHide = true;
-      else if (hiddenLocal && delta < -40) shouldHide = false;
-      if (shouldHide === hiddenLocal) return;
+      const shouldHide = autoHide.step(el, el.scrollTop, hiddenLocal);
+      if (shouldHide === null || shouldHide === hiddenLocal) return;
 
+      // The top of the page is never held back by the lock: no further scroll
+      // could release it there.
       const now = performance.now();
-      if (now < lockUntil) return;
+      if (now < lockUntil && !(shouldHide === false && el.scrollTop <= HIDE_AFTER)) return;
       lockUntil = now + 400;
 
       hiddenLocal = shouldHide;
@@ -454,8 +470,29 @@ export default function Header({
       setCollapse(shouldHide && !isWindowScroll);
     };
 
+    // A screen that removes the element whose scroll hid the header (leaving the
+    // form editor for the review page) asks for the header back. The hide state
+    // belongs to that element's scroll; nothing else releases it. Without this the
+    // review page opened with the header still hidden AND collapsed: the page sits
+    // at the top, where no upward scroll can bring the header back, and the
+    // collapsed header's missing height left a blank band under the page until a
+    // refresh (owner, 8 Oct 2026).
+    const handleReset = () => {
+      lockUntil = 0;
+      const el = document.scrollingElement || document.documentElement;
+      if (el) autoHide.reset(el, el.scrollTop);
+      if (!hiddenLocal) { setCollapse(false); return; }
+      hiddenLocal = false;
+      setHidden(false);
+      setCollapse(false);
+    };
+
     window.addEventListener("scroll", handleScroll, { passive: true, capture: true });
-    return () => window.removeEventListener("scroll", handleScroll, { capture: true });
+    window.addEventListener("app-header:reset", handleReset);
+    return () => {
+      window.removeEventListener("scroll", handleScroll, { capture: true });
+      window.removeEventListener("app-header:reset", handleReset);
+    };
   }, []);
 
   // Announce the header's live height and whether it is on screen, so sticky page

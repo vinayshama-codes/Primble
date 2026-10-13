@@ -423,6 +423,425 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### Choice Electric Client Test (Brent + Michelle, 5 Oct) - FIXED OFFLINE 6 Oct, uncommitted
+**Read `25sepChanges.md` top section ("CHOICE ELECTRIC", parts A-I) first.** 7 separate redacted decs, 5 carriers,
+umbrella + excess tower; stored production session `ca93ed8f` (per-document facts are plaintext - replay offline).
+Most of Brent's "old" screens were a stale browser tab (no version check exists). New doors to know:
+- `services/stops_now.py`: the ONE stops door - every scorer rebuilds stops from current facts; stored stop lists
+  are display copies only (AST-pinned).
+- `arq_service.propagate_fact_edits`: a form edit reaches every other form (person-typed boxes kept).
+- `schedule_capture.merge_saved_rows` / `arq_service._write_schedule_rows`: table saves MERGE by row id, never drop
+  non-column fields; `extraction_service.sync_location_list` derives `locations` from the table.
+- `lob_canon.umbrella_layer`: an excess layer is its own line record (`umbrella~excess`), family stays umbrella.
+- `normalization.is_not_a_policy_number`: no digit = not a policy number; designator form numbers ("IL DS 71 ...").
+- `sqs_service.gl_class_codes_present`: one GL class-code reader.
+Open: Brent decisions (two 131s, 130 audit tick, EBL placement, past proposed date, pre-form stop severity).
+Tests: `tests/test_choice_electric_{loc,pol,forms,flow}_6oct.py`. Suite 12,543 / 1 / 19.
+**Round 3, 7 Oct (offline, uncommitted; `25sepChanges.md` part J) - the six bigger builds:**
+- `services/form_instances.py` (+ `utils/formInstances.js`): a second copy of a form is "<base>__<key>"
+  ("ACORD_131__excess"). Files / rules by `base_form_id()`; storage / labels by the instance id; stamping, scoring,
+  QA by `facts_for_form()`. Single-copy packages byte-identical.
+- `services/umbrella_layers.py`: one ACORD 131 per umbrella-family layer; gap fill shares insured boxes and runs each
+  copy's own-policy boxes in its own group (improving-ll.md C102).
+- `services/session_documents.remerge_package`: add documents / reclassify / exclude after forms - only new files are
+  extracted, forms re-stamped in place (premium boxes too, each side judged on its own documents' text).
+- `services/policy_lines.py` + `routes/policy_line_routes.py` + `review/PoliciesTable.jsx`: edit / add / remove
+  policy lines (store `_producer_policy_lines`, survives every re-run).
+- `services/wc_premiums.py` + `pdf_service.nonfillable_box_value`: the ONE premium-box door (generation and every
+  re-stamp); the 130 prints the WC premiums.
+- `services/form_dry_run.py` + `BeforeYouGenerate.jsx`: the download review's checks before generation (no LLM);
+  `services/premises_cope.py`: per-building COPE in the location table.
+- `pdf_service._value_in_raw_text`: a number is "in the documents" only as the same number.
+  `_with_grid_memo`: the 125 prior-carrier grid is built once per stamp (10 s -> 1 s, identical output).
+Tests: `test_form_instances_7oct.py`, `test_choice_electric_{layers,upload,policies,dryrun,integration}_7oct.py`. Suite 12,821 / 1 / 19; FR125 312 of 312.
+**Round 4, 7 Oct (owner's localhost run `9acec031`; `25sepChanges.md` part K) - offline, uncommitted:**
+- `extraction_service._drop_another_lines_limits_on_one_line_document`: a one-line-family dec (an umbrella) never
+  witnesses another line's limit equal to its own (the umbrella's $5M was the GL limit on a fresh read).
+- `normalization.settle_document_entity_type`: a printed menu counts only as its ticked option; a legal-form designator
+  in the insured's own name overrides an incompatible reading. Integrity's carrier reason = two carriers on ONE line.
+- `premises_cope`: with 2+ location rows EVERY COPE card opens the location table (pre-form, editor HARD STOPS block).
+- `schedule_capture.MERGE_ON_SAVE` now also vehicles (VIN) and drivers (licence, name+DOB).
+- Brent #10: the "not a conflict" blocks are gone; the policies table has a Limit column (`policy_lines.record_limits`)
+  and Group by carrier. Brent #22: a Recommendations section (Raise your score + Your forms will need).
+- **C103:** a document added AFTER forms is read by the shared gap fill on the NEW document only
+  (`session_documents.run_new_document_fill`); a differing AI box becomes a "New document says X" choice, never an
+  overwrite; `NEW_DOCUMENT_AI_FILL=0` turns it off. Editor sidebar "Back to review" with an open-items count.
+Tests: `test_choice_electric_{data,cards,policies_table}_7oct.py`, `test_recommendations_section_7oct.py`,
+`test_new_document_fill_7oct.py`. Suite 13,001 / 1 / 19; FR125 312 of 312; D6 2 of 12 (+1, unchanged).
+**Round 5, 8 Oct (`25sepChanges.md` part L): the REAL AI fill's output, fixed by class and measured on a 691-session
+replay corpus** (`<scratchpad>/ce/r5/harness/`: stored AI answers fed back through the guards, old vs new tree - an
+`allow_llm=False` replay never sees AI junk). Doors: `normalization.policy_number_refusal`; `services/ai_answer_guards.py`
+(non-answers); `services/ai_role_guards.py` (wrong-role values); `services/scoped_evidence.py` (another policy's value,
+coverage sections the documents do not carry - never asked, improving-ll.md C104 - and the 131 underlying from the
+umbrella's own schedule); `services/property_coverages.py` (140 grid per schedule row). Suite 13,497 / 1 / 19; FR125 312;
+corpus 302 boxes changed, 0 correct values lost.
+
+**Round 6, 8 Oct - the owner's LIVE run `b4d18e8e` (`25sepChanges.md` parts M and N). 8 of the 27 points are now
+LIVE VERIFIED; three defects found and fixed.** Read part N before testing anything by hand - it says which items a
+screen can prove and which only the session row can.
+- **A SYNC function may never schedule an asyncio task.** `session_documents.launch_new_document_fill` was a plain
+  `def` handed to a Starlette `BackgroundTask`, so it ran in an AnyIO worker thread with no event loop:
+  `ensure_future` raised and `run_new_document_fill` was dropped, leaving `document_ai_fill` on `{"state":"running"}`
+  for ever while the screen said "Reading <file> into your forms...". Now `async def`; an AST test
+  (`test_no_sync_function_schedules_an_asyncio_task`) fails the build on the shape anywhere in `services/` or `routes/`.
+- **`services/insured_scope.py` - whose company does this value describe?** A Harborline Plumbing dec added to a
+  Choice Electric submission gave the APPLICANT 18 of Harborline's facts (DBA, both addresses, FEIN, all three
+  contacts, revenue, NAICS, SIC, employee counts, operations, occupancy, year built, years in business, start date),
+  took the package 38 -> 60 (raw 80) on another company's data, and printed a Washington licence plus Harborline's
+  policy number on ACORD 186 under "Choice Electric LLC". The upload HAD warned and the integrity check HAD capped
+  at 60. **A warning is not a scope and a cap is not a block.** An applicant-scoped fact is now dropped only when
+  EVERY document stating it names a different company; one applicant document keeps it, a person's answer is never
+  touched, `applicant_name` stays with the picker, a document naming no insured is never judged. Called from the
+  merge tail before the WC derivations. D6: 2 of 104 stored sessions, both genuine (`b4d18e8e`; `59cacc39`, where
+  Orbin Contracting held Meridian Fabrication's FEIN / year built / construction) - zero false positives.
+- **`derive_wc_facts_from_class_rows` now derives the SCALAR `wc_payroll`**, not only `wc_payroll_by_state`. The
+  scorer reads the scalar, so a complete class table produced a false "WC payroll is missing" and a 12-point
+  Exposure deduction. Two runs of the IDENTICAL documents: 7 Oct the model emitted it (Exposure 45), 8 Oct it did
+  not (33), while the ACORD 130 printed all three class payrolls. On `b4d18e8e`: None -> $2,626,500, Exposure 53 -> 65.
+  **Extraction is not repeatable - 8 facts differed between those two runs; a fact the scorer needs must be DERIVED,
+  never left to the model.**
+- Frontend: "Back to review" disables, spins and says "Opening review..." (it is a save plus a session re-read), and
+  clears the editor's body scroll lock explicitly rather than waiting for the `step` effect - that lock surviving
+  into the review render is what strands the footer over empty space.
+**Two gradings I got wrong and corrected the same day, both by checking the RENDERED output rather than a raw fact:**
+item 5 is a PASS - ACORD's own tooltip for `Policy_Audit_FrequencyCode_A` says "enter the code; **A - annual**", so
+"A" is that box's correct code and no indicator is ticked (Brent was reading the checkbox row, which has no Annual);
+item 9 is a PASS in part - `policy_lines.table_rows` renders **10 correct rows** with the Excess its own, filtering
+the nine auto coverage parts out of 20 raw `coverage_lines` entries.
+**Still open from that run, NOT fixed:** ten invented ACORD 140 values, eight labelled `ai_verified` (`BuiltYear_B`
+= 1999 is an **ISO copyright year**; protection class 4; "sprinklers"; five 2025 improvement years - none of those
+words is in any document); **no Commercial Auto row** in the policy table - `canon_line` reads "Auto Medical
+Payments" as the auto LINE not a part, and with the premium redacted and no number the de-dup drops it; NOT fixed at
+speed because `_row_evidence` reads `canon_line` only, so reclassifying it could drop the auto family and
+un-recommend the 127 - needs a corpus measurement first; ACORD 126 at 12 of 255 boxes with no GL premium; 126 and 131 disagreeing on GL claims-made; the 131 asserting follow-form (never-guess rule); the excess 131
+ticking claims-made AND occurrence; the 125 total excluding GL and WC; three different hard-stop counts on one screen.
+Tests: `tests/test_choice_electric_fixes_8oct.py` (22).
+
+**Round 7, 8 Oct - the second run `805049a7` (6 docs, the Business Auto Policy held back) and the "becomes a hard
+stop" reversal (`25sepChanges.md` part O).**
+- **The sentences are gone from both review layouts** (owner): "N hard stops now, M more when forms are generated"
+  and "1 warning becomes a hard stop when forms are generated." Brent's item 18 ASKED why hard stops appear after
+  generation; he did not ask for the answer printed on screen, and a sentence announcing a future problem in a
+  section where nothing can be done about it is not a fix. **The per-row `becomes_hard_tag` STAYS** - it sits
+  beside that row's own "Open to fix". `test_no_layout_announces_a_future_hard_stop` pins it; the old test
+  asserted the opposite and was updated (the TEST was wrong, not the code).
+- **The COPE location table is honest; the ACORD 140 is not - on the same data.** Every blank cell is a value no
+  document states (address, occupancy, year built, roof material / year, protection class, sprinkler). What looks
+  like data in the empty cells is the column PLACEHOLDER (`schedule_capture.py`). Round 6's 140 invented values for
+  those very fields. **When a table and a form disagree about the same missing fact, the form's gap fill is the
+  defect.** Two of my own searches returned false positives worth remembering: a "street address" matching
+  **Amerisure's own** head-office line in the dec header, and "roof material" matching the form title
+  "LIMITATIONS ON COVERAGE FOR ROOF SURFACING".
+- **A third unsatisfiable gate**: Period of Restoration. These decs print "EXTENDED PERIOD OF INDEMNITY 540 DAYS"
+  and a 72-hour BI deductible, never a period of restoration - so after generation it is a hard stop no document
+  in the package can clear, beside occupancy type and Minimum Viable COPE. All three wait on Brent.
+- **OPEN, owner's point 3, deliberately NOT built:** cross-form issues belong in the Recommendations section before
+  forms exist. It collides with `utils/recommendations.js`'s own stated rule ("ONE TO-DO, ONE PLACE - an item whose
+  fix a Hard Stop or Warning card already offers is not repeated here"). Three options in part O; **(a) add them to
+  the "Your forms will need" group only** is recommended - a different question from "what is wrong now", so the
+  dedupe rule survives and no score surface moves. Option (c) would reverse C75 and is Brent's call with a D6 table.
+
+**HELD FOR BRENT, nothing built (8 Oct, `25sepChanges.md` part P): `state_of_operations` is read off CARRIER
+letterheads.** The owner held the Business Auto Policy back from a Choice Electric re-run and noticed ACORD 137_CO
+was no longer offered. Cause: per-document `state_of_operations` came back **MI** (Amerisure's Farmington Hills
+head office), **PA** (Chubb claims, Scranton), **AZ** (the "OFFICE: PHOENIX AZ" line that also became
+`producer_address`) and **IN** (Federal) - on a **Colorado** contractor. With the auto policy's garaging
+(DENVER CO) gone and the WC class table not extracted that run, the merge settled on PA, `_supported_state_forms`
+returned `[]`, and 137_CO plus ACORD 28 dropped off. **The SAME Package Policy PDF gave CO on one run and MI on
+the next.** Blast radius is wider than the form list: the state also drives `state_restricted_boxes` and
+`state_auto_grid`. Proposed rule when approved: take the state ONLY from insured-scoped evidence (garaging, WC
+class-row states, `wc_payroll_by_state` keys, premises schedule, the applicant's own address) and otherwise DROP
+and ask - same shape as `_gate_inferred_payroll_period` and as `insured_scope`. Needs Brent because a populated
+field becomes blank on noise-only packages (D6).
+**ASK BRENT AS ONE BATCH - `25sepChanges.md` section F now holds 16 items, 11-16 added 8 Oct** (owner: ask them
+together, not one at a time): the state-of-operations rule above; the three gates no document can satisfy
+(occupancy, Minimum Viable COPE, Period of Restoration) as ONE question about whether an unsatisfiable gate may
+cap a score; where cross-form issues belong before forms exist (part O, three options); the location table's five
+plausible placeholders in empty COPE cells; whether "AI verified" should be renamed or its bar raised (it means
+only "this string appears somewhere" - which is how an ISO copyright year printed as a building's year built); and
+that extraction is not repeatable, which he should hear from us rather than discover.
+**Standing owner instruction (8 Oct): the form recommender is working - do not change it unless explicitly asked.**
+Verified that day: neither 8 Oct change touched it (`insured_scope` was a no-op on that session, the WC derivation
+had no table), and the offending values are written by extraction.
+**FOURTH SIGHTING OF ONE CLASS on 8 Oct: a carrier's details read as the insured's** - Harborline's identity as the
+applicant's (round 6), `producer_address` = "Office: Phoenix AZ", a premises search matching Amerisure's own head
+office, and now the risk state. Worth treating as one defect family rather than four fixes.
+
+**Round 8, 8 Oct evening - the generation of `805049a7` (`25sepChanges.md` part Q). 11 of 27 live verified; five
+defects fixed, each replayed on the stored row.** Doors / rules to know:
+- **The app header's auto-hide belongs to whichever element scrolled.** Scrolling the PDF in the editor hid AND
+  collapsed it; leaving the editor removed that element and nothing released it (no navbar, a blank band, until a
+  refresh). `Header.jsx` listens for `app-header:reset`; `AcordModal`'s step effect and `goBackToReview` dispatch it.
+  A screen that swaps out a scroll container must dispatch it too.
+- **A malformed extraction reply is rewound, not repaired from its first 3,000 characters** (`utils.json_salvage`,
+  improving-ll.md C105). The WC dec (identical text every run) came back as 75 of 201 keys, no flags: no class table,
+  no state - which ALSO explains the dropped 137_CO / ACORD 28 and the false "WC payroll is missing". **I first called
+  it a cut-off reply and was wrong; one probe call showed a COMPLETE reply with one stray `{` near the end.** The
+  salvage (built for truncation) gave up and the LLM repair, fed `raw[:3000]`, produced the fragment. Now the salvage
+  rewinds past the slip (203 facts, every class row); a partial result is retried once and never cached. **Probe the
+  real reply (`finish_reason`, usage) before naming why an LLM output failed - the backend logs only to a terminal.**
+- **A column heading is not the insured** (`normalization.is_not_a_party_name` / `is_abbreviation_heading`, applied in
+  the per-document door `extraction_service.drop_non_party_names`, the integrity check and `insured_scope`). The
+  re-upload `b38a4367` read the Travelers billing heading "S.B. MO." (under a redacted "INSURED'S NAME:") as the
+  insured: a "Possible multiple submissions" hard stop over one insured's six decs, and the package's applicant name.
+  Measured over 1,594 stored per-document names: only that one is dropped.
+- **Only a client's answers write "Since client answers"** - `recalculate_session_scores(..., trigger=
+  CLIENT_ANSWERS_TRIGGER)` from the questionnaire submit and an accepted held client answer; the band renders only a
+  stamped diff. Every other recalculation used to overwrite it.
+- **`issue_registry.retire_stopped_cross_form_issues`** - the upload's copy of a cross-form issue leaves
+  `structured_issues` when the recalculation's fresh run no longer raises it (`cross_form_validator.rule_codes()`,
+  harvested from its own `_issue` literals - every call must pass a literal code, pinned). An answered occupancy no
+  longer stays in Warnings.
+- **ACORD 125 OTHER rows** (`pdf_service._nonstandard_lob_rows`): a name the line canon places in a family with its
+  own 125 box is that box's line; a nameless part repeating a standard line's carrier AND premium is that policy's
+  coverage part (redacted decs have no numbers to match); the total is the rows printed. Replay: 317 sessions, 1
+  changed (the intended one).
+- The rail's policy count = the rows the policies table renders (`underwriting.policy_lines`).
+**Round 9, 8 Oct night (`25sepChanges.md` part S) - everything left that is neither UI nor Brent's, offline, each
+rule measured over all 1,688 stored documents (three first cuts over-reached on that measurement and were narrowed
+before shipping).** Doors to know:
+- `session_documents._stamp_with_answers` attaches the package's documents like generation; without them every
+  scoped guard stood down for a document added after forms (17 wrong ACORD 140 boxes on one addition).
+- Per-document pre-pass in `merge_facts` (all in `extraction_service`): `attach_generic_rows_to_document_line`
+  (a bare "Liability" row is its own document's line - item 9's missing Commercial Auto row),
+  `drop_flags_of_lines_not_carried` (`gl_is_claims_made` only from a document carrying GL),
+  `drop_reference_amounts` ("$SEE SCHEDULE" is no limit), `assign_declared_policy_premium` (a single-policy
+  document's one declared premium). `lob_canon`: "property protection" (Michigan no-fault) is not Property.
+- `ai_answer_guards` refusals: building years printed only inside dates / copyright / vehicle descriptions; a start
+  date printed beside a policy label; a building attribute or auto coverage amount not stated with that attribute;
+  a carrier code as the insured's ID; an OTHER row naming a coverage the form prints itself; a city / state in a
+  street line; a rating classification as an explanation or business type.
+- `scoped_evidence.foreign_policy_text`: a description printed only by another line's documents.
+- `_read_vehicle_schedule_tables` + `pdf_service._resolve_vehicle_stated_amount`: a vehicle schedule TABLE's own
+  Cost New / Stated Amount columns; the meaning gate treats vehicle cost new / stated amount as a value.
+- `_route_producer_party`: with no agency named in any document, a document address with no street is not the
+  login agency's. `_prefer_submission_terms` also reads "ADJUSTMENTS OF PREMIUM SHALL BE MADE ANNUALLY".
+Tests: `tests/test_choice_electric_run8_8oct.py` (46). A value a PERSON supplied is evidence for every round-9 rule
+(`ai_answer_guards.person_values`) - the first cut refused Brent's own year built / protection class on building 2.
+
+**Round 10, 8 Oct late (`25sepChanges.md` part T) - the owner's run `15f43bba` (all 7 documents) graded box by box;
+its backend predated the last round-9 edits, so restart before trusting a live run.** Doors to know:
+- `extraction_service.issue_only_dates` / `clear_issue_dates` (per-document pre-pass): a date printed only beside an
+  issue / countersign / transaction label leaves that document's rows (the auto dec's coverage-part menu dated GL,
+  Property, IM and Crime 01/16/2025 and raised two false umbrella-misalignment warnings). `_sources_are_own_
+  declarations` counts only rows that state a premium, number or date (the Commercial Auto row, item 9).
+- `ai_answer_guards`: a short code is read as itself (protection class "GRP I" was a property RATE group); BCEG needs
+  BCEG wording; `AI_LABEL_REPEATS_ITSELF` ("CO: CO"); `AI_SUMMARY_NOT_DOCUMENT_TEXT` - our own derived
+  `umbrella_follow_form` sentence "(per submitted documents)" was being copied into 131 boxes (7 stored sessions).
+- `pdf_service._vehicle_make_in_a_party_box` (before the gate): a schedule's vehicle MAKE is never an owner / interest;
+  an AI Yes whose own explanation scoped evidence refuses as another policy's text goes with it.
+- `scoped_evidence._drop_reference_only`: a document that only REFERENCES a line (an umbrella's schedule of
+  underlying insurance) speaks for its limits, dates and identifiers, never its deductibles, premiums or text.
+- `coverage_evidence.parse_xmod` reads 4 decimals ("1.0800" was "no mod"); `derive_xmod_from_rating_lines` reads the
+  worksheet's "Experience Mod 1.0800" into an empty `wc_xmod`.
+**Review screen Resolved section (owner's spec, 8 Oct night, `25sepChanges.md` part V - Brent items 12 / 13).** A
+dismissed hard stop / warning, or one fixed through "Open to fix" that stops firing, moves into a collapsed "Resolved
+(n)" dropdown on its page with a "Resolved" / "Dismissed" label and "Open again" (dismissed -> back to its list;
+fixed -> the editor's reopen door, `handleReopenIssue`). No "Resolve" button on the review screen (the editor keeps
+its own). Rules in `frontend/src/utils/resolvedIssues.js`; each status stores its page (`submission_issue_status.
+severity`, idempotent ALTER in `models/schemas.py`). Tests: `tests/test_review_resolved_section_8oct.py`.
+
+**BRENT'S ANSWERS, 8 Oct (`25sepChanges.md` part U) - ACORD 125 page one is the APPLICATION's, again.** Several
+writing companies are never listed in the top Carrier box (blank + the "carrier receiving this submission" card -
+REVERSES the 30 Sep join); a dec renewal's EXPIRING premiums never print on page one (REVERSES 29 Sep; they print in
+Prior Carrier Information; a quote's premium, a typed total or a person-typed line premium still prints; the 130
+keeps the WC premium - `wc_premiums.premiums_withheld` ignores the page-one flag on a renewal); the first landlord
+prints on 125 Additional Interest, the rest are a Needs-attention "ACORD 45" to-do; SIC / NAICS and the ACORD 25
+landlord were already as he wants. This rule has flipped three times (15 Sep, 29 / 30 Sep, 8 Oct) - **Brent's
+8 Oct answer is the latest word; do not restore the join or the page-one premiums.**
+
+**UI round, 9 Oct evening (`25sepChanges.md` part W) - frontend only, no score or stored data moves.** Doors to know:
+`utils/positiveWording.js` (`positiveScoreWording`) rewrites a "score capped / held / pinned" clause into Brent's
+"- fulfill to increase your Submission Quality Score (SQS)™" AT RENDER ONLY - never transform a stored message (issue
+ids, statuses and the legacy rule table key on it); `test_ui_items_16_17_19_9oct.py` harvests every backend string with
+cap wording and fails on a new one the helper does not rewrite. `packageGeneration.nextReviewStep` drives the rail
+footer ("Continue to <next page>" + "Skip to form selection"; last page / after forms one button). The skip is the
+form-selection "Back to review" button (`App.css .step-footer-back`, 212px on both screens, grows only for its words).
+`utils/formSelection.js`: ACORD 125 ticked on arriving at form selection, never re-ticked once unticked; the review's
+dry run follows the ticks only once the producer changes one. `PDFJsViewer` "Cancel" discards edits (the one exit that
+does not save); "Done editing - save" waits for a change. The review Resolved section is a card on Hard Stops and a
+tier-style heading on Warnings, with an "Open again" chip.
+**"Open again" takes the fix back - `services/issue_fix_undo.py` (owner, 9 Oct evening).** `resolve-issue` records,
+between the write and the re-score, a receipt of every fact / flag / form box the fix moved (before and after), under
+the issue id the screen uses (`openResolution` sends `issueIdOf`), encrypted at rest (`issue_fix_receipts`, one blob on
+the session row); `reopen-issue` puts the before-values back and re-scores - for table and note fixes too, which the old
+field-only clear never undid - and REFUSES (`changed_since`) when any recorded value moved since. Safety rules (each from
+a reproduced review finding): only the fix's own writes are recorded (another writer's source / box label is left out;
+the snapshot is taken at the write), bookkeeping dicts such as `_human_schedules` per entry, a second fix of the issue
+folds in only with no gap (else `blocked`), a changed document set refuses, forms generated after the fix are re-stamped
+(`_restamp_changed_boxes(keep_edited_own=True)`, own keys = the receipt's facts: a late box generation labelled
+"producer" moves while it still prints the fix; one a person changed after generation stays). No receipt = status only;
+the old field clear runs only when the request says
+`legacy_clear` (the editor's Cross-Form panel). A reopen that undid nothing and finds the item not firing leaves the
+stored status alone. Never for `add_form`. Tests: `tests/test_reopen_takes_the_fix_back_9oct.py` (22, the real routes
+and scorer; the score returns to the exact pre-fix number).
+**Our parts of 18 / 26 / 27 and item 24, 10 Oct (`25sepChanges.md` part X) - no score moves.** An Exposure row names
+what it CHARGES and prints its points: `sqs_service.EXPOSURE_BUCKET_LABELS` is the one label table ("Class Codes &
+Operations", "Cross-Form Checks"; keys unchanged), a stored run is renamed on read (`with_current_bucket_labels` - add
+the old label to `_RENAMED_EXPOSURE_LABELS` whenever a label changes), the panel prints "-N pts" (`formatters.
+deductionText`) so the rows add up to the pillar. The fix window confirms the values it shows when nothing was typed
+(`utils/fixWindow.js`; typing still sends only the typed boxes). The download review counts what there is to FIX -
+hard stops (incl. `hardblock_` boxes) + the producer's Missing rows - and names the rest
+(`needsAttention.downloadReviewCounts`); its hard stops come first after the download. Form names are plain pink
+text, never pills. Tests: `tests/test_our_parts_18_24_26_27_10oct.py` (18).
+**The owner's fresh run `18ecbfa8`, 12 Oct (`25sepChanges.md` part Y): 21 of 27 live verified; five problems fixed
+offline.** Doors: `scoped_evidence.retention_values` (rule e - an AI umbrella / excess retention must sit beside a
+retention / SIR / deductible label in that layer's own documents); `needs_attention._page_one_premiums_withheld` (a
+renewal's blank page-1 premiums are not to-dos); schedule tables show examples as "e.g. ..." hints, the Template is the
+column names only and an untouched example row is never imported (`utils/scheduleImport.js`); a "New document" choice
+must be printed in the new document and differ beyond punctuation (`session_documents.plan_form_fill(new_text=)`);
+open cards take their live WORDS on every sync (`audit_service.plan_card_sync` "reword", next to "repoint"); the
+policies table names a policy by its line when the printed name is one of its sections (`policy_lines.
+_names_a_section`). The editor's Cross-Form "RESOLVED (n)" list is a closed dropdown. Tests:
+`tests/test_live_run_12oct.py`.
+**Save progress (owner, 13 Oct, run `18f6914f`; `25sepChanges.md` part Z) - frontend only.** A fix-window save marked
+its item "resolved" whatever it did: the COPE table saved without occupancy type showed Resolved / "All 1 handled"
+while the hard stop still fired. Now `AcordModal.handleIssueResolved` sets "resolved" only when the save FIXED it -
+`utils/fixProgress.fixLeftOpen` reads the server's returned lists against the ones on screen (same item, by id or
+words, or its rule under NEW words = still open) - and takes off a stale "resolved". A table window that still lacks a
+value it shows names it and its button reads "Save progress" (saves, closes, "Open to fix" shows the progress); field
+windows with several boxes are "whichever applies", so the server's answer decides. The 12 Oct "Still missing ... Apply
+the fix" note is gone. Tests: `tests/test_save_progress_13oct.py`.
+**Before generating `18f6914f` (13 Oct night, part Z3) - five fixes, each proven on that package's stamped boxes:**
+a PERSON-saved driver table prints (the driver guard keeps a box equal to the person's unchanged row -
+`_is_person_driver_cell`); a NARRATIVE_FACT_KEYS answer over five words is the text to print
+(`answer_semantics` 0c - "no reported losses" emptied the remarks); a vehicle use class ("LOCAL SERVICE") is not the
+business description (`normalization.is_vehicle_use_label`, merge drop, Tier 2 missing, key-detail link for a prose
+fact of its own); `_GROUNDED_ROW_DETAIL_RESOLVERS` includes `_resolve_schedule_row` and the per-vehicle deductible, and
+premises rows with different BLDG # never fold; `_r_field(needs=)` declares the box groups a rule requires so the window
+can say "Save progress" (COPE cards only). Tests: `tests/test_fixes_before_generation_13oct.py` (32).
+**A 3-reviewer pass the same night found 11 real defects in those fixes (part Z4) - all fixed:** the narrative rule is
+now the ACORD 101 remarks only (`_REMARKS_FACT_KEYS`; the narrative door judges the NEW words alone) - descriptions
+keep refusing "not sure" and holding a client's denial; "LOCAL SERVICE" is ruled out only when it restates the
+evidence's own `auto_vehicle_use` (`normalization.vehicle_use_as_operations` - one ruling for the merge, Tier 2, the
+stamper, the fix-window pre-fill and the questionnaire); two rows their own location records state never fold; ACORD
+130 / 133 print a location once; a COPE card whose legacy twin takes over stays open (`fixLeftOpen` reads the cluster);
+the location table checks each building's COPE columns (`row_needs`). The navbar's auto-hide is
+`utils/headerAutoHide.js` (first event = start, upward runs add up, the top always shows it). **Narrative (owner-approved, same night):** a narrative option IS the classification - an unfinished starter or "TBD" is stripped before storing / scoring (`narrative_reader.strip_unfinished_starters`); one evidence-gated model call per narrative save reads paraphrases (`narrative_reader.read_narrative`, improving-ll.md C106, stored under the text's hash, only adds to the keyword pass, `NARRATIVE_READER=0` turns it off and the suite sets it).
+**Same night, UI (part Z4):** the fix window keeps every scroll to itself (html + body held, a native wheel listener);
+the navbar ignores any scroll inside a window / dialog / fixed overlay (the white band under the review footer);
+Recommendations shows each group's count beside its title and the badge names its parts (`recommendations.
+considerText`); the pre-form "Why other boxes are not listed" breakdown is gone (counts stay in the dry run payload).
+**DECIDED 13 Oct (owner + Brent): the SQS is separated from the forms** - it must exist, and reach 100, before forms;
+after generation it recalculates. Plan and the measured gap on `18f6914f` (94: Form Fill Rate slice, radius,
+hydrant / fire department) in `25sepChanges.md` part Z5; read memory `sqs-form-independence-research` first.
+**BUILT the same day (part Z6, offline): `18f6914f` reaches 100 before forms, and after forms 99 -> 100 on "Confirm
+all".** Doors: the pre-form door scores Structural without a fill (`calculate_package_sqs(form_fill=False)`); a check
+whose only fix is choosing a form is DEFERRED before forms (`cross_form_validator.defer_form_choices` in `stops_now`,
+the pipeline and the pre-form recalc -> `package_sqs.form_choices` -> `grouped_issues.form_choices` -> "Your forms
+will need" with "Add ACORD 25"); every Exposure / Property deduction is an item with its box
+(`sqs_service.exposure_deduction_items` / `property_gap_items` - the pillars are their sums, the Best Solutions rows
+are built from them by `_gap_rows`); `extraction_service.read_vehicle_radius_class` reads "LOCAL" off a rating table
+whose header names the radius; confidence weights stay BRENT'S 1.00 / 0.85 / 0.50 (a same-day `ai_verified` 1.00 was
+reverted - owner: "go with Brent's one"), so found AI values are Please verify rows too; Please verify rows have
+Confirm / "Confirm all" (`utils/confirmValues.js` -> `/api/update-pdf`, label `producer`;
+`needs_attention.CONFIRMABLE_LABELS`); every
+post-generation score carries `without_forms` ("Without forms X · With forms Y", `utils/scoreWithForms.js`). D6: 94
+stored packages pre-form 76 moved (-2..+4, downs = Structural on packages missing key details), post-form 0 moved;
+panel 0 of 12. Tests: `tests/test_sqs_without_forms_13oct.py` (107). Suite 13,956 / 1 / 19.
+**Spec audit, 13 Oct (part Z7):** the code was checked against `SQS_Scoring_Specification.docx.pdf` (the client's
+copy). Every divergence is a client V1 override or an owner / Michelle / Brent call - **owner's ruling: they stand, do
+not re-raise them.** The only change was the weight revert above. The client's copy is out of date (v2 offered).
+**Review "x of y handled" (part Z8, frontend):** y = still listed + the Resolved rows, x = the Resolved rows
+(`resolvedIssues.pageProgress`); a fix that clears other listed blockers records them resolved
+(`clearedBlockers` + `fixLeftOpen`); nothing left = no count shown.
+**Recommendations Resolved list (part Z9):** a "Raise your score" / "Your forms will need" fix carries the row's id
+(`rec:score:...` / `rec:dry:...`, `utils/resolvedIssues.js`), so `resolve-issue` keeps its undo receipt; a save that
+FIXED the row files it under page `"recommendation"` (`audit_service.ISSUE_STATUS_PAGES`) and the page lists it under
+"Resolved (n)"; "Open again" = `handleReopenIssue` (values and points come back; replay on `841bb967`: 41 -> 46 -> 41).
+A status on that page never shows under Warnings or the editor's Cross-Form Resolved list. The narrative window's
+options carry the scorer's `phrases` and tick what the typed text covers (`fixProgress.gapCovered`).
+**Run `ba7c709d` (part Z10, 13 Oct):** 100 before forms, 99 after (fill-rate slice). Re-verified on current code with
+an adversarial pass: 4, 6, 21, 23, 26 and our parts of 7 / 15 HOLD; **5 open (owner's call: "A" vs an At Expiration
+tick), 18 / 22 PARTIAL (ours: answers not carried to the forms - class code, hydrant on bldg 2, location revenue; three
+per-form cards appear only after forms), 20 PARTIAL (4 of 5 carriers absent from the 125 - Brent's Other column)**; 27
+better (0 hard stops, 19 boxes, 12 of them per-building duplicates) but never listed before forms; 25 not exercised.
+**5, 18, 22 and 27 were then FIXED offline - part Z11 below.** **OPEN, owner said "note, do not fix": wrong values (part Z10 table W1-W16)** -
+W7 (the saved GL class code never reached the 126) and W11 (fire department type as the district) were FIXED in Z11 as
+part of item 18; the rest stay open. Please verify rows confirm one at a time ("Confirming..." on that row only).
+**Items 5 / 18 / 22 / 27 (part Z11, 13 Oct night, offline):** 130 ticks At expiration (code box blank; 125 keeps "A");
+a saved GL code prints on the 126 (`_gl_code_only_rows`); ONE premises with several buildings is one location
+(`premises_interest.same_premises` / `one_premises_row`): revenue / staff once on row A, interest / city limits / hydrant
+repeat on later buildings (`_LOCATION_ONCE_SUBKEYS`, `_LOCATION_SHARED_GROUPS`, `_resolve_location_wide_fire_box`); five
+producer-only location-table columns (revenue, FT, PT, sq ft, inside city limits - "No" = Outside); LLC member count
+answerable (`applicant_member_manager_count`); the dry run lists each form's own checklist cards (`form_card_items`).
+Replay on `ba7c709d`: 6 intended boxes; answering the 8 pre-form items leaves 0. Held: fact-less Y/N questions.
+**Re-run `2076fe35` (part T2): round 10 verified live, item 9 PASS. Status 10 Oct (board): 14 done, 7 built and waiting for a live look (2, 12, 13, 16, 17, 19, 24) plus our parts of 18 / 26 / 27, 6 waiting on Brent, 0 UI left.** Three more, offline:
+`extraction_service.derive_property_values_from_premises` (an empty building / BPP value from the premises rows of a
+document whose ROLE may state it - never a certificate's limit, D23); `scoped_evidence.trigger_values` (an AI
+claims-made tick needs that policy's own claims-made wording; an AI retro date must sit beside a "retro" label);
+`ai_answer_guards.bureau_value_without_its_label` (the carrier's "ACCOUNT NUMBER: 3" printed as a credit bureau ID).
+Open: per-vehicle USE (policy-level by the 15 Sep ruling - owner's call), the 137 hired physical damage "primary"
+tick, `umbrella_follow_form` set from the EXCESS policy's heading (score-moving). Tests:
+`tests/test_choice_electric_run10_8oct.py` (28). Suite 13,633 / 1 / 19.
+
+**Open from this run, NOT fixed (one class - an AI value whose only evidence is another policy's / section's text):**
+the 140's built / wiring years 2025, burglar-alarm text from the cyber dec, "REPLACEMENT COST" as fire protection;
+the 126's claims-made tick, $5,000 property deductible as GL, per-project aggregate from the umbrella, 100%
+subcontracted; the 130's NCCI risk ID = the carrier's NCCI code 11525, retro plan "Annual", a property endorsement as
+WC state coverage; the 125 / 130 mailing state AZ and producer "Phoenix AZ". Tests:
+`tests/test_choice_electric_run7_8oct.py` (20).
+
+### CH125 Kit: False Warnings + Data Consistency After Generation - 5 Oct 2026 (offline; live retest pending)
+**Read `5Oct-formImprovement-125-126-127.md` (repo root, the living tracker) first.** The CH125 kit
+(`ch125_test_data/`, 300,000 chars, keys for 125 / 126 / 127) produced a pre-form screen of wrong warnings and a
+60 cap that no correct answer could clear. Fourteen generic fixes, each measured on the stored sessions (the CH125
+run 60 -> 83; replay 11 of 30 sessions changed, none down; D6 panel 0 of 12; suite 11,832 / 1 / 19). Doors to know:
+- `coverage_evidence.auto_limits_are_split` / `auto_csl_stated`: a CSL in words beats the split flag (the flag
+  OR-merges "$1M / $2M" from GL / lease text). Every split-limit reader uses it.
+- `extraction_service.lines_not_requested` -> `facts["_lines_not_requested"]` -> `line_presence` ABSENT
+  ("NOT REQUESTED: workers compensation ..." / "... is not being marketed" / "not part of this submission").
+  It ranks below a selected application form and a person's answer. `line_presence` now also describes
+  inland marine, with `census=False` (statement, explicit denial or false flag only).
+  **`has_workers_comp` means "part of THIS submission".** A declined line the insured still carries (a policy
+  or stated EL / payroll facts) gets `flags["workers_comp_in_force"]`; readers about the insured's COVERAGE
+  (employees without WC, the umbrella's Employers Liability) ask `line_presence.line_carried` /
+  `sqs_service._wc_carried`, never the bare flag. The recommender drops a declined line's form
+  (`form_service._DECLINED_LINE_FORMS`) unless that form was uploaded.
+- `_consolidate_property_locations`: beside a premises schedule with data, an address-only row from the
+  loose `locations` list (or the mailing / certificate-holder address) is not a premises; a P.O. Box never is.
+- `_validate_submission_carrier`: never an agency (the MGA writes TO the agency). A renewal QUOTATION from the
+  incumbent no longer vetoes "new business". `lob_canon.is_container_label` ("Commercial Package").
+- Umbrella footing: an in-force umbrella term is compared with the expiring term only when that term meets
+  the proposal (`cross_form_validator._date_meets`); otherwise stand down.
+- The pre-form recalc validates against the recommended forms and demotes cross-form hard stops, like the
+  upload (C75). `doc_consistency_stops` reads base confirmation keys.
+**Round 2 (fresh upload 6eda3069, same evening) - a re-upload of the SAME PDF broke four first-batch fixes,
+because extraction varies run to run (6 premises vs 20; AMS code rows "WORK" / "INMRC" vs names).** Added:
+- `underwriting_consistency._out_of_scope_contract_rows`: the picker skips rows the line records already exclude
+  (`prior_term_policy_numbers`) and rows of declined lines (by family OR shared policy number). The date text scan
+  reads a LABEL, never a bare verb ("This renewal quotation expires", a registration's "EXPIRES").
+- `extraction_service.premises_is_retired` (own-field closure evidence, dated on/before the proposed effective; kept
+  in `facts["_retired_premises"]`) and `fold_nickname_premises` (no street number, one street premises in the city,
+  every nickname word in the host's own address / description, no contradicting value).
+- `normalization.no_loss_statements` (account / line / term scope) + `loss_history_state.
+  no_loss_statements_contradict`: a line-scoped no-loss statement contradicts only claims on that line in its window.
+- ONE door `loss_history_state.package_has_loss_runs` (document type OR loss-run facts) at all 8 sites - a combined
+  PDF has one document type, so its bundled loss runs read as "no runs on file" (Loss History 25).
+- **Open, owner decision:** ACORD LOB codes (CPKGE, UMBRC, INMRC, WORK, PROPC, BOP, EXLIA, GARAG) are not in
+  `lob_canon` - D57 makes any new abbreviation a fresh D9 decision.
+**Data Consistency after generation (owner, reverses the 1 Oct lock for this one action):**
+`POST /api/underwriting/confirm-value-in-editor` -> `extraction_pipeline.confirm_underwriting_value_in_editor`
+applies the confirmation to the STORED facts, re-stamps every generated form in place, drops that key's
+picker issues, re-scores, and answers in the resolve-issue shape. Frontend: `confirmLockedReason` (only a live run
+locks it), a DATA CONSISTENCY block in the editor side panel, the package page's picker stays live. Reclassify,
+integrity resolve and exclude stay pre-form. **Dismiss / Resolve never move a score** (a review mark, not a value);
+the Review card says so (`reviewedStops.railCapNote`). Tests: `tests/test_false_warnings_5oct.py`,
+`tests/test_rerun_human_facts_5oct.py` (the `_fv` NameError that 500'd every confirm on a package with a
+named individual, and the human-fact carry-over that had never run).
+**Generality audit (5-6 Oct night; tracker "Generality audit") - several first-cut fixes were fixture-shaped
+and were rebuilt.** Doors to know: `services/declined_lines.py` (the "not requested" reader, vocabulary from
+`lob_canon`); `coverage_evidence.auto_limits_are_split` reads each amount with its nearest label and stores the
+dec reading in `_auto_liability_dec_reading` (the purge deletes the index); `sqs_service._to_float` is the one
+money reader (ranges, MM, "(000s)", counts); `cross_form_validator.umbrella_term_misalignment` compares policy
+ANNIVERSARIES; `valuation_method_corroborated` reads the row's specific words, then its table, and never policy
+prose; `fact_comparison.names_the_agency` (carrier is never the agency); `_mark_stated_new_business` vetoes only
+on a renewal statement ABOUT THE SUBMISSION; premises: a box with a street beside it is a premises, "location"
+is premises context only as a schedule noun, a closure must be the premises' own. Editor confirm keeps the
+documents' rows in `_coverage_lines_unconfirmed` and re-stamps by before/after diff
+(`arq_service._restamp_changed_boxes`). Template layout tables are precomputed in
+`templates/template_tables.json` (`scripts/build_template_tables.py`; keyed by template SHA + reader version).
+
 ### Client Re-test Of The 11 Orbin Items - FIXED OFFLINE 2026-09-24, awaiting the kit's live run
 **Read `v1-20AUG.md` "ORBIN client re-test" before touching entity identity, carried
 lines, form-number detection, producer routing, the umbrella reader or any generation
@@ -596,7 +1015,7 @@ client's own dec (session 8992d874), each item checked against the dec's text, t
     Tenant (recorded, not printed - Brent's call);
   - item 15: `loss_history_state.attested_no_losses_not_applicable` - an uncontradicted attestation makes Loss
     History Not Applicable. D6: up on healthy packages, DOWN on weak ones and some 1-5 year businesses.
-  Open owner calls: both carrier names joined on page one; pre-form cross-form rules checked against an empty form
+  Open owner calls: ~~both carrier names joined on page one~~ (ANSWERED by Brent 8 Oct - never joined; part U); pre-form cross-form rules checked against an empty form
   set (lifts an 85 cap on 2 of 11 panel packages after a pre-form fix; pre-existing). Pre-existing bug logged: any
   location-table edit drops LOC #, county, interest and per-row revenue.
   Tests: `tests/test_step2_orbin_29sep.py` (190). Suite 10,717 / 1 / 19.
@@ -774,8 +1193,12 @@ replayed: 0 boxes, 0 scores changed.
   (`GenerationHeartbeat` -> `JobQueue.touch`, which never touches a finished job); a processing job silent 5 min
   (`GENERATION_STALE_AFTER_SECONDS`) died with its process; GET /api/session returns `generation_state`,
   `form_order`, `active_form_id`; `/api/jobs/{id}/status` returns `stale`. A crashed sync run marks its job FAILED.
-  Reclassify / confirm-value / integrity resolve / select-forms-bulk refuse with 409 once forms exist or a run is
-  live (`form_routes._refuse_once_forms_exist`) - they re-read documents and never touch existing forms. Frontend:
+  Pre-form confirm-value / integrity resolve / select-forms-bulk refuse with 409 once forms exist or a run is
+  live (`form_routes._refuse_once_forms_exist`). REVERSED for documents 7 Oct (Choice Electric #25): adding
+  documents and reclassify / exclude / supporting-only after forms go through `services/session_documents.
+  remerge_package`, which re-stamps the generated forms in place (locked only while a run is live -
+  `generation_state.documents_locked_reason`). A Data Consistency value can be confirmed after generation since
+  5 Oct (`confirm-value-in-editor`, see "CH125"). Frontend:
   `utils/packageGeneration.js`; `AcordModal._loadEditorState` is the one way into the editor. After generation the
   "Add form" row button opens the editor's add-form window (resolve-issue `add_form`), never form selection.
 - **Item 14, the applicant signs as a PRE-TICKED QUESTION in Send to Client that asks ONLY for the signature (draw or
@@ -2866,7 +3289,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **11,762 passed, 1 failed, 19 skipped** (~11 min; 1 Oct 2026 night, after items 1 and 14). **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **13,998 passed, 1 failed, 19 skipped** (~17 min; 13 Oct 2026 evening, after part Z10 and another session's `_policy_contracts` change) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

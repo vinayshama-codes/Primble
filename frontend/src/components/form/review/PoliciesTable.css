@@ -1,0 +1,203 @@
+/* "Policies in this submission" - the shared body used by both review layouts. */
+.pt { display: flex; flex-direction: column; gap: 8px; }
+.pt-table-wrap { overflow-x: auto; }
+.pt-table { width: 100%; border-collapse: collapse; }
+.pt-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #475569;
+  white-space: nowrap;
+}
+.pt-table td {
+  padding: 8px 12px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12.5px;
+  color: #0f172a;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.pt-table tbody tr:first-child td { border-top: 0; }
+/* Brent #9: long carrier names and sources wrap instead of widening the table. */
+.pt-wrap { white-space: normal !important; overflow-wrap: anywhere; min-width: 90px; }
+.pt-muted { color: #64748b !important; }
+.pt-sub { margin-top: 3px; font-size: 11.5px; line-height: 1.35; }
+.pt-row.is-added td { background: #fdf2f8; }
+.pt-row.is-editing td { background: #f8fafc; white-space: normal; }
+.pt-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid #f9a8d4;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9d174d;
+  white-space: nowrap;
+}
+.pt-tag--edited { border-color: #93c5fd; color: #1d4ed8; }
+.pt-actions { text-align: right; }
+.pt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+.pt-icon-btn:hover:not(:disabled) { border-color: #e61b84; color: #e61b84; }
+.pt-icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pt-link-btn {
+  margin-left: 8px;
+  border: 0;
+  background: none;
+  color: #be123c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.pt-link-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pt-edit { display: flex; flex-direction: column; gap: 8px; }
+.pt-edit__title { font-size: 12.5px; font-weight: 700; color: #1e293b; }
+.pt-edit__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; }
+.pt-edit__hint { font-size: 11px; color: #64748b; }
+.pt-edit__actions { display: flex; gap: 8px; }
+.pt-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pt-field__label { font-size: 10.5px; font-weight: 700; color: #475569; }
+.pt-field__error { font-size: 11px; color: #be123c; line-height: 1.35; }
+.pt-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-family: inherit;
+  background: #fff;
+}
+.pt-field.has-error .pt-input { border-color: #f43f5e; }
+.pt-btn {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pt-btn--primary { border-color: #e61b84; background: #e61b84; color: #fff; }
+.pt-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.pt-foot { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px; }
+.pt-add-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px dashed #e61b84;
+  border-radius: 7px;
+  background: #fff;
+  color: #e61b84;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pt-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pt-error { font-size: 11.5px; color: #be123c; }
+.pt-note { font-size: 11.5px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 10px; }
+.pt-note--blue { color: #0c4a6e; background: #f0f9ff; border-color: #bae6fd; margin: 0 12px; }
+.pt-offers { display: flex; flex-direction: column; gap: 6px; }
+.pt-offer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+/* Brent #10: each policy's own limit, sorting and "Group by carrier". */
+.pt-limit-cell { min-width: 120px; }
+.pt-limit { line-height: 1.35; }
+.pt-limit + .pt-limit { margin-top: 2px; }
+.pt-limit__amount { font-weight: 600; }
+.pt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 0 12px; }
+.pt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pt-toggle.is-on { border-color: #e61b84; color: #9d174d; background: #fdf2f8; }
+.pt-toggle__box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 10px;
+  line-height: 1;
+  color: #e61b84;
+}
+.pt-toggle:focus-visible,
+.pt-sort-btn:focus-visible,
+.pt-link-btn:focus-visible { outline: 2px solid #e61b84; outline-offset: 2px; }
+.pt-link-btn--plain { margin-left: 0; color: #475569; }
+.pt-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.pt-sort-btn.is-active { color: #e61b84; }
+.pt-sort-mark { font-size: 9px; opacity: 0.7; }
+.pt-table tr.pt-group th {
+  padding: 7px 12px;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 0;
+  background: #f1f5f9;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: #1e293b;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pt-group__name { font-weight: 700; margin-right: 8px; }
+.pt-group__meta { font-weight: 500; color: #64748b; }
+@media (max-width: 900px) {
+  .pt-table th,
+  .pt-table td { padding-left: 8px; padding-right: 8px; }
+  .pt-toolbar { padding: 0 8px; }
+}

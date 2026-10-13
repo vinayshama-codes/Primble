@@ -44,9 +44,9 @@ def _f(v):
     return {"value": v, "confidence": 0.9}
 
 
-def _fill(fid, facts, inject=None):
+def _fill(fid, facts, inject=None, raw="RADIUS NA"):
     mapped, _ = P.map_facts_to_form(
-        dict(facts), _schema(fid), form_id=fid, raw_text="RADIUS NA",
+        dict(facts), _schema(fid), form_id=fid, raw_text=raw,
         pre_filled_gpt={"filled_values": dict(inject or {}),
                         "raw_text_fields": set(), "question_grounding": {}})
     return mapped
@@ -191,9 +191,21 @@ class TestAQuantityIsNeverZeroPadded:
 
     @pytest.mark.parametrize("value", ["5", "15", "7"])
     def test_a_real_seating_capacity_survives(self, value):
+        # A REAL capacity is one the documents print (round 5, 7 Oct 2026): an
+        # unstated "5 seats" is the count `ai_role_guards` refuses, so the
+        # fixture states it - the zero-padding rule is what is pinned here.
         assert _fill("ACORD_127", self._facts(),
-                     {"Vehicle_SeatingCapacityCount_A": value}).get(
+                     {"Vehicle_SeatingCapacityCount_A": value},
+                     raw=f"RADIUS NA  {value} SEATS").get(
                          "Vehicle_SeatingCapacityCount_A") == value
+
+    def test_an_unstated_seating_capacity_is_refused(self):
+        # Generation always carries the declarations index (production purges it
+        # only AFTER generation, and the count rule stands down without it -
+        # `ai_role_guards`, TestPurgedIndex). An index that states no seats:
+        assert not _fill("ACORD_127", dict(self._facts(), dec_page_entries=[]),
+                         {"Vehicle_SeatingCapacityCount_A": "5"}).get(
+                             "Vehicle_SeatingCapacityCount_A")
 
     def test_the_code_column_borrows_still_fire(self):
         facts = dict(self._facts(), gl_class_code_schedule=[{"class_code": "91580"}])

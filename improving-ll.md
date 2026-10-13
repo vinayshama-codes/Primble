@@ -77,6 +77,11 @@ its `LLM_SPEND` line and its `prompt_cache_key`:
 They are **separate cache families** because the system prompt differs. That is correct and
 expected; do not try to merge them.
 
+Since 2026-10-07 (**C103**) the same two stages also fire, through the same
+`form_service.shared_gap_fill`, when a document is ADDED after forms
+(`session_documents.run_new_document_fill`, background): over the NEW document's text only,
+once per add. Kill switch `NEW_DOCUMENT_AI_FILL=0`.
+
 `_chat_json` also contains a second `create()` call — a `json_object` fallback used **only**
 for a genuine `response_format` rejection. See C7.
 
@@ -4426,3 +4431,146 @@ sentence that names no form states a tier or routing other than the package's (t
 score ladder, routings off `_ROUTING_WORDS`; ordinary prose - "needs work", "hold back" - is not a
 claim). Cost: ~60 input chars per cover call, no new call, same model; the prompt is its own cache key,
 so every cached cover paragraph is rebuilt once. Tests: `tests/test_retest_fixes_1oct.py`.
+
+## C102 - 2026-10-07 One ACORD 131 per umbrella-family layer: a layer's own policy boxes are their own group
+Choice Electric #4 (Brent: "an umbrella base with excess on top of it, each gets their own form 131"). On a
+TOWER (an umbrella with an excess above it) the package carries two ACORD 131 copies ("ACORD_131",
+"ACORD_131__excess", `services/form_instances.py`) that share every field name, and `_combined_gap_fill_core`
+deduplicates the union by NAME - the excess copy would have taken the umbrella's answers.
+`form_service.shared_gap_fill` now splits each copy's gaps: boxes about the INSURED stay in the one shared union
+(one answer for both copies - no extra cost); boxes about THE COPY'S OWN POLICY (`umbrella_layers.is_private_field`:
+identity, policy type, coverage trigger, retro dates, defense-cost ticks, EBL, the underlying schedule) run in that
+copy's own `combined_gap_fill` group, with that layer's facts view and that layer's documents only (lowest layer:
+the package minus the upper layers' own declarations; an upper layer: its own declarations). Cross-form Y/N
+reconciliation runs over the shared answers only.
+Cost: towers only - measured on Choice Electric (recorder stub, 7 forms): the shared union is unchanged at 1,121
+fields (the excess copy's 71 insured gaps dedupe with the umbrella copy's); the umbrella copy's own group is 46
+fields (45 general + 1 compliance) over 67,431 chars, the excess copy's 15 fields (14 + 1) over its own 4,451-char
+declarations - about +4 calls per tower, each over far less text. Every package without a tower is byte-identical
+(no split, no extra call, same prompts). No prompt text changed; the facts block excludes the two new private keys
+(`_umbrella_layer_docs`, `_umbrella_layer`). The umbrella-period probe (LLM) never runs on a layer view.
+The pre-form dry run (`services/form_dry_run.py`, Choice Electric #27) stamps with `map_facts_to_form(...,
+allow_llm=False)`: no model call of any kind (gap fill treated as answered-empty, the umbrella-period probe skipped).
+C102 addendum (7 Oct, LAYERS follow-up): a copy stays bound to ITS layer (`facts["_umbrella_layer_bindings"]`,
+written with `generated_forms`, carried through every re-merge), so a layer added after generation never re-points
+an existing copy's gap-fill group. A single producer-added umbrella-family layer with stated limits gets its own
+view on the plain 131: the umbrella-period probe is skipped for it and its own-policy boxes ask in their own small
+group - no prompt text changed.
+
+## C103 - 2026-10-07 A document added AFTER forms is read into the forms by the AI - the new document only
+**New USE of an existing call site, no new prompt.** Until today a document added after generation
+(`services/session_documents.remerge_package`, Choice Electric #25) reached the forms only through its FACTS:
+the documents door re-stamps the boxes a deterministic rule prints, and nothing asked the AI the questions
+generation asks it. Now, once the door has answered, `session_documents.run_new_document_fill` runs in the
+background:
+- **What is sent:** exactly generation's shared gap fill (`form_service.shared_gap_fill` -> `combined_gap_fill`,
+  general + compliance passes, line scopes, private layer groups, the cross-form Yes/No reconciliation), called on
+  a session VIEW whose `docs` are the NEW documents only - the RAW DOCUMENT TEXT block, the line page scopes and every
+  layer's own text come from them alone. The facts block is the package's merged facts, as at generation. Every
+  gap box of every generated form is asked (the same union `compute_form_gaps` builds); an old document is never
+  sent again (`test_new_document_fill_7oct.py::test_only_the_new_documents_text_is_sent` asserts it on the stubbed
+  client's prompts). No prompt text changed.
+- **The other model calls:** the answers are stamped with `map_facts_to_form(..., pre_filled_gpt=answers,
+  allow_llm=False)` twice per answered form (with the answers, and with none - the baseline the diff is measured
+  against). `allow_llm=False` skips the ACORD 131 / 25 umbrella-period probe (it would send every document); the
+  evidence judge (C97) still runs - it reads only the answers' own quotes, all from the new document.
+- **Cost model:** calls ~= generation's FIRST-CHUNK call count for the same forms (field batches are the same; a new
+  document is almost always one chunk), each carrying the new document instead of the package. Measured offline
+  (recorder stub, the test package): ACORD 125 alone 8 calls / 63,321 input chars (largest call 13,905 chars);
+  ACORD 125 + 126 + 131 23 calls / 176,211 chars (largest 14,724). Replay on the live Choice Electric package
+  (6 documents stamped, the 7,016-char Umbrella policy added after forms, ACORD 125): 8 calls / 322,580 chars -
+  the package's merged FACTS block (~38k chars) dominates each call; of 524 distinctive lines of the six old
+  documents, 0 appear in the RAW DOCUMENT TEXT section (the 10 that appear anywhere are extracted facts values).
+  On a real package the saving per call is the
+  package text minus the new document's (Choice Electric: 67,431 chars of package vs a 5-10k narrative) - the field
+  list dominates. Runs only after an ADD after forms - never before forms (generation reads every document), never
+  for a reclassify / exclude.
+- **Prefix caching (§2):** unchanged conditions - one system prompt per pass, the field list last, the constant
+  block (form label, facts, raw text) ahead of it. Within one fill run the prefix is shared across batches exactly
+  as in generation; it is a NEW prefix (new raw text), so the first batch of a fill is a cache miss.
+  `_PREFIX_WARMUP` applies unchanged (gated on `LLM_PREFIX_WARMUP_MIN_CHARS` - usually not met by one narrative).
+- **What it may write:** a BLANK box nobody typed and no rule owns -> filled with generation's AI label; a box the AI
+  filled at generation answered DIFFERENTLY -> a suggestion (`document_fill_suggestions`), never an overwrite; a
+  person's or a rule's box -> never. Every post-fill guard runs (an identifier no document prints is dropped and
+  listed as "AI held back").
+- **Kill switch:** `NEW_DOCUMENT_AI_FILL=0` (default on) - the add then behaves exactly as before C103.
+
+## C104 - 2026-10-07 Round 5: a question about coverage the documents do not carry is never asked
+**No new call, no prompt text changed - FEWER fields reach the gap fill.** The owner's live Choice Electric run
+(session b248c194) printed ACORD 140 Spoilage and Blanket-summary sections filled with the buildings' own limits, and
+an Employee Benefits program on the excess layer's ACORD 131, for coverages no document carries (the umbrella's
+schedule even prints "EXCLUDED Employee Benefits"). `services/scoped_evidence.py` derives every form's
+optional-coverage SECTIONS from the schemas' field names (spoilage, blanket, employee benefits, earthquake / earth
+movement, flood, watercraft, aircraft, garagekeepers, liquor, sinkhole, mine subsidence, equipment breakdown, fungus)
+and reads whether a document that speaks for that section's policy names the coverage (outside policy wording, an
+unpriced coverage-part menu row, a question, and not only as excluded / not covered / N/A). Not carried:
+- **`form_service.shared_gap_fill`** drops those boxes from each form's `unmatched` right after `compute_form_gaps`,
+  before the C102 private split, so neither the shared union nor a layer's own group asks them (one INFO line:
+  "N question(s) about coverage the documents do not carry were not asked"). Named only as excluded, a Yes / No box
+  is still asked (its grounded answer is "No").
+- **`map_facts_to_form`'s guard** blanks a stored or fallback-path AI value in such a section (reason codes
+  `COVERAGE_NOT_IN_DOCUMENTS` / `COVERAGE_EXCLUDED_IN_DOCUMENTS`), and an AI value in a policy box printed only by
+  another policy's / another umbrella layer's documents (`VALUE_FROM_ANOTHER_POLICY` / `VALUE_FROM_ANOTHER_LAYER`) -
+  no model call, deterministic.
+- **What the model sees:** the documents ride the STAMPING facts under the private key `_scoped_documents`
+  (`scoped_evidence.attach_documents`, called by `shared_gap_fill` and `process_single_form`), which is in
+  `pdf_service._GAP_FILL_FACTS_EXCLUDE` - the facts block is byte-identical, the RAW DOCUMENT TEXT block unchanged.
+  Only the field list is shorter. Prefix-caching conditions (section 2) unchanged: same system prompts, same constant
+  block ahead of the field list; a shorter union can only shift batch boundaries, never the prefix.
+- **Measured (offline, `compute_form_gaps`, every decrypted stored session with documents):** questions removed /
+  asked before - ACORD 140 **1,660 of 11,638 (14%, 39 copies)**, ACORD 131 **904 of 9,475 (10%, 70 copies)**, ACORD
+  126 **265 of 28,770 (0.9%, 82 copies)**, ACORD 28 **41 of 252**. Choice Electric: 140 303 -> 259, 131 112 -> 92,
+  131 (Excess) 81 -> 70 (the 131 copies' shared Watercraft boxes dedupe in the union) - about 64 fewer union fields,
+  roughly 2 fewer 40-field gap-fill batches. The removed answers were junk on every package measured (the replay
+  A/B: 149 stored AI values blanked across 29 sessions, every one a building limit, a date, a policy number or a
+  blanket "1" in a section no document names).
+- **Kill switch:** none needed for the ask (fail-open: without attached documents nothing is removed); the
+  documents are attached only by the two generation doors, so the C103 new-document fill judges sections on the NEW
+  documents it is given.
+
+## C105 - 2026-10-08 A partial extraction reply is retried once and never cached; a slip near the end is rewound, not repaired from 3,000 characters
+**No prompt text changed. One conditional extra call, only when LLM call 1's result is partial.** The owner's Choice
+Electric runs `805049a7` and `b38a4367`: the Workers Compensation dec - **10,829 characters, byte-identical text on
+every run** - came back with **75-77 of 201 schema keys and an empty `flags` object**, losing the WC class table
+(5190 / 8742 / 8810, CO), `state_of_operations`, the X-mod, the dec index and every flag. Downstream: the ACORD 130
+printed no rating rows, the scorer raised a false "Workers Comp detected but payroll is missing" (-12 Exposure), and
+carrier letterheads alone decided the risk state (PA / MI), so ACORD 137_CO and ACORD 28 dropped off the
+recommendations. Three earlier runs of the same text had extracted all three class rows.
+
+**The first diagnosis ("the reply was cut off") was WRONG - a probe corrected it.** One real call on the stored text:
+`finish_reason=stop`, 3,768 completion tokens, **0 reasoning tokens**, 15,509 characters - a COMPLETE reply with ONE
+stray `{` four closers from the end (`..."growth_trends":{...},{"target_markets":{...}}}}`). `json.loads` failed;
+`utils.json_salvage.salvage_truncated_json` - written for truncation - chose a cut after the slip, could not parse it
+and returned None; `_safe_json_parse` then fell through to the LLM repair, **which is fed `raw[:3000]`** - so it
+returned a valid JSON of the first ~75 facts, and nothing said so. The model makes the same slip on this document run
+after run, so the retry added the same evening (below) could not help on its own.
+- **`salvage_truncated_json`**: when its first cut does not parse, it rewinds comma by comma until the text parses -
+  everything written before the slip is kept, only the element holding it is lost. Tried AFTER the first cut, so every
+  reply it already recovered is recovered byte-identically. On the live reply: **203 facts and 42 flags** (all three
+  class rows, state CO, X-mod 1.0800, 28 dec entries), 6 ms. The same function serves the gap-fill stage
+  (`pdf_service._salvage_truncated_json`); there too it can only turn a None into the completed portion.
+- **`_safe_json_parse(..., report=)`** reports `partial=True` for a salvaged prefix and for the LLM repair (which only
+  ever sees `raw[:3000]`). Other callers (the dec-index pass) are unchanged.
+- **`extract_facts`** retries a partial result ONCE with the identical prompt (same prefix, so a cache hit on the
+  constant block) and keeps whichever reply returned more fact keys; a complete retry wins outright.
+- **A partial result is never written to the extraction cache** (Redis L2 + in-process L1).
+- **Cost:** zero on a clean reply. One extra call on a partial one. The slip shape above now salvages to a near-complete
+  result, so its retry is usually a wash - kept because a genuine cut-off still needs it.
+- **Standing lesson:** the backend logs only to the owner's terminal, so the cause was inferred from the effect and
+  inferred wrong. **Probe the actual reply (one call, `finish_reason` + usage) before naming why an LLM output failed.**
+Tests: `tests/test_choice_electric_run7_8oct.py` (the live malformed reply as a fixture, the salvage keeping every class
+row, no 3,000-character repair, truncation salvaged exactly as before; retry wins, a fragment is never cached).
+
+## C106 - 2026-10-13 Narrative reader: ONE small call per narrative SAVE (owner-approved)
+**New call site:** `services/narrative_reader.read_narrative`, made by `arq_service.store_narrative_reading`
+after `append_producer_narrative` saves the ACORD 101 remarks (the Narrative Quality card, resolve-issue
+narrative mode). Input: the saved remarks (capped at 12,000 chars) + 20 item definitions (12 topics, 8 depth
+categories). Output: `{"items": {id: {"covered", "quote"}}}`, `max_tokens` 2,000, temperature 0, one retry.
+**Why:** the narrative score checks topics / depth by KEYWORD, and a person's own wording ("most of our jobs
+are commercial remodels") failed it - the card stayed with no way to tell why (owner, 13 Oct 2026).
+**Guarded so it cannot over-credit:** an item counts only when its quote appears word for word in the text
+(`gate_reply`, at least 8 characters); the reading is stored with a hash of the text it read
+(`facts["_narrative_reading"]`) and ignored for any other text. Only ADDS to the keyword pass.
+**Cost:** one call per narrative save (~2-3k input tokens, a few hundred out) - fractions of a cent; no call
+on scoring, recalculation or generation. **Off:** `NARRATIVE_READER=0` (the test suite sets it; a failed or
+refused call leaves the keyword pass alone).

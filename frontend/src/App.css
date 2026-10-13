@@ -5232,7 +5232,14 @@ body.app-header-collapsed .acord-modal-editor-root {
   align-items: stretch;
   gap: 12px;
 }
-.step-footer-buttons .step-footer-back { flex: 0 0 auto; white-space: nowrap; }
+/* One width for the row's smaller button on both screens that use it (owner,
+   9 Oct 2026): "Back to review" here and the review page's "Skip to form
+   selection" - the longer label - are exactly the same size. Stacked, it goes
+   back to full width (520px below; the review page's own stacking rule). Its
+   words never spill out: under text-only zoom, a minimum font size or a page
+   translation the button grows to fit them (the narrower side padding keeps
+   it 212px at normal size, where the words are centred anyway). */
+.step-footer-buttons .step-footer-back { flex: 0 0 auto; white-space: nowrap; width: 212px; min-width: max-content; padding-left: 16px; padding-right: 16px; }
 .step-footer-buttons .step-footer-primary { flex: 1 1 auto; min-width: 0; }
 
 @media (max-width: 768px) {
@@ -5260,15 +5267,20 @@ body.app-header-collapsed .acord-modal-editor-root {
   .form-select-checkbox-label { min-height: 44px; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 520px) {
   /* Stack the footer buttons. column-reverse keeps Generate on top - it is the
      action being taken, and on a phone the topmost button in a sticky footer is
-     the one under the thumb. DOM order stays Back-then-Generate for tab order. */
+     the one under the thumb. DOM order stays Back-then-Generate for tab order.
+     520px, not 480: with "Back to review" at 212px, "Generate 12 Forms Now"
+     would wrap onto two lines just above 480 (a classic scrollbar included). */
   .step-footer-buttons {
     flex-direction: column-reverse;
     align-items: stretch;
   }
-  .step-footer-buttons .step-footer-back { flex: 1 1 auto; }
+  .step-footer-buttons .step-footer-back { flex: 1 1 auto; width: auto; }
+}
+
+@media (max-width: 480px) {
   .review-section { padding: 12px; }
   .form-selection-list { padding: 12px 14px; }
 }
@@ -5284,4 +5296,13 @@ body.app-header-collapsed .acord-modal-editor-root {
 }
 @media (max-width: 480px) {
   .acord-step-shell { padding: 20px 12px; }
+}
+
+/* Schedule tables (locations, vehicles, drivers - producer and client alike):
+   an empty box's example reads as a hint, never as an entered value
+   ("e.g. 789 Commerce Dr", italic, lighter - owner's run 18ecbfa8, 12 Oct 2026). */
+.schedule-cell::placeholder {
+  font-style: italic;
+  color: #b8c2cf;
+  opacity: 1;
 }

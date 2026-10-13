@@ -17,6 +17,7 @@ from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
 from utils.helpers import safe_join, check_payment_access
+from services import form_instances as _fi
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import (
     BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest,
@@ -58,7 +59,7 @@ from services.pdf_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
-    current_package_sqs, key_details,
+    current_package_sqs, key_details, with_current_bucket_labels,
     _check_loss_run_insured_match, _extract_narrative_doc_text, doc_consistency_stops,
     doc_consistency_normalizations,
 )
@@ -84,8 +85,11 @@ router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
 
 
-def _grouped_cross_issues_or_none(cross_issues: list) -> Optional[dict]:
+def _grouped_cross_issues_or_none(cross_issues: list,
+                                  facts: Optional[dict] = None) -> Optional[dict]:
     """Cluster + tier a raw cross_form_validator issue list for display (Fig 24).
+    `facts`: the session facts, so a COPE card's fix follows the package
+    (Choice Electric #18, 7 Oct 2026 - see `build_grouped_view`).
 
     Every JSON response that hands the editor a `cross_issues` list must also
     hand it this, or the editor's Cross-Form Validation panel falls back to
@@ -107,6 +111,7 @@ def _grouped_cross_issues_or_none(cross_issues: list) -> Optional[dict]:
             build_structured_from_sources(cross_issues=cross_issues, include_advisories=True),
             [m for t, m in _typed if t == "hard_stop"],
             [m for t, m in _typed if t == "soft_warning"],
+            facts=facts,
         )
     except Exception as _gx:
         logger.error(f"grouped_cross_issues computation failed (non-fatal): {_gx}")
@@ -242,7 +247,8 @@ async def _pre_form_status(
     the session named (H1-G).
     """
     if (integrity or {}).get("review_required"):
-        return None, None
+        return PreFormStatus(None, None)
+    row = None
     try:
         row = session_row if session_row is not None else await get_processing_session(session_id)
         pkg = current_package_sqs(row, session_id, str(current_user["id"]))
@@ -250,13 +256,70 @@ async def _pre_form_status(
         logger.error(f"pre-form status: package SQS unavailable [session={session_id} "
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
         pkg = None
+    # Recommendations section (Choice Electric #22, 7 Oct 2026): each Best
+    # Solutions row a person can answer carries the fix window it opens - the
+    # same descriptor (and choices) a card on that fact offers. Adds a key to
+    # a COPY of each row; the score is untouched.
+    try:
+        from services.review_recommendations import with_fix_routes
+        pkg = with_fix_routes(pkg, facts if facts is not None else (row or {}).get("facts"))
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.warning(f"pre-form status: recommendation fix routes skipped "
+                       f"[session={session_id}]: {_ex}")
+    # Round 5 #15 (Brent #18): the warnings generation will make hard stops,
+    # through the one stops door, on a COPY - the Review cards are tagged from
+    # it (`grouped_with_package_caps`). Nothing to add (after forms, no
+    # recommended form, nothing demoted) leaves the payload exactly as it was.
+    try:
+        from services.stops_now import with_generation_hard_stops
+        pkg = with_generation_hard_stops(
+            pkg, row, facts=facts if facts is not None else (row or {}).get("facts"),
+            flags=flags if flags is not None else (row or {}).get("flags"))
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.warning(f"pre-form status: generation hard stops skipped "
+                       f"[session={session_id}]: {_ex}")
     try:
         kd = key_details(facts or {}, flags or {})
     except Exception as _ex:                                     # noqa: BLE001
         logger.error(f"pre-form status: key_details failed [session={session_id} "
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
         kd = None
-    return pkg, kd
+    return PreFormStatus(pkg, kd, await _pre_form_dry_run(session_id, facts, flags, row))
+
+
+class PreFormStatus(tuple):
+    """`(package_sqs, key_details)` - unpacked by every caller exactly as the
+    2-tuple `_pre_form_status` always returned - plus `.dry_run`, the "Before
+    you generate" payload (Choice Electric #27, 7 Oct 2026): the download
+    review's form checks run on the forms that will be generated, before they
+    are (`services/form_dry_run`). Each pre-form response carries it as
+    `"dry_run"`; None while the integrity review is pending, once forms exist,
+    or when the session could not be read."""
+
+    def __new__(cls, package_sqs=None, key_details_=None, dry_run=None):
+        self = super().__new__(cls, (package_sqs, key_details_))
+        self.dry_run = dry_run
+        return self
+
+
+async def _pre_form_dry_run(session_id: str, facts: Optional[dict], flags: Optional[dict],
+                            row: Optional[dict], form_ids=None) -> Optional[dict]:
+    """The dry run for a pre-form response - cached by facts + form set, run
+    off the event loop and time-bounded (`form_dry_run.dry_run_payload`).
+    Never raises: a failure is None, logged with the session named."""
+    if not isinstance(row, dict):
+        return None
+    try:
+        from services.form_dry_run import dry_run_payload
+        return await dry_run_payload(
+            row, facts or row.get("facts") or {},
+            flags if flags is not None else (row.get("flags") or {}),
+            form_ids, session_id=session_id,
+        )
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.error(f"pre-form status: dry run unavailable [session={session_id} "
+                     f"trace={get_trace_id()}]: {_ex}", exc_info=True)
+        return None
 
 
 def _grouped_with_package_caps(
@@ -265,14 +328,16 @@ def _grouped_with_package_caps(
     soft_stops,
     pkg,
     cross_issues=None,
+    facts=None,
 ):
     """Thin delegate - the implementation moved to `issue_registry` on
     2026-09-23 so `audit_routes` rebuilds this screen through the same door.
-    See `issue_registry.grouped_with_package_caps` for the reasoning."""
+    See `issue_registry.grouped_with_package_caps` for the reasoning.
+    `facts` lets a card's fix follow the package (Choice Electric #18)."""
     from services.issue_registry import grouped_with_package_caps
     return grouped_with_package_caps(
         structured_issues, hard_stops, soft_stops, pkg,
-        cross_issues=cross_issues,
+        cross_issues=cross_issues, facts=facts,
     )
 
 
@@ -366,7 +431,9 @@ async def _bg_lite_generate(session_id: str) -> None:
         # falls back to the form's own gap fill.
         per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
         for form_id in form_ids:
-            form_meta = next((f for f in session.get("all_forms", []) if f["form_id"] == form_id), None)
+            # A form's second copy is generated from its form's row (7 Oct 2026).
+            form_meta = _fi.form_meta_for(session.get("all_forms", []), form_id,
+                                          session.get("facts") or {})
             if not form_meta:
                 continue
             try:
@@ -400,6 +467,8 @@ async def _bg_lite_generate(session_id: str) -> None:
             "generated_forms": results,
             "active_form_id": form_ids[0] if form_ids else None,
             "cross_issues_last": cross_issues,
+            # each generated copy stays on its own subject (form_instances)
+            **_fi.binding_update(session.get("facts"), list(results)),
         })
         sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
         avg_score = round(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
@@ -442,73 +511,11 @@ async def upload_declaration(
     _job_id              = None
     _async_mode          = False
     try:
-        if len(files) > MAX_FILES_PER_UPLOAD:
-            raise HTTPException(400, f"Too many files — maximum {MAX_FILES_PER_UPLOAD} per upload.")
-
-        # Read all file bytes first so we can enforce the aggregate size cap before
-        # touching the filesystem.  10 × 50 MB = 500 MB per request without this guard.
-        contents = []
-        for f in files:
-            contents.append((f, await f.read(MAX_UPLOAD_SIZE_BYTES + 1)))
-
-        total_bytes = sum(len(c) for _, c in contents)
-        if total_bytes > MAX_UPLOAD_SIZE_BYTES * MAX_FILES_PER_UPLOAD:
-            raise HTTPException(
-                413,
-                f"Total upload size exceeds the aggregate limit "
-                f"({MAX_UPLOAD_SIZE_BYTES * MAX_FILES_PER_UPLOAD // 1024 // 1024} MB).",
-            )
-
-        for f, content in contents:
-            if len(content) > MAX_UPLOAD_SIZE_BYTES:
-                raise HTTPException(
-                    413,
-                    f"File '{f.filename}' exceeds the "
-                    f"{MAX_UPLOAD_SIZE_BYTES // 1024 // 1024} MB limit.",
-                )
-            ext = os.path.splitext((f.filename or "upload").lower())[1]
-            mime_ok, mime_err = validate_file_mime(content, ext)
-            if not mime_ok:
-                raise HTTPException(400, mime_err)
-            scan_file_bytes(content, f.filename or "upload")
-            safe_name = f"{uuid.uuid4().hex}_{os.path.basename(f.filename or 'upload')}"
-            path = os.path.join(UPLOAD_DIR, safe_name)
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda p=path, c=content: open(p, "wb").write(c)
-            )
-            uploaded_paths.append(path)
-            if ext == ".zip":
-                try:
-                    with zipfile.ZipFile(path, "r") as zf:
-                        for info in zf.infolist():
-                            inner_ext = os.path.splitext(info.filename.lower())[1]
-                            if inner_ext not in ({".pdf"} | set(SUPPORTED_IMG)):
-                                continue
-                            inner_data = zf.read(info.filename)
-                            inner_mime_ok, inner_mime_err = validate_file_mime(inner_data, inner_ext)
-                            if not inner_mime_ok:
-                                logger.warning(f"ZIP inner file failed MIME validation, skipping: {info.filename} — {inner_mime_err}")
-                                continue
-                            scan_file_bytes(inner_data, info.filename)
-                            safe_inner = f"{uuid.uuid4().hex}_{os.path.basename(info.filename)}"
-                            inner_path = os.path.join(UPLOAD_DIR, safe_inner)
-                            await asyncio.get_event_loop().run_in_executor(
-                                None, lambda p=inner_path, d=inner_data: open(p, "wb").write(d)
-                            )
-                            all_paths.append(inner_path)
-                except zipfile.BadZipFile:
-                    raise HTTPException(400, f"File '{f.filename}' is not a valid ZIP archive.")
-            elif ext == ".pdf" or ext == ".txt" or ext in SUPPORTED_IMG:
-                all_paths.append(path)
-
-        # Release the in-memory upload buffer now that every file is on disk.
-        # The extraction pipeline reads from `all_paths`; the raw bytes are no
-        # longer needed and holding them costs up to ~500 MB of heap on a
-        # 10-file × 50 MB upload while the pipeline runs.
-        contents = None
-
-        if not all_paths:
-            raise HTTPException(400, "No supported files found")
+        # File count, sizes, MIME, virus scan, ZIP contents and the temp writes:
+        # ONE door shared with documents added to an existing package
+        # (services/upload_intake.py, 7 Oct 2026) - moved there verbatim.
+        from services.upload_intake import store_uploads
+        uploaded_paths, all_paths = await store_uploads(files)
 
         # Acquire the heavy semaphore for synchronous processing.
         _sem_token = await try_acquire_heavy()
@@ -637,9 +644,10 @@ async def upload_declaration(
         # exactly as tier2_score is below. Scored BEFORE the grouped view so
         # any 60-cap the package scorer holds privately can be rendered as the
         # hard stop it is.
-        _pkg_now, _key_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
+        _status_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
+        _pkg_now, _key_now = _status_now
         _grouped_issues = _grouped_with_package_caps(
-            structured_issues, hard_stops, _final_soft_stops, _pkg_now)
+            structured_issues, hard_stops, _final_soft_stops, _pkg_now, facts=merged_facts)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -658,6 +666,8 @@ async def upload_declaration(
             # Tier 1 + Tier 2 "in place" / "missing" split. Not persisted here.
             "package_sqs": _pkg_now,
             "key_details": _key_now,
+            # Choice Electric #27: the form checks, before the forms exist.
+            "dry_run": _status_now.dry_run,
             "hard_stops": _remaining_hard,
             "soft_stops": _final_soft_stops,
             "can_proceed_with_warning": _can_proceed_warn,
@@ -879,13 +889,14 @@ async def submission_integrity_resolve(
     _final_soft_stops = result.get("soft_stops") or []
     # V1 H2: the score so far + key details, same withholding as tier2_score.
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
-    _pkg_now, _key_now = await _pre_form_status(
+    _status_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
         result.get("mflags") or {}, integrity, current_user,
     )
+    _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops, _pkg_now,
+        _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
     )
     return JSONResponse({
         "success": True,
@@ -910,6 +921,7 @@ async def submission_integrity_resolve(
         "tier2_missing": [] if bool(integrity.get("review_required")) else (result.get("tier2_missing") or []),
         "package_sqs": _pkg_now,
         "key_details": _key_now,
+        "dry_run": _status_now.dry_run,
         "doc_summary": [
             _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
             for d in (result.get("processed_docs") or [])
@@ -940,7 +952,14 @@ async def document_reclassify(
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
-    await _refuse_once_forms_exist(session)
+    # Choice Electric #25 (7 Oct 2026, reverses the 1 Oct lock for documents):
+    # once forms exist the change goes through the documents door, which
+    # re-stamps the forms; only a run in progress refuses.
+    from routes.audit_routes import _refuse_while_generating
+    await _refuse_while_generating(session)
+    if session.get("generated_forms"):
+        from routes.session_documents_routes import reclassify_after_forms
+        return await reclassify_after_forms(req, session, current_user)
 
     try:
         result = await reclassify_document(
@@ -988,6 +1007,7 @@ async def document_reclassify(
     package_sqs = None
     _pkg_now = None
     _key_now = None
+    _dry_now = None
     try:
         # V1 H2 (2026-08-27): the pre-generation recipe that used to live
         # inline here is now `sqs_service.current_package_sqs`, the one door
@@ -999,10 +1019,12 @@ async def document_reclassify(
         # capped this score at 60 while the card beside it said "warning"),
         # and a package with NO recommended form is scored through the 3.7
         # no-form path instead of skipped. Persist + snapshot are unchanged.
-        _pkg_now, _key_now = await _pre_form_status(
+        _status_now = await _pre_form_status(
             result["session_id"], result.get("merged_facts") or {},
             result.get("mflags") or {}, integrity, current_user,
         )
+        _pkg_now, _key_now = _status_now
+        _dry_now = getattr(_status_now, "dry_run", None)
         package_sqs = _pkg_now
         if package_sqs:
             # Same guard as the generate path, and the SAME SHAPE on purpose -
@@ -1036,7 +1058,7 @@ async def document_reclassify(
     # which folds in nothing and gives exactly the previous behaviour.
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops, _pkg_now,
+        _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
     )
 
     return JSONResponse({
@@ -1051,6 +1073,7 @@ async def document_reclassify(
         "recommendations": result.get("recommendations") or [],
         "account_profile": result.get("account_profile") or {},
         "all_available_forms": result.get("extra_forms_scored") or [],
+        "dry_run": _dry_now,
         "flags": result.get("mflags") or {},
         "hard_stops": _remaining_hard,
         "soft_stops": _final_soft_stops,
@@ -1151,7 +1174,9 @@ async def underwriting_confirm_value(
         if code == "underwriting_empty_value":
             raise HTTPException(400, "Enter a value to confirm.")
         if code == "underwriting_invalid_value":
-            raise HTTPException(400, "Enter a valid value (e.g. a dollar amount like $1,000,000).")
+            raise HTTPException(400, _invalid_confirm_value_message(req.fact_key))
+        if code == "underwriting_invalid_scope":
+            raise HTTPException(400, "This value cannot be confirmed for that coverage line.")
         if code == "underwriting_no_docs":
             raise HTTPException(409, "This submission has no stored documents.")
         logger.error(f"underwriting_confirm_value invalid request [trace={get_trace_id()}]: {ve}")
@@ -1168,7 +1193,7 @@ async def underwriting_confirm_value(
     # the session loaded at the top of this handler, before confirm_underwriting_value ran).
     from services.extraction_service import _fv as _efv
     _prev_facts = session.get("facts") or {}
-    _prev_val = _efv(_prev_facts, req.fact_key)
+    _prev_val = _previous_confirm_value(_prev_facts, req.fact_key, req.scope)
     _prev_str = str(_prev_val).strip() if _prev_val is not None else None
     await log_underwriting_confirmation(
         req.session_id,
@@ -1194,13 +1219,14 @@ async def underwriting_confirm_value(
     _final_soft_stops = result.get("soft_stops") or []
     # V1 H2: the score so far + key details, same withholding as tier2_score.
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
-    _pkg_now, _key_now = await _pre_form_status(
+    _status_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
         result.get("mflags") or {}, integrity, current_user,
     )
+    _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops, _pkg_now,
+        _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
     )
     return JSONResponse({
         "success": True,
@@ -1220,10 +1246,155 @@ async def underwriting_confirm_value(
         "tier2_missing": result.get("tier2_missing") or [],
         "package_sqs": _pkg_now,
         "key_details": _key_now,
+        "dry_run": _status_now.dry_run,
         "normalized_differences": result.get("normalized_differences") or [],
         "doc_conflicts": result.get("doc_conflicts") or [],
         "integrity": integrity,
         "integrity_review_required": bool(integrity.get("review_required")),
+    })
+
+
+
+def _invalid_confirm_value_message(fact_key: str) -> str:
+    """What a refused Data Consistency value should have been, in the field's terms."""
+    key = str(fact_key or "")
+    if key.endswith("_date"):
+        return "Enter a real date (MM/DD/YYYY)."
+    try:
+        from services.underwriting_consistency import RECONCILABLE_FIELDS
+        kind = (RECONCILABLE_FIELDS.get(key) or {}).get("kind")
+    except Exception:                                          # noqa: BLE001
+        kind = None
+    if kind == "currency":
+        return "Enter a dollar amount (e.g. $1,000,000)."
+    if kind == "integer":
+        return "Enter a whole number."
+    return "Enter the value as the documents print it - not N/A, TBD or unknown."
+
+
+def _previous_confirm_value(facts: dict, fact_key: str, scope: Optional[str]):
+    """The value an answer replaces: the package fact, or for a LINE answer
+    that line's own printings (audit G7: the package scalar was logged)."""
+    from services.extraction_service import _fv as _efv
+    if scope:
+        store = (facts or {}).get("_scoped") or {}
+        vals = []
+        for e in (store.get(fact_key) or []):
+            if isinstance(e, dict) and (e.get("scope") or {}).get("line") == scope:
+                v = str(e.get("value") or "").strip()
+                if v and v not in vals:
+                    vals.append(v)
+        if vals:
+            return " / ".join(vals)
+    return _efv(facts or {}, fact_key)
+
+
+@router.post("/api/underwriting/confirm-value-in-editor")
+async def underwriting_confirm_value_in_editor(
+    req: UnderwritingConfirmRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """The Data Consistency picker AFTER forms exist (5 Oct 2026, owner).
+
+    The pre-form route above stays locked once forms exist, because it re-reads
+    the documents and resets the forms. This one applies the confirmation to the
+    stored facts and re-stamps the generated forms in place
+    (`extraction_pipeline.confirm_underwriting_value_in_editor`), records the
+    same audit row, re-scores, and answers in the resolve-issue shape so the
+    editor's side panel refreshes without a reload.
+    """
+    session = await get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+    if not (session.get("generated_forms") or {}):
+        raise HTTPException(409, "Forms are not generated yet - confirm the value on the review page.")
+    # The AI reading of a document added after forms writes onto these forms
+    # (C103) - a confirmation waits for it, like every document change.
+    from services.generation_state import DOCUMENT_FILL_LOCKED, document_fill_running
+    if document_fill_running(session):
+        raise HTTPException(409, DOCUMENT_FILL_LOCKED)
+
+    from services.extraction_pipeline import confirm_underwriting_value_in_editor
+    try:
+        result = await confirm_underwriting_value_in_editor(
+            session, req.session_id,
+            fact_key=req.fact_key, value=req.value, user_id=str(current_user["id"]),
+            scope=req.scope,
+        )
+    except ValueError as ve:
+        code = str(ve)
+        if code == "underwriting_unknown_field":
+            raise HTTPException(400, "This field is not a reconcilable underwriting data element.")
+        if code == "underwriting_empty_value":
+            raise HTTPException(400, "Enter a value to confirm.")
+        if code == "underwriting_invalid_value":
+            raise HTTPException(400, _invalid_confirm_value_message(req.fact_key))
+        if code == "underwriting_invalid_scope":
+            raise HTTPException(400, "This value cannot be confirmed for that coverage line.")
+        if code == "underwriting_line_already_confirmed":
+            raise HTTPException(409, "This line's value was confirmed before the forms were "
+                                     "generated. To change it now, edit the boxes on the form.")
+        if code in ("underwriting_no_docs", "underwriting_no_forms"):
+            raise HTTPException(409, "This submission has no stored documents or forms.")
+        logger.error(f"confirm_value_in_editor invalid request [trace={get_trace_id()}]: {ve}")
+        raise HTTPException(400, "Could not confirm the value.")
+    except Exception as ex:
+        logger.error(f"confirm_value_in_editor error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Failed to confirm the underwriting value.")
+
+    from services.underwriting_consistency import RECONCILABLE_FIELDS
+    _prev_val = _previous_confirm_value(session.get("facts") or {}, req.fact_key, req.scope)
+    try:
+        await log_underwriting_confirmation(
+            req.session_id, str(current_user["id"]),
+            fact_key=req.fact_key,
+            label=(RECONCILABLE_FIELDS.get(req.fact_key) or {}).get("label", req.fact_key),
+            confirmed_value=req.value,
+            previous_value=str(_prev_val).strip() if _prev_val is not None else None,
+            candidates=result.get("_pre_confirm_candidates"),
+            reason=result.get("_pre_confirm_reason"),
+            note=getattr(req, "note", None),
+        )
+    except Exception as _le:                                   # noqa: BLE001
+        logger.warning(f"confirm_value_in_editor: audit log failed: {_le}")
+
+    from services.arq_service import recalculate_session_scores
+    await recalculate_session_scores(req.session_id)
+
+    from routes.audit_routes import (
+        _editor_score_refresh, _form_selection_view, _grade_from_score,
+        _grouped_cross_issues_for_panel, _package_page_key_details,
+    )
+    sess = await get_processing_session(req.session_id)
+    updated_forms: dict = {}
+    for fid, fdata in (sess.get("generated_forms") or {}).items():
+        score = (fdata.get("sqs") or {}).get("sqs_score") if isinstance(fdata, dict) else None
+        if score is None:
+            continue
+        g, t, c = _grade_from_score(int(score))
+        updated_forms[fid] = {"new_sqs_score": int(score), "new_grade": g, "new_tier": t,
+                              "new_tier_color": c, "new_sqs": fdata.get("sqs")}
+    cross_issues = sess.get("cross_issues_last") or []
+    package_sqs = sess.get("package_sqs") or {}
+    _view = _form_selection_view(sess, cross_issues, package_sqs=package_sqs)
+    return JSONResponse({
+        "success": True,
+        "session_id": req.session_id,
+        "fact_key": req.fact_key,
+        "forms_updated": result.get("forms_updated") or [],
+        "underwriting_consistency": sess.get("underwriting_consistency") or {},
+        "updated_forms": updated_forms,
+        "new_package_sqs_score": package_sqs.get("package_sqs_score"),
+        "new_package_tier": package_sqs.get("tier"),
+        "cross_issues": cross_issues,
+        "grouped_cross_issues": _grouped_cross_issues_for_panel(cross_issues),
+        "hard_stops": _view["hard_stops"],
+        "soft_stops": _view["soft_stops"],
+        "grouped_issues": _view["grouped_issues"],
+        "can_proceed_with_warning": _view["can_proceed_with_warning"],
+        "warning_stops": _view["warning_stops"],
+        **_editor_score_refresh(sess),
+        **_package_page_key_details(sess),
     })
 
 
@@ -1370,7 +1541,11 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 per_form_pre_filled = {}
 
         async def _generate_one(form_id: str):
-            form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
+            # A form's second copy ("ACORD_131__excess", 7 Oct 2026) is generated
+            # from its form's row under its own id; one the package no longer
+            # has (a stale tab after the tower changed) is refused.
+            form_meta = _fi.form_meta_for(session["all_forms"], form_id,
+                                          session.get("facts") or {})
             if not form_meta:
                 return form_id, None
             try:
@@ -1501,17 +1676,16 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         # silently tripled the first time anything re-scored the session. The
         # rules are gated on which forms are selected, so `combined_ids` is the
         # trigger set, exactly as update_pdf uses its own selected ids.
-        from services.cross_form_validator import run_cross_form_validation
-        cross_issues_raw     = run_cross_form_validation(
-            session["facts"], session["flags"], set(combined_ids),
-        )
-        seen_msgs            = set()
-        cross_issues_deduped = []
-        for issue in cross_issues_raw:
-            msg = issue.get("message", "")
-            if msg not in seen_msgs:
-                seen_msgs.add(msg)
-                cross_issues_deduped.append(issue)
+        #
+        # THE STOPS AS THEY STAND (6 Oct 2026, Choice Electric #18): every stop
+        # list comes from the one door, rebuilt from the STORED facts - never
+        # the stored `hard_stops` / `soft_stops`, which a pipeline re-run can
+        # leave describing facts the row no longer holds (live ca93ed8f: a 60
+        # cap for an occupancy the producer had answered). Cross-form rules are
+        # scoped to the forms being generated, at full severity.
+        from services.stops_now import stops_now
+        _gen_stops           = stops_now(session, combined_ids, pre_form=False)
+        cross_issues_deduped = _gen_stops["cross_issues"]
 
         # Display copy = cross-form validation issues + any stamp-mismatch
         # advisory. cross_issues_deduped stays pure for SQS scoring below.
@@ -1534,8 +1708,8 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 flags=session["flags"],
                 form_results=sqs_results_list,
                 cross_issues=cross_issues_deduped,
-                hard_stops=session.get("hard_stops", []),
-                soft_stops=session.get("soft_stops", []),
+                hard_stops=_gen_stops["hard"],
+                soft_stops=_gen_stops["soft"],
                 session_data=session,
                 session_id=req.session_id,
                 user_id=str(current_user["id"]),
@@ -1557,9 +1731,17 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "active_form_id": combined_ids[0] if combined_ids else None,
             "cross_issues_last": _display_cross,
             "underwriting_stamp_consistency": _stamp_check,
+            # The display cache now says what the score above used (6 Oct
+            # 2026): the stops the package was scored with, not the lists the
+            # last pipeline run left behind.
+            "hard_stops": _gen_stops["hard"],
+            "soft_stops": _gen_stops["soft"],
             # Fig 8: generation finished - clear the in-progress marker so a
             # reopen loads the editor directly rather than the resume overlay.
             "generation_job_id": None,
+            # Each generated copy stays bound to its own subject - one ACORD
+            # 131 per umbrella layer (services/form_instances.binding_update).
+            **_fi.binding_update(session.get("facts"), list(results)),
         })
 
         # Persist so the async (202) refetch path and page reloads can recover it.
@@ -1658,7 +1840,8 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "generated": summary,
             "form_ids": combined_ids,
             "cross_issues": _display_cross,
-            "grouped_cross_issues": _grouped_cross_issues_or_none(_display_cross),
+            "grouped_cross_issues": _grouped_cross_issues_or_none(
+                _display_cross, facts=session.get("facts") or {}),
             "package_sqs": package_sqs,
             "stamp_consistency": _stamp_check,
         })
@@ -1713,7 +1896,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     # The ONE generation door - see `_bg_lite_generate`.
     per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
     for form_id in form_ids:
-        form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
+        form_meta = _fi.form_meta_for(session["all_forms"], form_id, session.get("facts") or {})
         if not form_meta:
             continue
         try:
@@ -1746,6 +1929,8 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         "generated_forms": results,
         "active_form_id": form_ids[0] if form_ids else None,
         "cross_issues_last": cross_issues_deduped,
+        # each generated copy stays on its own subject (form_instances)
+        **_fi.binding_update(session.get("facts"), list(results)),
     })
 
     # Usage counting (client 2026-07-01): essentials consumes one package the
@@ -1929,7 +2114,7 @@ async def get_pdf(
     )
     return Response(
         content=pdf_bytes, media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",
+        headers={"Content-Disposition": f"inline; filename={_fi.file_stem(form_id)}_preview.pdf",
                  "Cache-Control": "no-store, no-cache, must-revalidate"},
     )
 
@@ -2152,6 +2337,11 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # a genuine retraction goes through `delete_facts`, never a bare None.
         _touched_fact_keys: set = set()
         for pdf_field, new_val in req.field_updates.items():
+            # A form's second copy (the excess layer's ACORD 131, 7 Oct 2026):
+            # a box about ITS OWN policy is that copy's alone - the edit stays
+            # on this form and never becomes the package's (the umbrella's) fact.
+            if _fi.is_instance(form_id) and _fi.is_private_field(form_id, pdf_field):
+                continue
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
                 if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
@@ -2198,6 +2388,18 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         _cleared_fact_keys = sorted(
             k for k in _touched_fact_keys if updated_facts.get(k) is None
         )
+
+        # Facts that FOLLOW an edited fact (6 Oct 2026, Choice Electric #27) -
+        # the next term's expiration after a typed effective date, years in
+        # business after a start date - re-derived exactly as an answered card
+        # re-derives them, BEFORE the stops and scores below read the facts.
+        # A stated or typed value is never overwritten (see the helper).
+        if _touched_fact_keys:
+            try:
+                from services.arq_service import _rederive_answer_dependent_facts
+                _rederive_answer_dependent_facts(updated_facts)
+            except Exception as _dx:                               # noqa: BLE001
+                logger.warning("update_pdf: dependent-fact re-derivation skipped: %s", _dx)
 
         # Re-evaluate stops against the LATEST facts so SQS can actually improve
         # when the producer fixes a field. Without this, stale hard_stops from
@@ -2299,6 +2501,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         _edit_docs    = session.get("docs", []) or []
         _edit_present = {str(d.get("doc_type") or "").strip()
                          for d in _edit_docs if isinstance(d, dict) and not d.get("excluded")}
+        from services.loss_history_state import package_has_loss_runs
+        _edit_has_loss_runs = package_has_loss_runs(_edit_docs, updated_facts)
         _edit_app_name = (updated_facts.get("applicant_name") or {})
         if isinstance(_edit_app_name, dict):
             _edit_app_name = _edit_app_name.get("value") or ""
@@ -2318,7 +2522,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             tier2_score=session.get("tier2_score", 50),
             confidence_dict=confidence,
             has_narrative_doc="narrative" in _edit_present,
-            has_loss_run_doc="loss_run" in _edit_present,
+            has_loss_run_doc=_edit_has_loss_runs,
             loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
             cross_issues_full=_cf_issues,
             narrative_doc_text=_extract_narrative_doc_text(_edit_docs),
@@ -2386,6 +2590,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 if _fk and not _fk.startswith("_") and _pat in field_name:
                     _canon_key = _fk
                     break
+            if _fi.is_instance(form_id) and _fi.is_private_field(form_id, field_name):
+                _canon_key = None         # a layer copy's own box writes no package fact
             try:
                 await log_field_change(
                     session_id=req.session_id,
@@ -2429,6 +2635,55 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             # renders it afresh (signature_boxes._render_with_applicant)
             "_applicant_render": None,
         })
+
+        # ── ONE EDIT, EVERY FORM (6 Oct 2026, Choice Electric #27) ───────────
+        # The edit wrote its fact back above; every OTHER generated form that
+        # prints that fact (or a fact that follows it) is re-stamped through the
+        # generation engine, so the package never disagrees with itself. Live
+        # ca93ed8f: one ACORD 125 date edit left six forms on the old date and
+        # field QA raised seven "shows X but the source value is Y" rows. A box
+        # a person typed on another form, or edited since generation, stays.
+        # Each changed form is re-scored once, on the same fresh stops as the
+        # edited form; the package below is then scored from all of them.
+        try:
+            from services.extraction_service import _fv as _prop_fv
+            from services.arq_service import propagate_fact_edits
+            _changed_fact_keys = sorted(
+                k for k in (set(prev_facts_for_audit) | set(updated_facts))
+                if not str(k).startswith("_")
+                and str(_prop_fv(prev_facts_for_audit, k) or "").strip()
+                != str(_prop_fv(updated_facts, k) or "").strip()
+            ) if _touched_fact_keys else []
+            _propagated_forms = propagate_fact_edits(
+                generated, form_id, prev_facts_for_audit, updated_facts,
+                _changed_fact_keys, provenance="producer",
+            ) if _changed_fact_keys else []
+            for _pf in _propagated_forms:
+                _pdata = generated.get(_pf) or {}
+                try:
+                    _pdata["sqs"] = calculate_sqs(
+                        facts=updated_facts, flags=fresh_flags,
+                        mapped_data=_pdata.get("field_state") or _pdata.get("mapped", {}),
+                        form_schema=_pdata.get("schema", {}),
+                        selected_form_ids=session.get("selected_form_ids", []),
+                        form_id=_pf,
+                        hard_stops=list(_re_hard), soft_stops=list(_re_soft),
+                        tier2_score=session.get("tier2_score", 50),
+                        confidence_dict=_pdata.get("confidence") or {},
+                        has_narrative_doc="narrative" in _edit_present,
+                        has_loss_run_doc=_edit_has_loss_runs,
+                        loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
+                        cross_issues_full=_cf_issues,
+                        narrative_doc_text=_extract_narrative_doc_text(_edit_docs),
+                    )
+                except Exception as _psx:                          # noqa: BLE001
+                    logger.warning("update_pdf: re-score of %s after propagation skipped: %s",
+                                   _pf, _psx)
+            if _propagated_forms:
+                logger.info("update_pdf: %s edit on %s propagated to %s",
+                            ", ".join(_changed_fact_keys), form_id, ", ".join(_propagated_forms))
+        except Exception as _prx:                                  # noqa: BLE001
+            logger.warning("update_pdf: edit propagation skipped: %s", _prx, exc_info=True)
 
         # Recompute package SQS from the now-updated per-form SQS results so
         # the package score, pillars, top recommendations, and cross-form
@@ -2604,7 +2859,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
                              "package_sqs": pkg_sqs, "cross_issues": _display_cross,
-                             "grouped_cross_issues": _grouped_cross_issues_or_none(_display_cross),
+                             "grouped_cross_issues": _grouped_cross_issues_or_none(
+                                 _display_cross, facts=updated_facts),
                              "stamp_consistency": _stamp_check})
     except HTTPException:
         raise
@@ -2653,8 +2909,12 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "client_answer_review": _car_rows(proc_session),
                          "cross_issues": _cross,
-                         "grouped_cross_issues": _grouped_cross_issues_or_none(_cross),
-                         "package_sqs": proc_session.get("package_sqs"),
+                         "grouped_cross_issues": _grouped_cross_issues_or_none(
+                             _cross, facts=proc_session.get("facts") or {}),
+                         # Today's Exposure row names on a stored score
+                         # (Choice Electric #26) - display words only.
+                         "package_sqs": with_current_bucket_labels(
+                             proc_session.get("package_sqs")),
                          # Fig 24: what the last client questionnaire resolved /
                          # worsened / left open. This endpoint (not
                          # /extraction-result) is what restores a session that
@@ -2669,7 +2929,11 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                          "generation_form_count": proc_session.get("generation_form_count"),
                          "generation_state": gen_state,
                          "form_order": form_order,
-                         "active_form_id": active_form_id})
+                         "active_form_id": active_form_id,
+                         # 5 Oct 2026: the editor's Data Consistency section
+                         # (confirm-value-in-editor). A direct reopen of the
+                         # editor never loaded the picker's state.
+                         "underwriting_consistency": proc_session.get("underwriting_consistency") or {}})
 
 
 @router.post("/api/session/{session_id}/active-form")
@@ -2719,13 +2983,15 @@ async def get_extraction_result(
     # V1 H2: the score so far + key details. The row is already loaded; once
     # forms exist this returns the persisted, credit-bearing score. Scored
     # BEFORE the grouped view - see _grouped_with_package_caps.
-    _pkg_now, _key_now = await _pre_form_status(
+    _status_now = await _pre_form_status(
         session_id, proc_session.get("facts") or {}, mflags, integrity,
         current_user, session_row=proc_session,
     )
+    _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(
         proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
         _pkg_now, cross_issues=proc_session.get("cross_issues_last") or [],
+        facts=proc_session.get("facts") or {},
     )
     return JSONResponse({
         "success":               True,
@@ -2749,6 +3015,8 @@ async def get_extraction_result(
         "tier2_missing":         [] if integrity.get("review_required") else proc_session.get("tier2_missing", []),
         "package_sqs":           _pkg_now,
         "key_details":           _key_now,
+        # Choice Electric #27: the form checks before generation (None after).
+        "dry_run":               _status_now.dry_run,
         "recommendations":       proc_session.get("recommendations", []),
         "account_profile":       proc_session.get("account_profile", {}),
         "all_available_forms":   score_extra_forms(
@@ -2769,6 +3037,9 @@ async def get_extraction_result(
         # Recomputed, never stored: deterministic, no LLM, fails open to [] -
         # which is precisely what this key was missing to before.
         "normalized_differences":    doc_consistency_normalizations(proc_session),
+        # Forms an added document's new line needs - offered, never added
+        # (services/session_documents, 7 Oct 2026). Empty for every other package.
+        "document_form_offers":      proc_session.get("document_form_offers") or [],
     })
 
 
@@ -2944,12 +3215,15 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
         field_data = r.get("field_state") or r.get("mapped", {})
         sqs        = r.get("sqs", {})
         return {"form_id": fid, "form_name": r.get("form_name", fid),
+                # The ACORD form this entry is ("ACORD_131" for the excess
+                # layer's copy "ACORD_131__excess") - beside the copy's own id.
+                "base_form_id": _fi.base_form_id(fid),
                 "sqs": {"score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
                         "tier": sqs.get("tier"), "routing_decision": sqs.get("routing_decision"), "breakdown": sqs.get("breakdown", {})},
                 "fields": {k: v for k, v in field_data.items() if v is not None and str(v).strip() not in ("", "null", "None")}}
 
     if form_id == "all":
-        epic_payload = {"source": "acordly", "version": "12.3.1", "export_type": "bulk",
+        epic_payload ={"source": "acordly", "version": "12.3.1", "export_type": "bulk",
                         "timestamp": timestamp, "session_id": session_id,
                         "user_email": current_user.get("email"), "organization": org_name,
                         "applicant": facts.get("applicant_name"), "forms": {fid: _build_payload(fid, r) for fid, r in generated.items()}}
@@ -2988,12 +3262,15 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
         field_data = r.get("field_state") or r.get("mapped", {})
         sqs        = r.get("sqs", {})
         return {"form_id": fid, "form_name": r.get("form_name", fid),
+                # The ACORD form this entry is ("ACORD_131" for the excess
+                # layer's copy "ACORD_131__excess") - beside the copy's own id.
+                "base_form_id": _fi.base_form_id(fid),
                 "sqs": {"score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
                         "tier": sqs.get("tier"), "routing_decision": sqs.get("routing_decision"), "breakdown": sqs.get("breakdown", {})},
                 "fields": {k: v for k, v in field_data.items() if v is not None and str(v).strip() not in ("", "null", "None")}}
 
     if form_id == "all":
-        payload = {"source": "acordly", "version": "12.3.1", "export_type": "bulk",
+        payload ={"source": "acordly", "version": "12.3.1", "export_type": "bulk",
                    "timestamp": timestamp, "session_id": session_id,
                    "user_email": current_user.get("email"), "organization": org_name,
                    "applicant": facts.get("applicant_name"), "forms": {fid: _build_payload(fid, r) for fid, r in generated.items()}}
@@ -3046,8 +3323,13 @@ async def clarity_analyze(
     session     = await get_processing_session(session_id)
     facts       = session.get("facts", {})
     flags       = session.get("flags", {})
-    hard_stops  = session.get("hard_stops", [])
-    soft_stops  = session.get("soft_stops", [])
+    # The stops as they stand (6 Oct 2026): the one door, never the stored
+    # display cache. No form is generated on this path, so cross-form rules
+    # are scoped to the recommended forms and demoted (C75).
+    from services.stops_now import stops_now as _stops_now
+    _clarity_stops = _stops_now(session, None, pre_form=True)
+    hard_stops  = _clarity_stops["hard"]
+    soft_stops  = _clarity_stops["soft"]
     tier2_score = session.get("tier2_score", 50)
 
     if session.get("user_id") != current_user["id"]:

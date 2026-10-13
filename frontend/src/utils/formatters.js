@@ -1,5 +1,7 @@
 // formatters.js
 //
+import { formLabel } from "./formInstances.js";
+//
 // Decision_Tree.txt §522-527 tier mapping (client-confirmed):
 //   A: 90-100 "Submission Ready" (Green)
 //   B: 80-89  "Almost There"     (Yellow)
@@ -12,6 +14,20 @@ export const gradeColor = (g) =>
 
 export const barColor = (v) =>
   v >= 80 ? "#10b981" : v >= 70 ? "#f59e0b" : "#ef4444";
+
+// An Exposure deduction row (Choice Electric #26): the points that bucket took
+// from its pillar, so the rows add up to it (Exposure = 100 minus every row).
+// "-20 pts"; nothing taken is "0 pts". Never a negative zero, never a fraction.
+export const deductionText = (n) => {
+  const pts = Math.round(Number(n) || 0);
+  return pts > 0 ? `-${pts} pts` : "0 pts";
+};
+
+// Nothing taken is green; a small deduction amber; ten points or more red.
+export const deductionColor = (n) => {
+  const pts = Math.round(Number(n) || 0);
+  return pts <= 0 ? "#10b981" : pts < 10 ? "#f59e0b" : "#ef4444";
+};
 
 export const sqsGradeFromScore = (v) => {
   if (v == null) return null;
@@ -44,7 +60,8 @@ export const scoreSoFar = (pkg) => {
 // there, so prefer the form id: "ACORD_137_CA" -> "ACORD 137 CA". Falls back to
 // the part of form_name before the first " - " when no id is available.
 export const shortFormLabel = (formId, formName) => {
-  if (formId) return String(formId).replace(/_/g, " ").trim();
+  // "ACORD 137 CA"; a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+  if (formId) return formLabel(formId);
   if (formName) return String(formName).split(" - ")[0].trim();
   return "This form";
 };

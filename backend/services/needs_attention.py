@@ -113,8 +113,23 @@ def _has_value(v: Any) -> bool:
     return v is not None and str(v).strip() not in ("", "null", "None")
 
 
+# A FILLED box whose label weighs less than a confirmed value in the fill rate
+# and that nothing else settles (13 Oct 2026 - the SQS reaches 100 after forms
+# once everything is answered): an AI value not found in the documents
+# ("low_confidence"), an AI value found in them ("ai_verified" - 0.85 by Brent's
+# 24 Aug weights, so it counts in full only once a person confirms it), and a
+# value sitting under a stale "required and empty" label. Each is "Please
+# verify" with a Confirm, which relabels it the producer's without changing it.
+# A "conflicted" box is settled in Data Consistency, not here.
+CONFIRMABLE_LABELS = frozenset({"low_confidence", "ai_verified",
+                                "missing_required", "missing_required_gate"})
+_UNTICKED = frozenset({"Off", "/Off"})        # a checkbox's empty state
+
+
 def form_label(form_id: str) -> str:
-    return (form_id or "").replace("ACORD_", "ACORD ").replace("_", " ").strip()
+    # "ACORD 131", and a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+    from services.form_instances import instance_label
+    return instance_label(form_id or "")
 
 
 # ── Where each box sits on the printed form ──────────────────────────────────
@@ -124,7 +139,9 @@ def _template_path(form_id: str, generated_form: Optional[dict]) -> Optional[str
         from config.settings import TEMPLATE_DIR
     except Exception:                                      # pragma: no cover
         return None
-    tpl = ((generated_form or {}).get("form") or {}).get("template_file") or f"{form_id}.pdf"
+    from services.form_instances import base_form_id
+    tpl = ((generated_form or {}).get("form") or {}).get("template_file") \
+        or f"{base_form_id(form_id)}.pdf"
     tpl = os.path.basename(str(tpl))                       # never a path from the row
     path = os.path.join(TEMPLATE_DIR, tpl)
     return path if os.path.exists(path) else None
@@ -162,7 +179,9 @@ def widget_positions(form_id: str, generated_form: Optional[dict] = None) -> Dic
 def _schema_from_disk(form_id: str) -> dict:
     try:
         from config.settings import FORMS_SCHEMAS_DIR
-        with open(os.path.join(FORMS_SCHEMAS_DIR, f"{os.path.basename(form_id)}_schema.json")) as fh:
+        from services.form_instances import base_form_id
+        with open(os.path.join(FORMS_SCHEMAS_DIR,
+                               f"{os.path.basename(base_form_id(form_id))}_schema.json")) as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except Exception:                                      # noqa: BLE001
@@ -354,6 +373,12 @@ def _points(rec: Optional[dict]) -> Tuple[int, bool]:
     return int(round(pts)), exact
 
 
+# A Please verify value counts at half weight in the package's Form Fill Rate
+# until a person confirms or corrects it (13 Oct 2026). One row moves the score
+# by a fraction of a point, so no number is printed - but it is not "no effect".
+VERIFY_SCORE_TEXT = "Counts in full once you confirm it"
+
+
 def score_text(points: int, exact: bool) -> str:
     if not points:
         return "No score effect"
@@ -387,7 +412,17 @@ _PARTY_FACTS: Tuple[Tuple[str, str], ...] = (
     ("producer_contact_phone", "your agency's contact phone"),
     ("producer_contact_name", "your agency's contact"),
 )
-_DATE_SHAPE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
+# A date in any shape a document prints - numbers ("03/01/2022", "2022-03-01")
+# or words ("March 1, 2022", "1 Mar 2022"). Only the "which is not a date"
+# sentence reads it: on the owner's run `18ecbfa8` (12 Oct 2026) a held-back
+# "March 1, 2022" was explained to the producer as "not a date".
+_MONTH_WORD = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+               r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?")
+_DATE_SHAPE = re.compile(
+    r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b"
+    rf"|\b{_MONTH_WORD}\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}\b"
+    rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH_WORD},?\s+\d{{4}}\b",
+    re.I)
 _NORM = re.compile(r"[^a-z0-9]")
 
 
@@ -490,7 +525,8 @@ def _is_identifier_box(schema: dict, field: str) -> bool:
 
 def held_back(schema: dict, field: str, removed: Any, facts: dict,
               kind: Optional[str] = None,
-              in_documents: Optional[bool] = None) -> Tuple[str, bool]:
+              in_documents: Optional[bool] = None,
+              reason: Optional[str] = None) -> Tuple[str, bool]:
     """(reason, quotable): one plain sentence, and whether the refused value
     may be shown beside it. Guards do not record WHICH rule fired, so this
     reads the refused value against the box and never claims more than it can
@@ -526,6 +562,26 @@ def held_back(schema: dict, field: str, removed: Any, facts: dict,
         return _TICK_UNANSWERED, False
     if yn is not None:
         return _YES_NO_IN_A_TEXT_BOX, False
+    # A guard that NAMED its rule says why in its own words (round 5, 7 Oct
+    # 2026: a cross-reference, a party's name, an echo, a form title, the
+    # tooltip's option list - `reason` is the guard report's own code). The
+    # refused value is never quoted: it is not this box's value at all.
+    if reason:
+        try:
+            from services.ai_answer_guards import held_back_sentence
+            own = held_back_sentence(reason)
+        except Exception:                                  # pragma: no cover
+            own = None
+        if not own:
+            # Another policy's value, a coverage the documents do not carry
+            # (services/scoped_evidence, round 5).
+            try:
+                from services.scoped_evidence import held_back_text
+                own = held_back_text(reason)
+            except Exception:                              # pragma: no cover
+                own = None
+        if own:
+            return own, False
     key = _NORM.sub("", text.lower())
     # Our own records first: a value that IS another party's (the applicant's
     # name, your agency's e-mail) is named as that, wherever it came from.
@@ -569,9 +625,10 @@ def held_back(schema: dict, field: str, removed: Any, facts: dict,
 
 def held_back_reason(schema: dict, field: str, removed: Any, facts: dict,
                      kind: Optional[str] = None,
-                     in_documents: Optional[bool] = None) -> str:
+                     in_documents: Optional[bool] = None,
+                     reason: Optional[str] = None) -> str:
     """The sentence of `held_back` (the E&O / field-QA rows use it)."""
-    return held_back(schema, field, removed, facts, kind, in_documents)[0]
+    return held_back(schema, field, removed, facts, kind, in_documents, reason=reason)[0]
 
 
 # ── "Please verify": a reason that is true ───────────────────────────────────
@@ -608,6 +665,9 @@ _VERIFY_WRONG_PARTY = ("Your documents print this name, but it reads like an ins
 # term, an expiration one term after a typed effective date) - never the AI's,
 # and never "not found" as if something had gone wrong (1 Oct 2026, item 4).
 _VERIFY_CALCULATED = "Calculated, not read from your documents. Confirm it before sending."
+# An AI value the stamper FOUND in the documents ("ai_verified", 13 Oct 2026):
+# printed there, but placed in this box by the AI - a person confirms the fit.
+_VERIFY_FOUND = "Filled by the AI from your documents. Confirm it belongs in this box."
 
 
 def _documents_print(value: Any, haystack: Optional[str]) -> Optional[bool]:
@@ -785,11 +845,15 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
     documents print the value. Without it the reason claims nothing about them.
     """
     fr = generated_form or {}
-    facts = facts or {}
+    # A form's second copy (ACORD 131 for the excess layer, 7 Oct 2026) is
+    # judged on its own view of the facts by its form's rules; rows keep its id.
+    from services.form_instances import base_form_id, facts_for_form
+    _base = base_form_id(form_id)
+    facts = facts_for_form(facts or {}, form_id)
     mapped = fr.get("field_state") or fr.get("mapped") or {}
     schema = fr.get("schema") if isinstance(fr.get("schema"), dict) and fr.get("schema") \
         else _schema_from_disk(form_id)
-    labels = effective_labels(form_id, fr, facts)
+    labels = effective_labels(_base, fr, facts)
     positions = widget_positions(form_id, fr)
     client_filled = set(fr.get("client_filled_fields") or [])
     # What generation stamped. An edit is saved into `field_state` and keeps the
@@ -831,7 +895,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
     # tests the download review uses (`field_qa.run_field_qa` "not_answered"):
     # the AI was asked (an empty box labelled low_confidence), no resolver owns
     # the blank, it is not a spare row, and no guard refused an answer.
-    _unanswered_question = _unanswered_high_impact_question_test(form_id, schema, mapped, labels,
+    _unanswered_question = _unanswered_high_impact_question_test(_base, schema, mapped, labels,
                                                                 facts, flags)
 
     sqs = fr.get("sqs") or {}
@@ -869,7 +933,8 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
         found = None
         required = label in _REQUIRED_LABELS or field in VIEWER_ALWAYS_REQUIRED
         if _has_value(value):
-            if label == "low_confidence" and not _edited(field):
+            if label in CONFIRMABLE_LABELS and not _edited(field) \
+                    and str(value).strip() not in _UNTICKED:
                 status = STATUS_VERIFY
         else:
             gb = None if applicant_step else guard.get(field)
@@ -886,7 +951,8 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                 if held:
                     status = STATUS_HELD_BACK
                     reason, quotable = held_back(schema, field, removed, facts, kind,
-                                                 gb.get("in_documents"))
+                                                 gb.get("in_documents"),
+                                                 reason=gb.get("reason"))
                     # A value the reason does not repeat is not shipped either.
                     found = str(removed or "") if quotable else None
             if status is None and required:
@@ -923,7 +989,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                 what = "Enter it on the form."
             reason = "Required on this form and still empty."
             _m = _ROW_RE.match(field)
-            _choice = _ACORD125_CHOICE_ROWS.get(_m.group("base")) if (_m and form_id == "ACORD_125") else None
+            _choice = _ACORD125_CHOICE_ROWS.get(_m.group("base")) if (_m and _base == "ACORD_125") else None
             if _choice:
                 text = _trim(_choice + _row_suffix(schema, field), _LABEL_MAX + 10)
                 what = "Tick the one that applies."
@@ -933,7 +999,8 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                     else "Check your documents and enter the right value if there is one.")
         else:
             what = "Check it against your documents and correct it on the form if it is wrong."
-            reason = verify_reason(schema, field, value, facts, doc_haystack, form_id)
+            reason = (_VERIFY_FOUND if label == "ai_verified"
+                      else verify_reason(schema, field, value, facts, doc_haystack, _base))
 
         fact_key = box_fact_key(field)
         pts, exact = (0, True) if status == STATUS_VERIFY else _points(recs.get(fact_key or ""))
@@ -953,7 +1020,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             "found_value": _snippet(found, 160) if found is not None else None,
             "score_effect": pts,
             "score_effect_exact": bool(exact),
-            "score_text": score_text(pts, exact),
+            "score_text": VERIFY_SCORE_TEXT if status == STATUS_VERIFY else score_text(pts, exact),
             "fact_key": fact_key,
             "answer_mode": _answer_mode(fact_key, facts),
             "applicant_step": bool(applicant_step and status == STATUS_MISSING),
@@ -969,8 +1036,13 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
     # with the jump to the box. Nothing is filled or guessed. A to-do for the
     # producer, never a gap the underwriter's cover page reports: a quote's
     # premium is blank until it is quoted.
+    # A dec renewal's page-1 premiums are blank BY RULE (Brent, 8 Oct 2026:
+    # "Leave the page 1 premium blank unless the appropriate premium is
+    # provided") - not a producer's to-do. The owner's run `18ecbfa8` (12 Oct)
+    # counted 8 of them into "49 items to fix". Same test the stamper uses.
     listed = {r["field"] for r in rows}
-    for field, why in _blank_premium_boxes(schema, mapped):
+    for field, why in ([] if _page_one_premiums_withheld(facts) else
+                       _blank_premium_boxes(schema, mapped)):
         if field in listed or field in client_filled:
             continue
         pos = positions.get(field)
@@ -996,7 +1068,40 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             "_sort": _print_order(field),
         })
 
-    if form_id == "ACORD_125":
+    # MORE THAN ONE LANDLORD (Brent, 8 Oct 2026): "The first can go under
+    # Additional Interest on the 125. Additional landlords go on ACORD 45." The
+    # 125 prints the first location's landlord; the rest are a producer to-do -
+    # Primble does not produce ACORD 45.
+    if _base == "ACORD_125":
+        extra = _landlords_for_acord45(facts)
+        anchor = "AdditionalInterest_FullName_A"
+        if extra and anchor not in listed:
+            pos = positions.get(anchor)
+            rows.append({
+                "form_id": form_id,
+                "form_label": form_label(form_id),
+                "field": anchor,
+                "page": pos[0] if pos else None,
+                "label": "Additional landlords (ACORD 45)",
+                "status": STATUS_MISSING,
+                "tag": STATUS_TAG[STATUS_MISSING],
+                "required": False,
+                "reason": ("ACORD 125 has room for one landlord, so the first is printed here. "
+                           + "; ".join(extra) + " - list them on an ACORD 45, which Primble "
+                           "does not produce."),
+                "what_to_do": "Attach an ACORD 45 for these landlords.",
+                "value": None,
+                "found_value": None,
+                "score_effect": 0,
+                "score_effect_exact": True,
+                "score_text": score_text(0, True),
+                "fact_key": None,
+                "answer_mode": "none",
+                "producer_todo": True,
+                "_sort": _print_order(anchor),
+            })
+
+    if _base == "ACORD_125":
         rows = _collapse_tick_groups(rows)
     rows.sort(key=lambda r: (STATUS_ORDER.index(r["status"]), r["_sort"]))
     for r in rows:
@@ -1012,6 +1117,18 @@ def _is_ticked(value: Any) -> bool:
     if value is True:
         return True
     return str(value or "").strip().lower() in ("yes", "y", "true", "1", "x", "on", "/1", "/yes")
+
+
+def _page_one_premiums_withheld(facts: Optional[dict]) -> bool:
+    """ACORD 125's page-1 premiums are left blank on purpose - the stamper's own
+    test (`pdf_service._page_one_current_policy`: a dec renewal's expiring
+    premiums, unless a person entered one). Fails toward listing them."""
+    try:
+        from services.pdf_service import _page_one_current_policy
+        return bool(_page_one_current_policy({**(facts or {}), "_form_id": "ACORD_125"},
+                                             "premium_is_current_policy", "total_policy_premium"))
+    except Exception:                                      # noqa: BLE001
+        return False
 
 
 def _blank_premium_boxes(schema: dict, mapped: dict) -> List[Tuple[str, str]]:
@@ -1031,6 +1148,23 @@ def _blank_premium_boxes(schema: dict, mapped: dict) -> List[Tuple[str, str]]:
     if _TOTAL_PREMIUM_BOX in (schema or {}) and not _has_value((mapped or {}).get(_TOTAL_PREMIUM_BOX)):
         out.append((_TOTAL_PREMIUM_BOX,
                     "Lines of business are ticked, but the total premium is blank."))
+    return out
+
+
+def _landlords_for_acord45(facts: Optional[dict]) -> List[str]:
+    """Every rented location's landlord AFTER the first (which ACORD 125 prints),
+    as "<name> (location N)". [] with one landlord or none. Fails open."""
+    try:
+        from services.premises_interest import ROW_LANDLORD_NAME_KEY, located_landlords
+        landlords = located_landlords(facts or {})
+    except Exception:                                      # noqa: BLE001
+        return []
+    out: List[str] = []
+    for pos, row in landlords[1:]:
+        name = str((row or {}).get(ROW_LANDLORD_NAME_KEY) or "").strip()
+        if name:
+            loc = str((row or {}).get("location_number") or pos).strip()
+            out.append(f"{name} (location {loc})")
     return out
 
 
@@ -1181,3 +1315,81 @@ def attention_recommendation_rows(attention: Optional[dict], shown: int = 6) -> 
                     "score_impact": None,
                 })
     return out
+
+
+# ── A document added after forms disagrees with the AI (C103, 7 Oct 2026) ─────
+# `session_documents.run_new_document_fill` never overwrites a box the AI filled
+# at generation: where a document added later answers it DIFFERENTLY it stores a
+# suggestion, and the producer chooses. These rows are the side panel's own
+# group - NOT a needs-attention status: nothing about the box is missing or
+# unverified, and the counts, the download review and the E&O rows above stay
+# exactly as they were. A suggestion is live only while its box still shows the
+# value it was measured against and nobody has typed it - "Use this value" (an
+# ordinary box edit) and any other edit retire it on the next read.
+
+STATUS_DOCUMENT_SAYS = "document_says"
+_DOCUMENT_SAYS_TAG = "New document"
+_DOCUMENT_SAYS_WHAT = "Use the new document's value, or keep the one the form shows."
+
+
+def _shown_value(schema: dict, field: str, value: Any) -> str:
+    if _field_type(schema, field) == "/Btn":
+        return "Ticked" if _is_ticked(value) else "Not ticked"
+    return _snippet(value, 120)
+
+
+def document_suggestion_rows(generated_forms: Optional[dict], suggestions: Iterable[dict],
+                             form_id: Optional[str] = None) -> List[dict]:
+    """One row per live suggestion (all forms, or `form_id`'s), in the order the
+    forms print their boxes. Each row: id, form_id, form_label, field, page,
+    label, status ("document_says"), tag, reason, what_to_do, current,
+    suggested (the raw value "Use this value" writes), current_display,
+    suggested_display, documents."""
+    rows: List[dict] = []
+    for s in suggestions or ():
+        if not isinstance(s, dict):
+            continue
+        fid, field = s.get("form_id"), s.get("field")
+        if not fid or not field or (form_id and fid != form_id):
+            continue
+        fr = (generated_forms or {}).get(fid)
+        if not isinstance(fr, dict):
+            continue
+        state = fr.get("field_state") if isinstance(fr.get("field_state"), dict) else (fr.get("mapped") or {})
+        label = (fr.get("confidence") or {}).get(field)
+        if label in ("producer", "client_arq") or field in set(fr.get("client_filled_fields") or []):
+            continue
+        if _NORM.sub("", str(state.get(field) or "").lower()) != _NORM.sub("", str(s.get("current") or "").lower()):
+            continue
+        schema = fr.get("schema") if isinstance(fr.get("schema"), dict) and fr.get("schema") \
+            else _schema_from_disk(fid)
+        try:
+            pos = widget_positions(fid, fr).get(field)
+        except Exception:                                  # noqa: BLE001
+            pos = None
+        order = (pos[0], -pos[1], pos[2]) if pos else (9999, 0.0, 0.0)
+        current = _shown_value(schema, field, s.get("current"))
+        suggested = _shown_value(schema, field, s.get("suggested"))
+        docs = [str(d) for d in (s.get("documents") or []) if str(d or "").strip()]
+        rows.append({
+            "id": s.get("id"),
+            "form_id": fid,
+            "form_label": form_label(fid),
+            "field": field,
+            "page": pos[0] if pos else None,
+            "label": _trim(box_label(schema, field), _LABEL_MAX + 10),
+            "status": STATUS_DOCUMENT_SAYS,
+            "tag": _DOCUMENT_SAYS_TAG,
+            "reason": f'New document says "{suggested}" - the form says "{current}".',
+            "what_to_do": _DOCUMENT_SAYS_WHAT,
+            "current": s.get("current"),
+            "suggested": s.get("suggested"),
+            "current_display": current,
+            "suggested_display": suggested,
+            "documents": docs,
+            "_sort": (order, field),
+        })
+    rows.sort(key=lambda r: (r["form_id"], r["_sort"]))
+    for r in rows:
+        r.pop("_sort", None)
+    return rows

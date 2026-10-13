@@ -10,6 +10,8 @@
 //
 // Pure: no React, no fetch.
 
+import { formLabel } from "./formInstances.js";
+
 export const GEN_NONE = "none";
 export const GEN_RUNNING = "running";
 export const GEN_DONE = "done";
@@ -20,7 +22,9 @@ export const GEN_INTERRUPTED = "interrupted";
 export const FORMS_LOCKED_TEXT = "Forms are generated - make changes in the form editor.";
 export const FORMS_RUNNING_TEXT = "Forms are being generated - wait for them to finish.";
 export const GENERATION_DIDNT_FINISH = "Generation didn't finish";
-export const GENERATION_DIDNT_FINISH_NEXT = "Continue to form selection to generate the forms again.";
+// Names the place, not a button: before forms the rail's footer reads "Skip to
+// form selection" on every page but the last (Choice Electric #2).
+export const GENERATION_DIDNT_FINISH_NEXT = "Go to form selection to generate the forms again.";
 export const GENERATION_RUNNING_TEXT = "Your forms are being generated.";
 
 export const CONTINUE_WHERE_LEFT = "Continue where you left off";
@@ -74,10 +78,33 @@ export function formToOpen(generated, order, preferred, lastOpen) {
   return ids[0];
 }
 
-// Why the pre-form actions (reclassify, exclude, confirm a value, resolve
+// Why the pre-form actions (confirm a value through the pre-form route, resolve
 // integrity, add a form by ticking it) are switched off, or null.
 export function lockedReason(state) {
   if (state === GEN_DONE) return FORMS_LOCKED_TEXT;
+  if (state === GEN_RUNNING) return FORMS_RUNNING_TEXT;
+  return null;
+}
+
+// Documents are the exception (Choice Electric #25, 7 Oct 2026): adding a
+// document, or changing one's type / exclusion / supporting-only, works before
+// AND after forms - after forms the server re-stamps the forms from the change
+// (backend services/session_documents.py). Only a run in progress locks them,
+// word for word the backend's generation_state.documents_locked_reason.
+export function documentsLockedReason(state) {
+  if (state === GEN_RUNNING) return FORMS_RUNNING_TEXT;
+  return null;
+}
+
+// What a document change does once forms exist - said before it happens.
+export const DOCUMENTS_UPDATE_FORMS_TEXT = "Forms will be updated from this change";
+export const DOCUMENTS_AFTER_FORMS_NOTE = "Changes to documents update your generated forms. Boxes you typed are kept.";
+
+// Confirming a Data Consistency value is the exception (owner, 5 Oct 2026):
+// once forms exist it goes to /api/underwriting/confirm-value-in-editor, which
+// applies the value to the stored facts and re-stamps the forms in place. Only
+// a run in progress locks it - its forms are stamped from the facts it read.
+export function confirmLockedReason(state) {
   if (state === GEN_RUNNING) return FORMS_RUNNING_TEXT;
   return null;
 }
@@ -87,6 +114,28 @@ export function lockedReason(state) {
 // finish, which is the way to generate them again.
 export function continueLabel(state) {
   return state === GEN_DONE || state === GEN_RUNNING ? CONTINUE_WHERE_LEFT : CONTINUE_TO_SELECTION;
+}
+
+// Choice Electric #2 (Brent; owner, 9 Oct 2026): before forms, the review's
+// main button walks the producer through its pages in rail order - "Continue
+// to Documents", "Continue to Submission Integrity", ... - and only the last
+// page's button goes to form selection. Until then "Skip to form selection"
+// sits beside it, so form selection is always one click away.
+export const SKIP_TO_SELECTION = "Skip to form selection";
+
+// The page the main button opens: { id, label } for the page after `current`
+// in `sections` ([{ id, label }], rail order), or null when the main button is
+// the continue button - on the last page, on a page the list does not hold,
+// and on every page once forms exist or are being generated (no form
+// selection lies ahead then; it reads "Continue where you left off").
+export function nextReviewStep(sections, current, state) {
+  if (state === GEN_DONE || state === GEN_RUNNING) return null;
+  const list = Array.isArray(sections) ? sections : [];
+  const at = list.findIndex((s) => s && s.id === current);
+  if (at < 0 || at >= list.length - 1) return null;
+  const next = list[at + 1];
+  if (!next || !next.id || !next.label) return null;
+  return { id: next.id, label: `Continue to ${next.label}` };
 }
 
 // The score's name on the package page: the number IS the Total Package Score
@@ -106,7 +155,8 @@ export function formRows(generated, order) {
       && Number.isFinite(Number(raw)) ? Number(raw) : null;
     return {
       formId,
-      label: String(formId).replace(/_/g, " ").trim(),
+      // "ACORD 131", and a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+      label: formLabel(formId),
       score,
       grade: typeof sqs.grade === "string" && sqs.grade ? sqs.grade : null,
       tier: typeof sqs.tier === "string" && sqs.tier ? sqs.tier : null,

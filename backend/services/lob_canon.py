@@ -100,7 +100,10 @@ _SPECIFIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
 # "Property Damage Liability" falls through to the bare-"liability" branch,
 # whose tokens are all GL vocabulary, and lands on GENERAL_LIAB where it belongs.
 _FAMILY_BLIND_PHRASES: dict = {
-    PROPERTY: ("property damage",),
+    # "property protection insurance" is Michigan's no-fault AUTO coverage
+    # (8 Oct 2026: the Choice Electric auto dec's "Property Protection Insurance
+    # (Michigan Only)" row made the auto policy a source of the Property line).
+    PROPERTY: ("property damage", "property protection"),
 }
 
 # The same phrases, flattened, for consumers that tokenise a line name WITHOUT
@@ -158,7 +161,12 @@ _SPECIALTY: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     (POLLUTION,          ("pollution", "environmental")),
     (DIRECTORS_OFFICERS, ("directors and officers", "directors officers",
                           "d and o", "management liability")),
-    (EMPLOYEE_BENEFITS,  ("employee benefits",)),
+    # The singular is how ISO's own coverage part prints ("EMPLOYEE BENEFIT
+    # LIABILITY COVERAGE PART", Choice Electric 6 Oct 2026) - it reached the
+    # producer as "Coverage part not recognised". Only the LIABILITY phrase:
+    # an "employee benefit plan" is a crime / ERISA fidelity subject, not EBL.
+    (EMPLOYEE_BENEFITS,  ("employee benefits", "employee benefit liability",
+                          "employee benefit liab")),
     (LIQUOR,             ("liquor",)),
 )
 
@@ -458,6 +466,35 @@ def canon_line_or_part(text: Any, present_families: Any = ()) -> Optional[str]:
     return canon_line(text) or canon_part(text, present_families)
 
 
+# ── THE LAYER OF AN UMBRELLA-FAMILY POLICY (6 Oct 2026, Choice Electric) ────
+# "Excess" folds into UMBRELLA on purpose (C23: an excess policy must never
+# masquerade as the primary line it sits over), and every reader - the carried
+# lines, the ACORD 131 recommendation - keeps reading one family. But a tower
+# is several POLICIES: an umbrella and an excess (following form) policy above
+# it are two contracts, two carriers, two limits, and Brent's rule is one ACORD
+# 131 each. The layer is what tells them apart where policies are counted (the
+# line records, the Data Consistency picker); it never changes the family.
+UMBRELLA_LAYER = "umbrella"
+EXCESS_LAYER = "excess"
+
+
+def umbrella_layer(text: Any) -> Optional[str]:
+    """The layer an umbrella-family line name prints, or None for any other line.
+
+    "excess" when the name names an excess / following-form policy and not an
+    umbrella ("Excess (Following Form) Liability", "Commercial Excess
+    Liability"); "umbrella" otherwise ("Commercial Liability Umbrella",
+    "Excess Umbrella" - a name that says umbrella is the umbrella layer)."""
+    if canon_line(text) != UMBRELLA:
+        return None
+    s = _clean(text)
+    if re.search(r"\bumbrella\b", s):
+        return UMBRELLA_LAYER
+    if re.search(r"\bexcess\b|\bfollow(?:ing|s)? form\b", s):
+        return EXCESS_LAYER
+    return UMBRELLA_LAYER
+
+
 def is_known_family(token: Any) -> bool:
     """True when ``token`` is one of the family constants this module emits."""
     return token in _ALL_FAMILIES
@@ -566,6 +603,56 @@ def is_charge_label(text: Any) -> bool:
     return bool(_CHARGE_LABEL_RE.search(str(text or "")))
 
 
+# A CONTAINER names the policy, not a coverage: "Commercial Package", "CPP",
+# "Commercial Multiple Peril", an AMS code "CPKGE". It holds several lines, so
+# it maps to no family (blank over wrong), and it is not unknown terminology
+# either. Live 5 Oct (CH125): the AMS export's package row became "Coverage
+# part not recognised" beside the property row printing the same number. The
+# generality audit (G3) widened the vocabulary and the shapes: an appended
+# status / code / carrier ("(Expiring)", "- Magnolia Underwriters"), OCR glued
+# words, and branded packages ("Contractors Package Policy"). A Businessowners
+# policy is a LINE, never a container.
+_CONTAINER_STRONG = frozenset({"package", "packaged", "pkg", "cpp", "cpkge", "cmp", "smp",
+                               "portfolio", "multiperil"})
+_CONTAINER_WORDS = _CONTAINER_STRONG | frozenset({"multi", "multiple", "peril", "combination"})
+_CONTAINER_FILLER = frozenset({"commercial", "business", "policy", "insurance",
+                               "coverage", "program", "programme", "special", "line",
+                               "lines", "and", "the"})
+
+
+def _container_text(text: Any) -> str:
+    s = re.sub(r"\([^)]*\)", " ", str(text or ""))           # "(Expiring)", "(CPKGE)"
+    s = re.split(r"\s[-–—]\s", s)[0]                # "CPP - Magnolia Underwriters"
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)               # OCR "CommercialPackage"
+    return _clean(s)
+
+
+def is_container_label(text: Any) -> bool:
+    """True when a coverage-row NAME is a package / multi-peril policy container."""
+    words = _container_text(text).split()
+    if not words:
+        return False
+    named = [w for w in words if w not in _CONTAINER_FILLER]
+    if named and all(w in _CONTAINER_WORDS for w in named) and (
+            set(named) & _CONTAINER_STRONG
+            or ("peril" in named and ({"multi", "multiple"} & set(named)))):
+        return True
+    # A branded package: "Contractors Package Policy", "Hospitality Package".
+    return bool(re.search(r"\b(?:package|pkg)(?:\s+(?:policy|program|programme))?$",
+                          " ".join(words))) and "protection" not in words
+
+
+def _same_contract_number(a: str, b: str) -> bool:
+    """Two punctuation-blind policy numbers name one contract: equal, or one is
+    the other plus a short module / term suffix ("CP123" vs "CP12300")."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 5 and long_.startswith(short) and len(long_) - len(short) <= 3
+
+
 def unmapped_material_lines(coverage_lines: Any) -> list:
     """Line names this module cannot place that the package actually CARRIES.
 
@@ -597,6 +684,26 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
     # rows establish, so an ambiguous part with no parent line is still routed.
     present = coverage_families_present(coverage_lines)
     by_policy = policy_number_families(coverage_lines)
+    # Policy numbers some PLACED row carries. A container row sharing one is
+    # that contract's own heading, already represented by its lines. A package
+    # number usually spans two families, so `by_policy` (one family only)
+    # cannot answer this.
+    placed = [
+        e for e in coverage_lines
+        if isinstance(e, dict) and not is_container_label(e.get("line"))
+        and (canon_line(e.get("line"))
+             or canon_part(e.get("line"), present, by_policy.get(_policy_key(e))))
+    ]
+    placed_numbers = {_policy_key(e) for e in placed if _policy_key(e)}
+    placed_carriers = {_clean(e.get("carrier")) for e in placed if _clean(e.get("carrier"))}
+
+    def _container_is_placed(entry: dict) -> bool:
+        key = _policy_key(entry)
+        if key:
+            return any(_same_contract_number(key, n) for n in placed_numbers)
+        # No number (a premium summary, a certificate row): the carrier a placed
+        # line also names ties it to that contract.
+        return bool(_clean(entry.get("carrier")) and _clean(entry.get("carrier")) in placed_carriers)
     for entry in coverage_lines:
         if not isinstance(entry, dict):
             continue
@@ -607,6 +714,8 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
             continue                      # a premium subtotal, not a coverage
         if canon_line(raw) or canon_part(raw, present, by_policy.get(_policy_key(entry))):
             continue                      # we can place it
+        if is_container_label(raw) and _container_is_placed(entry):
+            continue                      # the contract's heading; its lines are placed
         if not _grants_coverage(entry):
             continue                      # not carried -> not material
         key = _dedupe_key(raw)
@@ -635,7 +744,12 @@ def _grants_coverage(entry: dict) -> bool:
     import the service layer, and it is used here only to WITHDRAW a denial -
     the failure mode of reading it too generously is that a denial is dropped
     and the fact stays ``not_stated``, i.e. today's behaviour.
+
+    A line the PRODUCER added ("Policies in this submission", 7 Oct 2026,
+    marked ``_producer_added``) is carried by their own statement.
     """
+    if entry.get("_producer_added"):
+        return True
     for key in ("premium", "limit"):
         val = entry.get(key)
         if val is None:

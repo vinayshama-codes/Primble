@@ -136,6 +136,13 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # pinned by test_h1_coverage_gap_closure.py::
         # test_dec_entry_signals_survive_the_purge_through_derived_facts.
         "coverage_evidence.py",
+        # extraction_pipeline (5 Oct 2026, G1 skeptic). `_finalize_pipeline`
+        # STORES the declarations' auto-liability reading
+        # (`_auto_liability_dec_reading`) while the entries exist - the merge,
+        # and every re-run, which re-merges the per-document copies the purge
+        # never touches. It is the reason the split door reads the same answer
+        # after the purge; with no entries it writes nothing.
+        "extraction_pipeline.py",
         # fact_comparison `_issue_date_of` (24 Sep 2026, client item 9). Reads a
         # declarations page's own "Date of Issue" entry so a dec RE-ISSUED
         # after a dated change is not taken as the change's older side. It runs
@@ -180,6 +187,56 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # PER-DOCUMENT copies, which the purge never touches, and with no index
         # it has no opinion - the card behaves exactly as before the filter.
         "underwriting_consistency.py",
+        # session_documents (Choice Electric #25, 7 Oct 2026). DOES run after
+        # generation - documents added to a package, or a document excluded /
+        # reclassified once forms exist. DECIDED: it never keeps the index. The
+        # re-merge rebuilds it from the PER-DOCUMENT copies the purge never
+        # touches; the door compares what the engine prints with the index the
+        # forms were stamped with (rebuilt the same way, through the merge, for
+        # the documents before the change) against the index after it - so a
+        # box moves exactly as a regeneration would move it - and then deletes
+        # the merged index again in the same write when the purge is on.
+        "session_documents.py",
+        # umbrella_layers (Choice Electric #4, 7 Oct 2026 - one ACORD 131 per
+        # umbrella-family layer). DOES run after generation (every restamp of a
+        # layer's copy reads its view). DECIDED: it never NEEDS the index - it
+        # only FILTERS the entries out of a layer's view (another layer's
+        # contract stays off this copy). After the purge there is nothing to
+        # filter and the view is the same minus an absent key: purge-safe.
+        "umbrella_layers.py",
+        # policy_lines (Choice Electric #9, 7 Oct 2026 - "Policies in this
+        # submission"). DOES run after generation: a producer corrects or adds a
+        # policy once forms exist. It reads the entries for ONE thing - the
+        # policy-number door (`normalization.is_not_a_policy_number`: a number the
+        # declarations label as a form or account number is refused). After the
+        # purge it reads the PER-DOCUMENT copies, which the purge never touches:
+        # the same answer both sides. Purge-safe.
+        "policy_lines.py",
+        # wc_premiums (Choice Electric #7, 7 Oct 2026 - ACORD 130's premiums).
+        # DECIDED: it reads the index only at MERGE (`derive_wc_premiums`) and
+        # stores what the stamper needs in the private `_wc_premiums` fact, which
+        # the purge never deletes - exactly the `dec_states_payroll_basis`
+        # pattern. Its other read is a document's OWN per-document entries (which
+        # line a document is about). Purge-safe.
+        "wc_premiums.py",
+        # form_dry_run (Choice Electric #27, 7 Oct 2026 - "Before you generate").
+        # DECIDED: runs BEFORE generation only - `pre_form_dry_run` returns None
+        # and its route refuses once `generated_forms` exist (the download review
+        # is the live list then). Its read (`documents_name_it`: a verified
+        # declarations entry names a box's fact, so gap fill can still fill it)
+        # therefore always sees the index, which is purged only AFTER
+        # generation. Purge-safe.
+        "form_dry_run.py",
+        # ai_role_guards (round 5, 7 Oct 2026). Runs inside `map_facts_to_form`,
+        # i.e. during generation, and after it only where a form is stamped
+        # again (form_addition, session_documents' re-stamp). DECIDED: the index
+        # is never the reason to REFUSE. The count rule's index is a WITNESS that
+        # keeps a count, so with no index the rule stands down (no opinion); the
+        # premium rule uses an entry only to set an occurrence aside as another
+        # line's, so with no index an occurrence stays in play and the box KEEPS
+        # its value. Purge-safe: fewer refusals after the purge, never more -
+        # pinned by test_round5_ai_role_guards_7oct.py::TestPurgedIndex.
+        "ai_role_guards.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

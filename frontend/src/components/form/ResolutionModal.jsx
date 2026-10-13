@@ -24,6 +24,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../config/constants';
 import ScheduleTable from '../arq/ScheduleTable';
+import { formLabel as instanceFormLabel } from '../../utils/formInstances';
+import { positiveScoreWording } from '../../utils/positiveWording';
+import { applyLabel, fieldsToApply } from '../../utils/fixWindow';
+import { missingRequiredSummary } from '../../utils/scheduleImport';
+import { stillMissing as windowStillMissing, unmetNeeds, rowNeedsSummary, unfinishedStarters, textForCoverage, gapCovered } from '../../utils/fixProgress';
 
 const PINK = '#E61B84';
 
@@ -41,6 +46,13 @@ function humanizeFact(key) {
 export default function ResolutionModal({ issue, sessionId, onApplied, onSetStatus, onClose }) {
   const resolution = issue?.resolution || {};
   const mode = resolution.mode || 'none';
+  // A schedule fix may ALSO need a few whole-submission values (Choice
+  // Electric #18, 7 Oct 2026): on a package with two or more buildings the
+  // COPE card opens the location table for the per-building values, and the
+  // values that are not per building (occupancy, valuation) ride along as
+  // typed inputs above it - the table never has to hold them.
+  const extraFacts = mode === 'schedule' && Array.isArray(resolution.facts) ? resolution.facts.filter(Boolean) : [];
+  const fieldFacts = mode === 'field' ? (resolution.facts || []) : extraFacts;
 
   const [values, setValues] = useState({});     // field mode: fact -> typed value
   // Which facts the producer put into "Other" (free-text) mode. Tracked
@@ -68,7 +80,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // empty box that fills a beat later (client #3, and the same complaint on
   // narrative 2026-09-09 - "Already on ACORD 101" popped in after a second, so
   // for that beat the modal said nothing was saved).
-  const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative');
+  const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative' || extraFacts.length > 0);
   // Bumped after an apply that raised a follow-up, to re-read what is now on
   // file. Without it the producer is asked to "apply again" while looking at
   // the pre-apply snapshot (fix 2026-08-25, live run S10).
@@ -93,6 +105,13 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // Facts the producer has started editing - the async pre-fill must never
   // overwrite these, or a value would jump under the cursor.
   const touched = useRef(new Set());
+  // Did the producer change the table? A COPE card on a 2+ building package
+  // shows the location table beside its whole-submission inputs (round 4, 7 Oct
+  // 2026); answering only those inputs must not save the untouched table, which
+  // would mark it as the person's own and keep a later document re-read from
+  // refreshing it.
+  const rowsTouched = useRef(false);
+  const editRows = (next) => { rowsTouched.current = true; setRows(next); };
 
   // UX-05. Forms this validation says are missing, as the SERVER declared them.
   // Held in state, not read straight off `resolution`, because a successful add
@@ -102,7 +121,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     (Array.isArray(resolution.add_forms) ? resolution.add_forms : []).filter(Boolean));
   const [addingForm, setAddingForm] = useState(null);   // form id in flight
   const [addedForms, setAddedForms] = useState([]);     // form ids added here
-  const formLabel = (fid) => String(fid || '').replace(/_/g, ' ');
+  // "ACORD 131", and a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+  const formLabel = (fid) => instanceFormLabel(fid);
 
   // The add's own payload, kept so it survives a LATER apply in the same modal.
   //
@@ -139,9 +159,9 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // Both modes hold a spinner until this resolves, so a previously-entered
   // value never flashes in a beat after an empty box (client #3).
   useEffect(() => {
-    if (mode !== 'field' && mode !== 'narrative') { setPrefillLoading(false); return; }
+    if (mode !== 'field' && mode !== 'narrative' && extraFacts.length === 0) { setPrefillLoading(false); return; }
     let alive = true;
-    const facts = mode === 'field' ? (resolution.facts || []) : ['additional_remarks_text'];
+    const facts = mode === 'narrative' ? ['additional_remarks_text'] : fieldFacts;
     (async () => {
       try {
         const q = encodeURIComponent(facts.join(','));
@@ -149,7 +169,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         const data = await res.json();
         if (!alive) return;
         const vals = data?.values || {};
-        if (mode === 'field') {
+        if (mode !== 'narrative') {
           setValues((prev) => {
             const next = { ...prev };
             for (const [k, v] of Object.entries(vals)) {
@@ -198,6 +218,49 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     })();
     return () => { alive = false; };
   }, [mode, sessionId, resolution.schedule_key]);
+
+  // Only the window scrolls (owner, 13 Oct 2026: scrolling a long window also
+  // scrolled the faded page behind it - twice: locking the body alone let a wheel
+  // over the faded area, or past the window's end, reach the page). The page is
+  // held still (html and body, given back exactly as they were - the editor's
+  // own lock included, the scrollbar's width kept so nothing shifts), and every
+  // wheel over the overlay is the window's: it scrolls whatever inside the window
+  // can still scroll that way, and never passes on.
+  const overlayRef = useRef(null);
+  const cardRef = useRef(null);
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = [html.style.overflow, body.style.overflow, body.style.paddingRight];
+    const scrollbar = window.innerWidth - html.clientWidth;
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    if (scrollbar > 0) body.style.paddingRight = `${scrollbar}px`;
+    const el = overlayRef.current;
+    const onWheel = (e) => {
+      const card = cardRef.current;
+      if (!card || !card.contains(e.target)) { e.preventDefault(); return; }
+      // A sideways swipe is a table's (the location / driver tables scroll
+      // left and right inside the window).
+      const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      for (let n = e.target; n && n !== card.parentNode; n = n.parentNode) {
+        if (n.nodeType !== 1) continue;
+        const style = window.getComputedStyle(n);
+        const room = sideways
+          ? /(auto|scroll)/.test(style.overflowX) && n.scrollWidth > n.clientWidth + 1
+            && (e.deltaX > 0 ? n.scrollLeft + n.clientWidth < n.scrollWidth - 1 : n.scrollLeft > 0)
+          : /(auto|scroll)/.test(style.overflowY) && n.scrollHeight > n.clientHeight + 1
+            && (e.deltaY > 0 ? n.scrollTop + n.clientHeight < n.scrollHeight - 1 : n.scrollTop > 0);
+        if (room) return;                  // this element takes the scroll
+      }
+      e.preventDefault();                  // nothing inside can move that way
+    };
+    if (el) el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      if (el) el.removeEventListener('wheel', onWheel);
+      [html.style.overflow, body.style.overflow, body.style.paddingRight] = prev;
+    };
+  }, []);
 
   // Close on Escape.
   useEffect(() => {
@@ -249,17 +312,20 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   };
 
   const applyField = async () => {
-    // Only send fields the producer actually typed into. `values` also carries
-    // whatever the async pre-fill loaded from the current session facts (so a
-    // reopened validation shows what's already on file) - those are display
-    // only. Submitting an untouched pre-filled value back through this endpoint
-    // re-validates it as a fresh producer answer, which can reject a value the
-    // extraction pipeline already accepted as legitimate (e.g. a peril marked
-    // "Not covered") purely because the producer never meant to change it.
-    const filled = Object.entries(values).filter(
-      ([k, v]) => touched.current.has(k) && String(v || '').trim()
-    );
-    if (!filled.length) { setErr('Enter at least one value.'); return; }
+    // Send the fields the producer typed into. `values` also carries whatever
+    // the async pre-fill loaded from the current session facts (so a reopened
+    // validation shows what's already on file). Beside a typed box those stay
+    // display only: re-sending an untouched pre-filled value re-validates it as
+    // a fresh producer answer, which can reject a value the extraction pipeline
+    // already accepted (e.g. a peril marked "Not covered") purely because the
+    // producer never meant to change it. With NOTHING typed, the shown values
+    // are what the producer is confirming (Choice Electric #18 - Apply on a
+    // window full of values said "Enter at least one value."): see fixWindow.js.
+    // "Save progress" sends only what was typed: confirming the values already
+    // on file is a finished fix's step, not a partial one's.
+    const { send: filled, error } = fieldsToApply(fieldFacts, values, touched.current,
+                                                  { allowConfirm: !note && !progressGap });
+    if (!filled.length) { setErr(error || 'Enter at least one value.'); return; }
     setBusy(true); setErr(''); setNote('');
     let last = null;
     try {
@@ -268,7 +334,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       // in one go therefore reports no note: the second write clears what the
       // first one raised, and only the last response is read.
       for (const [field, value] of filled) {
-        last = await post({ mode: 'field', field, value: String(value).trim() });
+        last = await post({ mode: 'field', field, value });
         if (!last?.success) {
           setErr(last?.validation_error || last?.message || 'Could not apply that value.');
           setBusy(false);
@@ -306,6 +372,11 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
   const applyNarrative = async () => {
     if (!text.trim()) { setErr('Enter an explanation.'); return; }
+    const open = unfinishedStarters(text, resolution.gaps);
+    if (open.length) {
+      setErr(`Finish the sentence after "${String(open[0].starter).trim()}", or untick it.`);
+      return;
+    }
     setBusy(true); setErr('');
     let data;
     try {
@@ -323,13 +394,40 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     setBusy(true); setErr('');
     let data;
     try {
-      data = await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows });
+      // The whole-submission values typed above the table go first (only the
+      // ones the producer touched - same rule as field mode), then the table.
+      let typedOne = null;
+      for (const [field, value] of Object.entries(values)) {
+        if (!extraFacts.includes(field) || !touched.current.has(field) || !String(value || '').trim()) continue;
+        const r = await post({ mode: 'field', field, value: String(value).trim() });
+        if (!r?.success) {
+          setErr(r?.validation_error || r?.message || 'Could not apply that value.');
+          setBusy(false);
+          return;
+        }
+        applied.current = r;
+        typedOne = r;
+      }
+      // The table is saved when it was edited, or when it is the only thing
+      // being saved (an unchanged table still lets every row's stated value
+      // answer the card - premises_cope.derive_package_cope).
+      const savedTable = !(typedOne && !rowsTouched.current);
+      data = savedTable
+        ? await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows })
+        : typedOne;
       if (!data?.success) { setErr(data?.message || 'Could not save the schedule.'); setBusy(false); return; }
+      // Saved, and the window closes - also on "Save progress" (owner, 13 Oct
+      // 2026). What is still missing was named above the button before the
+      // click; an unfinished item stays in its list with "Open to fix" (the
+      // panel reads the server's lists, AcordModal.handleIssueResolved), and
+      // opening it again shows what was saved. No "Apply the fix" over a fix
+      // that is not finished.
     } catch (e) {
       setErr(e?.message || 'Could not save the schedule.');
       setBusy(false);
       return;
     }
+    applied.current = null;
     onApplied?.(withAdded(data), issue);
   };
 
@@ -373,6 +471,33 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     setAddingForm(null);
   };
 
+  // Save progress (owner, 13 Oct 2026). A table window - with or without the
+  // whole-submission boxes above it - that still lacks a value it shows saves
+  // as PROGRESS: the button says "Save progress", the line above it names what
+  // is missing, and the item stays open with "Open to fix" until a save really
+  // clears it. Field windows with several boxes are "whichever applies" (their
+  // own hint says so) unless the card declares the box groups its rule needs
+  // (`resolution.needs` - the COPE cards); without that the server's answer
+  // after the save decides whether they were fixed.
+  // The narrative window's options the typed text already covers (13 Oct 2026).
+  const narrativeGaps = mode === 'narrative' && Array.isArray(resolution.gaps) ? resolution.gaps : [];
+  const narrativeCoverage = narrativeGaps.length ? textForCoverage(text, narrativeGaps) : '';
+  const narrativeCovered = narrativeGaps.filter((g) => gapCovered(narrativeCoverage, g)).length;
+
+  const progressGap = mode === 'schedule' && schedule && !loading && !prefillLoading
+    ? windowStillMissing({
+        boxes: extraFacts.map((f) => [humanizeFact(f), values[f]]),
+        hasTable: true,
+        // The table's required cells, and each building row's COPE column
+        // groups the card declares (`resolution.row_needs`).
+        table: [missingRequiredSummary(rows, schedule.columns || []),
+                rowNeedsSummary(rows, resolution.row_needs, schedule.columns || [])]
+          .filter(Boolean).join('; '),
+      })
+    : (mode === 'field' && !prefillLoading && Array.isArray(resolution.needs)
+      ? unmetNeeds(resolution.needs, values, humanizeFact)
+      : '');
+
   const label = {
     field: 'Enter the correct value',
     schedule: 'Update the schedule',
@@ -380,8 +505,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     none: 'Review this validation',
   }[mode] || 'Resolve';
 
-  const overlay = { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
-  const card = { background: '#fff', borderRadius: 16, width: '100%', maxWidth: mode === 'schedule' ? 760 : 480, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.28)', animation: 'slideUp 0.2s ease-out' };
+  const overlay = { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overscrollBehavior: 'contain' };
+  const card = { background: '#fff', borderRadius: 16, width: '100%', maxWidth: mode === 'schedule' ? 760 : 480, maxHeight: '90vh', overflowY: 'auto', overscrollBehavior: 'contain', boxShadow: '0 24px 60px rgba(0,0,0,0.28)', animation: 'slideUp 0.2s ease-out' };
   const primaryBtn = { padding: '9px 16px', borderRadius: 9, border: 'none', background: PINK, color: '#fff', fontSize: 13, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit', opacity: busy ? 0.7 : 1 };
   const ghostBtn = { padding: '9px 16px', borderRadius: 9, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
   const inputStyle = { width: '100%', padding: '9px 11px', fontSize: 13, border: '1px solid #e2e8f0', borderRadius: 8, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' };
@@ -389,18 +514,18 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const stop = (e) => e.stopPropagation();
 
   return (
-    <div style={overlay} onMouseDown={() => { if (!busy && !addingForm) finish(); }}>
-      <div style={card} onMouseDown={stop}>
+    <div ref={overlayRef} role="dialog" aria-modal="true" data-header-autohide="off" style={overlay} onMouseDown={() => { if (!busy && !addingForm) finish(); }}>
+      <div ref={cardRef} style={card} onMouseDown={stop}>
         {/* Header */}
         <div style={{ padding: '18px 20px 12px', borderBottom: '1px solid #f1f5f9' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: PINK, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+              {/* Plain pink text, no pill (Brent's Choice Electric #24) - the
+                  same as the editor's Cross-Form rows. */}
               {Array.isArray(issue?.forms) && issue.forms.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                  {issue.forms.map((f, i) => (
-                    <span key={i} style={{ fontSize: 9.5, fontWeight: 700, color: '#9d174d', background: '#fce7f3', border: '1px solid #f9a8d4', borderRadius: 10, padding: '1px 7px' }}>{String(f).replace(/_/g, ' ')}</span>
-                  ))}
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: PINK, lineHeight: 1.4, marginTop: 5 }}>
+                  {issue.forms.map((f) => instanceFormLabel(f)).join(', ')}
                 </div>
               )}
             </div>
@@ -420,7 +545,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(230,27,132,0.1)'; e.currentTarget.style.color = PINK; e.currentTarget.style.transform = 'rotate(0deg)'; }}
             >×</button>
           </div>
-          <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.5, marginTop: 10 }}>{issue?.message}</div>
+          <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.5, marginTop: 10 }}>{positiveScoreWording(issue?.message)}</div>
         </div>
 
         {/* Body */}
@@ -474,18 +599,21 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </div>
           )}
 
-          {(mode === 'field' || mode === 'narrative') && prefillLoading && (
+          {(mode === 'field' || mode === 'narrative' || extraFacts.length > 0) && prefillLoading && (
             <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#64748b', fontSize: 13 }}>
               <span style={{ width: 15, height: 15, border: '2px solid #e2e8f0', borderTopColor: PINK, borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
-              {mode === 'field' ? 'Loading current value...' : 'Loading saved remarks...'}
+              {mode === 'narrative' ? 'Loading saved remarks...' : 'Loading current value...'}
             </div>
           )}
-          {mode === 'field' && !prefillLoading && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {(resolution.facts || []).length > 1 && (
+          {(mode === 'field' || extraFacts.length > 0) && !prefillLoading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: mode === 'schedule' ? 14 : 0 }}>
+              {mode === 'schedule' && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>For the whole submission</div>
+              )}
+              {fieldFacts.length > 1 && !Array.isArray(resolution.needs) && (
                 <div style={{ fontSize: 11.5, color: '#64748b' }}>Provide the correct value for whichever applies - you don't have to fill every field.</div>
               )}
-              {(resolution.facts || []).map((fact) => {
+              {fieldFacts.map((fact) => {
                 // A closed question is offered as a choice list (backend
                 // `resolution.controls`), so a hard stop or warning is never
                 // resolved by guessing at wording. "Other" reveals free text.
@@ -510,7 +638,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                         style={inputStyle}
                         value={isOther ? 'Other' : picked}
                         disabled={busy}
-                        autoFocus={(resolution.facts || [])[0] === fact}
+                        autoFocus={fieldFacts[0] === fact}
                         onChange={(e) => {
                           const chosen = e.target.value;
                           touched.current.add(fact);
@@ -535,7 +663,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                           autoFocus
                           value={picked}
                           onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && mode === 'field') applyField(); }}
                         />
                       )}
                     </>
@@ -545,10 +673,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                     value={picked}
                     placeholder="Type the correct value..."
                     disabled={busy}
-                    autoFocus={(resolution.facts || [])[0] === fact}
+                    autoFocus={fieldFacts[0] === fact}
                     onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
                     onFocus={() => { if (note) setNote(''); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && mode === 'field') applyField(); }}
                   />
                   )}
                 </label>
@@ -560,6 +688,51 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
           {mode === 'narrative' && !prefillLoading && (
             <div>
               <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 8 }}>Your explanation is added to the ACORD 101 Additional Remarks Schedule and sent to the underwriter.</div>
+              {/* What the score still looks for (owner, 13 Oct 2026: a producer
+                  could not tell why the card stayed). Tick one or several - each
+                  adds a sentence starter to finish below. */}
+              {Array.isArray(resolution.gaps) && resolution.gaps.length > 0 && (
+                <div style={{ marginBottom: 10, background: '#fdf2f8', border: '1px solid #f9a8d4', borderRadius: 10, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#be185d', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Still missing - tick to add a starter</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {resolution.gaps.map((g) => {
+                      // Ticked when its starter is in the box OR the text already
+                      // covers it the way the score reads it (13 Oct 2026). One the
+                      // producer's own words cover cannot be unticked - unticking
+                      // only takes a starter line out.
+                      const starterIn = !!g.starter && text.includes(g.starter);
+                      const coveredByText = gapCovered(narrativeCoverage, g);
+                      const on = starterIn || coveredByText;
+                      const locked = coveredByText && !starterIn;
+                      return (
+                        <label key={g.key} title={locked ? 'Your text already covers this' : undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: '#334155', background: on ? '#fce7f3' : '#fff', border: `1px solid ${on ? PINK : '#e2e8f0'}`, borderRadius: 999, padding: '3px 10px', cursor: busy || locked ? 'default' : 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={busy || !g.starter || locked}
+                            onChange={() => {
+                              if (!g.starter) return;
+                              setText((t) => (t.includes(g.starter)
+                                ? t.split('\n').filter((line) => line !== g.starter.trimEnd() && line !== g.starter).join('\n')
+                                : (t.trim() ? `${t.replace(/\s+$/, '')}\n${g.starter}` : g.starter)));
+                              if (err) setErr('');
+                            }}
+                            style={{ accentColor: PINK, margin: 0 }}
+                          />
+                          {g.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {narrativeCovered > 0 && (
+                    <div style={{ fontSize: 11, color: '#9d174d', marginTop: 7 }} data-testid="narrative-covered">
+                      {narrativeCovered === resolution.gaps.length
+                        ? 'Your text covers all of these.'
+                        : `Your text covers ${narrativeCovered} of ${resolution.gaps.length}.`}
+                    </div>
+                  )}
+                </div>
+              )}
               {existingRemarks.trim() && (
                 <div style={{ marginBottom: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '9px 11px' }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Already on ACORD 101</div>
@@ -579,6 +752,18 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
           {mode === 'schedule' && (
             <div>
+              {/* What this fix needs from the table (the COPE card on a package
+                  with two or more buildings, 7 Oct 2026): one row per building. */}
+              {(resolution.note || (Array.isArray(resolution.columns) && resolution.columns.length > 0)) && !loading && (
+                <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5, marginBottom: 10 }}>
+                  {resolution.note ? `${resolution.note} ` : ''}
+                  {Array.isArray(resolution.columns) && resolution.columns.length > 0 && schedule && (
+                    <>Per building: {resolution.columns
+                      .map((k) => ((schedule.columns || []).find((c) => c.key === k) || {}).label || humanizeFact(k))
+                      .join(', ')}.</>
+                  )}
+                </div>
+              )}
               {loading ? (
                 <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#64748b', fontSize: 13 }}>
                   <span style={{ width: 15, height: 15, border: '2px solid #e2e8f0', borderTopColor: PINK, borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
@@ -588,7 +773,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                 <ScheduleTable
                   columns={schedule.columns || []}
                   rows={rows}
-                  onChange={setRows}
+                  onChange={editRows}
                   label={schedule.schedule_label || 'Schedule'}
                   singular={schedule.schedule_singular || 'row'}
                   dedupKeys={schedule.dedup_keys || []}
@@ -619,6 +804,12 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             <div style={{ marginTop: 12, fontSize: 12.5, color: '#78350f', lineHeight: 1.55, background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '11px 13px' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Saved - one thing to check</div>
               {note}
+            </div>
+          )}
+
+          {progressGap && !note && (
+            <div style={{ marginTop: 12, fontSize: 12, color: '#475569', lineHeight: 1.5, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 12px' }}>
+              <b style={{ color: '#334155' }}>Still missing:</b> {progressGap}. Save your progress now and finish it later - it stays open until everything is in.
             </div>
           )}
 
@@ -673,10 +864,14 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                   : (mode === 'field' ? applyField : mode === 'narrative' ? applyNarrative : applySchedule)}
               >
                 {busy
-                  ? 'Applying...'
+                  ? (progressGap ? 'Saving...' : 'Applying...')
                   : note
                     ? (noteSettleHere ? 'Apply the fix' : 'Done')
-                    : 'Apply'}
+                    : progressGap
+                      ? 'Save progress'
+                      : (mode === 'field' && !prefillLoading
+                        ? applyLabel(fieldFacts, values, touched.current)
+                        : 'Apply')}
               </button>
             </>
           )}

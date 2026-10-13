@@ -697,6 +697,13 @@ _NO_PROBE = {"n", "no", "false", "f", "0", "off", "unchecked",
 # Every combined Yes/No vocabulary that is allowed to exist, and why. Keyed by
 # (file, the sorted tokens) so moving one does not silently re-permit another.
 _PINNED_VOCABULARIES = {
+    # Round 5 (7 Oct 2026): not a Yes/No reader - the values `ai_role_guards`
+    # never treats as a CATEGORY (so an AI "Yes" / "See schedule" is never read
+    # as another fact's construction / occupancy value). It answers nothing.
+    ("ai_role_guards.py", ("excluded", "false", "included", "n", "n a", "na", "nil",
+                           "no", "none", "not applicable", "other", "see attached",
+                           "see schedule", "tbd", "true", "unknown", "various",
+                           "y", "yes")),
     # THE OWNER.
     ("normalization.py", ("checked", "false", "no", "true", "unchecked", "yes")),
     # Fail-open fallbacks for the case where `normalization` cannot be imported.

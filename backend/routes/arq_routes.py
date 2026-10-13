@@ -577,6 +577,12 @@ async def client_view(token: str, request: Request):
             # keep every column, so nothing the agency fills is lost.
             _client_cols = [c for c in _sdef["columns"]
                             if not (isinstance(c, dict) and c.get("producer_only"))]
+            # The VALUES of those columns are stripped too (7 Oct 2026): the
+            # client never sees LOC # / BLDG # / roof / protection class cells
+            # the agency filled. Safe on save - `schedule_capture.merge_saved_rows`
+            # ignores producer-only cells on a client save and keeps the stored
+            # ones by the row's hidden id, which stays on every row.
+            _rows = schedule_capture.client_rows(_lk, _rows)
             _confirm_tbl = bool(q.get("confirm")) and bool(_rows)
             q_item.update({
                 "schedule_key":      _lk,
@@ -736,7 +742,10 @@ async def submit_arq(token: str, request: Request):
     score_update = {}
     if apply_ok:
         try:
-            score_update = await recalculate_session_scores(arq["session_id"])
+            from services.arq_service import CLIENT_ANSWERS_TRIGGER
+            score_update = await recalculate_session_scores(
+                arq["session_id"], trigger=CLIENT_ANSWERS_TRIGGER,
+            )
         except Exception as _recalc_ex:
             logger.error(f"ARQ submit: score recalculation failed: {_recalc_ex}", exc_info=True)
             # Don't swallow the failure silently: mark it so the producer can be

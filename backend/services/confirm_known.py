@@ -234,7 +234,16 @@ def sources_phrase(labels: Optional[List[str]]) -> str:
 # ── schedules ───────────────────────────────────────────────────────────────
 
 def rows_signature(rows: Any) -> str:
-    """Stable fingerprint of a table as it was shown."""
+    """Stable fingerprint of a table as it was shown. The hidden row identity
+    (`schedule_capture.ROW_ID_KEY`) is never shown, so it never counts: a
+    table confirmed before its rows carried one (vehicles / drivers from
+    7 Oct 2026) is still the same table."""
+    try:
+        from services.schedule_capture import ROW_ID_KEY
+        rows = [{k: v for k, v in r.items() if k != ROW_ID_KEY} if isinstance(r, dict) else r
+                for r in (rows or [])]
+    except Exception:                                         # noqa: BLE001
+        pass
     try:
         blob = json.dumps(rows or [], sort_keys=True, separators=(",", ":"), default=str)
     except Exception:                                         # noqa: BLE001

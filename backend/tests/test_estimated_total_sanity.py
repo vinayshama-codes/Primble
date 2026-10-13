@@ -226,11 +226,16 @@ def test_currency_to_int(text, expected):
 
 def test_one_implementation_of_the_line_sum():
     """The stated-total check and the fallback sum must be the SAME code. Two
-    copies of "which entries are real lines" would drift invisibly."""
+    copies of "which entries are real lines" would drift invisibly.
+
+    6 Oct 2026 (Choice Electric item 21): the one door is now what ACORD 125's
+    LINES OF BUSINESS grid PRINTS (`_printed_lob_premiums`) - the floor (the
+    largest printed row) and the fallback (`_printed_sum`) both read it, so the
+    total can never include a line no row shows. The test pinned the previous
+    helper's name; the rule it guards is unchanged."""
     import inspect
     src = inspect.getsource(ps._resolve_estimated_total)
-    assert src.count("_sum_of_coverage_line_premiums") >= 2, (
-        "the resolver must delegate both its sanity floor and its fallback to "
-        "the shared helper")
+    assert src.count("_printed_lob_premiums(") == 1 and src.count("_printed_sum(") >= 2, (
+        "the resolver must take its floor and its fallback from the printed rows")
     assert "_lob_indicator_index()" not in src, (
         "line-selection logic has been re-inlined into the resolver")

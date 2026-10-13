@@ -162,13 +162,54 @@ def _fact_value(facts: Any, key: str) -> Any:
     return _unwrap((facts or {}).get(key)) if isinstance(facts, dict) else None
 
 
-def one_premises_row(facts: Any) -> Optional[dict]:
-    """The single `property_locations` row, or None when there are 0 or 2+.
+def _premises_number(value: Any) -> str:
+    """A LOC # compared as a number: "001" and "1" are one location."""
+    s = str(value or "").strip()
+    return s.lstrip("0") or ("0" if s else "")
 
-    The same list, read the same way, as the schedule resolver that stamps the
+
+def same_premises(a: Any, b: Any) -> bool:
+    """Two location-table rows are buildings at ONE premises: the same LOC #,
+    or - when either lacks one - the same street line. A stated street that
+    differs always separates them (13 Oct 2026: LOC # is the premises, BLDG #
+    the building at it, so one premises with two buildings is two rows)."""
+    if not (isinstance(a, dict) and isinstance(b, dict)):
+        return False
+    street_a = re.sub(r"[^a-z0-9]", "", str(a.get("address_line1") or "").lower())
+    street_b = re.sub(r"[^a-z0-9]", "", str(b.get("address_line1") or "").lower())
+    if street_a and street_b and street_a != street_b:
+        return False
+    loc_a, loc_b = _premises_number(a.get("location_number")), _premises_number(b.get("location_number"))
+    if loc_a and loc_b:
+        return loc_a == loc_b
+    return bool(street_a and street_b)
+
+
+def first_row_of_premises(rows: Any, idx: int) -> Optional[int]:
+    """The index of the first row at the same premises as row `idx` (itself
+    when it is the first), or None for a row that is not a dict."""
+    if not isinstance(rows, list) or not (0 <= idx < len(rows)) or not isinstance(rows[idx], dict):
+        return None
+    for j in range(idx):
+        if isinstance(rows[j], dict) and same_premises(rows[j], rows[idx]):
+            return j
+    return idx
+
+
+def one_premises_row(facts: Any) -> Optional[dict]:
+    """The first `property_locations` row when every row is a building at ONE
+    premises, else None (no rows, or two or more premises).
+
+    Was "exactly one row" until 13 Oct 2026: a premises with two buildings is
+    two rows of one location, and every one-location rule (the business's
+    revenue and interest on its row, one own-or-rent question) stood down on it
+    - run `ba7c709d` asked the same location questions once per building. The
+    same list, read the same way, as the schedule resolver that stamps the
     premises grid (`pdf_service._resolve_schedule_row`)."""
     rows = _fact_value(facts, "property_locations")
-    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
+        return None
+    if any(not same_premises(rows[0], r) for r in rows[1:]):
         return None
     return rows[0]
 
@@ -410,7 +451,8 @@ def row_states(row: Any, key: str) -> bool:
         return str(row.get(key) or "").strip() != ""
 
 
-def write_location_answer(facts: dict, base: str, position: int, value: Any) -> bool:
+def write_location_answer(facts: dict, base: str, position: int, value: Any,
+                          source: str = "client_arq") -> bool:
     """Write one per-location answer onto its `property_locations` row. True
     when the row changed. An interest answer that names no interest ("Yes",
     blank) writes nothing; the list keeps its envelope."""
@@ -442,6 +484,14 @@ def write_location_answer(facts: dict, base: str, position: int, value: Any) -> 
     new_rows[idx] = row
     facts["property_locations"] = ({**held, "value": new_rows}
                                    if isinstance(held, dict) and "value" in held else new_rows)
+    # A person wrote on the table: re-fingerprint it, or the next pre-form
+    # re-run no longer recognises the rows as the person's and rebuilds them
+    # from the documents, answer and all (5 Oct audit hole, closed 6 Oct).
+    try:
+        from services.schedule_capture import refresh_human_mark
+        refresh_human_mark(facts, "property_locations", source)
+    except Exception:                                         # noqa: BLE001
+        pass
     return True
 
 

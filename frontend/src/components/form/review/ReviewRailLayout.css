@@ -6,7 +6,9 @@
    - No transform / filter / backdrop-filter / contain on anything that can hold
      a HoverTip or InfoTip: those tips are position:fixed and would re-anchor.
      (.rr-footer holds no tips, so its backdrop-filter is safe.)
-   - The only query container is the Data Consistency panel, which holds no tips.
+   - The query containers are the Data Consistency panel and the footer
+     (.rr-footer__inner, 9 Oct 2026); neither holds tips. A container is the
+     containing block for fixed descendants, so a tip must never go in one.
    ============================================================================= */
 
 .acord-step-shell.rr-shell { padding: 0; }
@@ -74,6 +76,34 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  container-type: inline-size;
+}
+/* The footer's buttons (Choice Electric #2, 9 Oct 2026) use the form-selection
+   footer's row (App.css .step-footer-buttons): "Skip to form selection" is sized
+   and coloured like that screen's "Back to review", the main button takes the
+   rest, and alone it fills the row. The review's main labels are longer than
+   "Generate N Forms Now", so the row stacks as that screen's does on a phone
+   (the main button on top, both full width) as soon as the footer is too narrow
+   for both on one line. */
+.rr-footer__buttons .rr-footer__next { text-align: center; }
+/* Touch screens keep :hover on the element last tapped. The main button stays
+   the same element from page to page, so it stayed in its darker hover state
+   beside the skip button; on a touch screen it keeps its resting look. */
+@media (hover: none) {
+  .rr-footer__buttons .btn-modal-primary:hover:not(:disabled) {
+    background: var(--primary);
+    transform: none;
+    box-shadow: 0 4px 16px rgba(230, 27, 132, 0.3);
+  }
+}
+@container (max-width: 600px) {
+  .rr-footer__buttons { flex-direction: column-reverse; }
+  .rr-footer__buttons.step-footer-buttons .step-footer-back { width: auto; }
+}
+/* The smallest phones (320px): the longest label ("Continue to Submission
+   Integrity") stays on one line. */
+@container (max-width: 340px) {
+  .rr-footer__buttons .rr-footer__next { font-size: 14px; padding-left: 12px; padding-right: 12px; }
 }
 
 /* ---------- Rail: package card ---------- */
@@ -600,13 +630,6 @@
 .rr-table td { padding: 9px 18px; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #0f172a; white-space: nowrap; }
 .rr-table tbody tr:first-child td { border-top: 0; }
 .rr-table__source { white-space: normal !important; color: #64748b !important; }
-.rr-scope-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; color: #0369a1; }
-.rr-scope-confirmed { font-size: 11px; font-weight: 600; color: #16a34a; }
-.rr-scoped { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 18px; font-size: 12.5px; color: #475569; }
-.rr-scoped__value { min-width: 0; font-weight: 600; color: #1e293b; overflow-wrap: anywhere; }
-.rr-scope-chip { padding: 1px 6px; border: 1px solid #e2e8f0; border-radius: 4px; background: #fff; font-size: 10.5px; color: #64748b; }
-.rr-scope-chip--unmatched { border-style: dashed; border-color: #cbd5e1; color: #94a3b8; }
-.rr-scoped__source { min-width: 0; font-size: 11px; color: #94a3b8; overflow-wrap: anywhere; }
 .rr-muted { color: #94a3b8; }
 
 /* ---------- Hard Stops / Warnings ---------- */
@@ -704,7 +727,6 @@
   .rr-doc,
   .rr-conf,
   .rr-issue,
-  .rr-scoped { padding-left: 14px; padding-right: 14px; }
   .rr-table th,
   .rr-table td { padding-left: 12px; padding-right: 12px; }
 }
@@ -731,3 +753,30 @@
   .rr-form-row { padding: 10px 14px; gap: 10px; }
   .rr-form-row__tier { display: none; }
 }
+
+/* The Resolved section (8 Oct 2026): a handled hard stop or warning, tucked
+   away with its label and "Open again" - the editor's Reviewed tuck. */
+.rr-resolved__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+/* "Open again" (owner, 9 Oct 2026: it rendered as a bare browser button): the
+   size of the "Dismiss" chip beside an open item (10px, 2px 8px, radius 5) and
+   its colours (App.css .issue-status-btn, with its hover), plus the arrow. */
+.rr-resolved__actions .rr-resolved__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 2px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.rr-resolved__actions .rr-resolved__open:disabled { cursor: wait; opacity: 0.6; }
+/* A dismissed item fixed since: nothing to reopen. */
+.rr-resolved__gone { font-size: 10px; font-weight: 600; color: #94a3b8; white-space: nowrap; }
+.rr-resolved__actions .rr-resolved__open:focus-visible { outline: 2px solid #e61b84; outline-offset: 2px; }
+.rr-resolved__label { font-size: 9.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; border: 1px solid; }
+.rr-resolved__label--resolved { background: #dcfce7; color: #166534; border-color: #86efac; }
+.rr-resolved__label--dismissed { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.rr-resolved__note { font-size: 10.5px; color: #475569; margin-top: 4px; line-height: 1.4; }

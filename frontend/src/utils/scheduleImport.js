@@ -68,6 +68,57 @@ export function isBlankRow(row, columns) {
   return columns.every((c) => !String(row?.[c.key] || '').trim());
 }
 
+// The column's example as a hint inside an empty box ("e.g. 789 Commerce Dr").
+// A bare "789 Commerce Dr" in grey read as a filled box (owner's run 18ecbfa8,
+// 12 Oct 2026: the street address looked entered while it was empty).
+export function exampleHint(col) {
+  const ph = String(col?.placeholder || '').trim();
+  return ph ? `e.g. ${ph}` : '';
+}
+
+const _norm = (v) => String(v ?? '').trim().toLowerCase();
+
+/**
+ * The example row an older template carried under its header (every column's
+ * own placeholder): an untouched copy is an example, never a row to import -
+ * it would put a fake "789 Commerce Dr, Houston" building (or "Jane Smith"
+ * driver) on the forms. Only the WHOLE example matches: a row the person
+ * changed anywhere is theirs.
+ */
+export function isTemplateExampleRow(row, columns) {
+  const cols = Array.isArray(columns) ? columns : [];
+  const withExample = cols.filter((c) => String(c?.placeholder || '').trim());
+  if (withExample.length < 2) return false;
+  return cols.every((c) => {
+    const cell = _norm(row?.[c.key]);
+    const ph = _norm(c?.placeholder);
+    if (!ph) return !cell;
+    return cell === ph || cell === `e.g. ${ph}`;
+  });
+}
+
+/**
+ * "Street address on rows 1 and 2" - the required cells the rows still miss
+ * (blank rows ignored), "" when none. Said after a save, so the person knows
+ * what is left (a save never waits for every cell).
+ */
+export function missingRequiredSummary(rows, columns) {
+  const list = Array.isArray(rows) ? rows : [];
+  const parts = [];
+  (Array.isArray(columns) ? columns : []).filter((c) => c?.required).forEach((c) => {
+    const missing = [];
+    list.forEach((row, idx) => {
+      if (!isBlankRow(row, columns) && !String(row?.[c.key] ?? '').trim()) missing.push(idx + 1);
+    });
+    if (!missing.length) return;
+    const nums = missing.length === 1
+      ? `row ${missing[0]}`
+      : `rows ${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}`;
+    parts.push(`${c.label} on ${nums}`);
+  });
+  return parts.join('; ');
+}
+
 /**
  * Validate a whole schedule.
  * Returns { errors: {rowIndex: {colKey: msg}}, duplicates: Set<rowIndex> }.
@@ -247,6 +298,25 @@ const HEADER_ALIASES = {
   address_state: ['state', 'addressstate', 'province'],
   address_zip: ['zip', 'zipcode', 'postalcode', 'addresszip', 'postcode'],
   operations_description: ['operations', 'operationsdescription', 'description', 'use', 'occupancy'],
+  // Location table premises numbering and COPE columns (6 Oct 2026). A bare
+  // "Location" header stays the street's (address_line1 above), never LOC #.
+  location_number: ['loc', 'locno', 'locnum', 'locnumber', 'locationno', 'locationnum', 'locationnumber',
+    'prem', 'premno', 'premnumber', 'premises', 'premisesno', 'premisesnumber'],
+  building_number: ['bldg', 'bldgno', 'bldgnum', 'bldgnumber', 'bld', 'bldno', 'building', 'buildingno',
+    'buildingnumber'],
+  construction_type: ['construction', 'constructiontype', 'constructionclass', 'constructioncode', 'const',
+    'isoconstruction', 'constr'],
+  year_built: ['yearbuilt', 'yrbuilt', 'built', 'yearconstructed', 'buildyear', 'originalyear'],
+  building_value: ['buildingvalue', 'buildinglimit', 'buildingamount', 'bldgvalue', 'bldglimit',
+    'buildingcoverage', 'buildingreplacementcost'],
+  bpp_value: ['bpp', 'bppvalue', 'bpplimit', 'businesspersonalproperty', 'personalproperty', 'contents',
+    'contentsvalue', 'contentslimit'],
+  // Per-building COPE columns (7 Oct 2026).
+  roof_material: ['roof', 'rooftype', 'roofmaterial', 'roofing', 'roofcovering', 'roofconstruction'],
+  roof_year: ['roofyear', 'roofupdated', 'roofreplaced', 'roofingyear', 'yearroofreplaced'],
+  protection_class: ['protectionclass', 'pc', 'ppc', 'protclass', 'fireprotectionclass', 'protectionclasscode',
+    'isoprotectionclass', 'firepc'],
+  sprinkler: ['sprinkler', 'sprinklers', 'sprinklered', 'sprinklerpercent', 'sprinklerpct', 'percentsprinklered'],
   date: ['date', 'dateofloss', 'lossdate', 'occurrencedate', 'dol'],
   line_of_business: ['line', 'lineofbusiness', 'lob', 'coverage', 'policytype'],
   paid: ['paid', 'amountpaid', 'paidamount', 'losspaid'],
@@ -312,7 +382,7 @@ export function rowsFromMatrix(matrix, columns) {
   });
 
   return {
-    rows: rows.filter((r) => !isBlankRow(r, columns)),
+    rows: rows.filter((r) => !isBlankRow(r, columns) && !isTemplateExampleRow(r, columns)),
     usedHeader: hasHeader,
     unmatched,
   };
@@ -342,10 +412,15 @@ export async function parseScheduleFile(file, columns) {
 }
 
 /** Download a template so an agent's spreadsheet lands in the right columns. */
+// The template is the column names only. Its old second line was an example
+// row ("789 Commerce Dr, Houston, ...") that an upload imported as a real
+// building when nobody deleted it (12 Oct 2026); the hints stay in the table.
+export function templateCsv(columns) {
+  return `${(columns || []).map((c) => c.label).join(',')}\n`;
+}
+
 export function downloadTemplate(columns, label) {
-  const header = columns.map((c) => c.label).join(',');
-  const example = columns.map((c) => c.placeholder || '').join(',');
-  const blob = new Blob([`${header}\n${example}\n`], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([templateCsv(columns)], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

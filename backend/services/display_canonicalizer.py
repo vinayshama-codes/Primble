@@ -286,6 +286,12 @@ _CURRENCY_SCALE = {
     "m": 1_000_000, "mm": 1_000_000, "mil": 1_000_000, "million": 1_000_000,
     "b": 1_000_000_000, "bn": 1_000_000_000, "billion": 1_000_000_000,
 }
+# A figure carrying a NON-MONEY unit is not an amount (round 5, 7 Oct 2026):
+# a property deductible box holds "2%" (a wind / hail percentage) or "72 Hours"
+# (a business income waiting period), and they printed "$2" / "$72".
+_NON_MONEY_UNIT_RE = re.compile(
+    r"%|\bpercent\b|\b(?:hours?|hrs?|days?|weeks?|wks?|months?|mos?|years?|yrs?)\b",
+    re.IGNORECASE)
 
 
 def canonicalize_currency(value: Any) -> str:
@@ -297,10 +303,13 @@ def canonicalize_currency(value: Any) -> str:
     wrong amount in any of 911 money boxes on 16 forms. A shorthand scale is
     expanded. Text stating NO amount, or MORE THAN ONE, comes back exactly as
     written: choosing one of two figures, or joining them, would print a number
-    the document never stated.
+    the document never stated. Neither does a figure in a non-money unit
+    ("2%", "72 Hours", "12 months").
     """
     s = _s(value)
     if not s:
+        return s
+    if _NON_MONEY_UNIT_RE.search(s):
         return s
     tokens = list(_CURRENCY_TOKEN_RE.finditer(s))
     if len(tokens) != 1:
@@ -330,8 +339,56 @@ def canonicalize_state(value: Any) -> str:
     return s
 
 
+# ── A CITY box holds the city (round 5, 7 Oct 2026) ──────────────────────────
+# Live run b248c194: ACORD 127's garaging CITY printed "Denver, Co" - the model
+# read "DENVER, CO 80221" and kept the state, which the title-caser then made
+# "Co". A US state (code, or full name) after the city's comma, or before a
+# ZIP, is the address's STATE, never part of the city; a trailing ZIP is its
+# ZIP. Structural, so a city that merely contains a state's name ("Kansas
+# City", "Indiana", "New York") or a non-US region ("Toronto, ON") is left
+# exactly as written. `pdf_service` moves the parts into an EMPTY state / ZIP
+# box of the same address when the documents agree.
+_CITY_STATE_TAIL_RE = re.compile(
+    r"^(?P<city>[A-Za-z][A-Za-z .'\-]*?)\s*(?P<comma>,)?\s*"
+    r"(?P<state>" + "|".join(re.escape(n) for n, _ in _STATE_PHRASES_SORTED) + r"|[A-Za-z]{2})\.?"
+    r"(?:\s*,?\s*(?P<zip>\d{5}(?:-\d{4})?))?\s*$", re.IGNORECASE)
+_STATE_ZIP_ONLY_RE = re.compile(r"^(?P<state>[A-Za-z]{2})\.?\s*,?\s*(?P<zip>\d{5}(?:-\d{4})?)\s*$")
+_CITY_ZIP_RE = re.compile(r"^(?P<city>[A-Za-z][A-Za-z .'\-]*?)\s*,?\s*(?P<zip>\d{5}(?:-\d{4})?)\s*$")
+
+
+def split_city_state_zip(value: Any) -> Optional[tuple]:
+    """(city, state code, zip) when a CITY value carries its address's state
+    and / or ZIP, else None. `city` is "" for a bare "TX 75201". A state needs
+    the city's comma or a ZIP after it - "Lake Ozark MO" is left alone."""
+    s = re.sub(r"\s+", " ", _s(value))
+    if not s:
+        return None
+    m = _STATE_ZIP_ONLY_RE.match(s)
+    if m and m.group("state").upper() in _2LETTER_STATES:
+        return "", m.group("state").upper(), m.group("zip")
+    bare = s.strip(" .,")
+    if len(bare) == 2 and bare.upper() in _2LETTER_STATES:
+        return "", bare.upper(), ""              # a state code alone: no city at all
+    m = _CITY_STATE_TAIL_RE.match(s)
+    if m and (m.group("comma") or m.group("zip")):
+        st = m.group("state")
+        code = _STATE_ABBR.get(st.lower()) or (st.upper() if len(st) == 2 and st.upper() in _2LETTER_STATES
+                                                else None)
+        city = m.group("city").strip(" ,")
+        if code and city:
+            return city, code, m.group("zip") or ""
+    m = _CITY_ZIP_RE.match(s)
+    if m and m.group("city").strip(" ,"):
+        return m.group("city").strip(" ,"), "", m.group("zip")
+    return None
+
+
 def canonicalize_city(value: Any) -> str:
-    """Title-case a city name, preserving mixed-case tokens."""
+    """Title-case a city name, preserving mixed-case tokens. A state / ZIP the
+    value carries after the city is not printed in the CITY box."""
+    parts = split_city_state_zip(value)
+    if parts and parts[0]:
+        value = parts[0]
     return _canon_phrase(value, street=False)
 
 

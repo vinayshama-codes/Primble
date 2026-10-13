@@ -1,0 +1,138 @@
+[
+ {
+  "line": "Cyber Incident Response Team",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Employment Practices Liability Coverage Part",
+  "carrier": "Federal Insurance Company",
+  "premium": null,
+  "policy_number": null,
+  "effective_date": "January 1, 2025",
+  "expiration_date": "January 1, 2026"
+ },
+ {
+  "line": "Excess (Following Form) Liability",
+  "carrier": "TRAVELERS PROPERTY CASUALTY COMPANY OF AMERICA",
+  "premium": "$ 10,692",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Commercial General Liability Coverage Part",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "$ 16,818.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Commercial Inland Marine Coverage Part",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "$ 2,431.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Commercial Property Coverage Part",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "$ 6,275.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Crime and Fidelity Coverage Part",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "$ 500.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Employee Benefit Liability Coverage Part",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "$ 425.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Commercial Liability Umbrella",
+  "carrier": "AMERISURE MUTUAL INSURANCE COMPANY",
+  "premium": "$17,082.00",
+  "policy_number": "CU DS 70 00 04 14",
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Workers' Compensation and Employers' Liability",
+  "carrier": "AMERISURE INSURANCE COMPANY",
+  "premium": "29,278.00",
+  "policy_number": null,
+  "effective_date": "01/01/2025",
+  "expiration_date": "01/01/2026"
+ },
+ {
+  "line": "Non-Panel Response Provider",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Business Interruption and Extra Expense",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Digital Data Recovery",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Network Extortion",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Payment Card Loss",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Regulatory Proceeding",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ },
+ {
+  "line": "Electronic, Social And Printed Media Liability",
+  "carrier": "ACE American Insurance Company",
+  "premium": "$4,162.00",
+  "policy_number": null,
+  "effective_date": "01-01-2025",
+  "expiration_date": "01-01-2026"
+ }
+]

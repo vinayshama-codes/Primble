@@ -56,7 +56,9 @@ _COVER_LOW_RE = re.compile(r"\b(?:worst|lowest|weakest)\b", re.I)
 
 
 def _cover_form_label(form_id) -> str:
-    return str(form_id or "").replace("ACORD_", "ACORD ").replace("_", " ").strip()
+    # "ACORD 131", and a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+    from services.form_instances import instance_label
+    return instance_label(str(form_id or ""))
 
 
 def _agent_name(user: Optional[dict]) -> str:
@@ -356,6 +358,13 @@ def a2a_block(facts: dict, flags: dict, *, org_name: str, user: Optional[dict],
     return block
 
 
+def _score_name(fid: Any) -> str:
+    """The form a score row names: a form's second copy by its label ("ACORD 131
+    (Excess)", 7 Oct 2026) - never the internal id - every plain id as before."""
+    from services.form_instances import is_instance
+    return _cover_form_label(fid) if is_instance(fid) else str(fid)
+
+
 def _score_entry(name: str, sqs: Optional[dict]) -> dict:
     score = (sqs or {}).get("sqs_score", 0) or 0
     grade, tier = grade_and_tier(score)
@@ -420,7 +429,7 @@ async def generate_ai_cover_narrative(
     # "kept for certificates") explains nothing about the score, so the model is
     # never handed one: it called the landlord a "major gap" (Orbin, 1 Oct 2026).
     sqs_summary = [
-        {**_score_entry(fid, sqs),
+        {**_score_entry(_score_name(fid), sqs),
          "breakdown": sqs.get("breakdown", {}), "issues": sqs.get("issues", []),
          "recommendations": [r for r in (sqs.get("recommendations") or [])
                              if not (isinstance(r, dict) and r.get("unscored"))]}
@@ -490,7 +499,7 @@ Return ONLY the JSON object."""
     # cached - it carries its own timestamp (1 Oct 2026, see `a2a_block`).
     _stops = lambda k: [m for s_ in sqs_results.values() for m in ((s_ or {}).get(k) or [])]
     _block = a2a_block(facts, flags, org_name=org_name, user=user,
-                       scores=[_score_entry(fid, sq) for fid, sq in sqs_results.items()],
+                       scores=[_score_entry(_score_name(fid), sq) for fid, sq in sqs_results.items()],
                        form_ids=form_ids,
                        hard_stops=list(dict.fromkeys(_stops("hard_stops"))),
                        soft_stops=list(dict.fromkeys(_stops("soft_stops"))))
@@ -783,8 +792,11 @@ def build_cover_page_pdf(
                 sc      = sqs_color(score)
                 routing = routing_label(sqs.get("routing_decision") if sqs else None)
                 grade, tier = grade_and_tier(score)
+                # Instance-aware: "ACORD 131 (Excess)"; every plain id as before.
+                _row_name = (_cover_form_label(fid) if "__" in str(fid)
+                             else str(fid).replace("_", " "))
                 sqs_rows.append([
-                    Paragraph(fid.replace("_", " "),  S("Cell", fontSize=8,  fontName="Helvetica")),
+                    Paragraph(_row_name,               S("Cell", fontSize=8,  fontName="Helvetica")),
                     Paragraph(f"<b>{score}/100</b>",   S("Cell", fontSize=9,  fontName="Helvetica-Bold", textColor=sc)),
                     Paragraph(grade,                    S("Cell", fontSize=8,  fontName="Helvetica-Bold", textColor=sc)),
                     Paragraph(tier,                     S("Cell", fontSize=7,  fontName="Helvetica")),
@@ -1034,7 +1046,7 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
         for fid, sqs in (sqs_results or {}).items():
             score = sqs.get("sqs_score", 0) if sqs else 0
             grade = grade_and_tier(score)[0]
-            lines.append(f"  {fid}: {score}/100 ({grade})")
+            lines.append(f"  {_score_name(fid)}: {score}/100 ({grade})")
         lines += ["", "SUMMARY:", (narrative or "No narrative available.")[:800]]
 
         page_content = "BT /F1 10 Tf 40 750 Td 14 TL\n"

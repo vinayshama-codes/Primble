@@ -505,7 +505,8 @@ def annotate_fact_states(facts: dict, flags: Optional[dict] = None) -> dict:
                 facts.pop("_flags", None)
     return facts
 
-def human_provenance_facts(facts: Optional[dict]) -> Dict[str, dict]:
+def human_provenance_facts(facts: Optional[dict],
+                           include_absence: bool = False) -> Dict[str, dict]:
     """Every fact envelope a HUMAN supplied or confirmed, keyed by fact key.
 
     Used to carry human answers across a pipeline re-run (V1 C1-D, Q7):
@@ -513,6 +514,12 @@ def human_provenance_facts(facts: Optional[dict]) -> Dict[str, dict]:
     client value for a field the documents never mention was destroyed by every
     re-run. Private keys and bare scalars are skipped - a bare scalar carries no
     provenance, so there is nothing to assert about who supplied it.
+
+    ``include_absence`` also returns a person's answer that there IS none -
+    "None" / "N/A", stored by `answer_semantics.build_fact_envelope` as an
+    empty value with ``value_state`` explicit_no / not_applicable. Without it a
+    re-run forgot the answer and asked the decided question again (audit G8,
+    5 Oct 2026).
     """
     out: Dict[str, dict] = {}
     if not isinstance(facts, dict):
@@ -524,7 +531,9 @@ def human_provenance_facts(facts: Optional[dict]) -> Dict[str, dict]:
             continue
         value = raw.get("value")
         if value is None or (isinstance(value, str) and not value.strip()):
-            continue
+            if not (include_absence
+                    and str(raw.get("value_state") or "") in (EXPLICIT_NO, NOT_APPLICABLE)):
+                continue
         if derive_evidence_state(raw)[0] == USER_CONFIRMED:
             out[key] = dict(raw)
     return out
@@ -587,8 +596,10 @@ def lines_applied_for(form_ids=None) -> frozenset:
     try:
         from services.pdf_service import _SECTION_FORM_LINE_PHRASES
         from services.lob_canon import canon_line
+        from services.form_instances import base_form_id
         for fid in form_ids:
-            for phrase in _SECTION_FORM_LINE_PHRASES.get(str(fid), ()):
+            # A form's second copy applies for its form's line (7 Oct 2026).
+            for phrase in _SECTION_FORM_LINE_PHRASES.get(base_form_id(str(fid)), ()):
                 fam = canon_line(phrase)
                 if fam:
                     out.add(fam)

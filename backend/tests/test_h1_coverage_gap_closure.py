@@ -584,6 +584,12 @@ def test_deductible_basis_is_read_from_the_real_fact():
     codes = [i["code"] for i in _check_property_deductible_structure(facts, flags, {"ACORD_140"})]
     assert "property_deductible_basis_missing" not in codes
     facts.pop("deductible_basis")
+    # 5 Oct 2026: the rule asks "flat dollar or percentage", and "$2,500"
+    # answers it on its own printing - so does a bare "2500" (a percentage
+    # always carries its "%"); only a small unitless number is open.
+    codes = [i["code"] for i in _check_property_deductible_structure(facts, flags, {"ACORD_140"})]
+    assert "property_deductible_basis_missing" not in codes
+    facts["property_deductible_aop"] = "2"
     codes = [i["code"] for i in _check_property_deductible_structure(facts, flags, {"ACORD_140"})]
     assert "property_deductible_basis_missing" in codes
     assert resolution_for("property_deductible_basis_missing")["mode"] == "field"
@@ -915,7 +921,10 @@ def test_split_limits_state_the_auto_liability_limit():
              "auto_bi_per_accident": "$500,000", "auto_pd_per_accident": "$100,000",
              "auto_covered_symbols": _sym(1)}
     assert ce.auto_liability_stated(split) and ce.auto_split_limits_stated(split)
-    assert not ce.auto_split_limits_stated(dict(split, auto_liability_limit="$1,000,000"))
+    # A limit PRINTED as a CSL outranks them; a bare "$1,000,000" beside a split
+    # structure and three parts does not (skeptic G1, 5 Oct 2026: a split part
+    # copied into the limit field outvoted the structure, the flag and the parts).
+    assert not ce.auto_split_limits_stated(dict(split, auto_liability_limit="$1,000,000 CSL"))
     subs = sq._calculate_exposure_consistency(split, AUTO, [], [])[1]
     assert subs["coverage_information"] == 100
     # The umbrella: split limits are an underlying auto; no CSL comparison is attempted.

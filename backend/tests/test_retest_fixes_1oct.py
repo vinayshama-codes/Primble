@@ -221,7 +221,10 @@ def _src(path):
 
 def test_the_side_panel_sections_start_closed_like_every_other_section():
     sections = [line for line in _src(PANEL).splitlines() if "<Section " in line]
-    assert len(sections) == 2 and not any("defaultOpen" in line for line in sections)
+    # Needs attention, AI held back, and (7 Oct 2026, C103) "New document" -
+    # the open choices a document added after forms raised. All start closed.
+    assert len(sections) == 3 and not any("defaultOpen" in line for line in sections)
+    assert any("New document (" in line for line in sections)
     assert "function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false," in _src(ACORD_MODAL)
 
 
@@ -237,7 +240,11 @@ def test_the_applicant_group_reads_as_the_review_names_it():
 
 
 def test_the_verify_tag_names_calculated_values_too():
-    assert 'hint: "Filled by the AI or calculated by us, and not confirmed in your documents."' in _src(UTIL)
+    # 13 Oct 2026: AI values FOUND in the documents are Please verify rows too
+    # (Brent's 0.85 weight - a person confirms them), so the hint no longer says
+    # every value is "not confirmed in your documents". The TEST pinned the old
+    # wording; the rule it guards (calculated values are named) still holds.
+    assert 'hint: "Filled by the AI or calculated by us. Confirm it or correct it."' in _src(UTIL)
     assert "not found word for word in your documents" not in _src(UTIL)
 
 

@@ -191,8 +191,14 @@ async def resolve_client_answer(
     # Recompute stops / SQS so the panel and the score reflect the decision.
     score_update: dict = {}
     try:
-        from services.arq_service import recalculate_session_scores
-        score_update = await recalculate_session_scores(session_id) or {}
+        from services.arq_service import CLIENT_ANSWERS_TRIGGER, recalculate_session_scores
+        # Accepting the CLIENT's value is a client answer taking effect, so it
+        # may update the "Since client answers" band; keeping the documents'
+        # value is not.
+        score_update = await recalculate_session_scores(
+            session_id,
+            **({"trigger": CLIENT_ANSWERS_TRIGGER} if choice == CHOICE_USE_CLIENT else {}),
+        ) or {}
     except Exception as exc:                                  # noqa: BLE001
         logger.error("client_answer_review: recalc failed for %s - %s", fact_key, exc)
 

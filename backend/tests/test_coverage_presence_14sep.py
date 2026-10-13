@@ -312,7 +312,10 @@ class TestFormEvidenceMatchesTheForm:
 
     def test_orbin_137_card_cites_the_auto_limit_not_a_contractor_fact(self):
         trig, suffix = _build_trigger_facts("ACORD_137_CO", _orbin_facts())
-        assert suffix == "Auto liability limit: $ 1,000,000"
+        # 7 Oct 2026 round 4: money prints through the currency canonicaliser
+        # (was the raw "$ 1,000,000" spelling) - the point of this test is the
+        # auto fact, not its spacing.
+        assert suffix == "Auto liability limit: $1,000,000"
         assert "contractor_type" not in {t["code"] for t in trig}
 
     def test_the_recommendation_card_reads_the_same(self):
@@ -320,7 +323,7 @@ class TestFormEvidenceMatchesTheForm:
         recs = {r["form_id"]: r for r in
                 match_forms_deterministic(_orbin_facts(), dict(ORBIN_FLAGS), text=text)}
         label = recs["ACORD_137_CO"]["reason_label"]
-        assert "Auto liability limit: $ 1,000,000" in label
+        assert "Auto liability limit: $1,000,000" in label
         assert "Contractor" not in label
 
     def test_a_form_with_none_of_its_facts_keeps_its_generic_message(self):

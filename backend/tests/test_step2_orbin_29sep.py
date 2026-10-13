@@ -290,18 +290,22 @@ def _doc(role="dec_page", **facts):
 
 class TestTheRenewalPresumption:
     def test_orbin_two_writers_premiums_print_carrier_stays_asked(self):
+        # Brent, 8 Oct 2026: the renewal holds, but a dec's EXPIRING premiums
+        # never print on page one (they belong in Prior Carrier Information).
         mf = _page_one_mf()
         marked = es._mark_page_one_current_policy(mf, [_doc()])
-        assert marked == ["carrier"]
+        assert marked == ["carrier", "premium"]
         assert mf["renews_current_programme"] is True
         assert mf["carrier_is_current_policy"] is True
-        assert "premium_is_current_policy" not in mf
+        assert mf["premium_is_current_policy"] is True
         assert mf["current_term_rows_ok"] is True
 
     def test_one_writer_prints_its_carrier_too(self):
         one = [dict(r, carrier=_EMCC) for r in _ORBIN_LINES if r.get("carrier")]
         mf = _page_one_mf(lines=one)
-        assert es._mark_page_one_current_policy(mf, [_doc()]) == []
+        # The one writing company still prints; the expiring premium does not
+        # (Brent, 8 Oct 2026).
+        assert es._mark_page_one_current_policy(mf, [_doc()]) == ["premium"]
         assert mf["renews_current_programme"] is True
 
     @pytest.mark.parametrize("role", ["policy", "binder", "endorsement"])
@@ -339,9 +343,11 @@ class TestTheRenewalPresumption:
 
     def test_the_marks_are_recomputed_not_sticky(self):
         # A replay or a re-merge on stored facts reflects the current rule.
-        mf = _page_one_mf(premium_is_current_policy=True, carrier_is_current_policy=True)
+        mf = _page_one_mf(premium_is_current_policy=True, carrier_is_current_policy=True,
+                          renews_current_programme="stale")
         es._mark_page_one_current_policy(mf, [_doc()])
-        assert "premium_is_current_policy" not in mf
+        assert mf["renews_current_programme"] is True        # recomputed, not the stale value
+        assert mf["premium_is_current_policy"] is True       # Brent, 8 Oct 2026
 
     @pytest.mark.parametrize("mf,docs", [(None, None), ({}, "x"), ({"coverage_lines": "junk"}, [None, 3])])
     def test_junk_never_raises(self, mf, docs):
@@ -361,11 +367,11 @@ def test_page_one_premiums_print_through_the_stamper():
     mf = _page_one_mf()
     es._mark_page_one_current_policy(mf, [_doc()])
     facts = {**mf, "_form_id": "ACORD_125"}
-    assert ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A", facts) not in (None, "")
-    # CARRIER names BOTH writing companies (owner, 30 Sep 2026 - reverses the 29
-    # Sep owned blank; ACORD's "company name(s)"), owned, never sent to gap fill.
-    assert ps.authoritative_expected_value("ACORD_125", "Insurer_FullName_A", facts) == \
-        f"{_EMCPC}; {_EMCC}"
+    # Brent, 8 Oct 2026: the expiring total stays off page one, and the two
+    # writing companies are not listed in the top Carrier box - both owned
+    # blanks, never sent to gap fill.
+    assert ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A", facts) in (None, "")
+    assert ps.authoritative_expected_value("ACORD_125", "Insurer_FullName_A", facts) is None
     assert ps.authoritative_expected_value("ACORD_125", "Insurer_NAICCode_A", facts) is None
 
 
@@ -381,12 +387,13 @@ class TestTheCarrierCard:
                 if x.get("rec_id") == "rec_submission_carrier_name"]
 
     def test_a_blank_page_one_carrier_raises_an_unscored_card(self):
-        # 30 Sep 2026 (owner): a renewed two-company programme now PRINTS both
-        # companies, so no card. The card still fires where no company can be
-        # named - a quote in the package, its market not stated.
+        # Brent, 8 Oct 2026: a renewed two-company programme leaves the top
+        # Carrier box blank again, so the card asks (the 30 Sep join is gone).
+        # It also fires where no company can be named - a quote in the package,
+        # its market not stated.
         mf = _page_one_mf()
         es._mark_page_one_current_policy(mf, [_doc()])
-        assert self._card(self._score(mf, {})) == []
+        assert len(self._card(self._score(mf, {}))) == 1
         mf = _page_one_mf()
         es._mark_page_one_current_policy(mf, [_doc(), _doc("quote")])
         assert mf.get("renews_current_programme") is not True
@@ -1063,10 +1070,16 @@ _T2 = {
 
 def _row(**over):
     """A pre-form row: nothing generated, nothing selected, two recommended
-    forms, Contact information missing (Tier 1)."""
+    forms, Contact information missing (Tier 1).
+
+    Claims-made GL (13 Oct 2026): the two recipes once differed through the
+    Form Fill Rate slice, which the door no longer counts before forms (the SQS
+    without forms). They still differ through the cross-form checks the door
+    runs on the RECOMMENDED forms (retro date / prior acts on ACORD 126), which
+    the old 3.7 call never saw - so the equality tests below still bite."""
     base = {
         "user_id": "u-item2", "facts": {**_T1, **_T2},
-        "flags": {"has_general_liability": True},
+        "flags": {"has_general_liability": True, "gl_is_claims_made": True},
         "hard_stops": [], "soft_stops": [],
         "recommendations": [{"form_id": "ACORD_125"}, {"form_id": "ACORD_126"}],
         "cross_form_issues": [], "structured_issues": [], "docs": [], "integrity": {},
@@ -2060,8 +2073,9 @@ def test_naming_a_company_that_writes_the_policies_keeps_the_renewal():
     ok, _u, store = _apply_with_docs("submission_carrier_name", _EMCPC, mf, gen)
     f = store["generated_forms"]["ACORD_125"]
     assert f["field_state"]["Insurer_FullName_A"] == _EMCPC
-    for box, val in _P1_PREMIUMS.items():
-        assert f["field_state"][box] == val, box
+    # The renewal holds, but its expiring premiums stay off page one (Brent, 8 Oct).
+    for box in _P1_PREMIUMS:
+        assert not str(f["field_state"].get(box) or "").strip(), box
     assert store["facts"].get("renews_current_programme") is True
 
 

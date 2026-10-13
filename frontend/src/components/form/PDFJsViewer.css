@@ -42,6 +42,67 @@
   gap: 4px;
 }
 
+/* "Cancel" beside "Done editing - save" (Choice Electric #19, 9 Oct 2026): the
+   same size as the save button in edit mode, outlined so the save stays the
+   one filled button. */
+.pdfviewer-cancel-btn {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid #4a5578;
+  background: #252a3d;
+  color: #e8eaf2;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pdfviewer-cancel-btn:hover:not(:disabled) {
+  background: #2f3550;
+  border-color: #6b7899;
+}
+.pdfviewer-cancel-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Edit mode adds "Cancel". Up to 1366px App.css already keeps the toolbar's
+   buttons on one row and truncates the form name; on wider screens the toolbar
+   wrapped instead (it had 1px to spare at 1440 before Cancel). In edit mode the
+   buttons now stay on the row there too, and the form name gives way first - it
+   truncates, with the full name in its tooltip; the highlight counts stay. */
+@media (min-width: 1367px) {
+  .pdfviewer-toolbar-top.is-editing { flex-wrap: nowrap !important; }
+  /* No overflow clip here: the "?" colour legend opens below this group. */
+  .pdfviewer-toolbar-top.is-editing > div:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap !important;
+  }
+  /* The highlight counts keep their size; only the name gives way. */
+  .pdfviewer-toolbar-top.is-editing > div:first-child > span:not(:first-child) {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .pdfviewer-toolbar-top.is-editing .pdfviewer-toolbar-actions {
+    flex-shrink: 0;
+    flex-wrap: nowrap !important;
+  }
+}
+
+/* A narrow viewer - a laptop with the editor sidebar open, a tablet (9 Oct
+   2026): the name, the highlight counts and the buttons cannot share one row
+   (in edit mode the counts ran into the buttons and the name disappeared), so
+   the buttons take a second row. The shell is the size container; it holds no
+   tips, and the colour legend is positioned against its own "?" icon. */
+.pdfviewer-toolbar-shell { container-type: inline-size; flex-shrink: 0; }
+@container (max-width: 900px) {
+  .pdfviewer-toolbar-shell .pdfviewer-toolbar-top { flex-wrap: wrap !important; row-gap: 4px !important; }
+  .pdfviewer-toolbar-shell .pdfviewer-toolbar-top > div:first-child { flex: 1 1 100% !important; }
+}
+
 /* The view-mode hint under the toolbar: where to click to edit. */
 .pdfviewer-view-hint {
   padding: 4px 14px;
@@ -65,6 +126,10 @@
     font-size: 11px !important;
     padding: 4px 9px !important;
   }
+  .pdfviewer-toolbar-actions .pdfviewer-cancel-btn {
+    font-size: 11px !important;
+    padding: 4px 9px !important;
+  }
 }
 
 /* Phones: App.css sets every toolbar button to 11px / 5px 8px. */
@@ -74,6 +139,10 @@
     padding: 7px 14px !important;
   }
   .pdfviewer-toolbar-actions .pdfviewer-edit-btn.is-editing {
+    font-size: 12px !important;
+    padding: 5px 10px !important;
+  }
+  .pdfviewer-toolbar-actions .pdfviewer-cancel-btn {
     font-size: 12px !important;
     padding: 5px 10px !important;
   }

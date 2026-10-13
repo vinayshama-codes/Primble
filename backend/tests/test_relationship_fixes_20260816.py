@@ -353,9 +353,17 @@ class TestUnderlyingCoverageGrid:
             not in _asked("ACORD_131", _run_facts())
 
     def test_a_real_leftover_liability_line_does_fill_an_other_row(self):
+        # Round 5 (7 Oct 2026, Brent #4): a leftover line is underlying when the
+        # umbrella's OWN schedule of underlying insurance lists it - this
+        # fixture's schedule used to list Auto and GL only, so the liquor
+        # policy is scheduled here (the unscheduled case is pinned in
+        # tests/test_round5_scoped_evidence_7oct.py).
         facts = _run_facts()
         facts["coverage_lines"] = facts["coverage_lines"] + [
             {"line": "Liquor Liability", "premium": "$900", "policy_number": "LQ-1"}]
+        facts["underlying_policies"] = facts["underlying_policies"] + [
+            {"line": "Liquor Liability", "limit": "$1,000,000",
+             "carrier": "EMC Property & Casualty Company", "policy_no": "LQ-1"}]
         mapped = _fill("ACORD_131", facts)
         descs = {str(mapped.get(f"UnderlyingCoverage_Coverage_OtherDescription_{r}") or "")
                  for r in "ABCD"}

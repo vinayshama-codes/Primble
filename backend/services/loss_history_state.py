@@ -50,6 +50,7 @@ door (the rule ``fact_comparison`` owns is "are these the same fact?").
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 NEW_VENTURE_FIELD = "new_venture_indicator"
@@ -470,6 +471,91 @@ def _row_has_claim_identity(row: Any) -> bool:
     if not isinstance(row, dict):
         return False
     return any(not _is_blank_fact(row.get(col)) for col in _CLAIM_IDENTITY_COLUMNS)
+
+
+_LOSS_RUN_DOC_TYPE = "loss_run"
+
+
+def package_has_loss_runs(docs: Any, facts: Any) -> bool:
+    """Does this submission carry LOSS RUNS? ONE door (5 Oct 2026).
+
+    It was read off the document TYPE alone, at eight sites. One uploaded PDF
+    has one type, so a submission package that bundles its loss runs with the
+    application, the decs and the e-mails (CH125: 59 pages, typed "narrative")
+    read as "no runs on file" - Loss History 25, "request loss runs" - beside
+    16 extracted claims and a 09/15/2026 valuation.
+
+    The loss-run FACTS are the evidence when the type is not: a valuation date
+    plus either the run's own period or claim rows a carrier numbered. A
+    narrative that only MENTIONS a valuation has neither, and a clean run
+    (no claims) still prints its period.
+    """
+    for d in docs or []:
+        if isinstance(d, dict) and not d.get("excluded") \
+                and str(d.get("doc_type") or "").strip() == _LOSS_RUN_DOC_TYPE:
+            return True
+    if not isinstance(facts, dict) or not _fv(facts, "loss_run_valuation_date"):
+        return False
+    if _fv(facts, "loss_run_period_start") or _fv(facts, "loss_run_period_end"):
+        return True
+    rows = _fv(facts, "loss_history")
+    return isinstance(rows, list) and any(
+        isinstance(r, dict) and _row_states_a_claim(r)
+        and str(r.get("claim_number") or "").strip()
+        for r in rows)
+
+
+def no_loss_statements_contradict(statements: Any, facts: Any) -> bool:
+    """Does any no-loss STATEMENT the documents make contradict the claims?
+
+    5 Oct 2026 (CH125 6eda3069). An account-level statement does whenever the
+    package asserts a claim (today's rule). A statement scoped to ONE line does
+    only when a claim on that line falls inside its window ("Umbrella - no
+    known losses" beside Auto claims does not). A loss-run row about a policy
+    year never does - it is part of the verified history. Unreadable input:
+    True for any statement, i.e. today's behaviour.
+    """
+    try:
+        from services.lob_canon import canon_line
+        from services.normalization import normalize_date
+    except Exception:                                          # noqa: BLE001
+        return bool(statements)
+    stmts = [s for s in (statements or []) if isinstance(s, dict)]
+    if not stmts:
+        return False
+    claims, incurred = asserted_claims(facts)
+    if not (claims or incurred):
+        return False
+    rows = _fv(facts, "loss_history")
+    rows = [r for r in rows if _row_states_a_claim(r)] if isinstance(rows, list) else []
+    anchor = (normalize_date(_fv(facts, "loss_run_valuation_date"))
+              or date.today().isoformat())
+    for st in stmts:
+        scope = st.get("scope")
+        if scope == "account":
+            return True
+        if scope != "line" or not st.get("line"):
+            continue
+        if not rows:
+            return True                      # claims with no line to tell them apart
+        for r in rows:
+            fam = canon_line(r.get("line_of_business") or r.get("line") or r.get("description"))
+            if fam != st.get("line"):
+                continue
+            years = st.get("years")
+            if not years:
+                return True
+            when = normalize_date(r.get("date") or r.get("claim_date"))
+            if not when:
+                return True
+            try:
+                y, m, d = (int(x) for x in anchor.split("-"))
+                start = date(y - int(years), m, min(d, 28)).isoformat()
+            except Exception:                                  # noqa: BLE001
+                return True
+            if when >= start:
+                return True
+    return False
 
 
 def asserted_claims(facts: Any) -> tuple:

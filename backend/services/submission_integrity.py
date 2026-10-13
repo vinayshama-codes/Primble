@@ -166,13 +166,75 @@ _POLICY_NUMBER_KEYS = ("policy_number", "policy_no", "policy_numbers")
 _CARRIER_KEYS = ("carrier_name", "carrier", "prior_carrier", "insurer_name")
 
 
-def _doc_identity(doc: dict) -> dict:
+def _document_entity_type(doc: dict, package_names: Optional[List[str]] = None) -> Any:
+    """The document's entity type, read the way the merge reads it
+    (`normalization.settle_document_entity_type`): a menu value only as its
+    ticked option, a legal-form designator in the insured's name over an
+    incompatible reading. Integrity can run BEFORE the merge corrects the
+    per-document copy (a document added after forms), so it asks the same door
+    rather than trusting the raw value. Fails open to the raw value."""
+    facts = doc.get("facts") or {}
+    raw = _fv(facts, "entity_type")
+    if raw is None:
+        return None
+    try:
+        from services.normalization import settle_document_entity_type
+        from services.normalization import is_not_a_party_name as _not_a_name
+        own = [str(_fv(facts, k)) for k in _IDENTITY_NAME_KEYS
+               if _fv(facts, k) and not _not_a_name(str(_fv(facts, k)))]
+        value, _rule = settle_document_entity_type(
+            raw, doc.get("text"), own, package_names or [])
+        return value
+    except Exception:                                         # noqa: BLE001
+        return raw
+
+
+def _carrier_line_claims(doc: dict, raw_carrier: Any) -> List[tuple]:
+    """[(line slot, carrier)] - which carrier the document says writes which
+    line. A slot is the coverage family, plus the LAYER on the umbrella family
+    (an excess policy above an umbrella is its own slot - `lob_canon.
+    umbrella_layer`). A row naming no carrier takes the document's; a row the
+    document denies claims nothing. A document with no placeable row gives one
+    claim with slot None (it cannot be placed, so it is compared with every
+    line - the legacy behaviour)."""
+    facts = doc.get("facts") or {}
+    claims: List[tuple] = []
+    try:
+        from services.lob_canon import canon_line, denies_coverage, umbrella_layer
+        rows = _fv(facts, "coverage_lines") or []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or denies_coverage(row):
+                continue
+            family = canon_line(row.get("line"))
+            if not family:
+                continue
+            carrier = str(row.get("carrier") or "").strip() or raw_carrier
+            if carrier:
+                claims.append(((family, umbrella_layer(row.get("line"))), str(carrier)))
+    except Exception:                                         # noqa: BLE001
+        claims = []
+    if not claims and raw_carrier:
+        claims.append((None, str(raw_carrier)))
+    return claims
+
+
+def _doc_identity(doc: dict, package_names: Optional[List[str]] = None) -> dict:
     """Extract the comparison signature for one document."""
     facts = doc.get("facts") or {}
 
     raw_name = None
+    try:
+        from services.normalization import is_not_a_party_name as _not_a_name
+    except Exception:                                         # noqa: BLE001
+        _not_a_name = lambda _v: False                        # noqa: E731
     for k in _IDENTITY_NAME_KEYS:
         raw_name = _fv(facts, k)
+        # A heading or a role names nobody, so it is no insured to compare
+        # ("S.B. MO." raised "Possible multiple submissions", 8 Oct 2026). Read
+        # here as well as dropped at extraction: a document stored before that
+        # fix still carries it, and adding a document re-runs this check.
+        if isinstance(raw_name, str) and _not_a_name(raw_name):
+            raw_name = None
         if raw_name:
             break
 
@@ -189,6 +251,7 @@ def _doc_identity(doc: dict) -> dict:
         raw_carrier = _fv(facts, k)
         if raw_carrier:
             break
+    entity_type = _document_entity_type(doc, package_names)
 
     return {
         # RAW values + the document's ROLE, so the soft-divergence check can ask
@@ -196,7 +259,7 @@ def _doc_identity(doc: dict) -> dict:
         # distinct normalised strings. See _soft_divergence_reasons.
         "_raw": {
             "dba_name":            _fv(facts, "dba_name"),
-            "entity_type":         _fv(facts, "entity_type"),
+            "entity_type":         entity_type,
             "mailing_address":     _fv(facts, "mailing_address"),
             "physical_address":    _fv(facts, "physical_address"),
             "operations_description": _fv(facts, "operations_description"),
@@ -214,7 +277,7 @@ def _doc_identity(doc: dict) -> dict:
         # formatting/synonym/alias-only differences (ST vs Street, LLC vs Limited
         # Liability Company, EMC vs Employers Mutual Casualty) do NOT produce a
         # spurious "differs across documents" review note (Beta Report §5).
-        "entity_type":    normalize_entity_type(_fv(facts, "entity_type")),
+        "entity_type":    normalize_entity_type(entity_type),
         "mailing":        normalize_address(_fv(facts, "mailing_address")),
         "physical":       normalize_address(_fv(facts, "physical_address")),
         "operations":     _normalize_text(_fv(facts, "operations_description"))[:120],
@@ -226,6 +289,7 @@ def _doc_identity(doc: dict) -> dict:
         # Date-aware so 07/15/2025 == 7/15/25 don't read as a difference (WS2).
         "effective_date": normalize_date(_fv(facts, "effective_date")) or _normalize_text(_fv(facts, "effective_date")),
         "carrier":        normalize_carrier(raw_carrier),
+        "_carrier_claims": _carrier_line_claims(doc, raw_carrier),
     }
 
 
@@ -305,8 +369,17 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
 
     # Attach a stable id/filename to each signature for the UI + removal flow.
     doc_sigs: List[dict] = []
+    package_names = [str(_fv(d.get("facts") or {}, k)) for d in docs if isinstance(d, dict)
+                     for k in _IDENTITY_NAME_KEYS if _fv(d.get("facts") or {}, k)]
+    # A heading or a role ("S.B. MO.") is nobody's name - it must not block
+    # the insured's "LLC" from settling a document's entity type either.
+    try:
+        from services.normalization import is_not_a_party_name as _not_a_name
+        package_names = [n for n in package_names if not _not_a_name(n)]
+    except Exception:                                         # noqa: BLE001
+        pass
     for idx, d in enumerate(docs):
-        sig = _doc_identity(d)
+        sig = _doc_identity(d, package_names)
         sig["doc_id"] = str(d.get("doc_id") or idx)
         sig["filename"] = d.get("filename") or f"document_{idx + 1}"
         sig["doc_type"] = d.get("doc_type") or "unknown"
@@ -472,10 +545,35 @@ def _soft_divergence_reasons(doc_sigs: List[dict],
             # divergence. The CONFLICT picker asks a different question about
             # the same two names and must keep answering "different entities"
             # (Round 10 fix 46). Same split as loss_run_identity.
-            if _door_family is None:
-                return len(_legacy_distinct(sig_field)) > 1
-            return any(not _door_family(raw[i], raw[j])
-                       for i in range(len(raw)) for j in range(i + 1, len(raw)))
+            #
+            # ONE LINE, TWO CARRIERS - not "several carriers" (7 Oct 2026).
+            # Choice Electric: five carriers, seven policies, each company
+            # writing its OWN line(s) (Cyber with ACE, EPLI with Federal, the
+            # excess layer with Travelers above Amerisure's umbrella). That is
+            # an ordinary multi-carrier package, and the Data Consistency card
+            # already calls the carrier field "scoped". The signal is two
+            # carriers claiming the SAME line slot (family + umbrella layer).
+            # A document whose carrier cannot be placed on a line is compared
+            # with every line, exactly as before.
+            def _same_family(a: Any, b: Any) -> bool:
+                if _door_family is None:
+                    return normalize_carrier(a) == normalize_carrier(b)
+                return bool(_door_family(a, b))
+
+            claims = [(i, slot, carrier)
+                      for i, sig in enumerate(doc_sigs)
+                      if _door_witnesses(sig.get("_doc_type"), fact_key)
+                      for slot, carrier in (sig.get("_carrier_claims") or [])]
+            for x in range(len(claims)):
+                for y in range(x + 1, len(claims)):
+                    (da, sa, ca), (db, sb, cb) = claims[x], claims[y]
+                    if da == db:
+                        continue          # one document's own rows
+                    if sa is not None and sb is not None and sa != sb:
+                        continue          # different lines: different policies
+                    if not _same_family(ca, cb):
+                        return True
+            return False
         return _door_conflict(fact_key, raw, ctx)
 
     if _differs("dba_name", "dba"):

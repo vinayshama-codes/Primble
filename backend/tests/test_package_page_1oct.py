@@ -10,9 +10,14 @@ package always lands on its package page.
   heartbeat (services/generation_state.py); a dead one is told apart by its
   silence, so a restart, a deploy or a crash is reported, not waited out.
 * Once forms exist (or are generating) the actions that re-read the documents
-  - reclassify, exclude, supporting-only, confirm a Data Consistency value,
-  resolve integrity, generate again - are off, on the screen AND on the server:
-  they never update forms that already exist.
+  - confirm a Data Consistency value through the pre-form route, resolve
+  integrity, generate again - are off, on the screen AND on the server: they
+  never update forms that already exist.
+* Documents are the exception since 7 Oct 2026 (Choice Electric #25, the
+  owner reverses the 1 Oct lock for them): reclassify, exclude and
+  supporting-only go through the documents door after forms, which re-stamps
+  the forms - only a run in progress locks them
+  (tests/test_choice_electric_upload_7oct.py).
 """
 import ast
 import asyncio
@@ -366,7 +371,7 @@ def test_the_lock_lets_an_unfinished_run_go_again(monkeypatch):
 
 
 @pytest.mark.parametrize("route", [
-    "submission_integrity_resolve", "document_reclassify", "underwriting_confirm_value", "select_forms_bulk",
+    "submission_integrity_resolve", "underwriting_confirm_value", "select_forms_bulk",
 ])
 def test_every_pre_form_writer_checks_the_lock_right_after_the_owner(route):
     body = _fn_src(BACKEND / "routes" / "form_routes.py", route)
@@ -380,21 +385,43 @@ def test_every_pre_form_writer_checks_the_lock_right_after_the_owner(route):
         assert writer not in between, (route, writer)
 
 
-def test_reclassify_refuses_on_a_generated_package_before_any_work(monkeypatch):
+def test_reclassify_after_forms_takes_the_documents_door_and_a_live_run_refuses(monkeypatch):
+    """Choice Electric #25 (7 Oct 2026): a generated package's document change
+    goes through the documents door (it re-stamps the forms) - never the
+    pre-form re-run, which would leave the forms on the old values. A run in
+    progress still refuses before any work."""
     from models.schemas import DocumentReclassifyRequest
+    import routes.session_documents_routes as sdr
 
     async def _get(sid):
         return {"user_id": "u1", "generated_forms": {"ACORD_125": {}}}
 
     async def _never(*a, **k):
-        raise AssertionError("reclassify ran on a generated package")
+        raise AssertionError("the pre-form re-run ran on a generated package")
+
+    seen = {}
+
+    async def _door(req, session, current_user):
+        seen["door"] = (req.doc_id, req.action)
+        return "door"
 
     monkeypatch.setattr(fr, "get_processing_session", _get)
     monkeypatch.setattr(fr, "reclassify_document", _never)
+    monkeypatch.setattr(sdr, "reclassify_after_forms", _door)
     req = DocumentReclassifyRequest(session_id="s1", doc_id="d1", action="exclude")
+    assert asyncio.run(fr.document_reclassify(req, current_user={"id": "u1"})) == "door"
+    assert seen["door"] == ("d1", "exclude")
+
+    live = {"status": "processing", "updated_at": datetime.now(timezone.utc).isoformat()}
+
+    async def _running(sid):
+        return {"user_id": "u1", "generation_job_id": "j1"}
+
+    monkeypatch.setattr(fr, "get_processing_session", _running)
+    monkeypatch.setattr(fr, "get_job_queue", lambda: _Queue(live))
     with pytest.raises(HTTPException) as ei:
         asyncio.run(fr.document_reclassify(req, current_user={"id": "u1"}))
-    assert ei.value.status_code == 409
+    assert ei.value.status_code == 409 and "being generated" in ei.value.detail
 
 
 # ══ 5. GET /api/session: state, the producer's order, the last open form ══════
@@ -595,8 +622,14 @@ def test_every_way_into_the_editor_uses_one_loader():
 
 def test_both_layouts_switch_the_button_and_the_score_label():
     rail, modal = _src(RAIL), _src(MODAL)
-    assert "{continueLabel(genState)}" in rail and "{continueLabel(pkgGen.state)}" in modal
-    assert "onContinue={handleContinueFromPackage}" in modal and "onClick={handleContinueFromPackage}" in modal
+    # The rail's main button walks its pages before forms (Choice Electric #2,
+    # 9 Oct 2026); where it is the continue button, the same label rule holds.
+    assert "{step ? <>{step.label}<ArrowIcon /></> : continueLabel(genState)}" in rail
+    assert "{continueLabel(pkgGen.state)}" in modal
+    assert "onContinue={handleContinueFromPackage}" in modal
+    # A double-click's second click is ignored (9 Oct 2026): on a narrow screen it
+    # landed on form selection's Generate, live now that ACORD 125 starts ticked.
+    assert "onClick={(e) => { if (e.detail > 1) return; handleContinueFromPackage(); }}" in modal
     assert 'onContinue={() => setStep("form_selection")}' not in modal
     assert '? <div className="rr-ready__note">Total Package Score</div>' in rail
     assert '{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score so far"}' in modal
@@ -605,15 +638,28 @@ def test_both_layouts_switch_the_button_and_the_score_label():
 
 def test_both_layouts_lock_the_document_and_value_actions():
     rail, modal = _src(RAIL), _src(MODAL)
-    assert rail.count("disabled={anyReclassBusy || !!lockText}") == 3
-    assert "const rowDisabled = busy || !!lockText;" in rail
-    assert "disabled={anyConfirmInFlight || !picked || !!lockText}" in rail
+    # Documents: locked only while a run is live (Choice Electric #25, 7 Oct
+    # 2026 - after forms a change re-stamps them through the documents door).
+    assert rail.count("disabled={anyReclassBusy || !!docLockText}") == 3
     assert modal.count("disabled={anyReclassBusy || reclassLocked}") == 3
-    assert "const rowDisabled = busy || !!lockedReason(pkgGen.state);" in modal
-    for handler in ("handleResolveIntegrity", "handleReclassify", "handleConfirmUnderwriting"):
-        head = modal[modal.index(f"const {handler} = async"):]
-        head = head[:head.index("try {")]
-        assert "if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }" in head, handler
+    assert "const reclassLocked = !!documentsLockedReason(pkgGen.state);" in modal
+    head = modal[modal.index("const handleReclassify = async"):]
+    head = head[:head.index("try {")]
+    assert "if (documentsLockedReason(pkgGen.state)) { setError(documentsLockedReason(pkgGen.state)); return; }" in head
+    # Integrity resolve keeps the forms lock.
+    head = modal[modal.index("const handleResolveIntegrity = async"):]
+    head = head[:head.index("try {")]
+    assert "if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }" in head
+    # 5 Oct 2026 (owner): confirming a Data Consistency value stays open once
+    # forms exist - it goes to confirm-value-in-editor, which re-stamps the
+    # forms in place. Only a run in progress locks it.
+    assert "const rowDisabled = busy || !!dcLockText;" in rail
+    assert "disabled={anyConfirmInFlight || !picked || !!dcLockText}" in rail
+    assert "const rowDisabled = busy || !!confirmLockedReason(pkgGen.state);" in modal
+    head = modal[modal.index("const handleConfirmUnderwriting = async"):]
+    head = head[:head.index("try {")]
+    assert "if (confirmLockedReason(pkgGen.state)) { setError(confirmLockedReason(pkgGen.state)); return; }" in head
+    assert '${afterForms ? "confirm-value-in-editor" : "confirm-value"}' in modal
 
 
 def test_after_generation_a_missing_form_is_added_in_the_package_not_ticked():
@@ -702,13 +748,16 @@ def test_the_screens_after_the_review():
     assert "_pollJobStatus(queued.job_id, 1200)" in gen
     # the URL resume asks the server too
     assert "setPkgGen(p => ({ ...p, state: GEN_INTERRUPTED }));" not in modal
-    # no dead "Fix in Data Consistency" / "Add form" while locked
-    assert "!!dcKey && !formsGenerated && !lockedReason(pkgGen.state)" in modal
+    # no dead "Fix in Data Consistency" while a run is live; after it, the
+    # button leads to the editor's own Data Consistency block (5 Oct 2026)
+    assert "!!dcKey && !confirmLockedReason(pkgGen.state)" in modal
+    assert 'id="editor-data-consistency"' in modal
     assert "if (lockedReason(pkgGen.state)) return [];" in modal
     afb = modal[modal.index("const addFormBeforeGeneration"):modal.index("const itemResolveAndStatus")]
     assert "lockedReason(pkgGen.state)" in afb
     # locked items are not "needing your input"; no stale "so far" score
-    assert "const openItemCount = lockedReason(pkgGen.state) ? 0 :" in modal
+    assert "const openItemCount = (lockedReason(pkgGen.state) ? 0 : docsNeedingReview.length)" in modal
+    assert "+ (confirmLockedReason(pkgGen.state) ? 0 : openConflicts.length);" in modal
     assert "setPackageSqs(d.package_sqs || null);" in modal
     rail = _src(RAIL)
     assert "const docsOpen = preFormLocked ? 0 : docsNeedingReview.length;" in rail

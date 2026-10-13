@@ -173,7 +173,9 @@ def _expired(row: dict, now: Optional[datetime] = None) -> bool:
 
 
 def form_label(form_id: str) -> str:
-    return str(form_id or "").replace("_", " ").strip()
+    # "ACORD 131", and a form's second copy "ACORD 131 (Excess)" (7 Oct 2026).
+    from services.form_instances import instance_label
+    return instance_label(form_id or "")
 
 
 def _form_order(proc_session: dict) -> List[str]:

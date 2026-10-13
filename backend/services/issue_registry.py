@@ -23,8 +23,11 @@ Warnings/advisories are tiered required / recommended / binder_followup.
 """
 
 import hashlib
+import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CLUSTER = "Other validations"
 DEFAULT_TIER = "recommended"
@@ -263,8 +266,35 @@ TIER_MAP: Dict[str, str] = {
 # the guard test fails the build if a live cross-form code is left unmapped.
 
 
-def _r_field(*facts: str) -> dict:
-    return {"mode": "field", "facts": list(facts)}
+def _r_field(*facts: str, needs=None) -> dict:
+    """`needs` (13 Oct 2026, owner: "Save progress" until a fix is complete):
+    the groups of boxes the rule requires - every group needs ONE value, so
+    [["a"], ["b", "c"]] is "a and (b or c)". Declared only where the rule
+    checks every box; without it a window's boxes are "whichever applies"."""
+    res = {"mode": "field", "facts": list(facts)}
+    if needs:
+        res["needs"] = [list(group) for group in needs]
+    return res
+
+
+# Minimum Viable COPE (sqs_service.evaluate_stops / cross_form_validator): an
+# occupancy, a construction type and a building OR contents value - every box
+# group the window shows. (The street address is the location table's.)
+_MIN_COPE_NEEDS = [["occupancy_type"], ["construction_type"],
+                   ["property_building_value", "property_bpp_value"]]
+
+
+def _with_current_needs(res, code):
+    """A card stored before its code declared `needs` (13 Oct 2026) takes the
+    code's current declaration, so its window can say "Save progress"."""
+    try:
+        if isinstance(res, dict) and res.get("mode") == "field" and "needs" not in res:
+            cur = resolution_for(code) if code else None
+            if isinstance(cur, dict) and cur.get("needs"):
+                res = {**res, "needs": [list(g) for g in cur["needs"]]}
+    except Exception:                                          # noqa: BLE001
+        pass
+    return res
 
 
 def _copy_resolution(res: dict) -> dict:
@@ -276,7 +306,8 @@ def _copy_resolution(res: dict) -> dict:
     Latent since the feature shipped - test_resolution_for_returns_a_copy only
     reassigned a scalar key, which a shallow copy does isolate. Found by the
     legacy-rule guard tests (2026-08-08) and fixed here, for every mode."""
-    out = {k: (list(v) if isinstance(v, list) else v) for k, v in res.items()}
+    out = {k: ([list(x) if isinstance(x, list) else x for x in v] if isinstance(v, list) else v)
+           for k, v in res.items()}
     # Owner 2026-08-24: a hard stop or warning resolved inline must offer the
     # same choices a recommendation card does - the ResolutionModal used to
     # render a bare "Type the correct value..." box for every fact. Attached
@@ -305,6 +336,14 @@ def _r_schedule(schedule_key: str) -> dict:
     return {"mode": "schedule", "schedule_key": schedule_key}
 
 
+def field_resolution(*facts: str) -> dict:
+    """A field-mode fix for `facts`, shaped exactly as every card's (answer
+    choices attached by `_copy_resolution`). The pre-form dry run
+    (`services/form_dry_run`) opens its typed items through this, so the
+    ResolutionModal offers them the same controls a hard stop would."""
+    return _copy_resolution(_r_field(*facts))
+
+
 _R_NARRATIVE = {"mode": "narrative"}
 _R_NONE = {"mode": "none"}
 
@@ -323,6 +362,7 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "minimum_viable_cope_missing": _r_field(
         "occupancy_type", "construction_type",
         "property_building_value", "property_bpp_value",
+        needs=_MIN_COPE_NEEDS,
     ),
     # Six facts, not the four this rule's own MESSAGE names, because its legacy
     # twin is suppressed below and the twin's modal was the only place the
@@ -834,13 +874,15 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     ("Minimum Viable COPE incomplete", "Property COPE completeness", "required",
      "legacy_minimum_viable_cope", _r_field(
          "occupancy_type", "construction_type",
-         "property_building_value", "property_bpp_value")),
+         "property_building_value", "property_bpp_value", needs=_MIN_COPE_NEEDS)),
     # The client's screenshot. evaluate_stops() checks SIX facts here (two more
     # than the cross-form twin), so all six are offered.
     ("Carrier-Grade COPE incomplete", "Property COPE quality", "binder_followup",
      "legacy_carrier_grade_cope", _r_field(
          "year_built", "roof_year", "sprinkler_system",
-         "fire_protection_class", "valuation_method", "coinsurance_percentage")),
+         "fire_protection_class", "valuation_method", "coinsurance_percentage",
+         needs=[["year_built"], ["roof_year"], ["sprinkler_system"], ["fire_protection_class"],
+                ["valuation_method"], ["coinsurance_percentage"]])),
     ("Peril-specific deductibles referenced but not defined", "Property deductible completeness", "required",
      "legacy_peril_deductibles_undefined", _r_field(
          "property_deductible_wind", "property_deductible_earthquake",
@@ -1403,15 +1445,166 @@ def _make_clusters(items: List[dict]) -> List[dict]:
     return clusters
 
 
+# ── ONE SEVERITY PER ROW, DECIDED ONCE (7 Oct 2026, round 5 #15) ────────────
+# Live b248c194 (Choice Electric re-run, Brent #18): after generation the
+# package page printed "No hard stops" beside a package capped at 60 by two.
+# Generation writes the stop LISTS at full severity (C75: the cross-form rules
+# return to force once forms are chosen) but never rewrites the structured
+# card copies, which still carry the pre-form demotion. The view then decided
+# severity twice, two ways: the twin check called the coded COPE twin hard
+# (its sentence is in the hard list) and hid its hard legacy copy, and the
+# render loop drew that twin by the STALE severity it was emitted with - a
+# warning. One problem, the blocker hidden behind a warning (8 of 690 stored
+# sessions drew a capping stop as a warning; no cap moved, only what was drawn).
+#
+# The lists are what the scorer reads, so they decide: a row whose sentence is
+# in the final HARD list is a hard stop whatever severity it was emitted with;
+# a hard row the caller moved to the soft list (classify_stops) is a warning;
+# anything else keeps its own. The twin rule and the renderer both ask this.
+
+def _listed_in(message: str, final_list: List[str]) -> bool:
+    """Is this row's sentence in a FINAL stop list? Exact, or carried with a
+    suffix appended after the row was captured (an "(Affects: ... Fix: ...)"
+    annotation) - the rule `build_grouped_view` has always matched by."""
+    if message in final_list:
+        return True
+    return bool(message) and any(
+        isinstance(s, str) and s.startswith(message) for s in final_list)
+
+
+def _display_severity(issue: dict, hard_stops: List[str], soft_stops: List[str],
+                      promote: frozenset = frozenset()) -> str:
+    """The severity this row RENDERS at (see the note above)."""
+    if (issue.get("code") or "") in promote:
+        return "hard_stop"
+    message = issue.get("message") or ""
+    emitted = issue.get("severity") or issue.get("type") or "soft_warning"
+    if _listed_in(message, hard_stops):
+        return "hard_stop"
+    if emitted == "hard_stop":
+        return "soft_warning" if _listed_in(message, soft_stops) else "hard_stop"
+    return emitted
+
+
+def _collapse_twins(structured_issues, cross_issues, hard_stops, soft_stops,
+                    promote: frozenset = frozenset()) -> tuple:
+    """A legacy stop and its coded twin (`_LEGACY_SUPERSEDED_BY_CODE`) shown
+    ONCE - `(structured_issues, hard_stops, soft_stops)`, the display copies.
+
+    Several rules are emitted by BOTH the legacy field-level engine (uncoded
+    strings) and cross_form_validator (coded, resolvable); they cluster
+    together and showed as two near-identical bullets (client review #4).
+    The coded twin is the row kept - it carries "Open to fix" - EXCEPT when
+    the legacy copy is a hard stop and the coded one is not: a blocker is never
+    hidden behind a warning (6 Oct 2026, Choice Electric #18 - before forms C75
+    demotes the coded twin while the legacy copy, not form-scoped, still caps
+    at 60). The demoted twin is the row hidden then, so the problem still
+    shows once, at the severity that is applied.
+
+    Display only and conditional: a legacy row is hidden only when its coded
+    twin is actually present (a coded rule with a stricter form gate that did
+    not fire leaves the legacy row exactly as before), and the CALLER's lists -
+    the SQS capping inputs - are never mutated; only these copies are trimmed,
+    so a safety net drawing from them cannot re-add a row hidden here.
+    `build_grouped_view` (the cards) and `stops_for_display` (the bare
+    sentences) both come through here - one matcher, one rule."""
+    structured_issues = list(structured_issues or [])
+    hard_stops = list(hard_stops or [])
+    soft_stops = list(soft_stops or [])
+    _present_codes = {(i.get("code") or "") for i in structured_issues} \
+        | {(i.get("code") or "") for i in (cross_issues or []) if isinstance(i, dict)}
+    _suppress_phrases = tuple(
+        phrase for code, phrase in _LEGACY_SUPERSEDED_BY_CODE.items()
+        if code in _present_codes
+    )
+    if not _suppress_phrases:
+        return structured_issues, hard_stops, soft_stops
+    _superseding_codes = set(_LEGACY_SUPERSEDED_BY_CODE.keys())
+    # Every decision below reads the lists as the caller passed them.
+    _final_hard, _final_soft = list(hard_stops), list(soft_stops)
+
+    def _hard(issue: dict) -> bool:
+        return _display_severity(issue, _final_hard, _final_soft, promote) == "hard_stop"
+
+    _hard_twin_phrases = {
+        _LEGACY_SUPERSEDED_BY_CODE[c]
+        for c in _superseding_codes & _present_codes
+        if any((i.get("code") or "") == c and _hard(i)
+               for i in structured_issues + [x for x in (cross_issues or []) if isinstance(x, dict)])
+    }
+
+    def _is_suppressed_legacy(issue: dict) -> bool:
+        # Never drop the coded keeper itself (its wording differs from the
+        # legacy phrase anyway - this is belt-and-suspenders).
+        if (issue.get("code") or "") in _superseding_codes:
+            return False
+        msg = issue.get("message") or ""
+        phrases = [p for p in _suppress_phrases if p in msg]
+        if not phrases:
+            return False
+        if _hard(issue):
+            return any(p in _hard_twin_phrases for p in phrases)
+        return True
+
+    # The phrases whose HARD legacy row stays on screen.
+    _kept_hard_phrases = {
+        p for p in _suppress_phrases if p not in _hard_twin_phrases and (
+            any(p in m for m in _final_hard)
+            or any(p in (i.get("message") or "") and _hard(i)
+                   and (i.get("code") or "") not in _superseding_codes
+                   for i in structured_issues))
+    }
+
+    def _is_hidden_twin(issue: dict) -> bool:
+        code = issue.get("code") or ""
+        return (code in _superseding_codes
+                and _LEGACY_SUPERSEDED_BY_CODE.get(code) in _kept_hard_phrases
+                and not _hard(issue))
+
+    _hidden_twin_msgs = [
+        (i.get("message") or "").strip() for i in structured_issues
+        if _is_hidden_twin(i) and (i.get("message") or "").strip()
+    ]
+    structured_issues = [
+        i for i in structured_issues
+        if not _is_suppressed_legacy(i) and not _is_hidden_twin(i)
+    ]
+    # The hidden twin's own warning string must not resurface through a safety
+    # net either; nor may a suppressed legacy string (a hard legacy string
+    # whose twin is only a warning is KEPT). The coded twin's sentence uses
+    # different wording and is not matched by the legacy phrase.
+    soft_stops = [m for m in soft_stops if not any(t in m for t in _hidden_twin_msgs)]
+    hard_stops = [m for m in hard_stops
+                  if not any(p in m and p in _hard_twin_phrases for p in _suppress_phrases)]
+    soft_stops = [m for m in soft_stops if not any(p in m for p in _suppress_phrases)]
+    return structured_issues, hard_stops, soft_stops
+
+
 def build_grouped_view(
     structured_issues: List[dict],
     hard_stops: List[str],
     soft_stops: List[str],
     cross_issues: Optional[List[dict]] = None,
     promote_codes: Optional[List[str]] = None,
+    facts: Optional[dict] = None,
+    becomes_hard: Optional[List[dict]] = None,
+    form_choices: Optional[List[dict]] = None,
 ) -> dict:
     """Group structured issues into clustered Hard Stop / tiered Warning
     sections plus a top-3 "fix this first" list.
+
+    `form_choices` (before forms only - 13 Oct 2026, the SQS without forms):
+    the pre-form package's `form_choices`, checks whose only fix is choosing a
+    form, which the number does not count. Their rows leave the warnings and
+    come back as `form_choices` - listed where forms are chosen, never counted
+    as a warning (a warning card at a score it does not hold is the "card must
+    match the cap" defect again). Omitted: nothing changes.
+
+    `facts` (optional, 7 Oct 2026 - Choice Electric #18): the session facts the
+    view is drawn for. When given, a COPE card's fix follows the package - on 2+
+    location rows its per-building half opens the location table
+    (`premises_cope.route_cope_resolution`). Omitted: every resolution is the
+    code's own, exactly as before.
 
     `hard_stops` / `soft_stops` are the FINAL string lists the caller is
     about to return to the client (i.e. already passed through
@@ -1443,6 +1636,11 @@ def build_grouped_view(
     cross-document conflict can actually be cleared. A freshly-minted row would
     carry none of it. Nothing here changes a score; the caller's stop arrays are
     untouched.
+
+    `becomes_hard` (optional, before forms only - 7 Oct 2026, round 5 #15):
+    `stops_now.becomes_hard_at_generation`'s entries. Each warning row one of
+    them names carries `becomes_hard_tag` / `becomes_hard_forms`, and the view
+    returns how many rows it tagged as `becomes_hard`. Display only.
     """
     hard_stops = hard_stops or []
     soft_stops = soft_stops or []
@@ -1458,44 +1656,16 @@ def build_grouped_view(
         ]
 
     # ── Cross-engine de-duplication (client review #4) ───────────────────────
-    # Several rules are emitted by BOTH the legacy field-level engine (uncoded
-    # strings) and cross_form_validator (coded, resolvable). When both are present
-    # they cluster together and show as two near-identical bullets - only the
-    # coded one carries "Open to fix". Hide the legacy twin so the problem shows
-    # once, on the resolvable row. This only ever removes the legacy STRING from
-    # the display: the coded issue is kept, and the raw hard_stops/soft_stops
-    # lists that drive SQS capping (owned by the caller) are unaffected. Because
-    # suppression is gated on the coded twin actually being present, a scenario
-    # where only the legacy rule fired (its coded counterpart has a stricter
-    # form-trigger gate) still shows the legacy row exactly as before - no blocker
-    # is ever dropped.
-    _present_codes = {(i.get("code") or "") for i in (structured_issues or [])} \
-        | {(i.get("code") or "") for i in (cross_issues or [])}
-    _suppress_phrases = tuple(
-        phrase for code, phrase in _LEGACY_SUPERSEDED_BY_CODE.items()
-        if code in _present_codes
-    )
-    if _suppress_phrases:
-        _superseding_codes = set(_LEGACY_SUPERSEDED_BY_CODE.keys())
-
-        def _is_suppressed_legacy(issue: dict) -> bool:
-            # Never drop the coded keeper itself (its wording differs from the
-            # legacy phrase anyway - this is belt-and-suspenders).
-            if (issue.get("code") or "") in _superseding_codes:
-                return False
-            msg = issue.get("message") or ""
-            return any(p in msg for p in _suppress_phrases)
-
-        structured_issues = [
-            i for i in (structured_issues or []) if not _is_suppressed_legacy(i)
-        ]
-        # Also drop the suppressed legacy strings from the local final-list copies
-        # so the "uncovered" safety net below does not re-add them under the
-        # default "Other validations" cluster. The coded twin's message uses
-        # different wording and is NOT matched, so it survives here and stays
-        # covered by its own structured issue.
-        hard_stops = [m for m in hard_stops if not any(p in m for p in _suppress_phrases)]
-        soft_stops = [m for m in soft_stops if not any(p in m for p in _suppress_phrases)]
+    # A legacy stop and its coded twin show ONCE, on the resolvable row - and a
+    # hard legacy row is never hidden behind a twin that is only a warning
+    # (6 Oct 2026, Choice Electric #18). The rule lives in `_collapse_twins`,
+    # shared with `stops_for_display`; it reads each row's severity the way the
+    # render loop below does (`_display_severity`), so a stale card copy can no
+    # longer make the two disagree (7 Oct 2026, round 5 #15). The caller's lists
+    # are never mutated - only these local copies, so the "uncovered" safety
+    # net below cannot re-add a row hidden here.
+    structured_issues, hard_stops, soft_stops = _collapse_twins(
+        structured_issues, cross_issues, hard_stops, soft_stops, frozenset(_promote))
 
     # ── THE PICKER SUPERSEDES check_doc_consistency's COPY (2026-08-23) ──────
     # Two engines compare the same eight identity/date fields, and both render.
@@ -1585,9 +1755,7 @@ def build_grouped_view(
         # ...)" annotation added after this issue's message was captured) -
         # the original text is still the start of the final string, so a
         # downgrade/presence check must not require byte-for-byte equality.
-        if message in final_list:
-            return True
-        return any(s.startswith(message) for s in final_list if message)
+        return _listed_in(message, final_list)
 
     # ── THE PICKER'S OWN ROW DOES NOT ALSO PRINT AS A WARNING (UI-13) ───────
     # Owner, 2026-09-09, on the client's UI-13: the same conflict was on the
@@ -1621,25 +1789,30 @@ def build_grouped_view(
     # summed from what this function RENDERS, so they follow automatically.
     _picker_hidden_msgs: Set[str] = set()
 
+    # Before forms: the checks the package's number leaves out because their
+    # only fix is choosing a form (see `form_choices` above).
+    _choice_by_msg: Dict[str, dict] = {}
+    for _fc in form_choices or []:
+        if isinstance(_fc, dict) and str(_fc.get("message") or "").strip():
+            _choice_by_msg[str(_fc["message"]).strip()] = _fc
+    _choice_rows: List[dict] = []
+
     enriched: List[dict] = []
     for issue in structured_issues or []:
         code = issue.get("code") or "uncategorized"
         message = issue.get("message") or ""
-        orig_severity = issue.get("severity") or issue.get("type") or "soft_warning"
+        # The lists decide (`_display_severity`): a `promote_codes` row is the
+        # blocker holding the score at 60; a row in the final hard list is a
+        # hard stop whatever it was emitted as (a card copy written before
+        # forms still says "warning" after generation re-promoted it - C75);
+        # a hard row the caller moved to the soft list was downgraded by
+        # classify_stops; anything else keeps its own severity.
+        severity = _display_severity(issue, hard_stops, soft_stops, frozenset(_promote))
 
-        if code in _promote:
-            # This issue is what is holding the score at 60. Whatever the
-            # emitting engine called it, it renders as the blocker it is.
-            severity = "hard_stop"
-        elif orig_severity == "hard_stop":
-            if _present_in(message, hard_stops):
-                severity = "hard_stop"
-            elif _present_in(message, soft_stops):
-                severity = "soft_warning"  # downgraded by classify_stops
-            else:
-                severity = "hard_stop"
-        else:
-            severity = orig_severity
+        if severity != "hard_stop" and message.strip() in _choice_by_msg:
+            if not any(r["message"].strip() == message.strip() for r in _choice_rows):
+                _choice_rows.append(_form_choice_row(_choice_by_msg[message.strip()], issue))
+            continue
 
         # UI-13 (full reasoning in the note above `enriched`): this row is a
         # Data Consistency row and it is rendering as a warning - drop it, the
@@ -1669,8 +1842,9 @@ def build_grouped_view(
             "severity": severity,
             "cluster": cluster,
             "tier": tier,
-            "resolution": issue.get("resolution") or resolution_for(code)
-                          or _fallback_resolution(code, message),
+            "resolution": _with_current_needs(
+                issue.get("resolution") or resolution_for(code)
+                or _fallback_resolution(code, message), code),
             # Re-derived from the CODE, never carried from the incoming dict.
             # Issues reach this view from several sources (persisted sessions,
             # the legacy string arrays, the cross-form mirror) and only some of
@@ -1702,6 +1876,16 @@ def build_grouped_view(
         # silent one.
         soft_stops = [m for m in soft_stops if not _is_hidden_picker_message(m)]
 
+    # A form choice the stored cards never mirrored is still listed - from the
+    # package's own entry - and a stale display copy of its sentence in the
+    # soft list (a row stored before 13 Oct) is not re-added as a warning.
+    if _choice_by_msg:
+        for _m, _fc in _choice_by_msg.items():
+            if not any(r["message"].strip() == _m for r in _choice_rows):
+                _choice_rows.append(_form_choice_row(_fc, None))
+        soft_stops = [m for m in soft_stops
+                      if not any(m.strip() == _m or m.strip().startswith(_m) for _m in _choice_by_msg)]
+
     # Safety net: guarantee every message the caller is actually about to show
     # (the final hard_stops/soft_stops lists) is represented SOMEWHERE in this
     # grouped view, even if it came from a source this registry doesn't yet
@@ -1729,6 +1913,29 @@ def build_grouped_view(
                 "severity": "soft_warning", "cluster": DEFAULT_CLUSTER, "tier": DEFAULT_TIER,
                 "resolution": _legacy_message_resolution(_msg),
             })
+
+    # ── A COPE CARD ON A 2+ BUILDING PACKAGE OPENS THE LOCATION TABLE ───────
+    # Choice Electric #18 (7 Oct 2026): "this should have turned up TWO building
+    # property values". Decided per package from the facts this view is drawn
+    # for; a card that reached the safety net above is routed by the legacy
+    # code its own sentence classifies to. Display only - no stop, cap or id moves.
+    if isinstance(facts, dict) and facts:
+        try:
+            from services.premises_cope import route_cope_resolution
+            for _it in enriched:
+                _code = _it.get("code") or ""
+                if _code.startswith("uncovered_"):
+                    _code = classify_legacy(_it.get("message") or "", _it.get("severity") or "")[0] or _code
+                _it["resolution"] = route_cope_resolution(_code, _it.get("resolution"), facts)
+        except Exception as _rx:                              # noqa: BLE001
+            logger.warning("issue_registry: COPE card routing skipped: %s", _rx)
+
+    # ── WHAT GENERATION WILL MAKE A HARD STOP (7 Oct 2026, round 5 #15) ─────
+    # Brent #18: "There were no Hard Stops in the initial SQS prior to form
+    # selection, but there's Hard Stops now. Why?" C75 shows a cross-form hard
+    # stop as a warning until its form is generated (unchanged, Brent's call);
+    # the warning now SAYS so. Tags only the rows this view draws as warnings.
+    _becomes_hard_rows = _tag_becomes_hard(enriched, becomes_hard)
 
     hard_items = [i for i in enriched if i["severity"] == "hard_stop"]
     hard_clusters = _make_clusters(hard_items)
@@ -1830,6 +2037,63 @@ def build_grouped_view(
         # the remaining items actually live.
         "hidden_warnings": len(_picker_hidden_msgs),
         "hidden_warning_messages": sorted(_picker_hidden_msgs),
+        # Before forms: checks whose only fix is choosing a form - not counted,
+        # not capping, listed where forms are chosen (13 Oct 2026).
+        "form_choices": _choice_rows,
+        # The warning rows drawn above that generation will make hard stops
+        # (each row carries its `becomes_hard_tag`). Before forms only; beside
+        # `counts`, never inside it - those rows ARE warnings now.
+        "becomes_hard": _becomes_hard_rows,
+    }
+
+
+def _tag_becomes_hard(rows: List[dict], entries: Optional[List[dict]]) -> int:
+    """Tag each WARNING row that generation will make a hard stop with the
+    entry's `tag` ("Becomes a hard stop when ACORD 140 is generated") and
+    `forms`; return how many rows were tagged. `entries` come from
+    `stops_now.becomes_hard_at_generation` (code, message, forms, tag). A row
+    matches its entry by sentence (exact or prefix, the lists' own rule) and,
+    when the row carries a real rule code, by that code too. Hard rows are
+    never tagged - they are hard stops already."""
+    todo = [e for e in (entries or []) if isinstance(e, dict)
+            and str(e.get("message") or "").strip() and e.get("tag")]
+    if not todo:
+        return 0
+    tagged = 0
+    for row in rows or []:
+        if row.get("severity") == "hard_stop":
+            continue
+        msg = str(row.get("message") or "").strip()
+        if not msg:
+            continue
+        code = str(row.get("code") or "")
+        coded = bool(code) and not code.startswith("uncovered_") and code not in (
+            "uncategorized", "cross_form_legacy")
+        for e in todo:
+            if coded and e.get("code") and str(e.get("code")) != code:
+                continue
+            emsg = str(e.get("message")).strip()
+            if msg == emsg or msg.startswith(emsg) or emsg.startswith(msg):
+                row["becomes_hard_tag"] = str(e["tag"])
+                row["becomes_hard_forms"] = [str(f) for f in (e.get("forms") or [])]
+                tagged += 1
+                break
+    return tagged
+
+
+def _form_choice_row(entry: dict, issue: Optional[dict]) -> dict:
+    """One "choose this form" row for the review (13 Oct 2026): the stored
+    card's id and forms when there is one, the package entry's otherwise."""
+    message = str((issue or {}).get("message") or entry.get("message") or "")
+    forms = list((issue or {}).get("forms") or entry.get("forms") or [])
+    add = [f for f in (entry.get("add_forms")
+                       or ((issue or {}).get("resolution") or {}).get("add_forms") or []) if f]
+    return {
+        "code": (issue or {}).get("code") or entry.get("code"),
+        "issue_id": (issue or {}).get("issue_id") or issue_id_for(message, forms),
+        "message": message,
+        "forms": forms,
+        "resolution": {"mode": "none", "add_forms": add} if add else {"mode": "none"},
     }
 
 
@@ -1839,8 +2103,12 @@ def grouped_with_package_caps(
     soft_stops,
     pkg,
     cross_issues=None,
+    facts=None,
 ):
     """`build_grouped_view` plus any 60-cap the PACKAGE scorer holds privately.
+
+    `facts`: the session facts, passed through to `build_grouped_view` so a
+    card's fix follows the package (Choice Electric #18, 7 Oct 2026).
 
     OWNER RULE, 2026-08-31: the card must match the cap. `calculate_package_sqs`
     can hold a score at 60 through a stop that never becomes a structured issue -
@@ -1867,6 +2135,11 @@ def grouped_with_package_caps(
 
     Display only. The caller's own arrays - which drive capping, dismiss credit
     and issue_id hashing - are never touched, and no score moves.
+
+    Before forms the door's package also names the warnings generation will
+    make hard stops (`becomes_hard_at_generation`, attached by
+    `stops_now.with_generation_hard_stops` - 7 Oct 2026, round 5 #15); the
+    view tags those rows, so every pre-form response says it the same way.
     """
     pkg = pkg or {}
     codes = [c for c in (pkg.get("cap_hard_stop_codes") or []) if c]
@@ -1879,7 +2152,41 @@ def grouped_with_package_caps(
         soft_stops or [],
         cross_issues=cross_issues,
         promote_codes=codes,
+        facts=facts,
+        becomes_hard=pkg.get("becomes_hard_at_generation"),
+        form_choices=pkg.get("form_choices"),
     )
+
+
+def stops_for_display(hard_stops, soft_stops, issues=None) -> Tuple[List[str], List[str]]:
+    """The two final stop lists as a screen or a cover PRINTS them - each
+    problem once (7 Oct 2026, round 5 #15).
+
+    For surfaces that print the bare sentences rather than cards (the Lite
+    screen, the Submission Brief): a legacy stop and its coded twin collapse by
+    the SAME rule the cards use (`_collapse_twins` over
+    `_LEGACY_SUPERSEDED_BY_CODE`). `issues` are the coded issue dicts that name
+    the sentences - cross-form issues or structured issues; only a coded issue
+    whose sentence is actually in one of the lists takes part, so a sentence no
+    coded issue names is never touched. Returns NEW lists; the caller's lists
+    (the scorer's inputs) are not mutated, and no cap, score or severity moves.
+    """
+    hard = [m for m in (hard_stops or []) if isinstance(m, str)]
+    soft = [m for m in (soft_stops or []) if isinstance(m, str)]
+    coded = []
+    for i in issues or []:
+        if not isinstance(i, dict):
+            continue
+        code = i.get("code")
+        msg = str(i.get("message") or "").strip()
+        if code in _LEGACY_SUPERSEDED_BY_CODE and msg and (
+                _listed_in(msg, hard) or _listed_in(msg, soft)):
+            coded.append({"code": code, "message": msg,
+                          "severity": i.get("severity") or i.get("type") or "soft_warning"})
+    if not coded:
+        return hard, soft
+    _rows, hard, soft = _collapse_twins(coded, None, hard, soft)
+    return hard, soft
 
 
 def normalize_issue_type(issue_type: Optional[str]) -> str:
@@ -2041,6 +2348,46 @@ def count_distinct_issues(
 # `legacy_`): a recomputed issue whose prefix nobody added here outlives its own
 # fix. Adding an emitter means adding its prefix in the SAME change.
 _RECOMPUTED_CODE_PREFIXES = ("legacy_", "tier1_missing_")
+
+
+def retire_stopped_cross_form_issues(
+    persisted: Optional[List[dict]], fresh_cross_issues: Optional[List[dict]],
+) -> List[dict]:
+    """Drop the persisted copy of every cross-form issue the rules no longer raise.
+
+    The upload copies each cross-form issue into ``structured_issues`` under its
+    rule's code; ``replace_recomputed_issues`` keeps everything that is not
+    ``legacy_`` / ``tier1_missing_``, so those copies outlived every
+    recalculation - although the recalculation RE-RUNS the cross-form rules and
+    holds their fresh list. Live, 8 Oct 2026 (Choice Electric 805049a7): the
+    producer answered occupancy, the rule stopped firing, and the Warnings
+    section kept "Property submission missing Minimum Viable COPE: occupancy
+    type" through generation and every reload.
+
+    A copy is retired only when its code is one ``cross_form_validator`` emits
+    (``rule_codes()``) and that code-and-message is not in the fresh run.
+    Everything else - doc / source conflicts, OCR, integrity, unmapped lines,
+    a rule still firing - is kept exactly as it was. Callers pass the list the
+    recalculation just validated, never a stale one.
+    """
+    try:
+        from services.cross_form_validator import rule_codes
+        codes = rule_codes()
+    except Exception:                                     # noqa: BLE001
+        codes = frozenset()
+    if not codes:
+        return list(persisted or [])
+    live = {
+        (str(i.get("code") or ""), str(i.get("message") or "").strip())
+        for i in (fresh_cross_issues or []) if isinstance(i, dict)
+    }
+    out: List[dict] = []
+    for i in persisted or []:
+        code = str(i.get("code") or "") if isinstance(i, dict) else ""
+        if code in codes and (code, str(i.get("message") or "").strip()) not in live:
+            continue
+        out.append(i)
+    return out
 
 
 def replace_recomputed_issues(

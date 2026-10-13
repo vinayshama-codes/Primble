@@ -93,7 +93,7 @@ export default function PDFJsViewer({
   const [pageDims,      setPageDims]      = useState([]);
   const [fieldValues,   setFieldValues]   = useState({});
   const [saveStatus,    setSaveStatus]    = useState("idle");
-  const [,              setPendingEdits]  = useState(false);
+  const [pendingEdits,  setPendingEdits]  = useState(false);
   const [fieldsLoaded,  setFieldsLoaded]  = useState(false);
   const [isSignedLocal, setIsSignedLocal] = useState(isSigned);
   const [showSignPrompt,setShowSignPrompt]= useState(null);
@@ -509,7 +509,9 @@ export default function PDFJsViewer({
           btn.title = "Remove stamped signature"; btn.textContent = "✕";
           btn.style.cssText = `position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:50%;color:#ef4444;font-size:9px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;font-family:inherit;`;
           btn.addEventListener("click", () => {
-            triggerSave(field.name, ""); clearedSigFieldsRef.current.add(field.name); wrap.innerHTML = "";
+            // Cleared first, so the pending-edits signal (and the save button
+            // that waits for an edit) already counts the removed signature.
+            clearedSigFieldsRef.current.add(field.name); triggerSave(field.name, ""); wrap.innerHTML = "";
             const inp = document.createElement("input"); inp.type = "text"; inp.value = ""; inp.placeholder = "Type name…";
             inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.95);border:1px solid #ef4444;outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
             inp.addEventListener("input", e => {
@@ -638,10 +640,14 @@ export default function PDFJsViewer({
   // ONE DOOR: `hasUnsavedEdits()` is both the signal reported upward and the
   // gate `handleToggleEditMode` uses to decide whether to post - so the panel
   // can never call an edit pending that the save would then skip, or vice versa.
+  // Two blanks are the same value: a blank checkbox loads as "" and comes back
+  // "Off" once ticked and unticked - no edit, so nothing to save or discard.
   const hasUnsavedEdits = () =>
-    Object.keys(fieldValuesRef.current).some(
-      k => fieldValuesRef.current[k] !== (originalFieldValuesRef.current[k] ?? "")
-    ) || clearedSigFieldsRef.current.size > 0;
+    Object.keys(fieldValuesRef.current).some(k => {
+      const now = fieldValuesRef.current[k];
+      const saved = originalFieldValuesRef.current[k] ?? "";
+      return now !== saved && !(isBlankBoxValue(now) && isBlankBoxValue(saved));
+    }) || clearedSigFieldsRef.current.size > 0;
 
   const _syncPending = () => {
     const dirty = hasUnsavedEdits();
@@ -705,6 +711,31 @@ export default function PDFJsViewer({
     // mode as if the edits had gone through.
     if (editMode && hasUnsavedEdits() && !(await saveEdits())) return;
     setEditMode(m => !m);
+  };
+
+  // "Cancel" (Choice Electric #19; owner, 9 Oct 2026): leave edit mode WITHOUT
+  // saving - every box goes back to its last saved value, a signature removed
+  // in this edit comes back, nothing is sent and nothing is redrawn from the
+  // server. The one exit that does not save; asks first when something would
+  // be thrown away. "Done editing - save" is the save.
+  const handleCancelEdits = () => {
+    if (!editModeRef.current || saveInFlightRef.current) return;
+    if (hasUnsavedEdits() && !window.confirm("Discard your changes to this form?")) return;
+    const saved = { ...originalFieldValuesRef.current };
+    fieldValuesRef.current = saved;
+    clearedSigFieldsRef.current = new Set();
+    setFieldValues({ ...saved });
+    _syncPending();
+    updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, saved);
+    setEditMode(false);
+    if (saveStatus === "error") {
+      // A save that failed on THIS side may still have reached the server (a
+      // gateway timeout while it re-scored): the discarded edits are gone from
+      // here already (above), and the form is read back so the boxes show what
+      // the server holds. If that read fails too, nothing discarded is resent.
+      setSaveStatus("idle");
+      fetchFields().catch(() => {});
+    }
   };
 
   // The request body of the ONE save - the changed boxes, the signed flag and
@@ -851,6 +882,8 @@ export default function PDFJsViewer({
   // and focuses that box. It never changes a value itself - a checkbox is only
   // focused, never ticked - and it waits whenever the Edit button would.
   const editBusy = saveStatus === "saving" || saveStatus === "generating";
+  // In edit mode with no change on screen there is nothing for the save to do.
+  const nothingToSave = editMode && !pendingEdits;
   const handleCanvasDoubleClick = (e) => {
     if (editModeRef.current || editBusy || applyingSign || loadingStage !== "idle" || !fieldsLoaded) return;
     const canvas = canvasRef.current;
@@ -901,7 +934,10 @@ export default function PDFJsViewer({
       {showSignPrompt === "none" && <NoSignaturePrompt onSetup={() => { setShowSignPrompt(null); onOpenSignatureModal(); }} onClose={() => setShowSignPrompt(null)} />}
 
       {/* Toolbar */}
-      <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+      {/* The shell is the toolbar's size container: on a narrow viewer the
+          buttons take a second row (PDFJsViewer.css). */}
+      <div className="pdfviewer-toolbar-shell">
+      <div className={`pdfviewer-toolbar-top${editMode ? " is-editing" : ""}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
           <span title={formName} style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: 420 }}>{formName}</span>
           {fieldsLoaded && (
@@ -957,14 +993,27 @@ export default function PDFJsViewer({
             Refresh
           </button>
 
+          {/* Choice Electric #19 (owner, 9 Oct 2026): "Cancel" beside the save -
+              leaves edit mode and throws the unsaved typing away. */}
+          {editMode && (
+            <button type="button" onClick={handleCancelEdits} disabled={editBusy}
+              className="pdfviewer-cancel-btn"
+              title="Leave edit mode without saving - your changes are discarded"
+              style={{ cursor: editBusy ? "wait" : "pointer", opacity: editBusy ? 0.7 : 1 }}>
+              Cancel
+            </button>
+          )}
+
           {/* Item 10 (client, 22 Sep): "Make Edit button WAY more obvious". The
               one filled, primary-colour, largest button in the toolbar. Same
-              handler, same disabled / wait states as before. */}
-          <button onClick={handleToggleEditMode} disabled={editBusy}
+              handler, same wait state as before. In edit mode it saves, so it
+              waits for something to save (Choice Electric #19: "Done Editing
+              should be reserved for actual updates"); Cancel leaves without. */}
+          <button onClick={handleToggleEditMode} disabled={editBusy || nothingToSave}
             className={`pdfviewer-edit-btn${editMode ? " is-editing" : ""}`}
             aria-pressed={editMode}
-            title={editMode ? "Save your edits and update the score" : "Edit the boxes on this form"}
-            style={{ cursor: editBusy ? "wait" : "pointer", opacity: editBusy ? 0.7 : 1 }}>
+            title={editMode ? (nothingToSave ? "Nothing to save yet - change a box, or Cancel to leave edit mode" : "Save your edits and update the score") : "Edit the boxes on this form"}
+            style={{ cursor: editBusy ? "wait" : nothingToSave ? "not-allowed" : "pointer", opacity: editBusy ? 0.7 : nothingToSave ? 0.55 : 1 }}>
             {editMode ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
             ) : (
@@ -993,10 +1042,11 @@ export default function PDFJsViewer({
           </>)}
         </div>
       </div>
+      </div>
 
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any box to edit - "Done editing - save" saves all changes</span>
+          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any box to edit - "Done editing - save" saves all changes, "Cancel" discards them</span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,243,199)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,215,170)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Verify (not found in docs)</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,226,226)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>AI-OK (found in docs)</span></span>

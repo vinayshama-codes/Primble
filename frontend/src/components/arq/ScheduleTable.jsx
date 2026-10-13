@@ -13,6 +13,7 @@ import { API_BASE } from '../../config/constants';
 import {
   MAX_ROWS,
   downloadTemplate,
+  exampleHint,
   isBlankRow,
   parseScheduleFile,
   validateRows,
@@ -84,8 +85,11 @@ export default function ScheduleTable({
       }
       // Append to whatever is already there rather than replacing, so an
       // agent pre-load plus a client addition can coexist. Existing blank
-      // rows are dropped first so importing into a fresh table is clean.
-      const existing = rows.filter((r) => !isBlankRow(r, columns));
+      // rows are dropped first so importing into a fresh table is clean. A row
+      // carrying the server's hidden id (`_row_id`) is a STORED row whose
+      // visible cells happen to be empty (the client's copy hides the agency's
+      // columns) - it stays, or the import would delete it on save.
+      const existing = rows.filter((r) => r?._row_id || !isBlankRow(r, columns));
       const merged = [...existing, ...parsed].slice(0, MAX_ROWS);
       setRows(merged);
 
@@ -301,10 +305,14 @@ export default function ScheduleTable({
                     </td>
                     {columns.map((c) => (
                       <td key={c.key} style={{ padding: '0 4px', verticalAlign: 'top' }}>
+                        {/* An empty box shows its column's example as a hint
+                            ("e.g. ...", italic, lighter) - never something that
+                            reads as an entered value (12 Oct 2026). */}
                         <input
+                          className="schedule-cell"
                           value={row[c.key] ?? ''}
                           onChange={(e) => updateCell(idx, c.key, e.target.value)}
-                          placeholder={c.placeholder || ''}
+                          placeholder={exampleHint(c)}
                           title={rowErr[c.key] || ''}
                           style={cellInput(!!rowErr[c.key])}
                         />

@@ -348,6 +348,19 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    _is_positive_int,
         "format_hint": "Whole number (e.g. 7)",
     },
+    # ACORD 125's NO. OF MEMBERS AND MANAGERS (row A, the applicant). No
+    # document states it, so before 13 Oct 2026 the box could only be typed on
+    # the generated form - listed as Missing after generation and nowhere
+    # before. Registered so it is answerable before forms (the dry run's fix
+    # window, the questionnaire's box -> fact door); the stamper already prints
+    # it from this fact (`pdf_service._APPLICANT_ROW_A_FACTS`).
+    "applicant_member_manager_count": {
+        "forms":       {"ACORD_125"},
+        "question":    "How many members and managers does the LLC have?",
+        "tier": None, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number (e.g. 2)",
+    },
     # Client report #15: "Obtain the actual business inception date. Do not
     # treat the policy inception date as the business inception date." The box no
     # longer takes `years_in_business`, so the questionnaire is how it gets filled.

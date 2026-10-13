@@ -245,6 +245,15 @@ def stamp_form_fields(
     Dict[str, str]
         Subset of ``target_fields`` that were filled by alias lookup.
     """
+    # A form's second copy ("ACORD_131__excess", 7 Oct 2026) stamps through its
+    # form's alias map, from that copy's own view of the facts.
+    try:
+        from services.form_instances import base_form_id, facts_for_form, is_instance
+        if is_instance(form_id):
+            facts = facts_for_form(facts, form_id)
+        form_id = base_form_id(form_id)
+    except Exception:                                   # noqa: BLE001
+        pass
     alias_map = _ALIAS_MAPS.get(form_id)
     if not alias_map:
         return {}

@@ -92,6 +92,35 @@ export function routeGhostIssues(ghosts, reviewedIds) {
   return { reviewed, crossForm };
 }
 
+// The Review page's readiness card (5 Oct 2026, CH125 b601fad1): the producer
+// dismissed every hard stop and warning and the number did not move, with
+// nothing on the card saying why. A cap is held by the VALUE, and Dismiss /
+// Resolve record a review - they never change a value. Null when the score is
+// not capped, or when an open item is still listed (the list says why).
+// `cap_applied` is the ceiling IN FORCE, not proof that it holds the score:
+// 27 of 30 scored packages sit below theirs (audit G7, 5 Oct 2026), and the
+// note then blamed a marked item for a number that is low for other reasons.
+// It speaks only when the cap BINDS - the raw score is above it - and, for an
+// 85, never when a hidden Data Consistency row may be what holds it.
+export function railCapNote(pkg, { hardOpen = 0, hardTotal = 0, warnOpen = 0, warnTotal = 0,
+                                   hiddenWarnings = 0 } = {}) {
+  const cap = pkg && Number(pkg.cap_applied);
+  if (!cap) return null;
+  const raw = Number(pkg.raw_sqs_score);
+  const score = Number(pkg.package_sqs_score ?? pkg.sqs_score);
+  const binds = Number.isFinite(raw) ? raw > cap : score === cap;
+  if (!binds) return null;
+  // Positive wording (Choice Electric #16, 9 Oct 2026): what fixes it, not the cap.
+  if (cap === 60 && hardTotal > 0 && hardOpen === 0) {
+    return "Fix the value of the hard stop you marked to increase your Submission Quality Score (SQS)™ - marking it records your review only.";
+  }
+  const hidden = Number(hiddenWarnings || pkg.hidden_warnings || 0);
+  if (cap === 85 && hardOpen === 0 && warnTotal > 0 && warnOpen === 0 && !hidden) {
+    return "Fix the value of the warning you marked to increase your Submission Quality Score (SQS)™ - marking it records your review only.";
+  }
+  return null;
+}
+
 // The line that replaces the red block when every stop still holding the score
 // is one the producer marked. Short, and it says what to do.
 export function stillCappedNote(handled, scope) {
@@ -101,7 +130,7 @@ export function stillCappedNote(handled, scope) {
   const statuses = new Set(list.map((r) => r && r.status));
   const verb = !statuses.has("dismissed") ? "resolved"
     : statuses.has("resolved") ? "resolved or dismissed" : "dismissed";
-  const who = scope === "form" ? "This form" : "The package";
+  const whose = scope === "form" ? "this form's" : "the package's";
   const what = n === 1 ? "an item" : `${n} items`;
-  return `${who} is still capped at 60 by ${what} you marked ${verb} - reopen ${n === 1 ? "it" : "them"} under Reviewed, or fix the value.`;
+  return `Fix the value of ${what} you marked ${verb} to increase ${whose} Submission Quality Score (SQS)™, or reopen ${n === 1 ? "it" : "them"} under Reviewed.`;
 }

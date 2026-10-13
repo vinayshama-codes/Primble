@@ -588,6 +588,36 @@ def _same_policy_contract(a: Any, b: Any) -> bool:
         return False
 
 
+# THE AUTO LIABILITY STRUCTURE IS A READING, NOT A PHRASE (8 Oct 2026,
+# 505bf394). The umbrella's schedule of underlying labels the auto limit
+# "Each Accident"; the auto dec says "combined single limit". One structure in
+# two wordings - and the picker raised "Values differ - confirm", which also
+# withheld ACORD 137's CSL tick as "conflicted". Two printings agree when they
+# read as the same structure; "split" against "CSL" is still a real conflict.
+_STRUCT_SPLIT_RE = re.compile(r"\bsplit\b|\b(?:each|per|ea\.?)\s+person\b", re.I)
+_STRUCT_SPLIT_NEGATED_RE = re.compile(r"\b(?:not|non|no)[\s-]*split\b", re.I)
+_STRUCT_CSL_RE = re.compile(
+    r"(?<![a-z])c\.?\s?s\.?\s?l\.?(?![a-z])|\bcombined\b|\bsingle\s+limit\b", re.I)
+_STRUCT_PER_ACCIDENT_RE = re.compile(r"\b(?:each|per|ea\.?)\s+(?:accident|occurrence)\b", re.I)
+
+
+def auto_structure_reading(value: Any) -> Optional[str]:
+    """"split" / "csl" / None for a printing of the auto liability structure.
+    A limit stated per accident with no per-person part IS a single limit."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    if _STRUCT_SPLIT_RE.search(s) and not _STRUCT_SPLIT_NEGATED_RE.search(s):
+        return "split"
+    if _STRUCT_CSL_RE.search(s) or _STRUCT_SPLIT_NEGATED_RE.search(s) \
+            or _STRUCT_PER_ACCIDENT_RE.search(s):
+        return "csl"
+    return None
+
+
+_STRUCTURE_READERS = {"auto_liability_structure": auto_structure_reading}
+
+
 def same_fact(fact_key: str, a: Any, b: Any) -> str:
     """SAME / DIFFERENT / INCOMPARABLE for two printings of one fact.
 
@@ -610,6 +640,11 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
         return INCOMPARABLE
     if sa == sb or sa.lower() == sb.lower():
         return SAME
+    _reader = _STRUCTURE_READERS.get(fact_key)
+    if _reader is not None:
+        ra, rb = _reader(sa), _reader(sb)
+        if ra and rb:
+            return SAME if ra == rb else DIFFERENT
 
     kind = value_kind(fact_key)
 

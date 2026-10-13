@@ -8,6 +8,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
+from services import form_instances as _fi
 from services.lob_canon import COVERAGE_DENIAL_RE
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf, _OVERFLOW_CHAR_THRESHOLD
 from services.sqs_service import cross_validate, calculate_sqs, _check_loss_run_insured_match, _extract_narrative_doc_text
@@ -56,16 +57,24 @@ _FORM_EVIDENCE_FACTS: Dict[str, dict] = {
     # ── Property - building value, else business personal property value ─────
     "ACORD_140": {"combine": False, "facts": [("property_building_value", "Building value"),
                                               ("property_bpp_value", "Business property value")]},
-    # ── Inland Marine - total scheduled value ────────────────────────────────
-    "ACORD_141": {"combine": False, "facts": [("inland_marine_total_value", "Inland marine value")]},
+    # ── ACORD 141 - recommended on PROPERTY evidence ("Detailed property values
+    #    or multiple locations detected"), so its evidence is the property
+    #    values. It printed the inland marine value - another line's (7 Oct
+    #    2026, round 4). The card's own "Property Schedule" label is a known
+    #    open item (the template is the Crime Section). ─────────────────────────
+    "ACORD_141": {"combine": False, "facts": [("property_building_value", "Building value"),
+                                              ("property_bpp_value", "Business property value")]},
     # ── Additional Remarks - loss count when losses drove the narrative ──────
     "ACORD_101": {"combine": False, "facts": [("num_claims", "Prior claims")]},
     # ── Workers Comp Assigned Risk - the template's own title (see the ACORD
     #    133 block in match_forms_deterministic). Same payroll evidence as 130 ─
     "ACORD_133": {"combine": False, "facts": [("total_payroll", "Total payroll"),
                                               ("wc_payroll", "WC payroll")]},
-    # ── Cyber - coverage limit ───────────────────────────────────────────────
-    "ACORD_160": {"combine": False, "facts": [("cyber_limit", "Cyber limit")]},
+    # ── ACORD 160 - recommended for the INLAND MARINE line (`for_line`), so its
+    #    evidence is inland marine. It printed "Cyber limit: $1,000,000" -
+    #    another line's value (Choice Electric, 7 Oct 2026 round 4). ──────────
+    "ACORD_160": {"combine": False, "facts": [("inland_marine_total_value", "Inland marine value"),
+                                              ("inland_marine_transit_limit", "Transit limit")]},
     # ── Contractors Supplemental - subcontracting exposure ───────────────────
     "ACORD_186": {"combine": False, "facts": [("percent_subcontracted", "% subcontracted")]},
     # ── Evidence of Property - the property value being evidenced ────────────
@@ -89,8 +98,114 @@ _FORM_EVIDENCE_FACTS: Dict[str, dict] = {
 }
 
 
-def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optional[str]]:
+# The line(s) of business each recommendation's reason speaks for (7 Oct 2026,
+# round 4). A reason fact must belong to one of them - never another line's
+# value (ACORD 160 "Possible Inland Marine / equipment exposure - Cyber limit:
+# $1,000,000"). Read through `lob_canon.fact_line_family`; a fact no line owns
+# (total payroll, % subcontracted, claim count) is line-neutral and passes. A
+# form absent here (125, 101, 186) is package-wide. Enforced at run time in
+# `_build_trigger_facts` and over the whole table by
+# tests/test_choice_electric_cards_7oct.py.
+_FORM_EVIDENCE_LINES: Dict[str, FrozenSet[str]] = {
+    "ACORD_25":     frozenset({"general_liab", "auto", "umbrella"}),
+    "ACORD_126":    frozenset({"general_liab"}),
+    "ACORD_127":    frozenset({"auto"}),
+    "ACORD_130":    frozenset({"workers_comp"}),
+    "ACORD_133":    frozenset({"workers_comp"}),
+    "ACORD_131":    frozenset({"umbrella"}),
+    "ACORD_140":    frozenset({"property"}),
+    "ACORD_141":    frozenset({"property"}),
+    "ACORD_28":     frozenset({"property"}),
+    "ACORD_160":    frozenset({"inland_marine"}),
+    "ACORD_137_CA": frozenset({"auto"}),
+    "ACORD_137_CO": frozenset({"auto"}),
+    "ACORD_138_CA": frozenset({"auto"}),
+    "ACORD_138_CO": frozenset({"auto"}),
+}
+
+
+def _evidence_fact_line(key: str) -> Optional[str]:
+    try:
+        from services.lob_canon import fact_line_family
+        return fact_line_family(key)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def _is_money_fact(key: str) -> bool:
+    """A fact the registry validates as a dollar amount."""
+    try:
+        from services.fact_registry import FACT_REGISTRY, _is_currency
+        return (FACT_REGISTRY.get(key) or {}).get("validate") is _is_currency
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+_BARE_AMOUNT_RE = re.compile(r"^\$?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$")
+
+
+def _reason_money(key: str, value: str) -> str:
+    """A money fact printed as money ("1,000,000" -> "$1,000,000") through the
+    display canonicaliser. Only a BARE amount is reformatted - "CSL 1,000,000",
+    "1,000,000 / 2,000,000" or "Statutory" print exactly as written."""
+    if not _is_money_fact(key) or not _BARE_AMOUNT_RE.match(value.strip()):
+        return value
+    try:
+        from services.display_canonicalizer import canonicalize_currency
+        return canonicalize_currency(value) or value
+    except Exception:                                         # noqa: BLE001
+        return value
+
+
+# A package fact that holds ONE building's figure, and the location-table column
+# holding each building's own (premises_cope.PER_BUILDING_COPE).
+_PER_BUILDING_TOTALS: Dict[str, Tuple[str, str]] = {
+    "property_building_value": ("building_value", "Building values"),
+}
+
+
+def _per_building_total(key: str, facts: dict) -> Optional[Tuple[str, int, int]]:
+    """(total, rows stating it, rows) when 2+ location rows state the per-building
+    figure behind `key` and every stated one is a plain amount; else None (a
+    one-building package keeps its fact's own value)."""
+    spec = _PER_BUILDING_TOTALS.get(key)
+    if not spec:
+        return None
+    try:
+        from decimal import Decimal
+        from services.premises_cope import location_rows
+        rows = location_rows(facts)
+        cells = [str(r.get(spec[0]) or "").strip() for r in rows]
+        stated = [c for c in cells if c and c.lower() not in ("none", "null")]
+        if len(stated) < 2:
+            return None
+        total = Decimal(0)
+        for c in stated:
+            if not _BARE_AMOUNT_RE.match(c):
+                return None
+            total += Decimal(c.replace("$", "").replace(",", "").strip())
+        if total <= 0:
+            return None
+        text = ("${:,}".format(int(total)) if total == total.to_integral_value()
+                else "${:,.2f}".format(total))
+        return text, len(stated), len(rows)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+# The label an EXCESS layer's copy prints for its limit, which is not the
+# umbrella's (services/umbrella_layers.py).
+_INSTANCE_EVIDENCE_LABELS: Dict[str, str] = {"umbrella_limit": "Excess limit"}
+
+
+def _build_trigger_facts(form_id: str, facts: dict,
+                         for_line: Optional[str] = None) -> Tuple[List[dict], Optional[str]]:
     """Return (trigger_facts, evidence_suffix) for one recommendation.
+
+    Round 4 (7 Oct 2026): a fact of another line is never evidence
+    (`_FORM_EVIDENCE_LINES`, narrowed to `for_line` when the recommendation
+    names its line); a money fact prints as money; a one-building package
+    figure on a 2+ building package prints the buildings' total and count.
 
     trigger_facts : [{code, label, value}] for every corroborating fact that is
                     actually present (empty list when none) - persisted as-is for
@@ -100,9 +215,19 @@ def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optiona
                     no evidence fact was extracted so the caller falls back to the
                     existing generic message unchanged.
     """
-    spec = _FORM_EVIDENCE_FACTS.get(form_id)
+    # A second copy of a form (an ACORD 131 for the excess layer, 7 Oct 2026)
+    # is evidenced by its base's facts, read from that copy's own view.
+    spec = _FORM_EVIDENCE_FACTS.get(_fi.base_form_id(form_id))
     if not spec:
         return [], None
+    # The copy's OWN layer names its limit (round 2): an excess layer's copy -
+    # whatever id it holds - says "Excess limit"; an umbrella layer's copy keeps
+    # the form's wording. A copy with no layer view reads as before.
+    _layer = (facts.get("_umbrella_layer") or {}).get("layer") \
+        if isinstance(facts, dict) and isinstance(facts.get("_umbrella_layer"), dict) else None
+    if _layer == "excess" or (_fi.is_instance(form_id) and _layer is None):
+        spec = {**spec, "facts": [(k, _INSTANCE_EVIDENCE_LABELS.get(k, lbl))
+                                  for k, lbl in spec["facts"]]}
     # An UNRESOLVED fact is not evidence (client 2026-08-17). The umbrella limit
     # was withheld from the form and simultaneously printed here as "Umbrella
     # limit: $3,000,000" on ACORD 25 AND 131 - the stamping layer obeyed the
@@ -114,7 +239,16 @@ def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optiona
         def is_withheld(_f, _k):                              # type: ignore
             return False
     present: List[dict] = []
+    shown: List[str] = []          # each present fact as the reason prints it
+    _lines = set(_FORM_EVIDENCE_LINES.get(_fi.base_form_id(form_id)) or ())
+    if for_line:
+        _lines = (_lines & {for_line}) or {for_line}
     for key, label in spec["facts"]:
+        _fam = _evidence_fact_line(key) if _lines else None
+        if _fam and _fam not in _lines:
+            logger.info("form evidence: %s is a %s fact - not evidence for %s (%s)",
+                        key, _fam, form_id, sorted(_lines))
+            continue
         if is_withheld(facts, key):
             logger.info(
                 "form evidence: %s withheld on %s - unresolved conflict, the "
@@ -138,15 +272,29 @@ def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optiona
                 continue
         except ValueError:
             pass
-        present.append({"code": key, "label": label, "value": sval})
+        entry = {"code": key, "label": label, "value": sval}
+        text = f"{label}: {_reason_money(key, sval)}"
+        # A package fact holding ONE building's figure, on a package whose
+        # location table states it for 2+ buildings, prints their total and
+        # count (round 4: "Building value: $798,556" was building 1 alone).
+        _tot = _per_building_total(key, facts)
+        if _tot is not None:
+            total, n_stated, n_rows = _tot
+            entry.update({"total": total, "buildings": n_stated})
+            count = (f"{n_stated} buildings" if n_stated == n_rows
+                     else f"{n_stated} of {n_rows} buildings")
+            text = f"{_PER_BUILDING_TOTALS[key][1]}: {total} ({count})"
+        present.append(entry)
+        shown.append(text)
     if not present:
         return [], None
     if spec.get("combine") and len(present) >= 2:
         # Paired limits (GL occurrence + aggregate) read as "limits a / b".
-        suffix = "limits " + " / ".join(tf["value"] for tf in present[:2])
+        suffix = "limits " + " / ".join(_reason_money(tf["code"], tf["value"])
+                                        for tf in present[:2])
     else:
         # Single value, or the first available of several alternative sources.
-        suffix = f"{present[0]['label']}: {present[0]['value']}"
+        suffix = shown[0]
     return present, suffix
 
 
@@ -1043,7 +1191,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              trigger_reason: str, template_pending: bool = False,
              needs_state_confirmation: bool = False,
              tier: str = TIER_RECOMMENDED, reason_label: str = None,
-             is_source_document: bool = False) -> None:
+             is_source_document: bool = False, for_line: str = None) -> None:
         # Generalised source-document detection (Beta Report §7 "Situation 3"):
         # if the broker uploaded this exact ACORD form (its printed number was
         # found in the upload), it is already-provided evidence, not a form to
@@ -1058,7 +1206,12 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
             reason_label = (
                 "Detected as an uploaded ACORD form - generate a clean copy only if needed"
             )
-        confidence, reason = _compute_confidence(form_id, facts, trigger_weight, triggered=True)
+        # A second copy of a form (7 Oct 2026, LAYERS) is scored by its base's
+        # rules on its own view of the facts; a plain id is its own base and,
+        # for every form without a layer view, the facts are the same object.
+        _base_id = _fi.base_form_id(form_id)
+        _form_facts = _fi.facts_for_form(facts, form_id)
+        confidence, reason = _compute_confidence(_base_id, _form_facts, trigger_weight, triggered=True)
         entry: dict = {
             "form_id":        form_id,
             "form_name":      form_name,
@@ -1079,13 +1232,14 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         # back to the existing message when no evidence value was extracted, and
         # is skipped for uploaded source docs (their message is about a clean
         # copy, not coverage evidence).
-        _trigger_facts, _evidence = _build_trigger_facts(form_id, facts)
+        _trigger_facts, _evidence = _build_trigger_facts(form_id, _form_facts,
+                                                         for_line=for_line)
         if _trigger_facts:
             entry["trigger_facts"] = _trigger_facts
             if _evidence and not is_source_document:
                 entry["reason_label"] = f"{entry['reason_label']} - {_evidence}"
         # Expose raw counts so the frontend can render "12 of 18 fields"
-        _, filled, total = _score_field_coverage(form_id, facts)
+        _, filled, total = _score_field_coverage(_base_id, _form_facts)
         entry["fields_filled"] = filled
         entry["fields_total"]  = total
         if template_pending:
@@ -1096,6 +1250,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         # to build from scratch (Beta Report §7 action item 6).
         if is_source_document:
             entry["is_source_document"] = True
+        # The ONE line this recommendation is for, when its trigger is that
+        # line alone - what a decline of the line withdraws (below).
+        if for_line:
+            entry["for_line"] = for_line
         # ── Beta Report §7.2 item 5: stamp account-profile filter dimensions ──
         # business class / account type + whether this form aligns with the
         # confirmed coverage goals or the business class. Additive metadata only:
@@ -1103,14 +1261,14 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         # triggered form is never dropped - the UI can filter/label by these.
         entry["business_class"] = _profile.get("business_class")
         entry["account_type"]   = _profile.get("account_type")
-        _rel, _rel_reason = _assess_profile_relevance(form_id, tier, is_source_document, _profile)
+        _rel, _rel_reason = _assess_profile_relevance(_base_id, tier, is_source_document, _profile)
         entry["profile_relevant"] = _rel
         if _rel_reason:
             entry["relevance_reason"] = _rel_reason
         # Positive per-form business-class label (e.g. "Relevant to Contractor
         # operations"). Additive optional key - present only when the form has a
         # business-class-specific tie; the UI renders it as a small chip.
-        _rel_label = _profile_relevance_label(form_id, _profile)
+        _rel_label = _profile_relevance_label(_base_id, _profile)
         if _rel_label:
             entry["relevance_label"] = _rel_label
         matches.append(entry)
@@ -1223,7 +1381,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              template_pending=True,
              tier=TIER_REQUIRED if _wc_confirmed else TIER_NEEDS_CONFIRMATION,
              reason_label=("Workers' Compensation exposure detected" if _wc_confirmed
-                           else "Possible Workers' Compensation exposure - confirm"))
+                           else "Possible Workers' Compensation exposure - confirm"),
+             for_line="workers_comp")
 
     _auto_line = _dec_line_present(search, _AUTO_LINE_PHRASES)
     _has_auto = flags.get("has_auto_coverage")
@@ -1284,13 +1443,41 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         else:
             _umb_reason = "umbrella / excess line detected on document (flag unconfirmed)"
             _umb_label  = "Umbrella / Excess shown on document - confirm"
+        # ONE ACORD 131 PER LAYER (7 Oct 2026, Choice Electric #4 - Brent: "When
+        # we have an umbrella base with excess on top of it, each gets their own
+        # form 131"). On a tower the plain 131 is the lowest layer and every
+        # layer above it is its own copy, in attachment order, each reason
+        # naming its layer and carrier (services/umbrella_layers.py). No tower:
+        # exactly the one recommendation as before.
+        try:
+            from services.umbrella_layers import recommendation_layers
+            _umb_layers = recommendation_layers(facts)
+        except Exception as _ulx:                            # noqa: BLE001
+            logger.warning("match_forms: umbrella layers unavailable: %s", _ulx)
+            _umb_layers = []
+        _umb_tier = TIER_REQUIRED if _umb_flag else TIER_NEEDS_CONFIRMATION
+        # A generated copy stays on its layer (round 2): the plain 131 is the
+        # layer bound to it, which is not always the lowest once a lower layer
+        # arrives after generation - so it is found by id, not by position.
+        _umb_plain = next((_l for _l in _umb_layers if _l["form_id"] == "ACORD_131"), None)
         _add("ACORD_131",
              "ACORD 131 - Umbrella / Excess Liability",
              trigger_weight=0.95,
              trigger_reason=_umb_reason,
              template_pending=True,
-             tier=TIER_REQUIRED if _umb_flag else TIER_NEEDS_CONFIRMATION,
-             reason_label=_umb_label)
+             tier=_umb_tier,
+             reason_label=_umb_plain["reason"] if _umb_plain else _umb_label)
+        for _layer in _umb_layers:
+            if _layer["form_id"] == "ACORD_131":
+                continue
+            _add(_layer["form_id"],
+                 _fi.instance_form_name("ACORD 131 - Umbrella / Excess Liability",
+                                        _layer["form_id"]),
+                 trigger_weight=0.95,
+                 trigger_reason=f"{_umb_reason}; {_layer['reason']}",
+                 template_pending=True,
+                 tier=_umb_tier,
+                 reason_label=_layer["reason"])
 
     _prop_line = _dec_line_present(search, _PROP_LINE_PHRASES) or bool(_PROP_VALUE_RE.search(search))
     _has_prop = flags.get("has_property_coverage")
@@ -1493,21 +1680,19 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     _payroll_str = _fv(facts, "total_payroll") or _fv(facts, "wc_payroll")
     _revenue_str = _fv(facts, "total_revenue")
     if _payroll_str and _revenue_str:
-        try:
-            _pr = float(re.sub(r"[^\d.]", "", str(_payroll_str)))
-            _rv = float(re.sub(r"[^\d.]", "", str(_revenue_str)))
-            if _rv > 0 and _pr / _rv > 0.85:
-                _101_recommended_reasons.append("payroll/revenue ratio exceeds 85% - unusual operations require explanation")
-        except ValueError:
-            pass
+        # The shared money parser (G2 audit): a digit-strip read "$18.6MM" as
+        # 18.6 and printed "payroll/revenue ratio exceeds 85%" on CH125.
+        from services.sqs_service import _to_float as _money
+        _pr, _rv = _money(_payroll_str), _money(_revenue_str)
+        if _pr and _rv and _rv > 0 and _pr / _rv > 0.85:
+            _101_recommended_reasons.append("payroll/revenue ratio exceeds 85% - unusual operations require explanation")
 
     _subpct_str = _fv(facts, "percent_subcontracted")
     if _subpct_str:
-        try:
-            if float(re.sub(r"[^\d.]", "", str(_subpct_str))) > 30 and not _fv(facts, "wc_payroll"):
-                _101_recommended_reasons.append("subcontract percentage >30% with no WC payroll on file")
-        except ValueError:
-            pass
+        from services.cross_form_validator import _to_percent
+        _subpct = _to_percent(_subpct_str)
+        if _subpct is not None and _subpct > 30 and not _fv(facts, "wc_payroll"):
+            _101_recommended_reasons.append("subcontract percentage >30% with no WC payroll on file")
 
     if flags.get("has_loss_history") and not _fv(facts, "num_claims") and not _fv(facts, "total_incurred"):
         _101_recommended_reasons.append("loss history detected but claim count and incurred amount are missing - narrative required")
@@ -1518,7 +1703,12 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     _total_incurred_str = _fv(facts, "total_incurred")
     if _num_claims_str:
         try:
-            _nc = int(float(re.sub(r"[^\d.]", "", str(_num_claims_str))))
+            # A COUNT: the first whole number ("3 claims in 2024" is 3, never
+            # the 32024 a digit-strip made of it).
+            _nc_tok = re.search(r"\d+", str(_num_claims_str))
+            _nc = int(_nc_tok.group(0)) if _nc_tok else None
+            if _nc is None:
+                raise ValueError("no count")
             if _nc > 3:
                 _101_recommended_reasons.append(
                     f"{_nc} prior claims detected - narrative recommended to explain loss history"
@@ -1527,7 +1717,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
             pass
     if _total_incurred_str:
         try:
-            _ti = float(re.sub(r"[^\d.]", "", str(_total_incurred_str)))
+            from services.sqs_service import _to_float as _money
+            _ti = _money(_total_incurred_str)
+            if _ti is None:
+                raise ValueError("no amount")
             if _ti > 100_000:
                 _101_recommended_reasons.append(
                     f"Total incurred losses ${_ti:,.0f} - narrative recommended to provide context for underwriter"
@@ -1535,9 +1728,24 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         except (ValueError, TypeError):
             pass
 
-    if flags.get("auto_split_limits"):
+    try:
+        from services.coverage_evidence import auto_limits_are_split as _split_door
+        _auto_split = _split_door(facts, flags)
+    except Exception:                                          # noqa: BLE001
+        _auto_split = bool(flags.get("auto_split_limits"))
+    if _auto_split:
+        # "Not all three components found" means the PARTS (G1 audit: it
+        # counted slashes in the CSL string, so a fully stated split - three
+        # part facts, no slash - got the false reason).
         _limit_val = str(_fv(facts, "auto_liability_limit") or "")
-        if _limit_val.count("/") < 2:
+        _parts_found = all(_fv(facts, k) for k in (
+            "auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident"))
+        try:
+            from services.coverage_evidence import liability_amounts as _amts
+            _in_limit = _limit_val.count("/") >= 2 or len(_amts(_limit_val)) >= 3
+        except Exception:                                      # noqa: BLE001
+            _in_limit = _limit_val.count("/") >= 2
+        if not (_parts_found or _in_limit):
             _101_optional_reasons.append(
                 "split auto limits selected but not all three components found "
                 "(BI per person / BI per accident / PD per accident) - additional remarks needed"
@@ -1665,7 +1873,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              trigger_weight=0.85,
              trigger_reason="assigned-risk / residual-market workers compensation wording detected",
              tier=TIER_RECOMMENDED,
-             reason_label="Assigned Risk / Workers Compensation Insurance Plan submission detected")
+             reason_label="Assigned Risk / Workers Compensation Insurance Plan submission detected",
+             for_line="workers_comp")
 
     _160_kw = {
         "inland marine", "contractor's equipment", "contractors equipment",
@@ -1693,7 +1902,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              trigger_reason="inland marine flag or equipment / cargo keywords detected",
              template_pending=True,
              tier=TIER_OPTIONAL,
-             reason_label="Possible Inland Marine / equipment exposure")
+             reason_label="Possible Inland Marine / equipment exposure",
+             for_line="inland_marine")
 
     # TODO: Add a dedicated crime/fidelity ACORD form (e.g. ACORD 140 or a crime-specific form)
     # once the correct form template is added to forms_database. ACORD 137 is a commercial
@@ -1845,6 +2055,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         if _sub_pct > 30:
             _add("ACORD_130",
                  "ACORD 130 - Workers Compensation Application",
+                 for_line="workers_comp",
                  trigger_weight=0.85,
                  trigger_reason=(
                      f"contractor with {_sub_pct:.0f}% subcontracting implies WC payroll "
@@ -1878,9 +2089,54 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              is_source_document=True,
              reason_label="Detected as an uploaded ACORD form - generate a clean copy only if needed")
 
+    # ── A line the submission declines is not recommended (5 Oct 2026) ────────
+    # "NOT REQUESTED: workers compensation ...; commercial inland marine ..."
+    # (`services.declined_lines`). The in-force WC page and the floater kept
+    # ACORD 130 / 160 on the list for lines nobody is applying for. Withdrawn
+    # by the recommendation's own trigger line (`for_line`), never by form
+    # number - ACORD 160 is offered here for Inland Marine, and a future BOP
+    # trigger for it must not be withdrawn by an IM decline. The decision is
+    # `line_presence.declined_by_submission`, the door the coverage flags use,
+    # so a person's answer on the line brings both back together. An uploaded
+    # copy of the form itself stays; the producer can still add any form.
+    try:
+        from services.line_presence import declined_by_submission as _declined_by
+    except Exception:                                    # noqa: BLE001
+        _declined_by = None
+    if _declined_by is not None:
+        _kept = [m for m in matches
+                 if not (m.get("for_line") and not m.get("is_source_document")
+                         and _declined_by(m["for_line"], facts))]
+        if len(_kept) != len(matches):
+            logger.info("match_forms: not recommending %s - the submission declines their line",
+                        sorted({m["form_id"] for m in matches} - {m["form_id"] for m in _kept}))
+        matches = _kept
+
     # ── Sort: blended confidence descending (ACORD_125 naturally stays first) ──
     matches.sort(key=lambda x: x["confidence"], reverse=True)
-    return matches
+    return keep_copies_beside_their_form(matches)
+
+
+def keep_copies_beside_their_form(items: List[dict]) -> List[dict]:
+    """A second copy of a form (ACORD 131 for the excess layer) is listed right
+    after its base, in the order it was added, wherever the base sorted to. A
+    copy whose base is not listed keeps its place. Order otherwise unchanged."""
+    if not any(_fi.is_instance((m or {}).get("form_id")) for m in (items or [])):
+        return items
+    copies: Dict[str, List[dict]] = {}
+    bases = {(m or {}).get("form_id") for m in items if not _fi.is_instance((m or {}).get("form_id"))}
+    for m in items:
+        fid = (m or {}).get("form_id")
+        if _fi.is_instance(fid) and _fi.base_form_id(fid) in bases:
+            copies.setdefault(_fi.base_form_id(fid), []).append(m)
+    out: List[dict] = []
+    for m in items:
+        fid = (m or {}).get("form_id")
+        if _fi.is_instance(fid) and _fi.base_form_id(fid) in bases:
+            continue
+        out.append(m)
+        out.extend(copies.get(fid, []))
+    return out
 
 
 def score_extra_forms(facts: dict, triggered_ids: set, all_forms: List[dict]) -> List[dict]:
@@ -1982,12 +2238,30 @@ def shared_gap_fill(session: dict, form_ids: List[str]) -> dict:
                 package_form_ids(session) or [str(f) for f in form_ids if f])
         except Exception as _pkg_ex:                         # noqa: BLE001
             logger.warning("combined_gap_fill: package form list unavailable: %s", _pkg_ex)
+        # The documents each form's coverage SECTIONS are read against (round 5,
+        # improving-ll.md C104): a question about coverage the documents do not
+        # carry is never asked. Bookkeeping only - never in the facts block.
+        from services.scoped_evidence import absent_section_fields, attach_documents
+        attach_documents(facts_with_flags, session.get("docs") or [])
+        _sections_not_asked = 0
         forms_to_unmatched: dict = {}
         forms_to_mapped: dict = {}
         schemas: dict = {}
+        # ONE ACORD 131 PER LAYER (7 Oct 2026, Choice Electric #4). The shared
+        # pass deduplicates by FIELD NAME, and two copies of a form share every
+        # name - so a box that describes the copy's OWN policy (its carrier,
+        # limits, underlying schedule: `form_instances.is_private_field`) must
+        # never take another copy's answer. A form whose facts view differs from
+        # the package's (each layer of an umbrella tower) asks those boxes in
+        # its OWN group, on its own view and its own layer's documents; every
+        # box about the insured stays in the shared union, so both copies get
+        # one answer. A package without copies is unchanged: no view, no split.
+        private_groups: Dict[str, tuple] = {}
+        _seen_bases: set = set()
+        _all_forms = session.get("all_forms", [])
+        _session_facts = session.get("facts") or {}
         for form_id in form_ids:
-            form_meta = next((f for f in session.get("all_forms", [])
-                              if f.get("form_id") == form_id), None)
+            form_meta = _fi.form_meta_for(_all_forms, form_id, _session_facts)
             if not form_meta:
                 continue
             try:
@@ -1999,37 +2273,59 @@ def shared_gap_fill(session: dict, form_ids: List[str]) -> dict:
             try:
                 schema = extract_form_schema(tpl, form_id)
                 schemas[form_id] = schema
-                mapped, unmatched, _det = compute_form_gaps(form_id, schema, facts_with_flags)
+                form_facts = _fi.facts_for_form(facts_with_flags, form_id)
+                mapped, unmatched, _det = compute_form_gaps(
+                    _fi.base_form_id(form_id), schema, form_facts)
             except Exception as ex:                          # noqa: BLE001
                 logger.warning("combined_gap_fill: gap preview exception (%s): %s", form_id, ex)
                 continue
+            _absent = absent_section_fields(form_id, list(unmatched or ()), form_facts)
+            if _absent:
+                unmatched = {f: m for f, m in unmatched.items() if f not in _absent}
+                _sections_not_asked += len(_absent)
+            if unmatched and form_facts is not facts_with_flags:
+                private = {f: m for f, m in unmatched.items()
+                           if _fi.is_private_field(form_id, f)}
+                if private:
+                    unmatched = {f: m for f, m in unmatched.items() if f not in private}
+                    private_groups[form_id] = (private, form_facts, mapped)
             if unmatched:
                 forms_to_unmatched[form_id] = unmatched
-            if mapped:
+            # The shared group's "already filled" context is the package's -
+            # one copy per form (the first), never two layers' identities.
+            _base = _fi.base_form_id(form_id)
+            if mapped and _base not in _seen_bases:
                 forms_to_mapped[form_id] = mapped
-        if not forms_to_unmatched:
+            _seen_bases.add(_base)
+        if _sections_not_asked:
+            logger.info("combined_gap_fill: %d question(s) about coverage the documents do "
+                        "not carry were not asked (scoped_evidence, C104)", _sections_not_asked)
+        if not forms_to_unmatched and not private_groups:
             logger.info("combined_gap_fill: no gaps after Pass 1 + 1.5 - skipping shared GPT pass")
             return {}
         # Excluded documents are NOT sent to the model (see active_document_text).
         raw_text = active_document_text(session)
+        _docs = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+        _active = [d for d in _docs if not d.get("excluded")] or _docs
         try:
-            _docs = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
-            _active = [d for d in _docs if not d.get("excluded")] or _docs
             line_scopes = build_line_page_scopes(_active, facts_with_flags)
         except Exception as _scope_ex:                       # noqa: BLE001
             logger.warning("combined_gap_fill: line scoping unavailable: %s", _scope_ex)
             line_scopes = {}
         logger.info(
             "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
-            "total_mapped_fields=%d line_scopes=%s",
+            "total_mapped_fields=%d line_scopes=%s private_groups=%s",
             len(forms_to_unmatched), len(forms_to_mapped),
             sum(len(v) for v in forms_to_mapped.values()),
             {k: len(v) for k, v in (line_scopes or {}).items()},
+            {k: len(v[0]) for k, v in private_groups.items()},
         )
-        per_form = combined_gap_fill(
+        per_form = (combined_gap_fill(
             forms_to_unmatched, facts_with_flags, raw_text,
-            forms_to_mapped=forms_to_mapped, line_scopes=line_scopes) or {}
-        # One question, one answer per package (24 Sep 2026).
+            forms_to_mapped=forms_to_mapped, line_scopes=line_scopes) or {}) \
+            if forms_to_unmatched else {}
+        # One question, one answer per package (24 Sep 2026) - over the shared
+        # answers only: two layers' own policy terms may rightly differ.
         try:
             from services.pdf_service import reconcile_cross_form_yes_no
             _contradicted = reconcile_cross_form_yes_no(per_form, schemas)
@@ -2038,6 +2334,27 @@ def shared_gap_fill(session: dict, form_ids: List[str]) -> dict:
                             "across forms - blanked for the producer: %s", _contradicted)
         except Exception as _yn_ex:                          # noqa: BLE001
             logger.warning("combined_gap_fill: cross-form Y/N check skipped: %s", _yn_ex)
+        for form_id, (private, form_facts, mapped) in private_groups.items():
+            text = _fi.scoped_text(_active, form_facts, form_id)
+            text = raw_text if text is None else text
+            if not str(text or "").strip():
+                logger.info("combined_gap_fill: %s has no documents of its own - its %d "
+                            "policy boxes stay blank", form_id, len(private))
+                continue
+            try:
+                res = (combined_gap_fill({form_id: private}, form_facts, text,
+                                         forms_to_mapped={form_id: mapped}) or {}).get(form_id) or {}
+            except Exception as _pg_ex:                      # noqa: BLE001
+                logger.warning("combined_gap_fill: %s own group failed - its policy boxes "
+                               "stay blank: %s", form_id, _pg_ex)
+                continue
+            dst = per_form.setdefault(form_id, {
+                "filled_values": {}, "raw_text_fields": set(),
+                "question_grounding": {}, "model_used": res.get("model_used")})
+            dst["filled_values"].update(res.get("filled_values") or {})
+            dst["raw_text_fields"] = set(dst.get("raw_text_fields") or set()) | set(
+                res.get("raw_text_fields") or set())
+            dst["question_grounding"].update(res.get("question_grounding") or {})
         return per_form
     except Exception as ex:                                  # noqa: BLE001
         logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex, exc_info=True)
@@ -2114,8 +2431,14 @@ def bind_generation_package(session: dict, form_ids) -> List[str]:
 
 
 def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = None) -> dict:
+    # ONE RULE for a form's second copy (7 Oct 2026, LAYERS): `form_id` is what
+    # is stored and shown ("ACORD_131__excess"); its form's schema, template and
+    # rules are the base's; it is stamped and scored from its own facts view.
+    # A plain id: base == form_id and, without a view, the very same facts.
+    form_id          = str(form_meta["form_id"])
+    base_id          = _fi.base_form_id(form_id)
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
-    schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
+    schema           = extract_form_schema(tpl, form_id=base_id)
     raw_text         = active_document_text(session)
     # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
     # is_contractor, has_auto_coverage, etc. for checkbox resolution.
@@ -2126,6 +2449,20 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
             session, str(form_meta.get("form_id") or ""))
     except Exception as _pkg_ex:                              # noqa: BLE001
         logger.warning("process_single_form: package form list unavailable: %s", _pkg_ex)
+    # The documents an AI value must be printed in for its own policy (round 5,
+    # services/scoped_evidence). In place, before the copy's view is taken.
+    from services.scoped_evidence import attach_documents
+    attach_documents(facts_with_flags, session.get("docs") or [])
+    form_facts = _fi.facts_for_form(facts_with_flags, form_id)
+    if pre_filled_gpt is None and form_facts is not facts_with_flags:
+        # A layer copy with NO shared answers (the shared pass failed): stamp
+        # deterministically only. The per-form fallback reads the whole package
+        # with no line scope, and would answer this layer's policy boxes from
+        # another layer's declarations.
+        logger.warning("process_single_form: %s has no shared gap-fill answers - "
+                       "deterministic boxes only", form_id)
+        pre_filled_gpt = {"filled_values": {}, "raw_text_fields": set(),
+                          "question_grounding": {}}
     # Guard blanks: boxes a post-fill guard emptied because the value was not
     # possible for that box. They are invisible to `evaluate_stops` (which
     # validates FACTS, not stamped VALUES), which is why four consecutive runs
@@ -2134,12 +2471,16 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     # can say so.
     guard_blanks: list = []
     mapped, confidence = map_facts_to_form(
-        facts_with_flags, schema,
-        form_id=form_meta["form_id"],
+        form_facts, schema,
+        form_id=base_id,
         raw_text=raw_text,
         pre_filled_gpt=pre_filled_gpt,
         guard_report=guard_blanks,
     )
+    if form_id != base_id:
+        for _g in guard_blanks:
+            if isinstance(_g, dict) and _g.get("form_id") in (base_id, "", None):
+                _g["form_id"] = form_id
 
     hard_stops, soft_stops = run_field_validations(mapped)
     if hard_stops:
@@ -2162,15 +2503,25 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     _docs        = session.get("docs", []) or []
     _present     = {str(d.get("doc_type") or "").strip() for d in _docs if isinstance(d, dict) and not d.get("excluded")}
     _has_narr    = "narrative" in _present
-    _has_loss    = "loss_run" in _present
+    from services.loss_history_state import package_has_loss_runs
+    _has_loss    = package_has_loss_runs(_docs, session.get("facts") or {})
     _loss_match  = _check_loss_run_insured_match(_docs, _fv(session["facts"], "applicant_name"))
     _narr_text   = _extract_narrative_doc_text(_docs)
+    # THE STOPS AS THEY STAND (6 Oct 2026, Choice Electric #18): rebuilt from
+    # the stored facts by the one door - never the stored `hard_stops` /
+    # `soft_stops` display cache. One form is scored with FIELD-LEVEL stops
+    # only (spec 10: cross-form conflicts never cap an individual form), the
+    # same lists `arq_service.recalculate_session_scores` scores a form with.
+    from services.stops_now import stops_now
+    # The package's field-level stops, as `recalculate_session_scores` scores
+    # every form with them - a form's second copy included (scoped to its form).
+    _form_stops      = stops_now(session, [base_id], pre_form=False)
     sqs              = calculate_sqs(
         facts=session["facts"], flags=session["flags"],
         mapped_data=mapped, form_schema=schema,
         selected_form_ids=[form_meta["form_id"]],
-        hard_stops=session.get("hard_stops", []),
-        soft_stops=session.get("soft_stops", []),
+        hard_stops=_form_stops["form_hard"],
+        soft_stops=_form_stops["form_soft"],
         tier2_score=session.get("tier2_score", 50),
         form_id=form_meta["form_id"],
         schema_size=len(schema),

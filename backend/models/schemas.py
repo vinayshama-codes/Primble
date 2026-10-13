@@ -266,10 +266,14 @@ SUBMISSION_ISSUE_STATUS_STATEMENTS = [
         status        TEXT CHECK(status IN ('open','resolved','dismissed')),
         reason        TEXT,
         updated_at    TEXT NOT NULL,
+        severity      TEXT,
         UNIQUE(session_id, issue_id)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_issue_status_session ON submission_issue_status(session_id)",
+    # "hard" / "warning" - which review page a handled item is filed under once
+    # it no longer recomputes (8 Oct 2026, the review screen's Resolved section).
+    "ALTER TABLE submission_issue_status ADD COLUMN IF NOT EXISTS severity TEXT",
 ]
 
 JOBS_STATEMENTS = [
@@ -354,11 +358,16 @@ class DocumentReclassifyRequest(BaseModel):
       - 'exclude'         : exclude the document from scoring (kept for display).
       - 'include'         : re-include a document as a normal scoring participant.
       - 'supporting_only' : include facts but never select it as primary truth.
+
+    confirm_same_insured (7 Oct 2026): after forms exist, a change that brings
+    a document naming another insured back into the package is refused (409)
+    unless the producer confirms it belongs to this insured.
     """
     session_id: str
     doc_id: str
     action: str
     new_doc_type: Optional[str] = None
+    confirm_same_insured: Optional[bool] = False
 
 
 class UnderwritingConfirmRequest(BaseModel):
@@ -508,6 +517,8 @@ class IssueStatusRequest(BaseModel):
     rule_code: Optional[str] = None
     source_fact: Optional[str] = None
     message: Optional[str] = None
+    # "hard" / "warning": the review page the item belongs to (Resolved section).
+    severity: Optional[str] = None
 
 
 class AnswerRecommendationRequest(BaseModel):
@@ -562,16 +573,18 @@ class ResolveIssueRequest(BaseModel):
 
 
 class ReopenIssueRequest(BaseModel):
-    # Reopen a Cross-Form Validation issue from the SQS panel. For a
-    # `field`-mode issue, this also clears whichever canonical fact(s) a prior
-    # inline resolve wrote (Reopen must undo the fix, not just relabel a
-    # validation whose value still shows on the form). Other resolution modes
-    # only flip the status marker - see audit_routes.reopen_issue for why.
+    # Reopen a fixed issue. The fix's recorded receipt is put back - a typed
+    # value, a table, a note (services/issue_fix_undo.py, 9 Oct 2026). A fix with
+    # no receipt (made before receipts existed) falls back to the old rule ONLY
+    # when `legacy_clear` asks for it (the editor's Cross-Form panel): a
+    # field-mode issue's producer fact(s) are cleared. Anything else only flips
+    # the status marker - see audit_routes.reopen_issue.
     session_id: str
     issue_id: Optional[str] = None
     code: Optional[str] = None
     form_id: Optional[str] = None
     message: Optional[str] = None
+    legacy_clear: bool = False
 
 
 class DownloadAnywayRequest(BaseModel):

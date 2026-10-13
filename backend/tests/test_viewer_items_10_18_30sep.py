@@ -500,8 +500,11 @@ def test_the_edit_button_is_unmistakable():
 def test_the_edit_button_keeps_every_behaviour():
     src = _src(VIEWER)
     assert 'const editBusy = saveStatus === "saving" || saveStatus === "generating";' in src
-    assert "<button onClick={handleToggleEditMode} disabled={editBusy}" in src
-    assert 'cursor: editBusy ? "wait" : "pointer", opacity: editBusy ? 0.7 : 1' in src
+    # In edit mode the save waits for a change (Choice Electric #19, 9 Oct 2026:
+    # "Done Editing should be reserved for actual updates" - "Cancel" leaves).
+    assert "<button onClick={handleToggleEditMode} disabled={editBusy || nothingToSave}" in src
+    assert ('cursor: editBusy ? "wait" : nothingToSave ? "not-allowed" : "pointer", '
+            'opacity: editBusy ? 0.7 : nothingToSave ? 0.55 : 1') in src
     body = src[src.index("const handleToggleEditMode"):src.index("const _loadPdfInBackground")]
     # the save path is unchanged: one POST of the changed boxes, the signed
     # flag, the cleared signature boxes, and the score callback

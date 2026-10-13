@@ -166,6 +166,15 @@ _ADDR_TRAILING_UNIT_RE = re.compile(
 )
 
 
+_US_COUNTRY_PART_RE = re.compile(
+    r"^(?:u\.?\s?s(?:\.?\s?a)?|united\s+states(?:\s+of\s+america)?)$", re.I)
+_OTHER_COUNTRY_PART_RE = re.compile(r"^(?:canada|india|mexico)$", re.I)
+_ENDS_IN_POSTAL_CODE_RE = re.compile(r"(?:\d{4,}(?:-\d{3,4})?|[A-Z]\d[A-Z]\s?\d[A-Z]\d)\s*$", re.I)
+# "... TX 75201 USA" - the country glued after the ZIP, no comma.
+_TRAILING_US_COUNTRY_RE = re.compile(
+    r"(?<=\d)\s+(?:u\.?\s?s\.?\s?a\.?|united\s+states(?:\s+of\s+america)?)\s*$", re.I)
+
+
 def _parse_address(addr: str) -> dict:
     # SHAPE FIRST (2026-09-06). This went straight to `addr.split(",")`, so a
     # fact that arrived as a bool, an int, a list or a dict raised
@@ -182,6 +191,19 @@ def _parse_address(addr: str) -> dict:
     if not isinstance(addr, str) or not addr:
         return {}
     parts  = [p.strip() for p in addr.split(",")]
+    # A trailing COUNTRY is not the state (round 5, 7 Oct 2026). "1234 Elm
+    # Street, Suite 500, Dallas, TX 75201, USA" parsed as city "TX 75201",
+    # state "USA" and line two "Suite 500, Dallas"; the stored corpus printed
+    # "TX 75201" in 114 CITY boxes. The country part goes before the parts are
+    # read. A non-US country only after a postal code ("..., Delhi 110020,
+    # India"), so a bare last part like "Mexico" is never taken from a city.
+    while len(parts) >= 2 and (
+            _US_COUNTRY_PART_RE.match(parts[-1].strip(" ."))
+            or (_OTHER_COUNTRY_PART_RE.match(parts[-1].strip(" ."))
+                and _ENDS_IN_POSTAL_CODE_RE.search(parts[-2]))):
+        parts.pop()
+    if parts:
+        parts[-1] = _TRAILING_US_COUNTRY_RE.sub("", parts[-1]).strip()
     result = {}
     if len(parts) >= 1:
         result["line1"] = parts[0]

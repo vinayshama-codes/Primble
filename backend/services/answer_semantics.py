@@ -128,6 +128,10 @@ _ABSENCE_TOKENS = frozenset({
     "none", "no", "nil", "nada", "nothing", "zero", "0", "never", "n",
     "none at all", "none known", "none reported", "none to report",
     "nothing to report", "no ne",
+    # "Nothing to add" as the WHOLE answer - the remarks read only whole-answer
+    # absences (0c), and these are how one is typed into a remarks box.
+    "no remarks", "no additional remarks", "no further remarks", "no comment",
+    "no comments", "nothing to add", "nothing further",
 })
 # Existential negation ANYWHERE in a longer sentence. Requires the negation to
 # govern existence ("there is no X", "we have never had X"), so a descriptive
@@ -145,6 +149,10 @@ _ABSENCE_PHRASE_RE = re.compile(
     r"first[- ]time (?:buyer|buying|purchase)|previously uninsured|"
     r"never (?:insured|carried|had|been insured)"
     r")\b", re.I)
+
+
+# The ACORD 101 remarks - composed prose, read only on a short answer (0c).
+_REMARKS_FACT_KEYS = frozenset({"additional_remarks_text", "acord101_remarks"})
 
 
 # ── 3b. Placeholder text: a value that says only "there is nothing here" ────
@@ -660,8 +668,24 @@ def interpret_answer(fact_key: str, answer: Any,
     except Exception:                                         # noqa: BLE001
         pass
 
+    # 0c. THE ACORD 101 REMARKS ARE TEXT TO PRINT (owner's run 18f6914f, 13 Oct
+    #     2026). The readers below judge a WHOLE answer to a question; the
+    #     remarks are prose the narrative door composes (what is on file plus
+    #     the new paragraph), so "Loss history: no reported losses" anywhere in
+    #     them was read as the absence "there is none" and the remarks were
+    #     stored EMPTY - the ones already on file with them - while the route
+    #     reported success. For the remarks a reader decides only on a SHORT
+    #     answer: uncertainty within the five-word bound, inapplicability and
+    #     absence only as the whole answer. Every other fact - the operations
+    #     description included, whose "We do not have any operations" a client
+    #     correction must still be HELD for (F7) - reads exactly as before.
+    #     The narrative door also judges the person's NEW words on their own
+    #     (arq_service.append_producer_narrative).
+    _remarks = fact_key in _REMARKS_FACT_KEYS
+    _short = len(stripped.split()) <= 5
+
     # 1. UNCERTAINTY first - "no idea" contains "no" but means unknown.
-    if _UNCERTAIN_RE.search(text):
+    if _UNCERTAIN_RE.search(text) and (_short or not _remarks):
         return out(UNKNOWN, reason="uncertainty", message=_ask_again)
 
     kind = _declared_kind(fact_key, entry)
@@ -703,7 +727,7 @@ def interpret_answer(fact_key: str, answer: Any,
             "if you do not have it yet and we will keep asking."))
 
     # 3. INAPPLICABILITY - a real answer, per Brent: N/A is not zero.
-    if stripped in _NA_TOKENS or _NA_RE.search(text):
+    if stripped in _NA_TOKENS or (_NA_RE.search(text) and not _remarks):
         return out(NOT_APPLICABLE, reason="not_applicable")
 
     # 4. NEGATIVE EXISTENCE. Short answers may be a bare token; longer ones
@@ -712,9 +736,9 @@ def interpret_answer(fact_key: str, answer: Any,
     words = stripped.split()
     _absent = (
         (stripped in _ABSENCE_TOKENS and not (kind and stripped in ("0", "zero")))
-        or (len(words) <= 5 and any(w in _ABSENCE_TOKENS for w in words[:2])
+        or (not _remarks and len(words) <= 5 and any(w in _ABSENCE_TOKENS for w in words[:2])
             and not _AFFIRM_TOKENS.intersection(words[:1]))
-        or bool(_ABSENCE_PHRASE_RE.search(text))
+        or (not _remarks and bool(_ABSENCE_PHRASE_RE.search(text)))
     )
     if _absent:
         # On a negative-polarity fact ("no prior losses"), "none" is the

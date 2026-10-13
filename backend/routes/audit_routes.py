@@ -1034,8 +1034,10 @@ async def get_reviewed(
     })
 
 
-def _grouped_cross_issues_for_panel(cross_issues: list):
+def _grouped_cross_issues_for_panel(cross_issues: list, facts: Optional[dict] = None):
     """Cluster + tier a raw cross_form_validator issue list for the SQS panel.
+    `facts` (optional): a COPE card's fix follows the package (Choice Electric
+    #18, 7 Oct 2026 - see `issue_registry.build_grouped_view`).
 
     Same shape the editor's Cross-Form Validation panel already consumes
     (form_routes._grouped_cross_issues_or_none): each cluster/item carries the
@@ -1052,6 +1054,7 @@ def _grouped_cross_issues_for_panel(cross_issues: list):
             build_structured_from_sources(cross_issues=cross_issues, include_advisories=True),
             [m for t, m in _typed if t == "hard_stop"],
             [m for t, m in _typed if t == "soft_warning"],
+            facts=facts,
         )
     except Exception as _gx:
         logger.error(f"resolve_issue: grouped view computation failed (non-fatal): {_gx}")
@@ -1112,6 +1115,7 @@ def _form_selection_view(sess: dict, cross_issues: list,
             hard, soft,
             package_sqs if package_sqs is not None else (sess.get("package_sqs") or {}),
             cross_issues=cross_issues,
+            facts=sess.get("facts") or {},
         )
     except Exception as _fgx:                                  # noqa: BLE001
         logger.error(f"form-selection grouped view failed (non-fatal): {_fgx}")
@@ -1155,15 +1159,35 @@ async def _pre_form_readiness(sess: dict, session_id: str,
             return None
         if (isinstance(scored, dict) and scored
                 and not (sess.get("integrity") or {}).get("review_required")):
-            return {"package_sqs": scored,
+            # Choice Electric #27 (7 Oct 2026): every fix refreshes the
+            # "Before you generate" list too - the same door as the five
+            # form_routes responses (`_pre_form_dry_run`).
+            from routes.form_routes import _pre_form_dry_run
+            # The Recommendations section's "Open to fix" needs each Best
+            # Solutions row's fix window - the same copy `_pre_form_status` returns.
+            from services.review_recommendations import with_fix_routes
+            # ...and the warnings generation will make hard stops, through
+            # the same door `_pre_form_status` uses (round 5 #15) - one shape.
+            from services.stops_now import with_generation_hard_stops
+            card = {"package_sqs": with_generation_hard_stops(
+                        with_fix_routes(scored, sess.get("facts") or {}), sess),
                     "key_details": key_details(sess.get("facts") or {},
                                                sess.get("flags") or {})}
+            dry = await _pre_form_dry_run(
+                session_id, sess.get("facts") or {}, sess.get("flags") or {}, sess)
+            if dry is not None:
+                card["dry_run"] = dry
+            return card
         from routes.form_routes import _pre_form_status
-        pkg, kd = await _pre_form_status(
+        status = await _pre_form_status(
             session_id, sess.get("facts") or {}, sess.get("flags") or {},
             sess.get("integrity") or {}, current_user, session_row=sess,
         )
-        return {"package_sqs": pkg, "key_details": kd}
+        pkg, kd = status
+        card = {"package_sqs": pkg, "key_details": kd}
+        if getattr(status, "dry_run", None) is not None:
+            card["dry_run"] = status.dry_run       # withheld exactly like the other two
+        return card
     except Exception as _px:                                   # noqa: BLE001
         logger.error(f"pre-form readiness unavailable [session={session_id}]: {_px}",
                      exc_info=True)
@@ -1416,6 +1440,17 @@ async def resolve_issue(
         _pre_facts = (await get_processing_session(req.session_id)).get("facts") or {}
     except Exception as _pf_ex:
         logger.warning(f"resolve_issue: pre-write facts read failed: {_pf_ex}")
+    # The whole session IMMEDIATELY before the write (each mode takes it at its
+    # write), so "Open again" can take back exactly what this fix changes - and
+    # nothing another writer did meanwhile (services/issue_fix_undo.py, 9 Oct).
+    _pre_session = None
+
+    async def _snapshot():
+        try:
+            return await get_processing_session(req.session_id)
+        except Exception as _sx:                                  # noqa: BLE001
+            logger.warning(f"resolve_issue: pre-write snapshot failed: {_sx}")
+            return None
 
     if mode == "field":
         field = (req.field or "").strip()
@@ -1432,6 +1467,7 @@ async def resolve_issue(
             _open_facts = (_res_for(req.code) or {}).get("facts") or []
         except Exception as _bx:
             logger.warning(f"resolve_issue: pre-apply issue snapshot failed: {_bx}")
+        _pre_session = await _snapshot()
         applied, _ = await apply_producer_answer_to_session(req.session_id, field, value)
         if not applied:
             return JSONResponse({
@@ -1453,6 +1489,7 @@ async def resolve_issue(
         # when the Narrative Quality recommendation card gained the same
         # narrative mode - two surfaces writing the same fact must not hold
         # two ideas of what "append" means.
+        _pre_session = await _snapshot()
         applied, _ = await append_producer_narrative(req.session_id, text)
         if not applied:
             return JSONResponse({"success": False, "message": "Could not save the explanation."})
@@ -1468,6 +1505,7 @@ async def resolve_issue(
                 "success": False,
                 "message": f"Too many rows (max {schedule_capture.MAX_ROWS}).",
             })
+        _pre_session = await _snapshot()
         ok, result = await save_session_schedule(req.session_id, list_key, rows)
         if not ok:
             return JSONResponse({"success": False, "message": result.get("message", "Could not save schedule.")})
@@ -1575,6 +1613,20 @@ async def resolve_issue(
         except Exception as _le:
             logger.warning(f"resolve_issue: audit log failed: {_le}")
 
+    # Owner, 9 Oct 2026: "Open again" takes back what a fix changed - for EVERY
+    # kind of fix (a typed value, a table, an ACORD 101 note), not only a typed
+    # value - so the points it earned come off the score. Record exactly what
+    # this write moved, before the re-score. Never for add_form: reopening never
+    # removes a generated form.
+    if mode != "add_form" and req.issue_id and _pre_session is not None:
+        try:
+            from services.issue_fix_undo import capture, record_fix
+            _receipt = capture(_pre_session, await get_processing_session(req.session_id))
+            if _receipt:
+                await record_fix(req.session_id, req.issue_id, _receipt)
+        except Exception as _ux:                                  # noqa: BLE001
+            logger.warning(f"resolve_issue: fix receipt not recorded: {_ux}")
+
     # Re-run field + cross-form rules and per-form / package SQS from updated facts.
     impact = await recalculate_session_scores(req.session_id)
     if not isinstance(impact, dict):
@@ -1677,7 +1729,8 @@ async def resolve_issue(
         "new_package_sqs_score": _new_pkg_score,
         "new_package_tier":      _new_pkg_tier,
         "cross_issues":          cross_issues,
-        "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
+        "grouped_cross_issues":  _grouped_cross_issues_for_panel(
+            cross_issues, facts=sess.get("facts") or {}),
         "hard_stops":            _fs_hard,
         "soft_stops":            _fs_soft,
         # New (form-selection banners). The editor panel ignores these.
@@ -1727,8 +1780,17 @@ async def issue_values(
     except Exception:
         return JSONResponse({"success": False, "values": {}})
     sess_facts = proc.get("facts") or {}
+    # A value the server has ruled is not an answer is never offered to confirm
+    # (13 Oct 2026: "LOCAL SERVICE" pre-filled with "Confirm this value").
+    try:
+        from services.normalization import vehicle_use_as_operations
+        _not_an_answer = {"operations_description"} if vehicle_use_as_operations(sess_facts) else set()
+    except Exception:                                          # noqa: BLE001
+        _not_an_answer = set()
 
     def _scalar(key: str) -> str:
+        if key in _not_an_answer:
+            return ""
         v = sess_facts.get(key)
         if isinstance(v, dict):
             v = v.get("value")
@@ -1738,6 +1800,28 @@ async def issue_values(
 
     keys = [f.strip() for f in (facts or "").split(",") if f.strip()]
     return JSONResponse({"success": True, "values": {k: _scalar(k) for k in keys}})
+
+
+async def _issue_still_live(session_id: str, issue_id) -> bool:
+    """Is this issue among the session's last computed issues - the cross-form
+    validations, and the hard stops / warnings the review screen lists?"""
+    if not issue_id:
+        return False
+    try:
+        from services.issue_registry import issue_id_for
+        _sess = await get_processing_session(session_id)
+        for i in (_sess.get("cross_issues_last") or []) + (_sess.get("structured_issues") or []):
+            if not isinstance(i, dict):
+                continue
+            # A stored issue carries no id; the grouped view gives it this one.
+            iid = i.get("issue_id") or (issue_id_for(i["message"], i.get("forms") or [])
+                                        if i.get("message") else None)
+            if iid == issue_id:
+                return True
+        return False
+    except Exception as _lx:                                      # noqa: BLE001
+        logger.warning(f"reopen_issue: live-check failed: {_lx}")
+        return False
 
 
 @router.post("/api/audit/reopen-issue")
@@ -1773,10 +1857,59 @@ async def reopen_issue(
         clear_producer_answer_from_session, recalculate_session_scores,
     )
 
+    # Owner, 9 Oct 2026: a fix recorded what it changed (resolve-issue,
+    # services/issue_fix_undo.py). Put all of it back - a typed value, a table,
+    # an ACORD 101 note alike - so the points the fix earned come off the score.
+    _undo_state, _undo_info = "none", {}
+    if req.issue_id:
+        try:
+            from services.issue_fix_undo import undo_fix
+            _undo_state, _undo_info = await undo_fix(req.session_id, req.issue_id)
+        except Exception as _ux:                                  # noqa: BLE001
+            logger.warning(f"reopen_issue: undo failed, falling back: {_ux}")
+            _undo_state, _undo_info = "none", {}
+    if _undo_state == "changed":
+        # Something the fix wrote was changed after it (another fix, an edit, a
+        # client answer). Undoing would erase that later work, so nothing is
+        # undone and the status stays as it was; the producer is told to change
+        # the values through "Open to fix".
+        return JSONResponse({
+            "success": True, "cleared": False, "changed_since": True,
+            "still_live": await _issue_still_live(req.session_id, req.issue_id),
+        })
+
     resolution = resolution_for(req.code)
-    cleared_any = False
+    cleared_any = _undo_state == "undone"
     _cleared_priors: dict = {}
-    if resolution and resolution.get("mode") == "field":
+    if cleared_any:
+        from services.fact_lineage import envelope_value as _env_val
+
+        def _said(v):
+            v = None if (isinstance(v, dict) and v.get("__absent__")) else _env_val(v)
+            if isinstance(v, list):
+                return f"{len(v)} row(s)"
+            if isinstance(v, dict) or v is None:
+                return None
+            return str(v).strip()[:2000] or None
+
+        for fact, ch in ((_undo_info.get("receipt") or {}).get("facts") or {}).items():
+            _cleared_priors[fact] = (_said(ch.get("after")) or "")[:300] or None
+            try:
+                await log_field_change(
+                    session_id=req.session_id, user_id=str(current_user["id"]),
+                    form_id=req.form_id, field_name=fact, fact_key=fact,
+                    source="producer", record_unchanged=True,
+                    previous_value=_said(ch.get("after")),
+                    new_value=_said(ch.get("before")) or "",
+                    confidence=None, model_version=SQS_MODEL_VERSION,
+                )
+            except Exception as _rle:                             # noqa: BLE001
+                logger.warning(f"reopen_issue: undo log failed for {fact}: {_rle}")
+    elif req.legacy_clear and resolution and resolution.get("mode") == "field":
+        # A fix with no receipt (made before receipts existed): the old rule,
+        # only where the caller asks for it (the editor's Cross-Form panel). It
+        # clears the producer's value for every fact the rule covers - which can
+        # be a value typed elsewhere - so the review screen never asks.
         # E&O 5.9: capture the values about to be retracted, then log each
         # retraction as a modification (previously silent - a fact could
         # vanish from the package with nothing in MODIFICATION HISTORY).
@@ -1817,7 +1950,12 @@ async def reopen_issue(
         except Exception as _ev_ex:
             logger.warning(f"reopen_issue: event log failed: {_ev_ex}")
 
-    if req.issue_id:
+    # The stored status says "open" only when the item really is open again:
+    # something was undone, or the check fires again. A status-only reopen of an
+    # item that no longer fires used to store "open" while the screen put
+    # "resolved" back, so the row vanished on the next reload (9 Oct review).
+    _live_now = None if cleared_any else await _issue_still_live(req.session_id, req.issue_id)
+    if req.issue_id and (cleared_any or _live_now):
         await set_issue_status(
             session_id=req.session_id, issue_id=req.issue_id, status="open",
             user_id=str(current_user["id"]), form_id=req.form_id,
@@ -1841,18 +1979,8 @@ async def reopen_issue(
         # bring it back. The same hole was already there for every schedule /
         # narrative / none-mode issue whose condition had since been fixed
         # elsewhere; this closes the class, not the one case.
-        _still_live = False
-        if req.issue_id:
-            try:
-                _sess = await get_processing_session(req.session_id)
-                _still_live = any(
-                    isinstance(i, dict) and i.get("issue_id") == req.issue_id
-                    for i in (_sess.get("cross_issues_last") or [])
-                )
-            except Exception as _lx:                              # noqa: BLE001
-                logger.warning(f"reopen_issue: live-check failed: {_lx}")
         return JSONResponse({
-            "success": True, "cleared": False, "still_live": _still_live,
+            "success": True, "cleared": False, "still_live": bool(_live_now),
         })
 
     _impact = await recalculate_session_scores(req.session_id)
@@ -1900,7 +2028,8 @@ async def reopen_issue(
         "new_package_sqs_score": package_sqs.get("package_sqs_score"),
         "new_package_tier":      package_sqs.get("tier"),
         "cross_issues":          cross_issues,
-        "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
+        "grouped_cross_issues":  _grouped_cross_issues_for_panel(
+            cross_issues, facts=sess.get("facts") or {}),
         # Reopening an issue changes what the pre-form Review banners must show,
         # so they get the whole view - not just the raw arrays. Handing over the
         # arrays alone made that screen fall back to printing bare sentences
@@ -1990,6 +2119,15 @@ async def get_needs_attention(
         package_sqs=session.get("package_sqs") or None,
         form_ids=[form_id] if form_id else None,
     )
+    # A document added after forms may disagree with an AI box (C103) - the
+    # download review lists those open choices too, as the side panel does.
+    try:
+        from services.needs_attention import document_suggestion_rows
+        from services.session_documents import SUGGESTIONS_KEY
+        result["document_suggestions"] = document_suggestion_rows(
+            generated, session.get(SUGGESTIONS_KEY) or [], form_id=form_id)
+    except Exception as _sx:                                   # noqa: BLE001
+        logger.warning(f"needs-attention: document suggestions skipped: {_sx}")
     return JSONResponse({"success": True, **result})
 
 
@@ -2023,6 +2161,7 @@ async def set_issue_status_route(
         rule_code=req.rule_code,
         source_fact=req.source_fact,
         message=req.message,
+        severity=req.severity,
     )
     return JSONResponse({"success": ok, "issue_id": req.issue_id, "status": status})
 

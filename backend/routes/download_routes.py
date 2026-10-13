@@ -20,6 +20,8 @@ from services.pdf_service import apply_draft_watermark
 # only, never the applicant's line (1 Oct 2026).
 from services.signature_boxes import regenerate_pdf_for_form
 from services.field_qa import check_hard_block
+# Download file names: a form's second copy is "ACORD_131_Excess" (7 Oct 2026).
+from services.form_instances import file_stem
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs, current_package_sqs, tier_for_score
 from services.audit_service import current_unresolved_recommendations
@@ -392,7 +394,7 @@ async def download_pdf(
 
         if is_draft:
             pdf_bytes = await _loop.run_in_executor(None, apply_draft_watermark, pdf_bytes)
-        file_manifest, package_checksum = _compute_manifest({f"{form_id}_{_file_suffix}.pdf": pdf_bytes})
+        file_manifest, package_checksum = _compute_manifest({f"{file_stem(form_id)}_{_file_suffix}.pdf": pdf_bytes})
         hard_stops, soft_stops = _split_open_recs(
             unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
             _live_card_points(proc_session.get("generated_forms")))
@@ -408,7 +410,7 @@ async def download_pdf(
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
-                zf.writestr(f"{form_id}_{_file_suffix}.pdf", pdf_bytes)
+                zf.writestr(f"{file_stem(form_id)}_{_file_suffix}.pdf", pdf_bytes)
             buf.seek(0)
             return buf
     else:
@@ -416,12 +418,12 @@ async def download_pdf(
         pdf_bytes = await _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature)
         if is_draft:
             pdf_bytes = await _loop.run_in_executor(None, apply_draft_watermark, pdf_bytes)
-        file_manifest, package_checksum = _compute_manifest({f"{form_id}_{_file_suffix}.pdf": pdf_bytes})
+        file_manifest, package_checksum = _compute_manifest({f"{file_stem(form_id)}_{_file_suffix}.pdf": pdf_bytes})
 
         def _build_zip():
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr(f"{form_id}_{_file_suffix}.pdf", pdf_bytes)
+                zf.writestr(f"{file_stem(form_id)}_{_file_suffix}.pdf", pdf_bytes)
             buf.seek(0)
             return buf
 
@@ -517,7 +519,8 @@ async def download_pdf(
     if is_draft:
         extra_headers["X-Download-Draft"] = "true"
 
-    _zip_name = f"{form_id}_Package_DRAFT.zip" if is_draft else f"{form_id}_Package.zip"
+    _zip_name = (f"{file_stem(form_id)}_Package_DRAFT.zip" if is_draft
+                 else f"{file_stem(form_id)}_Package.zip")
     return Response(
         content=zip_buf.getvalue(), media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename={_zip_name}", **extra_headers},
@@ -588,7 +591,7 @@ async def download_all(
         unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
         _live_card_points(proc_session.get("generated_forms")))
     file_manifest, package_checksum = _compute_manifest(
-        {f"{fid}_{_file_suffix}.pdf": pb for fid, pb in acord_pdfs.items()}
+        {f"{file_stem(fid)}_{_file_suffix}.pdf": pb for fid, pb in acord_pdfs.items()}
     )
 
     # The package score exactly as the SQS panel shows it (1 Oct 2026).
@@ -615,7 +618,7 @@ async def download_all(
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
         for fid, pb in acord_pdfs.items():
-            zf.writestr(f"{fid}_{_file_suffix}.pdf", pb)
+            zf.writestr(f"{file_stem(fid)}_{_file_suffix}.pdf", pb)
     zip_buf.seek(0)
 
     _ids_hash        = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
@@ -732,8 +735,12 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     _enforce_integrity_gate(proc_session)
     facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
-    hard_stops  = proc_session.get("hard_stops", [])
-    soft_stops  = proc_session.get("soft_stops", [])
+    # The stops as they stand (6 Oct 2026): the one door, never the stored
+    # display cache (see services/stops_now.py).
+    from services.stops_now import stops_now as _stops_now
+    _lite_stops = _stops_now(proc_session, None, pre_form=not proc_session.get("generated_forms"))
+    hard_stops  = _lite_stops["hard"]
+    soft_stops  = _lite_stops["soft"]
     tier2_score = proc_session.get("tier2_score", 50)
 
     # Use session recommendations for form-aware scoring.
@@ -752,7 +759,11 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
         form_id=primary_form_id,
         session_data=proc_session,
     )
-    return JSONResponse({"success": True, "sqs": sqs, "hard_stops": hard_stops, "soft_stops": soft_stops, "flags": flags})
+    # The lists as a screen PRINTS them - each problem once (round 5 #15); the
+    # scorer above read the door's own.
+    from services.issue_registry import stops_for_display
+    _shown_hard, _shown_soft = stops_for_display(hard_stops, soft_stops, _lite_stops["cross_issues"])
+    return JSONResponse({"success": True, "sqs": sqs, "hard_stops": _shown_hard, "soft_stops": _shown_soft, "flags": flags})
 
 
 @router.get("/api/lite/cover-sheet/{session_id}")
@@ -775,8 +786,18 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     _enforce_integrity_gate(proc_session)
     facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
-    hard_stops  = proc_session.get("hard_stops", [])
-    soft_stops  = proc_session.get("soft_stops", [])
+    # The stops as they stand (6 Oct 2026): the one door, never the stored
+    # display cache (see services/stops_now.py).
+    from services.stops_now import stops_now as _stops_now
+    _brief_stops = _stops_now(proc_session, None, pre_form=not proc_session.get("generated_forms"))
+    hard_stops  = _brief_stops["hard"]
+    soft_stops  = _brief_stops["soft"]
+    # The brief PRINTS each problem once (round 5 #15): a legacy stop and its
+    # coded twin collapse by the cards' own rule. Display copies only - the
+    # scorer below still reads the door's lists.
+    from services.issue_registry import stops_for_display
+    _shown_hard, _shown_soft = stops_for_display(hard_stops, soft_stops,
+                                                 _brief_stops["cross_issues"])
     tier2_score = proc_session.get("tier2_score", 50)
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
 
@@ -842,7 +863,7 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     from services.cover_service import generate_lite_cover_narrative
     ai_content = await generate_lite_cover_narrative(
         facts=facts, flags=flags, sqs=sqs,
-        hard_stops=hard_stops, soft_stops=soft_stops,
+        hard_stops=_shown_hard, soft_stops=_shown_soft,
         org_name=org_name, user=fresh,
     )
     cover_pdf = build_cover_page_pdf(
@@ -851,7 +872,7 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
         ai_block=ai_content["ai_block"],
         sqs_reasoning=ai_content.get("sqs_reasoning", ""),
         user=fresh,
-        hard_stops=hard_stops, soft_stops=soft_stops,
+        hard_stops=_shown_hard, soft_stops=_shown_soft,
     )
 
     # The cover sheet IS the delivered file for this tier - there is no separate

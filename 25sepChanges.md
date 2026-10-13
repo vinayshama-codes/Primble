@@ -1,5 +1,1688 @@
 # 25sepChanges - Orbin client feedback and our re-run
 
+---
+
+## CHOICE ELECTRIC - Brent + Michelle's test of 5 Oct 2026 (`Choice-Electric-Testing-10_5.pdf`, 27 items) - ANALYSIS 6 Oct, NO CODE CHANGED
+
+**Sources.** The client doc (27 items + screenshots), the 7 uploaded decs (`Choice-Electric/`), and the client's stored
+production session **`ca93ed8f`** (read-only, owner-approved 6 Oct: 177 audit events, 7 generated forms, stored PDFs,
+guard logs). Five read-only code investigations, each claim re-checked in code. Evidence dumps:
+`<scratchpad>/ce/` (session dump, `timeline.txt`, `final_<FORM>.txt`, `guard_<FORM>.json`, offline replays).
+
+### LIVE VERIFICATION BOARD - the owner's runs of 8 Oct 2026 (`b4d18e8e`, `805049a7`, `b38a4367`, `505bf394`; localhost)
+
+**"Live verified" means: seen working in one of THOSE runs, from the stored session data or on the owner's screen.**
+Everything else is fixed offline and still owed a live look. Updated after `505bf394` (part R) - the first run with
+every 8 Oct fix loaded (backend started 16:26, newest source 16:16).
+
+**STATUS 12 Oct (the owner's fresh run `18ecbfa8`, part Y): 21 done (live verified), 6 waiting on Brent, 0 UI left.**
+Every built item passed live on a new package (6 decs, Cyber added after forms). Our parts of 18 / 26 / 27 were seen
+live too; 27's count is still 8 too high (part Y, problem 2). Earlier: 10 Oct 14 / 7 built / 6; 9 Oct 14 / 6 / 6 / 1 UI.
+
+| State | Count | Items |
+|---|---|---|
+| **Done (live verified)** | **21** | 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 20, 21, 23, 24, 25 (12 Oct on `18ecbfa8`: 2, 12, 13, 16, 17, 19, 24 for the first time; 7 / 20 / 21 under Brent's 8 Oct page-one rules - carrier and page-1 premiums blank, Prior Carrier Information on page 4) |
+| **Waiting on Brent** | **6** | 7 (where expiring premiums that do not fit the prior-carrier grid go; an EPLI line - forms 152 / 834 / 827 left out for now, owner), 15 (EBL with GL or WC - also decides whether EBL keeps its own policy row), 22 (built; only the "hard stops before forms" rule is left), 18 / 26 / 27 (his two rules: show future hard stops before forms? required values a dec does not print - hard stop or warning, and do they cost Exposure points?) |
+| **Ours of 18 / 26 / 27** | **-** | seen live 12 Oct: 26's rows in points; 27's "N items to fix" + "Also listed", hard stops first, the 6 ACORD 140 download blockers listed before forms. 18's "Confirm this value" did not come up (Choice Electric's building card opens the table). Open: part Y problems 1-5 |
+| **UI changes, not started** | **0** | - |
+
+How each unverified item is checked is in part R ("How to verify the rest") and part N; the UI round's items (2, 12,
+13, 16, 17, 19 and "Open again" taking a fix back) in part W's "How to check it live" table; 18 / 24 / 26 / 27 in
+part X's.
+
+### OPEN ISSUES FOUND IN OUR RUNS - NOT IN BRENT'S 27 (kept here so none is lost; detail in parts S, T, T2)
+| # | Issue | Where | Next step |
+|---|---|---|---|
+| X1 | 137 "hired physical damage: primary" ticked with no document stating the basis | 137_CO | rule: a basis tick needs "primary" beside the coverage |
+| X2 | 130 OTHER rating row B holds "CO 9812: Employers Liab Incr Limits" - the form has its own INCREASED LIMITS row | 130 | widen the OTHER-row rule to `..._Other_CoverageDescription` + abbreviations |
+| X3 | 131 ANY AUTO tick is paired with an unrelated description box; the naked-Yes guard blanks it when that box is empty | 131 | exempt a deterministic tick from the pairing |
+| X4 | `umbrella_follow_form` is set from the EXCESS policy's "FOLLOWING FORM" heading and credited to the umbrella | scoring | needs a D6 table (score-moving) |
+| X5 | 127 USE "Service" on vehicle 4 - its own schedule line prints no use | 127 | owner's call: USE is policy-level by the 15 Sep ruling |
+| X6 | 125 / 127 mailing city + ZIP taken from the vehicles' garaging line (the decs redact the mailing address) | 125 / 127 | decide: blank (never guess) or garaging as a stated address |
+| X7 | 140 sublocation description = "Prem. #: 001 Bldg #: 001" (a reference, not a description) | 140 | low |
+| X8 | Exposure rows "Operations" / "Cross-Document Consistency" carry deductions that are not about them (= item 26) | SQS panel | **built 10 Oct (part X)**: "Class Codes & Operations" / "Cross-Form Checks", rows as "-N pts" |
+
+### Status board - the 27 items (7 Oct; "done" = fixed offline, live only after commit + deploy + reloaded tabs)
+| # | Point | Status | Left / who |
+|---|---|---|---|
+| 1 | Blank band where the header was | Probably the old tab; not reproducible | A screen recording if it recurs (UI) |
+| 2 | "Next" button per section | **Built 9 Oct (part W)**: "Continue to <next page>" + "Skip to form selection" (212px, same as "Back to review"); last page one button | Live look |
+| 3 | Document types right | Nothing to do | - |
+| 4 | Umbrella $5M vs Excess $4M | **Done**: two policies, no conflict; **7 Oct: a second ACORD 131 for the Excess** (`ACORD_131__excess`: Travelers, $4M, no SIR, Excess ticked, underlying = the Amerisure Mutual $5M umbrella); the plain 131 prints only the umbrella | Brent: should the excess 131 also list GL / Auto / EL under it? Should a follow-form excess count as having an attachment in its score? |
+| 5 | Audit "Annual" vs "A" | **LIVE PASS 8 Oct (my earlier FAIL was wrong).** ACORD's OWN tooltip for `Policy_Audit_FrequencyCode_A` reads "enter the code; **A - annual**, S - semi-annual, Q - Quarterly, M - Monthly, O - Other", so "A" is that box's correct code for an annual audit, and no indicator box is ticked. Brent was reading the CHECKBOX row (at expiration / semi-annual / quarterly / monthly / other), which indeed has no Annual. Reading a bare "A" OUT of a document is still refused (`_audit_period_of`). **13 Oct (Z11, owner's decision): the 130 now ticks AT EXPIRATION for an annual audit and leaves its code box empty; the 125 keeps "A".** | Live look on a fresh run (Z11) |
+| 6 | Address as a website | **Done**: refused, no card | Brent: which box? (no form of ours prints a carrier website) |
+| 7 | Premiums | **Done**: no card, money format, every premium on the 125 incl. Excess $10,692 / EBL $425, total = printed rows; **7 Oct: the 130 prints the WC premium $29,278, minimum $465, class premiums $37,600 / $597 / $180** | Brent: WC in the 125 total, an EPLI row, forms 152 / 834 / 827 |
+| 8 | "COMMERCIAL AUTO" as a policy number | **Done** | - |
+| 9 | 10 policies; inline edit; wrap | **LIVE PASS in part 8 Oct.** The TABLE renders **10 rows** and the Excess has its own row - `policy_line_records` correctly filters the nine auto coverage parts out of the 20 raw `coverage_lines` entries. (My first grading said 20 rows; I had measured the raw fact, not `policy_lines.table_rows`.) **STILL WRONG: there is no Commercial Auto row.** `canon_line` reads "Auto Medical Payments" as the auto LINE rather than a coverage part, and that record carries no premium (redacted on the dec) and no number, so the de-dup drops it - leaving the auto policy with no row at all. Was: the Excess is its own row; **7 Oct: edit a policy's carrier / NAIC / number / term / premium, add a missing policy, remove one you added - before and after forms**; long text wraps in the new table | - |
+| 10 | Remove the "not a conflict" blocks; group by carrier | **Done 7 Oct (round 4)**: both blocks removed (both layouts), a Limit column (each policy's own), sort + "Group by carrier" with premium subtotals | - |
+| 11 | Remove "Important" | **Done 1 Oct** (old tab) | - |
+| 12 | Keep fixed items listed as "Resolved" | **Built 8-9 Oct (parts V, W)**: a "RESOLVED" heading (tier style) with "Resolved" / "Dismissed" labels and an "Open again" chip | Live look |
+| 13 | Remove "Resolve" | **Built 8 Oct (part V)**: no Resolve on the review screen; the editor keeps its own | Live look |
+| 14 | 2 buildings, not 3; value columns; template | **Done** | - |
+| 15 | EBL "tucks under WC" | **Done**: recognised, warning gone | Brent: WC (his words) or GL (where ACORD prints it: 126 / 131)? |
+| 16 | Positive SQS wording | **Built 9 Oct (part W)**: "- fulfill to increase your Submission Quality Score (SQS)™" on every capped message and heading, screen only | Live look |
+| 17 | ACORD 125 first and ticked | **Built 9 Oct (part W)**: ticked on arrival; the order stays by match % (owner) | Live look |
+| 18 | Hard stop after forms; "Enter at least one value"; two values | **Done**: no stale stops, answers kept; **7 Oct: with 2+ buildings EVERY COPE card (also occupancy-only, also the editor's package HARD STOPS block) opens the location table, package-level asks typed above it**; **10 Oct (part X): the window confirms the values it shows ("Confirm this value")**; **13 Oct (Z11): answers reach the forms - the saved GL class code prints on the 126, building 2 prints the location's hydrant, the fire department type no longer fills the district** | Live look (Z11); Brent: pre-form stop severity, per-building COPE block or warn |
+| 19 | Edit button; double-click; Cancel | Edit / double-click **done 1 Oct**; **Cancel built 9 Oct (part W)** - "Done editing - save" waits for a change | Live look |
+| 20 | Carrier information on the 125 | **Done**: Federal listed, prior grid GL / Auto / Property | - |
+| 21 | Excess as a 125 line | **Done** | - |
+| 22 | Best Solutions before forms | **Done 7 Oct (round 4)**: a "Recommendations" section on the review page - "Raise your score" (the scorer's own rows with the same fix window) + "Your forms will need" (Before you generate; after forms the editor's Needs-attention Missing rows), one to-do in one place; **13 Oct (Z11): each form's own checklist cards (125 carrier receiving the submission, 126 GL form type, 130 officer exclusions) are listed before forms** | Live look (Z11); Brent: pre-form stop severity |
+| 23 | Location edits not saved | **Done** | - |
+| 24 | Pills on form names | **Built 10 Oct (part X)**: plain pink text in the editor's Cross-Form rows and the fix window | Live look |
+| 25 | Upload after forms; submission profile | **LIVE PARTIAL 8 Oct**: panel, upload, different-insured guard and the deterministic re-stamp all work; the **AI fill crashed** (sync BackgroundTask, no event loop) - fixed 8 Oct, needs a re-run. Profile **done 1 Oct** (old tab); **7 Oct: "Add documents" before and after forms; reclassify / exclude / supporting-only after forms; the forms update in place** | Owner: exclude BEFORE forms still keeps a document's unique values (today's behaviour) |
+| 26 | Exposure score looks wrong | **LIVE FAIL 8 Oct** - Exposure 33: a false "WC payroll is missing" while the ACORD 130 printed all three class payrolls. Fixed 8 Oct (the scalar is derived), 53 -> 65 on that session; needs a re-run. Earlier: false deductions gone (65 -> 75), "LOCAL" radius. **10 Oct (part X): rows print "-N pts" and add up to the pillar; "Class Codes & Operations", "Cross-Form Checks"** | Live look; Brent: do unsatisfiable hard stops cost Exposure points? |
+| 27 | 176 items, hard stops at the end | **Done**: 6 fake hard stops + 7 date rows gone, no DRAFT; **7 Oct: "Before you generate" lists the form checks before generation** (on Brent's package: building 2's year / roof / protection class and building 1's roof - the boxes behind his DRAFT); **10 Oct (part X): "47 items to fix" + "Also listed: ...", hard stops first after the download**; **13 Oct (Z11): one premises with two buildings is ONE location - revenue / staff asked once, interest / city limits repeat; five producer-only location-table columns; LLC member count answerable; on `ba7c709d` all 19 after-forms boxes but the fact-less Y/N questions are listed before forms** | Live look (Z11); held: fact-less Y/N questions; Brent: pre-form stop severity |
+
+Not in his doc but his to decide: the proposed date on an expired dec (01/01/2026 printed in Oct 2026 - he retyped
+01/01/2027): roll forward or ask? Payment plans with no ACORD code ("semi-annual", "10 pay") print as written - OK?
+
+### A. Why Brent "saw old things" (his afterthought mail) - SOLVED
+- primble.ai has served the 1 Oct build (7b681f4) since **1 Oct 17:20 UTC** (Vercel `last-modified`, edge age 4.6 days,
+  bundle `index-DLD3siP6.js` contains "Done editing - save", "Continue where you left off", "Score so far").
+- Most of Brent's screenshots are the **pre-1-Oct bundle** ("Refresh | Edit Fields | Sign", Best Solutions with %, "SQS is
+  calculated after forms are generated", the Important tab) - strings removed in 4f7e7db. His download window is the NEW
+  bundle. So at least one browser tab was opened before 1 Oct and never reloaded: a single-page app keeps running the
+  code it loaded. The backend he talked to was 7b681f4 (the session carries `active_form_id`, a 1 Oct route).
+- **No version check exists** (no build stamp, no "new version - reload" prompt). Old screens + new server can also
+  produce bugs that exist in neither build.
+- **Fix:** build stamp + `/version.json` poll on focus / every few minutes -> "A new version is available - Reload"
+  banner; backend `X-App-Version` header (Render's `RENDER_GIT_COMMIT`) logged against the client's. For this round:
+  ask Brent and Michelle to close every Primble tab and reload before retesting.
+- Stale-bundle items (already done at HEAD): **11** (Important block), **19** (Edit button + double-click), **22**'s
+  percentages, **25**'s "submission profile" (the package page, item 1). Item 1 (blank band where the header was) - not
+  reproducible in code; likely the Header's scroll-hide state; get a recording.
+
+### B. The five classes behind almost everything (fix the class, not the item)
+1. **Per-policy facts treated as one package fact.** Data Consistency auto-discovers every scalar
+   (`ENABLE_FULL_FIELD_RECONCILIATION`, `underwriting_consistency._auto_scalar_keys`) and compares it ACROSS different
+   policies - premium, audit term, carrier website, "schedule of underlying". Package scalars come from the
+   **first-uploaded dec** (`select_primary_truth` = first dec_page; here the Excess), so the package "carrier" was
+   Travelers, the umbrella limit $4M, the total premium $10,692. Excess is folded into the umbrella family
+   (`lob_canon` -> `umbrella`), and unnumbered policies on one family collapse into ONE line record
+   (`_build_line_records`), so the Excess policy and its carrier vanish. Items 4, 5, 6, 7, 9, 10, 20, 21 + extras.
+2. **Checks that only exist after generation, or use stale stored results.** Generation scores with the STORED
+   `hard_stops`; a legacy hard stop hides behind its demoted coded twin pre-form (`_LEGACY_SUPERSEDED_BY_CODE`); per-form
+   gates and field QA run only on stamped forms. Items 18, 22, 27.
+3. **Edits that do not propagate / get undone.** A Data Consistency confirm re-reads all documents and (HEAD `_fv`
+   NameError, fixed only in the working tree) drops human answers and re-adds deleted rows; the location table saves
+   only its 6 columns and wipes LOC #, construction, values; a 125 box edit updates the fact but re-stamps no other
+   form; the loose `locations` list is never re-synced after a table edit. Items 14, 18, 23, 26, 27.
+4. **"AI-verified" means "the string is somewhere in the documents", not "it belongs in this box".** Gap fill put
+   other sections' values into boxes and our guards then removed GOOD values (building 2 on the 140). Items 26, 27 +
+   most extras.
+5. **Extraction reads labels and menus as values.** Unticked option lists became audit periods, a redaction label
+   became a policy number, a form number became a policy number, a logo address became a website, carrier office states
+   became the insured's state, the EPLI "pending/prior" date became a retro date, EPI 540 days became period of
+   restoration, NCCI carrier code became NAIC, the WC dividend plan became the payment plan.
+
+### C. Item by item (verdict - root cause - fix - why we left it)
+| # | Brent's point | Verdict | Root cause (verified) | Fix | Why we left it |
+|---|---|---|---|---|---|
+| 1 | Blank band instead of header | Not reproducible | Header scroll-hide state not reset on mount (likely) | Reset header on the review mount; get a recording | Never reported before |
+| 2 | Section-aware "Next" button | UI ask, not done | Footer is `continueLabel(genState)` only | "Next: Documents" ... form selection last | New ask |
+| 3 | Doc types right | Positive | - | - | - |
+| 4 | Umbrella $5M vs Excess $4M "conflict"; each layer its own 131 | **Real** | Excess = umbrella family; one line record; `umbrella_limit` pinned to one line; suggestion = first-uploaded doc. The 131 PRINTED $4M (the excess) as the umbrella limit | Layer axis on line records (excess identified by its controlling-underlying schedule / title); scope `umbrella_*` per record; one 131 per layer = form instances (architecture) | No kit ever had a tower; the pin was built for Orbin's single umbrella ($3M vs $1M) |
+| 5 | Audit "Annual" vs "A"; 130 choices | **Real** | Unticked menus read as answers (`_audit_period_of` returns the first word -> "Semi-annual", a value NO document states; stored as the merged fact); 130 code box sits beside OTHER, nothing ticked | A line naming 2+ periods names none; never decode a bare "A"; per-policy fact; 130 resolver ticks the checkbox (annual -> At Expiration, confirm) | We decided "A = ACORD's code" ourselves on 29 Sep and never asked; true for the 125, wrong for the 130 |
+| 6 | Address offered as website | **Real** | `carrier_website` undefined in the prompt; Travelers' logo-image address; no URL check; compared across carriers; no form prints a carrier website | URL shape check at merge; no card for a fact no form prints | New shape |
+| 7 | Premium formatting; every premium belongs to its own line/form | **Real** | `total_policy_premium` auto-discovered as "identity" (raw strings); five policies' own totals treated as rivals | Premium per line record; format via `canonicalize_currency`; no card | 23 Aug removed premium from line scoping; never re-admitted |
+| 8 | "COMMERCIAL AUTO" as policy number | **Real** | `is_not_a_policy_number` has no digit rule (verified: returns False) | Brent's rule: no digit = not a policy number; one check everywhere | Every kit had real numbers |
+| 9 | 9 policies not 10; inline edit; wrap | **Real + asks** | Excess merged into the umbrella record (carrier Travelers - Amerisure Mutual lost); table read-only; CSS `nowrap` | Record per policy; wrap Line/Carrier/Source; inline edit + add line = product feature | Line identity is per FAMILY by design |
+| 10 | Remove "NOT A CONFLICT" blocks; group by carrier | UI ask | Blocks restored by the owner 27 Sep | Move their 2 unique facts into the table, then remove; sort/group | Owner's 27 Sep restoration - needs owner OK |
+| 11 | Remove Important block | **Done at HEAD** (stale tab) | Removed in 4f7e7db | - | - |
+| 12 | Fixed items vanish from Required / Binder | **Real** | Legacy rows are rebuilt each recalc (fixed = gone); cross-form rows are a stale mirror that never refreshes (shows "Resolved" by accident) | Pre-form "Resolved (n)" per group from status + not live; refresh mirrored rows | Item 16 shipped editor-only; conflicts with Brent's #18 "hide under Reviewed" - pick one |
+| 13 | Drop "Resolve" | UI ask | One `IssueStatusControl` everywhere | Keep Open to fix + Dismiss; auto "Resolved" tag after a fix | Client review #8 asked for Resolve earlier |
+| 14 | 2 buildings not 3; no COPE columns; template | **Real** | Auto garaging "DENVER, CO 80221" (prompt key `locations` undefined) became a premises (working tree drops it, fragile); building labels used as street addresses; LOC # = row position; table has 6 columns, saving deletes construction/values | Building label -> LOC/BLDG #; garaging never a premises; add LOC #, BLDG #, construction, year, building $, BPP $ columns (template follows); merge-on-save | Redacted decs never tested; table data loss logged 1 Oct as "next fix" and not done |
+| 15 | EBL "tucks under WC" | **Real (canon) + decision** | `canon_line("Employee Benefit Liability ...")` = None (only plural known) | Recognise singular; ACORD puts EBL on 126/131/160, never the 130 - **confirm with Brent** | Singular never seen |
+| 16 | Positive wording, not "capped at 85" | UI ask | Text in sqs_service messages; issue ids hash the MESSAGE | Display-layer rewrite only (never change `message`) | New ask |
+| 17 | 125 selected + first | UI ask | Sort by confidence (125 at 80% sank); selection starts empty | 125 first and pre-ticked | New ask |
+| 18 | Hard stop only after generation; "Enter at least one value"; two building values | **Real** | 18:21 audit confirm re-ran the pipeline; HEAD `_fv` NameError dropped human answers; stops computed without occupancy were STORED; generation scored with the stored stops and the hidden legacy stop surfaced (cap 60). Modal submits only TOUCHED fields | One `stops_now()` door for every scorer; never hide a hard legacy stop behind a demoted twin; modal "Confirm these values"; per-building COPE | `_fv` silent since 24 Aug (inside a try); supersession table predates C75 |
+| 19 | Edit button / double-click; Cancel | Stale tab + **new ask** | HEAD has both; no discard path | Add "Cancel" (discard, confirm if edits) | Item 10 rule "every exit saves" |
+| 20 | Carrier info missing on 125 | **Real** | Federal (EPLI) dropped: a writer needs a number or premium; prior-carrier grid drops every row without a policy number (all redacted) | Writer = carrier + term on its own dec; grid rows on carrier + term + premium | Kits always had numbers |
+| 21 | Excess as an LOB line | **Real** | One box per family; OTHER premium boxes never filled (ACORD tooltip typo "the for" breaks `_LOB_PHRASE_RE`) - EBL $425 blank; EPLI no row; total 58,385 includes rows not shown | Second policy of a family -> next OTHER row with premium; OTHER premium owner; total = printed rows | Never two policies in one family |
+| 22 | Best Solutions before forms | **Real gap** | The pre-form package result already holds them; nothing renders them; Exposure/Property rows have no field | Pillar ledger rendered on the Review rail with the fix window | Pre-form card kept "tier only" (H2) |
+| 23 | Location edits did not save | **Real** | The 17:53 delete WAS saved; the 18:21 confirm re-merge re-added the row (working tree marks human tables - new saves only; `write_location_answer` hole) | Commit the 5 Oct fix + re-mark after every schedule writer | Same `_fv` class |
+| 24 | Pill on form tags | UI ask | Editor Cross-Form `row()` | Plain pink text | New ask |
+| 25 | Upload docs after generation | **Not built** | Upload always starts a new package; re-reading actions 409 after forms | Append-to-session upload + re-stamp changed boxes (L, owner decision) | Locked on purpose 1 Oct |
+| 26 | Exposure 65 looks wrong | **Formula right, display wrong, 10-15 pts ours** | Pillar = 100 - deductions (spec) but rows show 100 - own deduction. -10 = two FALSE location warnings (stale `locations` copy after Brent's delete - his fix LOWERED the score); -5 "no radius" ("LOCAL" not read); -20 "no GL class codes" mislabelled "Operations" (126 meanwhile prints WC codes as GL) | Show "-N pts"; derive `locations` from the table; read radius classes; one GL-code door | Per-row tip removed 27 Aug; arithmetic shown nowhere |
+| 27 | 176 items; hard stops at the end | **Real** | 176 = 6 + 18 + 152. All 6 hard stops are OUR guards emptying building 2 on the 140 (construction "NON-COMBUSTIBLE - LIGHT STEEL" is printed in the dec; Brent's year/PC answers). **They blocked the download: Brent's package went out as a DRAFT** (`download_zip_draft`, 23:01). Of 176, ~28 accurate asks + ~36 genuine verify rows; ~112 inaccurate, self-inflicted, duplicate or informational | Fix the guards + per-building COPE; propagate edits; count only actions; dry-run deterministic stamp before forms | Field QA was built post-generation only |
+
+### D. Wrong values on the forms Brent did NOT report (fix before his next look)
+- **126:** GL hazards = the WC class codes 5190/8742/8810 with WC payroll (extraction put the WC schedule in
+  `gl_class_code_schedule`; `_drop_codes_another_line_owns` reads the cell name, not the list key, and the wrong
+  schedule witnesses itself); GL aggregate 1,000,000 (dec 2,000,000 - the umbrella's underlying schedule is extracted
+  with ONE limit per line); the property wind/hail "2" as a GL deductible.
+- **131:** umbrella limit $4M (the excess); Employee Benefits section filled with the EPLI policy (EBL is EXCLUDED);
+  GL aggregate 1,000,000; "COMMERCIAL AUTO" as the auto policy number; no umbrella carrier or premium.
+- **130:** claim count "1" (no loss data; the guard accepted "(1) Each Employment Claim" as evidence); prior mod "100%"
+  (dec 1.08); NCCI carrier code 11525 in the NCCI RISK ID box; small-deductible RATE as "$6.50" deductible; prior WC
+  carriers = Travelers / ACE with form numbers; building numbers as floor counts; "4" years in business; audit "A"
+  beside OTHER; dividend plan as the payment plan.
+- **125:** "IL DS 71 05 02 08" (a form number - the ISO regex has no second letter group) and "COMMERCIAL AUTO" in
+  question 4; payment plan "Blue I (B1) Dividend Plan"; proposed term 01/01/2026 on 10/05/2026 (9 months past - the
+  stale test checks the END of the next term, not its start; Brent retyped 01/01/2027-01/01/2028); EBL premium blank;
+  no Excess / EPLI rows; total 58,385 not the sum of rows; Federal missing from CARRIER; prior grid Auto only.
+- **127:** garaging street "111 Denver" (territory code glued on); raw OCR page text in the "vehicles owned but not
+  scheduled" explanation.
+- **137 CO:** property rate lines ("GRP I 0.053 $533.00", "Prem. #: 001 Bldg #: 001") as symbol descriptions; Med Pay
+  $1,000,000 (schedule: $5,000).
+- **140:** building 2 construction, limits $421,714 / $75,000 stock, deductibles removed by guards (Guard 2 row dedup;
+  the unanchored-row net; the numeric meaning gate classing every "Prem #" schedule value as a PREMIUM).
+- **Labels:** the producer's own location-table rows are labelled `client_arq` (green "Client") on 130/131/140.
+- **Security:** `session.docs[*].facts` (every per-document fact) is stored as PLAIN TEXT while `session.facts` is
+  encrypted. Needs the same field encryption + a migration (`scripts/encrypt_facts_data.py` pattern).
+
+### E. Not defects / already right
+3 (doc types), 11 / 19 / 25-profile (stale tab), the 125 "A" code itself (ACORD's code for annual on the 125), CARRIER
+joined list (owner's 1 Oct rule - only Federal missing), Brent's 94 form edits are all intact in `field_state`
+(only the two LOC # boxes were wiped by table saves).
+
+### V. Items 12 / 13 BUILT (owner's spec, 8 Oct night - question 5 settled by the owner, not sent to Brent)
+The review screen (rail layout, the default) now works like the editor's SQS panel "Reviewed":
+- A hard stop or warning that is DISMISSED, or fixed through "Open to fix", leaves its list and goes into a collapsed
+  **"Resolved (n)"** dropdown at the bottom of its own page (Hard Stops / Warnings), with a small **"Resolved"**
+  (value entered through Open to fix) or **"Dismissed"** label and an **"Open again"** button. Open again: a
+  dismissed item goes back to its list; a fixed one is reopened by the editor's own reopen (`handleReopenIssue` ->
+  `/api/audit/reopen-issue`: the typed value is taken back and the item returns to its list).
+- An answer that did NOT clear the check leaves the item in its list (it still needs attention).
+- **No "Resolve" button** on any review-screen hard stop or warning (both layouts); "Open to fix" + "Dismiss" stay.
+  The editor keeps its own controls.
+- Each stored status records its page (`submission_issue_status.severity`, "hard" / "warning", added by an
+  idempotent ALTER on startup), so a fixed item that stops firing is filed under the right page after a reload;
+  an older status with no page files under Warnings.
+- Empty pages say the truth: "No open hard stops. A dismissed hard stop still holds the score at 60 until its value
+  is fixed."
+Code: `frontend/src/utils/resolvedIssues.js` (pure rules), `ReviewRailLayout.jsx`, `AcordModal.jsx`
+(`IssueStatusControl showResolve`, `reviewSeverity`, `reopenFromResolved`), `models/schemas.py`,
+`services/audit_service.set_issue_status`, `routes/audit_routes.py`. Tests: `tests/test_review_resolved_section_8oct.py`
+(11, the rules run under node); `test_round5_stops_7oct.py` updated (it pinned the old function text). Full suite **13,659 passed, 1 failed (the known one), 19 skipped**. The classic
+layout (`VITE_REVIEW_LAYOUT=classic`) only loses Resolve - it has no Resolved section.
+
+### W. The UI round - items 2, 16, 17, 19 and the Resolved follow-ups BUILT (owner, 9 Oct 2026; frontend only)
+Every decision below is the owner's (9 Oct); nothing here moves a score or touches stored data.
+- **Item 2 - the review footer walks the pages.** Before forms, every review page but the last shows two solid-pink
+  buttons: **"Skip to form selection"** (left) and **"Continue to <next page>" ->** (the rest of the row), in rail order
+  Overview > Documents > Submission Integrity > Data Consistency > Hard Stops > Warnings > Recommendations. The last page
+  has the one button "Continue to form selection". Once forms exist or are generating: one button "Continue where you
+  left off" on every page, unchanged. Nothing is ever blocked by open items. The skip button is the form-selection
+  screen's "Back to review" button (same classes, `step-footer-*`); both are **exactly 212px** (owner) and grow only when
+  their words need it (text-only zoom, a minimum font size, a translation - measured 262 / 284px, no spill). Narrow, the
+  row stacks (main on top, both full width): the review footer under 600px, form selection under 520px (with Back at
+  212px, "Generate 12 Forms Now" wrapped just above 480). A second click of a double-click is ignored on the main button
+  (it would land on the next page's button and, from Warnings, leave the review). The interrupted-run note now says
+  "Go to form selection to generate the forms again." Code: `utils/packageGeneration.js` (`nextReviewStep`,
+  `SKIP_TO_SELECTION`), `ReviewRailLayout.jsx/.css`, `App.css`.
+- **Item 16 - positive SQS wording, on screen only.** Every message that said the score is "capped / held / pinned"
+  now reads Brent's words - e.g. "Carrier-Grade COPE incomplete **- fulfill to increase your Submission Quality Score
+  (SQS)™**. Missing: ..." - in the fix window, the review cards (both layouts), the editor's lists and HARD STOPS blocks,
+  the download review, the essentials screen and Recommendations. The six backend shapes (COPE x2, FEIN, the two date
+  mismatches, the loss-history attestation, the pinned loss-run year) are rewritten by `utils/positiveWording.js`
+  at render; the STORED message is untouched (issue ids, statuses, the legacy rule table key on it). The headings and
+  notes said the same thing and were rewritten too (owner: "this should not appear on any other messages"): "Caps your
+  SQS at 60 / 85" -> "fulfill to increase your Submission Quality Score (SQS)™"; the Reviewed notes now say what raises
+  the score ("Fix the value of the hard stop you marked to increase your SQS™ - marking it records your review only");
+  empty states "Your SQS™ is clear of hard stops / warnings". **Kept on purpose:** the SQS panel's arithmetic line
+  ("raw 88, held at 60 = 60", the client's C3 traceability) and the downloadable audit report. **Not changed:** the
+  cover PDF (not the screen). A backend test harvests every backend string with cap wording and fails on a new one.
+- **Item 17 - ACORD 125 ticked.** Ticked the moment the producer reaches form selection, unless they unticked it; the
+  list keeps the recommender's match-percentage order (owner). Ticking it at upload would have narrowed the review
+  page's "Your forms will need" checks to ACORD 125 alone, so those checks follow the ticks only once the producer
+  changes one. Code: `utils/formSelection.js`, `AcordModal.jsx` (`resetFormTicks`, `declined125`, `formTicksTouched`).
+- **Item 19 - "Cancel" in the form editor.** Beside "Done editing - save": every box goes back to its last saved value,
+  a signature removed in this edit comes back, nothing is sent or redrawn; asks first when something would be lost.
+  "Done editing - save" waits for a change (Brent: "reserved for actual updates"). The one exception to "every exit
+  saves". Over 1366px the edit-mode toolbar keeps its buttons on one row and the form name truncates (it had 1px to spare
+  at 1440 before Cancel). **Known:** a 1024px window with the editor sidebar open hides the form name in edit mode and
+  the counts touch the buttons by ~3px - close the sidebar. Code: `PDFJsViewer.jsx/.css`.
+- **Resolved follow-ups (owner's screenshots, 9 Oct):** the Resolved section takes the look of the headings around it -
+  on Warnings a heading like "REQUIRED BEFORE SUBMISSION" (rows in one card under it), on Hard Stops (no tiers there) a
+  card like the hard-stop cards - and "Open again" is a real chip, the Dismiss chip's size and colours with a turn-back
+  arrow (it rendered as a bare browser button). A row stays in place showing "Opening..." until the server answers; a
+  dismissed item that has since stopped firing shows "No longer applies" instead of "Open again" (there is nothing to
+  reopen, and reopening it only made it vanish).
+- **"Open again" takes the fix - and its points - back (owner, 9 Oct evening).** Before, reopen undid only a TYPED
+  value, by deleting it; a fix made through a table (the location table behind the COPE checks, loss history, WC
+  classes) or an ACORD 101 note stayed in place, so the score stayed up. Now every "Open to fix" records exactly what it
+  changed - facts, flags and form boxes, before and after (`services/issue_fix_undo.py`, encrypted at rest like facts)
+  - and "Open again" puts all of it back and re-scores: the score returns to the exact pre-fix number (tested on the
+  real routes and scorer, before and after forms). If something changed those values after the fix, nothing is undone
+  and the producer is told to use "Open to fix" - an undo never erases later work. Dismiss never moved a score, so
+  reopening a dismissal changes none. **An adversarial review (26 findings, 20 confirmed) hardened it the same night:**
+  only the fix's OWN writes are recorded (a client answer or an AI fill landing in the same moment is left out, and the
+  snapshot is taken right at the write); the shared table bookkeeping is recorded per table (a later WC table save no
+  longer blocks undoing a location-table fix); a second fix of the same issue is folded in only when nothing else changed
+  those values in between, otherwise the undo is refused; a document added / excluded / reclassified retires every undo
+  (the merge ran on other evidence); a form generated after the fix is re-stamped from the restored facts; the review
+  list's own Reopen button goes through the undo too; a reopen that undid nothing no longer stores "open" (the row
+  vanished on reload); the old "clear the typed value" fallback for fixes made before this change runs only from the
+  editor's Cross-Form panel, never the review screen (it could delete a value typed elsewhere); and for a moment after a
+  screen change the second click of a double-click is dropped wherever it lands (it could tick a form row).
+- **Responsive (owner):** the review footer stays one line down to 320px; the editor toolbar keeps one row on wide
+  screens and puts its buttons on a second row when the viewer is under 900px (a laptop with the sidebar open, a
+  tablet) instead of overlapping; the Resolved sections and chips were checked at 390 / 768 / 1280.
+- **From the review of this round:** a double-click's second click is ignored on every button that changes screen (it
+  could land on "Generate", live now that ACORD 125 starts ticked); ACORD 125 is not ticked when the producer uploaded
+  their own filled ACORD 125; older stored wordings ("Score is capped at 60 ...") are rewritten too; the editor's Best
+  Solutions rows use the positive wording; Cancel after a failed save reads the form back; ticking and unticking a blank
+  checkbox is not an edit.
+
+**How to check it live (restart the backend first - the reopen change is server code - then reload the browser; a fix
+made before the restart reopens the old way):**
+| # | Where | Do | Expect |
+|---|---|---|---|
+| 2 | Review, before forms | Click the pink "Continue to ..." on each page; then try "Skip to form selection" | Overview > Documents > ... > Recommendations, each page opens at its top; Recommendations has one button "Continue to form selection"; Skip goes straight there; a double-click moves one page |
+| 2 | Same, after generating | Open the package page | One button "Continue where you left off" on every page |
+| 16 | Hard Stops / Warnings / a COPE warning's "Open to fix" | Read the subtitles and the message | "fulfill to increase your Submission Quality Score (SQS)™" - "capped at" appears nowhere |
+| 17 | Form selection | Arrive from the review | ACORD 125 ticked ("1 selected"), list still in match-% order; untick it, go back and return - it stays unticked |
+| 19 | Editor | Edit form; then type in a box; then Cancel | "Done editing - save" greyed until a change; Cancel asks, puts the saved value back, leaves edit mode, score unchanged |
+| 12 / 13 | Review | Dismiss a hard stop and a warning | Hard Stops: a "Resolved" card with a yellow "Dismissed" label and "Open again"; Warnings: a "RESOLVED" heading like the tiers; no "Resolve" button anywhere on the review |
+| reopen | Review | Note the score; "Open to fix" an item and enter its value; then "Open again" | Score goes up and the item moves to Resolved; "Opening...", then it is back in its list and the score is the noted number again |
+| mobile | Phone, or the browser's device mode at 390px; a narrow laptop window | Repeat the footer, Resolved and editor checks | Buttons stack cleanly, nothing runs off the screen, the editor toolbar uses two rows |
+Tick each item off on the LIVE VERIFICATION BOARD above (move it from "Built, needs a live look" to "Done").
+Tests: `tests/test_review_next_button_9oct.py`, `tests/test_ui_items_16_17_19_9oct.py`; updated where they pinned the
+old wording or behaviour (the tests were wrong, the code intended): `test_review_resolved_section_8oct.py`,
+`test_item16_reviewed_30sep.py`, `test_viewer_items_10_18_30sep.py`, `test_package_page_1oct.py`. Measured in headless
+Chrome with the built CSS (footer at 23 widths, the editor toolbar at 7 widths with long names, the Resolved section).
+
+### X. Our parts of 18, 26, 27 and item 24 BUILT (owner, 10 Oct 2026: "fix what is our part")
+Brent's halves of 18 / 26 / 27 (show future hard stops before forms? a required value no dec prints - hard stop or
+warning, and does it cost Exposure points?) are untouched and still wait on him. Measured on the owner's run `2076fe35`.
+- **Item 26 - the Exposure rows add up and name their cause.** Each row printed 100 minus its OWN deduction ("80%")
+  while the pillar is 100 minus ALL of them, so 85 / 80 / 80 and four 100s sat beside an Exposure of 45. Rows now print
+  the points they took: **Auto Completeness -15 pts, Class Codes & Operations -20 pts, Cross-Form Checks -20 pts**, the
+  rest "0 pts" -> 100 - 55 = 45. Two rows were renamed by what they charge: "Operations" carried "no GL class codes"
+  (also WC codes, a code that does not match the operations, a contractor's subcontracting %) -> **"Class Codes &
+  Operations"**; "Cross-Document Consistency" carried the two cross-form hard stops (Minimum Viable COPE, Period of
+  Restoration) on documents that agreed -> **"Cross-Form Checks"** (every check the cross-form validator raises: -15 a
+  hard stop, -5 a warning, cap 20). One label table (`sqs_service.EXPOSURE_BUCKET_LABELS`) - the scorer's rows, the
+  unscored fallback and Best Solutions ("Incomplete: Class Codes & Operations, Cross-Form Checks, Auto Completeness")
+  read it; a stored run gets today's names when it is opened (`with_current_bucket_labels`, at `GET /api/session` and
+  `current_package_sqs`) without a recalculation. Keys unchanged. **No score moves.** Whether those two hard stops
+  should cost Exposure points at all is Brent's question (F00), not changed here.
+- **Item 18 - "Enter at least one value" in the fix window.** The window shows the values on file but sent only boxes
+  the producer TYPED in, so Apply on a window showing the right values said "Enter at least one value." Now, with
+  nothing typed and values showing, the button reads **"Confirm this value" / "Confirm these values"** and sends them as
+  the producer's answer; typing switches it back to "Apply" and only the typed boxes go (an untouched box is never
+  re-sent beside a typed one - unchanged). An empty window still asks for a value; a box emptied by hand says "Type
+  the correct value, or close this window to keep what is on file."; after a save that asks for one more value nothing
+  is re-sent. Code: `utils/fixWindow.js`, `ResolutionModal.jsx`. A confirmation is a producer answer, so the box's
+  label and fill weight become the producer's (the same as typing it).
+- **Item 27 - the download review counts what there is to fix.** "176 items flagged" (190 on `2076fe35`) added every
+  open card and every needs-attention row of every kind. The headline is now **"47 items to fix - review before
+  downloading"** (8 hard stops incl. the 6 required boxes that block the download + 39 Missing boxes the producer
+  fills), with **"Also listed: 26 to verify, 93 held back by the AI, 16 for the applicant to sign, 8 recommendations"**
+  under it; nothing is hidden. The checklist after the download says "To fix before sending (47)" and lists its hard
+  stops FIRST (they were after every form's rows - Brent's "hard stops at the end"); a required box that blocks the
+  download counts as a hard stop there too. The forms list says "Missing 39, To be signed by the applicant 16, AI
+  held back 93, Please verify 26" instead of one "(174)". Code: `utils/needsAttention.js` (`downloadReviewCounts`,
+  `alsoListedText`, `downloadReviewHeadline`), `AcordModal.jsx`, `NeedsAttentionPanel.jsx`.
+- **Item 24 - form names are plain pink text.** The editor's Cross-Form rows and the fix window's header printed
+  "ACORD 140" as a pink pill; both now print "ACORD 140, ACORD 125" as plain pink text.
+- **"Open again" on a form generated AFTER the fix (left open from the 9 Oct review, S2).** Generation labels a box
+  that prints a producer's answer "producer" - and the fix IS a producer's answer - so the undo's re-stamp kept the
+  fix on that form as "a person's value". It now moves the fixed facts' own boxes while they still print the fix,
+  keeps any box a person changed after generation, and labels each restored box by who supplied the restored value
+  (`issue_fix_undo._restamp_late_forms`, `arq_service._restamp_changed_boxes(keep_edited_own=True)`). Proven: the old
+  code reproduces the defect, the new test fails on it.
+
+**How to check it live (restart the backend, reload the browser):**
+| # | Where | Do | Expect |
+|---|---|---|---|
+| 26 | Editor, Total Package Score, expand Exposure Consistency | Read the rows | "-N pts" per row, the names "Class Codes & Operations" and "Cross-Form Checks"; 100 minus the rows = the pillar |
+| 18 | Any "Open to fix" whose window opens with a value already in the box | Click the pink button without typing | It says "Confirm this value" and saves; type in a box and it says "Apply" |
+| 27 | Download (any package with open items) | Read the review's top lines; download; read the checklist | "N items to fix" + "Also listed: ..."; after the download "To fix before sending (N)" with the hard stops first |
+| 24 | Editor side panel, Cross-Form Validation; any "Open to fix" window | Look at the form names | Plain pink "ACORD 140", no pill |
+| reopen | Fix an item BEFORE forms, generate, then "Open again" | Look at the form box | It prints the value from before the fix again |
+Tests: `tests/test_our_parts_18_24_26_27_10oct.py` (18), +2 in `tests/test_reopen_takes_the_fix_back_9oct.py`.
+
+### Y. The owner's fresh run `18ecbfa8` (12 Oct 2026) - every built item passed; 5 problems found (ours)
+6 decs uploaded, `25-26 Cyber Policy.pdf` added after forms (item 25: done in ~3 min, 125 ticks Cyber, 11 policy rows,
+no Data Consistency card). Owner passed 1, 2, 3, 4, 6, 8, 9, 10, 12, 13, 16, 17, 18 (part 1), 19, 22, 23, 24 on screen
+(12 / 13 with "Open again": 41 -> 46 -> 41 on the GL class code 92478). Checked on the stored row: 125 page 1 carrier,
+policy number and every premium blank; Other lines EBL + Excess; Prior Carrier Information (page 4) GL $16,818,
+Property $6,275, Auto; 130 audit "A", no tick, WC $29,278 on pages 1 and 2; umbrella 131 Amerisure Mutual $5M over GL /
+Auto / EL; Excess 131 Travelers $4M over the Amerisure umbrella, no claims-made tick; 127 policy number blank; building
+values right (BPP $73,008 is printed for BOTH buildings; building 2's $75,000 is stock).
+**Changed:** the editor's Cross-Form Validation "RESOLVED (n)" list is a closed dropdown (owner) - `AcordModal`,
+`tests/test_live_run_12oct.py`.
+**All five FIXED offline 12 Oct (owner: "fix these 5 problems and do not touch any other fixed things") - each
+measured so nothing else moves; backend restart needed.**
+- 1: `scoped_evidence.retention_values` (rule e): an AI umbrella / excess retention (`ExcessUmbrella_Umbrella_
+  DeductibleOrRetentionAmount_*` on 131, its copies, 25) must sit beside a retention / SIR / self-insured / retained /
+  deductible label in that layer's own documents. Corpus: 172 packages hold the box - 84 rule values never judged; 5 AI
+  values: 3 ACORD 25 "1,000" kept, 2 refused (this run's 5,000 and `b248c194`'s 10,000 - both Choice Electric excess
+  layers that print no retention). 0 correct values lost.
+- 2: `needs_attention._page_one_premiums_withheld` - the stamper's own test; on `18ecbfa8` the 125's Missing list
+  38 -> 30 (the 7 page-1 premiums + the estimated total), so "49 items to fix" -> 41. A quote / a person's premium
+  keeps the 30 Sep to-do.
+- 3: the table's examples read "e.g. 789 Commerce Dr" (italic, lighter - `scheduleImport.exampleHint`,
+  `.schedule-cell::placeholder`); the Template is the column names only (`templateCsv`); an untouched example row
+  from an older template is skipped on upload (`isTemplateExampleRow` - the WHOLE example only); a table save that
+  still misses required cells keeps the window open with "Still missing: Street address on rows 1 and 2"
+  (`missingRequiredSummary`; a typed value alone closes as before). Apply is NOT blocked (owner's suggestion
+  weighed: partial saves stay - Brent's #18 "had to retype").
+- 4: `session_documents.plan_form_fill(new_text=)`: a "New document" choice must be printed in the NEW document's own
+  text and differ by more than punctuation (`_words_only`, `_says_it`); fills of blank boxes unchanged.
+- 5: "March 1, 2022" is a date (`needs_attention._DATE_SHAPE` reads written dates - the sentence becomes "...could not
+  be confirmed for this box"); a blocking 140 box names its row ("(row 2)", field QA's gate message only); the
+  building card names only the missing parts ("Required: street address and occupancy" - `sqs_service._words_list`;
+  all four missing reads word for word as before) and open cards take the live words on every sync
+  (`audit_service.plan_card_sync` "reword", open + unanswered only, like "repoint"); the Cyber policy row reads
+  "Cyber" (`policy_lines._names_a_section` - over the 65 names in 1,137 stored packages it changes only that one).
+Tests: `tests/test_live_run_12oct.py` (21). Updated (the TEST was wrong): three in
+`tests/test_needs_attention_30sep.py` pinned the 30 Sep premium to-dos on two stored dec renewals (29 -> 24 rows;
+no "_missing_producer" row) - Brent's 8 Oct answer keeps those page-1 premiums blank. Full suite: 13,747 passed,
+1 failed (the known `test_arq_acord125_missing_only`), 19 skipped. Frontend builds.
+**How to see each fix (restart the backend, Cmd+Shift+R):** on the CURRENT package `18ecbfa8` - the download count
+(41), the "March 1, 2022" sentence, the Cyber row name, the table hints / Template / "Still missing" note, and the
+building card's words after any save or answer. Only a NEW generation shows the Excess 131 retention (blank) and the
+140 hard stops' "(row 2)"; only a document added after forms shows the "New document" rule (the two stored choices
+stay until "Keep current").
+
+**Problems found (as reported to the owner):**
+1. Excess 131 retention = 5,000 (`ai_verified`) - the Excess dec's "POLICY LIMITS (000 OMITTED) ... 5,000 EACH
+   OCCURRENCE" is the UMBRELLA's $5,000,000 in thousands; the Excess prints no retention. Rule: an AI retention / SIR
+   needs a retention / SIR / deductible label beside it in that layer's own documents.
+2. Download "49 items to fix" counts 8 ACORD 125 page-1 premium boxes (7 lines + the estimated total) as Missing - Brent's
+   8 Oct rule leaves them blank on a renewal. Should be 41. `needs_attention`'s 1 Oct premium rule
+   (`lob_premium_box_pairs`) never learned that rule.
+3. The location table's placeholders look like data ("789 Commerce Dr", "Houston", "TX", "77001", "Warehouse and
+   dispatch", "1998", "Metal", "2015", "3", "100") - the owner read the empty street address as filled. The Template CSV's
+   second line is that example row and `rowsFromMatrix` imports it: an uploaded template adds a fake building (vehicles /
+   drivers the same). Owner proposed blocking Apply until every required cell is filled; recommended instead: empty boxes
+   look empty, the example row is never imported, and Apply says what is still missing.
+4. Adding Cyber raised two "New document" choices on ACORD 140 (sublocation "Prem #: 001 Bldg #: 001" vs "Prem. #: ...")
+   - text the Cyber dec does not contain (the AI read it from the package's facts) and differing only by a dot.
+5. Text: "Your documents print 'March 1, 2022', which is not a date" (`needs_attention._DATE_SHAPE` reads numeric dates
+   only; the real reason - the EBL retro date, not the umbrella's); the six ACORD 140 download hard stops name no building
+   (read as duplicates); the min-COPE rec says "Required: street address, occupancy, construction type, and building or
+   BPP value" when only occupancy + address are missing; the Cyber policy row is labelled "Cyber Incident Response Team".
+
+### Z. Save progress - an unfinished fix is not Resolved (owner, 13 Oct 2026, run `18f6914f`; frontend only)
+**What the owner saw.** Pre-form, Hard Stops page: the COPE hard stop's window (location table + occupancy type above
+it) was saved with the table filled and occupancy type left blank. The item came back with a green "Resolved" tag and
+"Reopen", the page said "All 1 handled" - while the stop still fired ("Property Minimum Viable COPE incomplete -
+missing: occupancy type") and still held the score. Stored row: `submission_issue_status` iss_57ef2c1bec59 =
+"resolved" (hard) at 19:04:32; `occupancy_type` empty.
+**Cause.** `AcordModal.handleIssueResolved` set "resolved" after EVERY successful save, whatever the save did (only the
+add-form branch checked). The 12 Oct part Y note then offered "Apply the fix" over an unfinished table.
+**Owner's rule.** Unless an item is completely fixed: no Resolved section, no Resolved tag; it stays in its list with
+"Open to fix", and the window offers "Save progress" instead of "Apply the fix". Every hard stop / warning whose window
+holds more than one value (boxes, rows).
+**Built.**
+- `utils/fixProgress.js`: `listedIssues` (every item a response or the screen lists - grouped hard stops, warning
+  tiers, cross-form issues, bare sentences) and `fixLeftOpen` - after a save the item is still open when the same item
+  is still listed (by id or by its words - the editor's raw cross issues carry no server id), or its rule now fires
+  under NEW words (a partly fixed card renames what is missing: new id, same unfinished item); another listing of the
+  same rule that was there before is a different item (location 2). Errs toward "still open".
+- `handleIssueResolved`: "resolved" only when `fixLeftOpen` is false; a "resolved" an earlier partial save left on the
+  item is set back to "open".
+- `ResolutionModal`: a table window that still lacks a value it shows (a box above the table, or a required cell)
+  names it ("Still missing: Occupancy Type. Save your progress now and finish it later - it stays open until
+  everything is in.") and its button reads "Save progress"; the save closes the window, "Open to fix" shows what was
+  saved. Field windows with several boxes are "whichever applies" (their own hint says so) - the label cannot know, so
+  the server's answer after the save decides. The part Y "Still missing ... Apply the fix" note is removed (its test
+  was updated - the owner's new rule outdated it, the code was not wrong).
+**Not changed:** the trade-off note ("Saved - one thing to check" + "Apply the fix" when the RAISED item's box is on
+the screen) - a different case; none-mode "Mark resolved" (a deliberate mark).
+**On `18f6914f` now:** the stale "resolved" stays until that item is saved once more - Open to fix, then Save progress
+(or fill occupancy and Apply). Do NOT press its "Reopen": that takes the saved table back.
+Tests: `backend/tests/test_save_progress_13oct.py` (6, rules run under node). Related screen tests 1,664 passed;
+frontend build clean.
+
+### Z2. `18f6914f` pre-form answer sheet (13 Oct) - replayed read-only through the real fix routes
+All 9 remaining items (6 warnings, 2 score rows, ACORD 125 start date) cleared in memory: 60 -> 90 "Submission Ready", no
+cap, dry run "ready". Only ONE answer is in the documents: **UM/UIM $1,000,000** (Business Auto Policy vehicle schedule,
+UNINSURED/UNDERINSURED MOTORISTS column, every vehicle - the app's reader missed the column and raised a false "not
+specified"). Everything else is a labelled test value (the decs redact the insured block; no drivers, GL class schedule,
+period of restoration, loss runs or start date are printed). Files: `<scratchpad>/plan18f6/` (`sim_steps.json`,
+`sim_out.json`). **Open defects confirmed on the current code, NOT fixed:**
+- F1 `answer_semantics`: a narrative containing "no losses" / "no claims" / "never" / "none" / "without" is stored as an
+  ABSENCE - `additional_remarks_text` = "" and any remarks on file emptied, while the route says success.
+- F2 `pdf_service` guard `driver_personal_unattributable` blanks the PRODUCER's own driver table (DOB, licence #,
+  licence state, hire date, years) on ACORD 127: 8 typed drivers = 40 boxes "held back" (dry run 4 -> 44). Names only
+  avoids it.
+- `operations_description` = "LOCAL SERVICE" (AI) is the auto schedule's vehicle-use column, not the business; it prints
+  as the 125 description of operations and the pre-form screen has no link to change it (F4).
+- UM/UIM column not read by the vehicle-schedule reader (above).
+
+### Z3. Fixed the same night (owner: "fix the remaining issues ... then I generate") - each proven on `18f6914f`'s own boxes
+Replayed read-only (the Z2 answers + the operations description), then stamped ACORD 125 / 127 from the result:
+- **Driver table (F2):** `pdf_service` driver guard keeps a box that prints exactly what a PERSON-saved, unchanged
+  `auto_drivers` row states (`schedule_capture.human_rows` + `_is_person_driver_cell`). All 8 drivers print DOB,
+  licence, state, hire date, years; dry-run "held back" 44 -> 4. An unmarked or later-changed record is still cleared.
+- **Narrative (F1):** `answer_semantics.interpret_answer` step 0c - a NARRATIVE_FACT_KEYS answer longer than five words
+  is the text to print; short answers ("None", "N/A", "TBD") read as before; scalar facts unchanged.
+- **"LOCAL SERVICE":** `normalization.is_vehicle_use_label`; the merge drops it per document
+  (`extraction_service.drop_vehicle_use_descriptions`); Tier 2 lists it as missing unless a person typed it
+  (`sqs_service._describes_a_vehicle_not_the_business`); the key detail now has a link (`_key_detail_actions` types a
+  prose fact of its own - never the ACORD 101 remarks). On `18f6914f`: "Operations description" shows under Key details
+  missing; typed there it prints on the 125 and the score returns to 90.
+- **Rows a record states are not repeats:** `_GROUNDED_ROW_DETAIL_RESOLVERS` + `_resolve_schedule_row` and
+  `_resolve_vehicle_deductible_cell` (17 vehicles kept their $1,000 deductibles on rows B-D); `_dedupe_stamped_
+  premises_rows` never folds two rows with different BLDG # (building 2's whole 125 premises row was folded into
+  building 1's - same street, no unit). The one-premises-printed-twice case still folds.
+- **"Save progress" on box windows:** `issue_registry._r_field(needs=)` declares the box groups a rule requires (Minimum
+  Viable COPE: occupancy, construction, building or BPP value; legacy Carrier-Grade COPE: all six); `fixProgress.
+  unmetNeeds` + `ResolutionModal` show "Save progress" and the missing groups; a "Save progress" never confirms on-file
+  values. Undeclared windows stay "whichever applies".
+Not run: the stored-corpus replay (the grounding change can un-blank a repeated schedule value on other sessions -
+by design, each kept value is its row's own record). Tests: `backend/tests/test_fixes_before_generation_13oct.py` (32).
+
+### Z4. Adversarial review of Z3 (3 reviewers, read-only) - 11 real findings, fixed the same night
+- **Narrative fix was too broad (2 HIGH):** a >5-word non-answer ("I'm not sure, will ask my accountant") became an
+  operations description, and a client's denial ("We do not have any operations at all") no longer held (F7). Now only
+  the ACORD 101 remarks (`answer_semantics._REMARKS_FACT_KEYS`) are protected - uncertainty only on a short answer,
+  N/A and absence only as the whole answer - and `append_producer_narrative` judges the person's NEW words alone
+  ("None" / "TBD" add nothing; the composed remarks are never re-read as "none"). Every other fact reads as before.
+- **"LOCAL SERVICE" rule was vocabulary-only (2 medium, 1 low):** it dropped "LONG DISTANCE HAULING", "Local retail
+  business". Now `normalization.vehicle_use_as_operations` - the description must restate the evidence's own
+  `auto_vehicle_use` ("service"), a person's or confirmed (`user_confirmed`) value stands - and ONE ruling feeds the
+  merge drop, Tier 2, the stamper (the box prints blank), the fix-window pre-fill (never offered to "Confirm") and the
+  questionnaire (`_present_fact_keys` - the client is asked).
+- **Rows (3 medium / low):** a client-typed table (no BLDG #) lost building 2 on the 140 with a download hard stop ->
+  `_dedupe_stamped_premises_rows(facts=)` never folds two rows their own records state, and compares only LOC / BLDG #s
+  a person or document gave ("001" == "1"; gap fill's own numbers are no evidence); the per-vehicle deductible no longer
+  reaches ACORD 137 sections; ACORD 130 / 133 print each location once (`_dedupe_repeated_location_rows`: same LOC #
+  and street).
+- **Save progress (2 HIGH, 1 low):** a COPE card whose legacy TWIN took over was marked Resolved while the 85 cap held
+  -> `fixLeftOpen` treats a new item in the card's own cluster as the same unfinished item; the location-table window now
+  checks each building row's COPE columns (`premises_cope` `row_needs`, `fixProgress.rowNeedsSummary` - "Construction
+  on row 2"); a card stored before `needs` existed takes the code's current declaration (`_with_current_needs`).
+- **Navbar (owner, same night):** the header never came back after a refresh - the first scroll was measured from 0
+  (a restored position read as a huge downward scroll) and only ONE 40px upward step brought it back (a trackpad's
+  small steps never do). `utils/headerAutoHide.js`: first event = starting point, upward runs add up, the top always
+  shows it. Tests: `tests/test_header_comes_back_13oct.py`.
+- **Narrative card (owner, same night):** with every topic covered the card said only "Improve narrative quality" (the depth check missed "specific operations detail"). The card now names it (`sqs_service.narrative_substance_gaps`), and the narrative window lists everything still missing as tickable options - each adds a sentence starter carrying the phrase its check reads (`narrative_gap_options` -> row `narrative_gaps` -> `resolution.gaps`). On 18f6914f the scope-of-work sentence takes Narrative to 100. Box counts under "Why other boxes are not listed" read "14 boxes:".
+- **Narrative, owner-approved three layers (same night):** (1) the window's options ARE the classification - a starter or topic label with no real words after it (or "TBD") is no content: `narrative_reader.strip_unfinished_starters` removes such lines before storing (the narrative door) and scoring (`extraction_service._narrative_remarks_text`), and the window refuses them (`fixProgress.unfinishedStarters`); (2) ONE meaning-based model call per narrative SAVE (`narrative_reader.read_narrative`, improving-ll.md C106) credits a topic or depth item only with a word-for-word quote, stored with the text's hash (`facts["_narrative_reading"]`) and ignored for any other text - live probe on a paraphrased narrative: 17 items credited, each quoted; the model sometimes drops the id prefix, so bare ids are accepted; (3) the keyword pass stays first, the reading only adds; `NARRATIVE_READER=0` (the suite sets it) or a failed call = keywords alone. The fix window holds the page still while it scrolls (body scroll lock + `overscrollBehavior: contain`). Tests: `tests/test_narrative_options_and_reader_13oct.py` (14).
+- **Owner, same night, two more:** (a) the page behind the fix window still scrolled - the body lock alone let a wheel over the faded area or past the window's end reach the page; now html + body are held and a native wheel listener (`passive: false`) keeps every wheel in the window - whatever inside can still scroll that way (sideways for the tables) takes it, nothing passes on. (b) "2 to consider" with one card in view: the forms group's count sat beside "Check again" and read as that button's. Each group now shows its count beside its title and the page badge names its parts (`recommendations.considerText`: "1 to raise your score · 1 your forms need").
+- **Owner, same night: the "Why other boxes are not listed" breakdown is gone from the pre-form screen** (`BeforeYouGenerate`) - nothing in it can be acted on before generation, it counted boxes nobody can see in system terms, and each line has a home after generation (AI held back / Please verify panels, the Missing list). The counts stay in the dry run's payload (`dropped`); the red "Also needed for a clean download" note stays (actionable).
+- **Owner, same night: a white band under the review footer.** Scrolling inside the fix window (its own scroll box) hid AND collapsed the navbar; the window closed and nothing released it - Brent's item 1 class. `Header.jsx` now ignores any scroll inside a window or dialog (`role=dialog`, `aria-modal`, `.modal-overlay`, or any element under a `position: fixed` layer, cached per element); the editor's PDF scroll still hides it. Replay of 18f6914f with the last three key details (41 employees, NAICS 238210, SIC 1731): 94, "Submission Ready" - not 100: Structural 92 (the forms' fill rate, measured at generation), Exposure 95 (auto radius / use - no pre-form box), Property 90 (distance to hydrant / fire department type - asked on the 140 after generation).
+**Named, NOT fixed (pre-existing, not on 18f6914f's path):** `premises_cope.derive_package_cope` needs every row to
+state the SAME value column (building on one row + BPP on the other clears nothing); the one-building COPE field window
+cannot offer the street address its rule also needs; `unmetNeeds` counts an explicit "none" as a value; the re-merge's
+legacy branch marks restored driver rows as the producer's (unproven); gap fill could still write a vehicle use into an
+operations description box on a package where nobody typed one.
+On `18f6914f` after all of it: every form stamps with no wrong blank (125 both buildings + the typed description, 127
+drivers and deductibles, 130 one location, 140 both buildings). Tests: `test_fixes_before_generation_13oct.py` (61).
+
+### Z5. SQS without forms - DECIDED (owner + Brent, 13 Oct 2026): the SQS must exist without forms
+**Decision:** the SQS is separated from the forms (it exists, and can reach 100, before any form is selected or
+generated); after generation the score recalculates. Supersedes the 5 Oct "needs Brent" status of the form-independence
+research (memory `sqs-form-independence-research`).
+**Where the last points are on `18f6914f`** (replay with every pre-form item answered: 94, "Submission Ready"):
+- Structural 92 = Tier 1 100 x 40% + Tier 2 100 x 35% + **Form Fill Rate 71** x 25%. The client's own no-forms
+  formula (C3 3.7: Tier 1 53.3 / Tier 2 46.7, `_W_NOFORM_TIER1/2`) is already in `sqs_service` but applies only when no
+  forms exist; with it this pillar is 100.
+- Exposure 95 = Auto Completeness -5 "No radius of operation" (`coverage_evidence.auto_completeness_gaps`). The auto
+  policy's vehicle schedule prints "LOCAL" in the radius / use column ("LOCAL SERVICE") - not read today.
+- Property 90 = Location Info 60: `distance_to_hydrant` and `fire_department_type` missing (of locations, value,
+  hydrant, fire department, BI limit).
+- All three facts are already answerable (`answer_routing` field mode) - the score rows just never name them
+  ("Improve property integrity", "Incomplete: Auto Completeness" have no fix route).
+**Plan proposed (owner to approve the order):** (1) Structural always on the no-forms formula; the fill rate becomes
+the forms' own "Form completeness" number shown beside the SQS after generation; (2) every remaining deduction names
+its fact and is asked before forms (radius, hydrant distance, fire department - with option lists), and the radius is
+READ where the vehicle schedule prints it; (3) "form X is missing" checks and the C75 generation re-promotion leave the
+number, line rules keyed on submission scope (lines requested) instead of selected forms; (4) a build test - every
+deduction the scorer can make has a pre-form fix route. With (1) + (2) `18f6914f` reaches 100 before forms. D6 table
+before shipping (5 Oct measurement: pre-form fill slice averaged 62, post-generation 95).
+
+### Z6. BUILT (13 Oct 2026, offline, uncommitted): the SQS without forms - and with them - reaches 100 when everything is answered
+Owner: "build all the discussed things ... score should reach 100 before and after forms as well if user solves
+everything". **Restart the backend before testing** (it runs without `--reload`).
+**Proven on the owner's own package `18f6914f`** (read-only replay through the real fix routes, DB blocked, no LLM):
+every pre-form item answered = **100** "Submission Ready" (was 94); the last three answers are rows that did not
+exist before - Radius of operation +2, Distance to the nearest fire hydrant +1, Fire department type +1. Then the
+same answered package with the generated forms of the same documents (stored run `18ecbfa8`, real AI labels):
+**with forms 99** (Form Fill Rate 96 - 24 values to verify), **"Confirm all" on the 24 Please verify rows -> 100**
+(every form's fill 100). The 50 Missing / 121 AI held back rows are empty boxes and do not move the score.
+**Before forms (the pre-form door, `sqs_service.score_package_pre_generation`):**
+- Structural is the no-forms formula (Tier 1 53.3 / Tier 2 46.7) - `calculate_package_sqs(form_fill=False)`; the
+  per-form results still carry the cards. Lite / Clarity (selected, not generated) keep their own recipe.
+- **A form choice is not a gap in the submission.** A check whose only fix is choosing a form (mode `none` + a
+  remaining `add_forms` - today only `certificate_requested_but_acord25_missing` fires pre-form: 22 of 94 stored
+  packages, each capped at 85 by it with no way to answer it on the review) is deferred before forms
+  (`cross_form_validator.is_form_choice` / `defer_form_choices`, applied in `stops_now`, the upload pipeline and the
+  pre-form recalc): an advisory marked `form_choice`, out of both stop lists and the Exposure cross penalty. The
+  package payload lists them (`form_choices`); the grouped view moves their cards out of Warnings into
+  `grouped_issues.form_choices`; Recommendations shows them under "Your forms will need" with "Add ACORD 25" (ticks it
+  in Select forms). After generation the rule runs on the generated forms at full force, as before.
+- **One row per deduction.** `exposure_deduction_items` / `property_gap_items` list every Exposure / Property
+  deduction as {points, fact, label}; the pillar scores ARE their sums (one list, no drift) and the Best Solutions rows
+  are built from them (`_gap_rows`: a row per box, one review row for coverage decisions and the cross-form cards).
+  "Incomplete: Auto Completeness" / "Improve property integrity" are gone.
+- **The radius a rating table prints is read** (`extraction_service.read_vehicle_radius_class`, merge tail): the
+  header must name the radius of operation ("Radius of" over "Operation", or "Radius of Operation"), every row printing a
+  class must print the same one; stored in the scoring-only `_auto_radius_dec_reading` (the 127 RADIUS box prints miles).
+  Measured on 39 distinct stored documents: only the Choice Electric Business Auto Policy prints one (11 sessions, all
+  LOCAL); "12:01 AM local time" never matches. A stored session gets it on its next merge - until then the radius row asks.
+- Choice lists: radius (Local / Intermediate / Long distance, each reads as a stated radius) and fire department type
+  (the words its validator accepts). A probe answers a choice-list question with a choice (`_package_probe_answer`).
+**After forms:**
+- **Confidence weights stay Brent's 1.00 / 0.85 / 0.50** (he confirmed them 24 Aug). A same-day change of
+  `ai_verified` to 1.00 was REVERTED on the owner's instruction after the spec audit (part Z7): "we need to go with
+  Brent's one". 100 stays reachable because a found value is now a Please verify row too (reason "Filled by the AI
+  from your documents. Confirm it belongs in this box.").
+- **Confirm / "Confirm all N"** on the editor's Please verify rows (`NeedsAttentionPanel`, `utils/confirmValues.js`):
+  sends each box's own value through the producer-edit door (`/api/update-pdf`), which labels it `producer` and
+  re-scores. Every filled box below full weight is confirmable (`needs_attention.CONFIRMABLE_LABELS`: low_confidence,
+  ai_verified, and a value under a stale missing_required label); `conflicted` stays Data Consistency's. An unticked
+  checkbox ("Off") is no longer a filled box in the fill rate. Those rows' score line reads "Counts in full once you
+  confirm it" (it said "No score effect"). The verify tag's hint no longer says "not confirmed in your documents".
+- **Proven on the owner's generated `18f6914f`** (read-only snapshot, current code): package 99 (Form Fill Rate 93),
+  54 Please verify rows (13 of them found in the documents); all 54 confirmed -> **100**. Missing (36) and AI held
+  back (93) are empty boxes and never move the score.
+- Every post-generation package score carries `without_forms` {score, tier} (the pre-form recipe, light, never in a
+  probe); the editor's Total Package Score and the review page print "Without forms X · With forms Y" and why
+  (`utils/scoreWithForms.formsEffect`). A post-form Structural gap that is only the fill reads "Confirm the Please verify
+  values on each form (Form Fill Rate N%)".
+**D6 (Brent sees these first) - 94 stored packages, recomputed before / after on the same code paths:**
+- Before forms: 76 moved, 48 up / 28 down, -2 to +4 (mean +0.7), 9 tier changes (8 up from "Not Ready" 57 to "Major
+  Gaps" 60-61 - the ACORD 25 form choice no longer charged; 1 down 60 -> 59). Every DOWN is Structural on a package
+  missing Tier 1 / Tier 2 details: the old pre-form fill slice (a recommended form's inventory) was propping it up;
+  answering the key details now lifts it. Caps unchanged on all 94 (57 at 85, 34 at 60, 3 none).
+- After forms: 0 of 61 moved (re-measured after the `ai_verified` weight went back to Brent's 0.85; at 1.00 it was 7 up by 1).
+- With forms vs without forms (after): -4 to +4 - a package can score higher WITH forms (the fill exceeds its weak
+  Tier 2) or lower (cross-form checks at full force, unconfirmed AI values).
+- D6 panel (`score_delta_probe.py`): 0 of 12 moved.
+Tests: `tests/test_sqs_without_forms_13oct.py` (107). Updated as outdated by the owner's decisions:
+`test_c3_sqs_integrity` / `test_confidence_score_covers_every_label` (pinned ai_verified < filled) and the
+`test_step2_orbin_29sep` recipe guard (its fixture differed only through the fill slice; now claims-made GL) and
+`test_narrative_options_and_reader_13oct`'s pin on the forms badge (it now counts open form choices). Suite
+13,956 passed / 1 failed (`test_arq_acord125_missing_only`, pre-existing) / 19 skipped; frontend build clean.
+**How to verify live:** restart the backend; on `18f6914f` the Recommendations "Raise your score" group lists Radius of
+operation, Distance to the nearest fire hydrant and Fire department type; answering them (with the key details) shows
+100 before forms. Generate; the editor's Total Package Score says "Without forms 100 · With forms N"; each form's Needs
+attention panel has Confirm / "Confirm all" on Please verify rows; confirming them all brings the package to 100.
+**Not done / open:** a package whose only remaining Exposure item is a coverage decision ("employees but no workers comp
+coverage", "vehicles but no auto coverage") or a payroll / revenue ratio outlier cannot reach 100 by typing - those
+rows say so (review); Lite / Clarity keep their old recipe; the 127 RADIUS box still prints only a mileage.
+
+### Z7. Audit against `SQS_Scoring_Specification.docx.pdf` (13 Oct 2026, read-only) - owner's ruling
+The spec the client holds (repo root; `v1-20AUG.md` D0: the V1 master plan overrides it where they conflict) was
+checked rule by rule against the code. **Matches exactly:** §1-2 weights / N/A rescale / round down / ceiling then
+credits / raw kept; Tier 1 list and formula, producer and certificate exemptions; Tier 2 formula; per-form checklists
+125 / 126 / 127 / 131 / 28 / 101 / 140-141 and the OCR penalty (-6, cap -30); §3.3 Property in full; §3.5 Umbrella
+point for point; §3.6 Narrative formula, x0.75, floor 40, +8, two-signal rule; §4 field-level 6 of 7, identity 4 of 4,
+cross-form hard 10 of 11, the 5 "unexplained" rules; §5 cross-form warnings 36 of 37 and all 8 advisories; §6-9
+ceiling behaviour, Resolve / Dismiss never scores, a reasonless dismissal earns 0, credits re-capped and retired;
+§10 per-form vs package split and the tier ladder. Today's no-fill-before-forms BRINGS the code in line with §3.1
+("if no forms have been generated yet, the fill-rate component is dropped") - the recommended forms' fill broke it.
+**Divergences, all deliberate:** client V1 (C3 40/35/25, 53.3/46.7, Tier 2 six fields, prior carrier to Loss History,
+three Exposure deductions removed and two buckets added, C2 Loss History numbers, SYS-04 narrative gating) and later
+owner / Michelle / Brent calls (attested no-loss and new venture = Not Applicable, peril deductibles a warning,
+building value hard only with property, no pre-form credits, the narrative reader, expired term hard, the generation /
+clean-download blocks, pre-form cross-form rules on the recommended forms, the fill rate over FILLED boxes only, ACORD
+25 on the fill rate). **Owner's ruling (13 Oct): "else I think me / Michelle / Brent have discussed and we implemented
+as per their requirements" - these stand; do not re-raise them. One change: the `ai_verified` weight goes back to
+Brent's 0.85** (part Z6). Correction recorded: 126 / 130 / Excess 131 sit below 100 for their OWN checklist items (GL
+form type; owner / officer inclusion; the excess layer's SIR or attachment point), not a missing policy number.
+Open: the client's copy of the spec is out of date - a v2 was offered, not written.
+
+### Z8. Review page "x of y handled" (owner, 13 Oct 2026, run `841bb967`; frontend only, no score effect)
+Owner: every blocker fixed and the page read "0 of 0 items handled"; with one hard stop left, "0 of 1". The count
+read only what was still LISTED, and a fixed item stops firing and leaves its list. Owner: "x of y handled - y were
+all the blockers initially and x is how many are handled - and if 0 remaining then remove this."
+- y = the items still listed + the page's Resolved rows (dismissed, and fixed items that stopped firing, rebuilt
+  from their stored status); x = the Resolved rows (`utils/resolvedIssues.pageProgress`). The Hard Stops /
+  Warnings badges and rail lines read the same numbers ("All handled" once a page's blockers are all handled).
+- A save that clears OTHER listed blockers - a key-detail link, a "Raise your score" row, another card's fix -
+  records them "resolved" (`resolvedIssues.clearedBlockers` with the Save progress rule `fixLeftOpen`, called first
+  in `AcordModal.handleIssueResolved`), so they count and move to the Resolved section. A part-fixed item is never
+  marked. Items cleared that way BEFORE this change have no record and do not count retroactively.
+- Nothing left: the Overview panel shows no "x of y" and no bar; the rail's Overview line reads "All handled".
+Tests: `tests/test_review_progress_13oct.py` (4).
+
+### Z9. Recommendations get a Resolved list; the narrative window reads meaning (owner, 13 Oct 2026, run `841bb967`)
+**1. Owner: "on the preform screen i need a resolved section similar to hard stops and warnings and also they can be
+reopened and score goes back, basically same thing" (the Recommendations page).** Cause: a "Raise your score" /
+"Your forms will need" fix went to `resolve-issue` with `issue_id: null`, and the route records what a fix changed
+(`issue_fix_undo`) only under an id - so nothing could ever be taken back, and the row simply vanished.
+- The fix now carries the row's own id: `rec:score:<pillar>:<asks>` (`recommendations.scoreFixIssue`) or
+  `rec:dry:<item id>` (`dryRun.dryRunFixIssue`). Ids and the page live in `utils/resolvedIssues.js`
+  (`REC_PAGE = "recommendation"`, `recScoreIssueId` / `recDryIssueId` / `recChoiceIssueId`); they never collide
+  with an issue's `iss_...`.
+- A save that FIXED its row marks it "resolved" under that page (`AcordModal.markRecommendationFix`): a score row
+  is fixed when the package scorer no longer asks for it, read with NOTHING covered (a row now hidden behind a
+  warning card asking the same value is still open); a form-check row when a finished check of its form no longer
+  lists it - a check still running is judged when it finishes (`pendingRecFixes`). A part-fixed row is never marked,
+  and a stale "resolved" on a row still listed is taken off (the Save progress rule). Rules:
+  `recommendations.recommendationFixState` / `liveRecommendationIds` / `recommendationResolvedRows`.
+- The page shows a collapsed "Resolved (n)" at the bottom (`Recommendations.ResolvedGroup`, both layouts): label
+  "Resolved", "Open again" -> the one reopen door (`handleReopenIssue`): the server takes back what the fix
+  changed, re-scores, and the row returns to its list with its points. A ticked form choice moves there as "Added";
+  "Open again" unticks it. A row that vanished because ANOTHER fix answered it is not listed - it has nothing of its
+  own to take back. Pre-existing rows fixed before this change have no record and are not listed.
+- Backend: `audit_service.set_issue_status` files `severity: "recommendation"` (`ISSUE_STATUS_PAGES`); a status
+  with that page (or a `rec:` id) never shows under Warnings' Resolved list or the editor's Cross-Form Resolved
+  list (`resolvedIssues.pageOfStatus(st, iid)`).
+- **Replay on `841bb967`'s stored row (read-only, real routes):** narrative row 41 -> 46, Open again -> 41 and the row
+  is back; loss-history row 41 -> 44, Open again -> 41 and back. A value changed after the fix refuses the undo
+  ("changed since"), as on Hard Stops / Warnings.
+
+**2. Owner: "i pasted the paragraph and only the safety or loss control program is ticked".** A chip ticked only
+when its sentence STARTER appeared word for word; the paragraph covered all 20 options by the scorer's own phrases
+(and the save takes Narrative to 100). Each option now carries `phrases` (`sqs_service.narrative_gap_options`) -
+the exact strings its check reads - and the window ticks an option the typed text covers
+(`fixProgress.textForCoverage` / `gapCovered`; unfinished starter lines are ignored, as the server strips them).
+A covered option cannot be unticked (unticking only removes a starter line); "Your text covers N of M" / "all of
+these" under the chips. The paragraph: 1 of 20 ticked before, 20 of 20 now. Display only - no score moves.
+Tests: `tests/test_recommendations_resolved_13oct.py` (11); `test_save_progress_13oct` import pin updated (the TEST
+pinned the old import line). Suite 13,971 / 1 / 19 (the known `test_arq_acord125_missing_only`); frontend build clean.
+**3. Owner, same day: "add a little drop down icon like warnings and hard stops on recommendations as well".** Every
+Recommendations group heading ("Raise your score", "Your forms will need" before and after forms, "Resolved") is now
+a fold with the Hard Stops / Warnings triangle (`Recommendations.FoldHead`, `.rec-tri` turned 90 degrees when open).
+The working groups start open, Resolved starts closed; a folded "Your forms will need" is hidden, not unmounted, so
+the form check keeps polling and re-checking on the ticks. Display only. Test: +1 in
+`tests/test_recommendations_resolved_13oct.py` (12).
+
+### Z10. The owner's run `ba7c709d` (13 Oct 2026, fresh upload, 100 before forms, 8 forms generated 13:34 UTC)
+Pre-form: 42 (cap 60) -> **100** with the answer sheet (replayed read-only first; the owner's edit log matches it except
+contact phone / e-mail and the business start date, which were not typed). After generation: **99** ("Without forms 100
+· With forms 99" - the Form Fill Rate slice; Please verify values count 0.85 until confirmed). No hard stops, no
+warnings. Generated: 125, 126, 127, 130, 131, 131 (Excess), 137_CO, 140.
+
+**Brent's items graded on the stored forms (read-only):** 4 PASS (two 131s: Amerisure Mutual umbrella $5M over GL /
+Auto / EL; Travelers excess $4M over the umbrella), 5 PASS by ACORD's tooltip ("A - annual", no tick; Brent's tick
+question open), 6 PASS (only `carrier_website` = Chubb's cyber site; no address as a website; no form prints it), 7 OUR
+PART PASS (policies table in "$ X"; 126 GL $16,818; 130 WC $29,278, minimum $465, class premiums; 125 Prior Carrier
+GL / Auto / Property 2025; page-1 premiums blank by Brent's renewal rule; 131 and 140 have no own-premium box; 152 / 834
+/ 827 not built; the "Other" column waits on Brent), 15 OUR PART PASS (no EBL warning; EBL its own line), 18 PASS (0
+hard stops after forms; the COPE card opened the two-building table), 20 PASS (Brent's rule: page-1 carrier blank +
+the "carrier receiving this submission" card; Prior Carrier filled), 21 PASS (125 "Other: Excess (Following Form)
+Liability"), 22 PASS (owner reached 100 through it), 23 PASS (the table kept the owner's values; 125 / 140 print them),
+26 PASS (Exposure 100, no false deductions), 27 BETTER, NOT DONE (download review: 0 hard stops, 19 producer boxes to
+fill - was 175 then 47 - but those 19 were never listed before forms: 10 were "left to the documents" and 8 had no fix
+route in the dry run; examples: LLC members / managers, revenue per location, inside city limits, own or rent, FT / PT
+employees, square feet, area leased, four Yes / No questions), 25 not re-tested on this run. The policies table shows
+**11** rows, not Brent's 10: "Crime and Fidelity $500" - the Package Policy prints "CRIME AND FIDELITY COVERAGE PART
+$ 500.00", so the row is real (tell Brent; do not remove it).
+
+**UI fixes the same evening (owner, frontend only):** (1) one "Confirm" on a Please verify row put "Confirming..." on
+EVERY row and on "Confirm all" - `NeedsAttentionPanel` kept one busy flag; it now tracks the rows being saved by key
+(`confirmingKeys`): only they say "Confirming...", the others wait (one save of a form at a time) with their own
+label, "Confirm all" says so only when it is the save in flight. (2) The row footer's "Page N" / "Show on form" wrapped
+to "Page / 1" and "Show on / form"; they are now two small square-cornered labels (`rowChip`, radius 4, nowrap),
+one line each, stacked at the row's right. Tests: `tests/test_verify_rows_13oct.py` (2). Full suite after these: 13,998 / 1 / 19 (the known `test_arq_acord125_missing_only`; the count includes another session's `tests/test_policy_contract_count_13oct.py` and its `pdf_service._policy_contracts` change, made at 18:41 local - after the owner's backend started at 18:16, so `ba7c709d`'s forms predate it).
+
+**WRONG VALUES ON `ba7c709d`'s FORMS - OPEN, NOT FIXED (owner, 13 Oct: "do not fix these but note for future").** Each
+was read off the stored forms and checked against the documents. Most carry a Please verify label (low confidence or
+"AI verified"), so "Confirm all" would bless them - fix or clear them first.
+| # | Form / box | Printed | Why it is wrong | Class |
+|---|---|---|---|---|
+| W1 | 125 / 130 producer mailing address | 26777 Halsted Rd, Farmington Hills MI 48331-3586 | Amerisure's own head office, read off the dec header as the agency's (the account has no Agency Address) | a carrier's details read as someone else's (5th sighting) |
+| W2 | 125 / 130 / both 131s operations description | "Business auto coverage for a fleet of vehicles garaged in Denver, Colorado." | Written by the AI from the auto policy (only "BUSINESS AUTO COVERAGE FORM" is printed); describes a policy, not the business | an insurance description as the business description |
+| W3 | 125 contact type | "Accounting" | No document says so - the box's own tooltip example ("e.g. accounting, claims") | tooltip example as an answer |
+| W4 | 126 "paid to subcontractors" | $2,626,500 | The WC total payroll | wrong-category amount (meaning gate missed it) |
+| W5 | 126 tail coverage Y + explanation | "Item 3. Extended Reporting Period: (A) Additional Period: 1 Year(s)" | The EMPLOYMENT PRACTICES policy's extended reporting period answering a GL question | another policy's text (EPL not seen as foreign to GL) |
+| W6 | 126 type of work subcontracted | "about 70% new construction and tenant finish ..." | The narrative's scope-of-work sentence | borrowed sentence |
+| W7 | 126 hazard class code | (blank) | **FIXED 13 Oct (Z11). Our bug:** the warning's fix window writes `gl_class_codes_by_location` ("92478"); `pdf_service._gl_hazard_rows` reads only `gl_class_code_schedule` / `gl_class_codes`. The score counts the code, the form never prints it | one truth, two declarations |
+| W8 | 127 driver middle initial (all 8 rows) | M, T, L, K, B, A, C, R | Each driver's FIRST initial | invented from the given name |
+| W9 | 127 driver 1 mailing city / ZIP | Denver 80221 | The vehicles' garaging ZIP | borrowed address |
+| W10 | 131 (umbrella) "anything excluded?" Y + explanation | "EXCLUDED Employee Benefits Liability Each Employee Annual Aggregate" | The umbrella's coverage schedule; the question is about products / work / locations | borrowed sentence |
+| W11 | 140 fire district name | "Professional" | The fire department TYPE in the district-name box. **FIXED 13 Oct (Z11)** | wrong-role value |
+| W12 | 140 heating / wiring / other improvement years (bldg 1) | 2015 | Copied from the roof year | borrowed value |
+| W13 | 125 business start date | "April 2008" (Please verify) | From the producer's own narrative; not wrong, but not a date (the owner skipped the start-date item) | - |
+| W14 | 125 / 140 bldg 2 description | "Material and equipment storag" | A letter missing in what was typed in the table | owner's typing |
+| W15 | 130 normal anniversary / rating effective date | 01/01/2025 | The EXPIRING term's date on a renewal application for 01/01/2026 | worth a look |
+| W16 | 127 additional interest D ("other owner") + Y to "any vehicles not solely owned by the applicant?" | Dana Whitfield | The producer-typed CONTACT name used as a vehicle's other owner; no document prints it | a person's answer borrowed into another role |
+
+**RE-VERIFIED ON CURRENT CODE the same evening (3 read-only checks: the 8 forms re-stamped through the current code -
+0 deterministic differences, 23 replay-only differences (stored rows keep no grounding quotes), the other chat's
+`_policy_contracts` change a no-op here (policy numbers redacted); the pre-form answer sheet replayed 42 -> 100, dry run
+0; and an adversarial pass that tried to refute each verdict). The adversarial pass CORRECTED four of my verdicts:**
+| # | Corrected status | Why |
+|---|---|---|
+| 5 | **OPEN - the owner's decision (F00), not fixed in Brent's terms** | Brent: "neither option would be correct ... careful with A". The 130 prints "A" as a write-in beside the unlabelled Other box; the gate removed the AI's "At Expiration" tick. Decide: tick At Expiration for an annual audit, or keep the code **-> FIXED 13 Oct, part Z11** |
+| 18 | **PARTIAL (ours)** | No hard stops after forms - holds. But "answers already given must not be lost" fails: the GL class code (W7) prints nowhere; the hydrant answer prints on building A only (guard REPEATS_ROW_A blanked building B though both are LOC 1 at one address); "Annual revenue for this location" is asked after forms for both rows though total revenue was answered (the one-premises rule counts ROWS, not locations); the fire department type landed in the district-name box (W11) **-> FIXED 13 Oct, part Z11** |
+| 20 | **PARTIAL - waits on Brent (F00 Q1)** | Page one follows his 8 Oct rule, but 4 of the 5 carriers (Amerisure Mutual umbrella, Travelers excess, ACE cyber, Federal EPL) appear nowhere on the 125 - all 16 Prior Carrier "Other line" boxes are blank |
+| 22 | **PARTIAL (ours)** | Every pre-form recommendation was answerable (42 -> 100), but after forms the editor shows three per-form cards never offered before forms: 125 "carrier receiving this submission", 126 "Specify GL form type: occurrence or claims-made", 130 "owner / officer inclusion / exclusion" **-> FIXED 13 Oct, part Z11** |
+Also: 7 holds for our part, plus one box of ours - the excess 131's underlying (umbrella) premium box is blank though the
+umbrella dec prints $17,082. 27 "better, not done" holds, and 12 of its 19 boxes are six questions asked twice for two
+buildings at one location; the review lists 252 rows in all (19 to fix, 83 to verify, 134 held back, 16 applicant
+steps). 15: EBL today sits on the GL side (126 EBL employee count) - Brent wrote WC. Held: 4, 6, 15 (ours), 21, 23, 26.
+25 not exercised on this run. Evidence: `<scratchpad>/verify13/`.
+
+### Z11. Items 5 / 18 / 22 / 27 fixed (13 Oct 2026 night, offline, uncommitted) - owner: "fix them all ... for 5 go with your recommendation"
+
+**Proven on the stored run `ba7c709d` (read-only replay, stored AI answers fed back): 6 boxes change, all intended:**
+125 `CommercialStructure_AnnualRevenueAmount_A` blank -> 4,500,000; 126 `GeneralLiability_Hazard_ClassCode_A` blank -> 92478 (W7);
+130 `Policy_Audit_AtExpirationIndicator_A` blank -> Yes and `Policy_Audit_FrequencyCode_A` "A" -> blank (item 5); 140
+`BuildingFireProtection_FireDistrictName_A` "Professional" -> blank (W11); 140 `HydrantDistanceFeetCount_B` blank -> 500 (filled,
+the producer's answer). ACORD 125 yellow boxes 13 -> 7 (building 2's revenue / staff / interest / city limits no longer asked
+twice). **Pre-form dry run on the same package now lists 8 items** (location 1 staff + sq ft + city limits; location 2 sq ft;
+business start date; owner or tenant; LLC member count; and the three form cards - carrier receiving the submission, GL
+occurrence / claims-made, WC officer exclusions). **With every one answered before forms: 0 items left, 0 yellow boxes on the 125.**
+
+- **Item 5 (owner: go with the recommendation).** A form that PRINTS the audit tick boxes (130: At expiration / Semi-annual /
+  Quarterly / Monthly / Other) ticks the stated term's box and leaves the code box empty; an annual audit = At expiration. A
+  form with only the code box (125) keeps "A". Decided by the form's own schema (`pdf_service._form_prints_audit_ticks`,
+  `_resolve_audit_tick`, `_AUTHORITATIVE_BLANK_RESOLVERS`). No stated term = every box blank, as before.
+- **Item 18 - answers carried to the forms.** (a) W7: a GL class code a person saves (`gl_class_codes_by_location`) prints on
+  the 126 hazard grid when no schedule exists (`_gl_code_only_rows`; its other cells stay owned blanks, never "UNMATCHED").
+  (b) Hydrant / fire station / fire district are LOCATION-wide (`_LOCATION_WIDE_FIRE_FIELDS`): a later building at the same
+  premises prints row A's deterministic value (`_resolve_location_wide_fire_box`) and Guard 2 no longer blanks its copy.
+  (c) W11: "fire" is a generic word in `ai_role_guards._KEY_GENERIC_WORDS` - the department's TYPE never fills the district.
+- **Item 27 - one premises, several buildings = ONE location** (LOC # is the premises, BLDG # the building).
+  `premises_interest.same_premises` / `first_row_of_premises`; `one_premises_row` returns the first row when every row is at
+  one premises (was: exactly one row). Then: the business's revenue, full-time and part-time staff twin onto row A
+  (`_ONE_PREMISES_TWINS` + FT/PT); a LATER building prints no revenue / staff (counted once - `_LOCATION_ONCE_SUBKEYS`) and
+  repeats row A's interest and city limits (`_LOCATION_SHARED_GROUPS`) unless it states its own; the 125 yellow boxes skip
+  those on a later building (square feet stays per building); the interest boxes of a later building are twins of
+  `premises_interest`, so a post-form answer re-stamps them; the questionnaire asks own-or-rent ONCE for one premises and
+  never for a later building of a multi-location package.
+  **Five producer-only location-table columns** (`schedule_capture`): Location revenue, Full-time staff, Part-time staff,
+  Building sq ft, Inside city limits (Yes / No). The client's copy of the table is unchanged. City limits: "No" = OUTSIDE,
+  the reading extraction already gives `inside_city_limits` (owner's call: go with the recommendation) - ACORD's third option
+  "Other (unincorporated)" is not offered by the column; a stated Inside answer decides Outside over a stale stored value
+  (`pdf_service.city_limits_inside` / `_city_limits_cell`). A True / False cell shows as Yes / No in the table.
+  LLC NO. OF MEMBERS AND MANAGERS: `applicant_member_manager_count` registered (`fact_registry`), and
+  `arq_service._canonical_key` maps the row-A applicant boxes by name (`_APPLICANT_ROW_A_FACTS`) after the rules loop.
+- **Item 22 - a form's own checklist cards before forms** (`form_dry_run.form_card_items`): the per-form scorer runs on the
+  dry run's stamped forms; a `missing_field` card is listed only when it is a typed fact the answer door accepts, still
+  unanswered, not named by a verified dec entry, not already an item, not a Key detail. The dry run also offers the
+  business's own answer for a twinned premises box (`_field_routes` -> `premises_twin_key`), labelled by the fact
+  ("Owner or tenant of the premises"). `DRY_RUN_MODEL_VERSION` 1.1.0.
+- **Held, not built:** unanswered Y/N questions with no fact behind them (126 ACJ, 127 ABC / AAF, 130 ACD, 125 ABB x2) stay
+  "after forms" - answering them before forms needs an answer store for raw boxes (owner's call).
+- **D6:** no pre-form score moves (pre-form Structural reads facts only). Post-form fill rate rises slightly on packages
+  with one premises / several buildings (newly filled boxes at 1.00) - tell Brent with the rest.
+- Tests: `tests/test_items_5_18_22_27_13oct.py` (15); `test_choice_electric_dryrun_7oct` updated (the TEST pinned "only 125 /
+  140 items" - cards on other forms are item 22 itself).
+
+### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
+Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
+(excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,
+"AI verified", location hints) are **the owner's to answer, not Brent's**. **Owner: every question and every fix is
+a RULE FOR ANY DEC PAGE / PACKAGE - Choice Electric is only the example** (each fix is measured over every stored
+document, as rounds 8-10 were). Sent to Brent as general rules (five questions; the generic wording is in the chat of
+8 Oct night):
+1. #7 - where the expiring premiums of lines with no prior-grid column go (one "Other" per year; ACORD 101 for the
+   rest?) and whether EPLI (no premium) gets a page-one OTHER row.
+2. #15 - EBL with GL (126 / 131 / 160) rather than WC?
+3. #18 / #22 / #27 - show the checks that become hard stops at generation as hard stops BEFORE forms?
+4. #18 / #26 / #27 - occupancy type and Period of Restoration (no document states them): hard stop + 60 cap until
+   typed, or a warning that asks? Can "Extended Period of Indemnity 540 days" stand in for Period of Restoration?
+   Should they also cost Exposure points?
+5. ~~#12 / #13 / #18 fixed items~~ - SETTLED BY THE OWNER and built (part V); not sent to Brent.
+
+**The message as finalised with the owner (9 Oct) - four questions, plain words, rules for every package:**
+1. *Expiring premiums that don't fit.* Prior Carrier Information has GL, Auto, Property and one "Other" column per
+   year; page 1 has two "Other" line rows. With more lines than that: how do we choose which line takes "Other",
+   where do the rest go, and do we still list a policy whose premium is redacted or blank (carrier and dates)?
+2. *Employee Benefits Liability.* ACORD prints it on the liability forms (126, 131, 160), never the 130 - for every
+   client, where should EBL go?
+3. *Hard stops that appear only after forms.* Some checks run only once a form exists and show before that as
+   warnings marked "becomes a hard stop" (his earlier rule). When we already know the forms, how should these show
+   before generation?
+4. *Required values a dec usually doesn't print* (occupancy, Period of Restoration, roof / year built per building).
+   How strict should a missing one be (hard stop at 60 until entered, or a warning that asks)? Can a related printed
+   value stand in (e.g. Extended Period of Indemnity for Period of Restoration)? Should it also cost Exposure points?
+
+### F0. BATCH TO SEND BRENT - 8 Oct night (superseded by F00; part U closed the two-carrier,
+### page-one premium, landlord and SIC / NAICS questions)
+Needed to finish his test items: (1) #7 which line takes the prior-carrier grid's one "Other" column per year, the
+rest to ACORD 101? EPLI row on page one? (2) #7 forms 152 / 834 / 827 - add or out of V1? (3) #15 EBL with GL
+(126 / 131 / 160), not the 130? (4) #18 / #22 / #27 show future hard stops as hard before forms (reverses C75)?
+(5) #18 / #26 / #27 occupancy, Minimum Viable COPE, Period of Restoration - cap / block, or request for information?
+(6) #18 per-building year / roof / protection class - per building or per location; block or warn? (7) #12 / #13 /
+#18 fixed items: "Resolved" tag in place or a "Reviewed" group; remove Resolve? (8) #26 should property gaps also
+deduct in Exposure? Confirmations: (9) #4 excess 131 also lists GL / Auto / EL? (10) #5 annual audit = "At
+Expiration" tick? (11) #6 www.chubb.com/cyber is Chubb's site - did he mean the insured's? Also affecting his
+package: (12) risk state from carrier letterheads - blank and ask? (13) an ended dec's proposed term - roll to the
+next anniversary or ask? (14) per-vehicle USE when a vehicle's own line prints none? (15) follow-form credit from the
+Excess heading? (16) "AI verified" label? (17) location-table sample hints? Heads-up: extraction varies run to run.
+No Brent input needed (ours): #2, #16, #17, #19 Cancel, #24, #18's modal bug, #26's labels, #27's to-do count -
+all built 9-10 Oct (parts W and X), each waiting for a live look.
+
+### F. Decisions needed (Brent / owner) before building
+1. Two ACORD 131s (one per layer) - forms keyed by form_id today; an architecture change.
+2. 130 audit: annual = "At Expiration" tick? Which policy's audit goes on 125 page one?
+3. EBL: ACORD prints it on 126 / 131 / 160, never the 130 - does "tucks under WC" stand?
+4. WC premium in the 125 POLICY PREMIUM? EPLI row with a blank premium? Excess as its own OTHER row (Brent: yes).
+5. Proposed term on an expired dec: roll forward to the first anniversary after today, or ask?
+6. Pre-form: show stops at the severity generation will give them (reverses part of C75)?
+7. Resolved items: keep listed as "Resolved" (#12) or tuck under "Reviewed" (#18)? Remove "Resolve" (#13)?
+8. Per-building year / roof / protection class: one answer for all buildings or ask per building; hard block or warning?
+9. Forms 152 / 834 / 827 are outside our 17.
+10. #10 reverses the owner's 27 Sep restoration of the blocks; #19 Cancel is an exception to "every exit saves";
+    #25 reverses the 1 Oct lock.
+
+**ADDED 8 Oct 2026 - ASK THESE WITH THE TEN ABOVE, IN ONE GO (owner's instruction). Nothing below is built.**
+
+11. **A carrier's address is being read as the insured's state of operations** (part P - the one with a drafted
+    message to Brent already written). On a Colorado contractor we recorded MI, PA, AZ and IN - Amerisure's head
+    office, Chubb's Scranton claims office, a Phoenix office, Federal Insurance. **The question for Brent:** when
+    nothing in the documents states the risk state except carrier letterheads, do we leave it BLANK and ask, or
+    keep asserting a guess? We lean blank (a wrong state builds the wrong state's rules into the submission), but
+    it turns a populated field into a new "missing" item on some accounts - a D6 number.
+12. **Three gates no document can satisfy** - occupancy type, Minimum Viable COPE, and Business Income's Period of
+    Restoration (these decs print "EXTENDED PERIOD OF INDEMNITY 540 DAYS" and a 72-hour BI deductible instead).
+    Each caps the score and no uploaded document can clear it. **Ask as ONE question:** should a gate a producer
+    cannot satisfy from the documents cap the score at all, or become a request for information?
+13. **Where cross-form issues belong before forms exist** (part O). Three options, (a) recommended: add them to
+    "Your forms will need" only; (b) move them out of Warnings entirely - they leave the warning count and the 85
+    ceiling display; (c) stop demoting for forms already RECOMMENDED - closest to "fixable before must not block
+    after", but it REVERSES C75, which was Brent's own call, and moves scores.
+14. **The location table's placeholders.** Five plausible values sit in empty COPE cells - year built 1998, roof
+    Metal, roof year 2015, protection class 3, sprinkler 100, plus a Houston TX address on a Colorado risk. They
+    are grey ghost text, but they invite a copied wrong value. Neutral hints instead?
+15. **"AI verified" means only "this string appears somewhere in the documents"** - which is how an ISO copyright
+    line ("Copyright, Insurance Services Office, Inc., 1999") printed as a building's year built on ACORD 140,
+    with eight such boxes labelled `ai_verified`. **Ask:** should that label be renamed, or the bar raised so a
+    value must be found in a context that MEANS the field?
+16. **Extraction is not repeatable, and Brent should know.** The same Package Policy PDF gave CO on one run and MI
+    on the next; `wc_payroll` was extracted one run and not the next; the WC class table was present one run and
+    null the next. Facts the score depends on are now DERIVED where we can (round 6), but this is a standing
+    property of the pipeline he should hear from us rather than discover.
+
+### G. Proposed order (nothing started - owner's go)
+- **P0 (wrong values / data loss / trust):** commit the 5 Oct `_fv` + human-table fixes; version check; location table
+  (columns, merge-on-save, LOC/BLDG, garaging never a premises, `locations` derived); 140 guards; edit propagation;
+  `stops_now()` door; digit rule + ISO form regex; WC-codes-as-GL; per-policy facts out of the picker (premium, audit,
+  website, schedule sentence) + Excess as its own record; audit menus; the D-list wrong values; docs facts encryption.
+- **P1 (pre-form parity):** Best Solutions + dry-run stamp before forms; "-N pts" Exposure; download count = actions only.
+- **P2 (UI asks):** 2, 9c, 10, 12, 13, 16, 17, 19 Cancel, 24, 7a.
+- **Bigger, after decisions:** 131 per layer, inline policy edit / add line, upload after generation.
+- Every fix: replay `ca93ed8f` offline (per-document facts are readable) + FR125 312/312 + Orbin stored sessions + the
+  D6 panel; tell Brent where scores move (most go UP: false cards and false location warnings disappear).
+
+### I. FIX ROUND DONE 6 Oct evening (offline, NOT committed, NOT deployed) - the "no Brent approval" list + the 127-only cap bug
+Four parallel workstreams, each replayed on the client's own session `ca93ed8f`, then integrated and gated together.
+
+**Gates (final combined code):** full suite **12,543 passed / 1 failed / 19 skipped** (the 1 = known
+`test_arq_acord125_missing_only`); FR125 r2t6 / r2t7 / r2t8 **312 of 312, 0 wrong, 0 made up** (test 8's 3 made-up
+question-4 numbers are now blank); D6 panel **2 of 12 moved, both +1** (property deductible basis), live Orbin 71 -> 71;
+frontend builds, lint clean.
+
+**What changed - by area (notes per change: `<scratchpad>/ce/agents/{prop,pol,c125,scoring}/CHANGES.md`):**
+- **Locations (14, 23, 26, 27):** building labels fill LOC # / BLDG # (street blank; buildings at one premises share its
+  LOC #); a vehicle garaging address is never a premises; location table gets LOC #, BLDG #, Construction, Year built,
+  Building value, BPP value (CSV template follows; header synonyms); every save MERGES by a hidden row id and never drops
+  a field the table has no column for (`schedule_capture.merge_saved_rows`, `arq_service._write_schedule_rows`); the loose
+  `locations` list is derived from the table (`extraction_service.sync_location_list`, also after a re-run restores the
+  table); re-stamp only changed columns, never over a producer box; ACORD 140 guards keep a row's own stated values,
+  anchor rows on LOC/BLDG/street, read "LIMIT"/"DEDUCTIBLE" before "Prem #", clear a subject with its refused amount;
+  every guard removal records a reason. Session: 1 premises / 2 buildings, building 2 NON-COMBUSTIBLE / $421,714 /
+  $75,000 stock printed, 140 hard blocks 6 -> 0 (no DRAFT), no false location warnings.
+- **Stops / propagation / scoring (18, 26, 27, owner's 127-only bug):** new `services/stops_now.py` = the ONE stops door
+  for generation, per-form scoring, worker and pre-form (stored stop lists are display copies only - an AST test pins
+  it); the pipeline evaluates stops on the facts it will STORE; a hard legacy stop is never hidden behind a demoted twin;
+  a form edit propagates its fact to every other form (`arq_service.propagate_fact_edits`, person-typed boxes kept);
+  stated radius classes ("LOCAL") count; one GL class-code reader (`sqs_service.gl_class_codes_present`, both homes,
+  minus codes another line owns). Session: no stale occupancy stop, generation not capped at 60, Exposure 65 -> 75,
+  date mismatches 7 -> 0. The BI / Period of Restoration rule no longer caps a 127-only package (5 Oct scope + new test).
+- **Policies / Data Consistency / extraction (4, 5, 6, 7, 8, 9, 15):** no digit = not a policy number; form numbers with
+  a second letter group rejected; the Excess is its own line record (`lob_canon.umbrella_layer`, record id
+  `umbrella~excess`), confirmations are layer-scoped; per-policy facts compared only inside one policy; package scalars
+  no longer from the first-uploaded dec (`_settle_policy_level_scalars`); audit menus are not answers, a bare "A" is never
+  decoded; merge-time corrections (website shape, dividend plan, NCCI-as-NAIC, pending/prior date, EPI, insured's state);
+  WC codes leave the GL schedule; GL limits read from the umbrella's underlying schedule; singular EBL recognised.
+  Session: 11 records (Excess / Travelers and Umbrella / Amerisure Mutual apart; EBL its own), Data Consistency
+  conflicts 5 -> 0, umbrella_limit $5M, identical results with the upload order reversed.
+- **Stamped values (20, 21 + section D):** Federal in the 125 carrier list; prior-carrier rows without numbers (GL
+  $16,818, Auto, Property $6,275); one 125 row per policy - OTHER A = EBL $425, OTHER B = Excess $10,692; POLICY PREMIUM
+  = the printed rows; payment plan code-or-blank (dividend plan only in the 130's dividend box); 131 Employee Benefits
+  takes only EBL evidence; 130 claim count / prior mod / NCCI risk id / $6.50 / floor counts / years refused; 127
+  "111 Denver"; 137 symbol junk and Med Pay $1M (now blank - no med-pay fact exists); 126 wind/hail deductible.
+
+**Tests changed, and why (the TEST was out of date, not the code):** `test_stop_visibility_c75` (3 source pins moved
+with the rule into `stops_now.py`), `test_remaining_items_15sep::test_a_form_number_is_never_a_policy` and
+`test_estimated_total_sanity::test_one_implementation_of_the_line_sum` (rules this round reverses on purpose). Integrator
+fix: the new GL reader had counted a classification-only schedule row as a code - restored HEAD's rule.
+New tests: `test_choice_electric_{loc,pol,forms,flow}_6oct.py` (49 + 110 + 65 + ~30) with fixtures from `ca93ed8f`.
+
+**Still open (named, not hidden):**
+1. Building 2's year / roof / protection class are the producer's one answer copied by gap fill; roof "Composition" is
+   an AI guess (owner call: ask per building?).
+2. Vehicle and driver tables still rebuild from their columns on save (same data-loss class as the location table).
+3. ACORD 137 Med Pay prints blank (no extracted med-pay limit); $75,000 stock prints without its subject name.
+4. Other GL class-code readers (3 cross-form rules, per-form checklist, industry match) not yet on the one reader.
+5. Client questionnaire still built from the stored stop list; the score trace does not yet name each Exposure cause.
+6. LOC # / BLDG # values still travel to the client page (producer-only columns hidden, values not stripped).
+7. Prompt recommendations only (no prompt changed): define `locations`, `carrier_website`, `payment_plan`,
+   `state_of_operations`; unticked audit menus; per-vehicle radius; `limit` on `coverage_lines`; med-pay limit.
+8. Brent decisions in section F are untouched (two 131s, 130 audit tick, EBL placement, WC in the total, EPLI row,
+   past proposed date, pre-form stop severity, per-building COPE).
+
+**D6 for Brent:** scores go UP on multi-policy packages (false conflict cards and false location warnings gone),
+property packages +1; DOWN where a GL package has no GL class schedule (warning now true) and where boxes that printed
+wrong values now ship blank (fill rate). **To see any of this live: commit, push and deploy, then reload every tab.**
+
+### J. ROUND 3 - the six bigger builds (7 Oct; offline, NOT committed, NOT deployed; final full gate pending)
+Owner: "build these with full accuracy and do not leave anything behind". Four parallel builds (LAYERS, UPLOAD,
+POLICIES, DRYRUN), each designed in writing first, tested on Brent's own package, then integrated by the main session.
+Notes per build: `<scratchpad>/ce/r3/<BUILD>/CHANGES.md`; requests: `.../REQUESTS.md`.
+
+**Shared rule first - form instances (`services/form_instances.py`, JS twin `utils/formInstances.js`).** A second
+copy of an ACORD form is "<base>__<key>" ("ACORD_131__excess"). Anything that loads a file or keys a rule uses
+`base_form_id()`; anything that stores or shows uses the instance id (`instance_label()` / `formLabel()`,
+`file_stem()` / `fileStem()`); stamping, scoring and QA use `facts_for_form()`. Every single-copy package is
+byte-identical.
+
+| # | Built | How (doors to know) | Evidence on Brent's package |
+|---|---|---|---|
+| 4 | One ACORD 131 per umbrella-family LAYER | `services/umbrella_layers.py` (what a tower is, layer order, each layer's own document values in `_umbrella_layer_docs`), the ACORD_131 overlay, `pdf_service._resolve_upper_layer_box`; gap fill split: insured boxes shared, each copy's own-policy boxes in its own group over its own documents (improving-ll.md **C102**, +~4 calls per tower) | Plain 131: Amerisure Mutual / $5M / SIR 0 / Umbrella; `ACORD_131__excess`: Travelers / $4M / no SIR / Excess, underlying = the Amerisure Mutual $5M umbrella. Upload order irrelevant. 10,042 regression tests passed (2 failures, neither from LAYERS) |
+| 25 | Add documents to a package, before or after forms; reclassify / exclude / supporting-only after forms | `routes/session_documents_routes.py` (`POST /api/session/{id}/documents`, `/documents/add-form`), ONE door `services/session_documents.remerge_package` (only new files are OCR'd / extracted; stored per-document facts re-merged; human answers, tables and policy lines carried; integrity checked; one write), `services/upload_intake.py` (the upload checks, shared), `_finalize_pipeline(keep_forms, retract_document_keys, persist)`; frontend `AddDocumentsPanel.jsx`, `DocumentChangeConfirm.jsx` | Door vs REAL generation (every box, premiums included): package added last 62 moved / 0 missed / 0 wrong; WC added last 34 / 0 / 0; Excess excluded 6 / 0 / 0. Exclude after forms now really removes that document's values |
+| 9 | Edit / add / remove policy lines in "Policies in this submission" | `services/policy_lines.py` (`_producer_policy_lines` store, edits keyed by record with anchors, added lines as their own records, applied inside `_finalize_pipeline` and the editor confirm), `routes/policy_line_routes.py`, frontend `review/PoliciesTable.jsx` (both layouts); added umbrella / excess lines take `limit_each_occurrence`, `limit_aggregate`, `sir` | Correcting the auto policy after forms moved exactly the 127 header, 125 question 4 / Business Auto premium / POLICY PREMIUM (58,385 -> 61,485) / prior-grid auto row, the 131 underlying auto row; a person-typed box kept |
+| 7 | The 130's WC premiums | `services/wc_premiums.py` (read at merge into `_wc_premiums`, never computed), `pdf_service.nonfillable_box_value` (THE premium-box door generation and every re-stamp use) | 130 prints total $29,278, minimum $465, class premiums $37,600 / $597 / $180; over 1,359 boxes on 3 packages the only output change is those 130 boxes |
+| 27 | "Before you generate" | `services/form_dry_run.py` (the real stamper with `allow_llm=False`, then the download review's own `run_field_qa` / `needs_attention`; keeps only what a person must supply with a proven fix route; cached, off the event loop, 3 s wait then "pending"), `routes/dry_run_routes.py`, frontend `BeforeYouGenerate.jsx` | 8 items, 2 blocking: building 2 year / roof / protection class and building 1 roof - the boxes behind Brent's DRAFT, BEFORE generation; the download gate flags exactly the same blocking boxes; filling the table empties the list |
+| 18 | COPE card opens the location table with 2+ buildings | `services/premises_cope.py`, `issue_registry` card routing (`facts=`), four producer-only columns (roof material, roof year, protection class, sprinkler %) bound to live 140 / 160 boxes | One-building packages: byte-identical cards |
+
+**Integration (main session) - each found by checking the builds against each other:**
+- Premium boxes after a document change or an editor confirmation: `_restamp_changed_boxes` skips non-fillable boxes,
+  so the upload door and `confirm_underwriting_value_in_editor` now also run `policy_lines.restamp_nonfillable_boxes`,
+  each side judged against its OWN documents' text (`raw_text_before`). The earlier "0 missed" comparison skipped
+  every non-fillable box; against real generation the door is now exact (above).
+- The editor confirmation asks the engine with generation's own input (facts + flags + the package's forms) - a
+  flag-driven box was mistaken for an edited one.
+- `pdf_service._value_in_raw_text`: a NUMBER is "in the documents" only as the same number (token-aligned, no
+  thousands continuation, cents and trailing decimal zeros allowed, no word-subset fallback). It accepted "$3,100"
+  inside "23,100.00", and "100" anywhere vouched for "$3,100". 692 verification tests pass.
+- The client's copy of a table carries no producer-only VALUES (`schedule_capture.client_rows`).
+- ACORD 125 prior-carrier grid built once per stamp (`_with_grid_memo`): 10-11 s -> 1.0 s per 125 stamp on Choice
+  Electric (109 grid builds -> 1), FR125 4-6 s -> 0.8 s; 0 differences over 17 forms x 3 real packages.
+- `test_dec_index_purge` records the dry run (pre-generation only); CSV header synonyms for the new columns.
+- Tests: `test_form_instances_7oct.py`, `test_choice_electric_{layers,upload,policies,dryrun,integration}_7oct.py`.
+
+**LAYERS follow-ups - done:** a copy stays bound to ITS layer (`facts["_umbrella_layer_bindings"]`, written with
+`generated_forms` through `form_instances.binding_update`, carried through every re-merge by `carry_bindings`): on
+the real package, uploading a lower $2M excess after generation leaves `ACORD_131__excess` on Travelers $4M and
+offers the new layer as `ACORD_131__excess-2`; a producer-added layer prints its own limit / aggregate / SIR; EPIC
+and Vertafore payloads carry `base_form_id` beside `form_id`.
+
+**FINAL GATE (7 Oct, nothing else editing):**
+- Full suite (`-p no:randomly`, from `backend/`): **12,821 passed / 1 failed / 19 skipped** - the 1 is the known
+  `test_arq_acord125_missing_only`.
+- FR125 r2t6 / r2t7 / r2t8: **312 of 312 each, 0 wrong, 0 made up**.
+- D6 panel vs production (HEAD 7b681f4): 2 of 12 moved, both +1 (the 6 Oct property deductible-basis fix); live
+  Orbin 71 -> 71. Round 3 moved no panel score (no panel package is a tower or uses the new features).
+- Documents door vs REAL generation on Brent's package, every box incl. premiums: 62 / 34 / 6 moved, 0 missed,
+  0 wrong; the door now runs in ~8 s (was ~43 s before the grid memo).
+- Grid memo: 0 differences over 17 forms x 3 real packages.
+- Frontend: builds clean; eslint 0 errors, 74 warnings (unchanged).
+
+**Residual, named (not fixed):** the layer bindings are one fact written whole, so two add-forms of two different
+131 copies clicked at the same moment in one session could keep only one binding (that copy then falls back to
+position - today's behaviour).
+
+**Owner / Brent decisions this round adds:** excess 131 underlying (umbrella only, or GL / Auto / EL too); excess
+131 score (SIR / attachment rule costs it 20 + 25 points); exclude BEFORE forms keeps unique values; no new AI fill
+after an upload (deterministic only, by design); dry-run default form set (Required tier) and the operations
+description box (no pre-form route); `_build_line_records` lets one numbered contract absorb another carrier's
+unnumbered rows (pre-existing, moves Data Consistency results if changed).
+
+### K. ROUND 4 - the owner's localhost run of 7 Oct (session `9acec031`) and what it found (offline, NOT committed)
+The owner re-ran Brent's 7 decs on localhost (round 3 code). The pre-form screen found four wrong things a FRESH extraction
+produced that Brent's stored run did not, plus the owner's design asks. Five parallel builds (DATA, CARDS, POLICIES, RECS,
+NEWDOC; notes `<scratchpad>/ce/r4/<BUILD>/CHANGES.md`), integrated by the main session.
+
+| Found / asked | Root cause | Fix (door) |
+|---|---|---|
+| GL limits $5,000,000 (the umbrella's own) | The umbrella dec's model reading put its own "Each Occurrence $5,000,000" in all five GL facts; nothing competed; the underlying-schedule reader only fills blanks | `extraction_service._drop_another_lines_limits_on_one_line_document`: a one-line-family document never witnesses another line's limit equal to its own. Live: GL $1M / $2M / $2M / $1M from the umbrella's schedule of underlying |
+| Entity type "Corporation" for an LLC (Brent's stored 125 ticked it too - unreported) | Menu read as a value ("Corporation X Limited Liability Company"); Travelers' menu has no LLC | `normalization.settle_document_entity_type`: a menu counts only as the ticked option; a legal-form designator in the insured's own name (LLC, Inc, Corp, LP, LLP, PLLC) overrides an incompatible reading |
+| "Entity type differs ... confirm in Data Consistency" with Data Consistency saying "nothing to confirm" | The picker dropped "LLC" as not a legal option; the integrity check counted it | `underwriting_consistency._declared_domain_check` accepts what the fact's own comparison equates; guard test: a warning pointing at Data Consistency always has a card there |
+| "Multiple carriers referenced" on every multi-carrier package | Counted distinct carriers | `submission_integrity._carrier_line_claims`: only two carriers on the SAME line / layer |
+| COPE pop-up on 2 buildings showed building 1's values as package boxes | Round 3 kept "occupancy-only" cards in field mode | `premises_cope.route_cope_resolution`: 2+ rows -> always the table; also `sqs_service._cap_stop_items` (editor) |
+| Card reasons: 160 cited the Cyber limit, 127 "1,000,000", 140 building 1 only | Reason facts not line-checked; raw money; one scalar | `form_service._FORM_EVIDENCE_LINES` + `fact_line_family`; currency canonicaliser; "Building values: $1,220,270 (2 buildings)" |
+| Vehicle / driver tables wiped non-column fields on save (class code, territory on 17 vehicles) | Only `property_locations` merged on save | `schedule_capture.MERGE_ON_SAVE` + VIN / licence / name+DOB identities (unique on both sides) |
+| Brent #10 | - | Blocks removed; `policy_lines.record_limits` -> Limit column; sort + Group by carrier |
+| Brent #22 / #27, owner's design | - | Recommendations section (`review_recommendations.with_fix_routes`, `utils/recommendations.js`, `Recommendations.jsx`) |
+| Owner: a document added after forms must be read like the others | Only rule boxes re-stamped | `session_documents.run_new_document_fill` (improving-ll.md **C103**): the shared gap fill on the NEW document(s) only, every generation guard; blank -> filled; a differing AI box -> a "New document says X" choice (side panel + download review), never an overwrite; person / rule boxes never; background, locks document changes, policy edits and editor confirms while it runs; `NEW_DOCUMENT_AI_FILL=0` kill switch |
+| Owner: tell the producer what an added document changed; a way back | - | Pre-upload note; result box (boxes moved per form, AI fill outcome, "New on the review page: N hard stops, N warnings, N Data Consistency items" + Review them); editor sidebar "Back to review" with an open-items count |
+
+Integrator fixes: a client's untouched table holding producer-only values read as "changed" (`client_supplied_schedule`,
+the row-change review - compared as the client saw them); a building row with no address added no `locations` entry
+(`location_list_from_rows` fallback); the pre-form fast path after a resolve now carries the fix windows. Tests changed
+because the owner reversed what they pinned: `test_v1_c1d` (scoped rows), `test_choice_electric_dryrun_7oct` (occupancy-only
+field card), `test_coverage_presence_14sep` (money spelling), `test_v1_c1_canonical_facts` (an "LLC" name is not a real
+entity divergence). New tests: `test_choice_electric_{data,cards,policies_table}_7oct.py`, `test_recommendations_section_7oct.py`,
+`test_new_document_fill_7oct.py`, +6 in `test_choice_electric_integration_7oct.py`.
+
+**FINAL GATE (round 4):** full suite **13,001 passed / 1 failed / 19 skipped** (the 1 = known `test_arq_acord125_missing_only`;
+`test_retest_fixes_1oct` counted 2 side-panel sections and now 3 - the TEST was out of date); FR125 r2t6 / r2t7 / r2t8
+**312 of 312, 0 wrong, 0 made up**; D6 panel 2 of 12 moved, both +1 (unchanged from round 2), live Orbin 71 -> 71; frontend
+builds; eslint 0 errors / 74 warnings (unchanged). Live docs of `9acec031` re-merged: GL $1,000,000 / $2,000,000, entity
+Limited Liability Company, umbrella $5,000,000, integrity high with no reasons.
+
+**Residual, named:** a "Raise your score" row opened right after an EDITOR response shows a typed box without its choice
+list until the next package-page load; vehicle / driver rows with no VIN / licence and a stale tab opened before a
+reorder can still match by position; `shared_gap_fill` failing internally reports "done, 0 boxes" not "failed";
+the one-line-limit rule stands down if extraction lists an umbrella's underlying rows as its own coverage rows.
+
+### L. ROUND 5 - the owner's live run with the REAL AI fill (session `b248c194`, 7-8 Oct; offline, NOT committed)
+Every earlier gate replayed with `allow_llm=False`, so the AI gap fill's answers were never in a test. The live run put 15
+classes of wrong values on the forms (`<scratchpad>/ce/r5/PROBLEMS.md`). Owner: "fix them for all the random data, not
+this one submission". Built and measured on a replay corpus: 691 stored sessions dumped read-only; a harness
+(`<scratchpad>/ce/r5/harness/`) re-stamps 225 of them (393 forms) with their STORED AI answers fed back through the
+guards, old tree (frozen copy) vs new, every changed box with a reason code.
+
+| Class | Door (new / changed) |
+|---|---|
+| Policy number = label + the dec's own form number ("COMMERCIAL AUTO CA DS 70 01 09 06"), dates, amounts, "ACCOUNT ...", truncated "CGL-2024-" | `normalization.policy_number_refusal` (one door, reason codes); `pdf_service._not_a_contract_number` at 17 resolvers; a policy with its own declarations stays a policy without a number (`_policy_has_own_declarations`) |
+| AI non-answers: "SEE SCHEDULE", the insured's name as operations, "service" / question echoes, form titles, option-list dumps, rating-class wording as operations | `services/ai_answer_guards.py` (`AI_*` codes) |
+| Wrong-role AI values: another fact's value ("FRAME" as alarm), unverifiable small counts (floor "1"), premium-line amounts as deductibles / limits, binder dates without a binder | `services/ai_role_guards.py` (stands down when the dec index is purged) |
+| A value only another policy's document prints (excess retention $10,000 from Cyber / EPLI); coverage sections the documents do not carry (140 Spoilage / Blanket, 131 Employee Benefits) - now never asked (C104); 131 underlying OTHER rows from the umbrella's own schedule | `services/scoped_evidence.py` |
+| 140 premises grid: each schedule row its own subject / limit / coinsurance / deductible ($5,000, not the $500 default "Exceptions: SEE SCHEDULE"); Stock and BI rows; AI copies of other buildings refused | `services/property_coverages.py` + 140 resolvers |
+| City boxes with the state / ZIP glued on ("Denver, Co", "Tx 75201"); a state code as a tax code | display / address split |
+| The same hard stop listed twice after generation; pre-form warnings that generation promotes are tagged "Becomes a hard stop when ACORD 140 is generated" (display only, C75 unchanged) | `stops_now` / `issue_registry` / both review layouts |
+
+**FINAL GATE (8 Oct):** suite **13,497 passed / 1 failed / 19 skipped** (the known `test_arq_acord125_missing_only`);
+FR125 r2t6 / r2t7 / r2t8 **312 of 312, 0 wrong, 0 made up**; D6 panel unchanged (2 of 12 +1, Orbin 71); frontend builds,
+eslint 0 errors / 74 warnings; corpus replay **302 boxes changed over 50 sessions, every one reviewed: junk removed or a
+wrong value corrected, 0 correct values lost** (170 AI removals, 60 deterministic removals, 36 additions - split addresses,
+the 140 Stock / BI rows, the auto term on ca93ed8f's 131 - 35 deterministic corrections, 1 AI correction). Tests changed
+because they pinned a reversed rule: the 131 "every carried line is underlying" pins (2), the seating-capacity fixture
+(the index is always present at generation), the Yes/No vocabulary pin (a non-category list). New tests:
+`test_round5_{identifiers,ai_answer_guards,ai_role_guards,scoped_evidence,property_grid,stops}_7oct.py`.
+**Open / owner:** ACORD 125 Q4 lists only numbered policies (a redacted auto policy is not listed - same as ca93ed8f today);
+with no umbrella schedule a liquor policy may still take a 131 OTHER row; one-word "Roofing"-style descriptions; AI "See
+schedule" refused in amount boxes; the insured's contact copied into the 130's other contact boxes (74 sessions); the
+"State Act - " prefix on the deterministic 130 class description; stored sessions get the full 140 grid / clean line
+records only after a re-merge. Notes per fix: `<scratchpad>/ce/r5/FX-*/CHANGES.md`.
+
+### M. ROUND 6 - the owner's live run of 8 Oct (session `b4d18e8e`) - 3 defects found and FIXED, 8 points live-verified
+
+**The run.** The same seven Choice Electric decs, re-uploaded on current code (every round-5 module in place -
+backend started 7 Oct 23:48, newest source 7 Oct 23:48, nothing changed mid-run), 8 forms generated, **score 38,
+capped at 60, "Not Ready"**. Brent's own `ca93ed8f` scored 80. Most of that gap is round 5 correctly removing junk;
+three of the points were defects, all now fixed.
+
+**What the decs actually are, and why some "missing" values are right.** The seven PDFs are REDACTED:
+`NAMEDINSURED:` and `MAILINGADDRESS:` print as bare labels with no value, and the property dec says
+"Location, Construction And Occupancy: **SEE SCHEDULE**" while the schedule prints construction but never
+occupancy. So `mailing_address`, `fein`, `operations_description` and `occupancy_type` being empty is HONEST.
+**But the 60 cap is held by "Minimum Viable COPE incomplete - missing: occupancy type", which no document in
+this package can satisfy** - the unsatisfiable-gate class, open for the owner.
+
+| # | Defect | Door (new / changed) |
+|---|---|---|
+| 1 | **Adding a document crashed its AI fill.** `launch_new_document_fill` was a SYNC `def` handed to a Starlette `BackgroundTask`, so it ran in an AnyIO worker thread with no event loop; `asyncio.ensure_future` raised `RuntimeError: There is no current event loop` and the coroutine was dropped (`coroutine 'run_new_document_fill' was never awaited`). `document_ai_fill` then sat on `{"state":"running"}` for ever and the screen kept saying "Reading <file> into your forms...". C103's logic was fine; the seam was not | `session_documents.launch_new_document_fill` is now `async def`. AST sweep of `services/` + `routes/`: it was the ONLY instance, and `test_no_sync_function_schedules_an_asyncio_task` fails the build on the shape |
+| 2 | **A document naming a DIFFERENT insured handed the applicant its identity.** A Harborline Plumbing & Mechanical dec added to Choice Electric: the upload WARNED ("These documents name a different insured"), the producer answered "they belong to this insured", and the merge took **18 applicant facts** wholesale - DBA, mailing and physical address, FEIN, all three contacts, revenue, NAICS, SIC, employee counts, operations, occupancy, year built, years in business, business start date. Package SQS **38 -> 60 (raw 38 -> 80)** on another company's data; ACORD 186 printed a **Washington** contractor licence and Harborline's own policy number under "Choice Electric LLC". A cap is not a scope | **`services/insured_scope.py`** - an applicant-scoped fact is dropped only when EVERY document stating it names a different company. One applicant document stating it keeps it; a person's answer is never touched; `applicant_name` itself is left to the picker; a document naming no insured is never judged. Called from the merge tail, BEFORE the WC derivations and the flag re-derivation |
+| 3 | **`wc_payroll` was left to the model while `wc_payroll_by_state` was derived.** The scorer reads the SCALAR (`wc_payroll` / `total_payroll`), so a complete class table produced a false "Workers Comp detected but payroll is missing" and a 12-point Exposure deduction. Measured on two runs of the IDENTICAL documents: 7 Oct the model emitted it (Exposure 45), 8 Oct it did not (Exposure 33) - with `wc_payroll_by_state` holding `{'CO': '$2,626,500'}` and the ACORD 130 printing all three class payrolls | `derive_wc_facts_from_class_rows` now derives the scalar from the SAME complete-table evidence, one rule one moment. Same three guards: a stated or human value stands, our own value is recomputed, rows that stop supporting it retire it |
+
+**Also fixed (owner, same run):** "Back to review" ran a save plus a session re-read with no busy state - it looked
+dead and people clicked twice; it now disables, spins and says "Opening review...". It also clears the editor's
+body scroll lock explicitly instead of waiting for the `step` effect - that lock surviving into the review render is
+what leaves the page unscrollable with the footer stranded over empty space.
+
+**MEASURED (D6).** 104 stored sessions replayed read-only:
+
+| | Sessions |
+|---|---|
+| Identity scoped away | **2** - `b4d18e8e` (18 facts, Harborline) and `59cacc39` (3 facts: Orbin Contracting's FEIN / year built / construction type were **Meridian Fabrication Inc**'s, from a control dec) |
+| `wc_payroll` newly derived | **1** - `b4d18e8e`, Exposure 53 -> 65 |
+
+**Zero false positives.** Both identity hits are genuine two-insured packages; every other package is untouched,
+because the module cannot act unless a document actually names a different company.
+On `b4d18e8e`: `wc_payroll` None -> **$2,626,500**, Exposure **53 -> 65**, the payroll warning gone.
+
+Tests: `tests/test_choice_electric_fixes_8oct.py` (22). Targeted suites 351 passed. Frontend eslint 0 errors
+(26 pre-existing warnings), production build clean.
+
+**Open from this run, NOT fixed (ranked):**
+- **Ten invented values on the ACORD 140**, eight of them labelled `ai_verified`: `BuiltYear_A` = 2001 and
+  `BuiltYear_B` = **1999** - and 1999 appears in the documents ONLY as "Copyright, Insurance Services Office,
+  Inc., 1999", so an ISO copyright year is printing as the year a building was built; `ProtectionClassCode_A/B` = 4;
+  `Alarm_ProtectionDescription_A` = "sprinklers"; five `BuildingImprovement_*Year_A` = 2025. The words "protection
+  class", "year built", "sprinkler", "alarm", "heating", "plumbing", "fire protection" appear in NO document.
+  `ai_verified` means only "this string occurs somewhere", which is how a copyright year passed.
+- **No Commercial Auto row in the policy table** (item 9's remaining half). The table itself is RIGHT - 10 rows,
+  the nine auto coverage parts filtered out of 20 raw `coverage_lines` entries, the Excess its own row. But
+  `lob_canon.canon_line` reads **"Auto Medical Payments" as the auto LINE** instead of a coverage part, and that
+  record has no premium (redacted) and no policy number, so `policy_line_records`' de-dup drops it - and no other
+  row names the auto line. **Not fixed at speed on purpose:** `_row_evidence` (behind `evidenced_line_families` /
+  `carried_lines_of_business`) reads `canon_line` ONLY, so reclassifying that phrase as a part could drop the auto
+  family on a package where it is the only auto row and un-recommend the ACORD 127. The right fix is "a document
+  evidencing coverage PARTS of a family contributes a LINE record for it", measured across the corpus first.
+  Two of those part strings also leak onto ACORD 137_CO as `Vehicle_OtherCoverageDescription_C/D`.
+- **ACORD 126 is 12 boxes of 255** - no GL premium (Brent's item 7 wanted $16,818 on the 126), no class codes.
+- **126 says GL is claims-made; 131 says it is not** - two forms in one package contradicting each other.
+- **131 asserts follow-form** ("Umbrella follows form over the underlying coverages") - a guessed value, against
+  the standing never-guess rule (client Q3).
+- **131 (Excess) ticks BOTH `ClaimsMadeIndicator` and `OccurrenceIndicator`** - mutually exclusive.
+- **125 premium total 41,567** is the exact sum of the seven rows it prints but excludes GL $16,818 and WC $29,278
+  (real package ~$87,500); currency format is inconsistent ($37,600 on the 130, 2,431 on the 125 - Brent asked for "$ X").
+- **125 applicant address prints a ZIP and a state with no street or city**; producer address = "Office: Phoenix AZ"
+  (a carrier office line as the agency's address).
+- **`percent_subcontracted` = "estimated annual cost $310,000 of subcontracted work"** reads as a percentage out
+  of range - a cost in a percent fact.
+- **Three different hard-stop counts on one screen**: 1 in the stored `hard_stops`, "4 need attention" in the
+  sidebar, "3 hard stops remaining" in the block - and that block is headed "Since client answers" when the change
+  came from adding a document.
+- **Extraction is not repeatable**: 8 facts differ between the 7 Oct and 8 Oct runs of identical files.
+
+**Standing lesson.** Two guards fired on the cross-insured document (the upload warning and the integrity hard
+stop) and the data was still merged. **A warning is not a scope and a cap is not a block** - if a value must not be
+used, something has to refuse it, not price it.
+
+### O. ROUND 7 - the owner's second run of 8 Oct (`805049a7`, 6 documents) and the "becomes a hard stop" reversal
+
+**The run.** The same Choice Electric decs **minus the Business Auto Policy** (deliberate: one document held back so
+adding it after generation is a clean before/after). 6 docs, score 29, 1 hard stop, 11 warnings, 7 recommendations.
+
+**Three things confirmed, each from the code and not the screen:**
+
+1. **The location table is HONEST and the ACORD 140 is not - on the same package.** Every empty cell in the COPE
+   table is a value no document states: street / city / state / ZIP (the decs are redacted), what happens here
+   ("Location, Construction And Occupancy: SEE SCHEDULE", and the schedule never says), year built, roof material,
+   roof year, protection class, sprinkler %. What the rows DO carry is real: BLDG 001 / 002, FRAME and
+   NON-COMBUSTIBLE - LIGHT STEEL, $798,556 / $421,714, BPP $73,008 both. Everything else the owner saw is the
+   column PLACEHOLDER (`schedule_capture.py`: "789 Commerce Dr", "Houston", "TX", "77001", "1998", "Metal",
+   "2015", "3", "100"). **So on identical data the table shows blanks while round 6's ACORD 140 printed invented
+   values** (built year 2001 / 1999, protection class 4, "sprinklers", five 2025 improvement years). The defect is
+   the gap fill on the form, not the table. Two searches of mine returned FALSE POSITIVES worth recording: a street
+   address matched **Amerisure's own** "26777 HALSTED ROAD, FARMINGTON HILLS, MI" in the dec header, and a roof
+   material matched the form title "LIMITATIONS ON COVERAGE FOR ROOF SURFACING".
+   **Owner's call, open:** five plausible placeholders sitting in empty COPE cells invite a copied wrong value.
+2. **"Two hard stops earlier, one now" is correct.** Pre-form, C75 demotes BOTH cross-form hard stops (Minimum
+   Viable COPE and Business Income / Period of Restoration) to warnings, leaving only the field-level COPE stop.
+   Generation puts them back. The duplicate COPE wording is one problem said twice and the grouped view folds it.
+3. **Period of Restoration will be a hard stop nobody can clear.** These decs print "EXTENDED PERIOD OF INDEMNITY
+   540 DAYS" and a 72-hour BI deductible, never a period of restoration - a THIRD unsatisfiable gate beside
+   occupancy type and the COPE one. All three wait on the owner / Brent.
+
+**CHANGED (owner, 8 Oct): the "becomes a hard stop" sentences are gone from both layouts.**
+Brent's item 18 ASKED why hard stops appeared after generation; he did not ask for the answer to be printed on
+screen. Removed: "N hard stops now, M more when forms are generated" (the Overview tile) and "1 warning becomes a
+hard stop when forms are generated." (the Hard Stops section). **Kept: the per-row `becomes_hard_tag`**, which sits
+beside that row's own "Open to fix" - the one place a person can act on it. `generationStops.js` keeps its helpers
+and their unit tests; `test_no_layout_announces_a_future_hard_stop` now pins that no layout renders the sentences
+(the old pin asserted the opposite and was updated - the TEST was wrong, not the code).
+
+**STILL OPEN - the owner's point 3, NOT built, and why.** *"Cross form issues should be in the recommendation
+section before forms are generated, and once forms are generated in the left SQS panel under sections like cross
+form validation or hard stops."* The placement is right and the principle behind it is right - **an item you could
+have fixed before generating must not first become blocking after**. It is not built because it collides with a
+rule `utils/recommendations.js` states in its own header: *"ONE TO-DO, ONE PLACE. An item whose whole fix is
+already offered by a Hard Stop or Warning card on this screen is not repeated here."* A demoted cross-form issue
+IS such a card today (in Warnings, with its fix). Three ways out, owner to choose:
+  * **(a)** add the promoting rows to the **"Your forms will need"** group only - semantically exact ("what your
+    forms will need"), a different question from "what is wrong now", so the dedupe rule survives. Smallest change,
+    no score movement. **Recommended.**
+  * **(b)** move them out of Warnings into Recommendations entirely - one place, but they leave the warning count
+    and the 85 ceiling display, which is a score-surface change.
+  * **(c)** stop demoting for forms that are already RECOMMENDED (ACORD 140 is in this package's list), so the stop
+    is hard now and fixable now. Closest to the principle, but it REVERSES C75 (Brent's own ruling) and moves
+    scores - a D6 decision with a before/after table, his to make.
+After generation they already appear in the review page's Hard Stops section AND the editor's red HARD STOPS block,
+so the post-form half of the ask is satisfied today.
+
+### P. A CARRIER'S ADDRESS IS BEING READ AS THE INSURED'S STATE - found 8 Oct, HELD for Brent (nothing built)
+
+**Found by the owner's own test**, not by us: he re-ran Choice Electric with the Business Auto Policy held back and
+noticed **ACORD 137_CO was no longer recommended**. It was not the missing document, and it was not a recommender
+change - the recommender was fed a wrong state.
+
+**`state_of_operations` is being taken off carrier letterheads.** Per-document facts, written by extraction:
+
+| Document | 7-doc run (`b4d18e8e`) | 6-doc run (`805049a7`) | Whose address that is |
+|---|---|---|---|
+| Package Policy | **CO** | **MI** | Amerisure, 26777 Halsted Road, Farmington Hills MI |
+| Workers Compensation | CO | *(table not extracted)* | - |
+| Business Auto | CO | *(held back)* | - |
+| Cyber | - | **PA** | Chubb claims, P.O. Box 5105 Scranton PA |
+| Excess Umbrella | - | **AZ** | the "OFFICE: PHOENIX AZ" line (also seen as `producer_address`, round 6) |
+| EPLI | - | **IN** | Federal Insurance |
+
+Choice Electric is a **Colorado** contractor. In the 7-doc run three documents said CO (garaging DENVER CO 80221,
+the WC class rows CO/CO/CO, the package dec) and outvoted the noise. Remove the auto policy and lose the WC table
+to extraction variance, and the merge settles on **PA** -> `_supported_state_forms` returns `[]` -> no 137_CO, and
+ACORD 28 is lost too.
+
+**Two defects, not one:**
+1. **A carrier's / claims administrator's address is read as the insured's state.** Fourth sighting of one class
+   on 8 Oct, after Harborline's identity becoming the applicant's (round 6), `producer_address` = "Office: Phoenix
+   AZ", and a premises-address search matching Amerisure's own head office.
+2. **It is not repeatable.** The SAME Package Policy PDF gave **CO** on one run and **MI** on the next. Same code,
+   same file. (Third nondeterminism sighting: `wc_payroll` 7 vs 8 Oct, `wc_class_codes` present then null, now this.)
+
+**Blast radius beyond the form list:** `state_of_operations` feeds `_infer_primary_state` /
+`_supported_state_forms` AND the state-specific surfaces (`state_restricted_boxes`, `state_auto_grid`). A wrong
+state does not only drop a form - it builds state-specific content on the wrong basis. And it fails ASSERTIVELY:
+it printed "PA" rather than leaving the field open.
+
+**NOT BUILT - owner's decision 8 Oct: hold it and put it to Brent.** The proposed rule, for when it is approved:
+take the state only from evidence that belongs to the INSURED - garaging addresses, WC class-row states,
+`wc_payroll_by_state` keys, the premises schedule, the applicant's own mailing / physical address - and when none
+of those corroborate the extracted value, **drop it and ask** rather than assert it. Same shape as
+`_gate_inferred_payroll_period` (H1-K), and the same shape as `insured_scope` landed the same day.
+**Why it needs Brent:** on a package whose only state signal is noise the field goes BLANK, so a currently
+populated value becomes a new "missing" item. That is the blank-over-wrong rule, which is the owner's standing
+preference, but it is a D6 number Brent should see before it ships.
+
+**The owner's standing instruction recorded with it:** *form recommendations are working - do not change them
+unless explicitly asked.* Verified: neither 8 Oct change touched the recommender. `insured_scope` was a NO-OP on
+`805049a7` (no document names a different insured - five decs are redacted and state no insured at all, the sixth
+says CHOICE ELECTRIC LLC), and `derive_wc_facts_from_class_rows` had no table to read. The per-document `state_of_
+operations` values are written by extraction, which was not touched.
+
+### Q. ROUND 8 - the generation of `805049a7` (8 Oct evening): five defects fixed, the forms graded box by box
+
+**The run.** The six-document package (Business Auto Policy held back), the occupancy answer applied pre-form,
+7 forms generated: 131, 131 (Excess), 125, 126, 130, 140, 127. **Package 41, "Not Ready", one hard stop - Period of
+Restoration, exactly as predicted in part O** (the decs print "EXTENDED PERIOD OF INDEMNITY 540 DAYS" and a 72-hour
+BI deductible). Backend started 12:50 with every round-6 fix loaded (sources 12:17), so nothing here is a stale
+server. Box-by-box report: `<scratchpad>/ce12/forms_report.txt`.
+
+| # | Defect (found on this run) | Root cause | Fix |
+|---|---|---|---|
+| 1 | **"Back to review" still left no navbar and a blank band at the bottom** (item 1, the owner's second report) | The app header's auto-hide is driven by WHICHEVER element scrolls. Scrolling the PDF inside the editor hid it AND collapsed its space (`body.app-header-collapsed`, negative margin). Leaving the editor removed that element, so nothing could release the state: the review page opens at the top, where no upward scroll can bring the header back, and the review layout's heights still subtracted the header's 83 px - the blank band. A refresh reset the component. Round 6's fix (body scroll lock, scroll to top) was real but not this | `Header.jsx` listens for `app-header:reset` and shows itself; `AcordModal`'s step effect (every step change) and `goBackToReview` dispatch it |
+| 2 | **The Workers Comp dec was read in part** - 75 of 201 schema keys, no flags: no class table, no state, no X-mod, no dec index. **Same 10,829-char text that extracted all three class rows on three earlier runs** | **CORRECTED the same night by a probe (one real call): the reply was NOT cut off.** The model finished (`finish_reason=stop`, 3,768 tokens, 0 reasoning) with ONE stray `{` four closers from the end. The salvage, built for truncation, could not parse it and returned nothing; `_safe_json_parse` fell through to an LLM repair fed only the first 3,000 characters - whose valid answer was the 75-key fragment, cached as the whole document. The model repeats the slip on this document, so it failed the same way on every run since | `utils.json_salvage` rewinds past a slip until the text parses (live reply: **203 facts, 42 flags, all three class rows, state CO**); `extract_facts` retries a partial result once and never caches one (improving-ll.md **C105**). This one defect explains the 130's empty rating rows, "WC payroll is missing" (-12 Exposure), and the state settling on carrier letterheads so **137_CO and ACORD 28 dropped off** - part P's finding has a second cause |
+| 3 | **ACORD 125 POLICY PREMIUM $66,709 while its printed rows add to $62,547; two cyber coverage parts printed as lines of business** ("Cyber Incident Response Team", "Electronic, Social And Printed Media Liability") | Extraction pinned the cyber policy's ONE premium ($4,162, ACE American) on eight coverage parts. The policies table folds them into one Cyber row (`_line_records`, correct); the 125's OTHER rows used a second reader (`_nonstandard_lob_rows`) whose token match missed that the canon already calls "Cyber Incident Response Team" the cyber line, and which had no rule for a nameless part repeating a line's carrier and premium. The total counted $4,162 three times (one copy later removed by a guard, after the sum) | `_nonstandard_lob_rows`: a name the ONE line canon places in a family with its own 125 box is that box's line; a name with no family that prints a standard line's carrier AND premium is a coverage part of that policy (unnumbered decs - the number rule could not see it); a named line whose figure is another line's premium keeps its row, not the premium. **Now: OTHER rows = EBL $425, Excess $10,692; total $58,385 = the printed rows** |
+| 4 | **"Since client answers: 1 updated, 1 new"** on a package no client has seen (owner's question) | Figure 24's band is computed by `recalculate_session_scores`, which EVERY human action calls - producer card answers, table saves, policy-line edits, documents added. The owner's own pre-form occupancy answer (09:06, stage "arq_remediated") wrote it | `recalculate_session_scores(..., trigger=)`: only `CLIENT_ANSWERS_TRIGGER` (the questionnaire submit, and a held client answer the producer accepts) writes `issue_diff_last`, stamped with `trigger`; the band renders only a stamped diff, so the stored one on this session is hidden too. Placement unchanged |
+| 5 | **The answered occupancy kept "Minimum Viable COPE: occupancy type" in Warnings** after generation and every reload (part O's prediction - confirmed) | The upload copies each cross-form issue into `structured_issues` under its rule code. `replace_recomputed_issues` rebuilds only `legacy_` / `tier1_missing_` codes, so cross-form copies outlived every recalculation - though the recalculation re-runs the cross-form rules | `issue_registry.retire_stopped_cross_form_issues`: a copy whose code `cross_form_validator` emits (`rule_codes()`, read off its own `_issue` literals) and whose code-and-message the fresh run no longer raises is dropped. Replayed read-only on `805049a7`: Warnings 12 -> 11 (only that row), score 41 -> 41. **The stored row clears on the session's next recalculation** (any card answer or save) |
+| 6 | **The rail said "9 policies" beside a 10-row table** (Brent #9's literal complaint) | The rail counted `line_records`, which carry no id and no layer - the umbrella and the Excess, both line "umbrella", both unnumbered, keyed as one | The rail counts the rows the policies table renders (`underwriting.policy_lines`) |
+
+**Checked and RIGHT on this run:** both 131s (Amerisure Mutual $5M umbrella, SIR 0, Umbrella ticked; Travelers $4M
+Excess ticked, its underlying the $5M umbrella; neither claims-made box ticked - round 6's double tick is gone); the
+125's carrier list (all five companies), prior-carrier grid (GL / Auto / Property), Excess as an OTHER row, LLC ticked,
+2 buildings; the 130's premium $29,278 / minimum $465 and "A"; the 140's limits, subjects, coinsurance, deductibles,
+the $75,000 Stock, BI $1,000,000 and $25,000 at 72 hours, construction FRAME / NON-COMBUSTIBLE; the policies table's
+10 rows; no address offered as a website anywhere (item 6); the occupancy answer survived reload and generation
+(item 23). The 127 is a header only - correct, its policy is held back.
+
+**Wrong AI values on the forms, NOT fixed (not in Brent's 27; one class - an AI value whose only evidence is another
+policy's or another section's text):**
+- **ACORD 140:** `BuiltYear_A/B` = 2025, `WiringYear_A` = 2025 (2025 is only a policy date); burglar alarm
+  descriptions "Cyber Incident Response Team" / "Non-Panel Response Provider" (cyber dec text); fire protection
+  "REPLACEMENT COST" (a valuation). All labelled `ai_verified`. Round 6 printed 2001 / 1999 / class 4 on the same boxes
+  - the 140 gap fill invents COPE values on every run.
+- **ACORD 126:** claims-made TICKED (no claims-made or occurrence wording in the package or umbrella decs - the
+  sentence is Chubb's EPL / cyber); "other deductible" $5,000 (the PROPERTY deductible); per-project aggregate Yes (the
+  UMBRELLA's endorsement list); work subcontracted 100% (no document mentions subcontracting).
+- **ACORD 130:** NCCI risk ID 11525 = the CARRIER's "NCCI Code No.11525"; retrospective rating plan "Annual" (no retro
+  plan in any document); state "other coverage" = a Colorado PROPERTY endorsement; "additional company information" CO.
+- **ACORD 125 / 130:** applicant mailing state AZ and producer address "Phoenix AZ" - Travelers' "OFFICE: PHOENIX AZ"
+  (the carrier-address-as-insured family of part P, fifth sighting).
+- **ACORD 131:** underlying-coverage description = endorsement "CU 24 03 12 20 WAIVER OF TRANSFER OF RIGHTS...".
+
+**Q2. The re-upload `b38a4367` (after the backend restart, one document held back) - two more defects, fixed:**
+
+| # | Defect | Root cause | Fix |
+|---|---|---|---|
+| 7 | **"Submission Integrity Review Needed - Possible multiple submissions: S.B. MO. / CHOICE ELECTRIC LLC"** over six documents of ONE insured - and **"S.B. MO." won the merge as the package's applicant name** | The Travelers Excess dec prints "INSURED'S NAME:" (redacted) above its billing table's column headings "ACCT. EFF. PREMIUM" / "S.B. MO. DATE"; the model returned the heading as the insured. Integrity compared it as a second insured; it also blocked the insured's "LLC" from settling the same dec's "X CORPORATION" tick, adding "Entity type differs". `insured_scope` would have judged the Umbrella dec (the one document that DOES name Choice Electric) as another company's. Extraction variance - the previous run read nothing there | `normalization.is_not_a_party_name` / `is_abbreviation_heading`: a name made ENTIRELY of dotted abbreviations, with no legal-form designator, is a heading. Applied in the ONE per-document door `drop_non_party_names` (run at extraction and by `merge_facts` before it chooses), the merge's chunk vote, `_strip_non_value_facts`, the integrity check's own and package name lists, and `insured_scope`. **Measured: 1,594 per-document insured names in 1,105 stored sessions - exactly one dropped ("S.B. MO.", b38a4367).** Replayed on `b38a4367`: integrity "high", no reasons; merged applicant CHOICE ELECTRIC LLC |
+| 8 | The WC dec failed AGAIN on the re-upload, with the retry live | Row 2's real cause - a malformed, complete reply - which a retry at temperature 0 reproduces | Row 2's salvage fix |
+
+**`b38a4367` cannot be repaired in place** - its stored applicant name is "S.B. MO." and its WC read is the fragment.
+Restart the backend and upload again.
+
+**Re-checks for these fixes (frontend is live on Vite; the BACKEND needs a restart - it runs without --reload):**
+1. Open any form, scroll the PDF until the header hides, click **Back to review** -> navbar visible, no blank band.
+2. Restart the backend, then on `805049a7` answer or dismiss any card -> the "Minimum Viable COPE: occupancy type"
+   warning is gone; the "Since client answers" box is gone (no client answered).
+3. The rail reads **10 policies**.
+4. A FRESH upload of the same six decs -> the ACORD 130 shows the three class rows and their payrolls, no "WC payroll is
+   missing", and the 125 total equals its printed rows ($58,385 without WC).
+
+Tests: `tests/test_choice_electric_run7_8oct.py` (39 after Q2). Full suite after Q2: **13,559 passed, 1 failed (the known `test_arq_acord125_missing_only`), 19 skipped**. **Measured (D6):** the 125 OTHER-row change replayed over
+every stored session whose facts decrypt locally and carry coverage lines - **317 sessions, 1 changed** (`805049a7`:
+OTHER rows 4 -> 2, total $66,709 -> $58,385); 155 sessions are Render-key and cannot be read here. The stale-copy
+retirement replayed on `805049a7` alone: Warnings 12 -> 11, score unchanged. No score rule changed in this round.
+
+### R. `505bf394` - the first run with every 8 Oct fix (6 documents, Business Auto Policy held back, 8 forms)
+
+**Confirmed live:** no integrity screen and the applicant is CHOICE ELECTRIC LLC ("S.B. MO." fix); the WC dec read in
+full - 202 keys, 3 class rows, CO, payroll $2,626,500, X-mod 1.08 (salvage fix) - so the ACORD 130 prints every class
+row, rate, payroll and premium ($37,600 / $597 / $180), $29,278, minimum $465; **item 26 PASS** - Payroll/Employee 100,
+WC Supplemental 100, no "WC payroll is missing" (Exposure 20 = auto held back -40, no operations / GL class codes -20,
+the two cross-form gates -20); state CO, so **137_CO is back**; the 125 OTHER rows are EBL $425 and Excess $10,692 and
+its total ($54,223) equals the printed rows; the policies table 10 rows; Data Consistency nothing to confirm. ACORD 28
+is NOT a regression: in clean 7-document runs it was triggered by lender / loss-payee wording, and none of these six
+documents has any - it belongs to the held-back auto policy. Pre-form (reconstructed): 29, 1 hard stop (occupancy),
+12 warnings; after generation 32, 2 hard stops (occupancy, Period of Restoration - promoted at generation, C75),
+11 warnings.
+
+**Found on this run, NOT fixed (owner's next call):**
+- **A. "GL is claims-made" from the EPL dec.** Chubb's "NOTICE: THE LIABILITY COVERAGE PARTS PROVIDE CLAIMS-MADE
+  COVERAGE" (its own EPL parts) set `gl_is_claims_made` on the EPL document this run (False on every earlier run); the
+  package OR-merges flags, so three false "Claims-made continuity" warnings, and the ACORD 126 printed "claims-made
+  coverage" and a retro date 01/01/2025. Fix: a line's flag only from a document carrying that line.
+- **B. Cyber premium missing.** The model attached no premium to any cyber part this run; the cyber dec's own index
+  holds "Item 8. Policy Premium $4,162.00". The 125 ticks Cyber with no premium and its total is $4,162 short; the
+  table's Cyber row is blank. Fix: a policy record with no premium takes its document's single "Policy Premium" entry.
+- **C. AI values borrowed from another policy or section (one class):** ACORD 127 vehicle COST NEW $798,556 (building
+  1's limit); ACORD 140 building improvement "Other: Certified Risk Management Program" (a WC premium credit); ACORD 130
+  "employees travel out of state" Y with a class row as the explanation, NCCI risk ID 11525 (the carrier's NCCI code);
+  ACORD 131 underlying-coverage description = a carrier name plus a WC policy title; ACORD 131 (Excess) Occurrence
+  ticked with nothing stating it; ACORD 125 business type "Other: Electrical Wiring..." (a contractor).
+- **D.** Producer address "Office: Phoenix AZ" (Travelers' office line) on the 125 / 130 - the carrier-address family.
+- **E.** No audit period extracted this run ("ADJUSTMENTS OF PREMIUM SHALL BE MADE ANNUALLY" not read) - item 5's code
+  could not print; the rule itself passed on two earlier runs. Another non-repeatable read (Brent question 16).
+
+**How to verify the rest:**
+1. **Item 1** - open any form, scroll the PDF until the navbar hides, click Back to review: navbar visible, no blank
+   band. **Item 9 (rail)** - the rail reads "10 policies".
+2. **Item 25 (+ 9's auto row, ACORD 28)** - Documents -> Add documents -> the Business Auto Policy. "Reading ... into
+   your forms" must finish. Then the session row shows `document_ai_fill` done, a Commercial Auto row, 137_CO filled,
+   ACORD 28 offered, Auto Completeness recovered.
+3. **Item 10** - the policies table: click a column header (sorts); tick "Group by carrier" (groups, premium
+   subtotals); a Limit column.
+4. **Items 22 and 27** - on the NEXT fresh upload, before generating: Recommendations -> "Raise your score" -> open a
+   row (its fix window opens) -> answer -> the score moves; "Before you generate" lists the form checks.
+
+### R2. The Business Auto Policy added to `505bf394` AFTER generation (item 25) - what really changed
+
+**Item 25 PASS.** `document_ai_fill` reached `done` (11:17:17 -> 11:20:06), 46 boxes over 6 forms, 3 "new document
+says" choices; the deterministic re-stamp changed the rest - **164 boxes on 7 forms** (130 untouched, correctly).
+**Item 1 PASS** (owner, Back to review). **Item 10 PASS** (owner: Group by carrier with premium subtotals, Limit column).
+
+| | Before | After |
+|---|---|---|
+| Package | 32 | **40** (Exposure 20 -> 45, Umbrella 80 -> 100, Structural 46 -> 47) |
+| Per form | 125 40, 126 28, 127 24, 130 45, 131 54, 131x 42, 137_CO 28, 140 34 | 42, 30, **54**, 47, 60, **55**, **55**, 36 |
+| Warnings | 11 | **7** - gone: vehicle schedule, covered-auto symbols, umbrella / auto CSL unknown, UM/UIM advisory |
+| Hard stops | 2 (occupancy, Period of Restoration) | 2 (unchanged - neither is an auto question) |
+| Offers | - | **ACORD 28** ("lender / mortgagee evidence") |
+
+**Right:** the 127's four vehicles (2001 Chevrolet Express G2500, 1999 GMC Safari XT, 2012 Haulmark trailer, 2022
+Chevrolet Equinox LT), rate classes, territory 111, use Service, $1,000 comp / collision, liability / med pay / UM
+ticks, Denver 80221 garaging; the 137_CO insurer, symbols (1 liability, 2, 7 physical damage), hired and non-owned
+Yes; the 131's any-auto tick and $1,000,000 auto CSL; the 125's Business Auto tick and vehicle-schedule section.
+
+**Wrong, written by the addition (NOT fixed):**
+- ACORD 125 business START date 01/16/2025 - the common declarations' ISSUE date (reads as a 2025 new venture).
+- ACORD 127 COST NEW: A $798,556 (building 1's limit), B-D $1,000 (the deductible); the real cost-new figures
+  ($21,210 / $23,316 / $7,500 / $28,750, the dec's "Cost New" column) sit in the STATED AMOUNT boxes; garaging street
+  line "CO".
+- ACORD 137_CO: four OTHER-coverage rows "Medical Payments $1,000,000" (the dec prints Med Pay "SEE SCHEDULE");
+  BI per person $1,000,000 on a CSL policy. Facts `auto_med_pay_limit` / `auto_um_uim_limit` = "$SEE SCHEDULE".
+- ACORD 140: all 17 new boxes - improvement years 2025 x5, roof "Composition" x2, SPOILAGE limits = the building /
+  BPP limits, BLANKET summary = the buildings' limits, front exposure = the VEHICLE garaging address, guard / watchmen
+  = the WC "Certified Risk Management Program" credit. The auto dec never says spoilage or blanket.
+- Data Consistency: "Auto Liability Structure - Each Accident (umbrella) vs combined single limit (auto)" - one thing
+  in two wordings; a false card that also labels the 137's CSL tick "conflicted".
+- Policies table: still NO Commercial Auto row; the auto PDF (which carries the package's common declarations page)
+  appears as a second source on the GL and Property rows instead.
+
+**Period of Restoration after generation is correct under today's rules** (C75 demotes it before forms, generation
+promotes it once ACORD 140 is chosen; nothing in these decs states a period of restoration - "EXTENDED PERIOD OF
+INDEMNITY 540 DAYS" is a different coverage). On the editor's left panel it is listed under **Cross-Form Validation**;
+the red package HARD STOPS block names only the ONE reason that set the cap (occupancy) - with two capping stops, the
+second is not named there.
+
+### S. ROUND 9 - everything left that is neither UI nor Brent's (8 Oct night, offline; owner: "fix the remaining things")
+
+Every fix below was replayed on the stored sessions (`505bf394` before / after the auto policy was added) and each new
+per-document rule was measured over **all 1,688 stored documents in 1,132 sessions**. Two first cuts over-reached on
+that measurement and were narrowed BEFORE anything shipped (noted per row). No prompt or LLM call changed.
+
+| # | Problem (where seen) | Root cause | Fix (door) | Measured |
+|---|---|---|---|---|
+| 1 | Adding a document wrote 17 wrong ACORD 140 boxes, 12 on the 127 / 137 (R2) | The add-document stamp (`session_documents._stamp_with_answers`) never attached the package's documents, so every scoped guard stood down - sections no document carries (spoilage, blanket), values from another policy | Attach them exactly as generation does (`scoped_evidence.attach_documents`) | The addition's 46 AI boxes: **41 refused, 5 kept - all 5 correct** (garaging city / ZIP / state, garage description, hired PD state) |
+| 2 | "GL is claims-made": 3 false warnings + a GL retro date and "claims-made coverage" on ACORD 126 (R, item A) | The EPL dec's own notice set `gl_is_claims_made`; package flags are OR-merged | `extraction_service.drop_flags_of_lines_not_carried` (`_LINE_ATTRIBUTE_FLAGS`): a line's attribute only from a document carrying that line; run per document before the merge | 14 documents in 11 sessions - every one a Chubb EPL / cyber / ForeFront dec; no GL document touched |
+| 3 | Cyber premium $4,162 missing; 125 total short (R, item B) | The model attached the premium to no row this run | `assign_declared_policy_premium`: a single-policy document with every row unpriced takes the ONE "policy premium" its own verified declarations state | 1 document (the cyber dec). Multi-line, two amounts, minimum / additional premiums never assigned |
+| 4 | "Auto Liability Structure - Each Accident vs combined single limit" Data Consistency card (R2) | One structure, two wordings | `fact_equivalence.auto_structure_reading` (csl / split) inside `same_fact` | split vs CSL is still a conflict |
+| 5 | Med Pay / UM limits stored as "$SEE SCHEDULE" (R2) | A pointer kept as an amount | `drop_reference_amounts` - LIMIT facts only. **First cut also took deductible-basis sentences (64 documents); narrowed** | 1 document |
+| 6 | ACORD 140 invented improvement years 2025 (every run), round 6's ISO-copyright 1999; the 125's business start date = the issue date 01/16/2025 | A year / date "printed somewhere" passed every presence test | `ai_answer_guards`: a building year printed only inside dates / copyright lines / glued to a vehicle description is refused; a start date printed beside a policy-administration label is refused. **First cut counted "electric" as a building word (the insured's name); narrowed** | - |
+| 7 | Roof "Composition", protection class, sprinklers, cyber text as burglar alarm, "REPLACEMENT COST" as fire protection, garaging address as front exposure; 137 UM limits $1,000,000 copied from liability | ACORD options and amounts with no evidence for THAT attribute | `cope_answer_without_evidence`: the documents must state the attribute with the answer near it (coverage amounts read forward from their own heading) | - |
+| 8 | 137 "Medical Payments $1,000,000" x4 OTHER rows | Med Pay has its own boxes on the 137 | `other_row_names_a_coverage_with_its_own_boxes` (row + its limit / symbol) | - |
+| 9 | 130 NCCI risk ID 11525 = the carrier's "NCCI Code No.11525" | A carrier code in an insured identifier box | `carrier_code_as_insured_id` | - |
+| 10 | 130 "employees travel out of state" Yes, explained by a rating row; 125 business type "Other: Electrical Wiring..." | A rating classification is not an explanation / business type | The classification rule extended to explanation and business-type boxes | - |
+| 11 | 127 garaging street line "CO" | A state code in a street box | `not_a_street_line` | - |
+| 12 | 126 "claims-made coverage", 140 "Certified Risk Management Program" (WC credit) | Rule (a) never judged TEXT | `scoped_evidence.foreign_policy_text`: a description printed ONLY by documents of another line (not 125 / 101 / 25 / 131 / 186, never a description of the insured's business) | Both refused on `505bf394`; correct descriptions kept |
+| 13 | 127 COST NEW = $1,000 deductible / $798,556 building limit; the real cost new in STATED AMOUNT | The dec's vehicle schedule is a TABLE with VINs redacted - the VIN-keyed reader found nothing | `_read_vehicle_schedule_tables` (columns by position, matched by year + make + model, never guessed between two rows) + `pdf_service._resolve_vehicle_stated_amount` (the table's empty Stated Amount = owned blank) + the meaning gate's vehicle-value category | All 15 vehicles: cost new 21,210 / 23,316 / ... printed by rule |
+| 14 | **Item 9: no Commercial Auto row** (open since round 6) | The auto dec's bare "Liability" row read as GENERAL LIABILITY and "Property Protection Insurance (Michigan Only)" as PROPERTY, so the auto policy joined the GL / Property rows and had none of its own | `attach_generic_rows_to_document_line` (a bare liability row belongs to the one line its document's named rows establish) + `lob_canon` "property protection" is not Property. **First cut counted "general" / "commercial" as generic - renamed real GL rows on 99 documents; narrowed** | 2 documents (both Choice Electric auto decs). Table: 11 rows incl. "Auto Liability" (Business Auto Policy); GL / Property sourced from the Package only |
+| 15 | Producer address "Office: Phoenix AZ" (Travelers' office line) under the login's agency | No document names an agency, so the login is the producer - but only EMPTY producer facts took its values | `_route_producer_party`: in that case a document address with no street is dropped; the account's Agency Address (or a blank) takes its place | - |
+| 16 | No audit period on one run (the model skipped it) | The deterministic reader scanned only lines containing "audit"; the NCCI page says "ADJUSTMENTS OF PREMIUM SHALL BE MADE ANNUALLY" | The scan also reads "adjustment(s) of premium" lines (an unticked options list still reads as nothing) | Annual on `505bf394` |
+
+**Not done, and why:** the red HARD STOPS block naming only one capping stop (UI); carrier letterhead states (held
+for Brent, part P); the 131's underlying-coverage description wording and the Excess Occurrence tick (borderline -
+plausible from the documents, not wrong enough to refuse without a rule I can state).
+
+**Live check (one fresh upload of all 7 decs after a backend restart, then add the auto policy again):** no
+"claims-made" warnings; Cyber $4,162 in the table and on the 125; ACORD 127 COST NEW 21,210 / 23,316 / 7,500 /
+28,750 and STATED AMOUNT blank; the policies table shows a Business Auto row; ACORD 140 has no 2025 years, no roof
+material, no spoilage / blanket limits; ACORD 137 no "Medical Payments" OTHER rows; ACORD 130 NCCI risk ID blank,
+audit "A"; the 125 producer address blank (or your Account Settings address).
+
+**Two corrections from the full suite (first run: 13,601 passed, 3 failed - the known one plus two of mine):**
+- `test_cost_new_still_stamps_with_its_own_witness` - **the CODE was wrong.** The meaning gate's vehicle category was
+  "value", but a dec entry labelled COST NEW witnesses its figure as "cost", so a real COST NEW 26680 was refused.
+  COST NEW boxes now take "cost", STATED / AGREED AMOUNT "value". (Making the two interchangeable was rejected: it
+  would let a GL subcontract cost back into a property VALUE box.)
+- `test_replay_acord140_raises_no_completeness_hard_block` (Brent's own `ca93ed8f`) - **the code was wrong in part,
+  the test in part.** The producer had answered year built 2001 and protection class 3; gap fill carried them to
+  building 2 and the new rules refused them because no DOCUMENT prints them. A value equal to one a person supplied
+  is now grounded by that person (`ai_answer_guards.person_values`) - both values stand again. Roof material
+  "Composition" was answered by nobody (only roof YEAR 2011) - refusing it is right, and the test's "no gap at all"
+  held only because that invented value hid the gap. The test now pins the one honest gap (roof material, both
+  buildings) and both producer values. **Visible change for Brent: his 140 now asks for roof material instead of
+  printing an invented "Composition".**
+
+Tests: `tests/test_choice_electric_run8_8oct.py` (46). Full suite after the corrections: **13,605 passed, 1 failed (the
+known `test_arq_acord125_missing_only`), 19 skipped**.
+
+### T. ROUND 10 - the owner's run `15f43bba` (all 7 documents, 8 forms), graded box by box; 9 defects fixed offline
+
+**Read first: that run's backend started 18:15, before the last round-9 edits (18:22-18:23).** Two of its wrong values
+(the 127 hold-harmless explanation from the WC policy; the 140 roof answers) are already refused by the current tree
+on the run's own stored values. Restart the backend before the next run.
+
+**Held up live in this run:** no claims-made warnings (round 9); the 127's four vehicles with Cost New from the
+schedule table (21,210 / 23,316 / 7,500 / 28,750) and Stated Amount blank (its column is empty); class codes,
+territory 111, comp / collision $1,000; the 130's three class rows, payrolls, rates, minimum premium 465, total 29,278,
+EL 1M/1M/1M, and the AI's five prior-year "mods" (really this term's rating factors) refused; both 131s (umbrella 5M,
+excess 4M over the Amerisure Mutual umbrella); 137_CO symbols 1 / 2 / 2 / 7 / 7 and the Med Pay $1,000,000 refused;
+the 140's two buildings, every limit / deductible / coinsurance, and the invented years (2025 x7), roof materials,
+"80%" sprinkler and zero counts all refused; 125 cyber $4,162 and total $58,385.
+
+**Defects found, all fixed offline (each measured; none moves a score on the measured sessions - fix 1 removes the
+misalignment warnings here, umbrella pillar 90 -> 90, and the package stays capped by its hard stops):**
+1. **An issue date read as four policies' start.** The Business Auto Policy's common declarations prints
+   "01/16/2025 / Issue Date: ___" beside its coverage-part menu; the reading dated 11 menu rows 01/16/2025, so GL /
+   Property / Inland Marine / Crime opened 01/16/2025 (125 prior grid, 131 GL underlying, policies table) and two false
+   "Umbrella and GL policy periods misaligned" warnings fired. `extraction_service.issue_only_dates` /
+   `clear_issue_dates` (per-document pre-pass): a date printed ONLY beside an issue / countersign / transaction /
+   printed / processed label - never after a period label, never in a range; a label belongs to its nearest date -
+   leaves that document's rows and date facts. **1,695 stored documents: 3 change, all issue dates** (this auto dec, a
+   test certificate whose only date is "Date Issued"). Re-merged: all four lines 01/01/2025, both warnings gone.
+2. **No Commercial Auto row (item 9).** `_sources_are_own_declarations` counted the menu rows as other lines on the
+   auto dec. Now only rows stating something (premium, number or date) speak; a document of only bare rows is judged on
+   all of them, as before. Re-merged: the auto record (01/01/2025-01/01/2026, own declarations) is back. 8 stored
+   documents change eligibility; the 3 sessions re-built show no other record change.
+3. **140 protection class "GRP I"** (the property schedule's Group I RATE line), labelled AI verified, and **BCEG
+   "0"** (no document says BCEG). `cope_answer_without_evidence` abstained on any answer with no 4-letter word; a short
+   code is now read as itself (a Y/N tick still abstains), and BCEG joined the table. Corpus: 24 stored AI answers
+   newly refused, all junk (GL class codes and "SEE SCHEDULE" as BCEG, ZIPs as fire district, edition dates as Med Pay).
+4. **127 "other owner" = "Chevrolet" / "Gmc"** (the schedule's MAKE column), and the gate then ticked "any vehicles not
+   solely owned? Y" from them. `pdf_service._vehicle_make_in_a_party_box`, before the gate (`VEHICLE_MAKE_AS_PARTY`);
+   lenders' own names never judged. Corpus: 0 of 293 AI party boxes change.
+5. **127 "Any hold harmless agreements? Y"** explained by the WC policy's waiver-of-subrogation endorsement. The
+   explanation is refused as another policy's text (current tree); now an AI Yes whose OWN explanation is refused that
+   way goes with it (scoped evidence runs after the gate). Corpus: 0 other forms.
+6. **130 WC deductible "$1,000"** - the WC policy states no amount; "$1,000.00" is the umbrella's Minimum Policy
+   Charge, and the umbrella counted as a WC witness through its schedule of underlying insurance.
+   `scoped_evidence._drop_reference_only`: a document that only references a line (flags, not its own rows) speaks for
+   that line's limits, dates and identifiers - never deductibles, premiums or text - when the line's own policy is
+   present. Corpus: 0 of 1,210 forms change.
+7. **130 "CO: CO"** and the **131 "Umbrella follows form over the underlying coverages (per submitted documents)"** -
+   the second is OUR derived `umbrella_follow_form` sentence (`extraction_pipeline`, set from the Excess policy's
+   "FOLLOWING FORM" heading), copied by gap fill into 131 boxes in 7 stored sessions (one a tail-coverage box). Two
+   non-answer rules: `AI_LABEL_REPEATS_ITSELF`, `AI_SUMMARY_NOT_DOCUMENT_TEXT`. Corpus: the 7, nothing else.
+8. **The printed X-Mod 1.0800 never reached the 130.** `parse_xmod` read at most 3 decimals, so "1.0800" was "no mod"
+   (the fact registry's validator allows 4) - on every Choice Electric session (b248c194, ca93ed8f hold it). Fixed, and
+   `derive_xmod_from_rating_lines` reads "Experience Mod 1.0800" off a rating line when the fact is empty (one factor
+   only). Corpus: 16 agree with the stored mod, 4 sessions gain one (Meridian 0.96, Orbin 1.00). **D6: no score moved**
+   - measured on b248c194 (X-Mod status unknown -> satisfied, deduction 0 -> 0) and ca93ed8f (unchanged); unknown
+   never deducts. The 130's EXPERIENCE OR MERIT box now prints the mod.
+
+**Found, NOT fixed (owner's call or next round):**
+- **127 USE "Service" on vehicle 4** (2022 Equinox, class 7398) - its own schedule line prints no use; the other
+  vehicles print LOCAL SERVICE. USE is policy-level by the 15 Sep ruling; per-vehicle use needs the owner's yes.
+- **137 hired physical damage "primary" ticked** - no document states the basis (an AI tick with a borrowed quote).
+- **`umbrella_follow_form` is set from the EXCESS policy's heading** and the umbrella scorer credits it to the
+  umbrella - score-moving, needs a D6 table.
+- **125 / 127 mailing city and ZIP "Denver 80221"** come from the vehicles' garaging line (the decs redact the mailing
+  address) - plausible, not stated as the mailing address.
+- **The 131's deterministic ANY AUTO tick is paired with "UnderlyingCoverage_Coverage_OtherDescription_A"**
+  (`_question_explanation_pairs`) and the naked-Yes guard blanks it whenever that unrelated box is empty. It printed in
+  this run only because the AI had written that box (later removed). Seen on the replay; pre-existing.
+
+**Replay of this run through the current tree (stored facts, stored AI answers, judge off): 16 boxes change.** 12 are
+this round's refusals (127: both makes, "vehicles not solely owned? Y", the hold-harmless pair; 130: "CO: CO", "$1,000";
+131: the follow-form sentence; 140: "GRP I" x2, BCEG "0" x2). The other 4 change with every round-10 rule switched
+off, so they are replay effects, not fixes: the any-auto tick and the 130 deductible type (Other -> Medical) - the
+pairing above - and the 137 hired physical damage "primary" tick, which drops only because a stored run keeps no
+evidence quote (live it would print again - still open).
+
+Tests: `tests/test_choice_electric_run10_8oct.py` (28). Full suite: **13,633 passed, 1 failed (the known `test_arq_acord125_missing_only`), 19 skipped** - 13,605 + the 28 new, no regressions.
+
+### U. BRENT'S ANSWERS OF 8 OCT 2026 (ACORD 125 page one, SIC / NAICS, landlords) - applied
+
+| Brent's answer | Before | Now |
+|---|---|---|
+| **Two insurance companies:** "Don't list both EMC companies in the top Carrier box. That field is for the carrier tied to the application. Existing carriers are listed by coverage under Prior Carrier Information." | Several writing companies printed "; "-joined (30 Sep join) | **Blank**, and the unscored "carrier receiving this submission" card asks (`pdf_service._resolve_page_one_receiving_carrier`). One writing company still prints (the 15 / 29 Sep renewal rule - not part of his question) |
+| **Renewal premiums:** "Don't automatically put the expiring premium from the dec in the page 1 premium field. Expiring premiums belong under Prior Carrier Information. Leave the page 1 premium blank unless the appropriate premium is provided." | A dec-only renewal printed every line premium, the OTHER rows' premiums and the total on page one (29 Sep) | **Page one blank** (`_mark_page_one_current_policy` marks the premium on every dec renewal); a quote / application premium, a typed total, or a line premium a person typed in the policies table still prints; the prior-carrier grid still prints the expiring premiums; **the 130 still prints the WC premium** (his item 7 - `wc_premiums.premiums_withheld` ignores the page-one flag on a renewal) |
+| **SIC / NAICS:** "leave them blank and flag them for the agent/client to confirm" | Already so: no document code -> blank (the identifier / classification guards), and "NAICS or SIC industry code" is a key-details item for the agent | **No change needed** (checked on `2076fe35`) |
+| **Several landlords:** "The first can go under Additional Interest on the 125. Additional landlords go on ACORD 45." | With 2+ rented locations, NO landlord printed | **The first location's landlord prints** on 125 Additional Interest row A; the rest are a producer to-do in Needs attention: "Additional landlords (ACORD 45)" naming each (Primble does not produce ACORD 45) |
+| **ACORD 25:** "Don't automatically carry a landlord over as an Additional Insured." | Nothing ever carried a landlord to the 25 | **No change needed** |
+
+Measured on `2076fe35`: the 125 loses the five joined carrier names, the eight page-one premiums and the $58,385
+total; the ACORD 125 per-form score stays 42 and the package score does not read those boxes. **Follow-up for Brent:
+the Prior Carrier Information grid has ONE "Other" column per year, so Umbrella, Excess, Cyber, Crime, Inland Marine,
+EBL and WC's expiring premiums cannot all print there** - which one goes in "Other", and do the rest go to ACORD 101
+remarks? (His item 7 asked for every premium "with carrier information" on the 125.)
+Tests: 12 rewritten to his answers (they pinned the 29 / 30 Sep rules he reversed - the TESTS were wrong, not the
+code), +5 new in `tests/test_choice_electric_run10_8oct.py`. Full suite: **13,648 passed, 1 failed (the known `test_arq_acord125_missing_only`), 19 skipped** - no regressions.
+
+### T2. The re-run `2076fe35` (backend restarted 20:56, after every round-10 edit) - round 10 verified live; 3 more fixed
+
+**Verified live in this run:** every policy now starts 01/01/2025 (125 prior grid GL / Property, 131 GL underlying);
+**item 9 PASS - the policies table renders 11 rows including Commercial Auto** (01/01/2025-01/01/2026, $1,000,000
+CSL; no premium because the auto dec prints "$" / "SEE SCHEDULE" - correct); the 131 prints the auto underlying's
+own dates; no umbrella-misalignment warnings; the 127 makes / hold-harmless pair / "vehicles not solely owned" gone;
+the 130 prints the X-Mod 1.0800 and lost "CO: CO" and the $1,000 deductible; the 131 follow-form sentence gone; the
+140 lost "GRP I" and BCEG "0". (This run's auto extraction carried no menu rows, so the issue-date rule had nothing to
+do here - it is proven on 15f43bba's stored documents.)
+
+**Found in this run, fixed offline (backend restart needed):**
+1. **Hard stop said "building or BPP value" missing** although the 140 printed every building's limits - this run's
+   extraction returned no `property_building_value` / `property_bpp_value` (the previous run did: $798,556 /
+   $73,008). `extraction_service.derive_property_values_from_premises`: an empty fact takes the first scheduled
+   building's value, ONLY from a document whose role may state it (`fact_comparison.document_witnesses` - the
+   SYS-05 certificate's $4,200,000 is still never a building value; the first cut took it and was narrowed). Corpus:
+   7 sessions gain a value, 4 lose the false item; every COPE hard stop stays (occupancy / construction still
+   missing), so no cap moves.
+2. **Excess 131: claims-made "Yes" with retro dates 01/01/2025** - the only claims-made wording is the EPL policy's
+   notice; the excess prints "any one occurrence". `scoped_evidence.trigger_values` (rule d): an AI claims-made tick
+   needs claims-made wording in that policy's own documents; an AI retro date must be printed beside a "retro"
+   label there (an Employee Benefits retro date on a GL dec stands; a "No" is never judged). Corpus: 31 stored retro
+   dates refused - none printed within 600 characters of any "retro" label (most are the policy's own effective date;
+   Choice Electric's EBL "03/01/2022" appears in no document).
+3. **130 credit / rating bureau = "3", bureau name "Dun And Bradstreet Number"** - the Package Policy's "ACCOUNT
+   NUMBER: 3". `ai_answer_guards.bureau_value_without_its_label` (`AI_BUREAU_ID_NOT_STATED`). Every value ever stored
+   in those boxes was junk (3 in the corpus).
+
+**What the producer must still do on this package (not defects - the documents do not state these):**
+- Occupancy type (and, for Brent, the Period of Restoration) - the three hard stops capping the score at 60.
+- Applicant mailing address and contact information - the decs redact them.
+- GL class codes - no GL class code is printed anywhere in the package.
+- Drivers - the auto policy schedules vehicles, not drivers.
+
+**Still open (code):** 130 OTHER rating row B holds "CO 9812: Employers Liab Incr Limits" (the form has its own
+INCREASED LIMITS row); the 137 hired physical damage "primary" tick; per-vehicle USE (owner's call); follow-form
+credited from the excess (score-moving); the 131 any-auto / description pairing.
+
+Tests: +10 in `tests/test_choice_electric_run10_8oct.py` (38).
+
+### N. HOW TO VERIFY THE REST LIVE (written 8 Oct, after round 6)
+
+**Before anything: hard-refresh the tab (Cmd+Shift+R) and be on `localhost:5173`.** The `dist/` build is from
+23 Sep and primble.ai is a different deploy. A stale bundle is what made Brent's 5 Oct screenshots misleading
+(section A), and the app still has no version check.
+
+**Start a FRESH package of the seven `Choice-Electric/` decs.** `b4d18e8e` has Harborline's facts merged into it
+and can no longer answer a question about values. The round-6 fixes act at the MERGE, so only a fresh upload
+exercises them.
+
+#### Re-run the two that were live-verified broken and are now fixed
+
+| # | Where | PASS looks like | FAIL looks like |
+|---|---|---|---|
+| 26 | Review page, Warnings | **No** "Workers Comp detected but payroll is missing". Exposure above 60 | the warning is back, Exposure in the 30s |
+| 25 | Package page -> Documents -> "Add documents". Add any extra PDF **of this same insured** | the panel reports the boxes updated AND the "Reading ... into your forms" line finishes; `document_ai_fill` reaches `done`, not `running` | the message sticks on "Reading ..." for ever (the old crash) |
+
+For 25, also confirm the cross-insured guard still bites: add `harborline_dec_package_10p.pdf`, answer **"they
+belong to this insured"**, then check the ACORD 125 - the applicant's DBA, FEIN, address, contacts, revenue and
+NAICS must still be Choice Electric's (or blank), never Harborline's. That is round 6's defect 2.
+
+#### The four built-but-never-seen
+
+| # | Where | PASS looks like |
+|---|---|---|
+| 6 | Review page -> Data Consistency, on the fresh package | no row offers a **street address** as a website. The Cyber policy's real website, if captured, is available to the 126 and never the 125 |
+| 10 | Review page -> the policies table | the two "not a conflict" blocks are gone; there is a **Limit** column; a column header sorts; a **"Group by carrier"** checkbox groups with premium subtotals |
+| 22 | Review page, **before selecting or generating any form** | a **Recommendations** section with "Raise your score" and "Your forms will need"; every row opens a fix window; applying one moves the score with no form generated |
+| 23 | Hard stop "Minimum Viable COPE ... occupancy type" -> **Open to fix** | the modal shows **2 buildings** with per-building columns and ONE package-level Occupancy Type above the table. Answer it, **Apply**, then RELOAD: the value is still there and the hard stop is gone |
+
+**Item 23 note (8 Oct).** The red "Street address is required" on the pre-filled rows is **advisory** - the Apply
+button is gated on `busy` and the schedule loading, never on row errors, so Apply works. The placeholder
+("789 Commerce Dr / Ste 400 / Houston / TX / 77001", `schedule_capture.py`) is a Texas address on a Colorado risk
+and invites a copied wrong value - owner's call whether to make the placeholders neutral.
+
+#### What CANNOT be judged from a screen, and must be read from the session
+
+These were all verified on 8 Oct by dumping the stored session, not by looking:
+
+* which facts came from which document (round 6 defect 2) - compare `docs[*].facts` against the merged `facts`;
+* whether a form box is grounded - normalise the value and search the document text (that is how the ACORD 140's
+  "1999" was caught as an ISO copyright year);
+* whether the pre-form and post-form score agree (item 18) - recompute `score_package_pre_generation` on the row
+  with the forms removed and compare with the stored `package_sqs`;
+* the real policy count (item 9) - `facts["coverage_lines"]`, not the rendered table.
+
+**A screenshot proves a screen. Only the session row proves a value.**
+
+### H. Sorted by "needs Brent or not" - owner's ask 6 Oct (UI last)
+**Owner's run 6 Oct (session `ac300073`, CH125 kit, on primble.ai - facts do not decrypt locally, so Render / 7b681f4):**
+pre-form about 80, then 60 after generating ACORD 127 alone. Cause: the cross-form rule "Business Income limit but no
+Period of Restoration" is DEMOTED to a warning before forms (C75) and RE-PROMOTED to a hard stop at generation; at
+7b681f4 it is not scoped to the property forms, so it capped a 127-only package (raw 78 -> 60). After generation the
+package page shows the stored Total Package Score (item 1), hence 60 on reopening. The 5 Oct work scopes the rule to
+ACORD 140 / 160 - not deployed. The same run still shows the other false warnings fixed on 5 Oct ("26442473% of
+revenue ($19)", umbrella dates, multi-state WC): primble.ai cannot verify the 5 Oct work until it is deployed.
+
+**Step 0 - before anything:** commit the uncommitted 5 Oct work (the `_fv` re-run fix and the saved-table markers are
+in it). Exception to "UI last": the "new version - reload" banner - without it Brent can test old code again.
+
+**Can fix now, no Brent approval (bugs, or things he already asked for):**
+1. Location table: keep every field on save (LOC #, construction, values), building labels -> LOC/BLDG #, a vehicle
+   garaging address never becomes a premises, the loose `locations` list follows the table, the COPE columns he asked
+   for (+ CSV template). Fixes 14, 23 and the false location warnings in 26.
+2. ACORD 140 guards: never delete a value the documents print; clear a subject code with its amount; a reason on
+   every removal. Removes the 6 false hard stops and the DRAFT download (27).
+3. One door for stops: generation and every scorer recompute stops from the facts they score; a hard legacy stop is
+   never hidden behind a demoted warning (18).
+4. A box edit on one form updates the same fact on every form (the 7 date mismatch rows in 27).
+5. Policy identity: no digit = not a policy number (Brent's rule); ISO form numbers with a second letter group; Excess
+   its own policy record with its own carrier (10 policies, Amerisure Mutual back); per-policy facts (premium, website,
+   "schedule of underlying") out of the conflict picker; package values no longer taken from the first-uploaded dec
+   (4, 6, 7, 8, 9).
+6. Audit: an unticked options list is not an answer; never decode a bare "A" (5, reading half).
+7. Extraction misreads: dividend plan is not a payment plan (code-or-blank); NCCI code is not NAIC; a website must look
+   like one; pending/prior date is not a retro date; EPI is not period of restoration; carrier office states are not
+   the insured's state. Any prompt change = an `improving-ll.md` entry.
+8. Wrong values on the forms (section D): WC codes as GL on 126; GL aggregate (richer underlying schedule); 131 limit
+   from the right layer and no EPLI in Employee Benefits; 130 claim count / mod / NCCI risk id / $6.50 / floor count /
+   years; 127 "111 Denver" and the OCR dump; 137 symbol junk and Med Pay.
+9. ACORD 125: Federal in the carrier list; prior-carrier rows without policy numbers; the OTHER premium boxes (EBL $425);
+   Excess as its own line row (Brent: "should have been a line item"); total = the printed rows.
+10. Recognise "Employee Benefit Liability" (singular) - the warning goes; WHERE it prints waits for Brent.
+11. Exposure: read "LOCAL" as a radius; one GL-class-code reader.
+
+**Needs Brent first:** two 131s (one per layer); 130 audit tick (annual = At Expiration?); EBL under WC or GL; WC in the
+125 total / EPLI row with no premium; past proposed date (roll forward or ask); pre-form severity of stops (C75);
+per-building year / roof / PC (one answer or per building, block or warn); forms 152 / 834 / 827.
+
+**Owner's call (not Brent):** encrypting `docs[*].facts` (CLAUDE.md: ask Brent about compliance before data-handling
+changes - this one only tightens it); #10 reverses the 27 Sep restoration; #19 Cancel; #25 upload after forms.
+
+**UI - last:** "Enter at least one value" modal (a bug), 2, 9 wrap, 12, 13, 16, 17, 19 Cancel, 24, 7a money format,
+26 "-N pts" display, 22 Best Solutions before forms, 27 count only real actions, 10 and 9 inline edit, 25 upload.
+
+---
+
 **Status (1 Oct 2026) - read this first, it is the honest picture:**
 - The client's test document has **22 points**: 19 numbered items plus G1, G2 and Q. Where they stand after the
   owner's fresh runs of 1 Oct (sessions `359b36b0` and `69687a55`, section 6, "Third results" / "Fourth results"):
@@ -1238,7 +2921,7 @@ Frontend builds; 0 lint errors. **Full suite: 10,750 passed / 1 failed / 19 skip
 - **Question 4 depends on WHEN the carrier is answered.** The receiving-carrier filter keeps only that carrier's
   policies. Answered after generation (this run), question 4 kept all four; regenerated with EMC P&C named, it lists
   only BBC7263 (the other three are written by Employers Mutual Casualty Company). Which is right is the parked
-  "two EMC companies" question.
+  "two EMC companies" question - ANSWERED by Brent 8 Oct: neither prints in the top box (part U).
 
 **Owner's questions, answered:**
 - *Did the client ask for the pre-form key-detail links?* No - the owner asked (30 Sep evening: give the pre-form step a

@@ -41,6 +41,12 @@ ROUTES = open(os.path.join(os.path.dirname(__file__), "..", "routes",
                            "form_routes.py"), encoding="utf-8").read()
 PIPELINE = open(os.path.join(os.path.dirname(__file__), "..", "services",
                              "extraction_pipeline.py"), encoding="utf-8").read()
+# The Data Consistency stop builder moved into the one stops door (6 Oct 2026,
+# Choice Electric #18: every scorer rebuilds stops through `stops_now`). The
+# TEST changed, not the rule: blocking keys, relevance and the soft fallback
+# are pinned where they now live, and the pipeline still routes the result.
+STOPS_DOOR = open(os.path.join(os.path.dirname(__file__), "..", "services",
+                               "stops_now.py"), encoding="utf-8").read()
 
 # The live ORBIN stop, verbatim.
 _EXPIRED = ("Policy term already expired (07/15/26) - the application proposes "
@@ -122,8 +128,9 @@ def test_a_generation_blocking_conflict_is_raised_as_a_hard_stop():
 def test_the_blocking_keys_come_from_the_declared_sets_not_a_local_list():
     """ANTI-ROT: a second copy of 'which fields block' is how these two layers
     drifted apart in the first place."""
-    assert "HARD_STOP_RECONCILABLE_KEYS" in PIPELINE
-    assert "GENERATION_BLOCKING_RECONCILABLE_KEYS" in PIPELINE
+    assert "HARD_STOP_RECONCILABLE_KEYS" in STOPS_DOOR
+    assert "GENERATION_BLOCKING_RECONCILABLE_KEYS" in STOPS_DOOR
+    assert "underwriting_conflict_stops(" in PIPELINE
 
 
 def test_the_declared_sets_still_contain_what_this_relies_on():
@@ -140,13 +147,13 @@ def test_an_irrelevant_conflict_is_not_a_blocker():
     data'. With no property coverage there is no ACORD 140 to generate and no
     box for the number, so a building-value disagreement cannot block - it
     stays a visible warning rather than capping the score."""
-    assert '"property_building_value": "has_property_coverage"' in PIPELINE
-    assert "_blocking = _key in _blocking_keys and _relevant" in PIPELINE
+    assert '"property_building_value": "has_property_coverage"' in STOPS_DOOR
+    assert "key in blocking_keys and relevant" in STOPS_DOOR
 
 
 def test_an_irrelevant_conflict_is_still_shown():
     """Relevance downgrades severity; it must never delete the issue."""
-    _i = PIPELINE.index("_blocking = _key in _blocking_keys and _relevant")
+    _i = PIPELINE.index("for _key, _uw_msg, _blocking in underwriting_conflict_stops(")
     _block = PIPELINE[_i:_i + 900]
     assert "soft_stops = list(soft_stops) + [_uw_msg]" in _block
     assert "structured_issues.append(make_issue(" in _block

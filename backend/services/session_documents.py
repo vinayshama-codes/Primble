@@ -1,0 +1,1340 @@
+"""session_documents.py - documents ADDED to, or CHANGED on, an existing package
+(7 Oct 2026, Choice Electric #25).
+
+Brent: "Unable to upload a narrative or additional supporting docs after form
+generation." Until today the only upload created a NEW package, and the actions
+that re-read the documents (reclassify, exclude, supporting only) refused once
+forms existed (the 1 Oct lock): they re-ran the pipeline, which never touched
+forms that already existed, so the forms - and their score - kept the old values.
+
+THE DOOR - `remerge_package` - is the one way a package's DOCUMENT SET changes:
+  * a document added (before or after forms), and
+  * a document's type / exclusion / supporting-only changed after forms.
+
+What it does, in order:
+  1. Submission integrity over every active document (pure). A verdict needing
+     review that the prior "continue anyway" does not cover, and that the
+     producer did not confirm, is never merged silently: before forms the
+     existing integrity review step takes over (the pipeline stores the
+     verdict); after forms the change is refused (`IntegrityReviewRequired`,
+     a 409) and NOTHING is stored.
+  2. The re-merge - `extraction_pipeline._finalize_pipeline`, the same recipe
+     as every re-run: every stored per-document fact (no OCR, no extraction
+     call for an old document), human answers and person-saved tables carried,
+     confirmations re-applied, Data Consistency re-assessed, the stops scored
+     on the facts the row will hold (`stops_now.facts_as_stored`). A fact some
+     document stated before and none states after (an excluded document's own
+     values) is retracted - the facts write is additive and kept it otherwise.
+  3. Once forms exist: the re-merge is computed WITHOUT being written
+     (`persist=False`), every box whose ENGINE value moved is re-stamped
+     (`arq_service._restamp_changed_boxes`, no own keys -> the engine's own
+     "filled" label, never "producer"); a box a person typed and a box edited
+     since generation stay. The engine is handed what generation stamps from:
+     facts, flags merged over them, the package's form list - and on the
+     before side the declarations index the forms were stamped with (rebuilt
+     from the documents when production purged it). Moved boxes then get
+     generation's own label rules; the PDF caches of changed forms are busted
+     by the re-stamp. Then ONE write: the re-merged row, the forms, the offers,
+     the index purged again - a failure before it changes nothing. Then the
+     package is re-scored and its cards synced (`recalculate_session_scores`);
+     field QA and the mapping check refresh; an audit event records it.
+     Measured on the client's own package (Choice Electric, 7 documents, 6
+     forms): adding the Package policy last, excluding the Excess or the Auto
+     policy moved 57 / 6 / 76 boxes - exactly the boxes a from-scratch
+     regeneration over the same documents changes, none missed, none wrong.
+  4. Reports: boxes moved per form, applicant signatures the change made stale
+     (the existing fingerprint rule - `signature_boxes.applicant_signature_state`),
+     and the forms a newly evidenced line needs (`document_form_offers` on the
+     session - OFFERED, never added; `add_offered_form` adds one on request).
+  5. A document ADDED after forms is then read into the forms by the AI - the
+     NEW document only (improving-ll.md C103, `run_new_document_fill`): the
+     one shared gap fill generation uses, over the new document's text, then
+     every post-fill guard exactly as at generation. A blank box it answers is
+     filled; a box the AI filled at generation that it answers differently is
+     a SUGGESTION, never overwritten; a box a person typed or a rule owns is
+     never touched. Runs in the background after the add answers (it can take
+     minutes), locks document changes while alive, and writes the forms once.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import functools
+import logging
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from repositories.session_repository import get_processing_session, upd_processing_session
+
+logger = logging.getLogger(__name__)
+
+# The session key holding the forms a newly evidenced line needs (never auto-added).
+OFFERS_KEY = "document_form_offers"
+
+# The declarations index - purged from the session after generation
+# (form_routes.select_forms_bulk), rebuilt by every re-merge from the
+# per-document copies the purge never touches.
+_DEC_INDEX = "dec_page_entries"
+
+_FAMILY_LABELS = {
+    "general_liab": "General Liability",
+    "auto": "Commercial Auto",
+    "workers_comp": "Workers Compensation",
+}
+
+
+class IntegrityReviewRequired(Exception):
+    """After forms exist, the changed document set names an insured nobody
+    acknowledged. Carries the verdict and the documents that were NOT applied."""
+
+    def __init__(self, verdict: dict, documents: List[str]):
+        super().__init__("submission_integrity_review_required")
+        self.verdict = verdict or {}
+        self.documents = list(documents or [])
+
+
+class AlreadyInPackage(Exception):
+    """Every document added reads exactly like one the package already holds."""
+
+    def __init__(self, documents: List[str]):
+        super().__init__("documents_already_in_package")
+        self.documents = list(documents or [])
+
+
+class _HoldDone:
+    """A progress reporter whose `done` waits for the door: the pipeline calls
+    it when the row is stored, but after forms the door still re-stamps."""
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def done(self, *_a, **_k) -> None:
+        return None
+
+
+# ── Small pure helpers ───────────────────────────────────────────────────────
+
+def active_documents(docs: Iterable[dict]) -> List[dict]:
+    """The pipeline's own rule: every document not excluded - or all of them
+    when every one is excluded (a package is never scored empty)."""
+    docs = [d for d in (docs or []) if isinstance(d, dict)]
+    return [d for d in docs if not d.get("excluded")] or docs
+
+
+def _states_a_value(value: Any) -> bool:
+    if isinstance(value, dict) and "value" in value:
+        value = value.get("value")
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() not in ("null", "none")
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def stated_fact_keys(docs: Iterable[dict]) -> set:
+    """Public fact keys some ACTIVE document states a value for."""
+    out: set = set()
+    for d in active_documents(docs):
+        for key, value in (d.get("facts") or {}).items():
+            if key and not str(key).startswith("_") and _states_a_value(value):
+                out.add(str(key))
+    return out
+
+
+def _box_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()
+
+
+def _family_label(family: str) -> str:
+    return _FAMILY_LABELS.get(family) or str(family or "").replace("_", " ").title()
+
+
+def _form_families(form_id: str) -> set:
+    """The line families a SECTION form belongs to (by its base form - an
+    instance like ACORD_131__excess is the 131's line). Empty for a package
+    form (125, 101) or a form we cannot place."""
+    try:
+        from services.form_instances import base_form_id
+        from services.lob_canon import canon_line
+        from services.pdf_service import _SECTION_FORM_LINE_PHRASES
+    except Exception:                                          # noqa: BLE001
+        return set()
+    phrases = _SECTION_FORM_LINE_PHRASES.get(base_form_id(form_id)) or ()
+    return {f for f in (canon_line(p) for p in phrases) if f}
+
+
+def _line_families(facts: Optional[dict], flags: Optional[dict]) -> set:
+    try:
+        from services.lob_canon import evidenced_line_families
+        families, _rows = evidenced_line_families(facts or {}, flags or {})
+        return set(families or ())
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: line families unavailable: %s", ex)
+        return set()
+
+
+def _form_label(form_id: str) -> str:
+    try:
+        from services.form_instances import instance_label
+        return instance_label(form_id)
+    except Exception:                                          # noqa: BLE001
+        return str(form_id or "").replace("_", " ")
+
+
+# ── 1. Submission integrity ──────────────────────────────────────────────────
+
+def _override_covers(override: Optional[dict], verdict: dict) -> bool:
+    """Every insured the verdict names was acknowledged by this override."""
+    if not isinstance(override, dict):
+        return False
+    named = [e for e in (verdict.get("detected_entities") or []) if str(e or "").strip()]
+    acknowledged = [e for e in (override.get("acknowledged_entities") or []) if str(e or "").strip()]
+    if not named or not acknowledged:
+        return False
+    try:
+        from services.normalization import same_entity_name
+    except Exception:                                          # noqa: BLE001
+        return False
+    return all(any(same_entity_name(e, a) for a in acknowledged) for e in named)
+
+
+def integrity_plan(prior_integrity: Optional[dict], docs_after: Iterable[dict], *,
+                   confirm_same_insured: bool, user_id: str) -> dict:
+    """How the changed document set goes through Submission Integrity:
+    {verdict, override, review_needed, override_recorded}.
+
+      * no review needed            -> the prior override (if any) is kept;
+      * review needed, every named insured acknowledged by the prior
+        "continue anyway"           -> kept, no review;
+      * review needed, the producer confirmed these documents belong to this
+        insured                     -> a NEW override record;
+      * otherwise                   -> review needed (no override).
+    """
+    from services.submission_integrity import (
+        assess_submission_integrity, build_override_record,
+    )
+    verdict = assess_submission_integrity(active_documents(docs_after))
+    prior = prior_integrity if isinstance(prior_integrity, dict) else {}
+    prior_override = prior.get("override") if prior.get("overridden") else None
+    if not verdict.get("review_required"):
+        return {"verdict": verdict, "override": prior_override,
+                "review_needed": False, "override_recorded": False}
+    if _override_covers(prior_override, verdict):
+        return {"verdict": verdict, "override": prior_override,
+                "review_needed": False, "override_recorded": False}
+    if confirm_same_insured:
+        return {"verdict": verdict,
+                "override": build_override_record(user_id, verdict.get("detected_entities") or []),
+                "review_needed": False, "override_recorded": True}
+    return {"verdict": verdict, "override": None, "review_needed": True,
+            "override_recorded": False}
+
+
+# ── 3. The forms: what the engine prints before and after ────────────────────
+
+def _engine_view(facts: Optional[dict], flags: Optional[dict], package_ids: List[str],
+                 dec_index: Any = None) -> dict:
+    """The input generation stamps from (`form_service.process_single_form`):
+    the facts with the flags merged over them, and the package's form list."""
+    view = {**(facts or {}), **(flags or {})}
+    if package_ids:
+        view["_package_form_ids"] = list(package_ids)
+    if dec_index and not view.get(_DEC_INDEX):
+        view[_DEC_INDEX] = dec_index
+    return view
+
+
+def _generation_index(facts_before: dict, docs_before: List[dict]) -> Any:
+    """The declarations index the forms were stamped with, when the session no
+    longer holds it (production purges it after generation): rebuilt from the
+    documents the forms reflect THROUGH THE MERGE ITSELF - one recipe, never a
+    second copy of it. None when the session still holds it, or it cannot be
+    rebuilt (both sides then read the same, and nothing moves for it)."""
+    if (facts_before or {}).get(_DEC_INDEX):
+        return None
+    act = active_documents(docs_before)
+    if not act:
+        return None
+    try:
+        from services.extraction_service import merge_facts, select_primary_truth
+        docs = copy.deepcopy(act)
+        candidates = [d for d in docs if not d.get("supporting_only")] or docs
+        merged, _flags = merge_facts(docs, select_primary_truth(candidates))
+        return merged.get(_DEC_INDEX) or None
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: generation index not rebuilt (%s) - "
+                       "index-dependent boxes keep their values", ex)
+        return None
+
+
+def _label_moved_boxes(generated: dict, moved: Dict[str, List[str]], facts_after: dict) -> None:
+    """A moved box carries the label GENERATION would give it: the engine's
+    "filled", then the fact-state labels (Not Applicable / explicit No /
+    conflicted) and the "Please verify" of a calculated value - applied to the
+    moved boxes only, so nothing a person or a later fix labelled is touched.
+    The forms' missing-field highlights are refreshed, as a save refreshes them."""
+    try:
+        from services.form_instances import base_form_id, facts_for_form
+        from services.pdf_service import (
+            apply_acord125_missing_field_highlights, apply_acord126_missing_field_highlights,
+            apply_acord140_missing_field_highlights, apply_derived_value_labels,
+            apply_fact_state_confidence_labels,
+        )
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: label rules unavailable: %s", ex)
+        return
+    for fid, boxes in (moved or {}).items():
+        form = generated.get(fid)
+        if not isinstance(form, dict):
+            continue
+        state = form.get("field_state") or {}
+        conf = dict(form.get("confidence") or {})
+        base = base_form_id(fid)
+        facts = facts_for_form(facts_after, fid)
+        try:
+            sub = {b: conf[b] for b in boxes
+                   if conf.get(b) == "filled" and _box_text(state.get(b))}
+            if sub:
+                sub = apply_fact_state_confidence_labels(base, facts, state, sub)
+                sub = apply_derived_value_labels(base, facts, state, sub)
+                conf.update(sub)
+            for highlight in (apply_acord125_missing_field_highlights,
+                              apply_acord126_missing_field_highlights,
+                              apply_acord140_missing_field_highlights):
+                conf = highlight(base, facts, state, conf)
+        except Exception as ex:                                # noqa: BLE001
+            logger.warning("documents door: labels on %s skipped: %s", fid, ex)
+            continue
+        form["confidence"] = conf
+
+
+def restamp_forms(generated: dict, facts_before: dict, facts_after: dict, *,
+                  raw_text_before: Optional[str] = None,
+                  raw_text_after: Optional[str] = None) -> Tuple[List[str], Dict[str, List[str]]]:
+    """Move every box whose engine value changed (see the module note).
+    Synchronous and CPU-bound - the door runs it in an executor. Returns
+    (forms changed, {form: boxes whose printed value moved}).
+
+    Premium boxes are non-fillable, so `_restamp_changed_boxes` skips them; the
+    one door generation runs for them (`policy_lines.restamp_nonfillable_boxes`
+    -> `pdf_service.nonfillable_box_value`) re-stamps the ones the change moved
+    (7 Oct 2026: a document added after forms that brings a premium reaches the
+    125 line / OTHER rows, the prior-carrier grid and the 130's WC premium).
+    Each side reads its OWN documents' text: the presence backstop must judge
+    the old value against what the forms were generated from."""
+    from services.arq_service import _restamp_changed_boxes
+    before = {fid: dict((fd.get("field_state") or fd.get("mapped") or {}))
+              for fid, fd in (generated or {}).items() if isinstance(fd, dict)}
+    touched = list(_restamp_changed_boxes(generated, facts_before, facts_after,
+                                          own_keys=(), own_value=None, provenance="filled") or [])
+    if raw_text_after is not None:
+        try:
+            from services.policy_lines import restamp_nonfillable_boxes
+            _np = restamp_nonfillable_boxes(generated, facts_before, facts_after, raw_text_after,
+                                            raw_text_before=raw_text_before) or []
+            touched = list(dict.fromkeys(touched + list(_np)))
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("documents door: premium re-stamp skipped: %s", exc)
+    moved: Dict[str, List[str]] = {}
+    for fid in touched:
+        now = (generated.get(fid) or {}).get("field_state") or {}
+        was = before.get(fid) or {}
+        boxes = sorted(b for b in set(now) | set(was) if _box_text(now.get(b)) != _box_text(was.get(b)))
+        if boxes:
+            moved[fid] = boxes
+    _label_moved_boxes(generated, moved, facts_after)
+    return touched, moved
+
+
+# ── 4. Offers ────────────────────────────────────────────────────────────────
+
+def form_offers(recommendations: Iterable[dict], package_ids: Iterable[str],
+                recommended_before: Iterable[str], lines_before: set, lines_after: set,
+                prior_offers: Iterable[dict] = ()) -> List[dict]:
+    """The forms the changed documents call for that the package does not
+    have - OFFERED, never added. A SECTION form whose line the documents now
+    evidence and that the recommender now recommends (anything but its own
+    "optional" tier), when either its line is newly evidenced or the
+    recommendation is new (an excess layer's own 131). A previous offer stays
+    while its line is still evidenced and its form is still missing."""
+    try:
+        from services.form_service import TIER_OPTIONAL
+    except Exception:                                          # noqa: BLE001
+        TIER_OPTIONAL = "optional"
+    present = {str(f) for f in (package_ids or []) if f}
+    before_ids = {str(f) for f in (recommended_before or []) if f}
+    new_lines = set(lines_after or ()) - set(lines_before or ())
+    out: List[dict] = []
+    seen: set = set()
+    for offer in prior_offers or ():
+        if not isinstance(offer, dict):
+            continue
+        fid = str(offer.get("form_id") or "")
+        if fid and fid not in present and fid not in seen and offer.get("line") in (lines_after or ()):
+            out.append(dict(offer))
+            seen.add(fid)
+    now = datetime.now(timezone.utc).isoformat()
+    for rec in recommendations or ():
+        if not isinstance(rec, dict):
+            continue
+        fid = str(rec.get("form_id") or "")
+        if not fid or fid in present or fid in seen or rec.get("tier") == TIER_OPTIONAL:
+            continue
+        families = _form_families(fid) & set(lines_after or ())
+        if not families:
+            continue
+        newly_evidenced = sorted(families & new_lines)
+        if not newly_evidenced and fid in before_ids:
+            continue
+        line = (newly_evidenced or sorted(families))[0]
+        out.append({
+            "form_id": fid,
+            "label": _form_label(fid),
+            "form_name": str(rec.get("form_name") or _form_label(fid)),
+            "line": line,
+            "line_label": _family_label(line),
+            "tier": str(rec.get("tier") or ""),
+            "reason": str(rec.get("reason_label") or rec.get("trigger_reason") or ""),
+            "offered_at": now,
+        })
+        seen.add(fid)
+    return out
+
+
+def forms_without_their_line(package_ids: Iterable[str], lines_before: set,
+                             lines_after: set, recommended_before: Iterable[str] = (),
+                             recommended_after: Iterable[str] = ()) -> List[dict]:
+    """Forms in the package the documents stopped calling for (an excluded
+    policy). Informational - nothing is removed:
+      * a section form whose ONLY line is no longer evidenced (reason "line");
+      * a second copy of a form (an instance, e.g. an excess layer's 131) the
+        recommender asked for before the change and no longer does - its own
+        policy left the package (reason "policy")."""
+    try:
+        from services.form_instances import is_instance
+    except Exception:                                          # noqa: BLE001
+        is_instance = lambda _f: False                         # noqa: E731
+    gone = set(lines_before or ()) - set(lines_after or ())
+    before_ids = {str(f) for f in (recommended_before or ()) if f}
+    after_ids = {str(f) for f in (recommended_after or ()) if f}
+    out = []
+    for fid in package_ids or ():
+        fams = _form_families(fid)
+        if fams and fams <= gone:
+            fam = sorted(fams)[0]
+            out.append({"form_id": fid, "label": _form_label(fid), "line": fam,
+                        "line_label": _family_label(fam), "reason": "line"})
+        elif is_instance(fid) and fid in before_ids and fid not in after_ids:
+            out.append({"form_id": fid, "label": _form_label(fid), "line": "",
+                        "line_label": "", "reason": "policy"})
+    return out
+
+
+# ── 2 + 3. THE DOOR ──────────────────────────────────────────────────────────
+
+async def remerge_package(
+    session: dict,
+    session_id: str,
+    docs_before: List[dict],
+    docs_after: List[dict],
+    *,
+    user_id: Any,
+    reason: str,
+    changed_documents: Iterable[dict] = (),
+    confirm_same_insured: bool = False,
+    purge_dec_index: bool = True,
+    reporter: Any = None,
+) -> dict:
+    """Re-merge the package after its document set changed - see the module
+    note. Returns the pipeline's result plus `door` (what moved). Raises
+    `IntegrityReviewRequired` after forms when a new insured is unacknowledged."""
+    session = session if isinstance(session, dict) else {}
+    uid = str(user_id or session.get("user_id") or "")
+    changed_names = [str(d.get("filename") or "") for d in (changed_documents or ())
+                     if isinstance(d, dict)]
+    plan = integrity_plan(session.get("integrity"), docs_after,
+                          confirm_same_insured=confirm_same_insured, user_id=uid)
+    forms_exist = bool(session.get("generated_forms"))
+    if forms_exist and plan["review_needed"]:
+        raise IntegrityReviewRequired(plan["verdict"], changed_names)
+
+    from services.extraction_pipeline import _finalize_pipeline
+    retract = sorted(stated_fact_keys(docs_before) - stated_fact_keys(docs_after))
+    common = dict(
+        session_id=session_id,
+        integrity_override=plan["override"],
+        confirmations=session.get("underwriting_confirmations") or {},
+        client_answer_conflicts=session.get("client_answer_conflicts") or {},
+        prior_facts=session.get("facts") or {},
+        prior_flags=session.get("flags") or {},
+        progress_reporter=_HoldDone(reporter) if reporter is not None else None,
+        retract_document_keys=retract,
+    )
+    door: Dict[str, Any] = {
+        "reason": reason,
+        "forms_exist": forms_exist,
+        "integrity_review_required": False,
+        "integrity_override_recorded": bool(plan["override_recorded"]),
+        "integrity_verdict": plan["verdict"],
+        "forms_updated": [],
+        "boxes_updated": 0,
+        "boxes_by_form": {},
+        "stale_signatures": [],
+        "form_offers": [],
+        "forms_without_line": [],
+        "retracted_facts": [],
+        "score_before": None,
+        "score_after": None,
+    }
+
+    if not forms_exist:
+        # Before forms: exactly a pre-form re-run of the stored documents (no
+        # probe - it would send every document's text to the model again).
+        result = await _finalize_pipeline(docs_after, uid, **common)
+        door["integrity_review_required"] = bool((result.get("integrity") or {}).get("review_required"))
+        door["retracted_facts"] = list(result.get("retracted_facts") or [])
+        result["door"] = door
+        return result
+
+    # ── After forms ──────────────────────────────────────────────────────────
+    loop = asyncio.get_event_loop()
+    facts_before = copy.deepcopy(session.get("facts") or {})
+    flags_before = copy.deepcopy(session.get("flags") or {})
+    recommended_before = [str(r.get("form_id")) for r in (session.get("recommendations") or [])
+                          if isinstance(r, dict) and r.get("form_id")]
+    lines_before = _line_families(facts_before, flags_before)
+    generation_index = await loop.run_in_executor(
+        None, functools.partial(_generation_index, facts_before, docs_before))
+
+    if reporter is not None:
+        try:
+            await reporter.package_phase("normalized", "Re-reading the package with your documents…")
+        except Exception:                                      # noqa: BLE001
+            pass
+    # The re-merge, NOT written yet: its row update is written below in ONE
+    # update together with the re-stamped forms - a failure before that write
+    # leaves the package exactly as it was, never new facts beside old forms.
+    result = await _finalize_pipeline(docs_after, uid, keep_forms=True, persist=False, **common)
+    door["retracted_facts"] = list(result.get("retracted_facts") or [])
+    row_update = dict(result.get("session_payload") or {})
+    row_deletes = list(result.get("delete_facts") or [])
+    # The stop caches the pipeline built are the PRE-FORM view (cross-form hard
+    # stops demoted, scoped to the recommended forms). After generation the
+    # re-score below rebuilds them for the generated forms; if it ever failed,
+    # the previous post-generation lists stay rather than a demoted copy.
+    for _pre_form_cache in ("hard_stops", "soft_stops", "cross_form_issues"):
+        row_update.pop(_pre_form_cache, None)
+
+    # The facts the row will hold (the store's additive write, then the
+    # retractions) - exactly what the pipeline scored its stops on.
+    from services.stops_now import facts_as_stored
+    facts_after = copy.deepcopy(facts_as_stored(session.get("facts") or {},
+                                                row_update.get("facts") or {}, row_deletes))
+    flags_after = row_update.get("flags") or {}
+    generated = copy.deepcopy(session.get("generated_forms") or {})
+    try:
+        from services.form_service import package_form_ids
+        package_ids = package_form_ids(session)
+    except Exception:                                          # noqa: BLE001
+        package_ids = list(session.get("selected_form_ids") or []) or list(generated)
+    package_ids = list(dict.fromkeys(list(package_ids) + [f for f in generated if f not in package_ids]))
+
+    try:
+        from services.signature_boxes import STATE_SIGNED, STATE_STALE, applicant_signature_state
+    except Exception:                                          # noqa: BLE001
+        applicant_signature_state, STATE_SIGNED, STATE_STALE = None, "signed", "stale"
+    signed_before = {fid: applicant_signature_state(fd) if applicant_signature_state else None
+                     for fid, fd in generated.items()}
+
+    if reporter is not None:
+        try:
+            await reporter.package_phase("scored", "Updating your forms…")
+        except Exception:                                      # noqa: BLE001
+            pass
+    before_view = _engine_view(facts_before, flags_before, package_ids, generation_index)
+    after_view = _engine_view(facts_after, flags_after, package_ids)
+    _text_before = "\n".join(str(d.get("text") or "") for d in active_documents(docs_before))
+    _text_after = "\n".join(str(d.get("text") or "") for d in active_documents(docs_after))
+    touched, moved = await loop.run_in_executor(
+        None, functools.partial(restamp_forms, generated, before_view, after_view,
+                                raw_text_before=_text_before, raw_text_after=_text_after))
+
+    stale = []
+    for fid, fd in generated.items():
+        if signed_before.get(fid) == STATE_SIGNED and applicant_signature_state \
+                and applicant_signature_state(fd) == STATE_STALE:
+            stale.append({"form_id": fid, "label": _form_label(fid)})
+
+    lines_after = _line_families(facts_after, flags_after)
+    offers = form_offers(result.get("recommendations") or [], package_ids, recommended_before,
+                         lines_before, lines_after, prior_offers=session.get(OFFERS_KEY) or [])
+
+    # ONE write: the re-merged row, the re-stamped forms, the offers - and the
+    # declarations index purged again (it was rebuilt by the re-merge).
+    row_update[OFFERS_KEY] = offers
+    if touched:
+        row_update["generated_forms"] = {fid: generated[fid] for fid in touched}
+    if purge_dec_index and _DEC_INDEX not in row_deletes:
+        row_deletes.append(_DEC_INDEX)
+    await upd_processing_session(session_id, row_update, delete_facts=row_deletes or None)
+    # Written - the caller never needs the raw row update (every document's text).
+    result.pop("session_payload", None)
+    result.pop("delete_facts", None)
+
+    # Scores, the stop cache, the issue list and the stored cards follow the
+    # forms - the one post-generation recalculation every answer goes through.
+    try:
+        from services.arq_service import recalculate_session_scores
+        impact = await recalculate_session_scores(session_id) or {}
+    except Exception as ex:                                    # noqa: BLE001
+        logger.error("documents door: re-score failed [session=%s]: %s", session_id, ex,
+                     exc_info=True)
+        impact = {}
+    await _refresh_after_restamp(session_id, uid)
+
+    door.update({
+        "forms_updated": list(moved.keys()),
+        "boxes_updated": sum(len(v) for v in moved.values()),
+        "boxes_by_form": {fid: len(v) for fid, v in moved.items()},
+        "stale_signatures": stale,
+        "form_offers": offers,
+        "forms_without_line": forms_without_their_line(
+            package_ids, lines_before, lines_after, recommended_before,
+            [r.get("form_id") for r in (result.get("recommendations") or []) if isinstance(r, dict)]),
+        "score_before": impact.get("score_before"),
+        "score_after": impact.get("score_after"),
+    })
+    try:
+        from services.audit_service import log_audit_event
+        await log_audit_event(session_id, uid, "forms_updated_from_documents", {
+            "reason": reason,
+            "documents": changed_names,
+            "forms_updated": door["forms_updated"],
+            "boxes_updated": door["boxes_updated"],
+            "stale_signatures": [s["form_id"] for s in stale],
+            "forms_offered": [o["form_id"] for o in offers],
+            "facts_retracted": door["retracted_facts"],
+        })
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: audit event failed: %s", ex)
+    logger.info("documents door: session=%s reason=%s forms=%s boxes=%d stale=%s offers=%s",
+                session_id, reason, door["forms_updated"], door["boxes_updated"],
+                [s["form_id"] for s in stale], [o["form_id"] for o in offers])
+    result["door"] = door
+    return result
+
+
+async def _refresh_after_restamp(session_id: str, user_id: str) -> None:
+    """What a save refreshes after the forms change (`form_routes.update_pdf`):
+    the stamped-value consistency advisory beside the cross-form issues, field
+    QA and the field-mapping warnings. Each step is best-effort."""
+    try:
+        sess = await get_processing_session(session_id)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: refresh skipped (%s)", ex)
+        return
+    generated = sess.get("generated_forms") or {}
+    facts = sess.get("facts") or {}
+    confirmations = sess.get("underwriting_confirmations") or {}
+    try:
+        from services.underwriting_consistency import (
+            stamp_mismatch_issues, verify_stamped_consistency,
+        )
+        check = verify_stamped_consistency(generated, merged_facts=facts,
+                                           confirmations=confirmations)
+        issues = stamp_mismatch_issues(check)
+        update: Dict[str, Any] = {"underwriting_stamp_consistency": check}
+        if issues:
+            update["cross_issues_last"] = list(sess.get("cross_issues_last") or []) + list(issues)
+        await upd_processing_session(session_id, update)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: stamped-consistency check skipped: %s", ex)
+    try:
+        from config.settings import ENABLE_FIELD_QA
+        from services.audit_service import run_and_log_field_mapping_check, run_and_log_field_qa
+        await run_and_log_field_qa(session_id, user_id, generated, facts, confirmations,
+                                   ENABLE_FIELD_QA, flags=sess.get("flags") or {},
+                                   docs=sess.get("docs"))
+        await run_and_log_field_mapping_check(session_id, user_id, generated, facts, confirmations)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: field QA refresh skipped: %s", ex)
+
+
+# ── The two entry points ─────────────────────────────────────────────────────
+#
+# ONE CHANGE AT A TIME PER PACKAGE. Each change writes the package's whole
+# document list, so two at once (an add still running in one tab, an exclude
+# in another) would drop the first one's document. The entry points take the
+# package's id, wait for any other change to it in this process, and only then
+# read the row they change - never a copy read before they waited.
+
+_LOCKS: Dict[str, Tuple[Any, asyncio.Lock]] = {}
+
+
+class _Serialized:
+    """`async with _Serialized(session_id):` - one documents change at a time
+    per package, in this process. The lock belongs to the running event loop;
+    the map entry is dropped when nobody else is waiting."""
+
+    def __init__(self, session_id: str):
+        self.key = str(session_id)
+        self.entry = None
+
+    async def __aenter__(self):
+        loop = asyncio.get_running_loop()
+        entry = _LOCKS.get(self.key)
+        if entry is None or entry[0] is not loop:
+            entry = (loop, asyncio.Lock())
+            _LOCKS[self.key] = entry
+        self.entry = entry
+        await entry[1].acquire()
+        return self
+
+    async def __aexit__(self, *_exc):
+        lock = self.entry[1]
+        lock.release()
+        if not lock.locked() and not getattr(lock, "_waiters", None) \
+                and _LOCKS.get(self.key) is self.entry:
+            _LOCKS.pop(self.key, None)
+        return False
+
+
+async def add_documents(
+    session_id: str,
+    new_docs: List[dict],
+    *,
+    user_id: Any,
+    confirm_same_insured: bool = False,
+    purge_dec_index: bool = True,
+    reporter: Any = None,
+) -> dict:
+    """Append processed documents (from `extraction_pipeline.extract_document`)
+    to the package and re-merge it through the door. A document reading
+    exactly like one the package now holds (two uploads of one file racing)
+    is skipped - it would only vote twice in the merge; all of them skipped
+    raises `AlreadyInPackage`."""
+    from services.extraction_pipeline import document_text_key
+    async with _Serialized(session_id):
+        session = await get_processing_session(session_id)
+        stored = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+        held = {document_text_key(d.get("text")) for d in stored} - {""}
+        adding, skipped = [], []
+        for d in new_docs or []:
+            if not isinstance(d, dict):
+                continue
+            key = document_text_key(d.get("text"))
+            if key and key in held:
+                skipped.append(str(d.get("filename") or ""))
+                continue
+            held.add(key)
+            adding.append(d)
+        if not adding:
+            raise AlreadyInPackage(skipped)
+        result = await remerge_package(
+            session, session_id, stored, list(stored) + adding,
+            user_id=user_id, reason="documents_added", changed_documents=adding,
+            confirm_same_insured=confirm_same_insured, purge_dec_index=purge_dec_index,
+            reporter=reporter,
+        )
+        result.setdefault("door", {})["duplicates_skipped"] = skipped
+        result["documents_added"] = adding
+        return result
+
+
+async def change_document(
+    session_id: str,
+    *,
+    doc_id: str,
+    action: str,
+    new_doc_type: Optional[str] = None,
+    user_id: Any = None,
+    confirm_same_insured: bool = False,
+    purge_dec_index: bool = True,
+) -> dict:
+    """A document's type / exclusion / supporting-only changed AFTER forms:
+    the same change `reclassify_document` applies (`apply_document_action`),
+    then the door. Raises ValueError(code) like the pre-form path."""
+    async with _Serialized(session_id):
+        session = await get_processing_session(session_id)
+        stored = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+        if not stored:
+            raise ValueError("reclassify_no_docs")
+        from services.extraction_pipeline import apply_document_action
+        docs_after = [dict(d) for d in stored]        # the stored dicts stay as they were
+        target, prev_type = await apply_document_action(docs_after, doc_id, action, new_doc_type)
+        logger.info("documents door: change doc=%s action=%s %s->%s (session=%s)",
+                    doc_id, action, prev_type, target.get("doc_type"), session_id)
+        result = await remerge_package(
+            session, session_id, stored, docs_after,
+            user_id=user_id, reason=f"document_{action}", changed_documents=[target],
+            confirm_same_insured=confirm_same_insured, purge_dec_index=purge_dec_index,
+        )
+    result["reclassified"] = {
+        "doc_id": str(doc_id),
+        "action": action,
+        "previous_doc_type": prev_type,
+        "new_doc_type": target.get("doc_type"),
+    }
+    return result
+
+
+async def add_offered_form(session_id: str, form_id: str) -> Tuple[str, Dict[str, Any]]:
+    """Add ONE form the door offered (`document_form_offers`) - through the
+    one add-form door (`form_addition.add_form_to_session`). The SERVER
+    decides: a form the stored offers do not name is refused. The offer is
+    retired once the form is in the package. Returns (outcome, payload)."""
+    from services.form_addition import OK, ALREADY_PRESENT, add_form_to_session
+    session = await get_processing_session(session_id)
+    offers = [o for o in (session.get(OFFERS_KEY) or []) if isinstance(o, dict)]
+    form_id = str(form_id or "").strip()
+    if not form_id or form_id not in {str(o.get("form_id")) for o in offers}:
+        return "not_offered", {}
+    outcome, payload = await add_form_to_session(session_id, form_id, enforce_requested=False)
+    if outcome in (OK, ALREADY_PRESENT):
+        await upd_processing_session(session_id, {
+            OFFERS_KEY: [o for o in offers if str(o.get("form_id")) != form_id]})
+    return outcome, payload
+
+
+# ── 5. The AI reading of a document added AFTER forms (C103, 7 Oct 2026) ─────
+#
+# Until today an added document reached the forms only through its FACTS: the
+# door above re-stamps the boxes a deterministic rule prints, and nothing asked
+# the AI the questions generation asks it (the narrative's "how many years in
+# business", a loss run's "any losses?" ...). Now, once the door has answered,
+# the SAME shared gap fill generation runs (`form_service.shared_gap_fill`:
+# line scopes, private layer groups, the cross-form Yes/No reconciliation) is
+# run with the NEW documents as its only text - the package's merged facts are
+# the facts block, as at generation. An old document is never sent again.
+# Every answer then goes through `map_facts_to_form(..., pre_filled_gpt=...)`
+# - every post-fill guard, the evidence gate and the evidence judge (C97), the
+# ungrounded-identifier drop - with the WHOLE package's text as the presence
+# backstop, exactly as generation stamps. What the answers change is measured
+# against the same stamp with no answers (the baseline), so a box moves only
+# because the new document answered it. Then, box by box:
+#   * blank now (nobody typed it, no rule owns it)  -> filled, with the label
+#     generation gives an AI value ("ai_verified" / "low_confidence");
+#   * filled by the AI before, answered DIFFERENTLY now -> a suggestion
+#     (`SUGGESTIONS_KEY`), never an overwrite - the producer chooses
+#     (`needs_attention.document_suggestion_rows`; "Use this value" goes through
+#     the producer-edit door, `/api/update-pdf`, and is labelled "producer" like
+#     any value a person chose; "Keep current" retires it);
+#   * typed by a person (producer / client, or edited since generation) or
+#     printed by a rule -> never touched.
+# Crash-safe: the forms are written ONCE, at the end, after re-checking every
+# box against the row as it stands then (a box a person typed meanwhile wins).
+# A failure before that write leaves the forms exactly as the door left them
+# and the status says so. Kill switch: NEW_DOCUMENT_AI_FILL=0.
+
+FILL_KEY = "document_ai_fill"                    # = generation_state.DOCUMENT_FILL_KEY
+FILL_BEAT_KEY = "document_ai_fill_beat_at"       # = generation_state.DOCUMENT_FILL_BEAT_KEY
+SUGGESTIONS_KEY = "document_fill_suggestions"
+FILL_RUNNING, FILL_DONE, FILL_FAILED, FILL_OFF = "running", "done", "failed", "off"
+FILL_FAILED_TEXT = ("Reading the new document into your forms did not finish. Your forms keep "
+                    "the values its facts gave them.")
+_PERSON_LABELS = frozenset({"producer", "client_arq"})
+# The labels generation gives a gap-filled value (`map_facts_to_form`).
+_AI_LABELS = frozenset({"ai_verified", "low_confidence"})
+_TASKS: set = set()
+
+
+def ai_fill_enabled() -> bool:
+    """NEW_DOCUMENT_AI_FILL (default on). Read at call time."""
+    return os.getenv("NEW_DOCUMENT_AI_FILL", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _same(a: Any, b: Any) -> bool:
+    return _box_text(a).casefold() == _box_text(b).casefold()
+
+
+def _box_value(form: Optional[dict], field: str) -> Any:
+    form = form if isinstance(form, dict) else {}
+    state = form.get("field_state")
+    if not isinstance(state, dict):
+        state = form.get("mapped") or {}
+    return state.get(field)
+
+
+def box_owner(form: Optional[dict], field: str) -> str:
+    """Who a generated box belongs to: "person" (a producer / client value, or
+    a box edited since generation), "rule" (a value a deterministic rule
+    printed), "ai" (a value the AI filled) or "blank" (nobody's yet)."""
+    form = form if isinstance(form, dict) else {}
+    label = (form.get("confidence") or {}).get(field)
+    if label in _PERSON_LABELS or field in set(form.get("client_filled_fields") or []):
+        return "person"
+    state = form.get("field_state")
+    mapped = form.get("mapped") or {}
+    # An edit is saved into `field_state`; `mapped` is what generation stamped.
+    # The documents door re-stamps `field_state` only, always labelled
+    # "filled" - so a difference under any other label (or none, a cleared
+    # box) is a person's, whatever label an older save left behind.
+    if isinstance(state, dict) and label != "filled" and not _same(state.get(field), mapped.get(field)):
+        return "person"
+    if not _box_text(_box_value(form, field)):
+        return "blank"
+    return "ai" if label in _AI_LABELS else "rule"
+
+
+def review_counts(page: Optional[dict]) -> dict:
+    """The open items the review page shows: its grouped view's own `counts`
+    (the numbers the Hard Stops / Warnings sections print - the stop arrays
+    as the fallback, as `packageIssueCounts` reads them) and the Data
+    Consistency values that need confirming (status "conflict")."""
+    page = page if isinstance(page, dict) else {}
+    counts = (page.get("grouped_issues") or {}).get("counts") or {}
+    hard, warn = counts.get("hard_stops"), counts.get("warnings")
+    if not isinstance(hard, int) or not isinstance(warn, int):
+        hard, warn = len(page.get("hard_stops") or []), len(page.get("soft_stops") or [])
+    fields = (page.get("underwriting_consistency") or {}).get("fields") or []
+    dc = sum(1 for f in fields if isinstance(f, dict) and f.get("status") == "conflict")
+    return {"hard_stops": int(hard), "warnings": int(warn), "data_consistency": int(dc)}
+
+
+def new_on_review(before: Optional[dict], after: Optional[dict]) -> Optional[dict]:
+    """NEW open items on the review page: after minus before, never below 0.
+    None when either side is unknown."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return None
+    out = {k: max(0, int(after.get(k) or 0) - int(before.get(k) or 0))
+           for k in ("hard_stops", "warnings", "data_consistency")}
+    out["total"] = sum(out.values())
+    return out
+
+
+def _generation_schema(session: dict, form_id: str) -> dict:
+    """The schema generation stamps a form with - read from its TEMPLATE in
+    layout order (`extract_form_schema`), never the JSONB-sorted copy on the
+    session row (position-based pairing on it is wrong). The stored copy only
+    when the template cannot be found."""
+    from services import form_instances as _fi
+    from services.pdf_service import extract_form_schema
+    from config.settings import TEMPLATE_DIR
+    fd = (session.get("generated_forms") or {}).get(form_id) or {}
+    meta = fd.get("form") if isinstance(fd.get("form"), dict) else None
+    if not (meta or {}).get("template_file"):
+        meta = _fi.form_meta_for(session.get("all_forms") or [], form_id, session.get("facts") or {})
+    tpl = os.path.join(TEMPLATE_DIR, (meta or {}).get("template_file") or "")
+    if (meta or {}).get("template_file") and os.path.exists(tpl):
+        return extract_form_schema(tpl, form_id=_fi.base_form_id(form_id))
+    return fd.get("schema") if isinstance(fd.get("schema"), dict) else {}
+
+
+def _stamp_with_answers(session: dict, form_id: str, answers: dict, raw_text: str,
+                        schema: dict) -> Tuple[dict, dict, list]:
+    """One form stamped as `form_service.process_single_form` stamps it, with
+    `answers` as the shared gap fill's answers. No other model call: the
+    whole-document umbrella-period probe is skipped (`allow_llm=False` - it
+    would send every document again); the evidence judge, which reads only the
+    answers' own quotes, still runs."""
+    from services import form_instances as _fi
+    from services.form_service import package_form_ids
+    from services.pdf_service import map_facts_to_form
+    facts = {**(session.get("facts") or {}), **(session.get("flags") or {})}
+    try:
+        facts["_package_form_ids"] = package_form_ids(session, form_id)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("document fill: package form list unavailable: %s", ex)
+    # The package's documents ride the stamping facts EXACTLY as generation
+    # attaches them (`form_service.process_single_form`). Without them every
+    # scoped guard stands down: a coverage section no document carries
+    # (spoilage, blanket), a value printed only by ANOTHER policy's documents.
+    # Live 8 Oct 2026 (505bf394): adding the Business Auto Policy wrote 17
+    # wrong ACORD 140 boxes - the buildings' limits as spoilage and blanket
+    # limits, the WC credit as a guard, the vehicle garaging as the building's
+    # front exposure - that generation's own stamp had refused.
+    try:
+        from services.scoped_evidence import attach_documents
+        attach_documents(facts, session.get("docs") or [])
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("document fill: documents not attached: %s", ex)
+    guard: list = []
+    mapped, conf = map_facts_to_form(
+        _fi.facts_for_form(facts, form_id), schema, form_id=_fi.base_form_id(form_id),
+        raw_text=raw_text, pre_filled_gpt=answers, guard_report=guard, allow_llm=False)
+    return mapped or {}, conf or {}, guard
+
+
+def _new_document_answers(session: dict, new_docs: List[dict], form_ids: List[str]) -> Dict[str, dict]:
+    """THE call (C103): the one shared gap fill, with the NEW documents as the
+    package's only documents - its text, its line scopes and every layer's own
+    text come from them alone. Facts and flags are the package's."""
+    from services.form_service import shared_gap_fill
+    view = dict(session)
+    view["docs"] = [dict(d, excluded=False) for d in new_docs]
+    return shared_gap_fill(view, list(form_ids)) or {}
+
+
+def _words_only(value: Any) -> str:
+    """A box's text with only its letters and digits - "Prem. #: 001" and
+    "Prem #: 001" are the same words."""
+    return re.sub(r"[^0-9a-z]", "", _box_text(value).casefold())
+
+
+def _says_it(value: Any, new_text: Optional[str]) -> bool:
+    """Does the new document's own text print this value? A short answer (a
+    tick, "Y", a code) is not looked for - the evidence gate judges those. No
+    text to look in: not judged (True)."""
+    if new_text is None or len(_words_only(value)) < 4:
+        return True
+    try:
+        from services.pdf_service import _value_in_raw_text
+        return bool(_value_in_raw_text(_box_text(value), new_text))
+    except Exception:                                           # noqa: BLE001
+        return True
+
+
+def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
+                   base_mapped: dict, new_guard: Iterable[dict] = (),
+                   base_guard: Iterable[dict] = (), *, documents: Iterable[str] = (),
+                   new_text: Optional[str] = None) -> dict:
+    """What the new document's answers do to ONE stored form (pure).
+    {"fills": {field: {value, label}}, "suggestions": [...], "held_back": [...]}
+    - a box moves only where the stamp WITH the answers differs from the stamp
+    without them, and only with an AI label (a rule's box is the door's).
+
+    A SUGGESTION reads "the new document says X" - so X must be printed in the
+    new document's own text (`new_text`, folded like the stamper folds it) and
+    differ from the box by more than punctuation (owner's run `18ecbfa8`, 12 Oct
+    2026: adding the Cyber policy offered "Prem #: 001 Bldg #: 001" against the
+    box's "Prem. #: 001 Bldg #: 001" - text the Cyber policy does not contain,
+    which the AI read from the package's facts)."""
+    docs = [str(d) for d in (documents or ()) if str(d or "").strip()]
+    fills: Dict[str, dict] = {}
+    suggestions: List[dict] = []
+    for field, new in (new_mapped or {}).items():
+        if not _box_text(new) or _same(new, (base_mapped or {}).get(field)):
+            continue
+        label = (new_conf or {}).get(field)
+        if label not in _AI_LABELS:
+            continue
+        owner = box_owner(stored, field)
+        current = _box_value(stored, field)
+        if owner == "blank":
+            fills[field] = {"value": new, "label": label}
+        elif (owner == "ai" and not _same(new, current)
+              and _words_only(new) != _words_only(current) and _says_it(new, new_text)):
+            suggestions.append({
+                "form_id": form_id, "field": field,
+                "current": _box_text(current), "suggested": new if isinstance(new, str) else str(new),
+                "label": label, "documents": docs,
+            })
+    base_fields = {g.get("field") for g in (base_guard or ()) if isinstance(g, dict)}
+    held = []
+    for g in new_guard or ():
+        f = g.get("field") if isinstance(g, dict) else None
+        if f and f not in base_fields and f not in fills and box_owner(stored, f) == "blank":
+            held.append(dict(g, form_id=form_id))
+    return {"fills": fills, "suggestions": suggestions, "held_back": held}
+
+
+def _suggestion_id(form_id: str, field: str, suggested: Any) -> str:
+    import hashlib
+    raw = f"{form_id}|{field}|{_box_text(suggested).casefold()}"
+    return "docsug_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) -> dict:
+    """Apply the plans to the forms AS THEY STAND NOW (in place). A box is
+    filled only while it is still blank, nobody's, and shows what it showed
+    when the plan was made; a suggestion stands only while the box still shows
+    the AI value it was measured against. Returns
+    {"filled": {form: [boxes]}, "suggestions": [...], "held_back": n,
+     "stale_signatures": [...]}."""
+    try:
+        from services.signature_boxes import STATE_SIGNED, STATE_STALE, applicant_signature_state
+    except Exception:                                          # noqa: BLE001
+        applicant_signature_state, STATE_SIGNED, STATE_STALE = None, "signed", "stale"
+    filled: Dict[str, List[str]] = {}
+    suggestions: List[dict] = []
+    held_total = 0
+    stale: List[dict] = []
+    for fid, plan in (plans or {}).items():
+        form = (generated or {}).get(fid)
+        snap = (snapshot or {}).get(fid)
+        if not isinstance(form, dict) or not isinstance(snap, dict):
+            continue
+        signed_before = applicant_signature_state(form) if applicant_signature_state else None
+        state = form.get("field_state")
+        if not isinstance(state, dict):
+            state = dict(form.get("mapped") or {})
+        mapped = dict(form.get("mapped") or {})
+        conf = dict(form.get("confidence") or {})
+        done: List[str] = []
+        for field, fill in (plan.get("fills") or {}).items():
+            if box_owner(form, field) != "blank" or not _same(_box_value(form, field), _box_value(snap, field)):
+                continue                       # a person or a re-stamp got there first
+            state[field] = fill["value"]
+            mapped[field] = fill["value"]      # machine-stamped, as generation stamps
+            conf[field] = fill["label"]
+            done.append(field)
+        for s in plan.get("suggestions") or []:
+            if box_owner(form, s["field"]) == "ai" and _same(_box_value(form, s["field"]), s["current"]):
+                suggestions.append(dict(s, id=_suggestion_id(fid, s["field"], s["suggested"]),
+                                        created_at=datetime.now(timezone.utc).isoformat()))
+        held = [g for g in (plan.get("held_back") or [])
+                if g.get("field") not in done and box_owner(form, g.get("field")) == "blank"]
+        if held:
+            have = {g.get("field") for g in (form.get("guard_blanks") or []) if isinstance(g, dict)}
+            form["guard_blanks"] = list(form.get("guard_blanks") or []) + [
+                g for g in held if g.get("field") not in have]
+            held_total += len(held)
+        if done:
+            form["field_state"] = state
+            form["mapped"] = mapped
+            form["confidence"] = conf
+            form["_pdf_cache_hash"] = ""
+            form["pdf_bytes"] = None
+            form["_applicant_render"] = None
+            filled[fid] = done
+            if signed_before == STATE_SIGNED and applicant_signature_state \
+                    and applicant_signature_state(form) == STATE_STALE:
+                stale.append({"form_id": fid, "label": _form_label(fid)})
+    return {"filled": filled, "suggestions": suggestions, "held_back": held_total,
+            "stale_signatures": stale}
+
+
+def merge_suggestions(existing: Iterable[dict], new: Iterable[dict], generated: dict) -> List[dict]:
+    """The package's open suggestions: the new ones, then every older one still
+    live (its box still shows the value it was measured against) that the new
+    ones do not replace (one per box - the latest document's)."""
+    out: List[dict] = []
+    seen: set = set()
+    for s in list(new or []) + list(existing or []):
+        if not isinstance(s, dict) or not s.get("form_id") or not s.get("field"):
+            continue
+        key = (s["form_id"], s["field"])
+        if key in seen:
+            continue
+        form = (generated or {}).get(s["form_id"])
+        if box_owner(form, s["field"]) != "ai" or not _same(_box_value(form, s["field"]), s.get("current")):
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
+
+
+class _BeatQueue:
+    """`generation_state.GenerationHeartbeat` beats a queue's `touch`; the
+    document fill beats its session row instead."""
+
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+
+    async def touch(self, _job_id: str) -> None:
+        await upd_processing_session(self.session_id, {
+            FILL_BEAT_KEY: datetime.now(timezone.utc).isoformat()})
+
+
+async def start_new_document_fill(session_id: str, added_docs: Iterable[dict], user_id: Any, *,
+                                  review_counts_before: Optional[dict] = None) -> dict:
+    """Record a RUNNING fill for the documents just added (the lock starts
+    now) and return its status - the caller schedules `launch_new_document_fill`
+    once it has answered. {"state": "off"} when the kill switch is off or
+    nothing was added."""
+    docs = [d for d in (added_docs or ()) if isinstance(d, dict)]
+    if not ai_fill_enabled() or not docs:
+        return {"state": FILL_OFF}
+    now = datetime.now(timezone.utc).isoformat()
+    names = [str(d.get("filename") or "") for d in docs]
+    status = {
+        "run_id": uuid.uuid4().hex,
+        "state": FILL_RUNNING,
+        "documents": names,
+        "doc_ids": [str(d.get("doc_id") or "") for d in docs],
+        "started_at": now,
+        "review_counts_before": review_counts_before,
+        "message": f"Reading {', '.join(n for n in names if n) or 'your document'} into your forms...",
+    }
+    await upd_processing_session(session_id, {FILL_KEY: status, FILL_BEAT_KEY: now})
+    return status
+
+
+async def launch_new_document_fill(session_id: str, status: dict, user_id: Any) -> None:
+    """Start the run detached from the request (it can take minutes). Held in
+    `_TASKS` so it is never collected mid-run.
+
+    ── WHY THIS IS `async def` (8 Oct 2026) ────────────────────────────────
+    It is handed to Starlette as `BackgroundTask(launch_new_document_fill, ...)`.
+    Starlette awaits an async callable on the event loop, but a PLAIN `def` it
+    sends to `run_in_threadpool` - an AnyIO worker thread, which has no event
+    loop. `asyncio.ensure_future` there raises
+
+        RuntimeError: There is no current event loop in thread 'AnyIO worker thread'
+        RuntimeWarning: coroutine 'run_new_document_fill' was never awaited
+
+    so the coroutine was created and dropped. Measured on the owner's run
+    `b4d18e8e`: adding a document re-stamped the forms deterministically, the
+    AI reading of that document never ran, and `document_ai_fill` sat on
+    `{"state": "running"}` for ever - the screen kept saying "Reading
+    <file> into your forms..." with nothing behind it. C103's whole point,
+    broken at the seam rather than in the logic.
+
+    The one-word change (`def` -> `async def`) puts it back on the loop, where
+    `ensure_future` is valid and the task really is detached. The function is
+    still the same object the route schedules, so the route is unchanged.
+    """
+    if not isinstance(status, dict) or status.get("state") != FILL_RUNNING:
+        return
+    task = asyncio.ensure_future(run_new_document_fill(
+        session_id, status.get("doc_ids") or [], user_id, run_id=status.get("run_id")))
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
+
+
+async def _write_status(session_id: str, run_id: str, status: dict) -> None:
+    """Write the final status - unless a newer run has replaced this one."""
+    try:
+        sess = await get_processing_session(session_id)
+        if (sess.get(FILL_KEY) or {}).get("run_id") not in (None, run_id):
+            return
+        await upd_processing_session(session_id, {FILL_KEY: status})
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("document fill: status not written [session=%s]: %s", session_id, ex)
+
+
+async def run_new_document_fill(session_id: str, doc_ids: Iterable[str], user_id: Any, *,
+                                run_id: Optional[str]) -> dict:
+    """THE AI READING of documents added after forms - see the section note.
+    Never raises; returns the final status (also written to the row)."""
+    from services.generation_state import GenerationHeartbeat
+    uid = str(user_id or "")
+    beat = GenerationHeartbeat(_BeatQueue(session_id), str(run_id or "fill"))
+    await beat.start()
+    base: dict = {}
+    try:
+        base = dict((await get_processing_session(session_id)).get(FILL_KEY) or {})
+        status = await _fill_once(session_id, [str(d) for d in (doc_ids or ())], uid, run_id, base)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.error("document fill failed [session=%s run=%s]: %s", session_id, run_id, ex,
+                     exc_info=True)
+        status = {**base, "run_id": run_id, "state": FILL_FAILED, "message": FILL_FAILED_TEXT,
+                  "finished_at": datetime.now(timezone.utc).isoformat()}
+        await _write_status(session_id, str(run_id or ""), status)
+    finally:
+        await beat.stop()
+    return status
+
+
+async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Optional[str],
+                     base: dict) -> dict:
+    loop = asyncio.get_event_loop()
+    session = await get_processing_session(session_id)
+    if (session.get(FILL_KEY) or {}).get("run_id") not in (None, run_id):
+        return dict(session.get(FILL_KEY) or {})                # a newer run owns the package
+    generated = copy.deepcopy(session.get("generated_forms") or {})
+    docs = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+    wanted = set(doc_ids)
+    new_docs = [d for d in docs if str(d.get("doc_id") or "") in wanted
+                and not d.get("excluded") and str(d.get("text") or "").strip()]
+    names = [str(d.get("filename") or "") for d in new_docs]
+    status = {**base, "run_id": run_id, "state": FILL_DONE, "boxes_filled": 0,
+              "filled_by_form": {}, "suggestions": 0, "held_back": 0, "stale_signatures": [],
+              "message": ""}
+    if generated and new_docs:
+        per_form = await loop.run_in_executor(
+            None, functools.partial(_new_document_answers, session, new_docs, list(generated)))
+        # The presence backstop reads the package's text, as at generation.
+        raw_all = " ".join(str(d.get("text") or "") for d in active_documents(docs))
+        # A suggestion must be printed in the NEW documents themselves.
+        try:
+            from services.needs_attention import document_haystack
+            new_text = document_haystack(new_docs)
+        except Exception:                                      # noqa: BLE001
+            new_text = None
+        empty = {"filled_values": {}, "raw_text_fields": set(), "question_grounding": {}}
+        plans: Dict[str, dict] = {}
+        for fid in generated:
+            answers = per_form.get(fid) or {}
+            if not answers.get("filled_values"):
+                continue
+            schema = await loop.run_in_executor(None, functools.partial(_generation_schema, session, fid))
+            if not schema:
+                continue
+            new_m, new_c, new_g = await loop.run_in_executor(None, functools.partial(
+                _stamp_with_answers, session, fid, answers, raw_all, schema))
+            base_m, _bc, base_g = await loop.run_in_executor(None, functools.partial(
+                _stamp_with_answers, session, fid, empty, raw_all, schema))
+            plan = plan_form_fill(fid, generated[fid], new_m, new_c, base_m, new_g, base_g,
+                                  documents=names, new_text=new_text)
+            if plan["fills"] or plan["suggestions"] or plan["held_back"]:
+                plans[fid] = plan
+        if plans:
+            async with _Serialized(session_id):
+                fresh = await get_processing_session(session_id)
+                if (fresh.get(FILL_KEY) or {}).get("run_id") not in (None, run_id):
+                    return dict(fresh.get(FILL_KEY) or {})
+                forms_now = fresh.get("generated_forms") or {}
+                applied = apply_form_fills(forms_now, generated, plans)
+                touched = sorted(set(applied["filled"]) | {
+                    fid for fid, p in plans.items() if p.get("held_back")})
+                suggestions = merge_suggestions(fresh.get(SUGGESTIONS_KEY) or [],
+                                                applied["suggestions"], forms_now)
+                update: Dict[str, Any] = {SUGGESTIONS_KEY: suggestions}
+                if touched:
+                    update["generated_forms"] = {fid: {
+                        k: forms_now[fid].get(k) for k in (
+                            "field_state", "mapped", "confidence", "guard_blanks",
+                            "_pdf_cache_hash", "pdf_bytes", "_applicant_render")
+                        if k in forms_now[fid]} for fid in touched}
+                await upd_processing_session(session_id, update)
+            filled = applied["filled"]
+            status.update({
+                "boxes_filled": sum(len(v) for v in filled.values()),
+                "filled_by_form": {fid: len(v) for fid, v in filled.items()},
+                "forms_filled": [{"form_id": fid, "label": _form_label(fid), "boxes": len(v)}
+                                 for fid, v in filled.items()],
+                "suggestions": len(applied["suggestions"]),
+                "held_back": applied["held_back"],
+                "stale_signatures": applied["stale_signatures"],
+            })
+            if filled or applied["held_back"]:
+                # Scores, the stop cache and the stored cards follow the forms;
+                # field QA and the mapping check refresh (best-effort each).
+                try:
+                    from services.arq_service import recalculate_session_scores
+                    await recalculate_session_scores(session_id)
+                except Exception as ex:                        # noqa: BLE001
+                    logger.error("document fill: re-score failed [session=%s]: %s", session_id, ex,
+                                 exc_info=True)
+                await _refresh_after_restamp(session_id, uid)
+    status["finished_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        from services.audit_service import log_audit_event
+        await log_audit_event(session_id, uid, "forms_filled_from_new_documents", {
+            "documents": names,
+            "boxes_filled": status["boxes_filled"],
+            "filled_by_form": status["filled_by_form"],
+            "suggestions": status["suggestions"],
+            "held_back": status["held_back"],
+            "stale_signatures": [s["form_id"] for s in status["stale_signatures"]],
+        })
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("document fill: audit event failed: %s", ex)
+    logger.info("document fill: session=%s docs=%s filled=%s suggestions=%d held=%d",
+                session_id, names, status["filled_by_form"], status["suggestions"],
+                status["held_back"])
+    await _write_status(session_id, str(run_id or ""), status)
+    return status
+
+
+async def keep_current_value(session_id: str, suggestion_id: str) -> Optional[dict]:
+    """"Keep current": retire one suggestion. Returns it, or None when the
+    package holds no such suggestion."""
+    async with _Serialized(session_id):
+        session = await get_processing_session(session_id)
+        held = [s for s in (session.get(SUGGESTIONS_KEY) or []) if isinstance(s, dict)]
+        gone = next((s for s in held if s.get("id") == suggestion_id), None)
+        if gone is None:
+            return None
+        await upd_processing_session(session_id, {
+            SUGGESTIONS_KEY: [s for s in held if s.get("id") != suggestion_id]})
+        return gone

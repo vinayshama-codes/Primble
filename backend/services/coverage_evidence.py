@@ -448,12 +448,338 @@ def auto_liability_stated(facts: Optional[dict]) -> bool:
                 or _fv(facts, "auto_pd_per_accident"))
 
 
-def auto_split_limits_stated(facts: Optional[dict]) -> bool:
-    """Split limits are on the policy (any part printed, or the structure says
-    so) and no CSL is - so a CSL question / CSL-only deduction does not apply."""
-    if _fv(facts, "auto_liability_limit"):
+# ── How an auto liability limit is PRINTED (5 Oct 2026, audits G1 + skeptic) ─
+# The first two cuts matched words and counted slashes and amounts over the
+# whole printing. Adversarial audits broke both, in both directions:
+#   * "$1,000,000 CSL / $5,000 Med Pay", "CSL / $1,000,000 UM", a garage
+#     "$1,000,000 Each Accident / $2,000,000 Aggregate", a policy number, a year,
+#     an MCS-90 amount or a radius made a CSL "split" - and fired the 60-cap stop;
+#   * a split part's own label ("$300,000 Each Accident") outvoted a split
+#     structure, a split flag and the parts;
+#   * "BI & PD Combined", "Ea Acc", "not split" were misread.
+# So each AMOUNT is read with the label nearest to it - the words before it back
+# to the last separator, and after it up to the next - and only liability
+# amounts take part: Med Pay, UM / UIM, PIP, hired / non-owned, physical damage,
+# deductibles, aggregates, premiums (an amount with cents), counts and radii are
+# not. A bare number is an amount only with a "$", thousands commas or K / M.
+_CSL_WORDING_RE = re.compile(
+    r"(?<![a-z])c\.?\s?s\.?\s?l\.?(?![a-z])|combined\s*single|single\s+limit"
+    r"|\bcombined\b", re.I)
+_STRUCTURE_CSL_RE = re.compile(
+    r"(?<![a-z])c\.?\s?s\.?\s?l\.?(?![a-z])|combined|single\s+limit", re.I)
+_PER_PERSON_RE = re.compile(r"\b(?:each|per|ea\.?)\s+person\b", re.I)
+_BI_RE = re.compile(r"\bbodily\s+injury\b|(?<![a-z])b\.?\s?i\.?(?![a-z])", re.I)
+_PD_RE = re.compile(r"\bproperty\s+damage\b|(?<![a-z])p\.?\s?d\.?(?![a-z])", re.I)
+_ACCIDENT_WORDING_RE = re.compile(
+    r"\b(?:each|any\s+one|per|ea\.?)\s+(?:accident|acc\.?|occurrence|occ\.?)(?![a-z])", re.I)
+_LIABILITY_WORD_RE = re.compile(r"\bliab(?:ility)?\b", re.I)
+_NOT_LIABILITY_RE = re.compile(
+    r"\b(?:um|uim|uninsured|underinsured|med(?:ical)?(?:\s*pay(?:ments?)?)?|pip|personal\s+injury"
+    r"|no[\s-]?fault|hired|non[\s-]?owned|hnoa|comp(?:rehensive)?|collision|physical\s+damage"
+    r"|deductibles?|aggregate|agg|premiums?|mcs[\s-]?90|radius|miles?|vehicles?|units?|drivers?"
+    r"|towing|rental|garagekeepers|symbols?|fee|tax)\b", re.I)
+_LIMIT_DATE_RE = re.compile(
+    r"\b\d{1,2}/\d{1,2}/\d{4}\b|\b\d{4}-\d{2}-\d{2}\b"
+    # a two-digit year only after a date word: "25/50/25" is a split, not a date
+    r"|\b(?:eff(?:ective)?|exp(?:ires|iration)?|from|to|thru|through|dated|as\s+of)\.?\s*"
+    r"\d{1,2}/\d{1,2}/\d{2}\b"
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b", re.I)
+_LIMIT_EDITION_RE = re.compile(r"(?<![\d$,/])\b\d{2}\s*/\s*\d{2}\b(?![\d,/])")
+_SHORTHAND_SPLIT_RE = re.compile(
+    r"(?<![\d$,.])\b\d{2,4}\s*/\s*\d{2,4}\s*/\s*\d{2,4}\b(?![\d,/])"
+    r"|\b(?:bi|bodily\s+injury)\s*\$?\d{2,4}\s*[kK]?\s*/\s*\$?\d{2,4}\s*[kK]?\b[^\n]{0,20}?"
+    r"\b(?:pd|property\s+damage)\s*\$?\d{2,4}\b", re.I)
+_LIMIT_MONEY_RE = re.compile(r"(\$\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)")
+_MONEY_SUFFIX_RE = re.compile(r"\s*(mm|mil|million|thousand|m|k)(?![a-z])", re.I)
+# A separator ends a label: ";", "|", ",", a line break, " - ", parentheses,
+# and a "/" between amounts - not one joining two words ("BI/PD", "UM/UIM").
+_LABEL_BREAK_RE = re.compile(r"[;|,\n()]|\s[-\u2013]\s|(?<![A-Za-z])/|/(?![A-Za-z])")
+_LABEL_ASIDE_RE = re.compile(r"\s*\(([^()$\d]{1,60})\)")
+
+
+def _printing(text: Any) -> str:
+    s = str(text or "").replace("“", " ").replace("”", " ").replace('"', " ")
+    s = _LIMIT_DATE_RE.sub(" ", s)
+    return _LIMIT_EDITION_RE.sub(" ", s)
+
+
+def _labelled_amounts(text: Any) -> List[Tuple[float, str, bool]]:
+    """(dollars, the label nearest the amount, is_premium) for each money amount."""
+    s = _printing(text)
+    found = []
+    for m in _LIMIT_MONEY_RE.finditer(s):
+        dollar, num = m.group(1), m.group(2)
+        if m.end() < len(s) and (s[m.end()].isdigit() or s[m.end()] == "."
+                                 and m.end() + 1 < len(s) and s[m.end() + 1].isdigit()):
+            continue                    # part of a longer token
+        sm = _MONEY_SUFFIX_RE.match(s, m.end())
+        suffix = sm.group(1).lower() if sm else ""
+        end = sm.end() if sm else m.end()
+        prev = s[m.start() - 1] if m.start() > 0 else ""
+        if prev.isalpha() or prev == "-" and m.start() > 1 and s[m.start() - 2].isalnum():
+            continue                    # a policy number / code ("BA-456789", "CA7120045")
+        grouped = "," in num
+        if not (dollar or grouped or suffix):
+            continue                    # a bare count, year, symbol or policy number
+        try:
+            v = float(num.replace(",", ""))
+        except ValueError:
+            continue
+        if suffix in ("mm", "m", "mil", "million"):
+            v *= 1_000_000
+        elif suffix in ("k", "thousand"):
+            v *= 1_000
+        # A premium carries cents ("$1,496.00"); a limit printed with them
+        # ("$1,000,000.00") is still round.
+        cents = bool(re.search(r"\.\d{2}$", num)) and not suffix and v % 1000 != 0
+        found.append((m.start(), end, v, cents))
+    out = []
+    for i, (a, b, v, cents) in enumerate(found):
+        lo = found[i - 1][1] if i else 0
+        hi = found[i + 1][0] if i + 1 < len(found) else len(s)
+        left = re.sub(r"[\s:=\-\u2013$]+$", "", s[lo:a])
+        # "COMBINED SINGLE LIMIT (Ea accident) $2,000,000" - an aside right
+        # before the amount belongs to the label it follows.
+        while left.endswith(")") and "(" in left:
+            o = left.rfind("(")
+            left = re.sub(r"[\s:=\-\u2013$]+$", "", left[:o] + " " + left[o + 1:-1])
+        cut = list(_LABEL_BREAK_RE.finditer(left))
+        if cut:
+            head = left[cut[-1].end():]
+            # A table cell: "| CSL | $1,000,000 |" - the label is the cell before.
+            if not head.strip() and cut[-1].group(0) == "|" and len(cut) > 1:
+                head = left[cut[-2].end():cut[-1].start()]
+            left = head
+        right = s[b:hi]
+        aside = _LABEL_ASIDE_RE.match(right)      # "$100,000 (Per accident)"
+        if aside:
+            right = aside.group(1)
+        else:
+            # Bracketed asides with no amount join the label ("Each Accident (CSL)").
+            right = re.sub(r"\(([^()$\d]{1,60})\)", r" \1 ", right)
+            stop = _LABEL_BREAK_RE.search(right)
+            if stop:
+                cell = right[:stop.start()]
+                # "| $1,000,000 | CSL |" - the label is the cell after, but
+                # only for an amount with no label before it (a row of
+                # "| label | amount |" pairs must not lend the next pair's label).
+                if not cell.strip() and not left.strip() and stop.group(0) == "|":
+                    nxt = _LABEL_BREAK_RE.search(right, stop.end())
+                    cell = right[stop.end():nxt.start() if nxt else len(right)]
+                right = cell
+        out.append((v, f"{left} {right}".strip(), cents))
+    return out
+
+
+def _amount_kind(label: str, cents: bool) -> str:
+    """What one labelled amount IS: other / csl / bi_person / bi_accident / pd /
+    accident / liability / bare."""
+    if cents or _NOT_LIABILITY_RE.search(label):
+        return "other"
+    bi, pd = bool(_BI_RE.search(label)), bool(_PD_RE.search(label))
+    if _PER_PERSON_RE.search(label):
+        return "bi_person"
+    if _CSL_WORDING_RE.search(label) or (bi and pd):
+        return "csl"                    # "BI & PD Combined", "BI and PD Liability ... CSL"
+    if pd:
+        return "pd"
+    if bi:
+        return "bi_accident"
+    if _ACCIDENT_WORDING_RE.search(label):
+        return "accident"
+    if _LIABILITY_WORD_RE.search(label):
+        return "liability"
+    return "bare"
+
+
+def read_liability_printing(text: Any, *, dec_entry: bool = False) -> Tuple[Optional[str], Optional[str]]:
+    """("csl" | "split" | None, "strong" | "weak" | None) for one printing.
+
+    Strong: an amount labelled CSL / combined; split parts (per person, PD, BI
+    per accident); the three-number shorthand ("100/300/50", "$250K/$500K/$100K").
+    Weak: ONE liability amount labelled only "each accident" or "liability"
+    (a CSL's usual wording - and, rarely, a split part's).
+    Two bare amounts ("$1M / $2M", a GL pair leaked into the field) are not a
+    reading at all - asked, never guessed. Labels that disagree: None.
+    """
+    s = _printing(text)
+    if not s.strip():
+        return None, None
+    if _SHORTHAND_SPLIT_RE.search(s) and not _CSL_WORDING_RE.search(s):
+        return "split", "strong"
+    kinds = [(_amount_kind(label, cents), v) for v, label, cents in _labelled_amounts(s)]
+    liab = [(k, v) for k, v in kinds if k != "other"]
+    if not liab:
+        return None, None
+    names = {k for k, _ in liab}
+    split_parts = names & {"bi_person", "bi_accident", "pd"}
+    if "csl" in names and split_parts:
+        return None, None
+    if "csl" in names:
+        return "csl", "strong"
+    if split_parts:
+        return "split", "strong"
+    bare = [v for k, v in liab if k == "bare"]
+    if len(liab) >= 3 and len(bare) == len(liab) and "/" in s:
+        return "split", "strong"         # "$250,000 / $500,000 / $100,000"
+    if len(liab) == 1 and liab[0][0] in ("accident", "liability"):
+        return "csl", "weak"             # "$1,000,000 Each Accident", "Covered Autos Liability $1M"
+    return None, None
+
+
+def liability_amounts(text: Any) -> List[float]:
+    """The LIABILITY money amounts a printing states, in dollars, in order -
+    not Med Pay, UM, PIP, deductibles, aggregates, premiums, counts or dates."""
+    return [v for v, label, cents in _labelled_amounts(text)
+            if _amount_kind(label, cents) != "other"]
+
+
+def limit_is_split_shaped(text: Any) -> bool:
+    """The printing itself states split limits."""
+    return read_liability_printing(text)[0] == "split"
+
+
+def _structure_reading(raw: Any) -> Optional[str]:
+    """A structure label's reading: "split" (a "split" word not negated),
+    "csl", or None."""
+    s = str(raw or "").strip().lower()
+    if not s:
+        return None
+    negated = bool(re.search(r"\b(?:not|non|no)[\s-]*split\b", s))
+    if re.search(r"\bsplit\b", s) and not negated:
+        return "split"
+    if _STRUCTURE_CSL_RE.search(s) or negated:
+        return "csl"
+    return None
+
+
+def _human_set(facts: Optional[dict], key: str) -> bool:
+    raw = (facts or {}).get(key)
+    if not isinstance(raw, dict):
         return False
-    if str(_fv(facts, "auto_liability_structure") or "").strip().lower() == "split":
+    try:
+        from services.fact_state import USER_CONFIRMED, derive_evidence_state
+        return derive_evidence_state(raw)[0] == USER_CONFIRMED
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def auto_csl_stated(facts: Optional[dict]) -> bool:
+    """The policy states a COMBINED SINGLE LIMIT - the limit's own printing
+    reads CSL, or ONE liability amount stands beside a structure saying CSL.
+    A bare "$1,000,000" with nothing else is not enough on its own."""
+    limit = _fv(facts, "auto_liability_limit")
+    reading, _strength = read_liability_printing(limit)
+    if reading == "csl":
+        return True
+    if reading == "split":
+        return False
+    return (len(set(liability_amounts(limit))) == 1
+            and _structure_reading(_fv(facts, "auto_liability_structure")) == "csl")
+
+
+def _human_liability_reading(facts: Optional[dict]) -> Optional[str]:
+    """What a PERSON said about the structure: "split", "csl", or None (nothing,
+    or two answers that disagree)."""
+    said = set()
+    if _human_set(facts, "auto_liability_structure"):
+        r = _structure_reading(_fv(facts, "auto_liability_structure"))
+        if r:
+            said.add(r)
+    if _human_set(facts, "auto_liability_limit"):
+        limit = _fv(facts, "auto_liability_limit")
+        r, _ = read_liability_printing(limit)
+        if r:
+            said.add(r)
+        elif len(set(liability_amounts(limit))) == 1:
+            said.add("csl")             # a person typed one amount for the limit
+    if any(_human_set(facts, k) and _fv(facts, k)
+           for k in ("auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")):
+        said.add("split")
+    return next(iter(said)) if len(said) == 1 else None
+
+
+# The declarations reading survives the post-generation purge of
+# `dec_page_entries` (PURGE_DEC_INDEX_AFTER_GENERATION): `_finalize_pipeline`
+# stores it here, so a door verdict never changes because the index was deleted
+# (skeptic G1: CSL before generation, a 60-cap split on the first editor save).
+DEC_LIABILITY_READING_KEY = "_auto_liability_dec_reading"
+
+
+def dec_auto_liability_reading(facts: Optional[dict]) -> Optional[str]:
+    """The VERIFIED declarations index's reading of the auto liability limit:
+    "csl" / "split" / None. Each auto entry is read like a printing (its label
+    and value together); entries that disagree settle nothing. With no index
+    (purged after generation) the stored reading answers."""
+    entries = _fv(facts, "dec_page_entries")
+    if not isinstance(entries, list):
+        held = str((facts or {}).get(DEC_LIABILITY_READING_KEY) or "")
+        return held if held in ("csl", "split") else None
+    try:
+        from services.lob_canon import canon_line
+    except Exception:                                         # noqa: BLE001
+        return None
+    seen = set()
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        if canon_line(e.get("line_of_business")) != "auto" and canon_line(e.get("section")) != "auto":
+            continue
+        r, _strength = read_liability_printing(
+            f"{e.get('label') or ''}: {e.get('value') or ''}", dec_entry=True)
+        if r:
+            seen.add(r)
+    return next(iter(seen)) if len(seen) == 1 else None
+
+
+def auto_limits_are_split(facts: Optional[dict], flags: Optional[dict] = None) -> bool:
+    """THE ONE DOOR for "is this auto liability written on split limits?".
+
+    CSL and split limits are alternatives. Boolean flags OR-merge across every
+    extraction chunk, so `auto_split_limits` can be set by a GL / lease
+    "$1,000,000 / $2,000,000" requirement (CH125) and nothing then clears it.
+    Evidence, strongest first:
+      1. what a PERSON said (structure, a typed limit, typed parts);
+      2. the limit's own printing, read STRONGLY (an amount labelled CSL or
+         combined; per-person / PD / BI-per-accident parts; "100/300/50");
+      3. the structure label ("CSL", "Split Limits"; "not split" is not split);
+      4. the verified declarations reading (stored, so the purge cannot move it);
+      5. the printing's WEAK reading (one amount "each accident");
+      6. the old AI signals: the flag, or parts printed with no limit.
+    """
+    flags = flags or {}
+    human = _human_liability_reading(facts)
+    if human:
+        return human == "split"
+    limit = _fv(facts, "auto_liability_limit")
+    reading, strength = read_liability_printing(limit)
+    if reading and strength == "strong":
+        return reading == "split"
+    structure = _structure_reading(_fv(facts, "auto_liability_structure"))
+    if structure:
+        return structure == "split"
+    dec = dec_auto_liability_reading(facts)
+    if dec:
+        return dec == "split"
+    if reading:
+        # The weak reading still outranks stray parts: "each accident" is how
+        # ISO prints a CSL, and the parts beside it are most often the GL limits
+        # leaked into the auto fields (CH125: $1M / $2M / $50K).
+        return reading == "split"
+    parts = [_fv(facts, k) or _fv(facts, k[len("auto_"):])     # legacy unprefixed keys
+             for k in ("auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")]
+    raw_flag = _fv(flags, "auto_split_limits")
+    flag_on = raw_flag is True or str(raw_flag).strip().lower() in {"true", "yes", "y", "1"}
+    return bool(flag_on or (any(parts) and not limit))
+
+
+def auto_split_limits_stated(facts: Optional[dict], flags: Optional[dict] = None) -> bool:
+    """Split limits are on the policy AND stated (the parts, or a split
+    printing) - per the one door, so a CSL the door reads is never "split
+    stated" because stray parts were extracted beside it."""
+    if not auto_limits_are_split(facts, flags if flags is not None else facts):
+        return False
+    if limit_is_split_shaped(_fv(facts, "auto_liability_limit")):
         return True
     return bool(_fv(facts, "auto_bi_per_person") or _fv(facts, "auto_bi_per_accident")
                 or _fv(facts, "auto_pd_per_accident"))
@@ -757,9 +1083,83 @@ def auto_radius_known(facts: Optional[dict]) -> bool:
     for row in _rows(facts, "auto_vin_schedule"):
         if isinstance(row, dict):
             for k in _RADIUS_ROW_KEYS:
-                if _RADIUS_RE.match(str(row.get(k) or "").strip()):
+                if radius_stated(row.get(k)):
                     return True
-    return radius_from_dec_entries(_fv(facts, "dec_page_entries")) is not None
+    entries = _fv(facts, "dec_page_entries")
+    if radius_from_dec_entries(entries) is not None or stated_radius_from_dec_entries(entries):
+        return True
+    # The declarations' own reading, stored while the index existed - the
+    # index is purged after generation, and the answer must not change then.
+    return radius_stated((facts or {}).get(AUTO_RADIUS_READING_KEY))
+
+
+# ── A STATED radius (6 Oct 2026, Choice Electric #26) ───────────────────────
+# The question the 6.3 item asks is "is a radius of operation stated?". A
+# schedule that prints the ISO radius CLASS - "LOCAL" (up to 50 miles),
+# "INTERMEDIATE" (51-200), "LONG DISTANCE" (over 200) - or a distance with its
+# unit ("50 miles") states one; the reader accepted digits only, so a
+# 17-vehicle schedule printing "LOCAL" on every row was charged "No radius of
+# operation" (-5). Scoring only: the ACORD 127 RADIUS box keeps its numeric
+# reader (`radius_from_dec_entries`), so nothing new is printed. "NA" / "N/A"
+# / "None" state nothing, as before.
+AUTO_RADIUS_READING_KEY = "_auto_radius_dec_reading"
+_RADIUS_DISTANCE_RE = re.compile(
+    r"^(?:up\s+to\s+|within\s+|under\s+)?(\d{1,4}(?:\.\d{1,3})?)\s*-?\s*(?:miles?|mi\.?)?"
+    r"(?:\s+radius)?$", re.I)
+_RADIUS_CLASS_RE = re.compile(
+    r"^(local|intermediate|long\s+distance)(?:\s+radius)?(?:\s*\([^)]*\))?$", re.I)
+_RADIUS_NOT_STATED = frozenset({"na", "n/a", "none", "not applicable", "-", "--", "tbd", "unknown"})
+
+
+def radius_stated(value: Any) -> bool:
+    """Does this cell or answer STATE a radius of operation: a distance
+    ("50", "50 miles", "up to 50 mi") or an ISO radius class ("LOCAL",
+    "Intermediate", "long-distance")? Blank, "NA" and anything else: no."""
+    if isinstance(value, dict) and "value" in value:
+        value = value.get("value")
+    if value is None or isinstance(value, (bool, list, dict)):
+        return False
+    text = re.sub(r"\s+", " ", str(value).replace("-", " ")).strip()
+    if not text or text.lower() in _RADIUS_NOT_STATED:
+        return False
+    if _RADIUS_RE.match(text) or _RADIUS_DISTANCE_RE.match(text):
+        return True
+    return bool(_RADIUS_CLASS_RE.match(text))
+
+
+def stated_radius_from_dec_entries(entries: Any) -> Optional[str]:
+    """The first radius an AUTO declarations entry labelled radius STATES
+    (a distance or an ISO class), else None. Unlike `radius_from_dec_entries`
+    (the number the ACORD 127 box prints) several values are fine here - a
+    fleet rated on several radii has still stated them."""
+    if not isinstance(entries, list):
+        return None
+    try:
+        from services.extraction_service import _canon_line
+    except Exception:                                         # noqa: BLE001
+        return None
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        try:
+            if _canon_line(str(e.get("line_of_business") or "")) != "auto":
+                continue
+        except Exception:                                     # noqa: BLE001
+            continue
+        label_tokens = set(re.findall(r"[a-z]+", str(e.get("label") or "").lower()))
+        if "radius" not in label_tokens:
+            continue
+        v = str(e.get("value") or "").strip()
+        if radius_stated(v):
+            return v
+    return None
+
+
+def dec_auto_radius_reading(facts: Optional[dict]) -> str:
+    """The radius the auto declarations state, for `AUTO_RADIUS_READING_KEY`
+    ("" = none). Stored by the pipeline while `dec_page_entries` exists."""
+    entries = _fv(facts or {}, "dec_page_entries")
+    return radius_from_dec_entries(entries) or stated_radius_from_dec_entries(entries) or ""
 
 
 def radius_from_dec_entries(entries: Any) -> Optional[str]:
@@ -842,7 +1242,10 @@ def auto_completeness_deduction(facts: Optional[dict], flags: Optional[dict]) ->
 # An experience modification factor as printed: 0.75, 1.00, 1.23, 85 (%),
 # ".95". Bounds are generous on purpose - a real mod outside 0.3-3.0 is
 # vanishingly rare and a number like "2024" in this box is a year, not a mod.
-_XMOD_NUM_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3})?|\.\d{1,3})(?![\d.])")
+# Up to FOUR decimals, as the fact registry's own validator allows (8 Oct 2026:
+# a rating worksheet prints "Experience Mod 1.0800", and three decimals read
+# that stated 1.08 as no mod at all on every Choice Electric session).
+_XMOD_NUM_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,4})?|\.\d{1,4})(?![\d.])")
 
 
 def parse_xmod(value: Any) -> Optional[float]:
@@ -1216,12 +1619,23 @@ _VALUATION_NAMED_RE: Dict[str, Any] = {
 
 
 def valuation_method_corroborated(method, entries=None, text="") -> bool:
-    """True when the DOCUMENT literally names the valuation method claimed.
+    """True when the DOCUMENT names the claimed valuation method FOR PROPERTY.
 
-    Returns True for anything it cannot interpret, exactly like
-    `payroll_period_corroborated`: this exists to strip an INVENTED method, not
-    to police free text the scoring rules already ignore. A method the
-    normalizer does not recognise is left alone.
+    `valuation_method` is the PROPERTY valuation (ACORD 140); auto physical
+    damage has `auto_physical_damage_valuation`. The gate exists to strip an
+    INVENTED method, so a method the normalizer does not recognise, or a
+    mention with no coverage context at all, still counts - no opinion.
+
+    5 Oct 2026, rebuilt after the generality audit (G3). The first cut asked
+    "is everything around the mention about vehicles?" and broke both ways:
+    it threw away real property valuations ("PROPERTY: Limit $500,000;
+    Valuation ACV", "BLDG #1 TIV ... VALUATION ACV", ISO's "aircraft or
+    vehicles" peril) - 19% in a seeded fuzz - and kept inland-marine, lease and
+    policy-wording mentions. Now each mention is read in its OWN context: the
+    nearest coverage word before it (or, with none, just after it) decides -
+    property corroborates, auto / inland marine does not - and a mention inside
+    policy WORDING, a lease clause or an appraisal never counts. Dec entries
+    are decided by their own line of business / section.
     """
     try:
         from services.normalization import normalize_valuation_method
@@ -1233,10 +1647,298 @@ def valuation_method_corroborated(method, entries=None, text="") -> bool:
         return True                       # not a method we can check - no opinion
     if isinstance(entries, list):
         for e in entries:
-            if isinstance(e, dict) and rx.search(
-                    str(e.get("label") or "") + " " + str(e.get("value") or "")):
+            if not isinstance(e, dict):
+                continue
+            blob = str(e.get("label") or "") + " " + str(e.get("value") or "")
+            if rx.search(blob) and _entry_is_property_context(e):
                 return True
-    return bool(rx.search(str(text or "")))
+    text = str(text or "")
+    for m in rx.finditer(text):
+        if _valuation_mention_counts(text, m.start(), m.end()):
+            return True
+    return False
+
+
+_VALUATION_LOOK_BEFORE = 1500
+# REBUILT a second time (5 Oct 2026, G3 skeptic). "Whichever family word sits
+# nearest decides" stripped real valuations off ordinary schedules of values -
+# an auto dealership's or a parking garage's building row, "Unit 4" in an
+# address, an EDP or appraisal column - and then the "valuation missing" soft
+# warning capped the package at 85; it also kept an auto schedule's ACV when
+# its header had a "Garaging Location" column. Now a mention is read in its OWN
+# row, its table's header and its sentence, in a fixed order:
+#   1. policy wording, a lease clause or an appraisal never counts;
+#   2. a STRONG vehicle marker (VIN, "VEH", comp / coll deductible, physical
+#      damage, covered autos, GVW, year / make / model) - not property;
+#   3. a property marker (building, BPP, construction class, sq ft, SOV,
+#      causes of loss, loc #) - counts;
+#   4. a weak vehicle word (vehicles, autos, trucks) or an inland-marine word
+#      (floater, contractors equipment, EDP) - not property;
+#   5. anything else - counts (no opinion: the gate strips INVENTED methods).
+# "location", "unit 4", "garage", "dealer", "stock" decide nothing on their own.
+_VAL_STRONG_AUTO_RE = re.compile(
+    r"\b(?:veh|vin|vehicle\s*(?:#|no\b|number|schedule|valuation)|comp(?:rehensive)?\s+ded\w*"
+    r"|coll(?:ision)?\s+ded\w*|physical\s+damage|covered\s+autos?|gvw|year\W+make\W+model)\b"
+    r"|\b(?:comprehensive|collision)\s*[:\-]|\b(?:comp(?:rehensive)?|coll(?:ision)?)\b[^\n|]{0,30}\bded\w*"
+    r"|\b(?=[A-HJ-NPR-Z0-9]*\d)(?=[A-HJ-NPR-Z0-9]*[A-HJ-NPR-Z])[A-HJ-NPR-Z0-9]{17}\b", re.I)
+_VAL_WEAK_AUTO_RE = re.compile(
+    r"\b(?:vehicles?|autos?|automobiles?|trucks?|trailers?|fleet|garaged)\b", re.I)
+# STRONG property markers name a building row outright; WEAK ones (a bare
+# "building", "premises", "location #") can sit in a vehicle's garaging cell.
+_VAL_STRONG_PROPERTY_RE = re.compile(
+    r"(?<![a-z])(?:bpp|business\s+personal\s+property|tiv|statement\s+of\s+values|sov|"
+    r"businessowners?|real\s+property|commercial\s+property|"
+    r"(?:building|bldg|property|contents)\s+(?:limit|value|coverage|valuation)|"
+    r"frame|masonry|joisted|non[\s-]?comb\w*|fire[\s-]?resistive|sq\.?\s*ft|"
+    r"square\s+f(?:ee|oo)t|year\s+built|construction)(?![a-z])", re.I)
+_VAL_PROPERTY_RE = re.compile(
+    r"(?<![a-z])(?:buildings?|bldgs?|bpp|business\s+personal\s+property|premises|"
+    r"loc(?:ation)?\s*(?:#|no\.?)\s*\d|tiv|statement\s+of\s+values|sov|coinsurance|"
+    r"limit\s+of\s+insurance|businessowners?|contents|real\s+property|perils?|"
+    r"causes?\s+of\s+loss|commercial\s+property|property(?!\s+damage)|"
+    r"frame|masonry|joisted|non[\s-]?comb\w*|fire[\s-]?resistive|sq\.?\s*ft|"
+    r"square\s+f(?:ee|oo)t|year\s+built|construction|occupancy)(?![a-z])", re.I)
+_VAL_IM_RE = re.compile(
+    r"\b(?:inland\s+marine|floater|contractors?\s*'?\s*equipment|contr\.\s*equip\b|scheduled\s+equipment|"
+    r"(?:unscheduled|employees?|small|hand)\s+tools|equipment\s+schedule|"
+    r"schedule\s+of\s+equipment|computer\s+(?:coverage|hardware)|"
+    r"electronic\s+data\s+processing|edp|motor\s+truck\s+cargo|cargo\s+(?:coverage|limit)|"
+    r"bailee|fine\s+arts|signs?\s+coverage)\b", re.I)
+_VAL_PERIL_PHRASE_RE = re.compile(r"aircraft\s*(?:,|or|and)\s*vehicles", re.I)
+_VAL_NOT_A_DECLARATION_RE = re.compile(
+    r"we\s+will\s+(?:determine|pay|not\s+pay)|how\s+much\s+we\s+pay|will\s+be\s+valued|"
+    r"the\s+value\s+of\s+(?:covered\s+)?property\s+will|in\s+the\s+event\s+of\s+(?:a\s+)?"
+    r"(?:total\s+)?\W?loss|in\s+determining|replaces\s+actual\s+cash\s+value|"
+    r"(?:at|as\s+of)\s+the\s+time\s+of\s+(?:the\s+)?loss|(?:tenant|lessee|landlord|lessor)s?\s+"
+    r"(?:shall|must|will|agrees?)|shall\s+(?:be\s+)?(?:insure|insured|maintain|keep|carry)|"
+    r"insurable\s+replacement\s+cost|replacement\s+cost\s+new|salient\s+facts|"
+    r"apprais(?:al|ed)\s+(?:report|summary|of|by|as\s+of)|"
+    # form wording, a loss run's settlement, an insurance-to-value estimate
+    r"this\s+(?:coverage\s+(?:form|part)|optional\s+coverage)|loss\s+condition|"
+    r"shown\s+in\s+the\s+declarations|settled\s+(?:at|for|on)|"
+    r"estimated\s+replacement\s+cost|replacement\s+cost\s+estimate|valuation\s+report", re.I)
+
+
+def _line_around(text: str, start: int, end: int) -> str:
+    """The mention's ROW: its physical line - or, on a long line (OCR text with
+    its line breaks lost, a paragraph), the cells / sentence around it."""
+    a = text.rfind("\n", 0, start) + 1
+    b = text.find("\n", end)
+    b = b if b >= 0 else len(text)
+    if b - a <= 220:
+        return text[a:b]
+    return _window_around(text, start, end, a, b)
+
+
+def _is_long_line(text: str, start: int, end: int) -> bool:
+    a = text.rfind("\n", 0, start) + 1
+    b = text.find("\n", end)
+    return ((b if b >= 0 else len(text)) - a) > 220
+
+
+def _window_around(text: str, start: int, end: int, a: int, b: int) -> str:
+    lo, hi = max(a, start - 160), min(b, end + 160)
+    head = text[lo:start]
+    cuts = [m.end() for m in re.finditer(r"[.;!?](?=\s)|\s\|\s", head)]
+    lo = lo + (cuts[-1] if cuts else 0)
+    tail = text[end:hi]
+    m = re.search(r"[.;!?](?=\s|$)|\s\|\s", tail)
+    return text[lo:end + (m.start() if m else len(tail))]
+
+
+def _sentence_around(text: str, start: int, end: int) -> str:
+    lo = max(0, start - 400)
+    head = text[lo:start]
+    cuts = [m.end() for m in re.finditer(r"[.;!?](?=\s)|\n[ \t]*\n", head)]
+    a = lo + (cuts[-1] if cuts else 0)
+    tail = text[end:end + 400]
+    m = re.search(r"[.;!?](?=\s|$)|\n[ \t]*\n", tail)
+    return text[a:end + (m.start() if m else len(tail))]
+
+
+def _heading_like(line: str) -> bool:
+    letters = [c for c in line if c.isalpha()]
+    return (len(letters) >= 6 and not re.search(r"\d", line)
+            and sum(c.isupper() for c in letters) / len(letters) >= 0.7)
+
+
+def _block_above(text: str, start: int) -> List[str]:
+    """The lines of the mention's own block above it, nearest first: at most
+    10, stopping at a blank line or a prose sentence (a table never spans
+    either - a header 1,500 characters away belongs to another block)."""
+    window = text[max(0, start - _VALUATION_LOOK_BEFORE):start]
+    out: List[str] = []
+    for line in reversed(window.split("\n")[:-1]):
+        line = line.strip()
+        if not line or len(out) >= 10:
+            break
+        if len(line.split()) >= 8 and re.search(r"[A-Za-z]{3,}[.!?]\s*$", line):
+            break                          # a sentence of prose ends the table
+        out.append(line)
+    return out
+
+
+def _nearest_heading(text: str, start: int) -> str:
+    """The nearest HEADING line above `start` within its own block: a short
+    line written mostly in capitals - "VEH VALUATION COMP DED COLL DED",
+    "COMMERCIAL PROPERTY DECLARATIONS". Empty when there is none."""
+    for line in _block_above(text, start):
+        if len(line) <= 140 and len(line.split()) >= 2 and _heading_like(line):
+            return line
+    return ""
+
+
+_FORM_WORDING_RE = re.compile(
+    r"this\s+(?:coverage\s+(?:form|part)|optional\s+coverage)|loss\s+condition|"
+    r"shown\s+in\s+the\s+declarations|we\s+will\s+(?:not\s+)?pay|you\s+must\b", re.I)
+
+
+def _nearest_marker_verdict(text: str, start: int, end: int) -> Optional[bool]:
+    """In a window of flattened text: True / False by the nearest family
+    marker to the mention (property counts; a vehicle, weak vehicle or
+    inland-marine marker does not); None when the window has none."""
+    lo, hi = max(0, start - 160), min(len(text), end + 160)
+    win = _VAL_PERIL_PHRASE_RE.sub(lambda m: " " * len(m.group(0)), text[lo:hi])
+    best = None
+    for verdict, rx in ((False, _VAL_STRONG_AUTO_RE), (True, _VAL_PROPERTY_RE),
+                        (False, _VAL_WEAK_AUTO_RE), (False, _VAL_IM_RE)):
+        for m in rx.finditer(win):
+            a, b = lo + m.start(), lo + m.end()
+            dist = start - b if b <= start else (a - end if a >= end else 0)
+            if best is None or dist < best[0]:
+                best = (dist, verdict)
+    return best[1] if best else None
+
+
+# Policy VOICE: a form's defined terms in quotes ("you", "loss", "hardware")
+# and its pronouns. Read case-sensitively - "US" on a dec page is a country.
+_POLICY_VOICE_RE = re.compile(r"[\"\u201c][a-z][a-z' -]{1,30}[\"\u201d]|\b(?:we|us|our|you|your)\b|"
+                              r"\bcovered\s+property\b")
+
+
+def _reads_as_policy_wording(sentence: str) -> bool:
+    """A sentence of PROSE (nine or more words, mostly lower-case) in a policy's
+    own voice. A declaration is a label and a value, a schedule row or a
+    heading; a form says what "we" pay "you" for "covered property"."""
+    s = re.sub(r"\s+", " ", sentence or "")
+    words = re.findall(r"[A-Za-z]+", s)
+    letters = [c for c in s if c.isalpha()]
+    if len(words) < 9 or not letters:
+        return False
+    if sum(c.islower() for c in letters) / len(letters) < 0.6:
+        return False
+    return bool(_POLICY_VOICE_RE.search(s))
+
+
+def _is_prose(sentence: str) -> bool:
+    s = re.sub(r"\s+", " ", sentence or "")
+    letters = [c for c in s if c.isalpha()]
+    return (len(re.findall(r"[A-Za-z]+", s)) >= 9 and bool(letters)
+            and sum(c.islower() for c in letters) / len(letters) >= 0.6)
+
+
+def _row_is_tabular(row: str) -> bool:
+    """A schedule row, a label and its value or a heading - not wrapped prose."""
+    return bool(_heading_like(row) or "|" in row or re.search(r"[$\u20ac\u00a3]\s?\d|\w:\s", row)
+                or (sum(c.isupper() for c in row if c.isalpha())
+                    >= 0.7 * max(1, sum(c.isalpha() for c in row))))
+
+
+_NUMBERED_ITEM_RE = re.compile(r"\s*(?:\d{1,2}|[a-z])[.)]\s", re.I)
+
+
+def _valuation_mention_counts(text: str, start: int, end: int) -> bool:
+    sentence = _sentence_around(text, start, end)
+    if _VAL_NOT_A_DECLARATION_RE.search(sentence) or \
+            _VAL_NOT_A_DECLARATION_RE.search(_nearest_heading(text, start)):
+        return False                      # policy wording, a lease, an appraisal
+    if _reads_as_policy_wording(sentence):
+        return False                      # a form's own prose ("... of the covered property")
+    row = _line_around(text, start, end)
+    # A numbered item inside a coverage form ("b. Replacement Cost Does Not
+    # Apply"): the paragraph around it is form wording.
+    area = text[max(0, start - 300):end + 300]
+    numbered = (_NUMBERED_ITEM_RE.match(row) or _NUMBERED_ITEM_RE.match(sentence)
+                or any(_NUMBERED_ITEM_RE.match(l) for l in _block_above(text, start)[:3]))
+    if numbered and \
+            (_FORM_WORDING_RE.search(area) or _POLICY_VOICE_RE.search(area)):
+        return False
+    nxt = ""
+    if _heading_like(row):                # "VALUATION REPORT - ACTUAL CASH VALUE"
+        b = text.find("\n", end)
+        if b >= 0:
+            nxt = _line_around(text, b + 1, b + 1)
+    if _is_long_line(text, start, end):
+        # OCR text with its line breaks lost: two blocks share one "line", so
+        # the marker NEAREST the mention decides, within its window.
+        verdict = _nearest_marker_verdict(text, start, end)
+        if verdict is not None:
+            return verdict
+    # A schedule row's "sentence" is the row: uppercase dec text has no full
+    # stops, so a sentence would run into the next section's footer.
+    own = _VAL_PERIL_PHRASE_RE.sub(" ", row if _row_is_tabular(row) else sentence)
+    own_row = _VAL_PERIL_PHRASE_RE.sub(" ", row)
+    # 1. The row's SPECIFIC words decide at once ("EMPLOYEE TOOLS (ACTUAL CASH
+    #    VALUE) $ 7,500" is inland marine whatever the rows around it say).
+    for ctx in (own_row, own):
+        if _VAL_STRONG_AUTO_RE.search(ctx):
+            return False
+        if _VAL_STRONG_PROPERTY_RE.search(ctx):
+            return True
+        if _VAL_IM_RE.search(ctx):
+            return False
+    # 2. Its table, nearest line first: the line after a heading-like row, the
+    #    rows above it, the heading ("Valuation on all units: ACV" under rows
+    #    printing VINs; "Truck terminal" under "BUILDING | BPP").
+    for line in [nxt] + _block_above(text, start)[:6] + [_nearest_heading(text, start)]:
+        line = _VAL_PERIL_PHRASE_RE.sub(" ", line or "")
+        if _VAL_STRONG_AUTO_RE.search(line):
+            return False
+        if _VAL_STRONG_PROPERTY_RE.search(line):
+            return True
+        if _VAL_IM_RE.search(line):
+            return False
+    # 3. Generic words: the row's, then its sentence's, then the header's.
+    header = _VAL_PERIL_PHRASE_RE.sub(" ", " ".join((_nearest_heading(text, start), nxt)))
+    for ctx in (own_row, own, header):
+        if _VAL_PROPERTY_RE.search(ctx):
+            return True
+        if _VAL_WEAK_AUTO_RE.search(ctx):
+            return False
+    # No coverage word anywhere: a declaration ("Valuation: Replacement Cost")
+    # counts; a sentence of prose naming nothing is not a declaration.
+    return not _is_prose(sentence)
+
+
+def _entry_is_property_context(entry: dict) -> bool:
+    """A dec entry about PROPERTY - read in the same order as a text mention:
+    its own line of business, then strong vehicle markers, property markers,
+    its section's line, then weak vehicle / inland-marine words."""
+    try:
+        from services.lob_canon import canon_line
+    except Exception:                                         # noqa: BLE001
+        canon_line = None                                     # type: ignore
+    section = str(entry.get("section") or "")
+    lob = str(entry.get("line_of_business") or "")
+    label, value = str(entry.get("label") or ""), str(entry.get("value") or "")
+    if _VAL_NOT_A_DECLARATION_RE.search(f"{section} {label}"):
+        return False                      # an appraisal / lease / policy wording entry
+    if canon_line is not None and lob:
+        fam = canon_line(lob)
+        if fam:
+            return fam == "property"
+    full = f"{section} {label} {value}"
+    if _VAL_STRONG_AUTO_RE.search(full):
+        return False
+    if _VAL_PROPERTY_RE.search(full):
+        return True
+    if canon_line is not None and section:
+        fam = canon_line(section)
+        if fam:
+            return fam == "property"
+    if _VAL_WEAK_AUTO_RE.search(_VAL_PERIL_PHRASE_RE.sub(" ", full)) or _VAL_IM_RE.search(full):
+        return False
+    return True
 
 
 def payroll_period_corroborated(period, entries=None, text=""):

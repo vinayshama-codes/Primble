@@ -78,6 +78,19 @@ NARRATIVE_COMPONENT_LINES: Dict[str, str] = {
 }
 
 
+def _wc_carried(flags: Optional[dict]) -> bool:
+    """The insured CARRIES Workers Compensation: the line is in the submission,
+    or in force and declined by it (5 Oct 2026, `line_presence.line_carried`).
+    For the readers about the insured's coverage - employees without WC, the
+    umbrella's Employers Liability - never for the WC rules of this submission,
+    which keep reading `has_workers_comp`."""
+    try:
+        from services.line_presence import line_carried
+        return line_carried("workers_comp", None, flags)
+    except Exception:                                          # noqa: BLE001
+        return bool((flags or {}).get("has_workers_comp"))
+
+
 def session_form_ids(session_data: Optional[dict],
                      form_results: Optional[list] = None) -> list:
     """Every ACORD form id this submission has selected, generated or been
@@ -346,9 +359,9 @@ def _token_diversity(text: str) -> float:
 # "$1 million"). Longer tokens MUST precede their prefixes in the regex
 # alternation below so "million"/"thousand"/"billion" win over "m"/"b".
 _MAGNITUDE_SUFFIXES = {
-    "mm": 1_000_000, "m": 1_000_000, "million": 1_000_000,
+    "mm": 1_000_000, "m": 1_000_000, "million": 1_000_000, "mil": 1_000_000, "mn": 1_000_000,
     "k": 1_000, "thousand": 1_000,
-    "b": 1_000_000_000, "billion": 1_000_000_000,
+    "b": 1_000_000_000, "billion": 1_000_000_000, "bn": 1_000_000_000,
 }
 
 
@@ -386,30 +399,127 @@ def _to_int(v) -> int | None:
             return None
 
 
-def _to_float(v) -> float | None:
-    """Parse a numeric string to float. Returns None on failure.
+# Forms other than ACORD 140 / 141 that print a Business Income limit.
+_BI_PRINTING_FORMS = frozenset({"ACORD_160", "ACORD_28"})
 
-    Bug fix (2026-07-11, found via loss-history test suite): must expand
-    magnitude shorthand ("$3.2M" -> 3,200,000) the same way _to_int does.
-    Every caller of this function reads a currency fact (total_revenue,
-    total_payroll, total_incurred, ...); a bare digit-strip on "$3.2M" was
-    silently truncating at the decimal and dropping the "M", parsing an
-    exposure of $3.2M as literally $3 - which then produced nonsense loss
-    frequency/ratio figures ("2 claims on $3 exposure").
+_MAGNITUDE_WORD = r"(millions?|mil|mn|thousands?|billions?|bn|mm|m|k|b)"
+_MAGNITUDE_AFTER_RE = re.compile(r"\s*" + _MAGNITUDE_WORD + r"(?![a-z])", re.I)
+_CURRENCY_BEFORE_RE = re.compile(r"(?:us\s*\$|[$€£]|\b(?:usd|cad|eur|gbp)\b)\s*$", re.I)
+_PLAIN_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_FISCAL_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+# A figure stated in thousands: "$18,600 (000s)", "18,600 (in thousands)",
+# "Revenue ($000): 18,600".
+_THOUSANDS_NOTE_RE = re.compile(
+    r"\(\s*(?:in\s+)?\$?\s*000'?s?\s*\)|\bin\s+(?:\$\s*)?thousands\b|\bin\s+000'?s\b"
+    r"|\(\s*thousands\s*\)", re.I)
+# A number that COUNTS something, not money: "2 locations", "5 years".
+_COUNT_AFTER_RE = re.compile(
+    r"\s*(?:locations?|sites?|stores?|years?|yrs?|employees?|vehicles?|units?|claims?|losses"
+    r"|drivers?|buildings?|months?|days?|people|persons?|staff|ft|pt)\b", re.I)
+# Two numbers joined as a RANGE - the magnitude printed once on the upper
+# bound belongs to both ("$1.2-1.5M", "$12 to 15 million").
+_RANGE_JOIN_RE = re.compile(
+    r"^\s*(?:-|–|—|to|/)\s*(?:us\s*\$|[$€£]|usd|cad|eur|gbp)?\s*$", re.I)
+
+
+def _to_float(v) -> float | None:
+    """Parse a money string to float. Returns None on failure.
+
+    READ THE AMOUNT, never the digits (5 Oct 2026, generality audit G2 and its
+    skeptic). A digit-strip turned "Revenue: $18.6MM" into 18.6, "66 FT / 7 PT"
+    into 667 and a range into 1.0e13; the first rewrite then read "$1.2-1.5M"
+    as 1.2 (an absurd 53,333,333% payroll warning and an 85 cap), "$18,600
+    (000s)" as 18,600 and "8810: 250,000" as 8,810. Now:
+      * every number is read with what stands beside it - a currency mark, a
+        magnitude (K / M / MM / million(s) / mil / mn / bn), a "%", a count word
+        ("2 locations", "5 years"), a label colon ("8810:"), a fiscal year;
+      * a range takes its upper bound's magnitude onto the lower bound, and the
+        LOWER bound is the reading;
+      * a stated unit of thousands ("(000s)", "in thousands", "($000)")
+        multiplies a figure that carries no magnitude of its own;
+      * the reading is the first money-like number (currency, magnitude or
+        four or more digits) that is not a percentage, a count, a label or a
+        year; else the first number that is none of those.
+    An OCR "O" inside a digit group is a zero ("18,6O0,000").
     """
-    if v is None:
+    if v is None or isinstance(v, bool):
         return None
-    s = str(v).replace(",", "").replace("$", "").strip().lower()
-    _mag = re.match(r"([\d.]+)\s*(million|thousand|billion|mm|m|k|b)\b", s)
-    if _mag:
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().lower()
+    s = re.sub(r"(?<=[\d,])o(?=[\d,o])", "0", s)
+    s = re.sub(r"(?<=[\d,])l(?=[\d,])", "1", s)
+    in_thousands = bool(_THOUSANDS_NOTE_RE.search(s))
+    s = _THOUSANDS_NOTE_RE.sub(" ", s)
+    s = re.sub(r"(?<=\d)[,\s](?=\d{3}(?!\d))", "", s)          # thousands separators
+    toks = []
+    for m in _PLAIN_NUMBER_RE.finditer(s):
         try:
-            return float(_mag.group(1)) * _MAGNITUDE_SUFFIXES[_mag.group(2)]
-        except Exception:
-            pass
-    try:
-        return float(re.sub(r"[^\d.]", "", s))
-    except Exception:
+            val = float(m.group(0))
+        except ValueError:
+            continue
+        mm = _MAGNITUDE_AFTER_RE.match(s, m.end())
+        word = (mm.group(1).lower() if mm else "")
+        if word.endswith("s") and word not in ("ms",):
+            word = word[:-1]
+        mag = _MAGNITUDE_SUFFIXES.get(word, 1)
+        end = mm.end() if mm else m.end()
+        currency = bool(_CURRENCY_BEFORE_RE.search(s[max(0, m.start() - 6):m.start()]))
+        after = s[end:end + 12]
+        toks.append({
+            "start": m.start(), "end": end, "val": val, "mag": mag, "currency": currency,
+            "pct": bool(re.match(r"\s*(?:%|percent\b|per\s*cent\b|pct\b)", after)),
+            "count": bool(_COUNT_AFTER_RE.match(s, end)) and not currency and mag == 1,
+            "label": bool(re.match(r"\s*:", after)) and not currency and mag == 1,
+            "year": bool(_FISCAL_YEAR_RE.fullmatch(m.group(0))) and not currency and mag == 1,
+        })
+    if not toks:
         return None
+    for i in range(len(toks) - 1):
+        lo, hi = toks[i], toks[i + 1]
+        if (lo["mag"] == 1 and hi["mag"] > 1 and lo["val"] <= hi["val"]
+                and _RANGE_JOIN_RE.match(s[lo["end"]:hi["start"]])):
+            lo["mag"] = hi["mag"]
+    usable = [t for t in toks if not (t["pct"] or t["count"] or t["label"] or t["year"])]
+    money = [t for t in usable if t["currency"] or t["mag"] > 1 or t["val"] >= 1000]
+    best = (money or usable or toks)[0]
+    value = best["val"] * best["mag"]
+    if in_thousands and best["mag"] == 1:
+        value *= 1_000
+    return value
+
+
+_PERCENT_STATED_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b|per\s*cent\b|pct\b)", re.I)
+_MONEY_SHAPED_RE = re.compile(r"[$€£]|\b(?:usd|cad|eur)\b|\d\s*(?:k|m|mm|million)\b", re.I)
+
+
+def _to_percent(v) -> Optional[float]:
+    """A PERCENTAGE, never a money amount (5 Oct 2026, generality audit G2).
+
+    `percent_subcontracted` is free text, and once `_to_float` learned money
+    shorthand, "$1.5M (35%)" read as 1,500,000 percent and raised a false hard
+    stop. A stated "%" / "percent" wins; otherwise one bare number from 0 to
+    100 is the percentage; anything money-shaped, or several numbers, has no
+    reading (None) - silence, never a guess. The ONE percent reader -
+    `cross_form_validator` delegates here.
+    """
+    if isinstance(v, dict) and "value" in v:
+        v = v.get("value")
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if 0 <= v <= 100 else None
+    s = str(v)
+    m = _PERCENT_STATED_RE.search(s)
+    if m:
+        return float(m.group(1))
+    if _MONEY_SHAPED_RE.search(s):
+        return None
+    nums = re.findall(r"\d+(?:\.\d+)?", s)
+    if len(nums) == 1:
+        val = float(nums[0])
+        return val if 0 <= val <= 100 else None
+    return None
 
 
 # C2 (2026-08-24): the attestation parser moved to services/loss_history_state
@@ -452,7 +562,70 @@ def _score_narrative_components(text: str, strict: bool = False) -> Dict[str, bo
     return out
 
 
-def _score_narrative_substance(text: str) -> int:
+# What each depth category asks for, in the card's words (13 Oct 2026).
+NARRATIVE_SUBSTANCE_ASKS: Dict[str, str] = {
+    "ownership_or_experience":      "how long the owners have run the business",
+    "loss_context":                 "a sentence on the loss history",
+    "risk_controls":                "the safety or loss-control program",
+    "prior_carrier_or_renewal":     "why the account is being marketed",
+    "specific_operations_detail":   "the scope of work (what the work primarily consists of)",
+    "coverage_or_limit_discussion": "the coverage or limits being sought",
+    "financial_or_workforce_context": "revenue, payroll or headcount",
+    "management_or_oversight_quality": "management's licences or expertise",
+}
+
+
+# A sentence starter per depth category - it carries the phrase the check reads,
+# the person finishes the sentence (owner, 13 Oct 2026: "use options").
+NARRATIVE_SUBSTANCE_STARTERS: Dict[str, str] = {
+    "ownership_or_experience":         "Ownership: in business since ",
+    "loss_context":                    "Loss history shows ",
+    "risk_controls":                   "Risk controls: written safety program ",
+    "prior_carrier_or_renewal":        "Reason for seeking coverage: renewal - ",
+    "specific_operations_detail":      "Scope of work: primarily ",
+    "coverage_or_limit_discussion":    "Coverage requested: ",
+    "financial_or_workforce_context":  "Workforce: number of employees ",
+    "management_or_oversight_quality": "Management: experienced management, licensed ",
+}
+
+
+def narrative_gap_options(components: Dict[str, bool], text: str, credited=frozenset()) -> List[dict]:
+    """Everything the narrative card still lacks, as tickable options for the
+    window: each missing topic and each missing depth category, with a sentence
+    starter to finish. Empty when nothing is missing.
+
+    Each option carries the `phrases` its own check reads (owner, 13 Oct 2026:
+    a pasted paragraph that covered every item ticked only the one option whose
+    starter it repeated word for word). The window shows an option covered as
+    soon as the typed text holds one of them - the same single-mention test the
+    score applies to the remarks (`_score_narrative_components`, non-strict, and
+    `_score_narrative_substance`)."""
+    out: List[dict] = []
+    for k, ok in (components or {}).items():
+        if not ok and k in NARRATIVE_COMPONENT_LABELS:
+            out.append({"key": f"topic:{k}", "label": NARRATIVE_COMPONENT_LABELS[k],
+                        "starter": f"{NARRATIVE_COMPONENT_LABELS[k]}: ",
+                        "phrases": list(_NARRATIVE_SCORE_SIGNALS.get(k, ()))})
+    t = (text or "").lower()
+    for k, phrases in _NARRATIVE_SUBSTANCE_SIGNALS.items():
+        if k not in (credited or ()) and not any(p in t for p in phrases):
+            out.append({"key": f"depth:{k}", "label": NARRATIVE_SUBSTANCE_ASKS.get(k, k).capitalize(),
+                        "starter": NARRATIVE_SUBSTANCE_STARTERS.get(k, ""),
+                        "phrases": list(phrases)})
+    return out
+
+
+def narrative_substance_gaps(text: str, credited=frozenset()) -> List[str]:
+    """The depth categories `_score_narrative_substance` finds no phrase for."""
+    t = (text or "").lower()
+    if not t:
+        return []
+    return [NARRATIVE_SUBSTANCE_ASKS.get(k, k.replace("_", " "))
+            for k, phrases in _NARRATIVE_SUBSTANCE_SIGNALS.items()
+            if k not in (credited or ()) and not any(p in t for p in phrases)]
+
+
+def _score_narrative_substance(text: str, credited=frozenset()) -> int:
     """Score narrative text for underwriting substance (0-100).
 
     Replaces character-count / vocabulary-diversity as the 40% quality component
@@ -468,8 +641,8 @@ def _score_narrative_substance(text: str) -> int:
         return 0
     t = text.lower()
     present = sum(
-        1 for phrases in _NARRATIVE_SUBSTANCE_SIGNALS.values()
-        if any(p in t for p in phrases)
+        1 for k, phrases in _NARRATIVE_SUBSTANCE_SIGNALS.items()
+        if k in (credited or ()) or any(p in t for p in phrases)
     )
     return int(present / len(_NARRATIVE_SUBSTANCE_SIGNALS) * 100)
 
@@ -814,9 +987,25 @@ def _tier2_entries(facts: dict) -> Tuple[
             continue                       # 3.6: removed from the denominator
         applicable.append(((field,), label))
         # ANSWERED, not "has a value" - see check_tier1.
-        if not _answered(facts, field):
+        if not _answered(facts, field) or _describes_a_vehicle_not_the_business(facts, field):
             missing.append(((field,), label))
     return applicable, missing
+
+
+def _describes_a_vehicle_not_the_business(facts: dict, field: str) -> bool:
+    """An operations description that only restates the vehicles' use class
+    ("LOCAL SERVICE" over `auto_vehicle_use` "service" - owner's run 18f6914f,
+    13 Oct 2026) is not an answer: the review screen lists it as missing, with
+    its fix, instead of "in place". The ruling is `normalization.
+    vehicle_use_as_operations` - the stamper, the fix window's pre-fill and the
+    questionnaire read the same one; a person's own or confirmed words stand."""
+    if field != "operations_description":
+        return False
+    try:
+        from services.normalization import vehicle_use_as_operations
+        return vehicle_use_as_operations(facts)
+    except Exception:                                          # noqa: BLE001
+        return False
 
 
 def _tier2_items(facts: dict) -> Tuple[List[str], List[str]]:
@@ -919,7 +1108,7 @@ def _key_detail_actions(facts: dict, flags: dict) -> List[dict]:
     A detail no person can type (mode none) carries no `resolution`: it is
     listed, never offered as a dead button. Additive: `missing` is unchanged."""
     try:
-        from services.answer_routing import answer_mode, MODE_FIELD, MODE_SCHEDULE
+        from services.answer_routing import answer_mode, MODE_FIELD, MODE_NARRATIVE, MODE_SCHEDULE
     except Exception:                                          # noqa: BLE001
         return []
     try:
@@ -937,6 +1126,13 @@ def _key_detail_actions(facts: dict, flags: dict) -> List[dict]:
             except Exception:                                  # noqa: BLE001
                 continue
             if mode.get("mode") == MODE_FIELD and mode.get("fact"):
+                typed.append(str(mode["fact"]))
+            # A prose fact of its own - the operations description - is typed
+            # in the same window (owner's run 18f6914f, 13 Oct 2026: it had no
+            # link, so a wrong one could not be replaced before generation).
+            # The ACORD 101 remarks stay the Narrative card's.
+            elif mode.get("mode") == MODE_NARRATIVE and mode.get("fact") \
+                    and mode.get("fact") not in ("additional_remarks_text", "acord101_remarks"):
                 typed.append(str(mode["fact"]))
             elif mode.get("mode") == MODE_SCHEDULE and mode.get("schedule_key") and not schedule_key:
                 schedule_key = str(mode["schedule_key"])
@@ -1172,6 +1368,112 @@ def _dec_entries_state_payroll(facts: dict) -> bool:
     return _entries_state_payroll((facts or {}).get("dec_page_entries"))
 
 
+# ── ONE READER: "does this package hold GL class codes?" (6 Oct 2026) ────────
+# Choice Electric #26. The question had two copies with two answers: the
+# legacy stop (`evaluate_stops`, fixed 5 Sep to read both homes) and the
+# Exposure "Operations" -20 (`_calculate_exposure_consistency`, which read only
+# `gl_class_codes_by_location`). Live ca93ed8f: the score said "no GL class
+# codes" while ACORD 126 printed three - and the three were the WORKERS
+# COMPENSATION rows (5190 / 8742 / 8810) that extraction had also filed under
+# the GL schedule. One reader now, both homes, minus every code the documents
+# give only to another line's rating (`pdf_service._line_code_witnesses`,
+# read WITHOUT the GL homes themselves, so a WC row copied into the GL
+# schedule cannot vouch for itself).
+GL_CLASS_CODE_HOMES: Tuple[str, ...] = ("gl_class_codes_by_location", "gl_class_code_schedule")
+_GL_CODE_SUBKEY_RE = re.compile(r"^(?:(?:gl_)?class_?codes?|codes?)$", re.I)
+_GL_CODE_TOKEN_RE = re.compile(r"\b\d{4,6}\b")
+
+
+def _gl_code_tokens(raw: Any) -> Tuple[List[str], bool]:
+    """(code tokens, shape understood) for one GL home. A shape this reader
+    cannot parse (an opaque string, an unexpected row) is reported so the
+    caller keeps today's verdict for it - never a deduction on a guess."""
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw.get("value")
+    if raw is None or raw == "" or raw == [] or raw == {}:
+        return [], True
+    tokens: List[str] = []
+    understood = True
+    items = raw if isinstance(raw, list) else [raw]
+    for item in items:
+        if isinstance(item, dict):
+            # A row counts only through its code cell (HEAD's rule): a row with
+            # no code column holds no class code. Only an opaque STRING home is
+            # "not understood" below.
+            for k, v in item.items():
+                if not _GL_CODE_SUBKEY_RE.search(str(k)):
+                    continue
+                vals = v if isinstance(v, list) else [v]
+                for one in vals:
+                    s = str(one or "").strip()
+                    if not s:
+                        continue
+                    hits = _GL_CODE_TOKEN_RE.findall(s)
+                    # A code cell is a code even when it is not all digits.
+                    tokens += hits if hits else [s]
+        elif isinstance(item, (str, int)):
+            hits = _GL_CODE_TOKEN_RE.findall(str(item))
+            if hits:
+                tokens += hits
+            elif str(item).strip():
+                understood = False
+        elif item is not None:
+            understood = False
+    return tokens, understood
+
+
+def gl_class_codes(facts: Optional[dict]) -> List[str]:
+    """The GL class codes the facts hold (both homes), in order, without the
+    codes another line's rating owns. Empty when there are none."""
+    facts = facts if isinstance(facts, dict) else {}
+    codes: List[str] = []
+    for home in GL_CLASS_CODE_HOMES:
+        toks, _ok = _gl_code_tokens(facts.get(home))
+        for t in toks:
+            if t not in codes:
+                codes.append(t)
+    if not codes:
+        return []
+    try:
+        from services.pdf_service import _line_code_witnesses
+        others = _line_code_witnesses(
+            {k: v for k, v in facts.items() if k not in GL_CLASS_CODE_HOMES})
+    except Exception:                                         # noqa: BLE001
+        return codes                       # cannot judge -> today's behaviour
+    kept = []
+    for c in codes:
+        owners = others.get(re.sub(r"[^a-z0-9]", "", c.lower())) or set()
+        if owners and "general_liab" not in owners:
+            continue                       # another line's rating owns it
+        kept.append(c)
+    return kept
+
+
+def gl_class_codes_present(facts: Optional[dict]) -> bool:
+    """Does the package hold GL class codes? The ONE reader every "GL coverage
+    with no class codes" rule asks. A home whose shape cannot be parsed still
+    counts as present (today's verdict), so a format change can never invent
+    a -20 or a warning."""
+    facts = facts if isinstance(facts, dict) else {}
+    if gl_class_codes(facts):
+        return True
+    for home in GL_CLASS_CODE_HOMES:
+        raw = facts.get(home)
+        toks, ok = _gl_code_tokens(raw)
+        if not ok and not toks:
+            return True
+        # HEAD's per-home rule, kept: any entry in the by-location home counted
+        # as present whatever its shape; a SCHEDULE row counts only through its
+        # code cell (a classification-only row holds no class code).
+        if home == "gl_class_codes_by_location" and not toks:
+            val = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+            if isinstance(val, list) and any(
+                    isinstance(r, dict) and not any(_GL_CODE_SUBKEY_RE.search(str(k)) for k in r)
+                    for r in val):
+                return True
+    return False
+
+
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
@@ -1262,12 +1564,9 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         # 125's GL CODE box and ACORD 126's hazard row A while this warning said
         # it did not exist. Same one-rule-two-copies shape as the H1-C phantom
         # keys - the fact was there, the checker looked in one of its two homes.
-        codes = _fv(facts, "gl_class_codes_by_location") or []
-        schedule = _fv(facts, "gl_class_code_schedule") or []
-        _have = bool(codes) or bool(
-            [r for r in schedule if isinstance(r, dict)
-             and str(r.get("class_code") or "").strip()])
-        if not _have:
+        # 6 Oct 2026: through `gl_class_codes_present`, the one reader the
+        # Exposure bucket asks too - both homes, minus another line's codes.
+        if not gl_class_codes_present(facts):
             soft.append("GL coverage detected but no class codes found")
 
     # ── Property ──────────────────────────────────────────────────────────────
@@ -1409,7 +1708,6 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
     if flags.get("has_auto_coverage"):
-        auto_limit_structure = _fv(facts, "auto_liability_structure")
         # THE REAL KEYS (H1 audit, 2026-08-26). This read `bi_per_person` /
         # `bi_per_accident` / `pd_per_accident` - three names nothing has ever
         # written. The extractor, the registry and the ACORD 127 stamper all
@@ -1457,12 +1755,12 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         # would flip to "split", fire this hard stop and cap the package at 60
         # on a policy that states its combined limit perfectly. A stated CSL
         # means the policy is not split.
-        _csl_stated = bool(_fv(facts, "auto_liability_limit"))
-        _split_indicated = (
-            flags.get("auto_split_limits")
-            or auto_limit_structure == "split"
-            or (any([bi_pp, bi_pa, pd_pa]) and not _csl_stated)
-        )
+        # 5 Oct 2026: a CSL STATED IN WORDS also outranks the AI split flag and
+        # an AI split structure - the flag OR-merges across chunks, so one chunk
+        # misreading a GL "$1,000,000 / $2,000,000" made a CSL policy "split"
+        # and capped it at 60. One door: coverage_evidence.auto_limits_are_split.
+        from services.coverage_evidence import auto_limits_are_split
+        _split_indicated = auto_limits_are_split(facts, flags)
         if _split_indicated:
             if not all([bi_pp, bi_pa, pd_pa]):
                 hard.append(
@@ -1492,7 +1790,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             if "GL policy is claims-made - retro date is required" not in soft:
                 soft.append("Claims-made GL policy requires retro date for umbrella attachment.")
 
-        if flags.get("has_workers_comp"):
+        if _wc_carried(flags):
             el_limit = _fv(facts, "employers_liability_limits")
             if not el_limit:
                 soft.append("Umbrella attaches over WC but Employers Liability limits not provided.")
@@ -1531,12 +1829,20 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         except Exception:                                  # noqa: BLE001
             gl_eff, gl_exp = _fv(facts, "effective_date"), _fv(facts, "expiration_date")
 
+        # ...and the same COMPARISON: by policy anniversary, every printing
+        # read alike (`umbrella_term_misalignment` - this copy's strict date
+        # compare still capped "Dec. 1, 2025" and "12:01 AM EST" at 85).
         umb_eff = _fv(facts, "umbrella_effective_date")
-        if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
-            soft.append("Umbrella and GL policy periods misaligned.")
-
         umb_exp = _fv(facts, "umbrella_expiration_date")
-        if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
+        try:
+            from services.cross_form_validator import umbrella_term_misalignment as _umb_mis
+            _eff_bad, _exp_bad, _note = _umb_mis(umb_eff, umb_exp, gl_eff, gl_exp)
+        except Exception:                                  # noqa: BLE001
+            _eff_bad = bool(umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff))
+            _exp_bad = bool(umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp))
+        if _eff_bad:
+            soft.append("Umbrella and GL policy periods misaligned.")
+        if _exp_bad:
             soft.append("Umbrella and GL expiration dates misaligned.")
 
         # ── THE REAL UNKNOWN, WHICH SILENCE WAS HIDING ──────────────────────
@@ -1803,6 +2109,9 @@ def generate_risk_transfer_enforcement_report(
 def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> List[dict]:
     """Form-specific cross-validation checks."""
     issues: List[dict] = []
+    # Rules are keyed by FORM: a form's second copy counts as its form (7 Oct 2026).
+    from services.form_instances import base_form_ids as _base_form_ids
+    selected_form_ids = _base_form_ids(selected_form_ids or [])
 
     if not _fv(facts, "applicant_name"):
         issues.append({"type": "hard_stop", "message": "Named insured missing - required on all forms"})
@@ -1824,7 +2133,7 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
         if isinstance(_locs, list) and _locs and not _fv(facts, "operations_description"):
             issues.append({"type": "warning", "message": "GL class codes present but no operations description"})
         if flags.get("is_contractor"):
-            pct = _to_float(_fv(facts, "percent_subcontracted"))
+            pct = _to_percent(_fv(facts, "percent_subcontracted"))
             wc  = _to_float(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll"))
             if pct and pct > 30 and not wc:
                 issues.append({"type": "warning", "message": f"High subcontracting ({pct:.0f}%) with no WC payroll"})
@@ -2570,7 +2879,13 @@ def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
         ]
         if len(docs) < 2:
             return [], []          # nothing to compare against
-        confirmed = set(((session_data or {}).get("underwriting_confirmations") or {}).keys())
+        # The extraction path passes the BASE key of every confirmation
+        # (`parse_confirmation_key`), so a line-scoped answer ("effective_date
+        # @auto") settles its comparison there. This path read the raw keys, and
+        # the same confirmation stopped counting on the first rescore (5 Oct).
+        from services.underwriting_consistency import confirmed_fact_keys
+        confirmed = confirmed_fact_keys(
+            (session_data or {}).get("underwriting_confirmations") or {})
         hard, soft, _info, _conf = split_doc_consistency_issues(
             check_doc_consistency(docs, confirmed)
         )
@@ -2618,9 +2933,9 @@ def doc_consistency_normalizations(session_data: dict) -> List[dict]:
         if len(docs) < 2:
             return []                  # nothing to compare against
         try:
-            from services.underwriting_consistency import parse_confirmation_key
-            confirmed = {parse_confirmation_key(k)[0]
-                         for k in ((session_data or {}).get("underwriting_confirmations") or {})}
+            from services.underwriting_consistency import confirmed_fact_keys
+            confirmed = confirmed_fact_keys(
+                (session_data or {}).get("underwriting_confirmations") or {})
         except Exception:                                      # noqa: BLE001
             confirmed = set(((session_data or {}).get("underwriting_confirmations") or {}).keys())
 
@@ -2677,8 +2992,12 @@ CONFIDENCE_SCORE = {
     #   could not locate                     -> "low_confidence" (orange, verify)
     # "ai_verified" takes the AI-high slot: it is the highest confidence the
     # AI path can reach - the value is on the page - but it was still placed
-    # by the model, not read deterministically, so it is not 1.00. Brent may
-    # re-tune the number (Q9); its slot in the ladder is not in question.
+    # by the model, not read deterministically, so it is not 1.00. BRENT
+    # CONFIRMED 1.00 / 0.85 / 0.50 on 24 Aug 2026 ("Those assignments will do
+    # for now"). A 13 Oct change to 1.00 was reverted the same day (owner: "we
+    # need to go with Brent's one"). The package still reaches 100 after forms:
+    # an "ai_verified" box is a Please verify row with Confirm
+    # (`needs_attention.CONFIRMABLE_LABELS`), and a confirmed value is "producer".
     "ai_verified":      0.85,
     "ai_high":          0.85,    # fact-level label (extraction); never a field label today
     "ai_low":           0.50,    # fact-level label (extraction); never a field label today
@@ -2738,7 +3057,10 @@ def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
         if label == "explicit_no":
             filled_items.append(field)     # 3.8: a valid completed response
             continue
-        if val is not None and str(val).strip() not in ("", "null", "None"):
+        # "Off" is an unticked checkbox's state - an empty box, not a value
+        # (13 Oct 2026: four stored ACORD 125s counted it as a filled box at
+        # zero weight, so the fill rate could never reach 100).
+        if val is not None and str(val).strip() not in ("", "null", "None", "Off", "/Off"):
             filled_items.append(field)
     filled_count = len(filled_items)
     if filled_count == 0:
@@ -2988,7 +3310,7 @@ _LOSS_RECOMMENDATION_FIELDS: Tuple[Tuple[str, Optional[str]], ...] = (
 
 
 # ── Answer routing for recommendation cards ──────────────────────────────────
-def _cap_stop_items(messages, coded_issues=None):
+def _cap_stop_items(messages, coded_issues=None, facts=None):
     """Turn cap-gate sentences into rows the panel can act on.
 
     Same shape `issue_registry` builds for every other stop - message, rule
@@ -3045,11 +3367,46 @@ def _cap_stop_items(messages, coded_issues=None):
             else:
                 code, _cluster, _tier = classify_legacy(msg, "hard_stop")
             resolution = resolution_for(code)
+            # A COPE card on a 2+ building package opens the location table, as
+            # on the pre-form banners (`premises_cope`, Choice Electric #18).
+            if isinstance(facts, dict) and facts:
+                from services.premises_cope import route_cope_resolution
+                resolution = route_cope_resolution(code, resolution, facts)
         except Exception as _cx:                               # noqa: BLE001
             logger.warning(f"cap stop not classified: {_cx}")
         out.append({"message": msg, "code": code, "resolution": resolution,
                     "severity": "hard_stop", "forms": list(forms)})
     return out
+
+
+def _gap_rows(pillar: str, score: float, items: List[dict], eff_weight: float) -> List[dict]:
+    """Best Solutions rows for one pillar's gap items (13 Oct 2026): a row per
+    item a box answers - its label, its fact, what it is worth in package
+    points - largest first, then ONE row for the items no box answers (a
+    coverage decision, or the cross-form checks, whose cards carry the fix).
+    The rows' `points_available` add up to the pillar's gap."""
+    rows: List[dict] = []
+    seen: Dict[str, dict] = {}
+    for it in sorted((i for i in items if i.get("fact")), key=lambda i: -int(i.get("points") or 0)):
+        fact = str(it["fact"])
+        pts = int(it.get("points") or 0)
+        if fact in seen:                    # two deductions, one box: one row
+            seen[fact]["points_available"] = round(seen[fact]["points_available"] + pts * eff_weight, 1)
+            seen[fact]["missing"].append(it.get("label") or fact)
+            continue
+        row = {"pillar": pillar, "score": score, "action": it.get("label") or fact,
+               "missing": [it.get("label") or fact], "field": fact,
+               "points_available": round(pts * eff_weight, 1), "closes_with": "type"}
+        seen[fact] = row
+        rows.append(row)
+    rest = [i for i in items if not i.get("fact")]
+    if rest:
+        pts = sum(int(i.get("points") or 0) for i in rest)
+        labels = [str(i.get("label") or "") for i in rest if i.get("label")]
+        rows.append({"pillar": pillar, "score": score, "action": "; ".join(labels),
+                     "missing": labels[:3], "field": None,
+                     "points_available": round(pts * eff_weight, 1), "closes_with": "review"})
+    return rows
 
 
 def _pillar_rec_field(pillar: str, action: str) -> Optional[str]:
@@ -3984,21 +4341,96 @@ def _umbrella_schedule_present(facts: dict) -> bool:
 # the panel's sub-rows and the Best Solutions action that names a weak bucket
 # both read it, so the action never shows an internal key ("auto completeness,
 # operations description") the panel calls something else.
+#
+# A label names what the bucket CHARGES FOR (Choice Electric #26, 10 Oct 2026).
+# Brent's Exposure read "Operations -20" on a package whose operations
+# description was fine - the -20 was "no GL class codes" - and "Cross-Document
+# Consistency -20" on a package whose documents agreed - the -20 was two
+# cross-form hard stops (Minimum Viable COPE, Period of Restoration), which are
+# required-value rules, not disagreements. So:
+#   * `operations_description` charges GL / WC class codes (missing, or not
+#     matching the operations described) and a contractor's subcontracting %;
+#   * `cross_document_consistency` charges every cross-form check the
+#     validator raised (-15 a hard stop, -5 a warning, capped at 20) -
+#     a disagreement between documents is one kind of those, not the only one.
+# The KEYS stay: stored payloads, the C3 trace and the tests key on them.
 EXPOSURE_BUCKET_LABELS: Dict[str, str] = {
-    "operations_description":       "Operations",
+    "operations_description":       "Class Codes & Operations",
     "coverage_information":         "Coverage Info",
     "payroll_employee_information": "Payroll/Employee",
     "revenue_sales_information":    "Revenue/Sales",
-    "cross_document_consistency":   "Cross-Document Consistency",
+    "cross_document_consistency":   "Cross-Form Checks",
     "auto_completeness":            "Auto Completeness",
     "wc_supplemental":              "WC Supplemental",
 }
+
+# What a payload scored before a rename printed, so a stored run reads today's
+# words without a recalculation (`with_current_bucket_labels`). History only -
+# add a line here whenever a label above changes.
+_RENAMED_EXPOSURE_LABELS: Dict[str, str] = {
+    "Operations":                 "operations_description",
+    "Cross-Document Consistency": "cross_document_consistency",
+}
+
+
+def _words_list(items: List[str]) -> str:
+    """"a", "a and b", "a, b, and c" - a list a person reads in one sentence."""
+    items = [str(i) for i in items if str(i or "").strip()]
+    if len(items) <= 2:
+        return " and ".join(items)
+    return ", ".join(items[:-1]) + ", and " + items[-1]
 
 
 def exposure_bucket_label(key: str) -> str:
     """The plain name of one Exposure bucket. A bucket missing from the table
     still reads as words, never as its snake_case key."""
     return EXPOSURE_BUCKET_LABELS.get(key) or str(key).replace("_", " ").title()
+
+
+def with_current_bucket_labels(package: Optional[dict]) -> Optional[dict]:
+    """A STORED package score with its Exposure rows named by today's table.
+
+    Labels are display. A payload scored before a rename keeps the old words in
+    `category_breakdown` and in the Best Solutions "Incomplete: ..." action
+    until its next recalculation, so a reopened run would print "Operations"
+    beside the new "-20 pts". This rewrites only those words, on a copy - the
+    caller's dict, every score, every key and every other string are untouched.
+    """
+    if not isinstance(package, dict):
+        return package
+    out = package
+    cb = package.get("category_breakdown")
+    cats = cb.get("exposure_consistency") if isinstance(cb, dict) else None
+    if isinstance(cats, dict):
+        fresh = {
+            k: ({**v, "label": EXPOSURE_BUCKET_LABELS[k]}
+                if isinstance(v, dict) and k in EXPOSURE_BUCKET_LABELS
+                and v.get("label") != EXPOSURE_BUCKET_LABELS[k] else v)
+            for k, v in cats.items()
+        }
+        if any(fresh[k] is not cats[k] for k in cats):
+            out = dict(out)
+            out["category_breakdown"] = {**cb, "exposure_consistency": fresh}
+    recs = package.get("top_recommendations")
+    if isinstance(recs, list):
+        prefix = "Incomplete: "
+        changed = False
+        new_recs = []
+        for r in recs:
+            act = r.get("action") if isinstance(r, dict) else None
+            if (isinstance(act, str) and act.startswith(prefix)
+                    and r.get("pillar") == "exposure_consistency"):
+                names = [n.strip() for n in act[len(prefix):].split(",")]
+                renamed = [exposure_bucket_label(_RENAMED_EXPOSURE_LABELS[n])
+                           if n in _RENAMED_EXPOSURE_LABELS else n for n in names]
+                if renamed != names:
+                    r = {**r, "action": prefix + ", ".join(renamed)}
+                    changed = True
+            new_recs.append(r)
+        if changed:
+            out = dict(out) if out is package else out
+            out["top_recommendations"] = new_recs
+    return out
 
 
 def _calculate_exposure_consistency(
@@ -4021,18 +4453,65 @@ def _calculate_exposure_consistency(
     "make the subcategories reflect the actual scoring inputs"). The headline is
     100 minus the sum of all buckets - identical to the prior flat computation.
     """
-    ded = {
-        "operations_description":       0,
-        "coverage_information":         0,
-        "payroll_employee_information": 0,
-        "revenue_sales_information":    0,
-        "cross_document_consistency":   0,
-        # V1 H1 (client section 6, 2026-08-26): two SUBMISSION-level
-        # completeness buckets for facts that used to cost points only on the
-        # ACORD 127 / 130 form scores, which never feed the package (D29).
-        "auto_completeness":            0,   # 6.3, capped at 25
-        "wc_supplemental":              0,   # 6.4, capped at 10
-    }
+    items = exposure_deduction_items(facts, flags, hard_cross, warn_cross)
+    ded = {k: 0 for k in _EXPOSURE_BUCKETS}
+    for it in items:
+        ded[it["bucket"]] += it["points"]
+    # Headline = 100 minus all buckets (identical to the prior flat computation).
+    score = max(0, min(100, 100 - sum(ded.values())))
+    subscores = {k: max(0, 100 - v) for k, v in ded.items()}
+    return score, subscores
+
+
+# The Exposure buckets, in the order the breakdown lists them.
+_EXPOSURE_BUCKETS: Tuple[str, ...] = (
+    "operations_description",
+    "coverage_information",
+    "payroll_employee_information",
+    "revenue_sales_information",
+    "cross_document_consistency",
+    # V1 H1 (client section 6, 2026-08-26): two SUBMISSION-level
+    # completeness buckets for facts that used to cost points only on the
+    # ACORD 127 / 130 form scores, which never feed the package (D29).
+    "auto_completeness",            # 6.3, capped at 25
+    "wc_supplemental",              # 6.4, capped at 10
+)
+
+
+def exposure_deduction_items(
+    facts: dict,
+    flags: dict,
+    hard_cross: list,
+    warn_cross: list,
+) -> List[dict]:
+    """Every Exposure Consistency deduction, ONE item each: {bucket, points,
+    fact, label} (13 Oct 2026 - the SQS reaches 100 when everything is
+    answered). `_calculate_exposure_consistency` sums these, so the score and
+    the questions that close it cannot drift apart. `fact` is the box that
+    answers the item (None: a coverage decision, or the cross-form cards, which
+    carry their own fix); `label` names it in a person's words. A capped bucket
+    lists its items in rule order until the cap is reached.
+    """
+    items: List[dict] = []
+
+    def _add(bucket: str, points: int, fact: Optional[str], label: str) -> None:
+        if points:
+            items.append({"bucket": bucket, "points": int(points),
+                          "fact": fact, "label": label})
+
+    def _add_capped(bucket: str, gaps, cap: int) -> None:
+        left = int(cap)
+        for fact, pts, label in gaps or []:
+            take = min(int(pts), left)
+            if take <= 0:
+                break
+            # The rule tables word a gap as its absence ("No radius of
+            # operation"); a row names what to answer ("Radius of operation").
+            label = str(label or "")
+            if label.startswith("No ") and len(label) > 3:
+                label = label[3].upper() + label[4:]
+            _add(bucket, take, fact, label)
+            left -= take
 
     # ── GL: class codes vs operations (L90, L92) ─────────────────────────────
     #
@@ -4049,14 +4528,18 @@ def _calculate_exposure_consistency(
     #     it can never fire on the same condition Tier 2 is charging for. It is
     #     a consistency check, which is what this pillar is for.
     if flags.get("has_general_liability"):
-        gl_codes = _fv(facts, "gl_class_codes_by_location")
-        codes_present = bool(gl_codes) and not (isinstance(gl_codes, list) and not gl_codes)
+        # ONE reader (6 Oct 2026, Choice Electric #26): both homes, minus the
+        # codes another line's rating owns - the same answer `evaluate_stops`
+        # gives. This copy read `gl_class_codes_by_location` alone.
+        codes_present = gl_class_codes_present(facts)
         if not codes_present:
-            ded["operations_description"] += 20
+            _add("operations_description", 20, "gl_class_codes_by_location", "GL class codes")
         elif _is_ops_class_code_mismatch(facts, flags, "gl"):
-            ded["operations_description"] += 15  # GL class code does not match operations description
+            # GL class code does not match operations description
+            _add("operations_description", 15, "gl_class_codes_by_location",
+                 "GL class codes that match the operations described")
         if not _fv(facts, "gl_limits") and not _fv(facts, "gl_each_occurrence"):
-            ded["coverage_information"] += 8
+            _add("coverage_information", 8, "gl_each_occurrence", "GL each occurrence limit")
 
     # ── Payroll / revenue exposure base (L41, L121) ──────────────────────────
     #
@@ -4091,34 +4574,43 @@ def _calculate_exposure_consistency(
     if _rev and _pay and _rev > 0 and _pay > 0:
         _ratio = _pay / _rev
         if _ratio > 2.0:
-            ded["revenue_sales_information"] += 10  # Payroll is 200%+ of revenue - very unusual
+            # Payroll is 200%+ of revenue - very unusual
+            _add("revenue_sales_information", 10, "total_payroll",
+                 "Payroll is more than twice the revenue - check both figures")
         elif _ratio < 0.01:
-            ded["revenue_sales_information"] += 5    # Payroll under 1% of revenue - suspiciously low
+            # Payroll under 1% of revenue - suspiciously low
+            _add("revenue_sales_information", 5, "total_payroll",
+                 "Payroll is under 1% of revenue - check both figures")
 
     # ── WC: payroll + class codes + multi-state (L121, L143-150) ─────────────
     if flags.get("has_workers_comp"):
         if not _fv(facts, "wc_payroll") and not _fv(facts, "total_payroll"):
-            ded["payroll_employee_information"] += 12
+            _add("payroll_employee_information", 12, "wc_payroll", "Workers comp payroll")
         if not _fv(facts, "wc_class_codes"):
-            ded["operations_description"] += 10
+            _add("operations_description", 10, "wc_class_codes", "Workers comp class codes")
         elif _is_ops_class_code_mismatch(facts, flags, "wc"):
-            ded["operations_description"] += 15  # WC class code does not match operations description
+            # WC class code does not match operations description
+            _add("operations_description", 15, "wc_class_codes",
+                 "Workers comp class codes that match the operations described")
         if flags.get("wc_multi_state") and not _fv(facts, "wc_payroll_by_state"):
-            ded["payroll_employee_information"] += 8
+            # The breakdown by state IS the class table (V1 H3).
+            _add("payroll_employee_information", 8, "wc_class_codes",
+                 "Workers comp payroll by state")
 
     # ── Contractor: subcontracting % reconciliation (L91, L458) ──────────────
     if flags.get("is_contractor") or flags.get("has_subcontractors"):
         if not _fv(facts, "percent_subcontracted"):
-            ded["operations_description"] += 8
+            _add("operations_description", 8, "percent_subcontracted",
+                 "Percent of work subcontracted")
 
     # ── Auto: liability structure + symbols (L184-191) ───────────────────────
     if flags.get("has_auto_coverage"):
         # STATED as a CSL or as split limits - a split policy has no CSL by
         # design and was charged -10 for "no liability limit" (live P5).
         if not _auto_liability_stated(facts):
-            ded["coverage_information"] += 10
+            _add("coverage_information", 10, "auto_liability_limit", "Auto liability limit")
         if not _fv(facts, "auto_covered_symbols"):
-            ded["coverage_information"] += 5
+            _add("coverage_information", 5, "auto_covered_symbols", "Covered auto symbols")
 
     # ── V1 H1 6.3 - Auto Completeness (owned / scheduled exposure only) ─────
     # Client: "an incomplete ACORD 127 can receive a poor individual form score
@@ -4130,8 +4622,11 @@ def _calculate_exposure_consistency(
     # deductions remain separately applicable" - the two above are untouched.
     # A genuinely hired/non-owned-only account deducts nothing here.
     try:
-        from services.coverage_evidence import auto_completeness_deduction
-        ded["auto_completeness"] += auto_completeness_deduction(facts, flags)
+        from services.coverage_evidence import (
+            AUTO_COMPLETENESS_CAP, auto_completeness_gaps,
+        )
+        _add_capped("auto_completeness", auto_completeness_gaps(facts, flags),
+                    AUTO_COMPLETENESS_CAP)
     except Exception as _ace:                                  # noqa: BLE001
         logger.warning("auto completeness skipped: %s", _ace, exc_info=True)
 
@@ -4145,15 +4640,20 @@ def _calculate_exposure_consistency(
     # "This cap does not replace existing WC payroll/class/multi-state
     # deductions" - those stay in the buckets above.
     try:
-        from services.coverage_evidence import wc_supplemental_deduction
-        ded["wc_supplemental"] += wc_supplemental_deduction(facts, flags)
+        from services.coverage_evidence import (
+            WC_SUPPLEMENTAL_CAP, wc_supplemental_gaps,
+        )
+        _add_capped("wc_supplemental", wc_supplemental_gaps(facts, flags),
+                    WC_SUPPLEMENTAL_CAP)
     except Exception as _wse:                                  # noqa: BLE001
         logger.warning("wc supplemental skipped: %s", _wse, exc_info=True)
 
     # ── Exposure-coverage gaps (employees without WC, vehicles without auto) ─
     _num_emp = _to_int(_fv(facts, "num_employees"))
-    if _num_emp and _num_emp > 5 and not flags.get("has_workers_comp"):
-        ded["payroll_employee_information"] += 8   # Employees detected but no WC coverage
+    if _num_emp and _num_emp > 5 and not _wc_carried(flags):
+        # Employees detected but no WC coverage - a coverage decision, no box
+        _add("payroll_employee_information", 8, None,
+             "Employees are listed but no workers comp coverage is carried")
 
     _has_vehicle_exposure = bool(
         _fv(facts, "auto_vin_schedule")
@@ -4161,16 +4661,17 @@ def _calculate_exposure_consistency(
         or flags.get("auto_vehicles_detected")
     )
     if _has_vehicle_exposure and not flags.get("has_auto_coverage"):
-        ded["coverage_information"] += 8   # Vehicles detected but no auto coverage
+        # Vehicles detected but no auto coverage - a coverage decision, no box
+        _add("coverage_information", 8, None,
+             "Vehicles are listed but no auto coverage is carried")
 
     # ── Residual cross-form penalty (smaller now that checks are explicit) ──
     cross_penalty = min(len(hard_cross) * 15 + len(warn_cross) * 5, 20)
-    ded["cross_document_consistency"] += cross_penalty
-
-    # Headline = 100 minus all buckets (identical to the prior flat computation).
-    score = max(0, min(100, 100 - sum(ded.values())))
-    subscores = {k: max(0, 100 - v) for k, v in ded.items()}
-    return score, subscores
+    if cross_penalty:
+        # Each check has its own Hard Stop / Warning card - the card is the fix.
+        _add("cross_document_consistency", cross_penalty, None,
+             "Cross-form checks (see the hard stops and warnings)")
+    return items
 
 
 # ── Follow-form detection (Option B, client Q3) ──────────────────────────────
@@ -4285,7 +4786,7 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     if not gl_ok or not auto_ok:
         return "umbrella_coverage_needs_review"
 
-    if flags.get("has_workers_comp"):
+    if _wc_carried(flags):
         el_val = _to_int(_fv(facts, "employers_liability_limits"))
         if el_val is None or el_val < _UMB_EL_OK:
             return "umbrella_coverage_needs_review"
@@ -4882,8 +5383,9 @@ def _compute_category_breakdown(
     Sub-row structure (client-approved, updated to reflect actual scoring inputs):
       Structural Completeness  - Applicant Info (tier1), Underwriting Profile (tier2),
                                  Form Fill Quality (conf_rate) — these ARE the P1 formula
-      Exposure Consistency     - Operations, Coverage Info, Payroll/Employee,
-                                 Revenue/Sales, Cross-Document Consistency
+      Exposure Consistency     - EXPOSURE_BUCKET_LABELS (Class Codes & Operations,
+                                 Coverage Info, Payroll/Employee, Revenue/Sales,
+                                 Cross-Form Checks, Auto Completeness, WC Supplemental)
       Property Integrity       - Minimum COPE (hard-stop gate), Carrier-Grade Required (Tier1),
                                  Carrier-Grade Preferred (Tier2) — mirrors _calculate_cope_score
       Loss History             - Loss History
@@ -5077,12 +5579,14 @@ def _compute_category_breakdown(
             for k in _ordered
         }
     else:
+        # Same label table as the scored rows (Choice Electric #26) - a second
+        # copy of the names here is how "Operations" outlived its meaning.
         _exp_cats = {
-            "operations_description":       _cat(ops_s, ops_st,                                                          "Operations"),
-            "coverage_information":         _cat(cov_s, "ok" if cov_s == 100 else "missing",                            "Coverage Info"),
-            "payroll_employee_information": _cat(pay_s, "ok" if pay_s == 100 else ("partial" if pay_s else "missing"),  "Payroll/Employee"),
-            "revenue_sales_information":    _cat(rev_s, "ok" if rev_s == 100 else ("partial" if rev_s else "missing"),  "Revenue/Sales"),
-            "cross_document_consistency":   _cat(xd_s,  xd_st,                                                          "Cross-Document Consistency"),
+            "operations_description":       _cat(ops_s, ops_st,                                                          exposure_bucket_label("operations_description")),
+            "coverage_information":         _cat(cov_s, "ok" if cov_s == 100 else "missing",                            exposure_bucket_label("coverage_information")),
+            "payroll_employee_information": _cat(pay_s, "ok" if pay_s == 100 else ("partial" if pay_s else "missing"),  exposure_bucket_label("payroll_employee_information")),
+            "revenue_sales_information":    _cat(rev_s, "ok" if rev_s == 100 else ("partial" if rev_s else "missing"),  exposure_bucket_label("revenue_sales_information")),
+            "cross_document_consistency":   _cat(xd_s,  xd_st,                                                          exposure_bucket_label("cross_document_consistency")),
         }
 
     # ── Structural Completeness sub-rows - C3, 2026-08-25 ───────────────────
@@ -5265,7 +5769,7 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
         score -= 20              # Required underlying Auto missing (M4)
 
     # EL tiers (client Q2: $1M full, $500K acceptable, <$500K reduction)
-    if flags.get("has_workers_comp"):
+    if _wc_carried(flags):
         el_val = _to_int(_fv(facts, "employers_liability_limits"))
         if el_val is None:
             score -= 25          # Missing EL
@@ -5349,6 +5853,13 @@ def _calculate_narrative_quality(
     # the narrative lacked and the ARQ asked the client to provide). A filled
     # answer credits its component directly and joins the structured scan text so
     # both the component breakdown and the substance half reflect it.
+    # The meaning-based reading of exactly these remarks (13 Oct 2026,
+    # services/narrative_reader): it only ADDS to the keyword pass.
+    try:
+        from services.narrative_reader import credited as _credited_reading
+        _read_topics, _read_depth = _credited_reading(facts, remarks)
+    except Exception:                                          # noqa: BLE001
+        _read_topics, _read_depth = set(), set()
     _enrich_present = _only_applicable(_narrative_enrichment_present(facts))
     _enrich_text    = _narrative_enrichment_text(facts)
     if _enrich_text:
@@ -5442,6 +5953,8 @@ def _calculate_narrative_quality(
             k: bool(components.get(k) or _enrich_present.get(k))
             for k in _applicable
         }
+    if _read_topics:
+        components = {k: bool(components.get(k) or k in _read_topics) for k in _applicable}
     present_count = sum(1 for v in components.values() if v)
     total_count   = len(components)
     component_pct = int(present_count / total_count * 100) if total_count else 0
@@ -5452,7 +5965,7 @@ def _calculate_narrative_quality(
     # not writing length." This deliberately replaces the old character-count /
     # vocabulary-diversity measure with substance-signal detection - the client's
     # stated V1 preference, not a deviation from it.
-    substance_pct = _score_narrative_substance(text)
+    substance_pct = _score_narrative_substance(text, credited=_read_depth)
 
     # Blend: 60% component coverage, 40% underwriting substance
     raw = int((component_pct * 0.6 + substance_pct * 0.4) * source_factor)
@@ -5530,46 +6043,67 @@ def _calculate_cope_score(facts: dict, flags: dict) -> int:
     """
     if not flags.get("has_property_coverage"):
         return 100
+    # 100 minus every gap (`property_gap_items` - the one list the score and
+    # the questions that close it are both read from, 13 Oct 2026).
+    return min(100, max(0, 100 - sum(i["points"] for i in property_gap_items(facts, flags))))
 
-    min_ok = all([
-        bool(_fv(facts, "locations")),
-        bool(_fv(facts, "occupancy_type")),
-        bool(_fv(facts, "construction_type")),
-        bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
-    ])
 
-    if not min_ok:
-        return 0
+# The COPE fields the Property pillar credits, as a person names them.
+_COPE_TIER1 = (("year_built", "Year built"), ("roof_year", "Roof year"),
+               ("sprinkler_system", "Sprinkler system"),
+               ("fire_protection_class", "Fire protection class"))
+_COPE_TIER2 = (("distance_to_hydrant", "Distance to the nearest fire hydrant"),
+               ("fire_department_type", "Fire department type"),
+               ("business_income_limit", "Business income limit"),
+               ("period_of_restoration", "Period of restoration"))
+_COPE_MINIMUM = (("locations", "Premises address"), ("occupancy_type", "Occupancy type"),
+                 ("construction_type", "Construction type"),
+                 ("property_building_value", "Building or contents value"))
 
-    # Tier 1 Required: 4 fields → drive Minimum-Viable 60 up toward ~80.
-    _tier1 = ["year_built", "roof_year", "sprinkler_system", "fire_protection_class"]
-    tier1_filled = [bool(_fv(facts, k)) for k in _tier1]
-    tier1_count  = sum(tier1_filled)
 
-    # Tier 2 Preferred: 4 client-approved fields → drive ~80 up to 100.
-    # Each Tier 2 field is worth 5 pts so the four client-approved fields reach a
-    # clean 100 (60 + 4×5 + 4×5) without relying on a special-case promotion.
-    _tier2 = [
-        "distance_to_hydrant", "fire_department_type",
-        "business_income_limit", "period_of_restoration",
-    ]
-    tier2_filled = [bool(_fv(facts, k)) for k in _tier2]
-    tier2_count  = sum(tier2_filled)
+def property_gap_items(facts: dict, flags: dict) -> List[dict]:
+    """Every Property Integrity deduction, ONE item each: {points, fact, label}
+    (13 Oct 2026). The three-tier COPE model of `_calculate_cope_score`:
 
-    # Decision_Tree.txt (L319/L398/L407): Minimum-Viable COPE floors Property
-    # Integrity at ~60-70, NOT 30, and Carrier-Grade reaches 100. Base 60 also
-    # keeps this in step with the per-form COPE path in calculate_sqs (also 60-
-    # floored) - the two diverging (30 vs 60) was a real scoring bug.
-    score = 60 + tier1_count * 5 + tier2_count * 5  # 60 + 0-20 + 0-20 = 60-100
-
+      * Minimum Viable COPE missing -> the pillar is 0. Its missing parts
+        carry the 60 base plus the tier fields already present (what answering
+        them returns); every missing tier field carries its own 5.
+      * Minimum Viable present -> 60 + 5 per Tier 1 / Tier 2 field present, so
+        each missing field is a 5-point item; an ACV / RCV conflict is a
+        10-point item on the valuation method.
+    The items always sum to the pillar's gap (100 - score).
+    """
+    if not flags.get("has_property_coverage"):
+        return []
+    present = {
+        "locations": bool(_fv(facts, "locations")),
+        "occupancy_type": bool(_fv(facts, "occupancy_type")),
+        "construction_type": bool(_fv(facts, "construction_type")),
+        "property_building_value": bool(_fv(facts, "property_building_value")
+                                        or _fv(facts, "property_bpp_value")),
+    }
+    tier_missing = [(k, label) for k, label in _COPE_TIER1 + _COPE_TIER2
+                    if not bool(_fv(facts, k))]
+    tier_filled = len(_COPE_TIER1) + len(_COPE_TIER2) - len(tier_missing)
+    items: List[dict] = []
+    min_missing = [(k, label) for k, label in _COPE_MINIMUM if not present[k]]
+    if min_missing:
+        share = 60 + tier_filled * 5
+        base, extra = divmod(share, len(min_missing))
+        for n, (k, label) in enumerate(min_missing):
+            items.append({"points": base + (1 if n < extra else 0), "fact": k,
+                          "label": label, "minimum_viable": True})
+    for k, label in tier_missing:
+        items.append({"points": 5, "fact": k, "label": label})
     # ACV vs RCV conflict: -10 when the source documents and the generated-form
     # valuation basis disagree (client Property Integrity validation). Detection
     # is synonym-safe via _acv_rcv_conflict; the matching review flag is raised in
-    # evaluate_stops so the conflict is surfaced, not silently deducted.
-    if _acv_rcv_conflict(facts):
-        score = max(0, score - 10)  # Valuation basis conflict (ACV vs RCV)
-
-    return min(100, max(0, score))
+    # evaluate_stops so the conflict is surfaced, not silently deducted. Below
+    # Minimum Viable COPE the pillar is already 0 and it costs nothing more.
+    if not min_missing and _acv_rcv_conflict(facts):
+        items.append({"points": 10, "fact": "valuation_method",
+                      "label": "Valuation method - the documents disagree (replacement cost or actual cash value)"})
+    return items
 
 
 # ── Package-level SQS ─────────────────────────────────────────────────────────
@@ -6029,7 +6563,7 @@ def _build_umbrella_warnings(facts: dict, flags: dict, p5: Optional[int]) -> Lis
             f"(found ${_auto_val:,}, expected ${_UMB_AUTO_CSL_MIN:,}+)."
         )
     # Client Q2: surface a low/missing Employers Liability when umbrella is over WC.
-    if flags.get("has_workers_comp"):
+    if _wc_carried(flags):
         _el_val = _to_int(_fv(facts, "employers_liability_limits"))
         if _el_val is None:
             warnings.append(
@@ -6111,12 +6645,19 @@ def calculate_package_sqs(
     user_id: Optional[str] = None,
     calculation_stage: str = "initial_extract",
     _probe: bool = False,
+    form_fill: bool = True,
 ) -> dict:
     """
     Calculate package-level SQS with 6 spec-compliant pillars (Decision Tree v2.1.0+).
     Pillars: structural_completeness (25%) + exposure_consistency (25%) +
              property_integrity (15%) + loss_history_alignment (15%) +
              umbrella_limit_adequacy (10%) + narrative_quality (10%)
+
+    `form_fill=False` (owner + Brent, 13 Oct 2026 - the SQS exists without
+    forms): Structural is the C3 3.7 no-forms formula (Tier 1 53.3 / Tier 2
+    46.7) even when `form_results` are given. The pre-form door passes it: its
+    per-form results score RECOMMENDED forms nobody has generated, so their
+    fill rate measured a form, not the submission.
     """
     # Normalize mutable args - callers occasionally pass None when the session
     # field exists but is stored as null in the DB.
@@ -6128,7 +6669,8 @@ def calculate_package_sqs(
     # pillars so reclassifying a document measurably moves the score (§4.2).
     _present_types = _present_doc_types(session_data)
     _has_narrative = "narrative" in _present_types
-    _has_loss_run  = "loss_run"  in _present_types
+    from services.loss_history_state import package_has_loss_runs
+    _has_loss_run  = package_has_loss_runs((session_data or {}).get("docs"), facts)
     _session_docs  = (session_data or {}).get("docs") or []
 
     lob = infer_lob(facts, flags)
@@ -6148,7 +6690,9 @@ def calculate_package_sqs(
         r.get("confidence_fill_rate")
         for r in (form_results or [])
         if isinstance(r, dict) and isinstance(r.get("confidence_fill_rate"), (int, float))
-    ]
+    ] if form_fill else []
+    if not form_fill:
+        mapped_data = None          # no generated form: nothing to measure a fill on
     if _form_fill_rates:
         _fill_avg = int(sum(_form_fill_rates) / len(_form_fill_rates))
         p1 = int(tier1_score * _W_TIER1 + tier2_score * _W_TIER2
@@ -6240,6 +6784,14 @@ def calculate_package_sqs(
         narrative_doc_text=_narr_doc_text,
         form_ids=session_form_ids(session_data, form_results),
     )
+    # The text the depth check read - the card names what it still lacks.
+    _narrative_text_for_card = " ".join(filter(None, [
+        _narr_doc_text, _narrative_remarks_text(facts)])) or str(_fv(facts, "operations_description") or "")
+    try:
+        from services.narrative_reader import credited as _credited_reading
+        _card_read_depth = _credited_reading(facts, _narrative_remarks_text(facts).strip())[1]
+    except Exception:                                          # noqa: BLE001
+        _card_read_depth = set()
 
     # ── Package pillars = the package's OWN independent calculation ───────────
     # The package SQS is computed independently from the per-form scores. Each of
@@ -6328,7 +6880,7 @@ def calculate_package_sqs(
     _form_fill_rates = [
         r.get("confidence_fill_rate") for r in (form_results or [])
         if isinstance(r, dict) and r.get("confidence_fill_rate") is not None
-    ]
+    ] if form_fill else []
     _avg_fill = int(sum(_form_fill_rates) / len(_form_fill_rates)) if _form_fill_rates else None
 
     new_entry = {
@@ -6412,6 +6964,26 @@ def calculate_package_sqs(
         # can close, and that is exactly how a package with no open warnings sat
         # 22 points short with nothing on screen to act on.
         miss_list = _miss_by_pillar.get(pillar, [])
+        # ONE ROW PER QUESTION (13 Oct 2026, owner + Brent: the SQS reaches 100
+        # when everything is answered). Exposure and Property used to give one
+        # row per PILLAR - "Incomplete: Auto Completeness", "Improve property
+        # integrity" - with no box behind it, so the Recommendations section
+        # listed nothing and the last points (a radius of operation, the
+        # distance to a hydrant) could not be answered anywhere. Each deduction
+        # is now its own row naming the box that closes it, read off the SAME
+        # items the pillar is scored from.
+        if pillar in ("exposure_consistency", "property_integrity"):
+            try:
+                _items = (exposure_deduction_items(facts, flags, hard_cross, warn_cross)
+                          if pillar == "exposure_consistency"
+                          else property_gap_items(facts, flags))
+            except Exception as _gx:                           # noqa: BLE001
+                logger.warning("gap rows skipped for %s: %s", pillar, _gx)
+                _items = []
+            if _items:
+                top_recs.extend(_gap_rows(pillar, score, _items,
+                                          SPEC_PILLAR_WEIGHTS.get(pillar, 0.0) / _live_weight))
+                continue
         if pillar == "narrative_quality" and _narrative_components:
             # §6.3 AC#4: state what the narrative covers alongside what it lacks.
             _action = _narrative_gap_message(_narrative_components)
@@ -6423,7 +6995,13 @@ def calculate_package_sqs(
                         "add specific risk details, loss context, and market considerations"
                     )
                 else:
-                    _action = miss_list[0] if miss_list else "Improve narrative quality"
+                    # Name what the depth check still misses (owner, 13 Oct 2026:
+                    # the bare "Improve narrative quality" left a producer who had
+                    # covered every topic with nothing to act on).
+                    _thin = narrative_substance_gaps(_narrative_text_for_card, _card_read_depth)
+                    _action = (miss_list[0] if miss_list else
+                               ("Narrative covers every topic - add " + _words_list(_thin)
+                                if _thin else "Improve narrative quality"))
         elif pillar == "exposure_consistency" and not miss_list and _exposure_subscores:
             # NAME THE BUCKET, don't say "improve exposure consistency" - that
             # sentence tells a producer nothing they can act on, and this pillar
@@ -6440,6 +7018,12 @@ def calculate_package_sqs(
                     exposure_bucket_label(k) for k, _v in _weak[:3])
             else:
                 _action = "Improve exposure consistency"
+        elif pillar == "structural_completeness" and not miss_list and _form_fill_rates:
+            # Tier 1 and Tier 2 are complete: what is left is the form boxes'
+            # Fill Rate (13 Oct 2026) - values the AI placed that nobody has
+            # checked. Each one is a Please verify row with a Confirm.
+            _action = ("Confirm the Please verify values on each form "
+                       f"(Form Fill Rate {int(sum(_form_fill_rates) / len(_form_fill_rates))}%)")
         else:
             _action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
         _field = _pillar_rec_field(pillar, _action)
@@ -6462,6 +7046,10 @@ def calculate_package_sqs(
         top_recs.append({"pillar": pillar, "score": score,
                           "action": _action,
                           "missing": miss_list[:3],
+                          # The narrative window's tickable "still missing" list.
+                          **({"narrative_gaps": narrative_gap_options(
+                                _narrative_components, _narrative_text_for_card, _card_read_depth)}
+                             if pillar == "narrative_quality" and _narrative_components else {}),
                           # So `_route_recommendations` can ask the ONE DOOR
                           # whether this is answerable, instead of defaulting
                           # every package recommendation to "none".
@@ -6563,6 +7151,7 @@ def calculate_package_sqs(
                 soft_stops=soft_stops, session_data=session_data,
                 mapped_data=mapped_data, confidence_dict=confidence_dict,
                 calculation_stage=calculation_stage, _probe=True,
+                form_fill=form_fill,
             ).get("raw_sqs_score")
 
         try:
@@ -6597,7 +7186,7 @@ def calculate_package_sqs(
         "cap_hard_stop_items": _cap_stop_items(
             cap_hard_stops
             or ([cap_reason] if cap_applied == HARD_STOP_CAP and cap_reason else []),
-            coded_issues=cross_issues),
+            coded_issues=cross_issues, facts=facts),
         "tier": tier,
         "lob": lob,
         "pillars": {
@@ -6656,6 +7245,13 @@ def calculate_package_sqs(
         "loss_run_match_detail": _loss_run_detail,
         # Extraction Confidence: AI fill quality metric, reported separately from SQS (client spec).
         "extraction_confidence": _extraction_confidence,
+        # THE SAME PACKAGE WITHOUT ITS FORMS (13 Oct 2026, owner + Brent: the
+        # SQS exists without forms and recalculates with them). Only on a score
+        # that counted generated forms; None otherwise. See
+        # `package_sqs_without_forms`.
+        "without_forms": (_without_forms_summary(facts, flags, session_data)
+                          if (form_fill and not _probe and (_form_fill_rates or mapped_data))
+                          else None),
     }
 
 
@@ -6743,20 +7339,29 @@ def score_package_pre_generation(
     calculation_stage = calculation_stage or _PRE_GENERATION_STAGE
     facts = session.get("facts") or {}
     flags = session.get("flags") or {}
-    hard_stops = list(session.get("hard_stops") or [])
-    soft_stops = list(session.get("soft_stops") or [])
     form_ids = [
         r.get("form_id") for r in (session.get("recommendations") or [])
         if isinstance(r, dict) and r.get("form_id")
     ]
-    cross = _pre_generation_cross_issues(session)
+    # THE STOPS AS THEY STAND (6 Oct 2026, Choice Electric #18): rebuilt from
+    # the stored facts by the one door, never read back from the stored
+    # `hard_stops` / `soft_stops` - those are a display cache written by
+    # whichever run last touched the row, and can describe facts the row no
+    # longer holds. Cross-form rules are scoped to the recommended forms and
+    # demoted pre-form (C75), exactly as `_pre_generation_cross_issues` did.
+    from services.stops_now import stops_now
+    _stops = stops_now(session, form_ids, pre_form=True, facts=facts, flags=flags)
+    hard_stops = _stops["hard"]
+    soft_stops = _stops["soft"]
+    cross = _stops["cross_issues"]
     tier2_score, _ = check_tier2(facts, flags)
     per_form: List[dict] = []
     for fid in form_ids:
         try:
             per_form.append(calculate_sqs_from_facts(
                 facts=facts, flags=flags, selected_form_ids=form_ids,
-                hard_stops=hard_stops, soft_stops=soft_stops,
+                # One form is scored with field-level stops only (spec 10).
+                hard_stops=_stops["form_hard"], soft_stops=_stops["form_soft"],
                 tier2_score=tier2_score, form_id=fid,
                 session_id=session_id, user_id=user_id,
                 calculation_stage=calculation_stage,
@@ -6767,13 +7372,69 @@ def score_package_pre_generation(
                 "pre-generation per-form SQS failed [session=%s form=%s]: %s",
                 session_id, fid, ex,
             )
-    # No recommended form at all -> the scorer's own 3.7 no-form path.
-    return calculate_package_sqs(
+    # THE SQS WITHOUT FORMS (owner + Brent, 13 Oct 2026): Structural is the
+    # 3.7 no-form formula before any form is generated - the per-form results
+    # above score forms nobody has generated, so their fill rate is not the
+    # submission's. They still carry the cards (one number per card).
+    pkg = calculate_package_sqs(
         facts=facts, flags=flags, form_results=per_form,
         cross_issues=cross, hard_stops=hard_stops, soft_stops=soft_stops,
         session_data=session, session_id=session_id, user_id=user_id,
-        calculation_stage=calculation_stage,
+        calculation_stage=calculation_stage, form_fill=False,
     )
+    # ...and a check whose only fix is choosing a form ("ACORD 25 is not in the
+    # selected forms") is a form choice, not a gap in the submission: listed
+    # for form selection, never in the number (stops_now defers it).
+    choices = [i for i in cross if isinstance(i, dict) and i.get("form_choice")]
+    if isinstance(pkg, dict) and choices:
+        pkg["form_choices"] = [
+            {"code": i.get("code"), "message": i.get("message") or "",
+             "forms": list(i.get("forms") or []),
+             "add_forms": list((i.get("resolution") or {}).get("add_forms") or [])}
+            for i in choices]
+    return pkg
+
+
+def package_sqs_without_forms(session: Optional[dict],
+                              session_id: Optional[str] = None,
+                              user_id: Optional[str] = None) -> Optional[dict]:
+    """The package score as it would read with NO forms - the pre-form recipe
+    (`score_package_pre_generation`) on the same facts, nothing persisted
+    (13 Oct 2026, owner + Brent: "SQS can exist without the forms; after forms
+    are generated we recalculate"). Light: no per-form scoring and no card
+    points, which never move the number. None when it cannot be scored."""
+    session = dict(session or {})
+    session["generated_forms"] = {}
+    session["selected_form_ids"] = []
+    try:
+        facts = session.get("facts") or {}
+        flags = session.get("flags") or {}
+        from services.stops_now import stops_now
+        st = stops_now(session, None, pre_form=True, facts=facts, flags=flags)
+        # The scorer as defined, never the public name: like a probe, this is
+        # part of ONE scoring, so a caller's spy or stub sees one call.
+        return _PACKAGE_SCORER(
+            facts=facts, flags=flags, form_results=[],
+            cross_issues=st["cross_issues"], hard_stops=st["hard"], soft_stops=st["soft"],
+            session_data=session, session_id=session_id, user_id=user_id,
+            calculation_stage=_PRE_GENERATION_STAGE, _probe=True, form_fill=False,
+        )
+    except Exception as ex:                                      # noqa: BLE001
+        logger.warning("package score without forms skipped [session=%s]: %s", session_id, ex)
+        return None
+
+
+def _without_forms_summary(facts: dict, flags: dict, session_data: Optional[dict]) -> Optional[dict]:
+    """{score, raw, tier, cap} of `package_sqs_without_forms` on these facts -
+    what a post-generation score prints beside itself ("Without forms 100 ·
+    With forms 97")."""
+    if not isinstance(session_data, dict):
+        return None
+    pkg = package_sqs_without_forms({**session_data, "facts": facts, "flags": flags})
+    if not isinstance(pkg, dict):
+        return None
+    return {"score": pkg.get("package_sqs_score"), "raw": pkg.get("raw_sqs_score"),
+            "tier": pkg.get("tier"), "cap": pkg.get("cap_applied")}
 
 
 def is_pre_form_session(session: Optional[dict]) -> bool:
@@ -6819,7 +7480,7 @@ def current_package_sqs(
     session = session or {}
     if session.get("generated_forms"):
         stored = session.get("package_sqs")
-        return stored if isinstance(stored, dict) and stored else None
+        return with_current_bucket_labels(stored) if isinstance(stored, dict) and stored else None
     if (session.get("integrity") or {}).get("review_required"):
         return None
     try:
@@ -6857,7 +7518,8 @@ def calculate_package_sqs_spec_compliant(
     """
     _present_types = _present_doc_types(session_data)
     _has_narrative = "narrative" in _present_types
-    _has_loss_run  = "loss_run" in _present_types
+    from services.loss_history_state import package_has_loss_runs
+    _has_loss_run  = package_has_loss_runs((session_data or {}).get("docs"), facts)
 
     lob = infer_lob(facts, flags)
 
@@ -7238,6 +7900,22 @@ def _package_probe_answer(field: str) -> Tuple[str, bool]:
         validate = (FACT_REGISTRY.get(field) or {}).get("validate")
     except Exception:                                      # noqa: BLE001
         validate = None
+    # A question with a choice list is probed with a CHOICE (13 Oct 2026): a
+    # radius of operation answered "Yes" states no radius, so the row read
+    # "adds nothing" and was never listed - though "Local (up to 50 miles)"
+    # closes it.
+    try:
+        from services.answer_options import OTHER, options_for
+        for option in options_for(field) or []:
+            if option == OTHER:
+                continue
+            try:
+                if not callable(validate) or validate(option):
+                    return option, True
+            except Exception:                              # noqa: BLE001
+                continue
+    except Exception:                                      # noqa: BLE001
+        pass
     if not callable(validate):
         return _IMPACT_PROBE_VALUE, True
     for answer in _PROBE_ANSWERS:
@@ -7417,6 +8095,20 @@ def calculate_sqs(
     _simulate: bool = False,
 ) -> dict:
     """Per-form SQS calculation with full metadata and structured recommendations."""
+    # ONE RULE for a form's second copy (7 Oct 2026, Choice Electric #4): the
+    # copy ("ACORD_131__excess") is scored by its form's rule set on its own
+    # view of the facts, and the result keeps the copy's id. Every plain id is
+    # unchanged (`form_instances.facts_for_form` returns the same object).
+    _scored_form_id = form_id
+    if form_id:
+        from services.form_instances import (
+            base_form_id as _base_form_id, base_form_ids as _base_form_ids,
+            facts_for_form as _facts_for_form, is_instance as _is_instance,
+        )
+        facts = _facts_for_form(facts, form_id)
+        form_id = _base_form_id(form_id)
+        if any(_is_instance(f) for f in (selected_form_ids or [])):
+            selected_form_ids = _base_form_ids(selected_form_ids)
     extraction_quality = facts.get("_extraction_quality", 1.0)
     if isinstance(extraction_quality, float) and extraction_quality < 0.60:
         return {
@@ -7509,11 +8201,10 @@ def calculate_sqs(
              bool(_fv(facts, "producer_name")),     not _prod_exempt),
             # 29 Sep 2026 (client item 8, "no prompt to supply them"): page
             # one's CARRIER is left blank when no company can be named (the
-            # current policies of a quote whose market is not stated). Several
-            # companies writing a renewed programme print together since 30 Sep
-            # (Orbin item 7), so this card no longer fires for them. Ask for it
-            # - worth zero points, because carrier_name is not a Tier 1 / Tier 2
-            # fact.
+            # current policies of a quote whose market is not stated) - and,
+            # since Brent's 8 Oct answer, when SEVERAL companies write the
+            # renewed programme (the 30 Sep join is gone). Ask for it - worth
+            # zero points, because carrier_name is not a Tier 1 / Tier 2 fact.
             # The answer is the ADDRESSEE (`submission_carrier_name`), never
             # `carrier_name`: the documents own that one, and a typed market
             # written there was overwritten or held as a conflict by the next
@@ -7589,12 +8280,18 @@ def calculate_sqs(
             })
 
     elif fid in ("ACORD_140", "ACORD_141"):
-        min_cope = [
-            bool(_fv(facts, "locations")),
-            bool(_fv(facts, "occupancy_type")),
-            bool(_fv(facts, "construction_type")),
-            bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
+        # Each part names itself, so the card asks only for what is missing
+        # (owner's run `18ecbfa8`, 12 Oct 2026: it listed all four while
+        # construction and both building values were already stated). With all
+        # four missing the sentence is word for word the old one.
+        _min_cope_parts = [
+            ("street address",        bool(_fv(facts, "locations"))),
+            ("occupancy",             bool(_fv(facts, "occupancy_type"))),
+            ("construction type",     bool(_fv(facts, "construction_type"))),
+            ("building or BPP value", bool(_fv(facts, "property_building_value")
+                                           or _fv(facts, "property_bpp_value"))),
         ]
+        min_cope = [ok for _label, ok in _min_cope_parts]
         if not all(min_cope):
             struct = 0
             issues.append("Minimum Viable COPE incomplete - hard stop")
@@ -7602,7 +8299,7 @@ def calculate_sqs(
                 "rec_id": "rec_min_cope",
                 "field": "locations",
                 "component": "property_integrity",
-                "message": "Required: street address, occupancy, construction type, and building or BPP value",
+                "message": "Required: " + _words_list([label for label, ok in _min_cope_parts if not ok]),
                 "type": "hard_stop",
                 "score_impact": 0,
                 "priority": 1,
@@ -7893,7 +8590,7 @@ def calculate_sqs(
         # Compensation is carried (15 Sep 2026, held since 14 Sep): a no-WC
         # package lost a fifth of this score for a limit it cannot have. A
         # stated EL limit still counts wherever it appears.
-        if (flags or {}).get("has_workers_comp") is True or _fv(facts, "employers_liability_limits"):
+        if _wc_carried(flags or {}) or _fv(facts, "employers_liability_limits"):
             chks.append(bool(_fv(facts, "employers_liability_limits")))
         struct = int(sum(chks) / len(chks) * 100)
         if not _fv(facts, "umbrella_limit"):
@@ -8187,7 +8884,12 @@ def calculate_sqs(
         if not _fv(facts, "valuation_method"):
             prop = max(0, prop - 5)
 
-        if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
+        # Only on a form that PRINTS Business Income (the BOP section, the
+        # evidence of property) - 5 Oct 2026, generality audit G2: CH125's 125 /
+        # 126 / 127 were each capped at 85 for a period-of-restoration box none
+        # of them has.
+        if fid in _BI_PRINTING_FORMS and _fv(facts, "business_income_limit") \
+                and not _fv(facts, "period_of_restoration"):
             _prop_soft_because(
                 "Business income limit present but period of restoration not specified")
             issues.append("BI coverage present but period of restoration not specified")
@@ -8651,12 +9353,12 @@ def calculate_sqs(
         # table every other legacy stop uses, so the row carries the identical
         # "Open to fix" the pre-form banners do.
         "cap_hard_stop_items": _cap_stop_items(cap_hard_stops,
-                                               coded_issues=cross_issues_full),
+                                               coded_issues=cross_issues_full, facts=facts),
         # The 85 half of the same contract (2026-09-23). Same shape, so a
         # display surface renders it with the code it already has for the 60.
         "cap_soft_stops":      cap_soft_stops,
         "cap_soft_stop_items": _cap_stop_items(cap_soft_stops,
-                                               coded_issues=cross_issues_full),
+                                               coded_issues=cross_issues_full, facts=facts),
         "score_trace":         _score_trace,
         "tier":                tier,
         "tier_color":          tc,
@@ -8671,7 +9373,8 @@ def calculate_sqs(
         "match_score":         fill_rate,   # §6.1 AC#1: raw field coverage — distinct from SQS and confidence_fill_rate
         "confidence_fill_rate": conf_rate,
         "extraction_confidence": conf_rate,  # AI fill quality - same value, distinct label per client spec
-        "form_id":             fid,
+        # The copy that was scored (a form's second copy keeps its own id).
+        "form_id":             _scored_form_id or fid,
         "compliance_checklist": risk_transfer_check(facts, flags, selected_form_ids),
         "timestamp":           datetime.utcnow().isoformat() + "Z",
         "model_version":       SQS_MODEL_VERSION,
@@ -8928,7 +9631,10 @@ def calculate_sqs_from_facts(
     Uses FORM_FIELD_INVENTORY to derive fill_rate.
     """
     fid = form_id or (selected_form_ids[0] if selected_form_ids else "ACORD_125")
-    inventory = FORM_FIELD_INVENTORY.get(fid, list(facts.keys()))
+    # A form's second copy: its form's inventory, its own view (7 Oct 2026).
+    from services.form_instances import base_form_id as _base_form_id, facts_for_form
+    facts = facts_for_form(facts, fid)
+    inventory = FORM_FIELD_INVENTORY.get(_base_form_id(fid), list(facts.keys()))
 
     synthetic_mapped = {k: _fv(facts, k) for k in inventory}
     filled = sum(1 for k in inventory if _fact_is_filled(_fv(facts, k)))
@@ -8939,7 +9645,8 @@ def calculate_sqs_from_facts(
     _docs       = (session_data or {}).get("docs") or []
     _present    = {str(d.get("doc_type") or "").strip() for d in _docs if isinstance(d, dict) and not d.get("excluded")}
     _has_narr   = "narrative" in _present
-    _has_loss   = "loss_run" in _present
+    from services.loss_history_state import package_has_loss_runs
+    _has_loss   = package_has_loss_runs(_docs, facts)
     _loss_match = _check_loss_run_insured_match(_docs, _fv(facts, "applicant_name"))
 
     return calculate_sqs(

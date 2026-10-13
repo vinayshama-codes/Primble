@@ -1,0 +1,86 @@
+/* Recommendations section of the package page (Choice Electric #22 / #27).
+   Every class is prefixed rec- so nothing here reaches another screen. */
+
+.rec { display: flex; flex-direction: column; gap: 14px; }
+.rec[hidden] { display: none; }
+.rec-heading { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0; }
+.rec-heading-sub { font-size: 12.5px; color: #64748b; margin: 2px 0 0; line-height: 1.5; }
+
+.rec-group {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.rec-group__head { display: flex; align-items: center; gap: 8px; }
+/* Each group's heading opens and closes it, with the Hard Stops / Warnings
+   triangle (ReviewRailLayout.css .rr-tri) - turned down when open. */
+.rec-fold {
+  width: 100%; font: inherit; color: inherit; background: none; border: 0;
+  padding: 0; margin: 0; text-align: left; cursor: pointer;
+}
+.rec-fold:focus-visible { outline: 2px solid #e61b84; outline-offset: 2px; border-radius: 4px; }
+.rec-tri {
+  display: inline-block; flex-shrink: 0; font-size: 8px; line-height: 1;
+  color: #94a3b8; transition: transform 0.15s;
+}
+.rec-fold[aria-expanded="true"] > .rec-tri { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .rec-tri { transition: none; } }
+.rec-group__title { font-size: 14px; font-weight: 700; color: #0f172a; }
+.rec-group__sub { font-size: 12px; color: #64748b; line-height: 1.5; margin-top: 2px; }
+.rec-count {
+  font-size: 11px; font-weight: 700; color: #fff; background: #e61b84;
+  border-radius: 10px; padding: 1px 8px;
+}
+
+.rec-list { margin-top: 8px; }
+.rec-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; border-top: 1px solid #f1f5f9;
+}
+.rec-row__main { flex: 1 1 auto; min-width: 0; }
+.rec-row__title { font-size: 12.5px; font-weight: 600; color: #1e293b; line-height: 1.4; }
+.rec-row__detail { font-size: 11.5px; color: #64748b; line-height: 1.5; overflow-wrap: anywhere; }
+.rec-row__also { font-size: 11px; color: #475569; margin-top: 2px; }
+.rec-pts { font-size: 11px; font-weight: 700; color: #e61b84; white-space: nowrap; padding-top: 1px; }
+
+.rec-link {
+  font: inherit; font-size: 12px; font-weight: 600; background: none; border: none; padding: 0;
+  color: #e61b84; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; white-space: nowrap;
+}
+.rec-link--muted { color: #64748b; font-weight: 500; }
+
+.rec-form { margin-top: 12px; }
+.rec-form__head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rec-form__name { font-size: 12px; font-weight: 700; color: #334155; flex: 1 1 auto; }
+.rec-form__name small { font-weight: 500; color: #94a3b8; font-size: 12px; }
+.rec-form__check { font-size: 11.5px; color: #64748b; padding: 4px 0 0; }
+
+.rec-empty { font-size: 12.5px; color: #64748b; margin-top: 6px; line-height: 1.5; }
+.rec-empty--good {
+  display: flex; align-items: center; gap: 8px;
+  background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
+  border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 600;
+}
+
+/* The Resolved list (13 Oct 2026): the Hard Stops / Warnings Resolved look -
+   a green "Resolved" / "Added" label and the "Open again" chip with its arrow
+   (App.css .issue-status-btn colours). */
+.rec-count--muted { background: #94a3b8; }
+.rec-resolved__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+.rec-resolved__label { font-size: 9.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; border: 1px solid; }
+.rec-resolved__label--resolved,
+.rec-resolved__label--added { background: #dcfce7; color: #166534; border-color: #86efac; }
+.rec-resolved__actions .rec-resolved__open {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; line-height: 1.5;
+  padding: 2px 8px; border-radius: 5px; white-space: nowrap; font-family: inherit;
+}
+.rec-resolved__actions .rec-resolved__open:disabled { cursor: wait; opacity: 0.6; }
+.rec-resolved__actions .rec-resolved__open:focus-visible { outline: 2px solid #e61b84; outline-offset: 2px; }
+.rec-resolved__note { font-size: 10.5px; color: #475569; margin-top: 4px; line-height: 1.4; }
+
+@media (max-width: 600px) {
+  .rec-group { padding: 12px; }
+  .rec-row { flex-wrap: wrap; }
+}

@@ -38,6 +38,12 @@ from services.ocr_service import extract_text
 from services.extraction_service import (
     extract_facts_long, classify_document, merge_facts, select_primary_truth,
     detect_source_conflicts, ALLOWED_DOC_TYPES, apply_declared_absent_downgrades,
+    # Used by the re-run paths below and NEVER imported until 5 Oct 2026: a
+    # NameError behind a rarely-true branch (500 on every Data Consistency
+    # confirm of a package with a Drive Other Car named individual) and inside
+    # a try (human answers silently dropped by every re-run since 24 Aug).
+    # tests/test_rerun_human_facts_5oct.py fails the build on the class.
+    _fv,
 )
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, score_extra_forms,
@@ -54,11 +60,15 @@ from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
     RECONCILABLE_FIELDS, RECONCILABLE_FIELD_KEYS, unresolved_withheld_keys,
     parse_confirmation_key,
+    confirmed_fact_keys,
     unresolved_conflict_keys,
 )
 from repositories.session_repository import new_processing_session, upd_processing_session
 
 logger = logging.getLogger(__name__)
+
+# `coverage_lines` before any producer confirmation (see `_finalize_pipeline`).
+UNCONFIRMED_COVERAGE_LINES_KEY = "_coverage_lines_unconfirmed"
 
 
 def _unwrap_scalar(v: Any) -> Any:
@@ -226,6 +236,158 @@ def carrier_documents_only(doc_types) -> bool:
     return bool(types) and all(t in _CARRIER_DOC_TYPES for t in types)
 
 
+def document_text_key(text: Any) -> str:
+    """A document's identity by its READ text (whitespace-insensitive) - the
+    same file uploaded twice reads the same."""
+    import hashlib
+    norm = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    return hashlib.sha256(norm.encode("utf-8", "replace")).hexdigest() if norm else ""
+
+
+async def extract_document(
+    path: str,
+    display_name: str,
+    user_id: Any,
+    *,
+    reporter: Any = None,
+    index: int = 0,
+    doc_type: Optional[str] = None,
+    known_texts: Optional[set] = None,
+) -> Optional[dict]:
+    """ONE uploaded file -> its processed-document dict, or None when OCR found
+    no usable text. The one per-document door (7 Oct 2026, Choice Electric #25):
+    the fresh upload (`run_extraction_pipeline`) and a document ADDED to an
+    existing package (`services/session_documents`) run exactly these steps, in
+    this order - OCR, classification, the extraction LLM call, the output
+    schema check and the two per-document absence checks - so an added document
+    is read exactly like one uploaded with the package.
+
+    `doc_type` is a type the PRODUCER stated at upload (a narrative, a loss
+    run). It is applied BEFORE extraction, so the type-specific extraction runs
+    (a loss run's claim backstop), and recorded as a manual classification -
+    the same marks `reclassify_document`'s set_type leaves. None, "" or
+    "unknown" leaves the classifier's answer, exactly as before.
+
+    `known_texts` (documents added to a package): `document_text_key`s of the
+    documents already in it. A file that reads exactly like one of them is a
+    duplicate - returned as `{"duplicate": True, ...}` BEFORE the extraction
+    call, so it costs no LLM call and never votes twice in the merge. None
+    (the fresh upload) checks nothing, exactly as before.
+    """
+    if reporter is None:
+        from utils.progress_tracker import make_reporter
+        reporter = make_reporter(None, user_id, [])
+    await reporter.active(f"Reading {display_name}…", stage="reading")
+    text, low_conf = await extract_text(path)
+    if len(text) < 30:
+        # OCR produced nothing usable — mark this file's row complete so it
+        # does not hang in the overlay, then skip extraction for it.
+        await reporter.file_phase(index, "extracted")
+        return None
+    if known_texts is not None and document_text_key(text) in known_texts:
+        await reporter.file_phase(index, "extracted")
+        return {"duplicate": True, "filename": display_name,
+                "text_key": document_text_key(text)}
+
+    # Schedule rows reach the LLM as proper row-by-row tables, emitted INLINE
+    # with their page by extract_text() above (see extraction_arch_change.md).
+    # The end-of-document table append that lived here is gone.
+
+    # OCR (and table parsing) complete for this file → advance its row to
+    # "parsed" first (a real, distinct moment the overlay shows once, before
+    # any per-file extraction row goes active), then to "extracting" right
+    # before the fact-extraction LLM call begins.
+    await reporter.file_phase(index, "parsed")
+
+    # Document classification (Beta Report §4.2): content keywords + narrative
+    # detection rules + filename signals. Returns the canonical type plus the
+    # confidence/source/signals used (surfaced to the UI + audit).
+    classification = classify_document(text, filename=display_name)
+    _stated = str(doc_type or "").strip()
+    overridden = bool(_stated) and _stated != "unknown" and _stated in ALLOWED_DOC_TYPES
+    if overridden:
+        classification = dict(classification)
+        classification.update({"doc_type": _stated, "source": "manual", "confidence": "high"})
+    dtype = classification["doc_type"]
+    if dtype in _TABLE_EXPECTED_DOC_TYPES and "[Table - page " not in text:
+        logger.warning(
+            "EXTRACTION_NO_TABLES doc_type=%s file=%s chars=%d - a %s with no "
+            "detected table; the LLM will see its rows as flat text only",
+            dtype, display_name, len(text), dtype,
+        )
+    await reporter.file_phase(index, "extracting", active=f"Extracting facts from {display_name}…")
+    raw       = await extract_facts_long(text, dtype, low_confidence_tokens=low_conf)
+    extracted = _validate_extraction_output(raw, dtype)
+
+    # Absence is not "No" (client 2026-08-17 item 3), applied PER DOCUMENT
+    # against that document's OWN text. The cross-document conflict detector
+    # compares each doc's facts, not the merged set, so dropping an
+    # unsupported "No" only from the merge would leave the conflict card
+    # exactly where it is - probe runs B and D showed the dec page's silent
+    # "No" fighting the certificate's real "Yes" on three requirements.
+    try:
+        from services.extraction_service import _drop_unstated_risk_transfer
+        _drop_unstated_risk_transfer(extracted.get("facts") or {}, text)
+    except Exception as _rtx:                             # noqa: BLE001
+        logger.warning("risk-transfer absence check failed for %s: %s",
+                       display_name, _rtx)
+    # A heading is not the insured, and for the same per-document reason: the
+    # integrity check, the Data Consistency picker and `insured_scope` all read
+    # each document's OWN applicant name. "S.B. MO." - a billing-table heading
+    # under a redacted "INSURED'S NAME:" - raised "Possible multiple
+    # submissions" over six documents of one insured (8 Oct 2026, b38a4367).
+    # The ONE door is `extraction_service.drop_non_party_names` (also run per
+    # document by `merge_facts`); called here so the copy stored with the
+    # document is clean before the integrity check reads it.
+    try:
+        from services.extraction_service import drop_non_party_names
+        _gone = drop_non_party_names(extracted.get("facts"))
+        if _gone:
+            logger.info("%s: dropped name fact(s) naming no party %s", display_name, _gone[:4])
+    except Exception as _nmx:                             # noqa: BLE001
+        logger.warning("party-name check failed for %s: %s", display_name, _nmx)
+    # SAME REASON, SAME PLACE. An endorsement date must not become a policy
+    # date, and the conflict that exposes it is detected between PER-DOCUMENT
+    # facts. Probe run 2 (2026-08-17) still showed "Umbrella Effective Date
+    # 07/15/2025 vs 07/25/2025" AFTER the merge-level guard landed, because
+    # the certificate's own `umbrella_effective_date` never went through it -
+    # exactly the trap the risk-transfer check above had already fallen into
+    # once. Each document is judged against its OWN remarks and its OWN dec
+    # entries.
+    try:
+        from services.extraction_service import (
+            _drop_endorsement_dates_from_policy_facts,
+        )
+        _drop_endorsement_dates_from_policy_facts(
+            extracted.get("facts") or {}, [])
+    except Exception as _edx:                             # noqa: BLE001
+        logger.warning("endorsement-date check failed for %s: %s",
+                       display_name, _edx)
+
+    doc = {
+        "doc_id":                uuid.uuid4().hex,
+        "filename":              display_name,
+        "path":                  path,
+        "doc_type":              dtype,
+        "classification":        classification,
+        "doc_type_source":       classification.get("source"),
+        "doc_type_confidence":   classification.get("confidence"),
+        "doc_type_overridden":   overridden,
+        # E&O 5.2/5.3: per-document upload provenance. Set ONLY here (the
+        # one first-extraction path), so re-runs keep the original stamp.
+        "uploaded_at":           datetime.now(timezone.utc).isoformat(),
+        "uploaded_by":           str(user_id) if user_id is not None else "",
+        "text":                  text,
+        "facts":                 extracted.get("facts", {}),
+        "flags":                 extracted.get("flags", {}),
+        "low_confidence_tokens": low_conf,
+        "manual_confirmation_required": extracted.get("manual_confirmation_required") or [],
+        "truncation_warning":    extracted.get("truncation_warning"),
+    }
+    await reporter.file_phase(index, "extracted")
+    return doc
+
+
 async def run_extraction_pipeline(
     file_paths: list[str],
     user_id: Any,
@@ -253,92 +415,14 @@ async def run_extraction_pipeline(
     await reporter.begin()
 
     for i, path in enumerate(file_paths):
-        _display_name = filenames[i]
-        await reporter.active(f"Reading {_display_name}…", stage="reading")
-        text, low_conf = await extract_text(path)
-        if len(text) < 30:
-            # OCR produced nothing usable — mark this file's row complete so it
-            # does not hang in the overlay, then skip extraction for it.
-            await reporter.file_phase(i, "extracted")
+        # The one per-document door (`extract_document`), shared with a
+        # document added to an existing package (7 Oct 2026).
+        doc = await extract_document(path, filenames[i], user_id,
+                                     reporter=reporter, index=i)
+        if doc is None:
             continue
-        all_low_conf += low_conf
-
-        # Schedule rows reach the LLM as proper row-by-row tables, emitted INLINE
-        # with their page by extract_text() above (see extraction_arch_change.md).
-        # The end-of-document table append that lived here is gone.
-
-        # OCR (and table parsing) complete for this file → advance its row to
-        # "parsed" first (a real, distinct moment the overlay shows once, before
-        # any per-file extraction row goes active), then to "extracting" right
-        # before the fact-extraction LLM call begins.
-        await reporter.file_phase(i, "parsed")
-
-        # Document classification (Beta Report §4.2): content keywords + narrative
-        # detection rules + filename signals. Returns the canonical type plus the
-        # confidence/source/signals used (surfaced to the UI + audit).
-        classification = classify_document(text, filename=_display_name)
-        doc_type  = classification["doc_type"]
-        if doc_type in _TABLE_EXPECTED_DOC_TYPES and "[Table - page " not in text:
-            logger.warning(
-                "EXTRACTION_NO_TABLES doc_type=%s file=%s chars=%d - a %s with no "
-                "detected table; the LLM will see its rows as flat text only",
-                doc_type, _display_name, len(text), doc_type,
-            )
-        await reporter.file_phase(i, "extracting", active=f"Extracting facts from {_display_name}…")
-        raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
-        extracted = _validate_extraction_output(raw, doc_type)
-
-        # Absence is not "No" (client 2026-08-17 item 3), applied PER DOCUMENT
-        # against that document's OWN text. The cross-document conflict detector
-        # compares each doc's facts, not the merged set, so dropping an
-        # unsupported "No" only from the merge would leave the conflict card
-        # exactly where it is - probe runs B and D showed the dec page's silent
-        # "No" fighting the certificate's real "Yes" on three requirements.
-        try:
-            from services.extraction_service import _drop_unstated_risk_transfer
-            _drop_unstated_risk_transfer(extracted.get("facts") or {}, text)
-        except Exception as _rtx:                             # noqa: BLE001
-            logger.warning("risk-transfer absence check failed for %s: %s",
-                           _display_name, _rtx)
-        # SAME REASON, SAME PLACE. An endorsement date must not become a policy
-        # date, and the conflict that exposes it is detected between PER-DOCUMENT
-        # facts. Probe run 2 (2026-08-17) still showed "Umbrella Effective Date
-        # 07/15/2025 vs 07/25/2025" AFTER the merge-level guard landed, because
-        # the certificate's own `umbrella_effective_date` never went through it -
-        # exactly the trap the risk-transfer check above had already fallen into
-        # once. Each document is judged against its OWN remarks and its OWN dec
-        # entries.
-        try:
-            from services.extraction_service import (
-                _drop_endorsement_dates_from_policy_facts,
-            )
-            _drop_endorsement_dates_from_policy_facts(
-                extracted.get("facts") or {}, [])
-        except Exception as _edx:                             # noqa: BLE001
-            logger.warning("endorsement-date check failed for %s: %s",
-                           _display_name, _edx)
-
-        processed_docs.append({
-            "doc_id":                uuid.uuid4().hex,
-            "filename":              _display_name,
-            "path":                  path,
-            "doc_type":              doc_type,
-            "classification":        classification,
-            "doc_type_source":       classification.get("source"),
-            "doc_type_confidence":   classification.get("confidence"),
-            "doc_type_overridden":   False,
-            # E&O 5.2/5.3: per-document upload provenance. Set ONLY here (the
-            # one first-extraction path), so re-runs keep the original stamp.
-            "uploaded_at":           datetime.now(timezone.utc).isoformat(),
-            "uploaded_by":           str(user_id) if user_id is not None else "",
-            "text":                  text,
-            "facts":                 extracted.get("facts", {}),
-            "flags":                 extracted.get("flags", {}),
-            "low_confidence_tokens": low_conf,
-            "manual_confirmation_required": extracted.get("manual_confirmation_required") or [],
-            "truncation_warning":    extracted.get("truncation_warning"),
-        })
-        await reporter.file_phase(i, "extracted")
+        all_low_conf += doc["low_confidence_tokens"]
+        processed_docs.append(doc)
 
     if not processed_docs:
         raise ValueError("no_readable_text")
@@ -495,6 +579,23 @@ async def _finalize_pipeline(
     # and the marketing-reason classification. Carried only when the fact
     # each one was derived from survived the re-merge with human provenance.
     prior_flags: Optional[dict] = None,
+    # 7 Oct 2026 (Choice Electric #25) - both used ONLY by the documents door
+    # (`services/session_documents`), so every other caller is byte-identical.
+    # `keep_forms`: the package already has forms. Do not write
+    # `selected_form_ids` / `generated_forms` - the door re-stamps the forms
+    # itself, and the producer's form order must survive the re-merge.
+    keep_forms: bool = False,
+    # `retract_document_keys`: facts some document stated BEFORE the change and
+    # no active document states AFTER it (an excluded or re-read document). The
+    # facts write is additive, so without this an excluded document's own
+    # values stayed stored for good. A key the re-merge still produces, or a
+    # person supplied, is never retracted.
+    retract_document_keys: Optional[Any] = None,
+    # `persist=False` (the door, after forms): return the row update instead of
+    # writing it (`session_payload`, `delete_facts`), so the door writes it in
+    # ONE update together with the re-stamped forms - never new facts beside
+    # old forms. Requires `session_id`.
+    persist: bool = True,
 ) -> dict:
     """Run everything AFTER per-document extraction: merge facts, cross-doc
     consistency, Submission Integrity Validation, and — only when integrity
@@ -560,21 +661,84 @@ async def _finalize_pipeline(
         if isinstance(v, dict) and k not in (confirmations or {})
     }
 
+    # ── Tables a person saved survive the re-merge (audit G8, 5 Oct 2026) ────
+    # A saved schedule is a bare list, invisible to the provenance carry-over
+    # below: the documents' rows replaced a producer's 3-vehicle table, and on
+    # a Drive Other Car package the named-individual retract deleted the
+    # drivers the "Driver schedule not provided" card had asked for. Restored
+    # HERE, before anything scores this run, so the screen it returns agrees
+    # with what is stored. A named individual still never stays a driver.
+    try:
+        from services import schedule_capture as _sc
+        from services.named_individuals import (
+            _unwrap_rows as _ni_rows, drivers_without_named_individuals as _ni_drivers,
+        )
+        _human_marks = dict((prior_facts or {}).get(_sc.HUMAN_SCHEDULES_KEY) or {})
+        _kept_tables = []
+        for _lk in list(_sc.SCHEDULE_DEFS):
+            _rows, _src = _sc.human_rows(prior_facts, _lk)
+            if _lk == "auto_drivers" and _named_moved and not _rows \
+                    and not _fv(merged_facts, "auto_drivers"):
+                # A session saved before the marks existed (stored cc3ecfcc):
+                # the stored rows minus the named individuals the documents
+                # print are rows a person entered.
+                _stored, _ = _ni_rows((prior_facts or {}).get("auto_drivers"))
+                _rows = _ni_drivers(_stored or [], active_docs) or None
+                _src = "producer" if _rows else None
+            if not _rows:
+                continue
+            if _lk == "auto_drivers":
+                _rows = _ni_drivers(_rows, active_docs)
+                if not _rows:
+                    continue
+            merged_facts[_lk] = _rows
+            _human_marks[_lk] = {"source": _src or "producer",
+                                 "fingerprint": _sc.rows_fingerprint(_rows)}
+            _kept_tables.append(_lk)
+        if _kept_tables:
+            merged_facts[_sc.HUMAN_SCHEDULES_KEY] = _human_marks
+            logger.info("tables a person saved carried through the re-merge: %s", _kept_tables)
+            if "property_locations" in _kept_tables:
+                # The re-merge rebuilt the loose `locations` copy from the
+                # documents; it must follow the person's table (6 Oct 2026).
+                from services.extraction_service import sync_location_list
+                sync_location_list(merged_facts)
+    except Exception as _tbx:                                  # noqa: BLE001
+        logger.warning("human-table preservation skipped: %s", _tbx)
+
     # ── Human answers survive the re-merge (V1 C1-D, Q7) ────────────────────
     # A re-run reads the SAME documents, so nothing new can contradict a human
     # value - there is no winner to pick, the value was simply being dropped.
-    # Three outcomes, all spec-derived, none invented:
+    # Outcomes, all spec-derived, none invented:
     #   * the document value is still absent  -> restore the human fact;
-    #   * the document value agrees           -> restore it (keeps provenance);
-    #   * the document value now DISAGREES    -> client rule 1.5: hold it for the
-    #     producer rather than letting either side win silently.
-    # Confirmed keys are skipped: apply_confirmations owns those below.
+    #   * a PRODUCER's answer -> restore it, whatever the documents say. A
+    #     producer's card answer, form edit, picker confirmation or accepted
+    #     client answer - "None" / "N/A" included - was made with these very
+    #     documents in view: it IS the resolution. Holding it again re-asked a
+    #     decided question and put the document's value back on the form (5 Oct
+    #     2026; this whole block had never run before then - `_fv` was not
+    #     imported);
+    #   * a CLIENT questionnaire answer -> exactly the rule the questionnaire
+    #     applied when the answer was first written (F7,
+    #     `arq_service._client_answer_conflicts_with_source`): held for the
+    #     producer when the documents state a value the answer contradicts or
+    #     denies, restored otherwise (a list on the documents' side, prose).
+    # Never carried: a value taken from the LOGIN (`source: account`) - the
+    # merge reads the account fresh on every run, so a carried copy would
+    # freeze a renamed agency, a new e-mail or phone (audit G8). Confirmed keys
+    # are skipped: apply_confirmations owns those below.
     try:
-        from services.fact_state import human_provenance_facts
+        from services.fact_state import human_provenance_facts, derive_evidence_state
         from services.fact_comparison import verdict as _verdict, DIFFERENT as _DIFF
-        _restored, _newly_held = [], []
-        for _k, _env in human_provenance_facts(prior_facts).items():
+        try:
+            from services.arq_service import _client_answer_conflicts_with_source as _f7
+        except Exception:                                     # noqa: BLE001
+            _f7 = None
+        _restored, _newly_held, _producer_kept = [], [], []
+        for _k, _env in human_provenance_facts(prior_facts, include_absence=True).items():
             if _k in (confirmations or {}) or _k in _held_client:
+                continue
+            if str(_env.get("source") or "").strip().lower() == "account":
                 continue
             _human_val = _env.get("value")
             _doc_val = _fv(merged_facts, _k)
@@ -587,9 +751,23 @@ async def _finalize_pipeline(
             if _doc_val is None or not str(_doc_val).strip():
                 merged_facts[_k] = _env
                 _restored.append(_k)
-            elif _verdict(_k, _doc_val, _human_val) == _DIFF:
+                continue
+            if derive_evidence_state(_env)[1] == "producer":
+                merged_facts[_k] = _env
+                _absent = _human_val is None or not str(_human_val).strip()
+                if _absent or _verdict(_k, _doc_val, _human_val) == _DIFF:
+                    _producer_kept.append(_k)
+                else:
+                    _restored.append(_k)
+                continue
+            _client_text = _env.get("answer_text") or _human_val
+            if _f7 is not None:
+                _hold = _f7(_k, merged_facts.get(_k), _doc_val, _client_text)
+            else:
+                _hold = _verdict(_k, _doc_val, _human_val) == _DIFF
+            if _hold:
                 _held_client[_k] = {
-                    "client_value": str(_human_val),
+                    "client_value": str(_client_text),
                     "source_value": str(_doc_val),
                     "field_name": _k,
                     "held_at": datetime.now(timezone.utc).isoformat(),
@@ -600,6 +778,9 @@ async def _finalize_pipeline(
                 _restored.append(_k)
         if _restored:
             logger.info("human-provenance facts carried through the re-merge: %s", _restored)
+        if _producer_kept:
+            logger.info("producer answers kept over a disagreeing document value "
+                        "(the producer's decision stands): %s", _producer_kept)
         if _newly_held:
             logger.info("human answers now contradicted by the documents, held for "
                         "the producer: %s", _newly_held)
@@ -608,6 +789,32 @@ async def _finalize_pipeline(
 
     # ── Human-set flags survive the re-merge too (V1 H1, 2026-08-26) ────────
     _carry_human_flags(mflags, merged_facts, prior_flags)
+
+    # The declarations' reading of the auto liability limit, stored while the
+    # index exists: production purges `dec_page_entries` after generation, and
+    # the split-limit door must read the same answer before and after (skeptic
+    # G1, 5 Oct 2026). "" = no reading (the facts merge is additive).
+    try:
+        from services.coverage_evidence import (
+            dec_auto_liability_reading, DEC_LIABILITY_READING_KEY,
+        )
+        if isinstance(merged_facts.get("dec_page_entries"), (list, dict)):
+            merged_facts[DEC_LIABILITY_READING_KEY] = dec_auto_liability_reading(merged_facts) or ""
+    except Exception as _dlx:                                  # noqa: BLE001
+        logger.warning("auto liability declarations reading skipped: %s", _dlx)
+    # ...and the radius the auto declarations STATE (a distance or an ISO class,
+    # 6 Oct 2026), for the same reason: the Auto Completeness item must read
+    # the same answer before and after the index is purged.
+    try:
+        from services.coverage_evidence import (
+            dec_auto_radius_reading, AUTO_RADIUS_READING_KEY,
+        )
+        if isinstance(merged_facts.get("dec_page_entries"), (list, dict)):
+            _radius_reading = dec_auto_radius_reading(merged_facts)
+            if _radius_reading:
+                merged_facts[AUTO_RADIUS_READING_KEY] = _radius_reading
+    except Exception as _drx:                                  # noqa: BLE001
+        logger.warning("auto radius declarations reading skipped: %s", _drx)
 
     if _held_client:
         merged_facts["_client_answer_conflicts"] = _held_client
@@ -648,6 +855,10 @@ async def _finalize_pipeline(
         t == "certificate" for t in _active_types
     )
     mflags["_carrier_documents_only"] = carrier_documents_only(_active_types)
+    # The package's ACTIVE document types, for a box only one type can answer
+    # (round 5, 7 Oct 2026: ACORD 130's binder date needs a binder - see
+    # ai_role_guards.package_has_binder). Sorted, so a re-merge is stable.
+    mflags["_package_doc_types"] = sorted({t for t in _active_types if t})
     await reporter.package_phase("normalized", "Normalizing data across documents…")
 
     # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
@@ -790,6 +1001,7 @@ async def _finalize_pipeline(
     # M5 fix: collect which fact keys were contributed by narrative docs so
     # _derive_evidence_labels can emit "stated_in_narrative" for them.
     _narrative_fact_keys: set = set()
+    _no_loss_hits: List[str] = []
     for _ndoc in active_docs:
         if _ndoc.get("excluded"):
             continue
@@ -805,7 +1017,7 @@ async def _finalize_pipeline(
         # decide the LossHistory_NoPriorLossesIndicator_A checkbox, so the two
         # can never disagree with each other.
         if detect_no_loss_assertion(_ndoc_text):
-            mflags["narrative_states_no_losses"] = True
+            _no_loss_hits.append(_ndoc.get("text") or "")
         # Fact provenance attribution stays narrative-only — we only label facts as
         # "stated in narrative" when the source document is actually a narrative.
         if _ndoc.get("doc_type") == "narrative":
@@ -827,8 +1039,40 @@ async def _finalize_pipeline(
     # differentiation). The conflict guard in _loss_history_conflict still caps the
     # score when actual claims are present, so a false positive degrades into a
     # conflict prompt rather than wrongful credit - same safety property as the scan.
-    if mflags.get("asserts_no_known_losses"):
-        mflags["narrative_states_no_losses"] = True
+    # WHO each no-loss statement is about decides whether it is an attestation
+    # (5 Oct 2026, CH125 6eda3069: every phrase was scoped - "Umbrella - no known
+    # losses", loss-run rows for a policy year - while the claims sat on Auto
+    # and Property, and Loss History was held at 45). On a package with NO
+    # claims nothing changes: any statement sets the flag, as before. With
+    # claims, a statement counts only when it contradicts them
+    # (`loss_history_state.no_loss_statements_contradict`), and the AI's own
+    # flag stands down when every literal statement it can be reading is scoped
+    # and none contradicts. No literal statement at all: the AI flag stands
+    # (a paraphrase the phrase list cannot see).
+    try:
+        from services.normalization import no_loss_statements
+        from services.loss_history_state import (
+            asserted_claims, no_loss_statements_contradict,
+        )
+        _stmts = [st for _t in _no_loss_hits for st in no_loss_statements(_t)]
+        _claims, _incurred = asserted_claims(merged_facts)
+        if not (_claims or _incurred):
+            if _no_loss_hits or mflags.get("asserts_no_known_losses"):
+                mflags["narrative_states_no_losses"] = True
+        elif _stmts:
+            if no_loss_statements_contradict(_stmts, merged_facts):
+                mflags["narrative_states_no_losses"] = True
+            else:
+                logger.info(
+                    "no-loss statements are all scoped and none contradicts the "
+                    "claims (%s) - not an account attestation",
+                    sorted({(st["scope"], st.get("line")) for st in _stmts}))
+        elif _no_loss_hits or mflags.get("asserts_no_known_losses"):
+            mflags["narrative_states_no_losses"] = True
+    except Exception as _nlx:                               # noqa: BLE001
+        logger.warning("no-loss scope check skipped: %s", _nlx)
+        if _no_loss_hits or mflags.get("asserts_no_known_losses"):
+            mflags["narrative_states_no_losses"] = True
 
     # §6.3: narrative_components are detected inside every extraction call (RULE 11
     # in the extraction prompt) and OR-merged across chunks and documents during
@@ -922,8 +1166,35 @@ async def _finalize_pipeline(
     # the confirmed value flows consistently into every relevant form and into
     # SQS scoring.
     confirmations = confirmations or {}
+    # The coverage rows as the DOCUMENTS print them, kept beside the confirmed
+    # ones: a confirmation made after forms exist is re-applied onto these,
+    # never onto rows an earlier line-scoped answer already rewrote - which
+    # paired a re-confirmed GL policy number with the other company (audit G7,
+    # 5 Oct 2026).
+    if isinstance(merged_facts.get("coverage_lines"), list):
+        import copy as _copy_rows
+        merged_facts[UNCONFIRMED_COVERAGE_LINES_KEY] = _copy_rows.deepcopy(
+            merged_facts["coverage_lines"])
     if confirmations:
         merged_facts = apply_confirmations(merged_facts, confirmations, docs=active_docs)
+    # The policy lines a PRODUCER corrected or added ("Policies in this
+    # submission", 7 Oct 2026) - carried from the stored facts (no document
+    # states them) and applied over the documents' rows and the line-scoped
+    # confirmations above. No store: a no-op. See services/policy_lines.py.
+    try:
+        from services.policy_lines import carry_and_apply
+        carry_and_apply(merged_facts, mflags, active_docs, prior_facts)
+    except Exception as _plx:                                   # noqa: BLE001
+        logger.warning("producer policy lines skipped: %s", _plx)
+    # Which generated copy holds which subject (one ACORD 131 per umbrella
+    # layer, 7 Oct 2026): no document states it, so it is carried from the
+    # stored facts too - a layer this run adds can never re-point a copy
+    # already generated (services/form_instances.py, carry_bindings).
+    try:
+        from services.form_instances import carry_bindings
+        carry_bindings(merged_facts, prior_facts)
+    except Exception as _cbx:                                   # noqa: BLE001
+        logger.warning("form copy bindings not carried: %s", _cbx)
     try:
         from services.extraction_service import follow_proposed_expiration
         follow_proposed_expiration(merged_facts)
@@ -941,10 +1212,30 @@ async def _finalize_pipeline(
     except Exception as _pox:                                   # noqa: BLE001
         logger.warning("page-one re-check skipped: %s", _pox)
 
-    tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
+    # ── SCORE THE FACTS THIS RUN WILL STORE (6 Oct 2026, Choice Electric #18) ─
+    # The facts write is ADDITIVE (`session_repository.resolve_facts_write`: an
+    # empty value never erases a stored one), so on a re-run the session ends
+    # up holding `merged_facts` PLUS every stored value this merge left empty.
+    # The stops below used to be computed on `merged_facts` alone and stored
+    # beside facts that said otherwise - live ca93ed8f: "Minimum Viable COPE
+    # incomplete - missing: occupancy type" stored next to the producer's
+    # occupancy answer, and generation capped the package at 60 for it. The
+    # tiers, the stops and the cross-form rules now read what will be stored,
+    # retractions included (`_named_deletes` below), so a stored stop can never
+    # contradict a stored fact. A first upload has no prior facts: unchanged.
+    from services.stops_now import facts_as_stored
+    _planned_deletes = (["auto_drivers"]
+                        if _named_moved and not _fv(merged_facts, "auto_drivers") else [])
+    # The documents door's retractions (7 Oct 2026) - empty for every other
+    # caller. Planned here so the stops below score what the row will hold.
+    _doc_retracts = _document_retractions(retract_document_keys, merged_facts, prior_facts)
+    _planned_deletes += [k for k in _doc_retracts if k not in _planned_deletes]
+    _stored_view = facts_as_stored(prior_facts, merged_facts, _planned_deletes)
 
-    tier2_score, tier2_missing = check_tier2(merged_facts, mflags)
-    hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
+    tier1_ok, tier1_missing = check_tier1(_stored_view, mflags)
+
+    tier2_score, tier2_missing = check_tier2(_stored_view, mflags)
+    hard_stops, soft_stops     = evaluate_stops(_stored_view, mflags)
     # A run with NO stops looks identical to a run where the engine never fired,
     # and the owner asked exactly that question of a clean live package
     # (2026-08-13: "check why i am not getting expected warnings"). The answer
@@ -1023,7 +1314,7 @@ async def _finalize_pipeline(
     # policies on one coverage line (that is the only thing that produces a
     # line-scoped question), which is exactly where this engine already
     # downgrades a policy-date difference to a warning.
-    _confirmed_keys = {parse_confirmation_key(k)[0] for k in (confirmations or {})}
+    _confirmed_keys = confirmed_fact_keys(confirmations)
     consistency_issues = check_doc_consistency(active_docs, _confirmed_keys)
     doc_conflicts: list[dict] = []
     # Rows, not sentences (client UI-04). Each carries `message` - the exact
@@ -1119,11 +1410,8 @@ async def _finalize_pipeline(
         from services.sqs_service import _loss_history_conflict
         # 2026-09-05: the conflict requires ACTUAL loss-run evidence, and this
         # site is the one place that can see the document types directly.
-        _lh_loss_run_doc = any(
-            isinstance(_d, dict) and _d.get("doc_type") == "loss_run"
-            and not _d.get("excluded")
-            for _d in (active_docs or [])
-        )
+        from services.loss_history_state import package_has_loss_runs
+        _lh_loss_run_doc = package_has_loss_runs(active_docs, merged_facts)
         if _loss_history_conflict(merged_facts, mflags, _lh_loss_run_doc):
             # OWNER 2026-09-03: *"treat the loss history one as a proper warning
             # as it is capping the score."* It was emitted as an advisory, which
@@ -1250,55 +1538,23 @@ async def _finalize_pipeline(
         # when the document says "No Coverage"), so this gates on evidence
         # rather than on a guess. Irrelevant conflicts stay a warning; they are
         # never silently dropped.
-        try:
-            from services.underwriting_consistency import (
-                HARD_STOP_RECONCILABLE_KEYS, GENERATION_BLOCKING_RECONCILABLE_KEYS,
-            )
-            _blocking_keys = set(HARD_STOP_RECONCILABLE_KEYS) | set(
-                GENERATION_BLOCKING_RECONCILABLE_KEYS)
-        except Exception:                                  # noqa: BLE001
-            _blocking_keys = set()
-        # Keys whose conflict only matters when that coverage actually exists.
-        _relevance_flag = {
-            "property_building_value": "has_property_coverage",
-            "property_bpp_value":      "has_property_coverage",
-        }
-        for f in underwriting["fields"]:
-            if f.get("review_required"):
-                _key = f.get("fact_key", "field")
-                _uw_msg = (
-                    f"{f['label']}: documents disagree "
-                    f"({', '.join(v['display'] for v in f['values'])}). "
-                    "Fix: Confirm the correct value to apply it across forms."
-                )
-                _needs_flag = _relevance_flag.get(_key)
-                _relevant = (not _needs_flag) or bool(mflags.get(_needs_flag))
-                # A contract-scoped difference on a multi-policy package is not
-                # blocking - the reconciler decides that once (see
-                # underwriting_consistency.CONTRACT_SCOPED_HARD_STOP_KEYS) and
-                # this honours it. Probe run C shipped a hard stop from HERE
-                # while check_doc_consistency had already downgraded its own
-                # copy to a warning: one difference, two engines, two verdicts,
-                # both on screen.
-                _downgraded = bool(f.get("blocking_downgraded"))
-                if _downgraded:
-                    _uw_msg += (" This package evidences more than one policy, "
-                                "and each policy carries its own term.")
-                _blocking = _key in _blocking_keys and _relevant and not _downgraded
-                if _blocking:
-                    hard_stops = list(hard_stops) + [_uw_msg]
-                else:
-                    soft_stops = list(soft_stops) + [_uw_msg]
-                    if _needs_flag and not _relevant:
-                        logger.info(
-                            "underwriting %s conflict kept as a warning - %s is "
-                            "false, so this cannot block form generation",
-                            _key, _needs_flag,
-                        )
-                structured_issues.append(make_issue(
-                    f"underwriting_reconciliation_{_key}",
-                    "hard_stop" if _blocking else "soft_warning", _uw_msg,
-                ))
+        #
+        # ONE builder (6 Oct 2026): `stops_now.underwriting_conflict_stops` -
+        # the stops door reads the stored assessment through the same function,
+        # so the stop a scorer applies and the card drawn here cannot differ.
+        # A contract-scoped difference on a multi-policy package is not
+        # blocking - the reconciler decides that once (see
+        # underwriting_consistency.CONTRACT_SCOPED_HARD_STOP_KEYS).
+        from services.stops_now import underwriting_conflict_stops
+        for _key, _uw_msg, _blocking in underwriting_conflict_stops(underwriting, mflags):
+            if _blocking:
+                hard_stops = list(hard_stops) + [_uw_msg]
+            else:
+                soft_stops = list(soft_stops) + [_uw_msg]
+            structured_issues.append(make_issue(
+                f"underwriting_reconciliation_{_key}",
+                "hard_stop" if _blocking else "soft_warning", _uw_msg,
+            ))
 
     # ── Cross-document source conflicts ─────────────────────────────────────
     # Surface field-level discrepancies between uploaded documents so the
@@ -1309,24 +1565,12 @@ async def _finalize_pipeline(
         # here keeps detect_source_conflicts from (a) re-flagging a value that
         # normalizes equal and (b) double-reporting a genuine conflict the
         # consistency check already raised.
-        _consistency_owned = {
-            "applicant_name", "dba_name", "entity_type", "mailing_address",
-            "physical_address", "fein", "effective_date", "expiration_date",
-            "lines_of_business",
-        }
-        source_conflicts = detect_source_conflicts(
-            active_docs,
-            # Union the keys the reconciler actually assessed (curated + any
-            # auto-discovered scalar fields when full-field reconciliation is on)
-            # so a field owned by the picker is never double-reported here.
-            skip_fields=set(RECONCILABLE_FIELD_KEYS)
-            | _consistency_owned
-            | set(underwriting.get("assessed_keys") or []),
-            # Carry the real fact key back (client #1: the display message no
-            # longer contains it, so the old `for '<field>'` regex-scrape is gone -
-            # the code is now derived from the actual key, structurally).
-            return_fields=True,
-        )
+        # The keys the reconciler assessed (curated + any auto-discovered
+        # scalar fields) are skipped so a field owned by the picker is never
+        # double-reported here; the real fact key comes back with each message
+        # (client #1). ONE builder shared with the stops door (6 Oct 2026).
+        from services.stops_now import source_conflict_stops
+        source_conflicts = source_conflict_stops(active_docs, underwriting)
         if source_conflicts:
             logger.info("Source conflicts detected across docs: %d", len(source_conflicts))
             for _sc_field, _sc_msg, _sc_is_carrier in source_conflicts:
@@ -1353,16 +1597,14 @@ async def _finalize_pipeline(
     # Critical fields (business name, address, FEIN, policy dates, property
     # values) at OCR confidence below threshold are surfaced for manual
     # confirmation as soft warnings.
-    _ocr_review_fields: list[str] = []
-    for d in active_docs:
-        for fld in d.get("manual_confirmation_required") or []:
-            if fld not in _ocr_review_fields:
-                _ocr_review_fields.append(fld)
-    if _ocr_review_fields:
-        for fld in _ocr_review_fields:
-            _ocr_msg = f"Low OCR confidence on critical field — confirm: {fld}"
-            soft_stops = list(soft_stops) + [_ocr_msg]
-            structured_issues.append(make_issue(f"ocr_low_confidence_{fld}", "soft_warning", _ocr_msg))
+    # ONE builder shared with the stops door (6 Oct 2026): a field a person has
+    # since supplied (or confirmed in the picker) is satisfied and not listed -
+    # the same test `issue_registry.drop_confirmed_ocr_issues` applies to the
+    # card on every recalculation.
+    from services.stops_now import ocr_review_stops
+    for fld, _ocr_msg in ocr_review_stops(active_docs, _stored_view, confirmations):
+        soft_stops = list(soft_stops) + [_ocr_msg]
+        structured_issues.append(make_issue(f"ocr_low_confidence_{fld}", "soft_warning", _ocr_msg))
 
     unique_low_conf = list(dict.fromkeys(all_low_conf))
     available_forms = filter_available_forms(load_all_forms())
@@ -1394,7 +1636,14 @@ async def _finalize_pipeline(
         extra_forms_scored = score_extra_forms(merged_facts, triggered_ids, available_forms)
 
         # ── Cross-form validation ────────────────────────────────────────────
-        cross_form_issues = run_cross_form_validation(merged_facts, mflags, triggered_ids)
+        # On the facts this run will STORE (see `_stored_view` above), refreshed
+        # here because the underwriting pass has written to `merged_facts`.
+        _stored_view = facts_as_stored(prior_facts, merged_facts, _planned_deletes)
+        cross_form_issues = run_cross_form_validation(_stored_view, mflags, triggered_ids)
+        # Before forms a check whose only fix is choosing a form is a form
+        # choice, not a stop - the same rule `stops_now` applies (13 Oct 2026).
+        from services.cross_form_validator import defer_form_choices
+        cross_form_issues = defer_form_choices(cross_form_issues)
         cf_hard, cf_soft, cf_advisories = split_cross_form_issues(cross_form_issues)
         # ── A SUGGESTION MAY NOT BECOME A BLOCKER (owner's decision, C75) ─────
         # `triggered_ids` here is the RECOMMENDED forms - nothing is selected
@@ -1510,24 +1759,43 @@ async def _finalize_pipeline(
         # A JSON null is not SQL NULL - COALESCE would pick it and blank the card.
         session_payload.pop("carried_lines", None)
 
+    _final_retracts = [k for k in _doc_retracts if _write_skips(merged_facts.get(k))]
+    _named_deletes = None
     if session_id:
         # The facts merge is additive and SKIPS an empty list, so a re-run that
         # moved the only "driver" out as a named individual (Chat 5) would leave
-        # the stale row stored under `auto_drivers`. Retract it explicitly - the
-        # re-merged documents say there are no drivers, which is exactly what a
-        # non-empty re-merge would have written over the stored list anyway.
+        # the stale row stored under `auto_drivers`. Retract it explicitly. The
+        # drivers a PERSON typed were restored into `merged_facts` before this
+        # run scored (the human-table block above - audit G8, 5 Oct 2026: this
+        # line used to delete them), so an empty list here means neither the
+        # documents nor a person hold a driver.
         _named_deletes = (["auto_drivers"]
                           if _named_moved and not _fv(merged_facts, "auto_drivers")
                           else None)
-        await upd_processing_session(session_id, session_payload,
-                                     delete_facts=_named_deletes)
+        # The documents door (7 Oct 2026): a document's own values that no
+        # active document states any more, and the forms left alone (the door
+        # re-stamps them). Both empty / off for every other caller.
+        if _final_retracts:
+            _named_deletes = list(_named_deletes or []) + [
+                k for k in _final_retracts if k not in (_named_deletes or [])]
+        if keep_forms:
+            session_payload.pop("selected_form_ids", None)
+            session_payload.pop("generated_forms", None)
+        if persist:
+            await upd_processing_session(session_id, session_payload,
+                                         delete_facts=_named_deletes)
         sid = session_id
     else:
         sid = await new_processing_session(session_payload)
 
     # Session is persisted → the submission is form-ready. Marking done AFTER the
     # DB write means a poll that sees done=true can rely on the session existing.
-    await reporter.done(sid)
+    # (Not when the caller persists the row itself - it marks done after.)
+    if persist or not session_id:
+        await reporter.done(sid)
+    _unpersisted = ({"session_payload": session_payload,
+                     "delete_facts": list(_named_deletes or [])}
+                    if session_id and not persist else {})
 
     return {
         "session_id":         sid,
@@ -1552,7 +1820,49 @@ async def _finalize_pipeline(
         "available_forms":      available_forms,
         "integrity":            integrity,
         "underwriting_consistency": underwriting,
+        # The documents door's retractions (empty for every other caller).
+        "retracted_facts":      _final_retracts,
+        # Only with persist=False: the row update the caller must write.
+        **_unpersisted,
     }
+
+
+def _write_skips(value: Any) -> bool:
+    """True when the session's facts write would SKIP this value and keep the
+    stored one - `session_repository.resolve_facts_write`'s own test (None, a
+    blank string, an empty list or dict)."""
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return isinstance(value, (list, dict)) and not value
+
+
+def _document_retractions(keys: Any, merged_facts: dict,
+                          prior_facts: Optional[dict]) -> List[str]:
+    """`retract_document_keys` (the documents door, 7 Oct 2026) narrowed to
+    what may really be retracted: a stored, public fact the re-merge did not
+    produce (the write would keep the stale value) and no person supplied (a
+    human answer is carried, never retracted). Sorted; empty for no keys."""
+    if not keys or not isinstance(prior_facts, dict) or not prior_facts:
+        return []
+    try:
+        from services.fact_state import human_provenance_facts
+        human = human_provenance_facts(prior_facts, include_absence=True)
+    except Exception as _hx:                                   # noqa: BLE001
+        # Without the provenance reader nothing can be told apart: retract nothing.
+        logger.warning("document retraction skipped (no provenance reader): %s", _hx)
+        return []
+    out: List[str] = []
+    for key in sorted({str(k) for k in keys if k}):
+        if key.startswith("_") or key in human or key not in prior_facts:
+            continue
+        if _write_skips(prior_facts.get(key)):
+            continue                                  # nothing stored to retract
+        if not _write_skips((merged_facts or {}).get(key)):
+            continue                                  # the re-merge still produces it
+        out.append(key)
+    return out
 
 
 async def resolve_submission_integrity(
@@ -1699,42 +2009,21 @@ async def resolve_submission_integrity(
 _REEXTRACT_DOC_TYPES = {"loss_run", "schedule"}
 
 
-async def reclassify_document(
-    session: dict,
-    session_id: str,
-    *,
+async def apply_document_action(
+    docs: list,
     doc_id: str,
     action: str,
     new_doc_type: Optional[str] = None,
-    user_id: Any = None,
-) -> dict:
-    """Apply a manual document-classification correction and re-run downstream
-    scoring/recommendations (Beta Report §4.2 action items #4–#6).
+) -> tuple:
+    """Apply ONE document correction to `docs` IN PLACE - set its type,
+    exclude it, include it, or keep it as supporting only. Returns
+    `(target, previous_doc_type)`; raises ValueError(code) on an unknown
+    document, type or action.
 
-    Actions:
-      • set_type — set the document's type to ``new_doc_type`` (manual
-                   correction; e.g. Unknown → Underwriting Narrative). Clears any
-                   prior scoring exclusion. When the corrected type uses
-                   type-specific extraction (Loss Runs / Schedules), the document
-                   is re-extracted from its stored text (no re-OCR) so the new
-                   type's extraction behaviour is applied.
-      • exclude  — exclude the document from scoring; it stays in the session for
-                   display ("Exclude from scoring").
-      • include  — re-include a document as a normal scoring participant (clears
-                   both the exclusion and the supporting-only flag).
-      • supporting_only — "Include as supporting document only": its facts
-                   contribute to the merge but it is never selected as the
-                   primary truth document.
-
-    Re-runs _finalize_pipeline on the STORED documents (no re-OCR), so SQS, the
-    narrative/loss-history pillars, recommendations, cross-form validation, and
-    the integrity verdict all reflect the corrected classification. Mirrors
-    resolve_submission_integrity()'s reuse pattern.
+    The one door for the change itself (7 Oct 2026): before forms exist
+    `reclassify_document` re-runs the pipeline after it; once forms exist the
+    documents door (`services/session_documents`) does, and re-stamps the forms.
     """
-    docs = list(session.get("docs") or [])
-    if not docs:
-        raise ValueError("reclassify_no_docs")
-
     target = next((d for d in docs if str(d.get("doc_id")) == str(doc_id)), None)
     if target is None:
         raise ValueError("reclassify_doc_not_found")
@@ -1788,6 +2077,46 @@ async def reclassify_document(
         target["supporting_only"] = True
     else:
         raise ValueError(f"reclassify_unknown_action:{action}")
+    return target, prev_type
+
+
+async def reclassify_document(
+    session: dict,
+    session_id: str,
+    *,
+    doc_id: str,
+    action: str,
+    new_doc_type: Optional[str] = None,
+    user_id: Any = None,
+) -> dict:
+    """Apply a manual document-classification correction and re-run downstream
+    scoring/recommendations (Beta Report §4.2 action items #4–#6).
+
+    Actions:
+      • set_type — set the document's type to ``new_doc_type`` (manual
+                   correction; e.g. Unknown → Underwriting Narrative). Clears any
+                   prior scoring exclusion. When the corrected type uses
+                   type-specific extraction (Loss Runs / Schedules), the document
+                   is re-extracted from its stored text (no re-OCR) so the new
+                   type's extraction behaviour is applied.
+      • exclude  — exclude the document from scoring; it stays in the session for
+                   display ("Exclude from scoring").
+      • include  — re-include a document as a normal scoring participant (clears
+                   both the exclusion and the supporting-only flag).
+      • supporting_only — "Include as supporting document only": its facts
+                   contribute to the merge but it is never selected as the
+                   primary truth document.
+
+    Re-runs _finalize_pipeline on the STORED documents (no re-OCR), so SQS, the
+    narrative/loss-history pillars, recommendations, cross-form validation, and
+    the integrity verdict all reflect the corrected classification. Mirrors
+    resolve_submission_integrity()'s reuse pattern.
+    """
+    docs = list(session.get("docs") or [])
+    if not docs:
+        raise ValueError("reclassify_no_docs")
+
+    target, prev_type = await apply_document_action(docs, doc_id, action, new_doc_type)
 
     logger.info(
         "reclassify_document: session=%s doc=%s action=%s %s->%s (user=%s)",
@@ -1843,6 +2172,9 @@ async def confirm_underwriting_value(
     if not docs:
         raise ValueError("underwriting_no_docs")
     active_docs = [d for d in docs if not d.get("excluded")] or docs
+    from services.underwriting_consistency import known_line_scope, LINE_SCOPED_FACT_KEYS
+    if scope and (fact_key not in LINE_SCOPED_FACT_KEYS or not known_line_scope(scope)):
+        raise ValueError("underwriting_invalid_scope")
 
     # Raises ValueError(code) on unknown field / empty / unparseable value.
     # docs=active_docs lets an auto-discovered (non-curated) field validate too
@@ -1921,6 +2253,209 @@ async def confirm_underwriting_value(
     result["_pre_confirm_candidates"] = pre_candidates
     result["_pre_confirm_reason"] = pre_reason
     return result
+
+
+async def confirm_underwriting_value_in_editor(
+    session: dict,
+    session_id: str,
+    *,
+    fact_key: str,
+    value: Any,
+    user_id: Any = None,
+    scope: Any = None,
+) -> dict:
+    """The Data Consistency confirmation AFTER forms exist (5 Oct 2026, owner).
+
+    `confirm_underwriting_value` re-runs `_finalize_pipeline`, which re-reads
+    the documents and resets `generated_forms` - why the picker was locked
+    once forms exist (1 Oct). This applies the SAME confirmation to the stored
+    facts instead, and re-stamps the generated forms in place:
+
+      * the same validation, the same linked fields (never for a line-scoped
+        answer, SYS-06) and the same namespaced key as the pre-form route;
+      * the same `apply_confirmations` (a bare key becomes the user_confirmed
+        envelope; a scoped key chooses its contract on `coverage_lines`);
+      * the assessment, the withheld / conflicted key lists and the stored
+        picker issues are recomputed exactly as the pipeline computes them;
+      * every fact the confirmation can change is re-stamped onto every
+        generated form, labelled as the producer's.
+
+    Never touches the documents, the other facts, or the forms' other boxes.
+    The caller logs the audit row and recalculates the scores. Raises
+    ValueError(code) like the pre-form route.
+    """
+    import copy as _copy
+    from services.underwriting_consistency import (
+        scoped_confirmation_key, known_line_scope, LINE_SCOPED_FACT_KEYS,
+    )
+
+    generated = _copy.deepcopy(session.get("generated_forms") or {})
+    if not generated:
+        raise ValueError("underwriting_no_forms")
+    docs = list(session.get("docs") or [])
+    if not docs:
+        raise ValueError("underwriting_no_docs")
+    active_docs = [d for d in docs if not d.get("excluded")] or docs
+    # A scope must name a real line, on a fact that has one value per line -
+    # "policy_number@bogus" was stored, changed nothing and relabelled every
+    # identity box (audit G7).
+    if scope and (fact_key not in LINE_SCOPED_FACT_KEYS or not known_line_scope(scope)):
+        raise ValueError("underwriting_invalid_scope")
+    canonical = validate_confirmation(fact_key, value, docs=active_docs)
+
+    facts_before = _copy.deepcopy(session.get("facts") or {})
+    facts = _copy.deepcopy(facts_before)
+    flags = session.get("flags") or {}
+    stored_confirmations = dict(session.get("underwriting_confirmations") or {})
+    confirmations = dict(stored_confirmations)
+    new_key = scoped_confirmation_key(fact_key, scope)
+
+    # Re-apply EVERY confirmation onto the rows as the documents print them -
+    # applying onto rows an earlier line-scoped answer rewrote is not
+    # idempotent. A session generated before the pipeline kept those rows
+    # still has them when nothing line-scoped was confirmed; one that has a
+    # line answer and is asked to CHANGE it cannot be re-applied safely.
+    _pristine = facts.get(UNCONFIRMED_COVERAGE_LINES_KEY)
+    if isinstance(_pristine, list):
+        facts["coverage_lines"] = _copy.deepcopy(_pristine)
+    elif isinstance(facts.get("coverage_lines"), list):
+        _prior_scoped = [k for k in stored_confirmations
+                         if parse_confirmation_key(k)[1]]
+        if not _prior_scoped:
+            facts[UNCONFIRMED_COVERAGE_LINES_KEY] = _copy.deepcopy(facts["coverage_lines"])
+        elif (new_key in stored_confirmations
+              and str(stored_confirmations[new_key]) != str(canonical)):
+            raise ValueError("underwriting_line_already_confirmed")
+
+    linked_applied: List[str] = []
+    pre_candidates: Optional[list] = None
+    pre_reason: Optional[str] = None
+    open_before: set = set()
+    try:
+        pre = assess_underwriting_consistency(active_docs, facts_before, stored_confirmations,
+                                              flags=flags)
+        open_before = {f.get("fact_key") for f in pre.get("fields") or []
+                       if f.get("review_required")}
+        target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
+        if target:
+            pre_candidates = [
+                {"value": v.get("display"), "normalized": v.get("normalized"),
+                 "scope": v.get("scope"),
+                 "sources": [{"filename": s_.get("filename"), "doc_type": s_.get("doc_type"),
+                              "method": s_.get("source_method")}
+                             for s_ in (v.get("sources") or [])]}
+                for v in (target.get("values") or [])
+            ]
+            pre_reason = target.get("conflict_reason")
+        for link in ((target.get("linked_fields") if target else None) or []) if not scope else []:
+            lk = link["fact_key"]
+            if lk in confirmations:
+                continue
+            try:
+                confirmations[lk] = validate_confirmation(lk, canonical, docs=active_docs)
+                linked_applied.append(lk)
+            except ValueError:
+                continue
+    except Exception as exc:                              # pragma: no cover - defensive
+        logger.warning("confirm_in_editor: linked-field lookup skipped for %s - %s", fact_key, exc)
+
+    confirmations[new_key] = canonical
+    facts = apply_confirmations(facts, confirmations, docs=active_docs)
+    # The rows were reset to the documents' own above: the producer's policy
+    # lines go back on top (7 Oct 2026, services/policy_lines.py). No store:
+    # a no-op. The flags are the stored ones and are left alone here.
+    try:
+        from services.policy_lines import apply_producer_policy_lines
+        apply_producer_policy_lines(facts, None, active_docs)
+    except Exception as _plx:                                   # noqa: BLE001
+        logger.warning("confirm_in_editor: producer policy lines skipped: %s", _plx)
+    try:
+        from services.extraction_service import follow_proposed_expiration
+        follow_proposed_expiration(facts)
+    except Exception as _fpx:                                   # noqa: BLE001
+        logger.warning("confirm_in_editor: proposed-expiration follow skipped: %s", _fpx)
+
+    underwriting = assess_underwriting_consistency(active_docs, facts, confirmations, flags=flags)
+    # The pipeline's own bookkeeping (see `_finalize_pipeline`), on the stored
+    # facts. The facts merge is additive, so an emptied list is DELETED.
+    delete_facts: List[str] = []
+    _confirmed = set(confirmations.keys())
+    _withheld = set(unresolved_withheld_keys(underwriting, confirmations))
+    _withheld |= {k for k in (facts.get("_uw_conflicted_keys") or []) if k not in _confirmed}
+    _conflicts = set(unresolved_conflict_keys(underwriting, confirmations)) | _withheld
+    for _key, _vals in (("_uw_conflicted_keys", _withheld), ("_uw_conflict_keys", _conflicts)):
+        if _vals:
+            facts[_key] = sorted(_vals)
+        elif facts.pop(_key, None) is not None or _key in (session.get("facts") or {}):
+            delete_facts.append(_key)
+
+    # Every box the change moves - the fact's own boxes, the boxes derived
+    # from it (question 4 rows, the next term, an address split into parts) -
+    # re-read from the engine generation used (`_restamp_changed_boxes`). Only
+    # the confirmed fact's own boxes become the producer's.
+    from services.arq_service import _restamp_changed_boxes
+    # Generation stamps `{**facts, **flags, "_package_form_ids": ...}`
+    # (`form_service.process_single_form`), so the comparison asks the engine
+    # with the SAME input (7 Oct 2026): a flag-driven box (LOB ticks,
+    # ATTACHMENTS) otherwise reads differently from what the form prints and
+    # is mistaken for an edited box. Flags do not change on a confirmation.
+    try:
+        from services.form_service import package_form_ids as _pkg_ids
+        _pkg = _pkg_ids(session) or list(generated.keys())
+    except Exception:                                           # noqa: BLE001
+        _pkg = list(generated.keys())
+    _view_before = {**facts_before, **flags, "_package_form_ids": _pkg}
+    _view_after = {**facts, **flags, "_package_form_ids": _pkg}
+    stamped = _restamp_changed_boxes(generated, _view_before, _view_after,
+                                     own_keys={fact_key, *linked_applied},
+                                     own_value=canonical, provenance="producer",
+                                     scope=scope)
+    # Premium boxes are non-fillable, so `_restamp_changed_boxes` skips them;
+    # the one door generation runs for them re-stamps the ones the change moved.
+    try:
+        from services.policy_lines import restamp_nonfillable_boxes
+        _raw = "\n".join(str(d.get("text") or "") for d in active_docs)
+        _np = restamp_nonfillable_boxes(generated, _view_before, _view_after, _raw) or []
+        stamped = list(dict.fromkeys(list(stamped or []) + list(_np)))
+    except Exception as _npx:                                   # noqa: BLE001
+        logger.warning("confirm_in_editor: premium re-stamp skipped: %s", _npx)
+
+    # The stored picker / document-conflict issues of every field this answer
+    # SETTLED - its own, the linked ones, and any it closed indirectly (a
+    # policy number that chooses a contract settles that line's carrier too).
+    # A recalculation never rebuilds these, so without this a card would
+    # outlive the answer.
+    from services.issue_registry import doc_conflict_fact_key, picker_fact_key
+    _still_open = {f.get("fact_key") for f in underwriting.get("fields") or []
+                   if f.get("review_required")}
+    _gone = ({fact_key, *linked_applied} | open_before) - _still_open
+    structured = [
+        i for i in (session.get("structured_issues") or [])
+        if not (isinstance(i, dict) and (
+            picker_fact_key(i.get("code")) in _gone
+            or doc_conflict_fact_key(i.get("code")) in _gone))
+    ]
+
+    await upd_processing_session(session_id, {
+        "facts": facts,
+        "generated_forms": generated,
+        "underwriting_confirmations": confirmations,
+        "underwriting_consistency": underwriting,
+        "structured_issues": structured,
+    }, delete_facts=delete_facts or None)
+    logger.info(
+        "confirm_in_editor: session=%s field=%s scope=%s value=%r linked=%s "
+        "forms=%s (user=%s)", session_id, fact_key,
+        scope or "(submission-wide)", canonical, linked_applied,
+        stamped, user_id or session.get("user_id"))
+    return {
+        "confirmed_value": canonical,
+        "linked_applied": linked_applied,
+        "forms_updated": stamped,
+        "underwriting_consistency": underwriting,
+        "_pre_confirm_candidates": pre_candidates,
+        "_pre_confirm_reason": pre_reason,
+    }
 
 
 async def apply_marketing_reason(

@@ -109,7 +109,11 @@ def _literal_str(node) -> str:
         return _literal_str(node.body) + " " + _literal_str(node.orelse)
     if isinstance(node, ast.Call):
         # e.g. `"; ".join(reason_parts)` - no literal form id can hide in there.
-        return " "
+        # A message HELPER's literal arguments do ship to the producer (6 Oct:
+        # `_misaligned_message(..., "... explained via ACORD 101.")`), so they
+        # are harvested; the callee itself is not.
+        parts = [_literal_str(a) for a in node.args] + [_literal_str(k.value) for k in node.keywords]
+        return " ".join(p for p in parts if p.strip()) or " "
     return ""
 
 

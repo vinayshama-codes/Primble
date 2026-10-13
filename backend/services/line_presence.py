@@ -89,17 +89,27 @@ class LineProfile:
     """
 
     __slots__ = ("line", "phrases", "fact_prefixes", "fact_keys",
-                 "application_forms", "flag")
+                 "application_forms", "flag", "census", "shared_keys")
 
     def __init__(self, line: str, phrases: Tuple[str, ...],
                  fact_prefixes: Tuple[str, ...], fact_keys: Tuple[str, ...],
-                 application_forms: Tuple[str, ...], flag: str):
+                 application_forms: Tuple[str, ...], flag: str,
+                 census: bool = True, shared_keys: Tuple[str, ...] = ()):
         self.line = line
         self.phrases = phrases
         self.fact_prefixes = fact_prefixes
         self.fact_keys = fact_keys
         self.application_forms = application_forms
         self.flag = flag
+        # Facts of this line that ANOTHER line's schedule also records - the
+        # umbrella's underlying Employers Liability limit. A person confirming
+        # one is not asking for this line, so it never overrides a decline.
+        self.shared_keys = shared_keys
+        # May a granted-line census (three lines, this one never named) count
+        # as absence? True for WC, where it was measured (SYS-04). A line
+        # described only so the submission's own STATEMENT can reach it says
+        # False: then only an explicit denial, a statement or a false flag do.
+        self.census = census
 
 
 # Canonical line family (the `lob_canon.canon_line` vocabulary) -> profile.
@@ -122,6 +132,23 @@ _LINE_PROFILES: Dict[str, LineProfile] = {
         fact_keys=("employers_liability_limits",),
         application_forms=("ACORD_130",),
         flag="has_workers_comp",
+        shared_keys=("employers_liability_limits",),
+    ),
+    # 5 Oct 2026 (CH125): described so "NOT REQUESTED: commercial inland
+    # marine" reaches `has_inland_marine` - an in-force floater set the flag,
+    # the 125 box ticked and the 160 / 140 overlap warning fired on a line
+    # the submission declines. Census OFF: no measurement backs inferring IM
+    # absence from a coverage list (stored sessions: the census alone would
+    # flip one kit with no key to check it against). No application form -
+    # ACORD 160 is the Business Owners section in this repo.
+    "inland_marine": LineProfile(
+        line="inland_marine",
+        phrases=("inland marine",),
+        fact_prefixes=("inland_marine_",),
+        fact_keys=(),
+        application_forms=(),
+        flag="has_inland_marine",
+        census=False,
     ),
 }
 
@@ -259,10 +286,14 @@ def _documents_deny(prof: LineProfile, facts: Optional[dict]) -> bool:
     if not isinstance(facts, dict):
         return False
     try:
-        from services.pdf_service import _line_absent_from_package as _absent
+        from services.pdf_service import (
+            _line_absent_from_package as _absent, _line_declared_absent as _declared,
+        )
     except Exception:                                          # noqa: BLE001
         return False
     try:
+        if not prof.census:
+            return bool(_declared(facts, prof.phrases))     # an explicit denial only
         return bool(_absent(facts, prof.phrases))
     except Exception:                                          # noqa: BLE001
         return False
@@ -281,7 +312,9 @@ def _applied_for(prof: LineProfile, form_ids: Optional[Iterable[Any]]) -> bool:
     if not form_ids or not prof.application_forms:
         return False
     try:
-        seen = {str(f).strip().upper() for f in form_ids if f}
+        # A form's second copy is its form (7 Oct 2026: "ACORD_131__excess").
+        from services.form_instances import base_form_id
+        seen = {base_form_id(str(f).strip()).upper() for f in form_ids if f}
     except TypeError:                             # not iterable
         return False
     return any(f.upper() in seen for f in prof.application_forms)
@@ -300,6 +333,81 @@ def _flag_says_absent(prof: LineProfile, flags: Optional[dict]) -> bool:
     if isinstance(value, dict):                   # envelope shape
         value = value.get("value")
     return value is False or value == 0 or value in ("false", "False")
+
+
+def _submission_declines(prof: LineProfile, facts: Optional[dict]) -> bool:
+    """`extraction_service.lines_not_requested` recorded this line."""
+    if not isinstance(facts, dict):
+        return False
+    held = facts.get("_lines_not_requested")
+    if isinstance(held, dict):
+        held = held.get("value")
+    return isinstance(held, (list, tuple)) and prof.line in held
+
+
+def _is_a_persons(env: Any) -> bool:
+    """A person (producer, client, the Data Consistency picker) gave this value
+    - `fact_state.derive_evidence_state`, the one owner of that question."""
+    if not isinstance(env, dict):
+        return False
+    try:
+        from services.fact_state import derive_evidence_state, USER_CONFIRMED
+    except Exception:                                          # noqa: BLE001
+        return False
+    try:
+        return derive_evidence_state(env)[0] == USER_CONFIRMED
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _human_answered(prof: LineProfile, facts: Optional[dict],
+                    include_shared: bool = False) -> bool:
+    """A person gave a value on one of this line's own facts (a fact another
+    line's schedule shares counts only when `include_shared`)."""
+    for key in _line_fact_keys(prof, facts):
+        if not include_shared and key in prof.shared_keys:
+            continue
+        if _is_a_persons(facts.get(key)):
+            return True
+    return False
+
+
+def _carried_elsewhere_stated(prof: LineProfile, facts: Optional[dict]) -> bool:
+    """The decline statement itself says the insured carries the line
+    ("stays with TEM", "placed separately") - `declined_lines.
+    lines_carried_elsewhere`, stored by the merge."""
+    if not isinstance(facts, dict):
+        return False
+    held = facts.get("_lines_carried_elsewhere")
+    if isinstance(held, dict):
+        held = held.get("value")
+    return isinstance(held, (list, tuple)) and prof.line in held
+
+
+def declined_by_submission(line: str, facts: Optional[dict] = None,
+                           form_ids: Optional[Iterable[Any]] = None) -> bool:
+    """The submission declines this line and nothing a person did outranks it
+    (its application form selected, an answer on one of its own facts).
+    Readers that act on a decline (the form recommender) ask this, so they
+    can never disagree with `line_in_submission`. Never raises."""
+    prof = line_profile(line)
+    if prof is None:
+        return False
+    try:
+        return (_submission_declines(prof, facts)
+                and not _applied_for(prof, form_ids)
+                and not _human_answered(prof, facts))
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _flag_true(value: Any) -> bool:
+    if isinstance(value, dict):                   # envelope shape
+        value = value.get("value")
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "y", "1")
+    return value is True or (isinstance(value, (int, float)) and not isinstance(value, bool)
+                             and value == 1)
 
 
 # ── The door ─────────────────────────────────────────────────────────────────
@@ -335,6 +443,15 @@ def line_in_submission(line: str,
         if _applied_for(prof, form_ids):
             return PRESENT
 
+        # The submission's own statement that it is NOT requesting the line
+        # (5 Oct 2026) - "intentionally requested" answered by the documents.
+        # Outranks an in-force policy on the line, which is exactly the shape
+        # it exists for: a WC policy staying with its carrier, enclosed for
+        # reference. Selecting the line's form (above) or a person answering
+        # one of its questions still wins.
+        if _submission_declines(prof, facts) and not _human_answered(prof, facts):
+            return ABSENT
+
         stated_value, stated_absence = _value_states(prof, facts)
         grants = _documents_grant(prof, facts)
         denies = _documents_deny(prof, facts)
@@ -362,6 +479,18 @@ def line_in_submission(line: str,
         logger.warning("line_presence: %s failed, answering UNKNOWN: %s",
                        line, ex)
         return UNKNOWN
+
+
+def line_carried(line: str, facts: Optional[dict] = None,
+                 flags: Optional[dict] = None) -> bool:
+    """Does the insured CARRY this line - in the submission, or in force and
+    declined by it (`reconcile_line_flags` records the second as
+    `<line>_in_force`)? For readers about the insured's coverage, not about
+    what this submission asks for. Never raises."""
+    prof = line_profile(line)
+    if prof is None or not isinstance(flags, dict):
+        return False
+    return _flag_true(flags.get(prof.flag)) or _flag_true(flags.get(f"{prof.line}_in_force"))
 
 
 def line_is_absent(line: str,
@@ -417,6 +546,31 @@ def reconcile_line_flags(flags: Optional[dict],
             verdict = line_in_submission(line, facts, flags, form_ids)
         except Exception:                                      # noqa: BLE001
             continue
+        # OUT OF SCOPE IS NOT UNINSURED (5 Oct 2026). A line the submission
+        # declines while its documents evidence a policy in force (WC staying
+        # with its carrier) is demoted below - the flag means "part of this
+        # submission" to the WC rules - but the insured still CARRIES it, and
+        # the readers that ask that (employees without WC, the umbrella's
+        # Employers Liability) read `<line>_in_force` beside the flag.
+        _in_force_key = f"{line}_in_force"
+        # Carried = a policy the documents evidence, the decline statement
+        # saying so ("stays with Tennessee Employers Mutual", "placed
+        # separately"), or a PERSON's value on one of the line's facts. NOT an
+        # extracted value alone: extraction fills `wc_payroll` from the total
+        # payroll and `wc_description_of_operations` from the operations text
+        # on packages with no WC at all (9 of 40 stored sessions), and an
+        # umbrella schedule's REQUIRED EL limit is not a policy (audit, 5 Oct).
+        try:
+            _carried = (verdict == ABSENT and _submission_declines(prof, facts)
+                        and (_documents_grant(prof, facts)
+                             or _carried_elsewhere_stated(prof, facts)
+                             or _human_answered(prof, facts, include_shared=True)))
+        except Exception:                                      # noqa: BLE001
+            _carried = False
+        if _carried:
+            flags[_in_force_key] = True
+        else:
+            flags.pop(_in_force_key, None)
         current = flags.get(prof.flag)
         if verdict == ABSENT and current not in (False, None):
             flags[prof.flag] = False

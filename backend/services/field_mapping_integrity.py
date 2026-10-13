@@ -139,6 +139,11 @@ def _humanize_field(field: str) -> str:
 
 
 def _form_label(form_id: str) -> str:
+    # A form's second copy reads "ACORD 131 (Excess)" (7 Oct 2026); plain ids
+    # keep their historic wording.
+    from services.form_instances import instance_label, is_instance
+    if is_instance(form_id):
+        return instance_label(form_id)
     return (form_id or "").replace("ACORD_", "ACORD ")
 
 

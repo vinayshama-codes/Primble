@@ -543,11 +543,21 @@ class TestSubmissionIntegrityUsesTheDoor:
         ("carrier_name", "Travelers Indemnity", "Hartford Fire Insurance", "carrier"),
     ])
     def test_a_REAL_divergence_still_fires(self, field, a, b, needle):
+        # No legal-form designator in the name: since 7 Oct 2026 (Choice
+        # Electric) an "LLC" in the insured's own name settles a contradicting
+        # entity reading as a misread, so a REAL divergence needs a bare name.
         r = self._assess([
-            self._d("a.pdf", {"applicant_name": "Orbin Contracting LLC", field: a}),
-            self._d("b.pdf", {"applicant_name": "Orbin Contracting LLC", field: b},
+            self._d("a.pdf", {"applicant_name": "Orbin Contracting", field: a}),
+            self._d("b.pdf", {"applicant_name": "Orbin Contracting", field: b},
                     "application")])
         assert any(needle in x for x in r["reasons"]), r["reasons"]
+
+    def test_the_name_designator_settles_a_misread_entity_type(self):
+        r = self._assess([
+            self._d("a.pdf", {"applicant_name": "Orbin Contracting LLC", "entity_type": "LLC"}),
+            self._d("b.pdf", {"applicant_name": "Orbin Contracting LLC", "entity_type": "Corporation"},
+                    "application")])
+        assert not any("Entity type" in x for x in r["reasons"]), r["reasons"]
 
     def test_two_REAL_insureds_still_block(self):
         """The blocking path is name/FEIN clustering - untouched by C1c."""

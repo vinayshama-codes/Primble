@@ -241,7 +241,7 @@ class TestWiring:
         "/api/client-answer/resolve",         # resolver
         "Needs your decision",                # the new section
         "loss_run_match_detail?.notes",       # F4 notes
-        'f.status === "scoped"',              # F2b rows
+        "Policies in this submission",        # SYS-06 table (F2b rows removed - Brent #10)
         "f.conflict_reason",                  # F10 reason
     ])
     def test_the_frontend_renders_it(self, needle):
@@ -259,13 +259,15 @@ class TestWiring:
         return {name: (root / name).read_text(encoding="utf-8") for name in self._LAYOUTS}
 
     def test_the_policies_table_and_line_scoped_rows_are_shown(self):
-        """F2b renders the scoped rows ("N policies, N values - not a
-        conflict") and SYS-06 the "Policies in this submission" table - the
-        line -> carrier -> NAIC -> policy mapping the client wrote out as
-        correct (11 Sep). They were removed on 27 Sep by a misread of the
-        owner's instruction and restored the same day. Both layouts."""
+        """SYS-06's "Policies in this submission" table - the line -> carrier ->
+        NAIC -> policy mapping the client wrote out as correct (11 Sep) - stays
+        in both layouts. The F2b scoped rows ("N policies, N values - not a
+        conflict"), restored 27 Sep, are no longer drawn: Brent #10 (7 Oct 2026,
+        owner approved) - redundant to the table, which now carries each
+        policy's own Limit and Group by carrier
+        (test_choice_electric_policies_table_7oct.py)."""
         for name, src in self._layout_sources().items():
-            assert 'f.status === "scoped"' in src, name
+            assert 'f.status === "scoped").map' not in src, name
             assert "Policies in this submission" in src, name
 
     def test_a_dated_change_is_kept_but_not_shown(self):

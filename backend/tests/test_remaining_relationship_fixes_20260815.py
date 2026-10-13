@@ -989,6 +989,14 @@ class TestUnderlyingOtherPolicyLeftover:
              "carrier": "Beazley Insurance Company", "premium": "$1,200.00",
              "effective_date": "07/15/2025", "expiration_date": "07/15/2026"}])
         f = dict(facts, _form_id="ACORD_131")
+        # Round 5 (7 Oct 2026, Brent #4, PROBLEMS.md 12): a CYBER policy is
+        # underlying only when the umbrella's own schedule lists it - carried
+        # alone it is not (Choice Electric printed its cyber policy here).
+        assert P._resolve_underlying_policy_row(
+            "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_A", f) is None
+        f["underlying_policies"] = [
+            {"line": "Cyber Liability", "limit": "$1,000,000",
+             "carrier": "Beazley Insurance Company", "policy_no": "CYB-777"}]
         assert P._resolve_underlying_policy_row(
             "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_A", f) == "CYB-777"
         assert P._resolve_underlying_policy_row(

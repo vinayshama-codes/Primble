@@ -323,9 +323,11 @@ async def _process_form_generation_job(job: dict, queue) -> None:
 
         async def _generate_one(fid: str):
             """Generate a single form; returns (fid, result) or (fid, None) on failure."""
-            form_meta = next(
-                (f for f in session.get("all_forms", []) if f["form_id"] == fid), None
-            )
+            # A form's second copy ("ACORD_131__excess", 7 Oct 2026) is generated
+            # from its form's row under its own id (services/form_instances.py).
+            from services.form_instances import form_meta_for
+            form_meta = form_meta_for(session.get("all_forms", []), fid,
+                                      session.get("facts") or {})
             if not form_meta:
                 logger.warning("Job %s: form_meta missing for %s", job_id, fid)
                 return fid, None
@@ -387,17 +389,11 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         # Same engine as the sync select_forms_bulk path - see the note there.
         # These two must stay in step or an async-generated session would carry a
         # different validation set than a sync-generated one.
-        from services.cross_form_validator import run_cross_form_validation
-        cross_issues_raw     = run_cross_form_validation(
-            session["facts"], session.get("flags", {}), set(form_ids),
-        )
-        seen_msgs            = set()
-        cross_issues_deduped = []
-        for issue in cross_issues_raw:
-            msg = issue.get("message", "")
-            if msg not in seen_msgs:
-                seen_msgs.add(msg)
-                cross_issues_deduped.append(issue)
+        # The stops come from the one door (6 Oct 2026, Choice Electric #18),
+        # rebuilt from the stored facts - never the stored display cache.
+        from services.stops_now import stops_now
+        _gen_stops           = stops_now(session, form_ids, pre_form=False)
+        cross_issues_deduped = _gen_stops["cross_issues"]
 
         # Compute package SQS via the same scorer the sync + remediation paths use
         # so async (worker) sessions carry the full enriched package summary -
@@ -412,8 +408,8 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                     flags=session.get("flags", {}),
                     form_results=_sqs_list,
                     cross_issues=cross_issues_deduped,
-                    hard_stops=session.get("hard_stops", []),
-                    soft_stops=session.get("soft_stops", []),
+                    hard_stops=_gen_stops["hard"],
+                    soft_stops=_gen_stops["soft"],
                     session_data=session,
                     session_id=session_id,
                     user_id=user_id,
@@ -443,7 +439,17 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             "active_form_id":    form_ids[0] if form_ids else None,
             "cross_issues_last": cross_issues_deduped + _stamp_issues,
             "underwriting_stamp_consistency": _stamp_check,
+            # Same display cache the sync route writes: what the score used.
+            "hard_stops":        _gen_stops["hard"],
+            "soft_stops":        _gen_stops["soft"],
         }
+        # Each generated copy of a form stays bound to its own subject (one
+        # ACORD 131 per umbrella layer) - stored in this same write.
+        try:
+            from services.form_instances import binding_update
+            _update_payload.update(binding_update(session.get("facts"), list(results)))
+        except Exception as _bind_ex:                         # noqa: BLE001
+            logger.warning("worker: form copy binding skipped: %s", _bind_ex)
         if package_sqs is not None:
             _update_payload["package_sqs"] = package_sqs
             # Explicit key engages session_repository's append-only

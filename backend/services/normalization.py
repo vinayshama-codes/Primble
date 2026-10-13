@@ -367,6 +367,28 @@ _CARRIER_FORM_NUMBER_RE = re.compile(
     r"(?:ed(?:ition)?\.?\s*)?(?:0[1-9]|1[0-2])\s*[-/.\s]\s*(?:\d{2}|\d{4})\s*[)\]]?$",
     re.I)
 _EDITION_LETTER_FORM_NUMBER_RE = re.compile(r"^[A-Z]{2,3}(?:\s?\d{2}){2,3}\s[A-Z]$")
+# ...and a SERIES DESIGNATOR between the line prefix and the number (6 Oct 2026,
+# Choice Electric). ISO's declarations forms and carriers' own forms put a
+# second, short letter group there: "IL DS 71 05 02 08", "CP DS 70 00 09 06",
+# "CU DS 71 02 04 14" (DS = declarations schedule), "CG T0 96 04 17",
+# "IL T8 01 01 01", "CG D0 31 10 91", "IL N 020 09 03". Every one passed as a
+# POLICY number and "IL DS 71 05 02 08" printed on ACORD 125 question 4. The
+# shape still ends on a real edition (month 01-12, two-digit year), the two
+# letter groups are separated by a space, and the number groups are spaced
+# pairs - a policy number of the "LL dddddddd" / "LLL-dddddd-dd" families can
+# never take it.
+_DESIGNATOR_FORM_NUMBER_RE = re.compile(
+    r"^[A-Z]{2}\s[A-Z][A-Z0-9]?\s\d{2,3}(?:\s\d{2}){0,2}\s(?:0[1-9]|1[0-2])\s\d{2}$")
+# ...and a carrier form whose BRACKETED edition writes the month with one digit,
+# or whose series carries a dotted sub-number (7 Oct 2026, round 5 corpus):
+# "CA8214(5-12)", "CA8214.1(5-12)", "CA8282(8-18)", "CA8112.2(11-15)" - EMC page
+# footers the model tagged as the policy number of their declarations entries.
+# The brackets are what make the one-digit month safe: a policy number never
+# closes on a parenthesised month-year, and the series still never runs five
+# digits together.
+_BRACKETED_EDITION_FORM_NUMBER_RE = re.compile(
+    r"^(?!.*\d{5})[A-Z]{2,3}\s?\d{2}\s?\d{2}(?:\.\d{1,2})?[A-Z]{0,2}\s*[(\[]\s*"
+    r"(?:0?[1-9]|1[0-2])\s*[-/.]\s*(?:\d{2}|\d{4})\s*[)\]]$", re.I)
 
 
 def looks_like_a_form_number(value: Any) -> bool:
@@ -381,7 +403,41 @@ def looks_like_a_form_number(value: Any) -> bool:
         return False
     return bool(_ISO_FORM_NUMBER_RE.match(s)
                 or _CARRIER_FORM_NUMBER_RE.match(s)
-                or _EDITION_LETTER_FORM_NUMBER_RE.match(s))
+                or _EDITION_LETTER_FORM_NUMBER_RE.match(s)
+                or _DESIGNATOR_FORM_NUMBER_RE.match(s)
+                or _BRACKETED_EDITION_FORM_NUMBER_RE.match(s))
+
+
+# A page's own FOOTER: the page counter, the copy marking, the copyright line.
+# A form number prints there; the line that carries it is page furniture.
+_PAGE_FOOTER_MARK_RE = re.compile(
+    r"\bpage\s*\d+\s*of\s*\d+\b|\binsured'?s?\s+copy\b|\bcopyright\b|©", re.I)
+
+
+def printed_as_page_footer(value: Any, text: Any) -> bool:
+    """True when ``text`` prints ``value`` on a line that is the page's own
+    footer (a "Page 1 of 2" counter, "INSURED COPY", a copyright mark).
+
+    Choice Electric (6 Oct 2026): three declarations print "POLICYNUMBER: IL DS
+    71 05 02 08" - the contract number was redacted and the page's form number
+    sits beside the label - and the same three pages close with "IL DS 71 05 02
+    08 INSURED COPY Page 1of2". The label alone made it a contract. The footer
+    is the document saying, in its own layout, what the token is."""
+    s = str(value or "").strip()
+    t = str(text or "")
+    if not s or not t:
+        return False
+    tokens = [re.escape(tok) for tok in s.split() if tok]
+    if not tokens:
+        return False
+    pattern = re.compile(r"(?<![A-Za-z0-9])" + r"\s*".join(tokens) + r"(?![A-Za-z0-9])", re.I)
+    for m in pattern.finditer(t):
+        ls = t.rfind("\n", 0, m.start()) + 1
+        le = t.find("\n", m.end())
+        line = t[ls:le if le != -1 else len(t)]
+        if _PAGE_FOOTER_MARK_RE.search(line[:m.start() - ls] + " " + line[m.end() - ls:]):
+            return True
+    return False
 
 
 _ACCOUNT_LABEL_RE = re.compile(r"\b(?:account|acct)\b", re.I)
@@ -404,31 +460,224 @@ def labelled_identifiers(entries: Any) -> Tuple[Set[str], Set[str]]:
         if not isinstance(e, dict):
             continue
         label = str(e.get("label") or "")
-        key = _identifier_key(e.get("value"))
+        raw_value = str(e.get("value") or "")
+        key = _identifier_key(raw_value)
         if len(key) < 4:
             continue
         if _ACCOUNT_LABEL_RE.search(label) and not _POLICY_NO_LABEL_RE.search(label):
             accounts.add(key)
         elif _POLICY_NO_LABEL_RE.search(label):
+            # A contract identifier carries a digit and is not a DATE. A
+            # redacted "POLICY NUMBER" cell reads its neighbour instead -
+            # "EFFECTIVE DATE 01/01/2025", "X If Supplemental Declarations Is
+            # Attached" (6 Oct 2026) - and neither is a contract.
+            if not re.search(r"\d", key) or _LABELLED_DATE_RE.search(raw_value):
+                continue
             contracts.add(key)
     return contracts, accounts
 
 
-def is_not_a_policy_number(value: Any, entries: Any = None) -> bool:
-    """True for a value that cannot be THIS package's policy number: a form
-    number (unless the declarations print it as a contract), or the value the
-    declarations print under an ACCOUNT label (Orbin's "Account Number:
-    0482854" was listed on the card as a fifth policy)."""
+_LABELLED_DATE_RE = re.compile(r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\b")
+
+
+def is_not_a_policy_number(value: Any, entries: Any = None, text: Any = None) -> bool:
+    """True for a value that cannot be THIS package's policy number.
+
+    * NO DIGIT (Brent, 6 Oct 2026): *"Policy number will always have an actual
+      number somewhere in the string, even if it starts with letters."* The
+      Business Auto declarations print "POLICYNUMBER: COMMERCIAL AUTO" - a
+      redaction label - and it was the auto policy number on ACORD 125 and 131.
+      No label rescues a digit-free value.
+    * A FORM number (`looks_like_a_form_number`), unless the declarations print
+      it under a POLICY NUMBER label - and that label does not rescue a form
+      number the same document prints as its own page footer (``text``; see
+      `printed_as_page_footer`).
+    * The value the declarations print under an ACCOUNT label (Orbin's "Account
+      Number: 0482854" was listed on the card as a fifth policy).
+    * NO IDENTIFIER LEFT (7 Oct 2026, round 5): words plus a form number
+      ("COMMERCIAL AUTO CA DS 70 01 09 06"), a date, an amount, a lone digit, a
+      street address, a value naming itself another identifier ("ACCOUNT
+      4471100") or a number cut at its separator ("CGL-2024-") - see
+      `policy_number_refusal`. No label rescues these either.
+    """
+    return bool(policy_number_refusal(value, entries, text))
+
+
+# ── AN IDENTIFIER MUST BE LEFT (7 Oct 2026, round 5) ─────────────────────────
+# Brent's digit rule reads the WHOLE value, and "COMMERCIAL AUTO CA DS 70 01 09
+# 06" carries digits - every one of them the declarations' own FORM number. The
+# model joined the redacted "POLICYNUMBER: COMMERCIAL AUTO" with the form number
+# printed on the next line, the merge kept it (printed, in order) and it printed
+# on ACORD 125 question 4, 127, 137 and the 131 underlying auto row. The replay
+# corpus (690 sessions) holds the same hole in other shapes: a date
+# ("09/01/2026", "07/15/2025 - 07/15/2026"), an amount ("$4,600,000"), a lone
+# digit ("9", "Primble Beta Testing Round 1"), a street address ("1500 Market
+# Street"), a page header's "ACCOUNT 4471100" and a number cut at its dash
+# ("CGL-2024-") - each in a policy-number box or a line's policy number.
+#
+# So: take away what a value's digits can belong to that is not a contract - a
+# form number (every shape `looks_like_a_form_number` knows, wherever it sits
+# among the words), a date or a policy-year span, an amount, a percentage - and
+# the words; what is left must still carry a number - at least four letters and
+# digits, or a short code with a letter in it ("X-1"), never a bare count like
+# "9". TOKEN by token, never by substring: "6E7-40-02-26" is a policy
+# number, not the date "40-02-26" inside it. A value that keeps an identifier is
+# never rewritten here - "Commercial Auto: BA-456789" is not refused, and is not
+# cut down to its number either (measured 7 Oct: no stored value has that shape,
+# and "CPP 4Q 887214 26" / "GL 7784120 25" show a line word can BE the number's
+# own prefix).
+_ID_TOKEN_EDGE = "()[]{}<>,;:\"'"
+_ID_TOKEN_SEPARATORS = frozenset({"-", "–", "/", "&", "#", "|", "."})
+# Words that say the value is ANOTHER identifier. Whole tokens only, so a
+# carrier prefix glued to its number ("EIN-12345") is never read as a label.
+_OTHER_IDENTIFIER_LABEL_WORDS = frozenset({
+    "account", "acct", "fein", "ein", "naic", "phone", "telephone", "fax",
+    "license", "licence", "ssn",
+})
+_MONTH_NAME_RE = re.compile(
+    r"^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?$", re.I)
+_YEAR_SPAN_TOKEN_RE = re.compile(r"^((?:19|20)\d{2})\s*[-–/]\s*((?:19|20)\d{2})$")
+_YEAR_TOKEN_RE = re.compile(r"^(?:19|20)\d{2}$")
+_MONEY_TOKEN_RE = re.compile(
+    r"^\$\s*\d[\d,]*(?:\.\d{1,2})?$|^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$|^\d+\.\d{2}$")
+_PERCENT_TOKEN_RE = re.compile(r"^\d+(?:\.\d+)?%$")
+_HOUSE_NUMBER_RE = re.compile(r"^\d{1,6}[A-Za-z]?$")
+
+
+def _id_token(tok: str) -> str:
+    return tok.strip(_ID_TOKEN_EDGE)
+
+
+def _id_alnum(tok: str) -> int:
+    return len(re.sub(r"[^0-9A-Za-z]", "", tok))
+
+
+def _is_month_name_date(window: str) -> bool:
+    """"January 1, 2025" / "Jan. 1, 2025" / "15 Mar 2026" - a month NAME in the
+    first two words and the whole window one date (`normalize_date`)."""
+    ws = window.split()
+    if not any(_MONTH_NAME_RE.match(w.strip(_ID_TOKEN_EDGE)) for w in ws[:2]):
+        return False
+    return bool(normalize_date(re.sub(r"(?<=[A-Za-z])\.", "", window)))
+
+
+def _mark_runs(toks: List[str], test, width: int) -> List[Tuple[int, int]]:
+    """Left-to-right, longest-first runs of whole tokens `test` accepts - as
+    printed ("CA8214(5-12)" keeps its brackets) or without edge punctuation."""
+    runs: List[Tuple[int, int]] = []
+    i = 0
+    while i < len(toks):
+        for j in range(min(len(toks), i + width), i, -1):
+            window = " ".join(toks[i:j])
+            if test(window) or test(window.strip(_ID_TOKEN_EDGE)):
+                runs.append((i, j))
+                i = j
+                break
+        else:
+            i += 1
+    return runs
+
+
+def _no_identifier_reason(s: str) -> Optional[str]:
+    """Why ``s`` holds no contract identifier, or None when one is left. ``s``
+    carries a digit and is not itself form-shaped (the caller's earlier rules).
+    A colon separates like a space ("DATE:01/23/2025" is a label and a date)."""
+    toks = s.replace(":", " ").split()
+    if not toks:
+        return None
+    if not _POLICY_NO_LABEL_RE.search(s):
+        if any(_id_token(t).lower().rstrip(".#") in _OTHER_IDENTIFIER_LABEL_WORDS
+               for t in toks) or re.search(r"(?<![A-Za-z])tax\s*(?:id|identification)\b", s, re.I):
+            return "OTHER_IDENTIFIER_LABEL"
+    # A house number, a street word, then its suffix: an address, not a number.
+    if len(toks) >= 3 and _HOUSE_NUMBER_RE.match(_id_token(toks[0])):
+        words = [_id_token(t).lower().rstrip(".") for t in toks[1:]]
+        for k, w in enumerate(words):
+            if k >= 1 and w in _STREET_SUFFIXES and any(
+                    re.fullmatch(r"[a-z]{3,}", x) and x not in _STREET_SUFFIXES
+                    for x in words[:k]):
+                return "STREET_ADDRESS"
+    # A number cut at its separator ("CGL-2024-") identifies nothing.
+    if s.rstrip()[-1:] in ("-", "–", "/"):
+        return "TRUNCATED_IDENTIFIER"
+    taken = [""] * len(toks)
+    for i, j in _mark_runs(toks, looks_like_a_form_number, 8):
+        for k in range(i, j):
+            taken[k] = "form"
+    for i, j in _mark_runs(toks, _is_month_name_date, 4):
+        if any(taken[k] for k in range(i, j)):
+            continue
+        for k in range(i, j):
+            taken[k] = "date"
+    for k, raw in enumerate(toks):
+        if taken[k]:
+            continue
+        t = _id_token(raw)
+        if (_YEAR_SPAN_TOKEN_RE.match(t) or normalize_date(t)
+                or (_YEAR_TOKEN_RE.match(t) and (
+                    (k + 2 < len(toks) and toks[k + 1] in _ID_TOKEN_SEPARATORS
+                     and _YEAR_TOKEN_RE.match(_id_token(toks[k + 2])))
+                    or (k >= 2 and taken[k - 2] == "date" and toks[k - 1] in _ID_TOKEN_SEPARATORS)))):
+            taken[k] = "date"
+        elif (_MONEY_TOKEN_RE.match(t) or _PERCENT_TOKEN_RE.match(t)
+              or (k >= 1 and toks[k - 1] == "$" and re.fullmatch(r"\d[\d,]*(?:\.\d+)?", t))
+              or (k + 1 < len(toks) and toks[k + 1] == "%" and re.fullmatch(r"\d+(?:\.\d+)?", t))):
+            taken[k] = "amount"
+    kept = [t for k, t in enumerate(toks) if not taken[k] and re.search(r"\d", t)]
+    left = sum(_id_alnum(t) for t in kept)
+    if left >= 4:
+        return None
+    if left == 0:
+        for kind, reason in (("form", "LABEL_AND_FORM_NUMBER"), ("date", "DATE_NOT_AN_IDENTIFIER"),
+                             ("amount", "AMOUNT_NOT_AN_IDENTIFIER")):
+            if kind in taken:
+                return reason
+    # A bare one-to-three digit number ("9", "41", "Round 1") is a count, an
+    # ordinal or a row number. A short code that mixes letters in ("X-1", the
+    # SYS-06 pin of 4 Sep) has never been refused for its length and is not now.
+    if not any(re.search(r"[A-Za-z]", t) for t in kept):
+        return "TOO_SHORT_FOR_AN_IDENTIFIER"
+    return None
+
+
+# Reasons the door gives that the rules before 7 Oct 2026 did not - a guard
+# that records which rule took a box names these.
+NEW_POLICY_NUMBER_REFUSALS = frozenset({
+    "OTHER_IDENTIFIER_LABEL", "STREET_ADDRESS", "TRUNCATED_IDENTIFIER",
+    "LABEL_AND_FORM_NUMBER", "DATE_NOT_AN_IDENTIFIER", "AMOUNT_NOT_AN_IDENTIFIER",
+    "TOO_SHORT_FOR_AN_IDENTIFIER",
+})
+
+
+def policy_number_refusal(value: Any, entries: Any = None, text: Any = None) -> Optional[str]:
+    """Why ``value`` cannot be THIS package's policy number - a reason code - or
+    None when it can. `is_not_a_policy_number` is this, as a bool.
+
+    Reasons: NO_DIGIT, FORM_NUMBER, FORM_NUMBER_FOOTER, ACCOUNT_NUMBER (the
+    rules of 24 Sep / 6 Oct, unchanged) and the seven `NEW_POLICY_NUMBER_
+    REFUSALS` of `_no_identifier_reason`. A value the declarations print under
+    a POLICY NUMBER label still rescues a FORM-shaped value (the label decides
+    that edge, as before); it never rescues one with no identifier left."""
     s = str(value or "").strip()
     if not s:
-        return False
+        return None
+    if not re.search(r"\d", s):
+        return "NO_DIGIT"
+    form_shaped = looks_like_a_form_number(s)
+    if not form_shaped:
+        reason = _no_identifier_reason(s)
+        if reason:
+            return reason
     contracts, accounts = labelled_identifiers(entries) if entries else (set(), set())
     key = _identifier_key(s)
     if key in contracts:
-        return False
+        if form_shaped and text and printed_as_page_footer(s, text):
+            return "FORM_NUMBER_FOOTER"
+        return None
     if key in accounts:
-        return True
-    return looks_like_a_form_number(s)
+        return "ACCOUNT_NUMBER"
+    return "FORM_NUMBER" if form_shaped else None
 
 
 _POLICY_NUM_WORDS = ("number", "num", "no", "nbr", "id")
@@ -650,6 +899,105 @@ _PARTY_ROLE_LABELS: FrozenSet[str] = frozenset({
     # The lease-side roles a certificate prints in place of a name (14 Sep 2026).
     "landlord", "lessor", "lessee", "tenant", "building owner", "property owner",
 })
+
+
+# A HEADING IS NOT A NAME (8 Oct 2026, Choice Electric b38a4367). A redacted
+# Travelers dec prints "INSURED'S NAME:" with nothing after it; the next thing on
+# the page is the billing table's column headings ("ACCT. EFF. PREMIUM" /
+# "S.B. MO. DATE"), and the model returned "S.B. MO." as the insured. That one
+# reading raised a "Possible multiple submissions" hard stop over six documents
+# of one insured AND won the merge as the package's applicant name.
+# Structural, no word list: a name made ENTIRELY of dotted abbreviations
+# ("S.B.", "MO.", "ACCT.") is a table heading or a key, never a party - a real
+# insured has a word of its own ("J. Smith", "U.S. Steel", "St. Louis Electric").
+# A legal-form designator ("A.B. Co.", "U.S. Inc.") keeps it a name.
+_ABBREVIATION_TOKEN_RE = re.compile(r"^(?:[A-Za-z]{1,5}\.)+$")
+_HEADING_LEGAL_FORMS = frozenset({
+    "co", "inc", "llc", "lc", "pllc", "llp", "lp", "ltd", "corp", "pc", "pa", "plc", "na",
+})
+# The fact keys that name THE INSURED - the ones the integrity check, the
+# merge's applicant vote and `insured_scope` read.
+INSURED_NAME_KEYS = ("applicant_name", "named_insured", "insured_name", "loss_run_insured_name")
+
+
+def is_abbreviation_heading(value: Any) -> bool:
+    """True when every word of `value` is a dotted abbreviation and none is a
+    legal-form designator: "S.B. MO.", "ACCT. EFF." - never "J. Smith"."""
+    toks = [t.strip(",;:") for t in str(value or "").split()]
+    toks = [t for t in toks if t]
+    if not toks:
+        return False
+    if any(t.replace(".", "").lower() in _HEADING_LEGAL_FORMS for t in toks):
+        return False
+    return all(_ABBREVIATION_TOKEN_RE.match(t) for t in toks)
+
+
+def is_not_a_party_name(value: Any) -> bool:
+    """True when a value in an insured-name fact names nobody: a party ROLE
+    ("Certificate Holder") or a column heading ("S.B. MO.")."""
+    return is_party_role_label(value) or is_abbreviation_heading(value)
+
+
+# ── A VEHICLE'S USE / RADIUS IS NOT WHAT THE BUSINESS DOES (13 Oct 2026) ──────
+# The owner's run 18f6914f: `operations_description` = "LOCAL SERVICE" - the
+# Business Auto Policy's vehicle schedule prints it in every row's "Radius of
+# Operation / Use" column (the same document's `auto_vehicle_use` = "service"),
+# and extraction read it as the business description, which then stood as "in
+# place" on the review screen and would print as the ACORD 125's description of
+# operations.
+#
+# VOCABULARY IS NECESSARY, NOT SUFFICIENT (review, same night): "LONG DISTANCE
+# HAULING", "Local retail business" and "Local farm" are real descriptions made
+# of the same words. So the ruling needs a STRUCTURAL second condition: the
+# description restates the vehicle use the SAME evidence states
+# (`auto_vehicle_use`), and a person's own or confirmed words always stand.
+_VEHICLE_USE_ONLY_WORDS = frozenset({
+    "local", "intermediate", "long", "distance", "radius", "commute", "commuting", "zone",
+})
+_VEHICLE_USE_WORDS = _VEHICLE_USE_ONLY_WORDS | frozenset({
+    "service", "commercial", "retail", "business", "personal", "pleasure", "farm",
+    "use", "miles", "mile", "mi", "of", "to", "and",
+})
+_PERSON_FACT_SOURCES = frozenset({
+    "producer", "client", "client_arq", "user", "manual", "user_confirmed",
+})
+
+
+def is_vehicle_use_label(value: Any) -> bool:
+    """True when `value` is made only of vehicle use / radius words with at
+    least one word that exists only there ("LOCAL SERVICE", "Intermediate")."""
+    words = re.findall(r"[a-z]+", str(value or "").lower())
+    if not words or len(words) > 5:
+        return False
+    return (all(w in _VEHICLE_USE_WORDS for w in words)
+            and any(w in _VEHICLE_USE_ONLY_WORDS for w in words))
+
+
+def description_restates_vehicle_use(description: Any, vehicle_use: Any) -> bool:
+    """A business description that only restates the vehicle use class the
+    same evidence states: a vehicle-use label carrying every word of
+    `vehicle_use` ("LOCAL SERVICE" over use "service")."""
+    if not is_vehicle_use_label(description):
+        return False
+    use_words = set(re.findall(r"[a-z]+", str(vehicle_use or "").lower())) - {"of", "to", "and", "use"}
+    desc_words = set(re.findall(r"[a-z]+", str(description or "").lower()))
+    return bool(use_words) and use_words <= desc_words
+
+
+def vehicle_use_as_operations(facts: Any) -> bool:
+    """The ONE ruling (scorer, stamper, fix-window pre-fill, questionnaire):
+    the package's operations description is its vehicles' use class and no
+    person stated or confirmed it - so it is not an answer."""
+    if not isinstance(facts, dict):
+        return False
+    raw = facts.get("operations_description")
+    env = raw if isinstance(raw, dict) else {}
+    if str(env.get("source") or "").lower() in _PERSON_FACT_SOURCES \
+            or str(env.get("evidence_state") or "").lower() == "user_confirmed":
+        return False
+    use = facts.get("auto_vehicle_use")
+    use = use.get("value") if isinstance(use, dict) else use
+    return description_restates_vehicle_use(env.get("value") if env else raw, use)
 
 
 def is_party_role_label(value: Any) -> bool:
@@ -1317,6 +1665,230 @@ def entity_family(value: Any) -> Optional[str]:
     return None
 
 
+# ── ONE DOCUMENT'S ENTITY TYPE (7 Oct 2026, Choice Electric live run) ────────
+# The model reads an entity type off a printed MENU by taking the first option
+# word, not the ticked one: "Form Of Business: / Corporation X Limited Liability
+# Company Individual" (the X ticks LLC) came back "Corporation"; a carrier menu
+# with no LLC option ("X CORPORATION SOLE PROPRIETOR PARTNERSHIP OR JOINT
+# VENTURE OTHER") gave "Corporation" for "CHOICE ELECTRIC LLC". Two readers then
+# disagreed about the documents - the pre-form warning counted Corporation and
+# LLC, the Data Consistency card only Corporation - and the warning pointed at a
+# card that said "nothing to confirm".
+#
+# One reading, used by the merge (which corrects the per-document copy every
+# later reader sees) and by submission integrity (which may run before it):
+#   1. a value the document reads off a MENU (a run of lines made only of
+#      entity options, tick marks and "or") counts only as the option a tick
+#      mark sits beside - the box precedes its caption, so a mark binds to the
+#      option after it, or to the one before it at the end of a line; no single
+#      ticked option = no reading. A value the document STATES ("Entity Type:
+#      LLC") or that appears on no menu is left as read.
+#   2. a legal-form DESIGNATOR closing the insured's own name (LLC, L.L.C.,
+#      PLLC, Inc, Corp, LP, LLP ...) decides between INCOMPATIBLE families -
+#      a name ending "LLC" is not a Corporation. Compatible readings stand
+#      ("S Corporation" or "Non-Profit Corporation" for an "Inc").
+_ENTITY_MENU_MARK_GLYPHS_RE = re.compile(r"[☒☑✓✔✗✘■▣◼●◉]")
+_ENTITY_MENU_BOXED_X_RE = re.compile(r"[\[(]\s*[xX]\s*[\])]")
+_ENTITY_MENU_PHRASES = tuple(sorted({
+    "limited liability company", "limited liability corporation",
+    "limited liability partnership", "limited partnership", "general partnership",
+    "partnership", "joint venture", "corporation", "subchapter s corporation",
+    "subchapter s", "s corporation", "s corp", "not for profit corporation",
+    "non profit corporation", "not for profit", "non profit", "nonprofit",
+    "individual", "sole proprietor", "sole proprietorship", "proprietor", "trust",
+    "association", "unincorporated association", "llc", "pllc", "llp", "lp",
+    "corp", "inc", "incorporated", "other",
+}, key=lambda p: (-len(p.split()), p)))
+_ENTITY_MENU_CONNECTORS = frozenset({"or", "and", "specify"})
+_ENTITY_STATED_LABEL_RE = re.compile(
+    r"\b(?:entity|business\s+type|type\s+of\s+business|form\s+of\s+business|"
+    r"organi[sz]ation|legal\s+(?:form|status|structure))\b[^:\n]{0,40}:\s*(.+)$", re.I)
+_DESIGNATOR_SUFFIXES = (
+    (("limited", "liability", "company"), ENTITY_FAMILY_LLC, "Limited Liability Company"),
+    (("limited", "liability", "partnership"), ENTITY_FAMILY_PARTNERSHIP, "Limited Liability Partnership"),
+    (("limited", "partnership"), ENTITY_FAMILY_PARTNERSHIP, "Limited Partnership"),
+    (("pllc",), ENTITY_FAMILY_LLC, "Limited Liability Company"),
+    (("llc",), ENTITY_FAMILY_LLC, "Limited Liability Company"),
+    (("llp",), ENTITY_FAMILY_PARTNERSHIP, "Limited Liability Partnership"),
+    (("lp",), ENTITY_FAMILY_PARTNERSHIP, "Limited Partnership"),
+    (("incorporated",), ENTITY_FAMILY_CORPORATION, "Corporation"),
+    (("corporation",), ENTITY_FAMILY_CORPORATION, "Corporation"),
+    (("inc",), ENTITY_FAMILY_CORPORATION, "Corporation"),
+    (("corp",), ENTITY_FAMILY_CORPORATION, "Corporation"),
+)
+# Pairs a designator contradicts outright. Everything else is compatible (an
+# LLC can be a non-profit or elect S status; an "Inc" can be an S corporation
+# or a non-profit corporation) and is never overridden.
+_DESIGNATOR_CONTRADICTS = {
+    ENTITY_FAMILY_LLC: frozenset({ENTITY_FAMILY_CORPORATION, ENTITY_FAMILY_PARTNERSHIP,
+                                  ENTITY_FAMILY_INDIVIDUAL}),
+    ENTITY_FAMILY_CORPORATION: frozenset({ENTITY_FAMILY_LLC, ENTITY_FAMILY_PARTNERSHIP,
+                                          ENTITY_FAMILY_INDIVIDUAL}),
+    ENTITY_FAMILY_PARTNERSHIP: frozenset({ENTITY_FAMILY_LLC, ENTITY_FAMILY_CORPORATION,
+                                          ENTITY_FAMILY_INDIVIDUAL}),
+}
+_TICKED_FAMILY_LABEL = {
+    ENTITY_FAMILY_LLC: "Limited Liability Company",
+    ENTITY_FAMILY_CORPORATION: "Corporation",
+    ENTITY_FAMILY_S_CORPORATION: "S Corporation",
+    ENTITY_FAMILY_PARTNERSHIP: "Partnership",
+    ENTITY_FAMILY_INDIVIDUAL: "Individual",
+    ENTITY_FAMILY_NOT_FOR_PROFIT: "Non-Profit Corporation",
+    ENTITY_FAMILY_JOINT_VENTURE: "Joint Venture",
+    ENTITY_FAMILY_TRUST: "Trust",
+}
+
+
+def name_legal_form(name: Any) -> Optional[Tuple[str, str]]:
+    """(entity family, label) of the legal-form designator CLOSING a name, or
+    None. "CHOICE ELECTRIC LLC" / "Choice Electric, L.L.C." -> llc; "Acme Inc."
+    -> corporation; "Acme Company", "Acme Ltd", "Smith DBA Sparky" -> None
+    (no designator, or not one that names a single family)."""
+    s = deglue_entity_text(name).lower().replace(".", "")
+    toks = re.sub(r"[^a-z0-9&]+", " ", s).split()
+    if len(toks) < 2:
+        return None                      # a bare designator is not a name
+    for suffix, family, label in _DESIGNATOR_SUFFIXES:
+        n = len(suffix)
+        if len(toks) > n and tuple(toks[-n:]) == suffix:
+            return family, label
+    return None
+
+
+def _menu_items(line: str) -> Optional[List[Tuple[str, Optional[str], str]]]:
+    """The line as [(kind, family, printed)] when it is made ONLY of entity
+    options, tick marks and connectors (after an optional leading "Label:"),
+    else None. kind is "opt" / "mark"."""
+    s = _ENTITY_MENU_BOXED_X_RE.sub(" x ", _ENTITY_MENU_MARK_GLYPHS_RE.sub(" x ", str(line or "")))
+    if ":" in s:
+        head, tail = s.split(":", 1)
+        if not any(re.search(rf"\b{re.escape(p)}\b", head.lower()) for p in _ENTITY_MENU_PHRASES):
+            s = tail
+    toks = re.sub(r"[^a-z0-9]+", " ", s.lower().replace(".", "")).split()
+    if not toks:
+        return None
+    items: List[Tuple[str, Optional[str], str]] = []
+    i = 0
+    while i < len(toks):
+        if toks[i] == "x":
+            items.append(("mark", None, "x"))
+            i += 1
+            continue
+        for p in _ENTITY_MENU_PHRASES:
+            pt = p.split()
+            if tuple(toks[i:i + len(pt)]) == tuple(pt):
+                items.append(("opt", entity_family(p), p))
+                i += len(pt)
+                break
+        else:
+            if toks[i] in _ENTITY_MENU_CONNECTORS:
+                i += 1
+                continue
+            return None                  # a word that is no option: not a menu line
+    return items if any(k == "opt" for k, _f, _p in items) else None
+
+
+def _entity_menus(text: Any) -> List[dict]:
+    """Every entity-type MENU in ``text``: runs of menu-shaped lines with two
+    or more options. Each: {"families": set, "marked": set of ticked families}."""
+    menus: List[dict] = []
+    run: List[List[Tuple[str, Optional[str], str]]] = []
+
+    def _close() -> None:
+        opts = [it for line in run for it in line if it[0] == "opt"]
+        if len(opts) >= 2:
+            marked = set()
+            for line in run:
+                for i, (kind, _f, _p) in enumerate(line):
+                    if kind != "mark":
+                        continue
+                    nxt = line[i + 1] if i + 1 < len(line) else None
+                    if nxt is not None and nxt[0] == "opt":
+                        marked.add(nxt[1])
+                    elif nxt is None and i > 0 and line[i - 1][0] == "opt":
+                        marked.add(line[i - 1][1])
+            menus.append({"families": {f for _k, f, _p in opts},
+                          "marked": marked})
+        run.clear()
+
+    for raw_line in str(text or "").splitlines():
+        items = _menu_items(raw_line)
+        if items is None:
+            _close()
+        else:
+            run.append(items)
+    _close()
+    return menus
+
+
+def _entity_stated_families(text: Any) -> set:
+    """Families a document STATES on a labelled line ("Entity Type: LLC")."""
+    out = set()
+    for raw_line in str(text or "").splitlines():
+        m = _ENTITY_STATED_LABEL_RE.search(raw_line)
+        if not m:
+            continue
+        items = _menu_items(m.group(1))
+        if items and len(items) == 1 and items[0][0] == "opt":
+            out.add(items[0][1])
+    return out
+
+
+def _designator_for(own_names: Any, package_names: Any) -> Optional[Tuple[str, str]]:
+    """The ONE designator the insured's names carry: the document's own name
+    first; else the package's names of the same insured (all of them when the
+    document names nobody and the package names one insured). Two different
+    designators = None."""
+    def _clean(names: Any) -> List[str]:
+        return [str(n) for n in (names or []) if str(n or "").strip()]
+
+    own, pkg = _clean(own_names), _clean(package_names)
+    forms = {f for f in (name_legal_form(n) for n in own) if f}
+    if not forms:
+        if own:
+            keys = {normalize_name(n) for n in own} - {""}
+            pool = [n for n in pkg if normalize_name(n) in keys]
+        else:
+            pool = pkg if len({normalize_name(n) for n in pkg} - {""}) == 1 else []
+        forms = {f for f in (name_legal_form(n) for n in pool) if f}
+    families = {f[0] for f in forms}
+    if len(families) != 1:
+        return None
+    return sorted(forms, key=lambda f: f[1])[0]
+
+
+def settle_document_entity_type(value: Any, text: Any = None, own_names: Any = None,
+                                package_names: Any = None) -> Tuple[Optional[str], Optional[str]]:
+    """(the document's entity type, the rule that changed it or None).
+
+    See the block comment above. Never raises; an unclassifiable value and a
+    document with no menu and no designator come back unchanged.
+    """
+    try:
+        raw = "" if value is None else str(value).strip()
+        family = entity_family(raw) if raw else None
+        if not raw or family is None:
+            return (value, None)
+        out: Optional[str] = raw
+        rule: Optional[str] = None
+        if text:
+            menus = [m for m in _entity_menus(text) if family in m["families"]]
+            if menus and family not in _entity_stated_families(text):
+                marked = set().union(*(m["marked"] for m in menus))
+                if len(marked) == 1 and next(iter(marked)) == family:
+                    pass
+                elif len(marked) == 1 and next(iter(marked)) in _TICKED_FAMILY_LABEL:
+                    out, rule = _TICKED_FAMILY_LABEL[next(iter(marked))], "menu_tick"
+                else:
+                    return (None, "menu_without_one_tick")
+        designator = _designator_for(own_names, package_names)
+        if designator and entity_family(out) in _DESIGNATOR_CONTRADICTS.get(designator[0], ()):
+            out, rule = designator[1], "name_designator"
+        return (out if rule else value, rule)
+    except Exception:                                         # noqa: BLE001
+        return (value, None)
+
+
 def normalize_address(value: Any) -> str:
     """Street address for comparison.
 
@@ -1756,6 +2328,77 @@ def distinct_normalized(field: str, raw_values: List[Any]) -> Set[str]:
     difference) and no conflict should be raised.
     """
     return {n for v in raw_values if (n := normalize_value(field, v))}
+
+
+# ── WHO a no-loss statement is about (5 Oct 2026, CH125 6eda3069) ───────────
+# Every no-loss phrase in the kit was SCOPED - "Umbrella - no known losses",
+# "the umbrella has never had a claim (no known losses)", "Property - no
+# losses in the past 3 years", and loss-run rows "2019-20 VFM-CPP-7781203 ...
+# no losses" - while the claims sat on Auto and Property. The flag read them as
+# an account-wide attestation and held Loss History at 45. The clause BEFORE the
+# phrase (back to the line start or the previous sentence) decides:
+#   * a policy number or a policy-year range -> "term" (a loss-run row; the
+#     loss run is the verified history it belongs to, never its rival);
+#   * a coverage line it names -> "line", with any "past / last N years";
+#   * neither -> "account" (today's attestation).
+_NO_LOSS_POLICY_RE = re.compile(
+    r"\b(?:19|20)\d{2}\s*[-/]\s*(?:19|20)?\d{2}\b|\b[A-Z]{2,}[A-Z0-9-]*\d{4,}", re.I)
+_NO_LOSS_YEARS_RE = re.compile(
+    r"\b(?:past|last|prior|previous)\s+(\d{1,2}|one|two|three|four|five|six|seven|ten)\s+years?\b",
+    re.I)
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "ten": 10}
+
+
+def no_loss_statements(text: str) -> List[dict]:
+    """Every no-loss assertion `detect_no_loss_assertion` would accept, with its
+    scope: {"phrase", "scope": "account"|"line"|"term", "line", "years"}."""
+    out: List[dict] = []
+    if not text:
+        return out
+    try:
+        from services.lob_canon import canon_line
+    except Exception:                                          # noqa: BLE001
+        canon_line = lambda _t: None                          # noqa: E731
+    lowered = text.lower()
+    seen: set = set()
+    for phrase in _NO_LOSS_PHRASES:
+        start = 0
+        while True:
+            idx = lowered.find(phrase, start)
+            if idx == -1:
+                break
+            start = idx + len(phrase)
+            if idx in seen:
+                continue
+            after = lowered[idx + len(phrase): idx + len(phrase) + _LOSS_CLAUSE_WINDOW]
+            for _brk in _LOSS_CLAUSE_BREAK:
+                _cut = after.find(_brk)
+                if _cut >= 0:
+                    after = after[:_cut]
+            tail = after[:24].lstrip()
+            if (_tail_is_a_threshold(tail) or _tail_introduces_an_exception(after)
+                    or _clause_states_a_loss(lowered, idx)):
+                continue
+            seen.add(idx)
+            head = text[max(0, idx - 160):idx]
+            cut = max(head.rfind("\n"), head.rfind(". "), head.rfind("; "))
+            clause = head[cut + 1:] if cut >= 0 else head
+            years_m = _NO_LOSS_YEARS_RE.search(after) or _NO_LOSS_YEARS_RE.search(clause)
+            years = None
+            if years_m:
+                raw = years_m.group(1).lower()
+                years = int(raw) if raw.isdigit() else _NUMBER_WORDS.get(raw)
+            line = canon_line(clause)
+            if _NO_LOSS_POLICY_RE.search(clause):
+                scope = "term"
+            elif line:
+                scope = "line"
+            else:
+                scope = "account"
+            out.append({"phrase": phrase, "scope": scope, "line": line, "years": years,
+                        "at": idx})
+    return out
 
 
 def values_conflict(field: str, raw_values: List[Any]) -> bool:

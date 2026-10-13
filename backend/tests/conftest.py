@@ -11,3 +11,6 @@ import os
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-offline-test")
 os.environ.setdefault("GAP_FILL_TEXT_SELECTION", "1")
+# The narrative reader (services/narrative_reader) makes a model call on every
+# narrative save; the suite runs offline. Its own tests stub the call.
+os.environ.setdefault("NARRATIVE_READER", "0")

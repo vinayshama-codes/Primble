@@ -389,7 +389,12 @@ def test_two_landlords_are_recorded_and_none_is_squeezed_into_the_one_row():
     facts = _facts([_row(1, "1 Main St", is_tenant=True, landlord_name="Main LLC"),
                     _row(2, "2 Oak Ave", is_tenant=True, landlord_name="Oak LLC")])
     assert len(pi.located_landlords(facts)) == 2
-    assert ps.landlord_interest_row({**facts, "_form_id": "ACORD_125"}) is None
+    # Brent, 8 Oct 2026: the FIRST landlord goes under Additional Interest on
+    # the 125; the others go on ACORD 45 (a producer to-do, never this row).
+    first = ps.landlord_interest_row({**facts, "_form_id": "ACORD_125"})
+    assert first["name"] == "Main LLC" and first["location"] == "1"
+    import services.needs_attention as na
+    assert na._landlords_for_acord45(facts) == ["Oak LLC (location 2)"]
     one = _facts([_row(1, "1 Main St", is_tenant=True, landlord_name="Main LLC"),
                   _row(2, "2 Oak Ave", is_owner=True)])
     got = ps.landlord_interest_row({**one, "_form_id": "ACORD_125"})

@@ -99,15 +99,14 @@ def test_a_multi_company_renewal_prints_every_writing_company():
     mf = _renewal_facts()
     assert mf.get("renews_current_programme") is True and mf.get("carrier_is_current_policy") is True
     mapped, _ = _stamp(mf)
-    assert mapped.get("Insurer_FullName_A") == _BOTH
-    # one NAIC box, two companies; several policies, one POLICY NUMBER box
+    # Brent, 8 Oct 2026 (reverses the 30 Sep join): the top Carrier box is for
+    # the carrier tied to the application - two writing companies are listed
+    # in Prior Carrier Information, never here. Blank, and the card asks.
+    assert not mapped.get("Insurer_FullName_A")
     assert not mapped.get("Insurer_NAICCode_A")
     assert not mapped.get("Policy_PolicyNumberIdentifier_A")
-    # the owner the review compares against says the same
-    assert ps.authoritative_expected_value("ACORD_125", "Insurer_FullName_A", mf, S125) == _BOTH
-    # ...so the "carrier receiving this submission" card no longer fires
-    assert sqs._page_one_carrier_printed(mf, None) is True
-    assert sqs._page_one_carrier_printed(mf, {"Insurer_FullName_A": _BOTH}) is True
+    assert ps.authoritative_expected_value("ACORD_125", "Insurer_FullName_A", mf, S125) is None
+    assert sqs._page_one_carrier_printed(mf, None) is False
 
 
 def test_the_insurer_guard_attests_each_listed_company():

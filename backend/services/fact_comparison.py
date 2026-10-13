@@ -584,6 +584,51 @@ def same_agency(a: Any, b: Any) -> Optional[bool]:
     return False
 
 
+# An INSURER's name: "... Insurance Company", "... Mutual", "... Casualty
+# Company", an exchange, a risk retention group. An agency is never one of
+# these, so a producer fact that holds one is pollution, not an agency.
+_INSURER_SHAPE_RE = re.compile(
+    r"\b(?:insurance\s+(?:company|co\.?|corporation|companies|exchange)|"
+    r"casualty\s+(?:company|co\.?|insurance)|assurance\s+(?:company|co\.?)|"
+    r"indemnity\s+(?:company|co\.?|insurance)|mutual(?!\s+(?:agency|brokerage|insurance\s+agency))|"
+    r"risk\s+retention\s+group|reciprocal|surplus\s+lines\s+insurance|lloyd'?s)\b", re.I)
+# The name part of a printing: "Riverbend Insurance Partners, LLC - producer
+# code RIV-0417 / sub-code 22" names Riverbend Insurance Partners, LLC.
+_NAME_TAIL_RE = re.compile(r"\s+[-\u2013\u2014]\s+|\s*\(|\s*;|\s+producer\s+code\b|\s+code\s*:", re.I)
+
+
+def looks_like_an_insurer(name: Any) -> bool:
+    return bool(_INSURER_SHAPE_RE.search(str(name or "")))
+
+
+def names_the_agency(name: Any, agencies: Any) -> bool:
+    """Is ``name`` the producer AGENCY - one of ``agencies`` as the documents
+    or the account print it? (6 Oct 2026, G5 skeptic.) An exact key missed
+    "Riverbend Insurance Partners, LLC" against "Riverbend Insurance
+    Partners", a "- producer code ..." tail and OCR glue, and printed the
+    agency as the carrier receiving the submission. Read through
+    ``same_agency`` (True only); an insurer-shaped name is never an agency,
+    on either side - a direct writer's agency and its insurer share a word."""
+    text = str(name or "").strip()
+    if not text or looks_like_an_insurer(text):
+        return False
+    head = _NAME_TAIL_RE.split(text, maxsplit=1)[0].strip() or text
+    for a in agencies or ():
+        a = str(a or "").strip()
+        if not a or looks_like_an_insurer(a):
+            continue
+        a_head = _NAME_TAIL_RE.split(a, maxsplit=1)[0].strip() or a
+        if same_agency(head, a_head) is True or same_agency(text, a) is True:
+            return True
+        try:                              # "HARTLOWEINSURANCEGROUP" - OCR glue
+            from services.normalization import same_entity_name
+            if same_entity_name(head, a_head):
+                return True
+        except Exception:                                     # noqa: BLE001
+            pass
+    return False
+
+
 def is_declared_trade_name(value, docs, ctx=None) -> bool:
     """Is ``value`` a trade name the APPLICANT declared, rather than a rival
     identity?

@@ -114,8 +114,25 @@ class _Session:
         return copy.deepcopy(self.store)
 
     async def _upd(self, _sid, payload, delete_facts=None):
+        # Merged the way `upd_processing_session` merges (9 Oct 2026): facts
+        # additively, generated forms per form. A reopen now writes back only
+        # the facts it restores, which a wholesale replace would turn into the
+        # whole fact set.
         for k, v in (payload or {}).items():
-            self.store[k] = copy.deepcopy(v)
+            v = copy.deepcopy(v)
+            if k == "facts" and isinstance(v, dict):
+                merged = sr.resolve_facts_write(self.store, v, _sid)
+                if merged is not None:
+                    self.store["facts"] = merged
+            elif k == "generated_forms" and isinstance(v, dict):
+                gen = self.store.setdefault("generated_forms", {})
+                for fid, data in v.items():
+                    if fid in gen and isinstance(gen[fid], dict):
+                        gen[fid].update(data)
+                    else:
+                        gen[fid] = data
+            else:
+                self.store[k] = v
         for k in (delete_facts or []):
             self.store.get("facts", {}).pop(k, None)
         return True
@@ -255,7 +272,7 @@ def test_the_editor_reopen_reply_ships_them_too(capped):
     _fix_the_term(capped)
     back = capped.body(ar.reopen_issue, ReopenIssueRequest(
         session_id=_SID, code=_EXPIRED_CODE, issue_id="issf_expired",
-        message="Policy term already expired"))
+        message="Policy term already expired", legacy_clear=True))
     assert back["cleared"] is True
     assert back["editor_package_sqs"] == capped.store["package_sqs"]
     assert back["new_package_sqs_score"] == capped.store["package_sqs"]["package_sqs_score"]
@@ -435,13 +452,15 @@ console.log(JSON.stringify([
   R.stillCappedNote([r("resolved"), r("resolved"), r("resolved")], "form"),
 ]));""")
     assert out[0] == "" and out[1] == ""
-    assert out[2] == ("The package is still capped at 60 by an item you marked resolved - "
-                      "reopen it under Reviewed, or fix the value.")
-    assert out[3] == ("This form is still capped at 60 by an item you marked dismissed - "
-                      "reopen it under Reviewed, or fix the value.")
-    assert out[4].startswith("The package is still capped at 60 by 2 items you marked resolved or dismissed")
-    assert out[4].endswith("reopen them under Reviewed, or fix the value.")
-    assert out[5].startswith("This form is still capped at 60 by 3 items you marked resolved - reopen them")
+    # Positive wording since Choice Electric #16 (9 Oct 2026): what raises the
+    # score, not the cap - the same facts (marked, still to fix, reopen).
+    assert out[2] == ("Fix the value of an item you marked resolved to increase the package's "
+                      "Submission Quality Score (SQS)\u2122, or reopen it under Reviewed.")
+    assert out[3] == ("Fix the value of an item you marked dismissed to increase this form's "
+                      "Submission Quality Score (SQS)\u2122, or reopen it under Reviewed.")
+    assert out[4].startswith("Fix the value of 2 items you marked resolved or dismissed to increase the package's")
+    assert out[4].endswith("or reopen them under Reviewed.")
+    assert out[5].startswith("Fix the value of 3 items you marked resolved to increase this form's")
     for text in out:
         assert not any(d in text for d in _EM_DASHES)
 
@@ -463,7 +482,7 @@ console.log(JSON.stringify({{open: r.open.map((x) => x.message), handled: r.hand
     handled = status in ("resolved", "dismissed")
     assert out["open"] == ([] if handled else [item["message"]])
     assert out["handled"] == (1 if handled else 0)
-    assert bool(out["open"]) or out["note"].startswith("The package is still capped at 60 by an item")
+    assert bool(out["open"]) or out["note"].startswith("Fix the value of an item you marked")
 
 
 def test_once_fixed_the_block_is_gone_and_the_stop_is_under_reviewed(capped, tmp_path):
@@ -522,18 +541,18 @@ def test_the_package_block_prints_open_stops_and_never_a_silent_60():
     assert "const { open, handled } = pkgCapSplit;" in block
     assert "if (!open.length && !handled.length) return null;" in block
     assert 'stillCappedNote(handled, "package")' in block
-    assert "open.map((r, i) =>" in block and "• {r.message}" in block
+    assert "open.map((r, i) =>" in block and "• {positiveScoreWording(r.message)}" in block
     # Item 16 (1 Oct): a handled stop's sentence prints once, on its Reviewed
-    # row ("Still caps the package score at 60") - the block keeps the note only.
+    # row ("Fix its value to increase the package score") - the block keeps the note only.
     assert "handled.map((r, i) =>" not in block
-    assert "Caps the package Submission Quality Score (SQS) at 60" in block
+    assert "Fulfill to increase the package's Submission Quality Score (SQS)\u2122" in block
     assert "itemResolveAndStatus(r.item, r.item.forms || [])" in block
 
 
 def test_the_form_block_prints_open_stops_and_never_a_silent_60():
     src = _modal()
     block = _between(src, "{formCapSplit.open.length > 0 && (", "RECOMMENDATIONS (collapsible")
-    assert "Caps this form's Submission Quality Score (SQS) at 60" in block
+    assert "Fulfill to increase this form's Submission Quality Score (SQS)\u2122" in block
     assert "formCapSplit.open.map((r, i) =>" in block
     assert "itemResolveAndStatus(r.item, activeFormId ? [activeFormId] : [])" in block
     assert "{formCapSplit.open.length === 0 && formCapSplit.handled.length > 0 && (" in block
@@ -566,10 +585,13 @@ def test_reviewed_lists_handled_and_fixed_stops_with_their_reopen():
     assert 'tooltip="Items you\'ve already answered, resolved or dismissed."' in sec
     held = _between(sec, "reviewedStops.map((r) =>", "reviewedGhosts.map((g) =>")
     assert "itemResolveAndStatus(r.item, r.item.forms || [])" in held
-    assert "`Still caps the ${shortFormLabel(r.formId)} score at 60`" in held
-    assert "Still caps the package score at 60" in held
+    assert "`Fix its value to increase the ${shortFormLabel(r.formId)} score`" in held
+    assert "Fix its value to increase the package score" in held
     fixed = _between(sec, "reviewedGhosts.map((g) =>", "Array.from(dismissedRecDetails.entries())")
-    assert "<IssueStatusControl" in fixed and "onSet={handleReopenIssue}" in fixed
+    # The editor's panel keeps the old field clear for a fix with no receipt
+    # (9 Oct 2026: a fix now records what it changed, and reopen takes it back).
+    assert "<IssueStatusControl" in fixed
+    assert "onSet={(id, st, meta) => handleReopenIssue(id, st, meta, { legacyClear: true })}" in fixed
     assert "reopenNotices.get(g.issue_id)" in fixed and "reopeningIds.has(g.issue_id)" in fixed
     # recommendations still render beneath, unchanged
     assert "Array.from(dismissedRecDetails.entries()).map(([rid, d]) =>" in sec
@@ -580,7 +602,8 @@ def test_the_cross_form_panel_keeps_only_its_own_resolved_rows():
     panel = _between(src, "{(crossIssues.length > 0 || crossFormGhosts.length > 0) && (",
                      "REVIEWED (renamed from Dismissed)")
     assert "crossFormGhosts.map((g, gi) =>" in panel
-    assert "Resolved ({crossFormGhosts.length})" in panel
+    # A closed dropdown since 12 Oct 2026 (owner) - same rows, same count.
+    assert "title={`Resolved (${crossFormGhosts.length})`}" in panel
     assert "ghostIssues" not in panel
 
 
@@ -598,8 +621,8 @@ def test_the_panel_replaces_scores_from_a_resolve_or_reopen():
 
 def test_new_copy_carries_no_em_dash():
     src = _modal()
-    for text in ("Still caps the ${shortFormLabel(r.formId)} score at 60",
-                 "Still caps the package score at 60",
+    for text in ("Fix its value to increase the ${shortFormLabel(r.formId)} score",
+                 "Fix its value to increase the package score",
                  "Items you've already answered, resolved or dismissed."):
         assert text in src and not any(d in text for d in _EM_DASHES)
     util = _UTIL.read_text(encoding="utf-8")

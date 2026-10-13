@@ -69,9 +69,15 @@ def test_latest_live_run_counts_are_the_rows():
     # question "Any area leased to others?" now lists here, with the form's
     # wording, instead of only at download under an internal name.
     # 30 Sep night (items 8 / 11): +5 Missing - this run's four TICKED lines
-    # had blank premiums, and so did the total; each is now listed (the prompt
+    # had blank premiums, and so did the total; each was listed (the prompt
     # Michelle asked for), as a producer to-do.
-    assert res["counts"] == {"missing": 16, "ai_held_back": 13, "verify": 0, "total": 29}
+    # 12 Oct 2026: -5 again. This package is a dec RENEWAL, and Brent's 8 Oct
+    # answer keeps its page-1 premiums blank on purpose ("Leave the page 1
+    # premium blank unless the appropriate premium is provided") - a blank by
+    # rule is not a to-do (`needs_attention._page_one_premiums_withheld`; the
+    # owner's run `18ecbfa8` counted 8 of them into "49 items to fix"). The
+    # TEST pinned the 30 Sep rule Brent reversed; the code follows his answer.
+    assert res["counts"] == {"missing": 11, "ai_held_back": 13, "verify": 0, "total": 24}
     form = res["forms"][0]
     assert form["form_id"] == "ACORD_125" and form["form_label"] == "ACORD 125" and form["ok"] is True
     assert form["counts"] == na.count_rows(form["rows"]) == res["counts"]
@@ -221,7 +227,12 @@ def test_a_box_with_a_value_is_verify_only_when_ai_inferred():
     assert [(r["field"], r["status"]) for r in rows] == [(f, na.STATUS_VERIFY)]
     assert rows[0]["value"] == "Acme Holdings" and rows[0]["score_effect"] == 0
     assert _one(_form({f: "Acme Holdings"}, {f: "filled"})) == []
-    assert _one(_form({f: "Acme Holdings"}, {f: "ai_verified"})) == []
+    # 13 Oct 2026 (owner: Brent's 0.85 weight stands): an AI value FOUND in the
+    # documents is a Please verify row too - it counts in full only once a
+    # person confirms it. Until then this asserted it was never listed.
+    found = _one(_form({f: "Acme Holdings"}, {f: "ai_verified"}))
+    assert [(r["field"], r["status"]) for r in found] == [(f, na.STATUS_VERIFY)]
+    assert found[0]["reason"] == "Filled by the AI from your documents. Confirm it belongs in this box."
 
 
 def test_held_back_outranks_missing_and_keeps_required():
@@ -330,19 +341,20 @@ def test_with_the_door_each_form_and_box_is_named_and_counted_once():
     qa, att = _qa_8992()
     rows = fq.to_recommendation_rows(qa, attention=att)
     attn = [r for r in rows if r["rec_id"].startswith(na.ATTENTION_REC_PREFIX)]
-    # 30 Sep night (items 8 / 11): the blank premiums of ticked lines ride their
-    # own row, so the underwriter's cover page can leave them out.
+    # 30 Sep night (items 8 / 11): the blank premiums of ticked lines rode their
+    # own row ("_missing_producer"). 12 Oct 2026: this package is a dec renewal,
+    # whose page-1 premiums Brent's 8 Oct answer keeps blank on purpose - no
+    # to-do, so no such row (see test_latest_live_run_counts_are_the_rows).
     # 1 Oct: the applicant's own steps (sign and date) are a row of their own -
     # the producer is never told to "fill in" the applicant's signature.
     assert [r["rec_id"] for r in attn] == [
-        "fieldqa_attn_ACORD_125_missing", "fieldqa_attn_ACORD_125_missing_producer",
+        "fieldqa_attn_ACORD_125_missing",
         "fieldqa_attn_ACORD_125_missing_applicant", "fieldqa_attn_ACORD_125_ai_held_back"]
     assert attn[0]["message"].startswith("ACORD 125 - Missing (12): ")   # 14 less the 2 applicant steps
     assert "Signature" not in attn[0]["message"]
-    assert attn[1]["message"].startswith("ACORD 125 - Missing (5): Premium amount")
-    assert attn[2]["message"].startswith("ACORD 125 - To be signed by the applicant (2): Signature")
-    assert "Fix: Fill" not in attn[2]["message"]
-    assert attn[3]["message"].startswith("ACORD 125 - AI held back (11): ")
+    assert attn[1]["message"].startswith("ACORD 125 - To be signed by the applicant (2): Signature")
+    assert "Fix: Fill" not in attn[1]["message"]
+    assert attn[2]["message"].startswith("ACORD 125 - AI held back (11): ")
     for r in attn:
         n = int(re.search(r"\((\d+)\)", r["message"]).group(1))
         listed = r["message"].split("): ", 1)[1].split(". Fix:")[0]
@@ -444,8 +456,9 @@ def test_route_returns_the_door_for_the_owner(monkeypatch):
 
     monkeypatch.setattr(ar, "get_processing_session", fake_get)
     body = _call(ar.get_needs_attention("sid", None, {"id": "u1"}))
-    # +1 unanswered question (30 Sep); +5 blank premiums of ticked lines (30 Sep night)
-    assert body["success"] is True and body["counts"]["total"] == 29
+    # +1 unanswered question (30 Sep); +5 blank premiums of ticked lines (30 Sep
+    # night), -5 again 12 Oct (a renewal's page-1 premiums are blank by Brent's rule)
+    assert body["success"] is True and body["counts"]["total"] == 24
     body = _call(ar.get_needs_attention("sid", "ACORD_125", {"id": "u1"}))
     assert [f["form_id"] for f in body["forms"]] == ["ACORD_125"]
 

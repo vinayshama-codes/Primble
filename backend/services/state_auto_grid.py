@@ -189,9 +189,11 @@ def field_families(form_id: str) -> Mapping[str, str]:
     field is then SKIP, i.e. today's behaviour."""
     try:
         from config.settings import TEMPLATE_DIR
+        from services.form_instances import base_form_id
     except Exception:                                          # noqa: BLE001
         return MappingProxyType({})
-    path = os.path.join(TEMPLATE_DIR, f"{form_id}.pdf")
+    # A form's second copy is its form's template (7 Oct 2026).
+    path = os.path.join(TEMPLATE_DIR, f"{base_form_id(form_id)}.pdf")
     if not os.path.exists(path):
         return MappingProxyType({})
     out: dict = {}
@@ -327,15 +329,33 @@ def liability_limits(facts: Any) -> Tuple[Optional[str], List[Optional[str]]]:
     ("csl", [limit]); ("ambiguous", []); (None, []) when nothing is stated.
     """
     split = _flag(facts, "auto_split_limits") is True
-    if not split:
-        try:
-            from services.coverage_evidence import auto_split_limits_stated
-            split = bool(auto_split_limits_stated(facts))
-        except Exception:                                      # noqa: BLE001
-            split = False
+    try:
+        # 5 Oct 2026: the one door - a CSL stated in words outranks the flag.
+        from services.coverage_evidence import auto_limits_are_split
+        split = bool(auto_limits_are_split(facts, facts))
+    except Exception:                                          # noqa: BLE001
+        if not split:
+            try:
+                from services.coverage_evidence import auto_split_limits_stated
+                split = bool(auto_split_limits_stated(facts))
+            except Exception:                                  # noqa: BLE001
+                split = False
     if split:
-        return "split", [_amount(facts, k) for k in
-                         ("auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")]
+        parts = [_amount(facts, k) for k in
+                 ("auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")]
+        if any(parts):
+            return "split", parts
+        # No part facts: the split may be printed in the limit itself
+        # ("$500,000/$1,000,000/$250,000") - read it with the 137's own reader,
+        # which also says when the printing cannot be mapped to the boxes.
+        raw = _amount(facts, "auto_liability_limit")
+        if raw:
+            shape, lp = _read_limit(raw)
+            if shape == "split":
+                return "split", (list(lp) + [None, None, None])[:3]
+            if shape == "ambiguous":
+                return "ambiguous", []
+        return "split", parts
     raw = _amount(facts, "auto_liability_limit")
     if not raw:
         return None, []
@@ -471,6 +491,8 @@ def _cell(family: str, base: str, facts: Any):
 def resolve(form_id: str, field_name: str, facts: Any):
     """SKIP / None / ASK / a value for one ACORD 137 field - see the module
     docstring. Never raises on bad input; callers still wrap it."""
+    from services.form_instances import base_form_id
+    form_id = base_form_id(form_id)       # a copy is ruled by its form (7 Oct 2026)
     if form_id not in FORMS:
         return SKIP
     name = str(field_name or "")

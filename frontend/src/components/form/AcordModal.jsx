@@ -1,13 +1,19 @@
 ﻿//AcordModal.jsx
-import { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
-import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar } from "../../utils/formatters";
+import { gradeColor, barColor, deductionText, deductionColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar } from "../../utils/formatters";
+import { formLabel, fileStem, baseFormId } from "../../utils/formInstances";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
 import NeedsAttentionPanel, { NeedsAttentionSummary } from "./NeedsAttentionPanel";
-import { fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
+import { alsoListedText, downloadReviewCounts, downloadReviewHeadline, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
+import { confirmFieldUpdates } from "../../utils/confirmValues";
+import { formsEffect } from "../../utils/scoreWithForms";
 import KeyDetailsMissing from "./review/KeyDetailsMissing";
+import Recommendations from "./review/Recommendations";
+import { dryRunFixIssue } from "../../utils/dryRun";
+import { scoreFixIssue, recommendationFixState } from "../../utils/recommendations";
 import { withKeyDetailCards } from "../../utils/keyDetailCards";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
@@ -17,13 +23,23 @@ import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "..
 import { useToasts } from "../../hooks/useToasts";
 import { getReviewLayout } from "../../utils/reviewLayout";
 import { packageCapReasons, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
+import { listedIssues, fixLeftOpen } from "../../utils/fixProgress";
+import { clearedBlockers, pageOfStatus, isRecommendationId, REC_PAGE } from "../../utils/resolvedIssues";
+import { positiveScoreWording } from "../../utils/positiveWording";
+import { ANCHOR_FORM_ID, withAnchorForm, checkedFormsForReview } from "../../utils/formSelection";
+import { becomesHardCount } from "../../utils/generationStops";
 import ReviewRailLayout from "./review/ReviewRailLayout";
+import PoliciesTable from "./review/PoliciesTable";
+import AddDocumentsPanel from "./review/AddDocumentsPanel";
+import DocumentChangeConfirm from "./review/DocumentChangeConfirm";
+import { integrityRefusal, reviewOpenItems } from "../../utils/addDocuments";
 import { SignatureStatusList } from "../signature/ApplicantSignature";
 import { fetchSignatureStatus } from "../../utils/applicantSignature";
 import {
   GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED,
-  generationStateOf, inProducerOrder, formToOpen, lockedReason, continueLabel, scoreHeading, formRows,
+  generationStateOf, inProducerOrder, formToOpen, lockedReason, confirmLockedReason, continueLabel, scoreHeading, formRows,
   GENERATION_DIDNT_FINISH, GENERATION_DIDNT_FINISH_NEXT, GENERATION_RUNNING_TEXT,
+  documentsLockedReason, DOCUMENTS_AFTER_FORMS_NOTE,
 } from "../../utils/packageGeneration";
 
 const SQS_LABELS = {
@@ -868,7 +884,10 @@ const _issueBullet = <span style={{ fontWeight: 700, fontSize: "1.3em", lineHeig
 // backend/services/extraction_pipeline.py::_ensure_fix_hint.
 const _GENERIC_FIX_TEXT = "Review and correct this before proceeding.";
 
-function IssueLine({ message, className }) {
+function IssueLine({ message: stored, className }) {
+  // What the producer reads (Choice Electric #16): the positive SQS wording.
+  // The stored message - and every id and status keyed on it - is untouched.
+  const message = positiveScoreWording(stored);
   const fixIdx = message.indexOf("Fix: ");
   if (fixIdx === -1) {
     return <div className={className}>{_issueBullet} {message}</div>;
@@ -955,7 +974,7 @@ function AddFormButton({ formId, onClick }) {
       style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
     >
       <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M2 6h8" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round"/></svg>
-      Add {String(formId || "").replace(/_/g, " ")}
+      Add {formLabel(formId)}
     </button>
   );
 }
@@ -1014,6 +1033,21 @@ function ScoreNeutralNote({ show }) {
   return (
     <div style={{ fontSize: 10.5, color: "#94a3b8", fontStyle: "italic", marginTop: 4 }}>
       Advice only - this does not affect your score.
+    </div>
+  );
+}
+
+// Round 5 #15 (Brent #18): a pre-form warning that generation will make a hard
+// stop says so - the server's `becomes_hard_tag` ("Becomes a hard stop when
+// ACORD 140 is generated"). Rendered by the one per-row action door, so both
+// Review layouts show it. Missing tag (after forms, older payloads) renders nothing.
+function BecomesHardTag({ text }) {
+  if (!text) return null;
+  return (
+    <div data-becomes-hard="true" style={{ marginTop: 4 }}>
+      <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: "1px 8px" }}>
+        {text}
+      </span>
     </div>
   );
 }
@@ -1166,7 +1200,7 @@ function clusterIdOf(c) {
 const ACTION_TIP = {
   resolve: "For when you've already fixed it, or will fix it on the form. Ticks it off your list - your data and score don't change.",
   dismiss: "For when this doesn't apply to your account. Sets it aside - your data and score don't change.",
-  reopen: "Puts it back on your list. Your data and score don't change.",
+  reopen: "Puts it back on your list. A fix made through Open to fix is taken back, and its points come off the score.",
   reopenAnswered: "For when your answer was wrong. Clears it from the forms and puts it back on your list - your score goes back down.",
   reopenDismissed: "Puts it back on your list so you can answer it - any points credited for dismissing it are taken back.",
   recAnswer: "Applies your answer to the forms. This can raise your score.",
@@ -1181,7 +1215,12 @@ const _ISSUE_STATUS_BADGE = {
   resolved:  { t: "Resolved",  bg: "#dcfce7", fg: "#166534", bd: "#86efac" },
   dismissed: { t: "Dismissed", bg: "#fef3c7", fg: "#92400e", bd: "#fde68a" },
 };
-function IssueStatusControl({ issueId, meta, status, onSet }) {
+// The review page an issue row sits on - "hard" / "warning" - stored with its
+// status so a fixed item is filed under its own page's Resolved section once it
+// stops firing (8 Oct 2026). null anywhere else.
+const reviewSeverity = (tone) => (tone === "hard" ? "hard" : tone === "soft" ? "warning" : null);
+
+function IssueStatusControl({ issueId, meta, status, onSet, showResolve = true }) {
   const st = status || "open";
   const badge = _ISSUE_STATUS_BADGE[st] || _ISSUE_STATUS_BADGE.open;
   // Border/background/color moved to `.issue-status-btn` so the buttons can
@@ -1205,9 +1244,14 @@ function IssueStatusControl({ issueId, meta, status, onSet }) {
       )}
       {st === "open" ? (
         <>
-          <HoverTip text={ACTION_TIP.resolve} style={{ width: "auto", display: "inline-flex" }}>
-            <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
-          </HoverTip>
+          {/* The review screen has no Resolve (owner, 8 Oct 2026 - Brent: "Resolve
+              and Dismiss are basically just status tags"): an item turns Resolved
+              when "Open to fix" saves its value. The editor keeps its own. */}
+          {showResolve && (
+            <HoverTip text={ACTION_TIP.resolve} style={{ width: "auto", display: "inline-flex" }}>
+              <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
+            </HoverTip>
+          )}
           <HoverTip text={ACTION_TIP.dismiss} style={{ width: "auto", display: "inline-flex" }}>
             <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
           </HoverTip>
@@ -2052,7 +2096,11 @@ function answerResultLabel(r) {
 // questionnaire list lives); the default renders it for the wide
 // recommendations step.
 function RemediationDiffBand({ diff, compact = false }) {
-  if (!diff) return null;
+  // Only a diff a CLIENT's answers wrote may be shown under this title. The
+  // backend stamps `trigger` on it; a diff with none was written by some other
+  // recalculation (a producer's own answer, a table save, a document added)
+  // before 8 Oct 2026, and showing it credited the client with the change.
+  if (!diff || diff.trigger !== "client_answers") return null;
   const resolved = diff.resolved || [];
   const worsened = diff.worsened || [];
   const added    = diff.new || [];
@@ -2224,7 +2272,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
     <div style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
+          <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{positiveScoreWording(msg)}</div>
           {isObj && !result && typeof rec.suggestion_evidence === "string" && rec.suggestion_evidence && (
             <div style={{ fontSize: 10, color: "#64748b", marginTop: 2, lineHeight: 1.45 }}>{rec.suggestion_evidence}</div>
           )}
@@ -2366,8 +2414,10 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
   const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
   const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
   const allHardRecs = [...hardBlockItems, ...hardRecs];
-  const attentionTotal = attention?.counts?.total || 0;
-  const flaggedTotal = openRecs.length + attentionTotal;
+  // The headline counts what there is to FIX; the rest is named, not added in
+  // (Choice Electric #27 - "176 items flagged" was every row of every kind).
+  const counts = downloadReviewCounts(openRecs, attention);
+  const alsoListed = alsoListedText(counts);
   const reasonRequired = hasHardBlock && !overrideReason.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -2375,7 +2425,10 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
         <div style={{ flexShrink: 0 }}>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-            <div style={{ fontSize: 12, color: "#64748b" }}>{flaggedTotal > 0 ? `${flaggedTotal} item${flaggedTotal !== 1 ? "s" : ""} flagged - review before downloading` : "All clear - review the SQS summary below"}</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{downloadReviewHeadline(counts)}</div>
+            {alsoListed && (
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Also listed: {alsoListed}</div>
+            )}
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
@@ -2383,7 +2436,7 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
             <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({allHardRecs.length})</div>
               {allHardRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (–{r.score_impact} pts)</span> : ""}</div>
+                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {positiveScoreWording(r.message)}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</div>
               ))}
             </div>
           )}
@@ -2392,7 +2445,7 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
               {softRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</div>
+                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {positiveScoreWording(r.message)}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</div>
               ))}
             </div>
           )}
@@ -2781,7 +2834,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                               </span>
                             )}
                             {s.form_ids?.slice(0, 4).map(fid => (
-                              <span key={fid} className="db-badge db-badge-gray">{fid.replace(/_/g, " ")}</span>
+                              <span key={fid} className="db-badge db-badge-gray">{formLabel(fid)}</span>
                             ))}
                             {(s.form_ids?.length || 0) > 4 && <span style={{ fontSize: 11, color: "#b5b5b5" }}>+{s.form_ids.length - 4}</span>}
                             {s.lines?.length > 0 && (
@@ -2920,13 +2973,23 @@ const AcordModal = forwardRef(function AcordModal({
   // the form the user was reading.
   const { toasts: jobToasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
+  // EVERY step change returns to the top, not just the editor (owner, 8 Oct
+  // 2026). The app header scrolls with the page, so a step that renders while
+  // the window is still scrolled down - landing on Review straight after an
+  // upload, or leaving the editor - paints a page with NO navbar above it and
+  // what looks like dead space below the content. It reads as a frozen screen;
+  // the owner's fix was to reload, which is exactly what scrolling to the top
+  // does. Also clears the editor's scroll lock on the way out, so a lock can
+  // never survive into the next step's first paint.
+  // And it gives the header back: scrolling the PDF inside the editor hides
+  // the header and collapses its space, and leaving the editor removes the
+  // element that hid it - so nothing could release it. The review page opened
+  // with no navbar and a blank band at the bottom until a refresh (owner,
+  // 8 Oct 2026, the second report). Header.jsx listens for this event.
   useEffect(() => {
-    if (step === "editor") {
-      document.body.style.overflow = "hidden";
-      window.scrollTo(0, 0);
-    } else {
-      document.body.style.overflow = "";
-    }
+    document.body.style.overflow = step === "editor" ? "hidden" : "";
+    window.scrollTo(0, 0);
+    window.dispatchEvent(new Event("app-header:reset"));
     return () => { document.body.style.overflow = ""; };
   }, [step]);
 
@@ -2939,6 +3002,12 @@ const AcordModal = forwardRef(function AcordModal({
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(resumeSessionId || null);
   const [docSummary, setDocSummary] = useState([]);
+  // Choice Electric #25 (7 Oct 2026): documents added to / changed on the
+  // package - the last answer (its result line), the forms it offers, and a
+  // document change waiting for its confirm once forms exist.
+  const [documentsResult, setDocumentsResult] = useState(null);
+  const [documentFormOffers, setDocumentFormOffers] = useState([]);
+  const [docChange, setDocChange] = useState(null);
   const [flags, setFlags] = useState({});
   const [hardStops, setHardStops] = useState([]);
   const [canProceedWithWarning, setCanProceedWithWarning] = useState(false);
@@ -2957,6 +3026,10 @@ const AcordModal = forwardRef(function AcordModal({
   // Held as the server sent it; the screen reads `keyDetails` (below), which
   // also marks the details a rendered card already shows (item 3, 1 Oct 2026).
   const [keyDetailsRaw, setKeyDetails] = useState(null);
+  // "Before you generate" (Choice Electric #27, 7 Oct 2026): the download
+  // review's form checks run before the forms exist. Every pre-form response
+  // carries it as `dry_run`; BeforeYouGenerate polls while it is pending.
+  const [dryRun, setDryRun] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [accountProfile, setAccountProfile] = useState(null);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
@@ -3043,6 +3116,8 @@ const AcordModal = forwardRef(function AcordModal({
       setClientAnswerBusy(null);
     }
   }, [sessionId, clientAnswerBusy]);
+  // "Back to review" is a save plus a session re-read; the button says so.
+  const [backToReviewBusy, setBackToReviewBusy] = useState(false);
   const [dcOpenTick, setDcOpenTick] = useState(0);
   const [dcHighlight, setDcHighlight] = useState(null); // fact_key being highlighted
   // Review step layout (utils/reviewLayout): "classic" or the sectioned "rail".
@@ -3060,7 +3135,7 @@ const AcordModal = forwardRef(function AcordModal({
   const jumpToDataConsistency = (factKey) => {
     // Rail layout: the target row lives in the Data Consistency section, which
     // must be the visible one before the scroll below looks it up.
-    if (reviewRail) showReviewSection("consistency", { scrollToTop: false });
+    if (reviewRail && step !== "editor") showReviewSection("consistency", { scrollToTop: false });
     setDcOpenTick(t => t + 1);          // re-applies defaultOpen (true when conflicts exist)
     setDcHighlight(factKey || null);
     // Let the section render/expand before scrolling to the field row.
@@ -3094,6 +3169,14 @@ const AcordModal = forwardRef(function AcordModal({
   const [checkedFormIds, setCheckedFormIds] = useState(new Set());
   // ACORD 137s the producer unticked by hand - never re-ticked with the 127.
   const [declinedStateAutoForms, setDeclinedStateAutoForms] = useState(new Set());
+  // ACORD 125 starts ticked on form selection (Choice Electric #17; owner,
+  // 9 Oct 2026: "tick the ACORD 125 by itself and do not change the order").
+  // Ticked when the producer arrives there, never re-ticked once they untick
+  // it. The review page's form checks follow the ticks only once the producer
+  // has changed one - until then they check the recommended forms, as before.
+  const [declined125, setDeclined125] = useState(false);
+  const [formTicksTouched, setFormTicksTouched] = useState(false);
+  const resetFormTicks = () => { setCheckedFormIds(new Set()); setDeclined125(false); setFormTicksTouched(false); };
   const [showAddForms, setShowAddForms] = useState(false);
   const [generatedForms, setGeneratedForms] = useState({});
   const [activeFormId, setActiveFormId] = useState(null);
@@ -3283,6 +3366,9 @@ const AcordModal = forwardRef(function AcordModal({
       .catch(() => {});
   }, [step, sessionId]); // eslint-disable-line
 
+  // When the screen last changed - the double-click guard on the step shell
+  // below reads it (9 Oct 2026).
+  const stepArrivedAtRef = useRef(0);
   // Moving between steps must start at the top of the new screen. The review page
   // is long, so "Continue to form selection" is usually clicked from near its
   // bottom; without this the form list opens already scrolled past its own header
@@ -3290,6 +3376,7 @@ const AcordModal = forwardRef(function AcordModal({
   // element's minHeight), so this is a window scroll. The editor manages its own
   // internal panes and is excluded.
   useEffect(() => {
+    stepArrivedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (step === "editor") return;
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [step]);
@@ -3308,6 +3395,9 @@ const AcordModal = forwardRef(function AcordModal({
     // Replace, never keep: a missing package score must not leave the
     // pre-generation "so far" number on screen as the Total Package Score.
     setPackageSqs(d.package_sqs || null);
+    // The editor's Data Consistency block (5 Oct 2026). Only when the payload
+    // carries it, so an older response never blanks a picker already loaded.
+    if (d.underwriting_consistency !== undefined) setUnderwriting(d.underwriting_consistency || null);
     const open = formToOpen(forms, d.form_order, preferredFormId, d.active_form_id);
     setActiveFormId(open);
     const readyMap = {}; Object.keys(forms).forEach(fid => { readyMap[fid] = false; });
@@ -3353,11 +3443,13 @@ const AcordModal = forwardRef(function AcordModal({
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
+      if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setAccountProfile(data.account_profile || null);
-      setCheckedFormIds(new Set());
+      resetFormTicks();
       setUnderwriting(data.underwriting_consistency || null); setUnderwritingPicks({});
       setIntegrity(data.integrity || null);
+      setDocumentFormOffers(data.document_form_offers || []);
       if (data.integrity_review_required) {
         setRemoveDocIds(new Set());
         setStep("integrity_review");
@@ -3524,11 +3616,23 @@ const AcordModal = forwardRef(function AcordModal({
       // that no longer recomputes as live needs this to still render as a row
       // instead of vanishing (see ghostIssues below).
       for (const s of (d.issue_statuses || [])) {
-        next.set(s.issue_id, { status: s.status, reason: s.reason, message: s.message, form_id: s.form_id, rule_code: s.rule_code });
+        next.set(s.issue_id, { status: s.status, reason: s.reason, message: s.message, form_id: s.form_id, rule_code: s.rule_code, severity: s.severity ?? null });
       }
       setIssueStatuses(next);
     } catch { /* non-fatal */ }
   };
+
+  // Recommendations rows saved while the form check was still running (13 Oct
+  // 2026): judged against the next finished check (`settleRecommendationFix`).
+  const pendingRecFixes = useRef(new Map());
+  useEffect(() => { pendingRecFixes.current.clear(); }, [sessionId]);
+  useEffect(() => {
+    if (dryRun?.status !== "ready" || pendingRecFixes.current.size === 0) return;
+    for (const [iid, p] of Array.from(pendingRecFixes.current.entries())) {
+      const state = recommendationFixState("dry", p.itemId, { dryRun, formId: p.meta.form_id });
+      if (state !== "unknown") settleRecommendationFix(iid, state, p.meta, "dry", p.itemId);
+    }
+  }, [dryRun]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optimistically set an issue's status, then persist. On failure we keep the
   // optimistic value (non-fatal) - a reload re-syncs from the DB.
@@ -3545,6 +3649,9 @@ const AcordModal = forwardRef(function AcordModal({
         message:   meta.message   ?? existing.message   ?? null,
         form_id:   meta.form_id   ?? existing.form_id   ?? null,
         rule_code: meta.rule_code ?? existing.rule_code ?? null,
+        // The review page it belongs to - files a fixed item under the right
+        // page's Resolved section once it stops firing (8 Oct 2026).
+        severity:  meta.severity  ?? existing.severity  ?? null,
       });
       return n;
     });
@@ -3562,6 +3669,7 @@ const AcordModal = forwardRef(function AcordModal({
           rule_code:   meta.rule_code   ?? null,
           source_fact: meta.source_fact ?? null,
           message:     meta.message     ?? null,
+          severity:    meta.severity    ?? null,
         }),
       });
     } catch { /* keep optimistic value; non-fatal */ }
@@ -3581,14 +3689,18 @@ const AcordModal = forwardRef(function AcordModal({
     // the optimistic flip to "open" made the row belong to no list at all and
     // it vanished for the length of the round trip (live report 2026-09-09).
     .filter(([iid, st]) => (st.status === "resolved" || reopeningIds.has(iid))
-      && st.message && !liveIssueIds.has(iid))
+      && st.message && !liveIssueIds.has(iid)
+      // A Recommendations row keeps its own Resolved list (13 Oct 2026).
+      && pageOfStatus(st, iid) !== REC_PAGE)
     .map(([iid, st]) => ({ issue_id: iid, message: st.message, forms: st.form_id ? [st.form_id] : [], code: st.rule_code }));
 
   // One compact status control for a SINGLE issue. Every hard-stop / warning
   // sub-item gets its own (client review #8), so resolving or dismissing one
   // line never silently marks the other members of its cluster. Mirrors the
   // Cross-Form Validation panel, which is already per-row.
-  const itemStatusControl = (it, forms) => {
+  // `ctx` (the review screen, 8 Oct 2026): { reviewScreen, tone } - no Resolve
+  // button there, and the page ("hard" / "warning") rides along with the status.
+  const itemStatusControl = (it, forms, ctx = {}) => {
     const iid = issueIdOf(it);
     return (
       <IssueStatusControl
@@ -3598,8 +3710,14 @@ const AcordModal = forwardRef(function AcordModal({
           form_id:   (Array.isArray(it.forms) && it.forms[0]) || (Array.isArray(forms) ? forms[0] : null),
           rule_code: it.code,
           message:   it.message,
+          severity:  reviewSeverity(ctx.tone),
         }}
-        onSet={setIssueStatus}
+        // Reopen ("open") takes a fix - and its points - back through the one
+        // reopen door (owner, 9 Oct 2026); Dismiss stays a status mark.
+        onSet={(id, status, meta) => (status === "open"
+          ? handleReopenIssue(id, "open", meta)
+          : setIssueStatus(id, status, meta))}
+        showResolve={!ctx.reviewScreen}
       />
     );
   };
@@ -3669,18 +3787,20 @@ const AcordModal = forwardRef(function AcordModal({
     if (!formId) return;
     if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
     setCheckedFormIds((prev) => new Set(prev).add(formId));
+    setFormTicksTouched(true);
     setStep("form_selection");
   };
 
-  const itemResolveAndStatus = (it, forms) => {
+  const itemResolveAndStatus = (it, forms, ctx = {}) => {
     // 1) Conflict-family issue that IS an open row in the Data Consistency
     //    picker (documents disagree on name / FEIN / dates / Gross Sales / DBA):
     //    reconciled there, not by the inline modal - so route the producer up to
     //    that row. Checked first: it is the purpose-built path for these.
     const dcKey = issueFactKey(it);
-    // Not once forms exist or are generating: the picker is locked then
-    // (confirm-value refuses), so the button would lead nowhere.
-    const inDataConsistency = !!dcKey && !formsGenerated && !lockedReason(pkgGen.state) && (underwriting?.fields || []).some(
+    // Not while forms are generating (the picker is locked then). Once forms
+    // exist the button leads to the editor's own Data Consistency block
+    // (5 Oct 2026), which confirms through confirm-value-in-editor.
+    const inDataConsistency = !!dcKey && !confirmLockedReason(pkgGen.state) && (underwriting?.fields || []).some(
       (f) => f.fact_key === dcKey && f.status === "conflict"
     );
     // 2) Otherwise, a cross-form issue carrying an inline-resolution descriptor.
@@ -3719,11 +3839,15 @@ const AcordModal = forwardRef(function AcordModal({
     //    - client review #4 "align them") is what separates it from the message
     //    text above; kept equal to the fixable branch below so the vertical
     //    rhythm never depends on whether a row also has a fix button.
+    // Round 5 #15: before forms, a warning generation will make a hard stop
+    // carries the server's tag (both Review layouts render rows through here).
+    const becomesHard = !formsGenerated ? it?.becomes_hard_tag : null;
     if (!inDataConsistency && !canResolve && !explainOnly && !addable.length && !ticked.length) {
       return (
         <div>
+          <BecomesHardTag text={becomesHard} />
           <ScoreNeutralNote show={it?.score_neutral} />
-          <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms)}</div>
+          <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms, ctx)}</div>
         </div>
       );
     }
@@ -3733,6 +3857,7 @@ const AcordModal = forwardRef(function AcordModal({
     // the same baseline instead of drifting per-button.
     return (
       <div>
+        <BecomesHardTag text={becomesHard} />
         {explainOnly && <ResolutionHint mode={mode} note={res && res.note} />}
         {/* The producer has already ticked the form this row asked for. Say so
             - the alternative was silence or, worse, the generic "can't be
@@ -3740,19 +3865,19 @@ const AcordModal = forwardRef(function AcordModal({
         {ticked.length > 0 && (
           <div style={{ fontSize: 10.5, color: "#15803d", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            {ticked.map((f) => String(f).replace(/_/g, " ")).join(", ")} selected - {ticked.length > 1 ? "they" : "it"} will be generated with this package.
+            {ticked.map((f) => formLabel(f)).join(", ")} selected - {ticked.length > 1 ? "they" : "it"} will be generated with this package.
           </div>
         )}
         <ScoreNeutralNote show={it?.score_neutral} />
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
-          {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
+          {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms), __severity: reviewSeverity(ctx.tone) })} />}
           {addable.map((fid) => (
             <AddFormButton key={fid} formId={fid} onClick={() => (formsGenerated
               ? openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })
               : addFormBeforeGeneration(fid))} />
           ))}
-          {itemStatusControl(it, forms)}
+          {itemStatusControl(it, forms, ctx)}
         </div>
       </div>
     );
@@ -3874,9 +3999,10 @@ const AcordModal = forwardRef(function AcordModal({
   const resetToUpload = () => {
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
+    setDocumentsResult(null); setDocumentFormOffers([]); setDocChange(null);
     setCanProceedWithWarning(false); setWarningStops([]);
-    setKeyDetails(null); setRecommendations([]); setAccountProfile(null);
-    setAllAvailableForms([]); setCheckedFormIds(new Set());
+    setKeyDetails(null); setRecommendations([]); setAccountProfile(null); setDryRun(null);
+    setAllAvailableForms([]); resetFormTicks();
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
@@ -3892,8 +4018,9 @@ const AcordModal = forwardRef(function AcordModal({
   const goToDashboard = () => {
     setFiles([]); setSessionId(null); setStep("dashboard"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
-    setKeyDetails(null); setRecommendations([]); setAccountProfile(null);
-    setAllAvailableForms([]); setCheckedFormIds(new Set());
+    setDocumentsResult(null); setDocumentFormOffers([]); setDocChange(null);
+    setKeyDetails(null); setRecommendations([]); setAccountProfile(null); setDryRun(null);
+    setAllAvailableForms([]); resetFormTicks();
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
@@ -3990,7 +4117,7 @@ const AcordModal = forwardRef(function AcordModal({
       const isDraft = res.headers.get("X-Download-Draft") === "true";
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${formId}_Package_DRAFT.zip` : `${formId}_Package.zip`;
+      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${fileStem(formId)}_Package_DRAFT.zip` : `${fileStem(formId)}_Package.zip`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -4035,7 +4162,7 @@ const AcordModal = forwardRef(function AcordModal({
       const isDraft = res.headers.get("X-Download-Draft") === "true";
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${formId}_Package_DRAFT.zip` : `${formId}_Package.zip`;
+      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${fileStem(formId)}_Package_DRAFT.zip` : `${fileStem(formId)}_Package.zip`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -4437,7 +4564,9 @@ const AcordModal = forwardRef(function AcordModal({
   // Otherwise -> form selection, exactly as before.
   const handleContinueFromPackage = async () => {
     if (pkgGen.state === GEN_DONE) { await openFormFromPackage(null); return; }
-    if (pkgGen.state !== GEN_RUNNING || !sessionId) { setStep("form_selection"); return; }
+    // A review-page error (a document type, a marketing reason) does not follow
+    // the producer onto form selection, where it sat beside "Retry Generation".
+    if (pkgGen.state !== GEN_RUNNING || !sessionId) { setError(null); setStep("form_selection"); return; }
     const d = (await _readPackage(sessionId)) || pkgGen.data;
     const state = generationStateOf(d);
     if (state === GEN_DONE) { setPkgGen(_pkgGenFrom(d)); _loadEditorState(d); setStep("editor"); return; }
@@ -4567,9 +4696,10 @@ const AcordModal = forwardRef(function AcordModal({
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
+      if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setAccountProfile(data.account_profile || null);
-      setCheckedFormIds(new Set());
+      resetFormTicks();
       setUnderwriting(data.underwriting_consistency || null); setUnderwritingPicks({});
       // Submission Integrity Validation (Beta Report §4.1): pause for review
       // BEFORE form selection/generation when the package may hold multiple insureds.
@@ -4641,11 +4771,12 @@ const AcordModal = forwardRef(function AcordModal({
       setRecommendations(data.recommendations || []);
       setAllAvailableForms(data.all_available_forms || []);
       setAccountProfile(data.account_profile || null);
-      setCheckedFormIds(new Set());
+      resetFormTicks();
       setUnderwriting(data.underwriting_consistency || null);
       // Readiness number was withheld while the review was pending; restore it now
       // that the package is cleared so the bar shows on the recommendations screen.
       setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
+      if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
       // Workstream 6 §9.1 - integrity resolved → announce the now-current status
       // (hard stops / warnings / ready) as the user lands on the recommendations
       // screen, so they immediately know what to do next. When the package was
@@ -4675,23 +4806,240 @@ const AcordModal = forwardRef(function AcordModal({
     }
   };
 
+  // Documents added to, or changed on, the package (Choice Electric #25, 7 Oct
+  // 2026): keep the answer for its result line, then reload the package page
+  // the way a refresh does (one loader). Once forms exist the forms list and
+  // its scores are re-read too - the server re-stamped and re-scored them.
+  const handleDocumentsChanged = async (data) => {
+    if (!data || !sessionId) return;
+    if (!data.__formAdded) setDocumentsResult(data);
+    setDocumentFormOffers(data.document_form_offers || []);
+    // C103: an add after forms starts the AI reading of the new document.
+    if (data.after_forms && data.ai_fill !== undefined) {
+      setDocumentFill({ sessionId, status: data.ai_fill || null, newOnReview: data.new_on_review || null });
+    }
+    await _restoreFromExtraction(sessionId, _freshSignal());
+    if (data.after_forms || data.__formAdded || formsGenerated) {
+      const d = await _readPackage(sessionId);
+      if (d) {
+        setPkgGen(_pkgGenFrom(d));
+        setGeneratedForms(inProducerOrder(d.generated_forms || {}, d.form_order));
+      }
+    }
+  };
+
+  // ── The AI reading of a document added after forms (C103, 7 Oct 2026) ──────
+  // Polled HERE, not in the panel, so it keeps going in the editor: when it
+  // finishes, the forms (and the open form's picture) and the package score
+  // are re-read; on the package page the page itself reloads too.
+  const [documentFill, setDocumentFill] = useState(null);   // { sessionId, status, newOnReview }
+  const fillStepRef = useRef(step);
+  fillStepRef.current = step;
+  const fillOf = documentFill && documentFill.sessionId === sessionId ? documentFill : null;
+  const documentFillRunning = fillOf?.status?.state === "running";
+  const _readDocumentFill = async (sid, formId = null) => {
+    try {
+      const q = formId ? `?form_id=${encodeURIComponent(formId)}` : "";
+      const r = await fetch(`${API_BASE}/api/session/${sid}/documents/ai-fill${q}`, { credentials: "include" });
+      const d = r.ok ? await r.json() : null;
+      return d && d.success ? d : null;
+    } catch { return null; }
+  };
+  // A reload while a fill runs picks it (and its lock) up from the server.
+  useEffect(() => {
+    if (!sessionId || pkgGen.state !== GEN_DONE || fillOf) return undefined;
+    let live = true;
+    _readDocumentFill(sessionId).then((d) => {
+      if (live && d?.ai_fill?.state === "running") setDocumentFill({ sessionId, status: d.ai_fill, newOnReview: null });
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, pkgGen.state]);
+  useEffect(() => {
+    if (!documentFillRunning) return undefined;
+    const sid = sessionId;
+    let live = true;
+    let timer = null;
+    const tick = async () => {
+      const d = await _readDocumentFill(sid);
+      if (!live) return;
+      const st = d?.ai_fill;
+      if (!st || st.state === "running") { timer = setTimeout(tick, 3000); return; }
+      setDocumentFill((prev) => ({ sessionId: sid, status: st,
+        newOnReview: d.new_on_review !== undefined ? (d.new_on_review || null) : (prev?.newOnReview || null) }));
+      setDocumentsResult((prev) => (prev && prev.after_forms ? { ...prev, ai_fill: st } : prev));
+      const p = await _readPackage(sid);
+      if (!live || !p) return;
+      setPkgGen(_pkgGenFrom(p));
+      setGeneratedForms(inProducerOrder(p.generated_forms || {}, p.form_order));
+      if (p.package_sqs) setPackageSqs(p.package_sqs);
+      setPdfRefreshTick((t) => t + 1);
+      if (fillStepRef.current === "review") await _restoreFromExtraction(sid, _freshSignal());
+    };
+    timer = setTimeout(tick, 3000);
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [documentFillRunning, sessionId]);
+
+  // "Use this value" on a "New document says X - the form says Y" row: an
+  // ordinary box edit through the producer-edit door (/api/update-pdf), so it
+  // is labelled "producer" like any value a person chose, writes its fact back
+  // and re-scores. Unsaved typing is saved first.
+  const applyDocumentSuggestion = async (row) => {
+    if (!sessionId || !row?.form_id || !row?.field) return false;
+    if (!(await saveViewerEdits())) return false;
+    try {
+      const res = await fetch(`${API_BASE}/api/update-pdf`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId,
+                               field_updates: { __form_id__: row.form_id, [row.field]: String(row.suggested ?? "") } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        setError(data.detail || data.message || "Could not use that value. Please try again.");
+        return false;
+      }
+      if (data.sqs) setGeneratedForms((prev) => (prev[row.form_id] ? { ...prev, [row.form_id]: { ...prev[row.form_id], sqs: data.sqs } } : prev));
+      if (data.package_sqs) setPackageSqs(data.package_sqs);
+      setPdfRefreshTick((t) => t + 1);
+      return true;
+    } catch (e) {
+      setError("Could not use that value: " + (e?.message || "network error"));
+      return false;
+    }
+  };
+
+  // "Confirm" / "Confirm all" on Please verify rows (13 Oct 2026, owner + Brent:
+  // the SQS reaches 100 after forms once everything is answered or checked).
+  // Each box keeps its value and is labelled the producer's by the same
+  // producer-edit door, which re-scores the form and the package. Unsaved
+  // typing is saved first, so a confirm never sends a value older than the box.
+  const confirmVerifyValues = async (rows) => {
+    const formId = rows?.[0]?.form_id;
+    const updates = confirmFieldUpdates(formId, rows);
+    if (!sessionId || !updates) return false;
+    if (!(await saveViewerEdits())) return false;
+    try {
+      const res = await fetch(`${API_BASE}/api/update-pdf`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, field_updates: updates }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        setError(data.detail || data.message || "Could not confirm. Please try again.");
+        return false;
+      }
+      if (data.sqs) setGeneratedForms((prev) => (prev[formId] ? { ...prev, [formId]: { ...prev[formId], sqs: data.sqs } } : prev));
+      if (data.package_sqs) setPackageSqs(data.package_sqs);
+      setPdfRefreshTick((t) => t + 1);
+      return true;
+    } catch (e) {
+      setError("Could not confirm: " + (e?.message || "network error"));
+      return false;
+    }
+  };
+
+  // The editor's "Back to review" (7 Oct 2026): the review page's open items -
+  // hard stops and warnings not yet handled, plus Data Consistency values to
+  // confirm - counted the way the review rail counts them, and the first
+  // section with work (Hard Stops, Warnings, Data Consistency, else Overview).
+  const reviewOpen = reviewOpenItems({
+    groupedIssues, hardStops, softStops,
+    isHandled: (it) => {
+      const st = issueStatuses.get(issueIdOf(it))?.status;
+      return st === "resolved" || st === "dismissed";
+    },
+    consistencyFields: underwriting?.fields,
+  });
+  // Typed edits are saved first (the one door every switch uses); the package
+  // page is then re-read the way a refresh reads it, and opened at that section.
+  // "Back to review" saves the open edits and re-reads the session before it
+  // can render the review page - seconds of network on a big package. Without
+  // a busy state the button looked dead and people clicked it again (owner,
+  // 8 Oct 2026). It now says what it is doing and refuses a second click.
+  const goBackToReview = async () => {
+    if (!sessionId || backToReviewBusy) return;
+    setBackToReviewBusy(true);
+    try {
+      if (!(await saveViewerEdits())) return;
+      const section = reviewOpen.section;
+      const ok = await _restoreFromExtraction(sessionId, _freshSignal());
+      if (!ok) setStep("review");
+      // The editor locks body scrolling (`step === "editor"`). The step effect
+      // clears it, but only after this await resolves and React re-renders -
+      // so clear it here too. A lock left on while the review page paints is
+      // what leaves the page unscrollable with the footer stranded over empty
+      // space (owner, 8 Oct 2026).
+      document.body.style.overflow = "";
+      window.dispatchEvent(new Event("app-header:reset"));
+      if (reviewRail) showReviewSection(section);
+      else if (section === "consistency") jumpToDataConsistency();
+      else window.scrollTo({ top: 0, behavior: "auto" });
+    } finally {
+      setBackToReviewBusy(false);
+    }
+  };
+
+  // The confirm (or the "names a different insured" question) said yes.
+  const confirmDocChange = () => {
+    const p = docChange;
+    setDocChange(null);
+    if (p) handleReclassify(p.docId, p.action, p.newType, p.busyBtn, { confirmed: true, confirmSameInsured: !!p.sameInsured });
+  };
+
+  const renderAddDocumentsPanel = () => (
+    <AddDocumentsPanel
+      sessionId={sessionId}
+      apiBase={API_BASE}
+      afterForms={pkgGen.state === GEN_DONE}
+      lockedText={documentsLockedReason(pkgGen.state)}
+      availableDocTypes={availableDocTypes}
+      pendingOffers={documentFormOffers}
+      result={documentsResult}
+      onChanged={handleDocumentsChanged}
+      fill={fillOf?.status || null}
+      newOnReview={fillOf?.newOnReview || null}
+      onReview={(section) => { if (reviewRail) showReviewSection(section); else if (section === "consistency") jumpToDataConsistency(); }}
+    />
+  );
+
   // Document classification correction (Beta Report §4.2). action:
   // "set_type" (with newType) | "exclude" | "include". Re-runs scoring server-side.
-  const handleReclassify = async (docId, action, newType = null, busyBtn = null) => {
+  // Choice Electric #25 (7 Oct 2026): also once forms exist - the server then
+  // re-stamps the forms from the change, so it is confirmed first
+  // (DocumentChangeConfirm). Only a run in progress locks it.
+  const handleReclassify = async (docId, action, newType = null, busyBtn = null, opts = {}) => {
     if (!sessionId || !docId) return;
-    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
+    if (documentsLockedReason(pkgGen.state)) { setError(documentsLockedReason(pkgGen.state)); return; }
+    if (documentFillRunning) { setError("Your forms are being updated from a document you added - wait for it to finish."); return; }
+    const afterForms = formsGenerated || pkgGen.state === GEN_DONE;
+    const docName = (docSummary.find((d) => d.doc_id === docId) || {}).filename || "";
+    if (afterForms && !opts.confirmed) {
+      setDocChange({ docId, action, newType, busyBtn, filename: docName });
+      return;
+    }
     setReclassDocId(docId); setReclassBusyBtn(busyBtn); setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/document/reclassify`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, doc_id: docId, action, new_doc_type: newType }),
+        body: JSON.stringify({ session_id: sessionId, doc_id: docId, action, new_doc_type: newType,
+                               confirm_same_insured: !!opts.confirmSameInsured }),
       });
       const data = await res.json().catch(() => ({}));
+      const refusal = integrityRefusal(res.status, data);
+      if (refusal && afterForms) {
+        setDocChange({ docId, action, newType, busyBtn, filename: docName, sameInsured: true, message: refusal.message });
+        return;
+      }
       if (!res.ok || !data.success) {
         setError(data.detail || data.message || "Could not update the document type.");
         return;
       }
+      // After forms: the package page reloads as a refresh would, with the
+      // forms and their scores (handleDocumentsChanged).
+      if (afterForms) { await handleDocumentsChanged(data); return; }
       // Corrected classification re-runs downstream scoring + recommendations.
       setDocSummary(data.doc_summary || docSummary);
       if (data.available_doc_types) setAvailableDocTypes(data.available_doc_types);
@@ -4707,6 +5055,7 @@ const AcordModal = forwardRef(function AcordModal({
       // is pending: the score so far goes blank rather than stale.
       setKeyDetails(data.key_details || null);
       setPackageSqs(data.package_sqs || null);
+      if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
       if (data.integrity) setIntegrity(data.integrity);
       if (data.underwriting_consistency) setUnderwriting(data.underwriting_consistency);
     } catch (e) {
@@ -4902,12 +5251,19 @@ const AcordModal = forwardRef(function AcordModal({
   // otherwise, which is the behaviour this endpoint has always had.
   const handleConfirmUnderwriting = async (factKey, value, scope) => {
     if (!sessionId || !factKey) return;
-    if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
+    if (confirmLockedReason(pkgGen.state)) { setError(confirmLockedReason(pkgGen.state)); return; }
     const v = (value ?? "").toString().trim();
     if (!v) { setError("Enter or select a value to confirm."); return; }
+    // Once forms exist (5 Oct 2026, owner): the editor route applies the value
+    // to the stored facts and re-stamps the forms in place - the pre-form route
+    // re-reads the documents and would reset them.
+    const afterForms = formsGenerated || pkgGen.state === GEN_DONE;
+    // Item 10: typed edits are saved before anything replaces the viewer - the
+    // confirm re-stamps the forms and remounts it (audit G7, 5 Oct 2026).
+    if (afterForms && !(await saveViewerEdits())) return;
     setUnderwritingBusy(factKey); setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/underwriting/confirm-value`, {
+      const res = await fetch(`${API_BASE}/api/underwriting/${afterForms ? "confirm-value-in-editor" : "confirm-value"}`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, fact_key: factKey, value: v,
@@ -4919,6 +5275,15 @@ const AcordModal = forwardRef(function AcordModal({
         return;
       }
       setUnderwriting(data.underwriting_consistency || null);
+      if (afterForms) {
+        // The resolve-issue shape: per-form scores, the whole package score,
+        // stops and the cross-form panel, and the open PDF re-fetched. The
+        // client-filled list is re-read too: a confirmed value replaces a
+        // client's answer, which must stop showing green.
+        _applyCrossIssuePanelUpdate(data);
+        refreshArqData();
+        return;
+      }
       setRecommendations(data.recommendations || recommendations);
       if (data.account_profile) setAccountProfile(data.account_profile);
       setAllAvailableForms(data.all_available_forms || allAvailableForms);
@@ -4927,12 +5292,44 @@ const AcordModal = forwardRef(function AcordModal({
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setKeyDetails(data.key_details || keyDetailsRaw); setPackageSqs(data.package_sqs || null);
+    if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
       setFlags(data.flags || flags);
     } catch (e) {
       setError("Could not confirm the value: " + (e?.message || "network error"));
     } finally {
       setUnderwritingBusy(null);
     }
+  };
+
+  // "Policies in this submission" (Brent #9, 7 Oct 2026): a policy corrected,
+  // added or removed in `PoliciesTable`. Before forms the server re-ran the
+  // package and answers in the confirm-value shape; after them it re-stamped the
+  // forms in place and answers in the resolve-issue shape - the same two
+  // refreshes the Data Consistency confirm uses.
+  const handlePolicyLinesApplied = (data) => {
+    if (!data || data.success === false || data.changed === false) return;
+    if (data.underwriting_consistency) setUnderwriting(data.underwriting_consistency);
+    if (data.after_forms) {
+      _applyCrossIssuePanelUpdate(data);
+      refreshArqData();
+      return;
+    }
+    setRecommendations(data.recommendations || recommendations);
+    if (data.account_profile) setAccountProfile(data.account_profile);
+    setAllAvailableForms(data.all_available_forms || allAvailableForms);
+    setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+    setGroupedIssues(data.grouped_issues || null);
+    setCanProceedWithWarning(!!data.can_proceed_with_warning);
+    setWarningStops(data.warning_stops || []);
+    setKeyDetails(data.key_details || keyDetailsRaw); setPackageSqs(data.package_sqs || null);
+    if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
+    setFlags(data.flags || flags);
+  };
+  const policyTableProps = {
+    sessionId,
+    // Typed edits are saved before the server re-stamps the forms (item 10).
+    onBeforeChange: async () => !(formsGenerated || pkgGen.state === GEN_DONE) || (await saveViewerEdits()),
+    onApplied: handlePolicyLinesApplied,
   };
 
   // After a Generate that failed or was refused: is a run still going, or did
@@ -5071,15 +5468,17 @@ const AcordModal = forwardRef(function AcordModal({
   const stateAutoCompanions = () =>
     (recommendations || []).map(r => r.form_id).filter(id => /^ACORD_137_[A-Z]{2}$/.test(id || ""));
   const toggleForm = formId => {
-    const companions = formId === "ACORD_127" ? stateAutoCompanions() : [];
+    // Special cases key on the FORM (a second copy "ACORD_131__excess" is an ACORD 131).
+    const isAuto127 = baseFormId(formId) === "ACORD_127";
+    const companions = isAuto127 ? stateAutoCompanions() : [];
     setCheckedFormIds(prev => {
       const next = new Set(prev);
       if (next.has(formId)) {
         next.delete(formId);
-        if (formId === "ACORD_127") companions.forEach(id => next.delete(id));
+        if (isAuto127) companions.forEach(id => next.delete(id));
       } else {
         next.add(formId);
-        if (formId === "ACORD_127") companions.forEach(id => { if (!declinedStateAutoForms.has(id)) next.add(id); });
+        if (isAuto127) companions.forEach(id => { if (!declinedStateAutoForms.has(id)) next.add(id); });
       }
       return next;
     });
@@ -5090,7 +5489,17 @@ const AcordModal = forwardRef(function AcordModal({
         return next;
       });
     }
+    // The producer has chosen (Choice Electric #17): an ACORD 125 they untick
+    // stays unticked, and the review's form checks now follow the ticks.
+    setFormTicksTouched(true);
+    if (formId === ANCHOR_FORM_ID) setDeclined125(checkedFormIds.has(formId));
   };
+  // ACORD 125 is ticked the moment the producer reaches form selection, unless
+  // they unticked it - the list keeps its match-percentage order.
+  useLayoutEffect(() => {
+    if (step !== "form_selection") return;
+    setCheckedFormIds(prev => withAnchorForm(prev, recommendations, declined125));
+  }, [step, recommendations, declined125]);
   const missingStateAutoForms = checkedFormIds.has("ACORD_127")
     ? stateAutoCompanions().filter(id => !checkedFormIds.has(id))
     : [];
@@ -5124,7 +5533,10 @@ const AcordModal = forwardRef(function AcordModal({
   const dcLineRecords = (underwriting?.fields || []).map(f => f.line_records).find(r => (r || []).length) || [];
   // Locked once forms exist or are generating (Orbin item 1): those items
   // cannot be acted on here, so they are not "needing your input".
-  const openItemCount = lockedReason(pkgGen.state) ? 0 : docsNeedingReview.length + openConflicts.length;
+  // Conflicts stay actionable once forms exist (5 Oct 2026) - only a run in
+  // progress locks them.
+  const openItemCount = (lockedReason(pkgGen.state) ? 0 : docsNeedingReview.length)
+    + (confirmLockedReason(pkgGen.state) ? 0 : openConflicts.length);
 
   // Workstream 6 §9.1 - what the Hard Stops / Warnings sections actually have to
   // show, from the same helper the completion toast uses (grouped view first,
@@ -5513,6 +5925,7 @@ const AcordModal = forwardRef(function AcordModal({
       setPackageSqs(prev => prev ? { ...prev, package_sqs_score: data.new_package_sqs_score, tier: data.new_package_tier ?? prev.tier } : prev);
     }
     if (data.key_details !== undefined) setKeyDetails(data.key_details || null);
+    if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
     if (Array.isArray(data.hard_stops)) setHardStops(data.hard_stops);
     if (Array.isArray(data.soft_stops)) setSoftStops(data.soft_stops);
     if (Array.isArray(data.cross_issues)) setCrossIssues(data.cross_issues);
@@ -5534,10 +5947,72 @@ const AcordModal = forwardRef(function AcordModal({
   // ResolutionModal already applied the change server-side; this drops the
   // response into state and marks the issue resolved so the panel reflects
   // the fix without a reload.
+  // Blockers a save cleared besides its own item (owner, 13 Oct 2026: "x of y
+  // handled, y were all the blockers"). A key-detail link, a "Raise your score"
+  // row or another card's fix can clear a warning whose card was never opened;
+  // it is recorded "resolved" so it keeps counting as handled and moves to the
+  // Resolved section. Read off the lists the server just sent, with the Save
+  // progress rule (`fixLeftOpen`), so a part-fixed item is never marked.
+  const markClearedBlockers = (data, issue) => {
+    try {
+      const own = issue && !issue.__scoreItem && !issue.__keyDetail && !issue.__dryRun ? issueIdOf(issue) : null;
+      const cleared = clearedBlockers(groupedIssues, data?.grouped_issues, issueIdOf, fixLeftOpen,
+        new Set(own ? [own] : []));
+      for (const c of cleared) {
+        const st = issueStatuses.get(c.iid)?.status;
+        if (st === "resolved" || st === "dismissed") continue;
+        setIssueStatus(c.iid, "resolved", {
+          form_id: Array.isArray(c.item.forms) ? (c.item.forms[0] || null) : null,
+          rule_code: c.item.code || null, message: c.item.message,
+          severity: c.page === "hard" ? "hard" : "warning",
+        });
+      }
+    } catch { /* tracking only - never blocks a fix */ }
+  };
+
+  // A Recommendations row fixed through its own window (owner, 13 Oct 2026:
+  // "a resolved section similar to hard stops and warnings"): marked "resolved"
+  // under that page only when the save FIXED it - the score no longer asks for
+  // it, or a finished form check no longer lists it - and a "resolved" an
+  // earlier save left on a row still listed is taken off (the Save progress
+  // rule). A form check still running is judged when it finishes.
+  const settleRecommendationFix = (iid, state, meta, kind, itemId) => {
+    if (state === "fixed") {
+      pendingRecFixes.current.delete(iid);
+      setIssueStatus(iid, "resolved", meta);
+    } else if (state === "open") {
+      pendingRecFixes.current.delete(iid);
+      if (issueStatuses.get(iid)?.status === "resolved") setIssueStatus(iid, "open", meta);
+    } else if (kind === "dry") {
+      pendingRecFixes.current.set(iid, { meta, itemId });
+    }
+  };
+  const markRecommendationFix = (data, issue) => {
+    const iid = issue?.issue_id;
+    if (!iid || !isRecommendationId(iid) || !issue.__recKind) return;
+    const meta = {
+      form_id: Array.isArray(issue.forms) ? (issue.forms[0] || null) : null,
+      rule_code: null, message: issue.__recTitle || issue.message || null, severity: REC_PAGE,
+    };
+    const pkg = data?.package_sqs !== undefined ? data.package_sqs : data?.editor_package_sqs;
+    const state = recommendationFixState(issue.__recKind, issue.__recItemId,
+      { packageSqs: pkg, dryRun: data?.dry_run, formId: meta.form_id });
+    settleRecommendationFix(iid, state, meta, issue.__recKind, issue.__recItemId);
+  };
+
   const handleIssueResolved = (data, issue) => {
     if (!data?.success) return;
+    markClearedBlockers(data, issue);
     _applyCrossIssuePanelUpdate(data);
     // A pre-form key detail is not an issue: no status chip to flip.
+    // "Before you generate" items are not issues either (Choice Electric #27).
+    // Nor are the Recommendations section's "Raise your score" rows (#22) -
+    // they keep their own Resolved list (13 Oct 2026).
+    if (issue?.__dryRun || issue?.__scoreItem) {
+      try { markRecommendationFix(data, issue); } catch { /* tracking only - never blocks a fix */ }
+      setResolutionIssue(null);
+      return;
+    }
     if (issue?.__keyDetail) { setResolutionIssue(null); return; }
     // Opened from a recommendation card (schedule mode), not from a validation
     // row: close the REC and leave the issue-status table alone.
@@ -5581,33 +6056,53 @@ const AcordModal = forwardRef(function AcordModal({
       if (iid && !stillLive) {
         setIssueStatus(iid, "resolved", {
           form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null,
-          rule_code: issue?.code, message: issue?.message,
+          rule_code: issue?.code, message: issue?.message, severity: issue?.__severity ?? null,
         });
       }
       setResolutionIssue(null);
       return;
     }
-    // Flip the issue's durable status chip to Resolved (work-tracking marker).
+    // Flip the issue's durable status chip to Resolved (work-tracking marker) -
+    // only when the save FIXED it. A save that leaves it firing is progress
+    // (owner, 13 Oct 2026 - run 18f6914f: the COPE table saved without occupancy
+    // type was marked Resolved, "All 1 handled", while the hard stop still held
+    // the score). Read off the lists the server just sent, against the ones on
+    // screen before the save (this closure's state): the item stays in its list
+    // with "Open to fix" and no tag, and a "resolved" an earlier partial save
+    // left on it is taken off.
     const iid = issueIdOf(issue);
-    if (iid) setIssueStatus(iid, "resolved", { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message });
+    const meta = { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message, severity: issue?.__severity ?? null };
+    const before = listedIssues({ grouped: groupedIssues, cross: crossIssues, hardStops, softStops });
+    const after = listedIssues({ grouped: data.grouped_issues, cross: data.cross_issues, hardStops: data.hard_stops, softStops: data.soft_stops });
+    if (iid && fixLeftOpen(issue, before, after, issueIdOf)) {
+      if (issueStatuses.get(iid)?.status === "resolved") setIssueStatus(iid, "open", meta);
+      setResolutionIssue(null);
+      return;
+    }
+    if (iid) setIssueStatus(iid, "resolved", meta);
     setResolutionIssue(null);
   };
 
-  // Producer clicks "Reopen" on a Cross-Form Validation row (live or already-
-  // resolved/ghost). For a field-mode issue this UNDOES the fix: the backend
-  // deletes the producer-provenance fact(s) and blanks them everywhere they
-  // were stamped, then re-runs the rules - so reopening genuinely clears the
-  // value instead of just relabeling a validation that still shows the old
-  // answer on the form. Schedule/narrative/none-mode issues (and the generic
-  // hard-stop/warning rail elsewhere, which never routes through here) just
-  // flip the status marker, same as Resolve/Dismiss always have.
-  const handleReopenIssue = async (issueId, status, meta = {}) => {
+  // Producer clicks "Reopen" / "Open again" on a fixed issue. This UNDOES the
+  // fix (owner, 9 Oct 2026: its points come off the score): the server puts
+  // back everything the fix changed - a typed value, a table's rows, an ACORD
+  // 101 note, the boxes it stamped - and re-runs the rules. It refuses, and
+  // says so, when those values were changed after the fix. A fix made before
+  // the server kept that record falls back to the old rule (a typed value is
+  // cleared; anything else just flips the status marker).
+  const handleReopenIssue = async (issueId, status, meta = {}, { optimistic = true, legacyClear = false } = {}) => {
     if (status !== "open") { setIssueStatus(issueId, status, meta); return; }
     if (!issueId || !sessionId) return;
+    const prevStatus = issueStatuses.get(issueId)?.status;
     // Optimistic status flip so the badge updates immediately even if the
     // network call is slow; a failure below just leaves it at "open", which is
     // the correct end state either way (worst case: the fact wasn't cleared).
-    setIssueStatuses(prev => { const n = new Map(prev); const existing = prev.get(issueId) || {}; n.set(issueId, { ...existing, status: "open", reason: "" }); return n; });
+    // Not from the review screen's Resolved list (9 Oct 2026): a status of
+    // "open" takes a fixed row OUT of that list, so it vanished for the whole
+    // request and its "Opening..." never showed. There the row stays put until
+    // the server answers.
+    const markOpen = () => setIssueStatuses(prev => { const n = new Map(prev); const existing = prev.get(issueId) || {}; n.set(issueId, { ...existing, status: "open", reason: "" }); return n; });
+    if (optimistic) markOpen();
     setReopeningIds(prev => new Set(prev).add(issueId));
     setReopenNotices(prev => { const n = new Map(prev); n.delete(issueId); return n; });
     try {
@@ -5621,10 +6116,38 @@ const AcordModal = forwardRef(function AcordModal({
           code: meta.rule_code ?? null,
           form_id: meta.form_id ?? null,
           message: meta.message ?? null,
+          // The old field clear for a fix with no receipt - the editor's
+          // Cross-Form panel only (it can delete a value typed elsewhere).
+          legacy_clear: !!legacyClear,
         }),
       });
       const data = await res.json();
-      if (data?.success && data.cleared) { _applyCrossIssuePanelUpdate(data); return; }
+      if (data?.success && data.cleared) { if (!optimistic) markOpen(); _applyCrossIssuePanelUpdate(data); return; }
+      // Status-only reopen of an item that is firing again: it is back in its list.
+      if (!optimistic && data?.success && data.cleared === false && data.still_live && !data.changed_since) markOpen();
+      // The fix's values were changed after it (owner, 9 Oct 2026): taking it
+      // back would erase that later change, so the server undid nothing. Leave
+      // the item where it was and say why.
+      if (data?.success && data.cleared === false && data.changed_since) {
+        // The server kept the status it had; so does the screen.
+        if (optimistic) {
+          setIssueStatuses(prev => {
+            const n = new Map(prev);
+            const existing = prev.get(issueId) || {};
+            n.set(issueId, { ...existing, status: prevStatus || "resolved" });
+            return n;
+          });
+        }
+        setReopenNotices(prev => new Map(prev).set(
+          issueId,
+          // A Recommendations row is not listed while it is Resolved, so it
+          // has no "Open to fix" to point at (13 Oct 2026).
+          isRecommendationId(issueId)
+            ? "Its values were changed after this fix, so Open again can't take it back without losing that change."
+            : "Its values were changed after this fix, so Open again can't take it back without losing that change. Use Open to fix to change them.",
+        ));
+        return;
+      }
       // Reopen undid nothing AND the validation is not firing again, so there
       // is no "open" row for it to become: it would render in neither the
       // severity sections (not live) nor the Resolved section (not resolved)
@@ -5638,15 +6161,19 @@ const AcordModal = forwardRef(function AcordModal({
       // signature, and this codebase's standing rule is that a wrongly-kept
       // artefact is visible while a wrongly-deleted one is not.
       if (data?.success && data.cleared === false && data.still_live === false) {
+        // Nothing was undone and nothing fires: the server kept the status it
+        // had (9 Oct 2026), and the screen puts the same one back.
         setIssueStatuses(prev => {
           const n = new Map(prev);
           const existing = prev.get(issueId) || {};
-          n.set(issueId, { ...existing, status: "resolved" });
+          n.set(issueId, { ...existing, status: prevStatus || "resolved" });
           return n;
         });
         setReopenNotices(prev => new Map(prev).set(
           issueId,
-          "This one is already fixed - the validation has stopped firing. Reopening the note can't undo it, and it never removes a form that has been generated.",
+          isRecommendationId(issueId)
+            ? "Nothing to take back - this was answered another way."
+            : "This one is already fixed - the validation has stopped firing. Reopening the note can't undo it, and it never removes a form that has been generated.",
         ));
       }
     } catch { /* optimistic status already applied; non-fatal */ }
@@ -5655,6 +6182,43 @@ const AcordModal = forwardRef(function AcordModal({
       // homeless between the status settling and the spinner clearing.
       setReopeningIds(prev => { const n = new Set(prev); n.delete(issueId); return n; });
     }
+  };
+
+  // "Open again" in the review screen's Resolved section (8 Oct 2026): a
+  // dismissed item goes back to its list; a fixed one is reopened the way the
+  // editor's panel reopens it - its typed value is taken back and the item
+  // returns to its list (handleReopenIssue, the one reopen door).
+  const reopenFromResolved = (row, kind, tone) => {
+    if (!row?.iid) return;
+    const meta = {
+      form_id: (Array.isArray(row.forms) && row.forms[0]) || row.item?.forms?.[0] || null,
+      rule_code: row.item?.code ?? null,
+      message: row.item?.message ?? null,
+      severity: reviewSeverity(tone),
+    };
+    if (kind === "status") { setIssueStatus(row.iid, "open", meta); return; }
+    if (kind === "none") return;          // dismissed, then fixed another way
+    handleReopenIssue(row.iid, "open", meta, { optimistic: false });
+  };
+
+  // "Open again" in the Recommendations page's Resolved list (owner, 13 Oct
+  // 2026: "they can be reopened and score goes back"). A fixed row goes through
+  // the one reopen door - the server takes back what its fix changed and
+  // re-scores, and the row returns to its list. An added form is unticked.
+  const reopenRecommendation = (row) => {
+    if (!row?.iid) return;
+    if (row.kind === "choice") {
+      const ids = (row.forms || []).filter(Boolean);
+      if (!ids.length) return;
+      if (lockedReason(pkgGen.state)) { setError(lockedReason(pkgGen.state)); return; }
+      setCheckedFormIds((prev) => { const n = new Set(prev); ids.forEach((f) => n.delete(f)); return n; });
+      setFormTicksTouched(true);
+      return;
+    }
+    handleReopenIssue(row.iid, "open", {
+      form_id: (row.forms || [])[0] || null, rule_code: null,
+      message: row.title || null, severity: REC_PAGE,
+    }, { optimistic: false });
   };
 
   // Open the inline-resolution modal for a validation row/cluster that carries a
@@ -5680,13 +6244,40 @@ const AcordModal = forwardRef(function AcordModal({
     });
   };
 
+  // "Before you generate" (Choice Electric #27): a box the forms will need,
+  // opened in the same fix window as everything else on this page. Like a
+  // key detail it is not an issue - it leaves the list because it is answered.
+  const openDryRunFix = (item) => {
+    if (!item?.resolution) return;
+    setResolutionIssue(dryRunFixIssue(item));
+  };
+
+  // Recommendations section (Choice Electric #22, 7 Oct 2026): a "Raise your
+  // score" row opens the same fix window, with the fix the server attached to
+  // the package scorer's row. Not an issue either - it leaves the list because
+  // the score no longer asks for it.
+  const openScoreFix = (item) => {
+    if (!item?.resolution) return;
+    setResolutionIssue(scoreFixIssue(item));
+  };
+
+  // After forms, "Your forms will need" opens a form - and, for a box, shows
+  // that box (the side panel's own jump, `attentionFocus`).
+  const openFormAtBox = async (formId, field = null) => {
+    await openFormFromPackage(formId);
+    if (formId && field) setAttentionFocus({ field, formId, nonce: `${Date.now()}:${field}` });
+  };
+
   const openResolution = async (issOrCluster) => {
     if (!issOrCluster?.resolution) return;
     // The fix is applied on the server and the viewer is redrawn from it, so
     // typed edits go first (item 10).
     if (!(await saveViewerEdits())) return;
+    // The id the status chip and "Open again" use travels with the fix, so the
+    // server files what the fix changed under it (owner, 9 Oct 2026: reopening
+    // takes the fix - and its points - back).
     const issue = issOrCluster.message
-      ? issOrCluster
+      ? { ...issOrCluster, issue_id: issueIdOf(issOrCluster) }
       : { ...issOrCluster, message: issOrCluster.primary_message, issue_id: issueIdOf(issOrCluster) };
     setResolutionIssue(issue);
   };
@@ -5843,7 +6434,7 @@ const AcordModal = forwardRef(function AcordModal({
       // item 19d); the stored rows it supersedes are hidden only when it loaded.
       const attention = attentionRes.status === "fulfilled" ? attentionRes.value : null;
       setPreflightAttention(attention);
-      const attentionTotal = attention?.counts?.total || 0;
+      const attentionTotal = (attention?.counts?.total || 0) + (attention?.document_suggestions?.length || 0);
       const openRecs = withoutSupersededRecs(recsData?.open_recommendations || [], attention);
       const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
       if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
@@ -5986,6 +6577,7 @@ const AcordModal = forwardRef(function AcordModal({
     download: "Package downloaded",
     signature_requested: "Sent to the client for signature",
     applicant_signed: "Client signed the forms",
+    forms_updated_from_documents: "Forms updated from documents",
   };
   const _historyLabel = (t) => _HISTORY_EVENT_LABEL[t] || t;
   // Per-event detail line. Carries over the bespoke wording the old EVENT LOG
@@ -6065,7 +6657,7 @@ const AcordModal = forwardRef(function AcordModal({
         for (const r of d.dismissed_recommendations) {
           lines.push(`  - ${r.message}`);
           lines.push(`    Reason: ${r.override_reason || "(none given)"}`);
-          lines.push(`    Form: ${r.form_id || "-"}  |  Dismissed: ${r.action_at}`);
+          lines.push(`    Form: ${r.form_id ? formLabel(r.form_id) : "-"}  |  Dismissed: ${r.action_at}`);
           lines.push(`    By: ${_auditWho(r, "Producer")}`);
         }
       } else {
@@ -6214,7 +6806,7 @@ const AcordModal = forwardRef(function AcordModal({
       lines.push("MODIFICATION HISTORY");
       if (d.field_modifications?.length) {
         for (const m of d.field_modifications) {
-          lines.push(`  - ${m.field_name}${m.form_id ? ` (${m.form_id})` : ""}${m.fact_key && m.fact_key !== m.field_name ? `  [fact: ${m.fact_key}]` : ""}`);
+          lines.push(`  - ${m.field_name}${m.form_id ? ` (${formLabel(m.form_id)})` : ""}${m.fact_key && m.fact_key !== m.field_name ? `  [fact: ${m.fact_key}]` : ""}`);
           lines.push(`    ${m.previous_value ? `"${m.previous_value}"` : "(blank)"} -> ${m.new_value ? `"${m.new_value}"` : "(blank)"}`);
           lines.push(`    Changed by: ${_auditWho(m, m.source === "client_arq" ? "Client" : "Producer")}  |  ${m.changed_at}`);
           lines.push(`    How: ${_auditSource(m.source)}${m.previous_source ? ` (previous value: ${_auditSource(m.previous_source)})` : ""}`);
@@ -6280,7 +6872,7 @@ const AcordModal = forwardRef(function AcordModal({
       lines.push("DOWNLOADS");
       if (d.package_downloads?.length) {
         for (const dl of d.package_downloads) {
-          lines.push(`  - ${dl.timestamp}  ${dl.action}${dl.form_id ? `  (${dl.form_id})` : ""}`);
+          lines.push(`  - ${dl.timestamp}  ${dl.action}${dl.form_id ? `  (${String(dl.form_id).split(", ").map(formLabel).join(", ")})` : ""}`);
           if (dl.sqs_score_at_download !== null && dl.sqs_score_at_download !== undefined) {
             lines.push(`    Score at download: ${dl.sqs_score_at_download}`);
           }
@@ -6326,7 +6918,7 @@ const AcordModal = forwardRef(function AcordModal({
           }
           lines.push(`    By: ${_auditWho(h)}`);
           if (h.reason) lines.push(`    Reason: ${h.reason}`);
-          if (h.form_id) lines.push(`    Form: ${h.form_id}`);
+          if (h.form_id) lines.push(`    Form: ${formLabel(h.form_id)}`);
           const extra = _historyDetail(h);
           if (extra) lines.push(`    ${extra}`);
         }
@@ -6356,6 +6948,14 @@ const AcordModal = forwardRef(function AcordModal({
           side padding before .modal-step's own 8px. Moved to .acord-step-shell so
           it can step down with the viewport. Desktop values are unchanged. */}
       <div
+        // The second click of a double-click that changed the screen lands on
+        // the NEW screen - a form row's tick, Generate (9 Oct 2026 review). For
+        // a moment after a screen change such a click is dropped, wherever it
+        // lands; a single click (detail 1) and a key press (detail 0) never are.
+        onClickCapture={(e) => {
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          if (e.detail > 1 && now - stepArrivedAtRef.current < 700) { e.preventDefault(); e.stopPropagation(); }
+        }}
         className={step === "editor" ? undefined : (step === "review" && reviewRail ? "acord-step-shell rr-shell" : "acord-step-shell")}
         style={step === "editor"
           ? { padding: 0, flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }
@@ -6438,6 +7038,7 @@ const AcordModal = forwardRef(function AcordModal({
           onClose={() => setResolutionIssue(null)}
         />
       )}
+      <DocumentChangeConfirm pending={docChange} onConfirm={confirmDocChange} onCancel={() => setDocChange(null)} />
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal
@@ -6823,20 +7424,20 @@ const AcordModal = forwardRef(function AcordModal({
                         <div className="lite-stops-grid">
                           {liteHardStops.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - Caps your Submission Quality Score (SQS) at 60</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - fulfill to increase your Submission Quality Score (SQS)™</div>
                               {liteHardStops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
-                                  <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
+                                  <span style={{ flexShrink: 0 }}>•</span><span>{positiveScoreWording(s)}</span>
                                 </div>
                               ))}
                             </div>
                           )}
                           {liteSqsData?.soft_stops?.length > 0 && (
                             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings - Will cap your Submission Quality Score (SQS) at 85</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings - fulfill to increase your Submission Quality Score (SQS)™</div>
                               {liteSqsData.soft_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
-                                  <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
+                                  <span style={{ flexShrink: 0 }}>•</span><span>{positiveScoreWording(s)}</span>
                                 </div>
                               ))}
                             </div>
@@ -7159,7 +7760,7 @@ const AcordModal = forwardRef(function AcordModal({
               <h2 className="stop-title">Submission Blocked - Minimum Fields Missing</h2>
               <p className="stop-subtitle">ACORD 125 cannot be generated. Missing:</p>
             </div>
-            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon"></span><span>{f}</span></div>)}</div>
+            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon"></span><span>{positiveScoreWording(f)}</span></div>)}</div>
             <p className="stop-advice">Upload documents that include these fields, then try again.</p>
             <button className="btn btn-modal-primary" onClick={resetToUpload}>← Upload New Documents</button>
           </div>
@@ -7332,6 +7933,7 @@ const AcordModal = forwardRef(function AcordModal({
             reviewLoadingId={reviewLoadingId}
             onReclassify={handleReclassify}
             onReviewData={handleReviewData}
+            renderAddDocuments={renderAddDocumentsPanel}
             underwriting={underwriting}
             openConflicts={openConflicts}
             underwritingPicks={underwritingPicks}
@@ -7347,7 +7949,11 @@ const AcordModal = forwardRef(function AcordModal({
             reviewIssueCounts={reviewIssueCounts}
             hasHardStops={hasHardStops}
             hasWarnings={hasWarnings}
-            renderItemActions={itemResolveAndStatus}
+            renderItemActions={(it, forms, tone) => itemResolveAndStatus(it, forms, { reviewScreen: true, tone })}
+            onReopenIssue={reopenFromResolved}
+            onReopenRecommendation={reopenRecommendation}
+            reopeningIds={reopeningIds}
+            reopenNotices={reopenNotices}
             renderClusterRollup={clusterRollup}
             issueDiff={issueDiff}
             canProceedWithWarning={canProceedWithWarning}
@@ -7355,12 +7961,21 @@ const AcordModal = forwardRef(function AcordModal({
             openItemCount={openItemCount}
             onContinue={handleContinueFromPackage}
             onFixKeyDetail={openKeyDetailFix}
+            dryRun={dryRun}
+            dryRunSessionId={sessionId}
+            dryRunFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
+            onDryRunUpdate={setDryRun}
+            onFixDryRunItem={openDryRunFix}
+            onFixScoreItem={openScoreFix}
+            onAddForm={addFormBeforeGeneration}
+            onOpenFormAt={openFormAtBox}
             packageGen={{
               state: pkgGen.state,
               forms: pkgGen.state === GEN_DONE ? formRows(generatedForms, pkgGen.order) : [],
               lastOpen: pkgGen.lastOpen,
               onOpenForm: openFormFromPackage,
             }}
+            policyTable={policyTableProps}
           />
         )}
 
@@ -7400,6 +8015,17 @@ const AcordModal = forwardRef(function AcordModal({
                                         text = "Nothing needs your attention - continue where you left off";
                 else                    text = "Nothing needs your attention - continue to form selection";
                 return <NextStepBanner text={text} />;
+              })()}
+              {/* Round 5 #15 (Brent #18): before forms, what generation will make
+                  a hard stop - "1 hard stop now, 1 more when forms are generated".
+                  The rows themselves carry the tag; the rail layout's Overview
+                  prints the same line. */}
+              {(() => {
+                const later = (pkgGen.state === GEN_DONE || pkgGen.state === GEN_RUNNING || formsGenerated)
+                  ? null : null;   // no becomes-a-hard-stop sentence (owner, 8 Oct 2026)
+                return later ? (
+                  <div data-becomes-hard-line="classic" style={{ marginTop: 8, fontSize: 12.5, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 6, padding: "7px 11px" }}>{later}</div>
+                ) : null;
               })()}
               {/* Orbin item 1: what happened to the package's forms. */}
               {pkgGen.state === GEN_RUNNING && (
@@ -7452,6 +8078,8 @@ const AcordModal = forwardRef(function AcordModal({
                 </div>
               );
             })()}
+            {/* Choice Electric #27's form checks ("Before you generate") moved
+                into the Recommendations block after the warnings (#22). */}
             {/* Orbin item 1: the generated forms, each with its own score and an
                 Open link, right under the key details. */}
             {pkgGen.state === GEN_DONE && (() => {
@@ -7509,7 +8137,7 @@ const AcordModal = forwardRef(function AcordModal({
                   doc_summary (pre-UX-04 sessions). Collapsed-by-default used to
                   hide this case; now that the section always opens, say why it
                   is empty instead of showing a blank panel. */}
-              {lockedReason(pkgGen.state) && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{lockedReason(pkgGen.state)}</div>}
+              {(documentsLockedReason(pkgGen.state) || pkgGen.state === GEN_DONE) && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{documentsLockedReason(pkgGen.state) || DOCUMENTS_AFTER_FORMS_NOTE}</div>}
               {docSummary.length === 0 && (
                 <div style={{ fontSize: 11, color: "#64748b" }}>
                   No document details are available for this submission.
@@ -7530,8 +8158,9 @@ const AcordModal = forwardRef(function AcordModal({
                   // the same snapshot before either persists → last-write-wins drops
                   // the first change. Block other docs' controls while one is active.
                   const anyReclassBusy = reclassDocId !== null;
-                  // Orbin item 1: off once forms exist or are generating.
-                  const reclassLocked = !!lockedReason(pkgGen.state);
+                  // Off only while forms are generating (Choice Electric #25,
+                  // 7 Oct 2026 - once forms exist a change re-stamps them).
+                  const reclassLocked = !!documentsLockedReason(pkgGen.state);
                   const reviewBusy = reviewLoadingId === d.doc_id;
                   const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
                   // Figure 3 relabel: this pill answers "how sure are we about the
@@ -7630,6 +8259,8 @@ const AcordModal = forwardRef(function AcordModal({
                   Some documents need review. Set the correct type so scoring and form recommendations use them - or exclude documents that don't belong.
                 </div>
               )}
+              {/* Choice Electric #25: add documents before or after forms. */}
+              {renderAddDocumentsPanel()}
               </CollapsibleSection>
             </div>
 
@@ -7642,7 +8273,9 @@ const AcordModal = forwardRef(function AcordModal({
                 cut) is not shown (owner, 27 Sep 2026) - see ReviewRailLayout.
                 The backend keeps it: the forms print the current value and no
                 conflict is raised. */}
-            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped") && (
+            {Array.isArray(underwriting?.fields)
+              && (underwriting.fields.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped")
+                || Array.isArray(underwriting.policy_lines) || !!sessionId) && (
               <div ref={dcSectionRef} className="doc-summary review-section" style={{ marginTop: 12 }}>
                 <CollapsibleSection
                   title="Data Consistency"
@@ -7653,7 +8286,7 @@ const AcordModal = forwardRef(function AcordModal({
                   marginBottom={0}
                   titleRight={<ReviewCountBadge count={openConflicts.length} clearLabel="All confirmed" />}
                 >
-                {lockedReason(pkgGen.state) && openConflicts.length > 0 && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{lockedReason(pkgGen.state)}</div>}
+                {confirmLockedReason(pkgGen.state) && openConflicts.length > 0 && <div style={{ fontSize: 12, color: "#0c4a6e", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 6, padding: "7px 10px", marginBottom: 8 }}>{confirmLockedReason(pkgGen.state)}</div>}
                 {underwritingBusy !== null && (
                   <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
                     Confirming and updating everything this value affects - you can prepare any other item, confirming it will apply once this finishes.
@@ -7667,115 +8300,42 @@ const AcordModal = forwardRef(function AcordModal({
                       submission it would just repeat what every other panel
                       already says. */}
                   {(() => {
+                    // Editable since 7 Oct 2026 (Brent #9) - the shared
+                    // `PoliciesTable`; a payload without `policy_lines` keeps
+                    // the read-only multi-policy table it always had.
+                    const editableRows = Array.isArray(underwriting.policy_lines) ? underwriting.policy_lines : null;
                     const recs = (underwriting.fields || [])
                       .map(f => f.line_records).find(r => (r || []).length > 1) || [];
-                    if (recs.length < 2) return null;
-                    const th = { textAlign: "left", padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
-                    const td = { padding: "4px 8px", fontSize: 11.5, color: "#0f172a", borderTop: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+                    // With a session the table reads its rows from the server
+                    // when the stored assessment predates them.
+                    const canEdit = !!editableRows || !!sessionId;
+                    if (!canEdit && recs.length < 2) return null;
                     return (
-                      <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>
+                      <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 0" }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", marginBottom: 4, padding: "0 10px" }}>
                           Policies in this submission
                         </div>
-                        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, lineHeight: 1.45 }}>
-                          Each coverage line keeps its own carrier and policy number. Different
-                          numbers across different lines are expected and are not a conflict.
+                        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, lineHeight: 1.45, padding: "0 10px" }}>
+                          {canEdit
+                            ? "Each coverage line keeps its own carrier and policy number. Correct any value, or add a policy the documents do not show."
+                            : "Each coverage line keeps its own carrier and policy number. Different numbers across different lines are expected and are not a conflict."}
                         </div>
-                        <div style={{ overflowX: "auto" }}>
-                          <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                            <thead><tr>
-                              <th style={th}>Line</th><th style={th}>Carrier</th><th style={th}>NAIC</th>
-                              <th style={th}>Policy number</th><th style={th}>Term</th><th style={th}>Source</th>
-                            </tr></thead>
-                            <tbody>
-                              {recs.map((r, i) => (
-                                <tr key={i}>
-                                  <td style={td}>{r.line_printed || lineLabel(r.line, dcLineRecords)}</td>
-                                  <td style={td}>{r.carrier_name || "-"}</td>
-                                  <td style={td}>{r.carrier_naic || "-"}</td>
-                                  <td style={td}>{r.policy_number || "-"}</td>
-                                  <td style={td}>{(() => {
-                                    // One date format per table: a dec page prints "07/15/25", a schedule "07/15/2025".
-                                    const d = (s) => {
-                                      const t = String(s || "").trim();
-                                      let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
-                                      if (m) {
-                                        const y = m[3].length === 2 ? `${Number(m[3]) > 69 ? "19" : "20"}${m[3]}` : m[3];
-                                        return `${m[1].padStart(2, "0")}/${m[2].padStart(2, "0")}/${y}`;
-                                      }
-                                      m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
-                                      return m ? `${m[2]}/${m[3]}/${m[1]}` : s;
-                                    };
-                                    return r.effective_date || r.expiration_date ? `${d(r.effective_date) || "?"} - ${d(r.expiration_date) || "?"}` : "-";
-                                  })()}</td>
-                                  <td style={{ ...td, whiteSpace: "normal", color: "#64748b" }}>{[...new Set(r.sources || [])].join(", ") || "-"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                        <PoliciesTable rows={editableRows} legacyRecs={recs}
+                          unmatched={underwriting.unmatched_policy_edits || []}
+                          sessionId={sessionId} lockText={confirmLockedReason(pkgGen.state)}
+                          afterForms={formsGenerated || pkgGen.state === GEN_DONE}
+                          onBeforeChange={policyTableProps.onBeforeChange}
+                          onApplied={policyTableProps.onApplied}
+                          lineLabel={(ln) => lineLabel(ln, dcLineRecords)} />
                       </div>
                     );
                   })()}
-                  {/* V1 C1 F2b: a multi-policy package legitimately carries one
-                      policy number / carrier / term PER POLICY. Client 1.5 says
-                      "retain each under its correct scope. Do not create a
-                      conflict" - so these render read-only, with their scope,
-                      and there is nothing to confirm. */}
-                  {underwriting.fields.filter(f => f.status === "scoped").map((f) => (
-                    <div key={`scoped-${f.fact_key}`} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                          {(() => {
-                            // Policies = the distinct contracts behind the lines the values are
-                            // scoped to (one carrier can write three policies; one package policy
-                            // can cover three lines), plus any value not matched to a line.
-                            const vals = f.values || [];
-                            const lines = new Set(vals.flatMap(v => (Array.isArray(v.scope) ? v.scope : [])));
-                            const allRecs = (underwriting.fields || []).map(x => x.line_records)
-                              .find(r => (r || []).length) || [];
-                            const recs = allRecs.filter(r => lines.has(r.line));
-                            const contracts = recs.length
-                              ? new Set(recs.map(r => r.policy_number || r.id || r.line)).size
-                              : lines.size;
-                            const policies = contracts
-                              + vals.filter(v => !(Array.isArray(v.scope) && v.scope.length)).length;
-                            return `${policies} ${policies === 1 ? "policy" : "policies"}, ${vals.length} ${vals.length === 1 ? "value" : "values"} - not a conflict`;
-                          })()}
-                        </span>
-                        {Object.keys(f.confirmed_scopes || {}).length > 0 && (
-                          <span style={{ fontSize: 10.5, fontWeight: 600, color: "#16a34a" }}>
-                            Confirmed: {Object.entries(f.confirmed_scopes).map(([ln, val]) => `${lineLabel(ln, dcLineRecords)} - ${val}`).join("; ")}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                        {(f.values || []).map((v, vi) => (
-                          <div key={vi} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#475569", flexWrap: "wrap" }}>
-                            <span style={{ minWidth: 0, overflowWrap: "anywhere", fontWeight: 600, color: "#1e293b" }}>{v.display}</span>
-                            {(v.scope || []).length > 0 ? (
-                              <span style={{ fontSize: 10, color: "#64748b", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 4, padding: "1px 6px" }}>
-                                {v.scope.map(ln => lineLabel(ln, dcLineRecords)).join(" / ")}
-                              </span>
-                            ) : (
-                              /* SYS-06: the store placed every other value but not
-                                 this one. Saying so is better than an unexplained
-                                 blank - and it is NOT a conflict, because a value
-                                 we cannot place is not evidence against the ones
-                                 we can. */
-                              <span style={{ fontSize: 10, color: "#94a3b8", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 4, padding: "1px 6px" }}>
-                                not matched to a coverage line
-                              </span>
-                            )}
-                            <span style={{ fontSize: 10.5, color: "#94a3b8", minWidth: 0, overflowWrap: "anywhere" }}>
-                              {[...new Set((v.sources || []).map(sr => sr.filename).filter(Boolean))].join(", ")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                  {/* V1 C1 F2b kept each line-scoped value (status "scoped") under
+                      its own policy, never a conflict. Brent #10 (7 Oct 2026):
+                      the read-only "N policies, M values - not a conflict" blocks
+                      repeated the table above, so they are not drawn - the table
+                      shows each policy's carrier and, in its Limit column, its
+                      own limit. The backend still computes "scoped". */}
                   {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {
                     const isConflict = f.status === "conflict";
                     const isConfirmed = f.status === "confirmed";
@@ -7789,8 +8349,8 @@ const AcordModal = forwardRef(function AcordModal({
                     // so letting two race dropped confirmations (the "click
                     // multiple, none applied" lag). anyConfirmInFlight covers
                     // just the Confirm button; it never disables radios/text.
-                    const rowDisabled = busy || !!lockedReason(pkgGen.state);
-                    const anyConfirmInFlight = underwritingBusy !== null || !!lockedReason(pkgGen.state);
+                    const rowDisabled = busy || !!confirmLockedReason(pkgGen.state);
+                    const anyConfirmInFlight = underwritingBusy !== null || !!confirmLockedReason(pkgGen.state);
                     const picked = underwritingPicks[f.fact_key] ?? "";
                     // SYS-06: exactly one coverage line in dispute -> the
                     // answer belongs to THAT line. Two or more (or none) and
@@ -7803,7 +8363,7 @@ const AcordModal = forwardRef(function AcordModal({
                     // CAN land, not proof it has been written. On the pre-form
                     // screen no form exists yet, so the copy reads "available
                     // for". Reserve "applied to" for a confirmed write event.
-                    const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
+                    const formsLabel = (f.forms || []).map(x => formLabel(x)).join(", ");
                     const highlighted = dcHighlight === f.fact_key;
                     return (
                       <div key={f.fact_key} id={`dc-field-${f.fact_key}`} style={{
@@ -7943,7 +8503,7 @@ const AcordModal = forwardRef(function AcordModal({
                   <div className="stops-banner stops-hard">
                     <div className="stops-title">
                       Hard Stops
-                      <span className="stops-title-meta">Required before submission - Caps your Submission Quality Score (SQS) at 60</span>
+                      <span className="stops-title-meta">Required before submission - fulfill to increase your Submission Quality Score (SQS)™</span>
                       {sectionProgress(groupedIssues?.hard_stops)}
                     </div>
                     {/* Hard-stop cards stay expanded by default: these block
@@ -7957,7 +8517,7 @@ const AcordModal = forwardRef(function AcordModal({
                           cluster={c}
                           tone="hard"
                           defaultOpen
-                          renderItemActions={(it) => itemResolveAndStatus(it, c.forms)}
+                          renderItemActions={(it) => itemResolveAndStatus(it, c.forms, { reviewScreen: true, tone: "hard" })}
                           headerRight={clusterRollup(c)}
                         />
                       ))
@@ -7977,7 +8537,7 @@ const AcordModal = forwardRef(function AcordModal({
                   <div className="stops-banner stops-soft">
                     <div className="stops-title">
                       Warnings
-                      <span className="stops-title-meta">Caps your Submission Quality Score (SQS) at 85</span>
+                      <span className="stops-title-meta">Fulfill to increase your Submission Quality Score (SQS)™</span>
                       {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat())}
                     </div>
                     {/* No "Important" preview (client, 22 Sep, item 3): it
@@ -8010,7 +8570,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   key={clusterIdOf(c)}
                                   cluster={c}
                                   tone="soft"
-                                  renderItemActions={(it) => itemResolveAndStatus(it, c.forms)}
+                                  renderItemActions={(it) => itemResolveAndStatus(it, c.forms, { reviewScreen: true, tone: "soft" })}
                                   headerRight={clusterRollup(c)}
                                 />
                               ))}
@@ -8032,13 +8592,28 @@ const AcordModal = forwardRef(function AcordModal({
                 )}
               </div>
             )}
+            {/* Recommendations (Choice Electric #22 / #27, 7 Oct 2026): what
+                raises the score and what the forms will need, after the
+                warnings and before the continue button - the rail layout's
+                section of the same name, same data and handlers. */}
+            <div style={{ margin: "14px 0" }}>
+              <Recommendations heading packageSqs={packageSqs} groupedIssues={groupedIssues} keyDetails={keyDetails}
+                dryRun={dryRun} sessionId={sessionId} tickedFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
+                onDryRunUpdate={setDryRun} onOpenDryRunFix={openDryRunFix} onOpenScoreFix={openScoreFix}
+                onAddForm={addFormBeforeGeneration}
+                onOpenForm={openFormAtBox} formsExist={pkgGen.state === GEN_DONE}
+                generating={pkgGen.state === GEN_RUNNING}
+                refreshKey={`${packageSqs?.package_sqs_score ?? ""}|${packageSqs?.timestamp ?? ""}`}
+                issueStatuses={issueStatuses} onReopenResolved={reopenRecommendation}
+                reopeningIds={reopeningIds} reopenNotices={reopenNotices} />
+            </div>
             {canProceedWithWarning && warningStops.length > 0 && !lockedReason(pkgGen.state) && (
               <div className="stops-banner stops-warning" style={{ margin: "8px 0", padding: "12px 16px", background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 8 }}>
                 <div className="stops-title" style={{ color: "#9d0f5a", fontWeight: 600, marginBottom: 6 }}>
                   Incomplete Submission - Review Before Generating
                 </div>
                 {warningStops.map((s, i) => (
-                  <div key={i} className="stop-item" style={{ color: "#b01868", fontSize: 13, marginBottom: 2 }}>- {s}</div>
+                  <div key={i} className="stop-item" style={{ color: "#b01868", fontSize: 13, marginBottom: 2 }}>- {positiveScoreWording(s)}</div>
                 ))}
                 <div style={{ marginTop: 10, fontSize: 13, color: "#9d0f5a" }}>
                   This submission is missing information typically required for property coverage. Forms can still be generated, but the underwriter may request additional data.
@@ -8071,7 +8646,7 @@ const AcordModal = forwardRef(function AcordModal({
               )}
               <button
                 className="btn btn-modal-primary btn-block btn-large"
-                onClick={handleContinueFromPackage}
+                onClick={(e) => { if (e.detail > 1) return; handleContinueFromPackage(); }}
               >
                 {continueLabel(pkgGen.state)}
               </button>
@@ -8241,15 +8816,19 @@ const AcordModal = forwardRef(function AcordModal({
                   the same solid btn-modal-primary pink as every other button in
                   the app. Generate takes the remaining width, which is what
                   separates the two now that colour no longer does. */}
+              {/* Both ignore the second click of a double-click (9 Oct 2026): on a
+                  narrow screen the review's footer button sits where these do, so
+                  a double-click there landed its second click on Generate - which
+                  ACORD 125's tick (Choice Electric #17) now leaves enabled. */}
               <div className="step-footer-buttons">
                 <button
                   type="button"
                   className="btn btn-modal-primary step-footer-back"
-                  onClick={() => setStep("review")}
+                  onClick={(e) => { if (e.detail > 1) return; setStep("review"); }}
                 >
                   ← Back to review
                 </button>
-                <button className="btn btn-modal-primary btn-large step-footer-primary" onClick={handleGenerateAll} disabled={loading || checkedFormIds.size === 0}>
+                <button className="btn btn-modal-primary btn-large step-footer-primary" onClick={(e) => { if (e.detail > 1) return; handleGenerateAll(); }} disabled={loading || checkedFormIds.size === 0}>
 {loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
                 </button>
               </div>
@@ -8292,7 +8871,7 @@ const AcordModal = forwardRef(function AcordModal({
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "#f8fafc"; }}
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#E61B84" : "#1e293b" }}>
-                          {fd?.form_name || fid}
+                          {fd?.form_name || formLabel(fid)}
                           {signedForms.has(fid) && <span style={{ color: "#10b981", fontSize: 10 }}> (signed)</span>}
                           {pdfLoading[fid] && <span style={{ color: "#f59e0b", fontSize: 10 }}> (loading)</span>}
                         </div>
@@ -8568,17 +9147,74 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                           <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                             HARD STOPS
-                            <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package Submission Quality Score (SQS) at 60</span>
+                            <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Fulfill to increase the package's Submission Quality Score (SQS)™</span>
                           </div>
                           {open.map((r, i) => (
                             <div key={i} style={{ padding: "2px 0" }}>
-                              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {r.message}</div>
+                              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {positiveScoreWording(r.message)}</div>
                               {r.item && itemResolveAndStatus(r.item, r.item.forms || [])}
                             </div>
                           ))}
                         </div>
                       );
                     })()}
+
+                    {/* ── DATA CONSISTENCY (5 Oct 2026, owner) ── The documents still
+                        disagree on these values. Confirming one here applies it to the
+                        stored facts, re-stamps every generated form that prints it and
+                        re-scores the package (confirm-value-in-editor) - no reload, and
+                        the forms are kept. */}
+                    {formsGenerated && openConflicts.length > 0 && (
+                      <div id="editor-data-consistency" style={{ border: "1px solid #fbcfe8", background: "#fdf2f8", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "#9d174d", marginBottom: 2 }}>
+                          DATA CONSISTENCY
+                          <span style={{ fontWeight: 600, color: "#831843", marginLeft: 6 }}>{openConflicts.length} value{openConflicts.length === 1 ? "" : "s"} to confirm</span>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "#831843", lineHeight: 1.45, marginBottom: 6 }}>
+                          Your documents disagree. Confirm the right value and every form that prints it is updated.
+                        </div>
+                        {openConflicts.map((f) => {
+                          const busy = underwritingBusy === f.fact_key;
+                          const locked = !!confirmLockedReason(pkgGen.state);
+                          const picked = underwritingPicks[f.fact_key] ?? "";
+                          const lineScope = (f.conflict_scope || []).length === 1 ? f.conflict_scope[0] : null;
+                          const scopeLabel = lineScope ? lineLabel(lineScope, dcLineRecords) : null;
+                          return (
+                            <div key={f.fact_key} id={`dc-field-${f.fact_key}`}
+                              style={{ borderTop: "1px solid #fbcfe8", padding: "6px 0", background: dcHighlight === f.fact_key ? "#fce7f3" : "transparent" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#831843" }}>{f.label}{scopeLabel ? ` (${scopeLabel})` : ""}</div>
+                              {f.conflict_reason && <div style={{ fontSize: 10, color: "#9d174d", lineHeight: 1.4, margin: "1px 0 3px" }}>{f.conflict_reason}</div>}
+                              <div role="radiogroup" aria-label={f.label}>
+                                {(f.values || []).map((v, vi) => (
+                                  <label key={vi} style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 10.5, color: "#3f3f46", padding: "1px 0", cursor: busy || locked ? "default" : "pointer" }}>
+                                    <input type="radio" name={`uw-editor-${f.fact_key}`} checked={picked === v.display}
+                                      disabled={busy || locked}
+                                      onChange={() => setUnderwritingPicks((p) => ({ ...p, [f.fact_key]: v.display }))} />
+                                    <span>
+                                      <b>{v.display}</b>
+                                      <span style={{ color: "#71717a" }}> from {(v.sources || []).map((s) => s.filename).join(", ")}</span>
+                                      {f.suggested_value != null && v.display === f.suggested_value && <span style={{ color: "#047857", fontWeight: 600 }}> Suggested</span>}
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                <input type="text" value={picked} disabled={busy || locked} placeholder="...or type a value"
+                                  aria-label={`Type a value for ${f.label}`}
+                                  onChange={(e) => setUnderwritingPicks((p) => ({ ...p, [f.fact_key]: e.target.value }))}
+                                  style={{ flex: 1, minWidth: 0, fontSize: 11, padding: "3px 6px", border: "1px solid #e4e4e7", borderRadius: 5 }} />
+                                <button type="button" disabled={underwritingBusy !== null || !picked || locked}
+                                  onClick={() => handleConfirmUnderwriting(f.fact_key, picked, lineScope)}
+                                  style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 5, border: "none", color: "#fff",
+                                           background: underwritingBusy !== null || !picked || locked ? "#f9a8d4" : "#be185d", cursor: underwritingBusy !== null || !picked || locked ? "default" : "pointer" }}>
+                                  {busy ? "Confirming..." : "Confirm"}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     {/* ── TOTAL PACKAGE SCORE (collapsible, white; score + LOB shown in header) ── */}
                     {packageSqs && (
@@ -8644,7 +9280,7 @@ const AcordModal = forwardRef(function AcordModal({
                                       {binds ? `, held at ${ceiling}` : ""} = <b>{shown}</b>
                                     </span>
                                     {!binds && ceiling != null && (
-                                      <InfoTip text={`A ceiling of ${ceiling} applies while warnings are open, but this submission scores below it, so it is not holding the score down. Clearing the warnings would not raise the number by itself.`} />
+                                      <InfoTip text={`A ceiling of ${ceiling} applies while ${Number(ceiling) === 60 ? "hard stops" : "warnings"} are open, but this submission scores below it, so it is not holding the score down. Clearing the ${Number(ceiling) === 60 ? "hard stops" : "warnings"} would not raise the number by itself.`} />
                                     )}
                                     {ceiling == null && (
                                       <InfoTip text="No hard stops and no warnings, so no ceiling applies." />
@@ -8655,9 +9291,22 @@ const AcordModal = forwardRef(function AcordModal({
                                 {!scoreRecalcBusy && binds && reason && (
                                   <div style={{ display: "flex", gap: 6 }}>
                                     <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Why</span>
-                                    <span style={{ color: "#b45309", lineHeight: 1.4 }}>{reason}</span>
+                                    <span style={{ color: "#b45309", lineHeight: 1.4 }}>{positiveScoreWording(reason)}</span>
                                   </div>
                                 )}
+                                {/* With and without forms (13 Oct 2026, owner + Brent):
+                                    the same package scored with no forms, beside this one. */}
+                                {!scoreRecalcBusy && (() => {
+                                  const fx = formsEffect(packageSqs);
+                                  return fx ? (
+                                    <div style={{ display: "flex", gap: 6 }} data-forms-effect="editor">
+                                      <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Forms</span>
+                                      <span style={{ color: "#475569", lineHeight: 1.4 }}>
+                                        <b>{fx.text}</b>{fx.detail ? `. ${fx.detail}` : ""}
+                                      </span>
+                                    </div>
+                                  ) : null;
+                                })()}
                               </div>
                             );
                           })()}
@@ -8747,9 +9396,17 @@ const AcordModal = forwardRef(function AcordModal({
                                             category's arithmetic there, so the reconciliation is
                                             one hover instead of seven. */}
                                         <span style={{ color: "#475569" }}>{cv?.label || ck}</span>
-                                        {(weighted || deducted !== null)
-                                          ? <span style={{ color: barColor(cv.score), fontWeight: 700, whiteSpace: "nowrap" }}>{cv.score}%</span>
-                                          : <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>}
+                                        {/* A deduction row prints the POINTS it took (Choice
+                                            Electric #26). As "80%" each row read as its own
+                                            score and the pillar (100 minus all of them) looked
+                                            wrong: 85%, 80%, 80% and four 100% rows beside an
+                                            Exposure of 45. As "-15 pts", "-20 pts", "-20 pts"
+                                            the rows add up to it. */}
+                                        {deducted !== null
+                                          ? <span style={{ color: deductionColor(deducted), fontWeight: 700, whiteSpace: "nowrap" }}>{deductionText(deducted)}</span>
+                                          : weighted
+                                            ? <span style={{ color: barColor(cv.score), fontWeight: 700, whiteSpace: "nowrap" }}>{cv.score}%</span>
+                                            : <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>}
                                       </div>
                                     );
                                   })}
@@ -8902,7 +9559,7 @@ const AcordModal = forwardRef(function AcordModal({
                       <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
                           HARD STOPS
-                          <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's Submission Quality Score (SQS) at 60</span>
+                          <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Fulfill to increase this form's Submission Quality Score (SQS)™</span>
                         </div>
                         {formCapSplit.open.map((r, i) => (
                           // `r.item` is the row the SERVER classified for this
@@ -8912,7 +9569,7 @@ const AcordModal = forwardRef(function AcordModal({
                           // 2026-09-08 this block was text only - and two of
                           // the sentences were internal rule names.
                           <div key={i} style={{ padding: "2px 0" }}>
-                            <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {r.message}</div>
+                            <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {positiveScoreWording(r.message)}</div>
                             {r.item && itemResolveAndStatus(r.item, activeFormId ? [activeFormId] : [])}
                           </div>
                         ))}
@@ -8940,6 +9597,8 @@ const AcordModal = forwardRef(function AcordModal({
                         setAttentionFocus({ field: row.field, formId: row.form_id, nonce: `${Date.now()}:${row.field}` });
                         if (window.innerWidth <= 900) setSidebarOpen(false);
                       }}
+                      onApplySuggestion={applyDocumentSuggestion}
+                      onConfirmValues={confirmVerifyValues}
                     />
 
                     {/* ── RECOMMENDATIONS (collapsible, white): Key Issues → Best Solutions →
@@ -8954,7 +9613,7 @@ const AcordModal = forwardRef(function AcordModal({
                         {activeKeyIssues.length > 0 && (
                           <div style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>Key Issues</div>
-                            {activeKeyIssues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {s}</div>)}
+                            {activeKeyIssues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {positiveScoreWording(s)}</div>)}
                           </div>
                         )}
 
@@ -8990,7 +9649,7 @@ const AcordModal = forwardRef(function AcordModal({
                                 return (
                                   <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0" }}>
                                     <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
-                                    <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{r}</span>
+                                    <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{positiveScoreWording(r)}</span>
                                   </div>
                                 );
                               }
@@ -9006,7 +9665,7 @@ const AcordModal = forwardRef(function AcordModal({
                                     )}
                                   </div>
                                   {r.action && (
-                                    <div style={{ fontSize: 11, color: "#334155", marginLeft: 22, marginTop: 2 }}>{r.action}</div>
+                                    <div style={{ fontSize: 11, color: "#334155", marginLeft: 22, marginTop: 2 }}>{positiveScoreWording(r.action)}</div>
                                   )}
                                   {/* Item 19 (1 Oct 2026): the row's points are the
                                       pillar's whole gap; the answer it asks for can be
@@ -9097,16 +9756,16 @@ const AcordModal = forwardRef(function AcordModal({
                             // a surprise.
                             const addNames = (iss.resolution?.add_forms || []);
                             const actionLabel = addNames.length
-                              ? `Add ${String(addNames[0]).replace(/_/g, " ")}${addNames.length > 1 ? ` +${addNames.length - 1}` : ""}`
+                              ? `Add ${formLabel(addNames[0])}${addNames.length > 1 ? ` +${addNames.length - 1}` : ""}`
                               : "Open to fix";
                             return (
                             <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: divider ? "1px solid #f1f5f9" : "none" }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
+                                {/* The forms it is about, as plain pink text - no pill
+                                    (Brent's Choice Electric #24). */}
                                 {Array.isArray(iss.forms) && iss.forms.length > 0 && (
-                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 3 }}>
-                                    {iss.forms.map((f, fi) => (
-                                      <span key={fi} style={{ fontSize: 9, fontWeight: 700, color: "#9d174d", background: "#fce7f3", border: "1px solid #f9a8d4", borderRadius: 10, padding: "0 6px", whiteSpace: "nowrap" }}>{String(f).replace(/_/g, " ")}</span>
-                                    ))}
+                                  <div style={{ fontSize: 9.5, fontWeight: 700, color: "#E61B84", lineHeight: 1.4, marginBottom: 2 }}>
+                                    {iss.forms.map((f) => formLabel(f)).join(", ")}
                                   </div>
                                 )}
                                 {actionable ? (
@@ -9120,10 +9779,10 @@ const AcordModal = forwardRef(function AcordModal({
                                     onMouseEnter={(e) => { e.currentTarget.style.color = "#be185d"; }}
                                     onMouseLeave={(e) => { e.currentTarget.style.color = "#000"; }}
                                   >
-                                    {iss.message}
+                                    {positiveScoreWording(iss.message)}
                                   </div>
                                 ) : (
-                                  <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
+                                  <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{positiveScoreWording(iss.message)}</div>
                                 )}
                                 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
                                   {actionable && (
@@ -9141,7 +9800,7 @@ const AcordModal = forwardRef(function AcordModal({
                                       issueId={iid}
                                       status={issueStatuses.get(iid)?.status}
                                       meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
-                                      onSet={handleReopenIssue}
+                                      onSet={(id, st, meta) => handleReopenIssue(id, st, meta, { legacyClear: true })}
                                     />
                                   ); })()}
                                   {reopeningIds.has(issueIdOf(iss)) && (
@@ -9212,12 +9871,15 @@ const AcordModal = forwardRef(function AcordModal({
                           return (
                             <>
                               {mainContent}
+                              {/* A closed dropdown (owner, 12 Oct 2026): the resolved
+                                  history stays one click away instead of pushing the
+                                  open items down. Closed again on every form switch. */}
                               {crossFormGhosts.length > 0 && (
-                                <div key="resolved-ghosts" style={{ marginTop: 8 }}>
-                                  <div style={{ fontSize: 9.5, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                                    Resolved ({crossFormGhosts.length})
-                                  </div>
-                                  {crossFormGhosts.map((g, gi) => row(g, `resolved-${gi}`, gi < crossFormGhosts.length - 1))}
+                                <div key="resolved-ghosts" data-cross-resolved="1" style={{ marginTop: 8 }}>
+                                  <CollapsibleSection resetKey={activeFormId} title={`Resolved (${crossFormGhosts.length})`}
+                                    headerColor="#059669" titleSize={9.5} marginBottom={0}>
+                                    {crossFormGhosts.map((g, gi) => row(g, `resolved-${gi}`, gi < crossFormGhosts.length - 1))}
+                                  </CollapsibleSection>
                                 </div>
                               )}
                             </>
@@ -9238,9 +9900,9 @@ const AcordModal = forwardRef(function AcordModal({
                               that replaces the red block. Same controls it had there. */}
                           {reviewedStops.map((r) => (
                             <div key={r.iid} data-reviewed-stop="held" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
-                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{r.message}</div>
+                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{positiveScoreWording(r.message)}</div>
                               <div style={{ marginTop: 3, fontSize: 9.5, fontWeight: 700, color: "#b91c1c" }}>
-                                {r.scope === "form" ? `Still caps the ${shortFormLabel(r.formId)} score at 60` : "Still caps the package score at 60"}
+                                {r.scope === "form" ? `Fix its value to increase the ${shortFormLabel(r.formId)} score` : "Fix its value to increase the package score"}
                               </div>
                               {itemResolveAndStatus(r.item, r.item.forms || [])}
                             </div>
@@ -9249,13 +9911,13 @@ const AcordModal = forwardRef(function AcordModal({
                               the Cross-Form panel's Resolved rows use: it undoes the fix. */}
                           {reviewedGhosts.map((g) => (
                             <div key={g.issue_id} data-reviewed-stop="fixed" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
-                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{g.message}</div>
+                              <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4 }}>{positiveScoreWording(g.message)}</div>
                               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
                                 <IssueStatusControl
                                   issueId={g.issue_id}
                                   status={issueStatuses.get(g.issue_id)?.status}
                                   meta={{ form_id: Array.isArray(g.forms) ? g.forms[0] : null, rule_code: g.code, message: g.message }}
-                                  onSet={handleReopenIssue}
+                                  onSet={(id, st, meta) => handleReopenIssue(id, st, meta, { legacyClear: true })}
                                 />
                                 {reopeningIds.has(g.issue_id) && (
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 600, color: "#be185d" }}>
@@ -9274,7 +9936,7 @@ const AcordModal = forwardRef(function AcordModal({
                           {Array.from(dismissedRecDetails.entries()).map(([rid, d]) => (
                             <div key={rid} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                                <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4, flex: 1, minWidth: 0, textDecoration: "line-through", textDecorationColor: "#cbd5e1" }}>{d.message}</span>
+                                <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4, flex: 1, minWidth: 0, textDecoration: "line-through", textDecorationColor: "#cbd5e1" }}>{positiveScoreWording(d.message)}</span>
                                 <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(d.kind === "answered" ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{d.kind === "answered" ? "Answered" : "Dismissed"}</span>
                                 {d.impact > 0 && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#10b981", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: "1px 6px", flexShrink: 0, whiteSpace: "nowrap" }}>+{d.impact} pts credited</span>}
                               </div>
@@ -9360,6 +10022,19 @@ const AcordModal = forwardRef(function AcordModal({
                 </button>
                 </HoverTip>
 
+                {/* Back to review (7 Oct 2026): the package page, opened at the first
+                    section with work. The badge counts its open items - hard stops and
+                    warnings not yet handled, Data Consistency values to confirm. */}
+                <button type="button" onClick={goBackToReview} data-testid="back-to-review"
+                  disabled={backToReviewBusy} aria-busy={backToReviewBusy}
+                  title={backToReviewBusy ? "Saving your edits and opening the review page" : (reviewOpen.total > 0 ? `${reviewOpen.total} open item${reviewOpen.total !== 1 ? "s" : ""} on the review page` : "Open the review page")}
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: backToReviewBusy ? "wait" : "pointer", opacity: backToReviewBusy ? 0.72 : 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
+                  onMouseEnter={e => { if (backToReviewBusy) return; e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { if (backToReviewBusy) return; e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                  {backToReviewBusy
+                    ? <><span data-testid="back-to-review-spinner" style={{ width: 13, height: 13, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Opening review...</>
+                    : <>Back to review{reviewOpen.total > 0 && <span aria-label={`${reviewOpen.total} open item${reviewOpen.total !== 1 ? "s" : ""} on the review page`} style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{reviewOpen.total}</span>}</>}
+                </button>
 
                 {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
@@ -9507,7 +10182,7 @@ const AcordModal = forwardRef(function AcordModal({
               <PDFJsViewer
                 key={`${activeFormId}::${pdfRefreshTick}`}
                 pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}?v=${pdfRefreshTick}`}
-                formName={activeFormId ? (generatedForms[activeFormId]?.form_name || activeFormId) : ""}
+                formName={activeFormId ? (generatedForms[activeFormId]?.form_name || formLabel(activeFormId)) : ""}
                 onFormNav={{ goPrev, goNext, activeIdx, total: formIdList.length }}
                 sessionId={sessionId} formId={activeFormId} token={token}
                 savedSignature={savedSignature}
@@ -9559,10 +10234,14 @@ const AcordModal = forwardRef(function AcordModal({
                 is clean. Surface unresolved issues + next actions so nothing is assumed. */}
             {(() => {
               const recs     = preflightRecs || [];
-              const hardRecs = recs.filter(r => r.recommendation_type === "hard_stop");
-              const softRecs = recs.filter(r => r.recommendation_type !== "hard_stop");
-              const attentionTotal = preflightAttention?.counts?.total || 0;
-              const hasIssues = recs.length > 0 || attentionTotal > 0;
+              // A required box blocking the download is a hard stop here too, as
+              // on the review before it - one rule, `downloadReviewCounts`.
+              const isHard   = r => r.recommendation_type === "hard_stop" || (r.rec_id || "").includes("hardblock_");
+              const hardRecs = recs.filter(isHard);
+              const softRecs = recs.filter(r => !isHard(r));
+              const counts   = downloadReviewCounts(recs, preflightAttention);
+              const alsoListed = alsoListedText(counts);
+              const hasIssues = counts.total > 0;
               const score = packageSqs?.package_sqs_score;
               const nextAction = (sqsNarrative || "").replace(/\n+/g, " ").trim();
               return (
@@ -9586,20 +10265,25 @@ const AcordModal = forwardRef(function AcordModal({
 
                   {hasIssues && (
                     <>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                        Unresolved items ({recs.length + attentionTotal})
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: alsoListed ? 2 : 8 }}>
+                        {counts.toFix > 0 ? `To fix before sending (${counts.toFix})` : "Nothing to fix - still listed"}
                       </div>
-                      <NeedsAttentionSummary attention={preflightAttention} />
+                      {alsoListed && (
+                        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>Also listed: {alsoListed}</div>
+                      )}
+                      {/* Hard stops FIRST (Choice Electric #27: they sat at the end,
+                          under every needs-attention row of every form). */}
                       {hardRecs.map((r, i) => (
                         <div key={`h${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#7f1d1d", padding: "4px 0", lineHeight: 1.5 }}>
                           <span style={{ color: "#dc2626", fontWeight: 700 }}>☐</span>
-                          <span>{r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</span>
+                          <span>{positiveScoreWording(r.message)}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</span>
                         </div>
                       ))}
+                      <NeedsAttentionSummary attention={preflightAttention} />
                       {softRecs.map((r, i) => (
                         <div key={`s${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#334155", padding: "4px 0", lineHeight: 1.5 }}>
                           <span style={{ color: "#94a3b8", fontWeight: 700 }}>☐</span>
-                          <span>{r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</span>
+                          <span>{positiveScoreWording(r.message)}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</span>
                         </div>
                       ))}
                       {nextAction && (

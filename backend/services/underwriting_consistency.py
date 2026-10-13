@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # would be free to drift, and a field captured by one rule but validated by
 # another is precisely the defect class this module has now hit three times.
 from services.normalization import (
-    normalize_value, DATE_FIELDS, FEIN_FIELDS, _infer_field_category,
+    normalize_value, normalize_date, DATE_FIELDS, FEIN_FIELDS, _infer_field_category,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,8 +135,16 @@ _TEXT_SCAN_PATTERNS: Dict[str, List[str]] = {
     "effective_date": [
         r"\b(?:policy\s+)?effective(?:\s+date)?\s*[:\-]?\s*" + _SCAN_SHAPE_DATE,
     ],
+    # A LABEL, not a verb (5 Oct 2026, CH125 6eda3069): the bare "expires"
+    # matched every sentence about something that expires - "This renewal
+    # quotation expires 11/15/2026", a vehicle registration's "EXPIRES
+    # 11/30/2027" - and the first such match in a 59-page package became a
+    # rival Policy Expiration Date. The noun forms, "policy expires", or the
+    # verb used AS a label ("Expires: 12/01/2027") are labels; prose is not.
     "expiration_date": [
-        r"\b(?:policy\s+)?expir\w*(?:\s+date)?\s*[:\-]?\s*" + _SCAN_SHAPE_DATE,
+        r"\b(?:policy\s+expir\w*(?:\s+date)?\s*[:\-]?"
+        r"|expir(?:ation|y)(?:\s+date)?\s*[:\-]?"
+        r"|expir(?:es|ed|ing)\s*[:\-])\s*" + _SCAN_SHAPE_DATE,
     ],
     "fein": [
         r"\b(?:fein|f\.e\.i\.n|ein|fed(?:eral)?\s*(?:employer\s*)?"
@@ -194,6 +202,17 @@ _FOREIGN_LABEL_QUALIFIERS = (
     "experience", "modification", "mod", "x-mod", "xmod", "emod", "merit",
     "rating", "anniversary", "retro", "retroactive", "audit", "birth",
     "hire", "hired", "termination", "inspection", "quote", "bind", "binder",
+    # 5 Oct 2026 (CH125 6eda3069): "This renewal quotation expires 11/15/2026"
+    # became a Policy Expiration candidate - the word matched is the whole
+    # token, so "quote" alone never covered its inflections. A quotation,
+    # proposal, offer or indication has a validity date, not a policy term.
+    "quotes", "quoted", "quotation", "quotations", "proposal", "proposals",
+    "offer", "offers", "indication", "indications",
+    # ...and the other things a package prints dates for that are not the
+    # policy term: a vehicle's registration or plate, a licence or permit, a
+    # lease, and an endorsement / cancellation / reinstatement's own date.
+    "registration", "plate", "license", "licence", "permit", "lease",
+    "endorsement", "cancellation", "reinstatement",
 )
 _QUALIFIER_TAIL_CHARS = 48
 
@@ -732,6 +751,15 @@ def _fv(facts: dict, key: str, default=None):
 
 # ── Normalization ─────────────────────────────────────────────────────────────
 
+_CURRENCY_MAGNITUDE_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(million|mil|mn|thousand|billion|bn|mm|m|k|b)(?![a-z])", re.I)
+_CURRENCY_MAGNITUDES = {"million": Decimal(1_000_000), "mil": Decimal(1_000_000),
+                        "mn": Decimal(1_000_000), "mm": Decimal(1_000_000), "m": Decimal(1_000_000),
+                        "thousand": Decimal(1_000), "k": Decimal(1_000),
+                        "billion": Decimal(1_000_000_000), "bn": Decimal(1_000_000_000),
+                        "b": Decimal(1_000_000_000)}
+
+
 def _normalize_currency(value: Any) -> Optional[str]:
     """Canonical numeric string for a money amount, or None if not parseable.
 
@@ -743,6 +771,17 @@ def _normalize_currency(value: Any) -> Optional[str]:
     if value is None:
         return None
     s = str(value).strip()
+    # Magnitude shorthand (G2 audit, 5 Oct 2026): "$18.6MM" and "$18,600,000"
+    # are one amount - a digit-strip made them '18.6' vs '18600000', a false
+    # conflict in the picker.
+    _mag = _CURRENCY_MAGNITUDE_RE.search(s)
+    if _mag:
+        try:
+            dec = Decimal(_mag.group(1).replace(",", "")) * _CURRENCY_MAGNITUDES[_mag.group(2).lower()]
+            text = format(dec, "f")
+            return text.rstrip("0").rstrip(".") if "." in text else text
+        except (InvalidOperation, ValueError, KeyError):
+            pass
     # Keep only digits and the decimal point (drop $, commas, spaces, etc.).
     cleaned = re.sub(r"[^\d.]", "", s)
     # Collapse accidental multiple dots ("1.000.000" -> first dot wins is risky;
@@ -1316,10 +1355,23 @@ def _declared_domain_check(fact_key: str):
         # The document's own caption for an option ("OCCUR") names it - see
         # `option_named_by`. Exact match alone judged the certificate's correct
         # answer illegal, so a form number could never be dropped against it.
-        if any(str(o).strip().lower() != "other"
-               for o in (options_for(fact_key) or [])):
+        _opts = [o for o in (options_for(fact_key) or [])
+                 if str(o).strip().lower() != "other"]
+        if _opts:
             checks.append(
                 lambda v, _k=fact_key: option_named_by(_k, v) is not None)
+            # A printing the fact's OWN comparison normalisation equates with an
+            # option names that option (7 Oct 2026): "LLC" IS "Limited Liability
+            # Company" to `normalize_entity_type`, the comparator the pre-form
+            # identity warning uses. Reading it as illegal dropped the LLC from
+            # the card while the warning still counted it - a warning pointing
+            # at a card that said "nothing to confirm". Equality only, so a
+            # value no option normalises to stays illegal.
+            _opt_norms = {n for n in (_normalize(o, "identity", fact_key) for o in _opts) if n}
+            if _opt_norms:
+                checks.append(
+                    lambda v, _k=fact_key, _n=_opt_norms:
+                        _normalize(v, "identity", _k) in _n)
     except Exception:                                         # noqa: BLE001
         pass
     if not checks:
@@ -1636,7 +1688,8 @@ def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
 # prints $1,000,000 as the GL Each Occurrence limit, and the $3M-vs-$1M
 # umbrella conflict (the one the client praised) was scoped into silence.
 # Identifiers, carrier names and dates do not collide that way; amounts do.
-def _is_form_number_policy_value(fact_key: Any, value: Any, entries: Any = None) -> bool:
+def _is_form_number_policy_value(fact_key: Any, value: Any, entries: Any = None,
+                                 text: Any = None) -> bool:
     """True when a POLICY-NUMBER fact holds an ISO/AAIS FORM number.
 
     Orbin, 14 Sep 2026: the card's only two "Policy Number" candidates were
@@ -1656,7 +1709,7 @@ def _is_form_number_policy_value(fact_key: Any, value: Any, entries: Any = None)
     # Orbin's "0482854" was a fifth "policy" on this card).
     try:
         from services.normalization import is_not_a_policy_number
-        return is_not_a_policy_number(value, entries)
+        return is_not_a_policy_number(value, entries, text)
     except Exception:                                         # noqa: BLE001
         pass
     try:
@@ -2201,6 +2254,29 @@ def _scope_of_group(fact_key: str, group: dict, store: List[dict]) -> tuple:
     return records, lines
 
 
+def _slots_of_group(fact_key: str, group: dict, store: List[dict]) -> set:
+    """``{(line, layer)}`` this value group is stated on.
+
+    The LAYER is the umbrella family's second axis (6 Oct 2026, Choice
+    Electric): an umbrella and the excess following-form policy above it are
+    two policies on one family - two ACORD 131s in Brent's rule - never "two
+    policies on the same coverage line". A store written without layers yields
+    ``(line, None)`` for every entry, i.e. exactly the old line test."""
+    printings = [group.get("display")] + [
+        s.get("raw") for s in (group.get("sources") or [])]
+    slots: set = set()
+    for rec in store or []:
+        if not isinstance(rec, dict):
+            continue
+        if any(p and _door_values_agree(fact_key, p, rec.get("value"))
+               for p in printings):
+            scope = rec.get("scope") or {}
+            ln = scope.get("line")
+            if ln:
+                slots.add((ln, scope.get("layer") if ln == "umbrella" else None))
+    return slots
+
+
 def _merge_by_line_record(fact_key: str, values: List[dict],
                           merged_facts: Optional[dict]) -> List[dict]:
     """Fold groups the LINE RECORD store proves are ONE contract's one fact.
@@ -2303,10 +2379,12 @@ def _scope_from_store(fact_key: str, values: List[dict],
         # fact; they can never be rivals.
         recs_for: List[set] = []
         lines_for: List[set] = []
+        slots_for: List[set] = []
         for g in values:
             r, l = _scope_of_group(fact_key, g, store)
             recs_for.append(r)
             lines_for.append(l)
+            slots_for.append(_slots_of_group(fact_key, g, store))
         # ── ONE UNPLACEABLE VALUE MUST NOT UNSCOPE THE WHOLE FIELD ──────────
         # STRESS TEST, 2026-09-04. The all-or-nothing gate that used to live
         # here handed the entire field to `_scope_values`, the LEGACY path that
@@ -2340,7 +2418,11 @@ def _scope_from_store(fact_key: str, values: List[dict],
                     # record id on BOTH sides: on a legacy store there is none,
                     # and a shared line then means what it always meant.
                     continue
-                collided |= (lines_for[i] & lines_for[j])
+                # Same LINE and same LAYER: a second policy where one belongs.
+                # The umbrella and the excess layer above it share the family
+                # and never collide (`_slots_of_group`).
+                collided |= {(ln + LAYER_SEPARATOR + _layer if _layer == "excess" else ln)
+                             for ln, _layer in (slots_for[i] & slots_for[j])}
         if collided:
             # A genuine second policy on one coverage line (defect D-1, and the
             # client's own review rule). Name the line so the producer knows
@@ -2352,7 +2434,10 @@ def _scope_from_store(fact_key: str, values: List[dict],
                 _sc = (_e.get("scope") or {}) if isinstance(_e, dict) else {}
                 if _sc.get("line") and str(_sc.get("line_printed") or "").strip():
                     printed.setdefault(_sc["line"], str(_sc["line_printed"]).strip())
-            pretty = ", ".join(sorted(printed.get(l) or l.replace("_", " ") for l in collided))
+            pretty = ", ".join(sorted(
+                (printed.get(l) or l.replace("_", " ")) if LAYER_SEPARATOR not in l
+                else f"{l.split(LAYER_SEPARATOR)[1]} layer of the umbrella"
+                for l in collided))
             return False, (f"two policies on the same coverage line ({pretty}) "
                            "in one submission - confirm which applies"), collided
         for g, own in zip(values, lines_for):
@@ -2377,6 +2462,151 @@ def _scope_from_store(fact_key: str, values: List[dict],
         logger.warning("underwriting: stored-scope check failed for %s - %s",
                        fact_key, exc)
         return False, None, set()
+
+
+# ── WHICH FACTS BELONG TO ONE POLICY (6 Oct 2026, Choice Electric) ─────────
+# A fact about the INSURED (its name, FEIN, addresses, revenue, payroll,
+# employees, operations) has one value per submission, so two documents
+# stating two values disagree whatever policy each document is. A fact about
+# a CONTRACT - a line's own limit / deductible / form, a policy's premium,
+# audit term, billing or payment plan, its carrier's details, its underlying
+# schedule - has one value PER POLICY. Derived, never listed per key: the
+# fact's own coverage line (`fact_equivalence.fact_line`), or a contract word
+# in the key. The line-scoped identity chain keeps its own store-based scoping
+# (`_scope_from_store`) and is not re-decided here.
+_CONTRACT_FACT_TOKENS = frozenset({
+    "premium", "premiums", "audit", "billing", "payment", "carrier", "deductible",
+    "deductibles", "retention", "sir", "retro", "coinsurance", "underlying",
+    "limit", "limits", "aggregate", "occurrence", "symbols", "plan", "dividend",
+})
+
+
+def fact_line_of(fact_key: Any) -> Optional[str]:
+    """The ONE coverage line a fact belongs to by definition (`umbrella_limit`
+    -> umbrella), or None - the comparison door's own reading, for callers
+    outside the comparison modules."""
+    try:
+        from services.fact_comparison import _fe as _door
+        return _door.fact_line(str(fact_key or "").split("@", 1)[0]) or None
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def is_policy_level_fact(fact_key: Any) -> bool:
+    """True when ``fact_key`` describes ONE POLICY rather than the insured."""
+    k = str(fact_key or "").split("@", 1)[0].strip().lower()
+    if not k or k in LINE_SCOPED_FACT_KEYS:
+        return False
+    try:
+        from services.fact_comparison import _fe as _door
+        if _door.fact_line(k):
+            return True
+    except Exception:                                         # noqa: BLE001
+        pass
+    return bool(set(t for t in re.split(r"[^a-z0-9]+", k) if t) & _CONTRACT_FACT_TOKENS)
+
+
+def _document_records(merged_facts: Optional[dict], line: Optional[str] = None) -> Dict[str, set]:
+    """``{document filename: {record ids it is a source of}}``, optionally only
+    the records on ``line``. Read from the line records' own `sources`."""
+    out: Dict[str, set] = {}
+    for rec in _line_records(merged_facts):
+        if line and rec.get("line") != line:
+            continue
+        rid = rec.get("id")
+        if not rid:
+            continue
+        for name in rec.get("sources") or []:
+            if name:
+                out.setdefault(str(name), set()).add(rid)
+    return out
+
+
+def _scope_by_policy_record(fact_key: str, values: List[dict],
+                            merged_facts: Optional[dict]) -> bool:
+    """True when every candidate of a POLICY-level fact comes from a different
+    policy's own documents - each value kept under its own policy, no conflict.
+
+    Positive evidence only, three conditions:
+      1. the fact describes a policy (`is_policy_level_fact`);
+      2. every source document of every candidate is a SOURCE of at least one
+         line record (on the fact's own line when it has one) - a document the
+         records cannot place, a questionnaire answer or a typed value gives
+         no attribution and the field is compared exactly as before;
+      3. no record is shared between two candidates. Two printings on the SAME
+         policy (Orbin's dec $3,000,000 vs the certificate's $1,000,000 on one
+         umbrella contract) share the record and stay a real conflict.
+
+    Labels each candidate's ``scope`` with the lines of its records and
+    ``scope_labels`` with their printed names (the umbrella and the excess
+    layer above it read as two names on one line)."""
+    if len(values) < 2 or not is_policy_level_fact(fact_key):
+        return False
+    try:
+        line = None
+        try:
+            from services.fact_comparison import _fe as _door
+            line = _door.fact_line(fact_key) or None
+        except Exception:                                     # noqa: BLE001
+            line = None
+        by_doc = _document_records(merged_facts, line)
+        if not by_doc:
+            return False
+        recs_by_id = {r.get("id"): r for r in _line_records(merged_facts)}
+        owned: List[set] = []
+        for g in values:
+            got: set = set()
+            for src in g.get("sources") or []:
+                name = str((src or {}).get("filename") or "")
+                recs = by_doc.get(name)
+                if not recs:
+                    return False                  # an unplaceable source decides nothing
+                got |= recs
+            if not got:
+                return False
+            owned.append(got)
+        for i in range(len(owned)):
+            for j in range(i + 1, len(owned)):
+                if owned[i] & owned[j]:
+                    return False                  # one policy, two values: a real conflict
+        for g, recs in zip(values, owned):
+            g["scope"] = sorted({recs_by_id[r].get("line") for r in recs
+                                 if r in recs_by_id and recs_by_id[r].get("line")})
+            g["scope_labels"] = sorted({str(recs_by_id[r].get("line_printed") or "")
+                                        for r in recs if r in recs_by_id} - {""})
+        logger.info("underwriting: %s - %d value(s) each from a different policy's "
+                    "own documents; kept per policy, not a conflict",
+                    fact_key, len(values))
+        return True
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: policy-record scope failed for %s - %s",
+                       fact_key, exc)
+        return False
+
+
+def _display_money(fact_key: str, kind: str, values: List[dict]) -> None:
+    """Rewrite each group's ``display`` through
+    `display_canonicalizer.canonicalize_currency` when the fact is an AMOUNT -
+    curated as currency, or auto-discovered with a money value kind. Text
+    stating no amount, or two, is returned unchanged by that function. Never
+    raises; ``normalized`` and every source's ``raw`` are untouched."""
+    try:
+        money = kind == "currency"
+        if not money:
+            from services.fact_comparison import _fe as _door
+            money = _door.value_kind(fact_key) == "money"
+        if not money:
+            return
+        from services.display_canonicalizer import canonicalize_currency
+        for g in values:
+            shown = g.get("display")
+            if shown is None:
+                continue
+            canon = canonicalize_currency(shown)
+            if canon and canon != shown:
+                g["display"] = canon
+    except Exception:                                         # noqa: BLE001
+        pass
 
 
 def _door_values_agree(fact_key: str, a, b) -> bool:
@@ -2581,6 +2811,62 @@ _PROPOSED_TERM_ROLES = frozenset({
     "submission", "proposal"})
 
 
+def _out_of_scope_contract_rows(merged_facts: Optional[dict], docs: Optional[list]):
+    """A predicate: is this `coverage_lines` row OUTSIDE the submission's own
+    identity, so it may never compete in the picker?
+
+    5 Oct 2026 (CH125 6eda3069). Two kinds of row, both already outside the
+    submission everywhere else, kept raising "these values could not be matched
+    to a coverage line" because the picker read EVERY row:
+
+    * the EXPIRING programme - `prior_term_policy_numbers`, the same set
+      `_build_line_records` excludes from the line records the picker scopes
+      against. Reading the row while the store had dropped it made each of its
+      values unplaceable, i.e. a rival nothing could place;
+    * a line the submission declines (`_lines_not_requested`), and every row
+      carrying that line's contract number - an AMS code row ("INMRC") prints
+      the declined floater's number under a code the line map cannot read.
+
+    No prior grid and no declined line: nothing is excluded, as before.
+    """
+    try:
+        from services.extraction_service import (
+            _norm_policy_number, prior_term_policy_numbers,
+        )
+        from services.lob_canon import canon_line
+    except Exception:                                         # noqa: BLE001
+        return lambda _row: False
+    facts = merged_facts or {}
+    try:
+        numbers = set(prior_term_policy_numbers(facts))
+    except Exception:                                         # noqa: BLE001
+        numbers = set()
+    declined = {str(x) for x in (facts.get("_lines_not_requested") or [])
+                if isinstance(x, str)}
+    if declined:
+        rows = list(_fv(facts, "coverage_lines") or [])
+        for d in docs or []:
+            if isinstance(d, dict):
+                rows += list(_fv(d.get("facts") or {}, "coverage_lines") or [])
+        for r in rows:
+            if isinstance(r, dict) and canon_line(r.get("line")) in declined:
+                pn = _norm_policy_number(r.get("policy_number"))
+                if pn:
+                    numbers.add(pn)
+    if not numbers and not declined:
+        return lambda _row: False
+
+    def _out(row: dict) -> bool:
+        try:
+            if declined and canon_line(row.get("line")) in declined:
+                return True
+            pn = _norm_policy_number(row.get("policy_number"))
+            return bool(pn and pn in numbers)
+        except Exception:                                     # noqa: BLE001
+            return False
+    return _out
+
+
 def assess_underwriting_consistency(
     docs: List[dict],
     merged_facts: Optional[dict] = None,
@@ -2717,6 +3003,7 @@ def assess_underwriting_consistency(
         _flags_for_lines = flags if isinstance(flags, dict) else (merged_facts.get("_flags") or {})
     except Exception:                                         # noqa: BLE001
         _fact_line = None
+    _out_of_scope_row = _out_of_scope_contract_rows(merged_facts, docs)
     for fact_key, cfg in effective_fields.items():
         if _fact_line is not None:
             try:
@@ -2786,7 +3073,8 @@ def assess_underwriting_consistency(
             # A FORM number is never a candidate policy number (see
             # `_is_form_number_policy_value`) - not from the scalar, not from a row.
             if _is_form_number_policy_value(
-                    fact_key, raw, _fv(d.get("facts") or {}, "dec_page_entries")):
+                    fact_key, raw, _fv(d.get("facts") or {}, "dec_page_entries"),
+                    d.get("text")):
                 raw = None
             llm_norm = None
             if raw is not None:
@@ -2825,9 +3113,12 @@ def assess_underwriting_consistency(
                 for _ln in (_fv(d.get("facts") or {}, "coverage_lines") or []):
                     if not isinstance(_ln, dict):
                         continue
+                    if _out_of_scope_row(_ln):
+                        continue
                     _lv = _ln.get(_line_attr)
                     if _is_form_number_policy_value(
-                            fact_key, _lv, _fv(d.get("facts") or {}, "dec_page_entries")):
+                            fact_key, _lv, _fv(d.get("facts") or {}, "dec_page_entries"),
+                            d.get("text")):
                         continue
                     _ln_norm = _normalize(_lv, kind, fact_key) if _lv else None
                     if not _ln_norm:
@@ -3070,6 +3361,13 @@ def assess_underwriting_consistency(
             _unplaced = [v for v in values if v.get("scope") == []]
             if len(_unplaced) >= 2:
                 values = _unplaced
+        # ONE POLICY'S FACT IS COMPARED WITH THAT POLICY ONLY (6 Oct 2026,
+        # Choice Electric). Five declarations each printed THEIR policy's
+        # premium, three their own audit term, two layers their own limit - and
+        # every one became a "values differ" card. See
+        # `_scope_by_policy_record`; positive evidence only.
+        if not scoped and conflict_reason is None:
+            scoped = _scope_by_policy_record(fact_key, values, merged_facts)
         if not scoped and conflict_reason is None:
             scoped, conflict_reason = _scope_values(fact_key, values, eq_context)
 
@@ -3082,6 +3380,12 @@ def assess_underwriting_consistency(
             values = _merge_equivalent_value_groups(fact_key, values, eq_context)
 
         distinct = len(values)
+        # ONE PRINTING FOR AN AMOUNT (Brent, 6 Oct 2026: "$ 10,692.00",
+        # "$4,162.00" and "29,278.00" in one list). The card shows each money
+        # value the way the forms print it; the raw printing stays on every
+        # source. Applied to the final groups, so the suggestion, the confirm
+        # payload and the issue message all read the same text.
+        _display_money(fact_key, kind, values)
 
         # ── A DATED CHANGE IS NOT A CONFLICT (client 11 Sep, Orbin) ─────────
         # "The COI specifically states it was reduced from $3M to $1M effective
@@ -3291,6 +3595,17 @@ def assess_underwriting_consistency(
             if g is not f and _signature(g) == sig
         ]
 
+    # "Policies in this submission" (7 Oct 2026): one row per policy, with the
+    # key the producer edits it by and what they added - services/policy_lines.
+    # Display only; nothing above reads it.
+    try:
+        from services.policy_lines import table_rows, unmatched_edits
+        _policy_lines = table_rows(merged_facts or {})
+        _unmatched_policy_edits = unmatched_edits(merged_facts or {})
+    except Exception as _ple:                                 # noqa: BLE001
+        logger.warning("underwriting: policy table skipped - %s", _ple)
+        _policy_lines, _unmatched_policy_edits = [], []
+
     return {
         "fields":          fields_out,
         "review_required": any(f["review_required"] for f in fields_out),
@@ -3301,6 +3616,8 @@ def assess_underwriting_consistency(
         "assessed_keys":   sorted(assessed_keys),
         "model_version":   UNDERWRITING_CONSISTENCY_MODEL_VERSION,
         "assessed_at":     now,
+        "policy_lines":    _policy_lines,
+        "unmatched_policy_edits": _unmatched_policy_edits,
     }
 
 
@@ -3364,6 +3681,50 @@ def parse_confirmation_key(key: Any) -> Tuple[str, Optional[str]]:
         return s, None
     fact_key, _, scope = s.partition(SCOPED_CONFIRM_SEPARATOR)
     return fact_key, (scope.strip() or None)
+
+
+def confirmed_fact_keys(confirmations: Any) -> set:
+    """The facts a confirmations map settles, as BASE keys.
+
+    A line-scoped answer ("effective_date@auto") settles its fact's comparison
+    (SYS-06). A scoped key on a fact that is NOT line-scoped settles nothing:
+    `apply_confirmations` ignores it, so it must not silence that fact's
+    warning either (audit G7, 5 Oct 2026). One rule for the upload path, the
+    rescore and the refresh, which each kept a copy.
+    """
+    out = set()
+    for key in (confirmations or {}):
+        fk, scope = parse_confirmation_key(key)
+        if scope and fk not in LINE_SCOPED_FACT_KEYS:
+            continue
+        if fk:
+            out.add(fk)
+    return out
+
+
+LAYER_SEPARATOR = "~"
+
+
+def _row_layer(row: Any) -> Optional[str]:
+    """The umbrella-family layer a `coverage_lines` row prints, or None."""
+    try:
+        from services.lob_canon import umbrella_layer
+        return umbrella_layer((row or {}).get("line")) if isinstance(row, dict) else None
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def known_line_scope(scope: Any) -> bool:
+    """A confirmation scope names a line family the canon knows - optionally
+    qualified by an umbrella-family layer ("umbrella~excess", 6 Oct 2026)."""
+    try:
+        from services.lob_canon import is_known_family, EXCESS_LAYER, UMBRELLA_LAYER
+        base, sep, layer = str(scope or "").strip().partition(LAYER_SEPARATOR)
+        if sep and (base != "umbrella" or layer not in (EXCESS_LAYER, UMBRELLA_LAYER)):
+            return False
+        return bool(base) and is_known_family(base)
+    except Exception:                                         # noqa: BLE001
+        return False
 
 
 def _pair_naic_with_its_carrier(
@@ -3466,9 +3827,19 @@ def _apply_scoped_confirmations(out: dict, scoped: List[Tuple[str, str, str]]) -
             edits.setdefault(sc, {})[fk] = val
     changed = False
     new_rows: List[Any] = list(rows)
-    for line, edit in edits.items():
+    for scope_key, edit in edits.items():
+        line, _sep, layer_wanted = str(scope_key).partition(LAYER_SEPARATOR)
         idx = [i for i, r in enumerate(new_rows)
                if isinstance(r, dict) and _canon_line(r.get("line")) == line]
+        # ── ONE LAYER'S ANSWER NEVER TOUCHES ANOTHER LAYER (6 Oct 2026) ──────
+        # An umbrella and the excess policy above it share the family. A
+        # confirmation is about ONE of them - the layer its scope names
+        # ("umbrella~excess"), the umbrella layer when it names none - and the
+        # other layer's rows are neither rewritten nor set aside as a rival.
+        _layers = {_row_layer(new_rows[i]) for i in idx}
+        if len(_layers - {None}) > 1:
+            _want = layer_wanted or "umbrella"
+            idx = [i for i in idx if _row_layer(new_rows[i]) == _want]
         if not idx:
             continue
         # ── THE ANSWER CHOOSES A CONTRACT, IT DOES NOT OVERWRITE THE LINE ────
@@ -3725,6 +4096,23 @@ def validate_confirmation(fact_key: str, value: Any, docs: Optional[List[dict]] 
                 return canon
     except Exception:                                        # noqa: BLE001
         pass
+    # A DATE must be a real calendar date - "banana" and "13/45/2026" passed
+    # the text normalizer and were stamped into five generated forms (audit G7,
+    # 5 Oct 2026; the pre-form route had the same hole).
+    if fact_key in DATE_FIELDS or fact_key.endswith("_date"):
+        if not normalize_date(value):
+            raise ValueError("underwriting_invalid_value")
+    # "N/A", "TBD", "unknown" are not a value to print on a signed form; the
+    # picker chooses between printed values (`answer_semantics`, the one door
+    # for reading what a person typed).
+    try:
+        from services.answer_semantics import VALUE, interpret_answer
+        if interpret_answer(fact_key, str(value)).intent != VALUE:
+            raise ValueError("underwriting_invalid_value")
+    except ValueError:
+        raise
+    except Exception:                                        # noqa: BLE001
+        pass
     return str(value).strip()
 
 
@@ -3800,7 +4188,16 @@ def verify_stamped_consistency(
             # mapped — identical to the original behaviour.
             fr     = form_result or {}
             mapped = fr.get("field_state") or fr.get("mapped") or {}
-            for field in form_fields.get(form_id, ()):
+            # A form's second copy (the excess layer's ACORD 131, 7 Oct 2026) is
+            # checked against its OWN view: its limit is not the umbrella's.
+            from services.form_instances import base_form_id as _bfid, facts_for_form
+            _form_facts = facts_for_form(merged_facts, form_id)
+            _expected_here = expected_raw
+            if _form_facts is not merged_facts:
+                _expected_here = _fv(_form_facts, fact_key)
+                if _expected_here is None or not _norm_native(_expected_here, kind):
+                    continue
+            for field in form_fields.get(_bfid(form_id), ()):
                 val = mapped.get(field)
                 if val is None or str(val).strip() in ("", "null", "None"):
                     continue
@@ -3815,10 +4212,10 @@ def verify_stamped_consistency(
                 # owned blank with nothing. This compared every box with the
                 # package figure alone.
                 try:
-                    exp = box_expectation(form_id, field, fact_key, expected_raw,
-                                          merged_facts, fr.get("schema") or {})
+                    exp = box_expectation(_bfid(form_id), field, fact_key, _expected_here,
+                                          _form_facts, fr.get("schema") or {})
                 except Exception:                         # noqa: BLE001
-                    exp = ("value", expected_raw)
+                    exp = ("value", _expected_here)
                 if not exp or exp[0] != "value":
                     continue
                 want_norm = _norm_native(exp[1], kind)
@@ -3869,7 +4266,10 @@ def stamp_mismatch_issues(stamp_check: Optional[dict]) -> List[dict]:
     issues: List[dict] = []
     for (fact_key, label), forms in by_fact.items():
         flist = sorted(f for f in forms if f)
-        pretty = ", ".join(f.replace("ACORD_", "ACORD ") for f in flist)
+        # A form's second copy reads "ACORD 131 (Excess)" (7 Oct 2026).
+        from services.form_instances import instance_label, is_instance
+        pretty = ", ".join(instance_label(f) if is_instance(f) else f.replace("ACORD_", "ACORD ")
+                           for f in flist)
         issues.append({
             "type":    "soft_warning",
             "code":    "underwriting_stamp_mismatch",

@@ -59,6 +59,36 @@ ANSWER_PREFIX = "schedule::"
 # (lossless) but cannot be stamped onto the form itself.
 ROW_CAPACITY = 14
 
+# ── A table row keeps its identity through an edit (6 Oct 2026) ─────────────
+# A table shows only its columns, and a save used to rebuild every row from
+# those columns alone - so the LOC #, county, interest, revenue, employee
+# counts, building values ... a document had put on a premises row were gone
+# after any edit (Choice Electric: the producer's LOC # typed on the 125 was
+# blanked by three location-table saves). Each row now travels with a hidden
+# identity (`ROW_ID_KEY`, never a column) and a save MERGES the typed cells
+# into the stored row it came from (`merge_saved_rows`). Only the schedules in
+# MERGE_ON_SAVE carry it; the others keep the rebuild-from-columns behaviour.
+ROW_ID_KEY = "_row_id"
+# Vehicles and drivers joined 7 Oct 2026 (round 4): a vehicle row carries its
+# class code, territory, garaging, cost new, use ... and a driver row its
+# relationship, gender, MVR facts - none of them columns, all wiped by the old
+# rebuild-from-columns save (17 of 17 live vehicles lost class code / territory
+# on any edit). Same class as the location table's LOC # loss (Brent #14 / #23).
+MERGE_ON_SAVE = frozenset({"property_locations", "auto_vin_schedule", "auto_drivers"})
+# The stored row's own stable id, per schedule (consolidation issues it).
+_STORED_ROW_ID_FIELD: Dict[str, str] = {"property_locations": "location_id"}
+# A row a save carries with no usable hidden id (an import, an older copy of
+# the table) is matched to a stored row by these identities, in order - each
+# only when EVERY key is stated and the value names exactly one stored row AND
+# exactly one typed row (two rows sharing a VIN identify nothing). The
+# location table keeps its own street / LOC # / BLDG # rule (unchanged).
+_MERGE_IDENTITIES: Dict[str, Tuple[Tuple[str, ...], ...]] = {
+    "auto_vin_schedule": (("vin",),),
+    "auto_drivers": (("license_number",), ("name", "dob")),
+}
+_ADDRESS_PART_KEYS = ("address_line1", "address_line2", "address_city",
+                      "address_state", "address_zip")
+
 # Hard safety bounds. A 143-vehicle fleet — the case in the bug report — fits
 # comfortably; these exist to bound a malicious or runaway payload.
 MAX_ROWS = 500
@@ -81,12 +111,18 @@ class Column(dict):
         placeholder: str = "",
         width: int = 0,
         producer_only: bool = False,
+        options: Optional[List[str]] = None,
     ):
         super().__init__(
             key=key, label=label, type=type, required=required,
             placeholder=placeholder, width=width,
             producer_only=producer_only,
         )
+        # Suggested answers for a closed column (a renderer may offer them as a
+        # pick list). Free text stays allowed - a document's own wording
+        # ("NON-COMBUSTIBLE - LIGHT STEEL") is never refused for not being one.
+        if options:
+            self["options"] = list(options)
 
 
 class ScheduleDef(dict):
@@ -196,7 +232,28 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
         # Suite 200 in one building are byte-identical rows, and the duplicate
         # detector tells the client their two premises are the same one.
         # Measured before the fix: `validate_rows` returned `duplicates: [1]`.
-        dedup_keys=("address_line1", "address_line2", "address_city"),
+        #
+        # ONE ROW PER BUILDING, numbered as ACORD numbers it (6 Oct 2026,
+        # Choice Electric #14): LOC # is the premises, BLDG # the building at
+        # it - one premises with two buildings is two rows sharing LOC # 1. The
+        # COPE card ("N insured locations are missing construction type or
+        # building/BPP value") opens THIS table, so the table carries those
+        # columns; it used to offer a street, a city and nothing the card asked
+        # for (the BUG-05 shape). Every column binds a live ACORD box
+        # (`test_every_schedule_column_binds_to_a_live_acord_field`): LOC # /
+        # BLDG # the 125 / 140 / 160 premises numbers, construction and year
+        # the 140 / 160 building boxes, the two values the 160 limits (and the
+        # 140 subject-of-insurance grid, which reads the same row keys).
+        # The NUMBERING is the agency's - LOC # is "the producer assigned number
+        # of the location" (ACORD 160) - so LOC # / BLDG # are producer-only:
+        # stripped from the client's copy, and a client save never touches
+        # them (`merge_saved_rows`).
+        # The two numbers join the duplicate signature: two buildings at one
+        # street are two rows, not a duplicate. The new columns sit AFTER the
+        # address ones: a header-less spreadsheet imports positionally, and a
+        # one-column list of addresses must still land in "Street address".
+        dedup_keys=("address_line1", "address_line2", "address_city",
+                    "location_number", "building_number"),
         columns=[
             Column("address_line1",          "Street address", "text",  required=True, placeholder="789 Commerce Dr", width=210),
             Column("address_line2",          "Suite / unit",   "text",  placeholder="Ste 400", width=110),
@@ -204,6 +261,61 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             Column("address_state",          "State",          "state", placeholder="TX", width=90),
             Column("address_zip",            "ZIP",            "text",  placeholder="77001", width=100),
             Column("operations_description", "What happens here", "text", placeholder="Warehouse and dispatch", width=220),
+            Column("location_number",        "LOC #",          "text",  placeholder="1", width=70,
+                   producer_only=True),
+            Column("building_number",        "BLDG #",         "text",  placeholder="1", width=70,
+                   producer_only=True),
+            # ACORD's own construction classes (the ConstructionCode tooltip).
+            # The four COPE / value columns are NOT producer-only: binding them
+            # makes the 140 / 160 building boxes part of this table, and the
+            # client questionnaire used to ask "What is your building mainly made
+            # of?" / "What year was your building originally built?" from exactly
+            # those boxes - hiding the columns from the client would have dropped
+            # the questions (measured on a two-premises 125 + 140 package). The
+            # insured knows these per building; the table now asks them so.
+            Column("construction_type",      "Construction",   "text",  placeholder="Frame", width=160,
+                   options=["Frame", "Joisted Masonry", "Non-Combustible",
+                            "Masonry Non-Combustible", "Modified Fire Resistive",
+                            "Fire Resistive"]),
+            Column("year_built",             "Year built",     "year",  placeholder="1998", width=90),
+            Column("building_value",         "Building value", "currency", placeholder="$750,000", width=130),
+            Column("bpp_value",              "BPP value",      "currency", placeholder="$75,000", width=120),
+            # The rest of each building's COPE (7 Oct 2026, Choice Electric #18):
+            # ACORD 140 requires roof material and protection class PER BUILDING
+            # (its completeness gate) and the Carrier-Grade COPE card asks roof
+            # year, sprinkler and protection class - a second building's values
+            # had nowhere to go. Each binds its live 140 / 160 box (deferred, like
+            # the columns above). PRODUCER-ONLY: the questionnaire classifies
+            # every one of these boxes internal (never asked of the client), so
+            # the client's copy of the table is exactly what it was.
+            Column("roof_material",          "Roof material",  "text",  placeholder="Metal", width=130,
+                   producer_only=True,
+                   options=["Composition", "Metal", "Poured", "Slate", "Tile", "Wood Shake"]),
+            Column("roof_year",              "Roof year",      "year",  placeholder="2015", width=90,
+                   producer_only=True),
+            Column("protection_class",       "Protection class", "text", placeholder="3", width=110,
+                   producer_only=True),
+            Column("sprinkler",              "Sprinkler %",    "percent", placeholder="100", width=100,
+                   producer_only=True),
+            # ACORD 125's per-location boxes (13 Oct 2026, Choice Electric #27):
+            # each was a required box with no place to answer it before forms,
+            # so run `ba7c709d` listed them only after generation - once per
+            # building. A premises' revenue and staff are asked once, on its
+            # first row; a later building at the same LOC # prints none of them
+            # (`pdf_service._LOCATION_ONCE_SUBKEYS`) and repeats its city limits.
+            # "No" to city limits means OUTSIDE, as extraction already reads it
+            # (`pdf_service.city_limits_inside`). PRODUCER-ONLY: the client's
+            # copy of the table is exactly what it was.
+            Column("annual_revenue",         "Location revenue", "currency", placeholder="$1,200,000", width=135,
+                   producer_only=True),
+            Column("full_time_employees",    "Full-time staff", "number", placeholder="12", width=95,
+                   producer_only=True),
+            Column("part_time_employees",    "Part-time staff", "number", placeholder="3", width=95,
+                   producer_only=True),
+            Column("total_building_area",    "Building sq ft", "number", placeholder="8,500", width=110,
+                   producer_only=True),
+            Column("is_inside_city_limits",  "Inside city limits", "text", placeholder="Yes", width=120,
+                   producer_only=True, options=["Yes", "No"]),
         ],
     ),
     "loss_history": ScheduleDef(
@@ -325,6 +437,24 @@ def is_producer_only(list_key: str) -> bool:
     return bool(defn and defn.get("producer_only"))
 
 
+def client_rows(list_key: str, rows: Any) -> list:
+    """The rows the CLIENT's copy of a table carries (7 Oct 2026): every
+    producer-only column's VALUE removed, not only its spec - the client never
+    sees LOC # / BLDG # / roof / protection class cells the agency filled. Every
+    other key (the hidden row id included) stays, so a client save still merges
+    into the stored rows (`merge_saved_rows` keeps producer-only cells by row
+    identity). Never mutates `rows`."""
+    defn = SCHEDULE_DEFS.get(list_key)
+    if not isinstance(rows, list):
+        return []
+    hidden = {c.get("key") for c in ((defn or {}).get("columns") or [])
+              if isinstance(c, dict) and c.get("producer_only")}
+    if not hidden:
+        return list(rows)
+    return [{k: v for k, v in r.items() if k not in hidden} if isinstance(r, dict) else r
+            for r in rows]
+
+
 def answer_key(list_key: str) -> str:
     return f"{ANSWER_PREFIX}{list_key}"
 
@@ -369,6 +499,8 @@ def schedule_list_key_for_field(field_name: str) -> Optional[str]:
 def _schedules_on_form_from_disk(form_id: str) -> frozenset:
     import json as _json
     import os as _os
+    from services.form_instances import base_form_id
+    form_id = base_form_id(form_id)     # a form's second copy reads its form's schema
     path = _os.path.join(
         _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
         "forms_schemas", f"{form_id}_schema.json",
@@ -417,7 +549,9 @@ def schedules_on_form(form_id: str, schema: Any = None) -> frozenset:
     """
     if isinstance(schema, dict) and schema:
         return _schedules_in_schema(schema)
-    return _schedules_on_form_from_disk(str(form_id or ""))
+    # A form's second copy ("ACORD_131__excess") carries its form's schema.
+    from services.form_instances import base_form_id
+    return _schedules_on_form_from_disk(base_form_id(str(form_id or "")))
 
 
 def binds_a_capturable_column(field_name: str) -> bool:
@@ -484,6 +618,14 @@ _DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{2}-\d{2}$")
 _STATE_RE = re.compile(r"^[A-Za-z]{2}$")
 _NUMERIC_RE = re.compile(r"^\d+(\.\d+)?$")
 _COUNT_RE = re.compile(r"^\d+$")
+
+
+def _cell_value(raw: Any) -> Any:
+    """A True / False row value (extraction writes city limits that way) shows
+    as the Yes / No its column offers, never "True"."""
+    if isinstance(raw, bool):
+        return "Yes" if raw else "No"
+    return raw
 
 
 def _clean_cell(raw: Any) -> str:
@@ -610,11 +752,19 @@ def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
             if msg:
                 row_errors[col["key"]] = msg
 
+        # The hidden row identity (MERGE_ON_SAVE schedules) rides along, never
+        # validated. A row that has one is an EXISTING row the person kept - it
+        # is never dropped as blank, even when every cell they can see is empty
+        # (a redacted street, the client's copy without the agency's columns).
+        _rid = _clean_cell(raw_row.get(ROW_ID_KEY))[:40] if list_key in MERGE_ON_SAVE else ""
+
         # A row where the user typed nothing at all is dropped silently rather
         # than reported as N required-field errors (trailing blank rows are a
         # normal artifact of both the table UI and spreadsheet exports).
-        if not any(row.values()):
+        if not any(row.values()) and not _rid:
             continue
+        if _rid:
+            row[ROW_ID_KEY] = _rid
 
         sig = _dedup_signature(defn, row)
         if sig is not None:
@@ -658,7 +808,246 @@ def rows_for_facts(list_key: str, rows: List[dict]) -> List[Any]:
             rows = [normalize_wc_class_row(dict(r)) for r in rows]
         except Exception:                                     # noqa: BLE001
             pass
-    return rows
+    # The hidden row identity is a property of the TABLE, never a fact.
+    return [{k: v for k, v in r.items() if k != ROW_ID_KEY} if isinstance(r, dict) else r
+            for r in rows]
+
+
+# ── Who typed this table (audit G8, 5 Oct 2026) ─────────────────────────────
+# A saved schedule is a bare list - no envelope, so nothing says a PERSON typed
+# it, and a pre-form re-run rebuilt it from the documents (or, for a Drive Other
+# Car package, deleted it). Each human save records its source and a
+# fingerprint of the rows it wrote under `facts[HUMAN_SCHEDULES_KEY]`; a re-run
+# keeps the stored rows while they still match that fingerprint (anything
+# later written over them - a document re-merge - is no longer the person's).
+HUMAN_SCHEDULES_KEY = "_human_schedules"
+
+
+def rows_fingerprint(rows: Any) -> str:
+    import hashlib
+    try:
+        blob = json.dumps(rows, sort_keys=True, default=str)
+    except Exception:                                         # noqa: BLE001
+        blob = repr(rows)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _bare_rows(raw: Any) -> Optional[list]:
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw.get("value")
+    return raw if isinstance(raw, list) else None
+
+
+def mark_human_rows(facts: dict, list_key: str, source: str) -> None:
+    """Record that a person (`producer` / `client_arq`) saved `facts[list_key]`."""
+    if not isinstance(facts, dict) or list_key not in SCHEDULE_DEFS:
+        return
+    rows = _bare_rows(facts.get(list_key))
+    held = dict(facts.get(HUMAN_SCHEDULES_KEY) or {})
+    if rows:
+        held[list_key] = {"source": str(source or "producer"), "fingerprint": rows_fingerprint(rows)}
+    else:
+        held.pop(list_key, None)
+    facts[HUMAN_SCHEDULES_KEY] = held
+
+
+def human_rows(facts: Any, list_key: str) -> Tuple[Optional[list], Optional[str]]:
+    """(the rows a person saved, their source) while `facts[list_key]` still
+    holds exactly what they saved; (None, None) otherwise."""
+    if not isinstance(facts, dict):
+        return None, None
+    mark = (facts.get(HUMAN_SCHEDULES_KEY) or {}).get(list_key)
+    rows = _bare_rows(facts.get(list_key))
+    if not isinstance(mark, dict) or not rows:
+        return None, None
+    if mark.get("fingerprint") != rows_fingerprint(rows):
+        return None, None
+    return list(rows), str(mark.get("source") or "producer")
+
+
+def refresh_human_mark(facts: dict, list_key: str, source: str) -> None:
+    """Re-fingerprint a person-saved table after a writer changed its rows.
+
+    Any writer of a schedule fact must call this (or `mark_human_rows`):
+    otherwise the stored fingerprint no longer matches and the next pre-form
+    re-run treats the person's table as the documents' and rebuilds it (the
+    per-location own / rent answer did exactly that - 5 Oct audit hole). An
+    existing mark keeps its source; a table nobody marked yet becomes
+    `source`'s, because a person has now written on it."""
+    if not isinstance(facts, dict):
+        return
+    held = (facts.get(HUMAN_SCHEDULES_KEY) or {}).get(list_key)
+    src = (held or {}).get("source") if isinstance(held, dict) else None
+    mark_human_rows(facts, list_key, src or source)
+
+
+def _stored_row_id(list_key: str, item: Any, position: int) -> str:
+    """The identity a stored row travels with in the table: its own stable id
+    (`location_id`), else its position in the stored list."""
+    field = _STORED_ROW_ID_FIELD.get(list_key)
+    rid = str((item or {}).get(field) or "").strip() if (field and isinstance(item, dict)) else ""
+    return rid or f"#{position}"
+
+
+def _compose_address(row: dict) -> str:
+    line1 = " ".join(p for p in (str(row.get("address_line1") or "").strip(),
+                                 str(row.get("address_line2") or "").strip()) if p)
+    tail = " ".join(p for p in (str(row.get("address_state") or "").strip(),
+                                str(row.get("address_zip") or "").strip()) if p)
+    return ", ".join(p for p in (line1, str(row.get("address_city") or "").strip(), tail) if p)
+
+
+def _identity_norm(key: str, raw: Any) -> str:
+    """One identity cell, compared loosely on spelling only: a VIN as
+    `normalize_vin`, anything else upper-cased with every non-alphanumeric
+    removed ("D-123 456" == "d123456", "Jane  Smith" == "JANE SMITH")."""
+    cell = _clean_cell(raw)
+    if not cell:
+        return ""
+    if key == "vin":
+        return normalize_vin(cell)
+    return re.sub(r"[^0-9A-Z]", "", cell.upper())
+
+
+def merge_saved_rows(list_key: str, stored: Any, typed: List[dict],
+                     source: str = "producer") -> List[Any]:
+    """The stored schedule after a person saved `typed` (validated rows).
+
+    Each typed row is matched to the stored row it came from - by its hidden
+    identity, else (an older copy of the table, an import) by identical cells,
+    else by the schedule's own unique identity (`_MERGE_IDENTITIES`: a VIN; a
+    licence number, then name + date of birth), else by a UNIQUE street
+    signature, else by a unique LOC # / BLDG # pair - and only the cells the
+    person changed are written onto it. Fields the table has no column for
+    (county, interest, revenue, employees, areas, the document's own address
+    string; a vehicle's class code, territory, garaging, cost new; a driver's
+    relationship, gender ...) are never dropped. A stored row no typed row
+    claims was deleted; a typed row that claims none is new.
+
+    A CLIENT save never writes a producer-only column - the client's copy of
+    the table does not show those columns, so their blank cells are not an
+    answer. Schedules outside MERGE_ON_SAVE keep `rows_for_facts`."""
+    defn = SCHEDULE_DEFS.get(list_key)
+    if defn is None:
+        return []
+    if list_key not in MERGE_ON_SAVE:
+        return rows_for_facts(list_key, typed)
+    stored_rows = [dict(r) for r in (_bare_rows(stored) or []) if isinstance(r, dict)]
+    all_keys = [c["key"] for c in defn["columns"]]
+    edit_keys = [c["key"] for c in defn["columns"]
+                 if source == "producer" or not c.get("producer_only")]
+    _vin_cols = {c["key"] for c in defn["columns"] if c.get("type") == "vin"}
+
+    def _view_cell(k: str, raw: Any) -> str:
+        # The stored cell as the TABLE showed it (`validate_rows` cleans a VIN
+        # the same way), so an untouched cell never reads as an edit.
+        cell = _clean_cell(raw)
+        return normalize_vin(cell) if (k in _vin_cols and cell) else cell
+
+    views = [{k: _view_cell(k, r.get(k)) for k in all_keys} for r in stored_rows]
+    by_id: Dict[str, int] = {}
+    for i, r in enumerate(stored_rows):
+        by_id.setdefault(_stored_row_id(list_key, r, i), i)
+    claimed: set = set()
+    identities = _MERGE_IDENTITIES.get(list_key, ())
+
+    def _unique(cands: List[int]) -> Optional[int]:
+        return cands[0] if len(cands) == 1 else None
+
+    def _ident(keys: Tuple[str, ...], row: dict) -> Optional[str]:
+        vals = [_identity_norm(k, row.get(k)) for k in keys]
+        return "|".join(vals) if all(vals) else None
+
+    typed_ident_counts: Dict[Tuple[Tuple[str, ...], str], int] = {}
+    for t in typed or []:
+        if isinstance(t, dict):
+            for keys in identities:
+                sig = _ident(keys, t)
+                if sig is not None:
+                    typed_ident_counts[(keys, sig)] = typed_ident_counts.get((keys, sig), 0) + 1
+
+    def _by_identity(t: dict, free: List[int]) -> Optional[int]:
+        for keys in identities:
+            sig = _ident(keys, t)
+            if sig is None or typed_ident_counts.get((keys, sig), 0) != 1:
+                continue
+            hit = _unique([i for i in free if _ident(keys, views[i]) == sig])
+            if hit is not None:
+                return hit
+        return None
+
+    out: List[dict] = []
+    for t in typed or []:
+        if not isinstance(t, dict):
+            continue
+        rid = str(t.get(ROW_ID_KEY) or "").strip()
+        idx = by_id.get(rid) if rid else None
+        if idx in claimed:
+            idx = None
+        free = [i for i in range(len(stored_rows)) if i not in claimed]
+        if idx is not None and identities and rid.startswith("#"):
+            # A POSITIONAL id (a schedule with no stable row id) points at
+            # whatever row now sits there - a stale tab after the list was
+            # re-ordered. A unique identity naming a different stored row
+            # outranks the position.
+            other = _by_identity(t, free)
+            if other is not None and other != idx:
+                idx = other
+        if idx is None:
+            idx = _unique([i for i in free
+                           if all(views[i][k] == str(t.get(k) or "").strip() for k in edit_keys)])
+        if idx is None and identities:
+            idx = _by_identity(t, free)
+        if idx is None:
+            sig = _dedup_signature({"dedup_keys": [k for k in defn.get("dedup_keys") or []
+                                                   if k in _ADDRESS_PART_KEYS]}, t)
+            if sig is not None:
+                idx = _unique([i for i in free if _dedup_signature(
+                    {"dedup_keys": [k for k in defn.get("dedup_keys") or []
+                                    if k in _ADDRESS_PART_KEYS]}, views[i]) == sig])
+        if idx is None:
+            num = (str(t.get("location_number") or "").strip(),
+                   str(t.get("building_number") or "").strip())
+            if all(num):
+                idx = _unique([i for i in free
+                               if (views[i].get("location_number"), views[i].get("building_number")) == num])
+        base = stored_rows[idx] if idx is not None else {}
+        merged = dict(base)
+        address_moved = idx is None
+        for k in edit_keys:
+            new = str(t.get(k) or "").strip()
+            old = views[idx][k] if idx is not None else ""
+            if new == old:
+                continue
+            merged[k] = new or None
+            if k in _ADDRESS_PART_KEYS:
+                address_moved = True
+        if address_moved:
+            composed = _compose_address(merged)
+            if composed or idx is not None:
+                merged["address"] = composed or None
+        merged.pop(ROW_ID_KEY, None)
+        if idx is not None:
+            claimed.add(idx)
+        out.append(merged)
+
+    id_field = _STORED_ROW_ID_FIELD.get(list_key)
+    if id_field:
+        # A deleted row's id is never re-issued: a stale copy of the table that
+        # still names it must not land on a different, new row.
+        used = {str(r.get(id_field)) for r in out + stored_rows if r.get(id_field)}
+        n = 1
+        for r in out:
+            if r.get(id_field):
+                continue
+            while f"L{n}" in used:
+                n += 1
+            r[id_field] = f"L{n}"
+            used.add(f"L{n}")
+    dropped = len(stored_rows) - len(claimed)
+    if dropped:
+        logger.info("merge_saved_rows: %s - %d stored row(s) removed by the save", list_key, dropped)
+    return out
 
 
 def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
@@ -684,9 +1073,11 @@ def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
 
     scalar_key = defn.get("scalar_key") or defn["columns"][0]["key"]
     out: List[dict] = []
-    for item in raw[:MAX_ROWS]:
+    for _pos, item in enumerate(raw[:MAX_ROWS]):
         if isinstance(item, dict):
-            row = {c["key"]: _clean_cell(item.get(c["key"])) for c in defn["columns"]}
+            row = {c["key"]: _clean_cell(_cell_value(item.get(c["key"]))) for c in defn["columns"]}
+            if list_key in MERGE_ON_SAVE:
+                row[ROW_ID_KEY] = _stored_row_id(list_key, item, _pos)
             if list_key == "wc_officers" and not row.get("include_exclude"):
                 # The extractor records treatment as two booleans; the table
                 # shows one word. ONE reader decides (coverage_evidence).

@@ -126,11 +126,12 @@ def _form_meta(session: dict, form_id: str) -> Optional[dict]:
     been through `filter_available_forms`, so membership here means the template
     file existed at upload time. The path is re-checked below anyway - a
     template that has since moved must fail loudly, not stamp a blank PDF.
+
+    A form's second copy ("ACORD_131__excess", 7 Oct 2026) is built from its
+    form's row under its own id, and only while the package has that copy.
     """
-    for f in (session.get("all_forms") or []):
-        if isinstance(f, dict) and f.get("form_id") == form_id:
-            return f
-    return None
+    from services.form_instances import form_meta_for
+    return form_meta_for(session.get("all_forms") or [], form_id, session.get("facts") or {})
 
 
 def _package_form_ids(session: dict) -> set:
@@ -247,10 +248,18 @@ async def add_form_to_session(
     selected = list(session.get("selected_form_ids") or [])
     if form_id not in selected:
         selected.append(form_id)
-    await upd_processing_session(session_id, {
+    _update = {
         "generated_forms":   {form_id: result},
         "selected_form_ids": selected,
-    })
+    }
+    # The added copy stays bound to its own subject (one ACORD 131 per
+    # umbrella layer, 7 Oct 2026) - stored in this same write.
+    try:
+        from services.form_instances import binding_update
+        _update.update(binding_update(session.get("facts"), [form_id]))
+    except Exception as _bind_ex:                             # noqa: BLE001
+        logger.warning("form_addition: form copy binding skipped: %s", _bind_ex)
+    await upd_processing_session(session_id, _update)
 
     logger.info("form_addition: added %s to session=%s (package now %d forms)",
                 form_id, session_id, len(selected))

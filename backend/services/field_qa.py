@@ -75,6 +75,14 @@ _HARD_BLOCK_REASON_CODES = frozenset({"placeholder_value", "missing_required_gat
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
 
+def _qa_label(form_id: Any) -> str:
+    """The form as a QA message names it: "ACORD 131", and a form's second copy
+    "ACORD 131 (Excess)" (7 Oct 2026). Plain ids keep their historic wording."""
+    from services.form_instances import instance_label, is_instance
+    fid = str(form_id or "")
+    return instance_label(fid) if is_instance(fid) else fid.replace("ACORD_", "ACORD ")
+
+
 def _fv(facts: dict, key: str):
     """Scalar fact value, unwrapping the {value, confidence} envelope."""
     if not isinstance(facts, dict):
@@ -210,6 +218,9 @@ def run_field_qa(
     merged_facts: Optional[dict] = None,
     confirmations: Optional[dict] = None,
     flags: Optional[dict] = None,
+    *,
+    unanswered: bool = True,
+    mismatches: bool = True,
 ) -> dict:
     """Run field QA across all generated forms.
 
@@ -220,6 +231,18 @@ def run_field_qa(
     merged_facts    : the merged fact dict (source of truth for value checks).
     confirmations   : {fact_key: confirmed_value} - user-confirmed values take
                       precedence over merged facts as the expected value.
+    unanswered /    : the "left blank by the AI" (`not_answered`) rows and the
+    mismatches        value-vs-source (`value_mismatch`) rows. Both default ON -
+                      every existing caller is unchanged. The pre-form dry run
+                      (`services/form_dry_run`, Choice Electric #27, 7 Oct 2026)
+                      turns them off: before generation every gap-fill box is
+                      still empty (nothing has read the documents yet) and no
+                      value has been edited, so it keeps neither kind of row -
+                      and the not-answered branch's owned-blank test alone cost
+                      ~9 s on a seven-form package. Every other verdict (the
+                      download hard blocks, required boxes, placeholders,
+                      schedule rows, refused values) is computed exactly as
+                      before.
 
     Returns
     -------
@@ -272,7 +295,7 @@ def run_field_qa(
     # that check and are judged on confidence alone.
     field_fact: Dict[tuple, str] = {}
     fact_expected: Dict[str, Any] = {}
-    for fact_key in set(merged_facts.keys()) | set(confirmations.keys()):
+    for fact_key in (set(merged_facts.keys()) | set(confirmations.keys())) if mismatches else ():
         expected = confirmations.get(fact_key)
         if expected is None:
             expected = _fv(merged_facts, fact_key)
@@ -304,7 +327,13 @@ def run_field_qa(
         # HIRED COST as "left blank by the AI" - boxes a resolver decided are
         # empty and never asked the model about. Asked the same way the stamper
         # asked: facts plus flags, this form's id and schema.
-        _owned_facts = {**merged_facts, **(flags or {}), "_form_id": form_id}
+        # A form's second copy (ACORD 131 for the excess layer, 7 Oct 2026) is
+        # checked on its own view of the facts by its form's rules.
+        from services.form_instances import base_form_id as _base_form_id, facts_for_form
+        _base = _base_form_id(form_id)
+        _form_facts = facts_for_form(merged_facts, form_id)
+        _own_view = _form_facts is not merged_facts
+        _owned_facts = {**_form_facts, **(flags or {}), "_form_id": _base}
 
         def _owned(field: str, _schema=schema, _facts=_owned_facts) -> bool:
             try:
@@ -328,6 +357,16 @@ def run_field_qa(
                 return form_box_label(_fid, field, _schema) or _humanize_field(field)
             except Exception:                             # noqa: BLE001
                 return _humanize_field(field)
+
+        def _row_words(field: str, _schema=schema) -> str:
+            # "(row 2) " for a second or later row, "" for row one - the side
+            # panel's own rule (`needs_attention._row_suffix`).
+            try:
+                from services.needs_attention import _row_suffix
+                suffix = _row_suffix(_schema, field).strip()
+            except Exception:                             # noqa: BLE001
+                suffix = ""
+            return f"{suffix} " if suffix else ""
 
         for field in all_fields:
             val = mapped.get(field)
@@ -364,7 +403,7 @@ def run_field_qa(
                         "reason_code": "placeholder_value",
                         "high_impact": high_impact,
                         "message": (
-                            f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
+                            f"{_qa_label(form_id)}: \"{_form_words(field)}\" "
                             f"contains a placeholder value (\"{val}\"), not real data. "
                             "Fix: Re-generate the form or enter the correct value manually - "
                             "this blocks a clean download."
@@ -386,13 +425,17 @@ def run_field_qa(
             # amount), and for a checkbox the TICK its fact implies. The
             # post-generation stamp check asks the same door, so the two can
             # never again disagree about which boxes are comparable.
-            fact_key = field_fact.get((form_id, field))
-            if has_val and fact_key and fact_key in fact_expected:
+            fact_key = field_fact.get((_base, field))
+            # On a copy with its own view the source value is the view's (the
+            # excess layer's limit, never the umbrella's).
+            _source_val = (_fv(_form_facts, fact_key) if (_own_view and fact_key)
+                           else fact_expected.get(fact_key))
+            if has_val and fact_key and fact_key in fact_expected and _source_val is not None:
                 expected = None
                 _mismatch = False
                 try:
-                    _exp = box_expectation(form_id, field, fact_key,
-                                           fact_expected[fact_key], merged_facts, schema)
+                    _exp = box_expectation(_base, field, fact_key,
+                                           _source_val, _form_facts, schema)
                 except Exception as _exc:                 # pragma: no cover
                     logger.debug("field_qa: box expectation failed for %s/%s - %s",
                                  form_id, field, _exc)
@@ -418,7 +461,7 @@ def run_field_qa(
                         "reason_code": "value_mismatch",
                         "high_impact": high_impact,
                         "message": (
-                            f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
+                            f"{_qa_label(form_id)}: \"{_form_words(field)}\" "
                             f"shows \"{val}\" but the source value is \"{expected}\". "
                             "Fix: Re-confirm the correct value so it applies uniformly."
                         ),
@@ -445,7 +488,12 @@ def run_field_qa(
                     "reason_code": "missing_required_gate" if _is_gate else "missing_required",
                     "high_impact": high_impact,
                     "message": (
-                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
+                        f"{_qa_label(form_id)}: \"{_form_words(field)}\" "
+                        # A blocking box is listed ONE ROW AT A TIME, so it names
+                        # its row the way the side panel does ("(row 2)"); two
+                        # buildings' year-built boxes read as one duplicate
+                        # otherwise (owner's run `18ecbfa8`, 12 Oct 2026).
+                        + (_row_words(field) if _is_gate else "")
                         + (
                             "is required for this section (a related field was already "
                             "filled) but empty. Fix: Provide a value before sending - this "
@@ -469,7 +517,7 @@ def run_field_qa(
                     "reason_code": "low_confidence",
                     "high_impact": high_impact,
                     "message": (
-                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_form_words(field)}\" "
+                        f"{_qa_label(form_id)}: \"{_form_words(field)}\" "
                         + (
                             "is a high-impact question that was AI-inferred (not copied "
                             "verbatim from a document). Fix: Confirm this value against the "
@@ -482,7 +530,8 @@ def run_field_qa(
                     "stamped":  str(val),
                     "expected": None,
                 })
-            elif verdict == "review" and not has_val and not _is_nonfillable_field(field):
+            elif (verdict == "review" and not has_val and unanswered
+                  and not _is_nonfillable_field(field)):
                 if _owned(field):
                     continue                  # decided empty - the AI was never asked
                 if _spare_row_of_an_answered_group(field, mapped):
@@ -529,7 +578,7 @@ def run_field_qa(
                     "high_impact": high_impact,
                     "is_question": _is_question,
                     "message": (
-                        f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_words}\" "
+                        f"{_qa_label(form_id)}: \"{_words}\" "
                         + (
                             f"is a high-impact {_kind_word} the AI left blank (no value found "
                             "in the documents). Fix: Answer it on the form if it applies."
@@ -551,7 +600,8 @@ def run_field_qa(
     # against fact_registry.SCHEDULE_ROW_RULES. Only surfaced when a form that
     # actually consumes the list fact was generated, so e.g. driver-row issues
     # never appear when ACORD 127 wasn't selected.
-    generated_form_ids = set(generated_forms.keys())
+    from services.form_instances import base_form_ids as _base_form_ids
+    generated_form_ids = set(generated_forms.keys()) | set(_base_form_ids(list(generated_forms)))
     for list_key in SCHEDULE_ROW_RULES:
         entry = FACT_REGISTRY.get(list_key) or {}
         if not (entry.get("forms") or set()) & generated_form_ids:
@@ -661,7 +711,8 @@ def run_field_qa(
                 from services.needs_attention import form_box_label, held_back_reason
                 _glabel = form_box_label(form_id, gb.get("field"), _gschema) or _humanize_field(gb.get("field"))
                 _greason = held_back_reason(_gschema, gb.get("field"), gb.get("removed_value"),
-                                            merged_facts, gb.get("kind"), gb.get("in_documents"))
+                                            merged_facts, gb.get("kind"), gb.get("in_documents"),
+                                            reason=gb.get("reason"))
             except Exception:                             # noqa: BLE001
                 _glabel = _humanize_field(gb.get("field"))
                 _greason = "A value was left blank because it did not fit this box."
@@ -674,7 +725,7 @@ def run_field_qa(
                 "reason_code": "guard_removed_value",
                 "high_impact": False,
                 "message": (
-                    f"{form_id.replace('ACORD_', 'ACORD ')}: \"{_glabel}\" was left blank on "
+                    f"{_qa_label(form_id)}: \"{_glabel}\" was left blank on "
                     f"purpose. {_greason} Fix: Check the source document and enter the "
                     "correct value if there is one."
                 ),
@@ -870,7 +921,7 @@ def to_recommendation_rows(qa_result: Optional[dict],
     # half empty". It is the ONLY place a producer learns that a blank is a
     # decision rather than an absence.
     for form_id, items in sorted(guard_by_form.items()):
-        form_label = (form_id or "").replace("ACORD_", "ACORD ")
+        form_label = _qa_label(form_id)
         # One entry per BOX NAME, with its count. ACORD repeats a box across
         # rows (_A, _B, ...) and the humanized label drops the row letter, so
         # live run 6's cover page read "AdditionalInterest FullName,
@@ -915,7 +966,7 @@ def to_recommendation_rows(qa_result: Optional[dict],
         by_form_reason.setdefault((form_id, code), []).append((base_field, grp))
 
     for (form_id, code), groups in by_form_reason.items():
-        form_label = (form_id or "").replace("ACORD_", "ACORD ")
+        form_label = _qa_label(form_id)
         if len(groups) == 1:
             base_field, grp = groups[0]
             fields = grp["fields"]

@@ -291,7 +291,11 @@ def test_orbin_hired_physical_damage_is_asked_of_the_document(form_id):
 # 3. Edge cases
 # ─────────────────────────────────────────────────────────────────────────────
 def test_split_liability_fills_three_boxes_and_ticks_each_person():
+    # A split extraction says so in its structure too: the Orbin fixture's own
+    # "CSL" label now outranks the OR-merged flag (skeptic G1, 5 Oct 2026 - the
+    # flag alone is what printed GL limits as auto BI on CH125).
     d = _decide(_orbin(auto_liability_limit=_DROP, auto_split_limits=True,
+                       auto_liability_structure="split",
                        auto_bi_per_person="$500,000", auto_bi_per_accident="$1,000,000",
                        auto_pd_per_accident="$250,000"))
     assert d["Vehicle_CombinedSingleLimit_LimitIndicator_A"] == "No"

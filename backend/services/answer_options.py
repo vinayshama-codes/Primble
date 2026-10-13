@@ -200,6 +200,26 @@ VEHICLE_USE_OPTIONS = _with_other(
     "Pleasure - personal use only, driving to and from work",
 )
 
+# ADDED 13 Oct 2026 (the SQS reaches 100 before forms). The ISO radius classes
+# a schedule prints ("LOCAL" up to 50 miles, "INTERMEDIATE" 51-200, "LONG
+# DISTANCE" over 200) - each option reads as a stated radius
+# (`coverage_evidence.radius_stated`), and "Other" still takes miles. The
+# ACORD 127 RADIUS box prints only a number, so a class answers the score's
+# question without printing a figure nobody stated.
+RADIUS_OF_OPERATION_OPTIONS = _with_other(
+    "Local (up to 50 miles)",
+    "Intermediate (51 to 200 miles)",
+    "Long distance (over 200 miles)",
+)
+
+# ── Property ────────────────────────────────────────────────────────────────
+# ADDED 13 Oct 2026. The words the fact's own validator accepts, nothing else.
+FIRE_DEPARTMENT_TYPE_OPTIONS = _with_other(
+    "Professional",
+    "Volunteer",
+    "Combination",
+)
+
 # ── Workers Compensation ────────────────────────────────────────────────────
 # ADDED 2026-08-26 (V1 H1 6.4). The producer states what period the payroll
 # figure covers; "Other" still lets a free-text period through, and
@@ -311,6 +331,8 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "umbrella_follow_form":        (UMBRELLA_FOLLOW_FORM_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
     "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
+    "auto_radius_of_operation":    (RADIUS_OF_OPERATION_OPTIONS, False),
+    "fire_department_type":        (FIRE_DEPARTMENT_TYPE_OPTIONS, False),
     "wc_xmod":                     (WC_XMOD_OPTIONS, False),
     "wc_officer_exclusions":       (WC_OFFICER_EXCLUSION_OPTIONS, False),
     "wc_payroll_period":           (WC_PAYROLL_PERIOD_OPTIONS, False),

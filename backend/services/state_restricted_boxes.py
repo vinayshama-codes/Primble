@@ -44,15 +44,35 @@ def _state_codes(phrase: str) -> FrozenSet[str]:
     return frozenset(codes)
 
 
+# Bump when the reading below changes: the precomputed table
+# (`services.template_tables`) is then ignored until it is rebuilt.
+READER_VERSION = 1
+
+
 @lru_cache(maxsize=32)
 def restricted_boxes(form_id: str) -> Mapping[str, FrozenSet[str]]:
-    """{field name: the states its block applies in}, read off the template."""
+    """{field name: the states its block applies in}, read off the template
+    (precomputed per template - `services.template_tables`)."""
+    try:
+        from services.template_tables import stored as _stored_table
+        hit = _stored_table("state_restricted_boxes", form_id, READER_VERSION)
+        if isinstance(hit, dict):
+            return MappingProxyType({str(k): frozenset(v) for k, v in hit.items()})
+    except Exception:                                          # noqa: BLE001
+        pass
+    return read_restricted_boxes(form_id)
+
+
+def read_restricted_boxes(form_id: str) -> Mapping[str, FrozenSet[str]]:
+    """`restricted_boxes`, read off the template PDF."""
     try:
         import pdfplumber
         from config.settings import TEMPLATE_DIR
+        from services.form_instances import base_form_id
     except Exception:                                          # noqa: BLE001
         return MappingProxyType({})
-    path = os.path.join(TEMPLATE_DIR, f"{form_id}.pdf")
+    # A form's second copy is its form's template (7 Oct 2026).
+    path = os.path.join(TEMPLATE_DIR, f"{base_form_id(form_id)}.pdf")
     if not os.path.exists(path):
         return MappingProxyType({})
     out: dict = {}
@@ -91,7 +111,8 @@ def restricted_boxes(form_id: str) -> Mapping[str, FrozenSet[str]]:
 def outside_its_state(form_id: str, field_name: str, facts: Any) -> bool:
     """True when this box belongs to a state block and the risk is provably
     elsewhere - every state we hold for it is outside the block's states."""
-    states = restricted_boxes(str(form_id or "")).get(str(field_name or ""))
+    from services.form_instances import base_form_id
+    states = restricted_boxes(base_form_id(str(form_id or ""))).get(str(field_name or ""))
     if not states:
         return False
     from services.form_service import _collect_states
