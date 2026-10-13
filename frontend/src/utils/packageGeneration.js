@@ -142,7 +142,7 @@ export function nextReviewStep(sections, current, state) {
 // once forms exist (the backend returns the persisted editor score then);
 // before that it is the score so far.
 export function scoreHeading(state) {
-  return state === GEN_DONE ? "Total Package Score" : "Score so far";
+  return state === GEN_DONE ? "Total Package Score" : "Submission Score";
 }
 
 // One row per generated form for the package page's list: label, the form's

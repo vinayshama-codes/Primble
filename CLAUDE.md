@@ -765,7 +765,13 @@ a saved GL code prints on the 126 (`_gl_code_only_rows`); ONE premises with seve
 repeat on later buildings (`_LOCATION_ONCE_SUBKEYS`, `_LOCATION_SHARED_GROUPS`, `_resolve_location_wide_fire_box`); five
 producer-only location-table columns (revenue, FT, PT, sq ft, inside city limits - "No" = Outside); LLC member count
 answerable (`applicant_member_manager_count`); the dry run lists each form's own checklist cards (`form_card_items`).
-Replay on `ba7c709d`: 6 intended boxes; answering the 8 pre-form items leaves 0. Held: fact-less Y/N questions.
+Replay on `ba7c709d`: 6 intended boxes; answering the 8 pre-form items leaves 0. Held: fact-less Y/N questions. Suite 14,013 / 1 / 19.
+**Orbin 22 Sep re-check + items 2 and 4 / 11 (part Z12, 14 Oct):** the score copy no longer reads forms-first ("Scored
+from your documents and answers - no forms needed", "Submission Score"; marketing page rewritten); the dashboard shows
+the pre-form score (`form_routes._remember_pre_form_score` -> `pre_form_score`, display only, POST actions only; the
+list query COALESCEs it); the proposed term rolls to the next anniversary on or after today when the next term is more
+than 30 days under way (`_ROLL_FORWARD_AFTER_DAYS`; Brent's own retype). Open: Umbrella / Inland Marine expiring
+premiums print nowhere on the 125 (asked Brent); Michelle not yet told about items 5 / 12.
 **Re-run `2076fe35` (part T2): round 10 verified live, item 9 PASS. Status 10 Oct (board): 14 done, 7 built and waiting for a live look (2, 12, 13, 16, 17, 19, 24) plus our parts of 18 / 26 / 27, 6 waiting on Brent, 0 UI left.** Three more, offline:
 `extraction_service.derive_property_values_from_premises` (an empty building / BPP value from the premises rows of a
 document whose ROLE may state it - never a certificate's limit, D23); `scoped_evidence.trigger_values` (an AI
@@ -3289,7 +3295,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **13,998 passed, 1 failed, 19 skipped** (~17 min; 13 Oct 2026 evening, after part Z10 and another session's `_policy_contracts` change) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **14,013 passed, 1 failed, 19 skipped** (~18 min; 13 Oct 2026 night, after part Z11) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

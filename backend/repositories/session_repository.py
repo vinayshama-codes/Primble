@@ -511,7 +511,11 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 -- per-form scores client-side and label the result "Quote
                 -- Ready" at 90 - which is the PACKAGE threshold - so the badge
                 -- could disagree with the banner inside the same submission.
-                (data->'package_sqs'->>'package_sqs_score')::int      AS package_sqs_score,
+                -- Before forms (14 Oct 2026, Orbin item 2) the score the pre-form
+                -- screen showed (`form_routes._remember_pre_form_score`).
+                COALESCE((data->'package_sqs'->>'package_sqs_score')::int,
+                         (data->'pre_form_score'->>'package_sqs_score')::int)
+                                                                     AS package_sqs_score,
                 (SELECT jsonb_object_agg(key, value->'sqs')
                    FROM jsonb_each(CASE WHEN jsonb_typeof(data->'generated_forms') = 'object'
                                         THEN data->'generated_forms' ELSE '{}'::jsonb END))

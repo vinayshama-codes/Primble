@@ -788,7 +788,50 @@ occurrence / claims-made, WC officer exclusions). **With every one answered befo
 - **D6:** no pre-form score moves (pre-form Structural reads facts only). Post-form fill rate rises slightly on packages
   with one premises / several buildings (newly filled boxes at 1.00) - tell Brent with the rest.
 - Tests: `tests/test_items_5_18_22_27_13oct.py` (15); `test_choice_electric_dryrun_7oct` updated (the TEST pinned "only 125 /
-  140 items" - cards on other forms are item 22 itself).
+  140 items" - cards on other forms are item 22 itself). Full suite 14,013 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.
+
+### Z12. Orbin 22 Sep document re-checked on today's code + items 2 and 4 / 11 changed (14 Oct 2026)
+
+**Re-check (owner: "be honest and check deeply").** Stored Orbin run `bfa8711d` (1 Oct) re-stamped read-only through
+current code, plus the 8 Oct page-one rule re-run on its facts (what a fresh upload does today). Results: page-one
+CARRIER blank (Brent 8 Oct: two EMC companies) + the "carrier receiving this submission" card (now listed before
+forms, Z11); page-one premiums blank (Brent 8 Oct); Prior Carrier prints GL EMC P&C BBC7263-26 $3,954 and Auto EMCC
+6E7-40-02---26 $2,991, 07/15/2025-07/15/2026; **the Umbrella $3,418 and Inland Marine $300 expiring premiums print
+nowhere on the 125** (the grid has one "Other" column per year - Brent asked); producer phone / e-mail from the
+logged-in account (never the dec's agency phone; the dec prints no e-mail at all); GL CODE 91580, 91585; FEIN = the
+client's answer. Item 1 confirmed by the owner (a dashboard click opens the package page).
+
+**Item 2 - the score must not read as forms-dependent (owner: "fix point 2").**
+- Wording: "Submission Quality Score so far. It can change when forms are generated." -> "Submission Quality Score.
+  Scored from your documents and answers - no forms needed." (rail and classic layouts); the classic heading drops
+  "so far"; the rail footer reads "Submission Score" before forms (`packageGeneration.scoreHeading`, "Total Package
+  Score" after). Marketing page (`PlatformPage.jsx`): "Submission quality, scored without forms", "SQS scores the
+  submission itself - from its documents and answers, with or without ACORD forms - and still gates every download",
+  "Submission scoring" card; the step tags lose "SQS per-form".
+- **Dashboard showed "SQS -" before forms** - it reads a SAVED score and nothing was saved until the first answer.
+  `form_routes._remember_pre_form_score` copies the pre-form screen's score into `pre_form_score` (display only:
+  `package_sqs`, its history and the delta baseline untouched) on the four pre-form actions that change the package
+  (upload, integrity resolve, reclassify, confirm value - never a page view); `session_repository.
+  list_sessions_for_user` reads `COALESCE(package_sqs, pre_form_score)`. No score moves.
+- Kept on purpose (owner, part O): the per-row "becomes a hard stop" tag beside a warning's own "Open to fix".
+
+**Items 4 / 11 - the proposed term is the next anniversary on or after today (owner: "yes").** Brent retyped Choice
+Electric's 01/01/2026 (nine months past) as 01/01/2027-01/01/2028. `extraction_service._route_renewal_dates`: when the
+derived next term is more than `_ROLL_FORWARD_AFTER_DAYS` (30) days under way it rolls on to the term after it
+(derivation flag `rolled_to_next_anniversary`; still "Please verify - calculated"); a next term that began within 30
+days is kept (a renewal a few days late); a next term that has ENDED is still asked (documents two terms old). The
+old "next term ends within 30 days -> ask" rule is gone (that case now proposes the upcoming term). Orbin today:
+07/15/2027-07/15/2028 (was 07/15/2026-07/15/2027); Choice Electric 01/01/2027-01/01/2028. **Acts at the merge: a
+stored package keeps its dates until re-uploaded.**
+
+Tests: `tests/test_orbin_items_2_4_14oct.py` (new); TESTS updated, not code, where they pinned the old wording or the
+29 Sep date rule: `test_step2_orbin_29sep`, `test_package_page_1oct`, `test_remaining_items_15sep`,
+`test_relationship_preservation_20260815`, `test_line_binding_14sep`. Frontend build clean.
+
+**Still open on the Orbin document (for Brent / Michelle):** item 8's Umbrella / Inland Marine premiums (ask Brent -
+the Other column); items 5 and 12 declined, Michelle never told; item 14 - do carriers accept the built-in signature;
+item 15 lowers some weak packages; item 17's retype check never run; nothing verified on the deployed site with
+Michelle's account (set her Contact Phone / Agency Address first).
 
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below

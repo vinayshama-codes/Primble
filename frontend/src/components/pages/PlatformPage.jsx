@@ -9,7 +9,7 @@ const WORKFLOW_STEPS = [
     num: "02",
     title: "AI extraction and form recommendation",
     desc: "",
-    tags: ["AI extraction", "select-forms-bulk", "recommended forms UI"],
+    tags: ["AI extraction", "SQS score - no forms needed", "recommended forms UI"],
   },
   {
     num: "03",
@@ -21,7 +21,7 @@ const WORKFLOW_STEPS = [
     num: "04",
     title: "SQS quality check",
     desc: "",
-    tags: ["SQS per-form", "package-level", "hard/soft stops", "preflight modal"],
+    tags: ["submission-level", "hard/soft stops", "preflight modal"],
   },
   {
     num: "05",
@@ -79,8 +79,8 @@ export default function PlatformPage({ onGetStarted, onNavigate }) {
       <section className="mkt-section mkt-section-alt">
         <div className="mkt-section-inner">
           <div className="mkt-section-header">
-            <h2 className="mkt-section-h2">Quality gates before every download</h2>
-            <p className="mkt-section-sub">SQS isn't a report - it's a preflight check that runs before you can complete a download.</p>
+            <h2 className="mkt-section-h2">Submission quality, scored without forms</h2>
+            <p className="mkt-section-sub">SQS scores the submission itself - from its documents and answers, with or without ACORD forms - and still gates every download.</p>
           </div>
           <div className="mkt-sqs-grid">
             <div className="mkt-sqs-card">
@@ -89,11 +89,11 @@ export default function PlatformPage({ onGetStarted, onNavigate }) {
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
                 </svg>
               </div>
-              <h3 className="mkt-sqs-title">Per-form scoring</h3>
+              <h3 className="mkt-sqs-title">Submission scoring</h3>
               <ul className="mkt-sqs-list">
-                <li>Required field completeness %</li>
-                <li>Data type validation per field</li>
-                <li>Cross-form consistency checks</li>
+                <li>Key details and completeness</li>
+                <li>Exposure, property and loss history checks</li>
+                <li>Cross-document consistency checks</li>
                 <li>Insured name + policy date alignment</li>
               </ul>
             </div>

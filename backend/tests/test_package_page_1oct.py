@@ -577,7 +577,7 @@ def test_the_helper_in_node(tmp_path):
                          "Forms are being generated - wait for them to finish.", None, None]
     assert o["label"] == ["Continue where you left off", "Continue where you left off",
                           "Continue to form selection", "Continue to form selection"]
-    assert o["head"] == ["Total Package Score", "Score so far", "Score so far", "Score so far"]
+    assert o["head"] == ["Total Package Score", "Submission Score", "Submission Score", "Submission Score"]
     assert o["rows"] == [
         {"formId": "ACORD_125", "label": "ACORD 125", "score": 77, "grade": None, "tier": "Needs Work"},
         {"formId": "ACORD_25", "label": "ACORD 25", "score": 81, "grade": "B", "tier": "Almost There"},
@@ -632,8 +632,9 @@ def test_both_layouts_switch_the_button_and_the_score_label():
     assert "onClick={(e) => { if (e.detail > 1) return; handleContinueFromPackage(); }}" in modal
     assert 'onContinue={() => setStep("form_selection")}' not in modal
     assert '? <div className="rr-ready__note">Total Package Score</div>' in rail
-    assert '{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score so far"}' in modal
-    assert '{pkgGen.state !== GEN_DONE && <div className="tier2-detail">It can change when forms are generated.</div>}' in modal
+    assert '{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score"}' in modal
+    assert ('{pkgGen.state !== GEN_DONE && <div className="tier2-detail">Scored from your documents '
+            'and answers - no forms needed.</div>}') in modal
 
 
 def test_both_layouts_lock_the_document_and_value_actions():

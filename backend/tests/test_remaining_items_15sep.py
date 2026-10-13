@@ -119,11 +119,14 @@ class TestProposedTerm:
         assert _v(mf["prior_expiration_date"]) == exp
         assert mf["prior_expiration_date"]["routed_from"] == "current_term"
         assert mf["renewal_dates_routed"] is True
-        assert _v(mf["effective_date"]) == exp_d.strftime("%m/%d/%Y")
+        # 14 Oct 2026 (owner): that next term is 76 days under way, so the
+        # proposal is the next anniversary - one more term on (Brent's retype).
+        assert _v(mf["effective_date"]) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
         assert mf["effective_date"]["source"] == "derived"
         assert mf["effective_date"]["confidence"] == "low_confidence"
         assert mf["effective_date"]["derivation"]["rule"] == "next_term_after_current_policy"
-        assert _v(mf["expiration_date"]) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+        assert mf["effective_date"]["derivation"]["rolled_to_next_anniversary"] is True
+        assert _v(mf["expiration_date"]) == _year_shift(exp_d, 2).strftime("%m/%d/%Y")
         assert not (mf.get(es.REJECTED_FACTS_KEY) or {})
         assert "renewal_lines_expiring" not in mf       # never a "Renewal:" warning here
 
@@ -140,9 +143,13 @@ class TestProposedTerm:
         reason = mf[es.REJECTED_FACTS_KEY]["effective_date"]
         assert "out of date" in reason and "—" not in reason
 
-    @pytest.mark.parametrize("next_ends_in, asked", [(-1, True), (29, True), (31, False), (200, False)])
-    def test_the_stale_boundary(self, next_ends_in, asked):
-        # A next term that ends within 30 days is not a proposal (grace window).
+    @pytest.mark.parametrize("next_ends_in, outcome", [
+        (-1, "asked"), (29, "rolled"), (31, "rolled"), (200, "rolled"), (350, "kept")])
+    def test_the_stale_boundary(self, next_ends_in, outcome):
+        # 14 Oct 2026 (owner): a next term that has ENDED is asked; one more
+        # than 30 days under way rolls on to the next anniversary (Brent's
+        # retype); one that began within 30 days is the proposal. (Until 14 Oct
+        # a next term ending within 30 days was asked as well.)
         exp_d = datetime.now() + timedelta(days=next_ends_in - 365)
         if exp_d.month == 2 and exp_d.day == 29:
             exp_d -= timedelta(days=1)
@@ -150,8 +157,11 @@ class TestProposedTerm:
         eff, exp = eff_d.strftime("%m/%d/%Y"), exp_d.strftime("%m/%d/%Y")
         mf = _term_facts(eff, exp)
         es._route_renewal_dates(mf, _term_docs(eff, exp))
-        assert ("effective_date" not in mf) is asked
-        if not asked:
+        if outcome == "asked":
+            assert "effective_date" not in mf
+        elif outcome == "rolled":
+            assert _v(mf["effective_date"]) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+        else:
             assert _v(mf["effective_date"]) == exp
 
     def test_a_term_we_would_not_repeat_is_still_asked(self):
@@ -226,7 +236,9 @@ class TestProposedTerm:
         eff, exp = _d(-500), _d(-135)
         mf = _term_facts(eff, exp, renewal="yes")
         es._route_renewal_dates(mf, _term_docs(eff, exp))
-        assert _v(mf["effective_date"]) == exp
+        # 14 Oct 2026: that next term is 135 days under way - the next anniversary.
+        nxt = es._renewed_term_end(datetime.strptime(eff, "%m/%d/%Y"), datetime.strptime(exp, "%m/%d/%Y"))
+        assert _v(mf["effective_date"]) == nxt.strftime("%m/%d/%Y")
         assert mf["effective_date"]["derivation"]["rule"] == "renewal_routing_prior_expiration"
 
     def test_a_renewal_dec_in_force_now_proposes_the_next_term(self):
@@ -243,8 +255,10 @@ class TestProposedTerm:
         es._route_renewal_dates(mf, _term_docs(eff, exp))
         assert mf["prior_effective_date"] == "01/01/2020"
         assert mf["prior_expiration_date"] == "01/01/2021"
-        # 29 Sep 2026: the ended term still proposes the next one.
-        assert _v(mf["effective_date"]) == exp
+        # 29 Sep 2026: the ended term still proposes the next one - its next
+        # anniversary since 14 Oct (that term is 135 days under way).
+        nxt = es._renewed_term_end(datetime.strptime(eff, "%m/%d/%Y"), datetime.strptime(exp, "%m/%d/%Y"))
+        assert _v(mf["effective_date"]) == nxt.strftime("%m/%d/%Y")
         assert mf["effective_date"]["source"] == "derived"
 
     @pytest.mark.parametrize("junk", [None, "", "not a date", {"value": None}, 7, ["x"]])
@@ -505,8 +519,9 @@ def test_through_the_merge_the_orbin_package_proposes_its_next_term():
                      "coverage_lines": copy.deepcopy(_LINES)},
            "flags": {}}
     mf, _flags = es.merge_facts([doc], doc)
-    assert _v(mf.get("effective_date")) == exp_d.strftime("%m/%d/%Y")
-    assert _v(mf.get("expiration_date")) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+    # 14 Oct 2026: 76 days under way -> the next anniversary (owner).
+    assert _v(mf.get("effective_date")) == _year_shift(exp_d, 1).strftime("%m/%d/%Y")
+    assert _v(mf.get("expiration_date")) == _year_shift(exp_d, 2).strftime("%m/%d/%Y")
     assert _v(mf["prior_expiration_date"]) == exp
     assert mf.get("renewal_dates_routed") is True
     # 29 Sep 2026 (client items 7 / 8): a dec-only upload renews its programme.

@@ -18119,15 +18119,19 @@ def _renewed_term_end(prev_eff: Any, prev_exp: Any) -> Optional[Any]:
     return _next_term_end(prev_exp, prev_eff, prev_exp)
 
 
-# A derived next term that ends within this many days is treated as ended: a
-# proposal about to expire is not the term being applied for (29 Sep 2026).
+# Grace for a term we cannot repeat (outside 300-400 days): a renewal still
+# derives its effective date from it unless it ended more than a year and this
+# many days ago. (Until 14 Oct 2026 a next term ending within it was also asked;
+# that term now rolls on to the next anniversary - `_route_renewal_dates`.)
 _STALE_PROPOSAL_GRACE_DAYS = 30
+# A derived next term that began more than this many days ago is under way, so
+# the proposal rolls on to the anniversary after it (14 Oct 2026).
+_ROLL_FORWARD_AFTER_DAYS = 30
 
 
 def _park_stale_term(mf: dict, iso: str, next_iso: str) -> None:
-    """The current term ended AND the term after it has ended too (or ends
-    within _STALE_PROPOSAL_GRACE_DAYS): the documents are out of date, so both
-    proposed dates are asked."""
+    """The current term ended AND the term after it has ended too: the
+    documents are out of date, so both proposed dates are asked."""
     _move_current_term_to_prior(mf)
     reason = (f"the policy term in the documents ended on {iso} and the term after it "
               f"ends on {next_iso}; the documents are out of date, so the proposed "
@@ -18175,10 +18179,11 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     ended current-policy term (or an ended renewal term) derives the next term:
     effective = the old expiration, expiration = one repeat of the old term.
     Asked instead when:
-      * the next term has ALSO ended, or ends within
-        _STALE_PROPOSAL_GRACE_DAYS - the documents are out of date
+      * the next term has ALSO ended - the documents are out of date
         (`_park_stale_term`; this now applies to renewals too, which used to
-        derive a term that was already over);
+        derive a term that was already over). A next term that has started
+        but not ended rolls on to the term after it (14 Oct 2026: the next
+        anniversary on or after today - Brent's own retype);
       * the old term is not one we repeat (outside 300-400 days) on a
         non-renewal (`_park_ended_current_term`, the 15 Sep behaviour).
     """
@@ -18207,8 +18212,6 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     else:
         # ENDED (29 Sep 2026, client items 4 / 11): the next term follows the
         # ended one, unless it has ended too - then the documents are stale.
-        # A next term within _STALE_PROPOSAL_GRACE_DAYS of its end counts as
-        # ended: a proposal about to expire is not the term being applied for.
         from datetime import timedelta
         _eff_prev = normalize_date(_fv(mf, "effective_date") or "")
         _next = None
@@ -18217,7 +18220,10 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
                 _next = _renewed_term_end(datetime.strptime(_eff_prev, "%Y-%m-%d"), exp_d)
             except ValueError:
                 _next = None
-        if _next is not None and _next <= now + timedelta(days=_STALE_PROPOSAL_GRACE_DAYS):
+        # 14 Oct 2026 (owner, Brent's retype on Choice Electric): a next term
+        # that has STARTED but not ended rolls on to the term after it (below),
+        # so only a next term that has ENDED is stale now.
+        if _next is not None and _next <= now:
             _park_stale_term(mf, iso, _next.strftime("%Y-%m-%d"))
             return
         if _next is None and (not renewal or exp_d + timedelta(
@@ -18259,6 +18265,22 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
             prop_exp = _renewed_term_end(datetime.strptime(eff_prev, "%Y-%m-%d"), exp_d)
         except ValueError:
             pass
+    # THE NEXT ANNIVERSARY ON OR AFTER TODAY (14 Oct 2026, owner - Choice
+    # Electric / Orbin items 4 / 11). The term after an ended one can itself be
+    # under way: Choice Electric's dec ran 01/01/2025-01/01/2026, so on 5 Oct
+    # 2026 we proposed 01/01/2026 - nine months past - and Brent retyped
+    # 01/01/2027-01/01/2028. A proposal starts on the next anniversary that has
+    # not passed: once, since a next term that has ENDED is asked (above). A
+    # term that began within _ROLL_FORWARD_AFTER_DAYS is kept - a renewal a few
+    # days late is still that term, not one a year away.
+    rolled = False
+    if prop_exp is not None and prop_eff.date() < (now - timedelta(days=_ROLL_FORWARD_AFTER_DAYS)).date():
+        try:
+            _after = _next_term_end(prop_exp, datetime.strptime(eff_prev, "%Y-%m-%d"), exp_d)
+        except ValueError:
+            _after = None
+        if _after is not None:
+            prop_eff, prop_exp, rolled = prop_exp, _after, True
     # E&O 5.7's own worked example is exactly this value: "Proposed Effective
     # Date ... Derivation: Prior expiration date + renewal routing rule".
     mf["effective_date"] = {"value": prop_eff.strftime("%m/%d/%Y"),
@@ -18267,14 +18289,16 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
                                 "rule": ("renewal_routing_prior_expiration" if renewal
                                          else "next_term_after_current_policy"),
                                 "inputs": (["prior_expiration_date", "is_renewal"] if renewal
-                                           else ["prior_expiration_date"])}}
+                                           else ["prior_expiration_date"]),
+                                **({"rolled_to_next_anniversary": True} if rolled else {})}}
     if prop_exp is not None:
         mf["expiration_date"] = {"value": prop_exp.strftime("%m/%d/%Y"),
                                  "confidence": "low_confidence", "source": "derived",
                                  "derivation": {
                                      "rule": "renewal_routing_prior_term_length",
                                      "inputs": ["prior_effective_date",
-                                                "prior_expiration_date"]}}
+                                                "prior_expiration_date"],
+                                     **({"rolled_to_next_anniversary": True} if rolled else {})}}
     else:
         mf.pop("expiration_date", None)
         _record_fact_rejection(

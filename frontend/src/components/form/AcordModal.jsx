@@ -8037,7 +8037,7 @@ const AcordModal = forwardRef(function AcordModal({
                 </div>
               )}
             </div>
-            {/* Submission Quality Score so far (V1 H2, client section 7,
+            {/* Submission Quality Score before forms (V1 H2, client section 7,
                 2026-08-27; the number restored 29 Sep 2026 - Orbin 22 Sep
                 item 2, owner-approved).
                 This card used to print "Submission Readiness NN%" with a bar.
@@ -8048,11 +8048,12 @@ const AcordModal = forwardRef(function AcordModal({
                 figure (a 100% beside 12 warnings). From 27 Aug it printed only
                 the status label; the client then asked "Do not require forms
                 to get the score". Now:
-                  - the package SQS NUMBER and its tier, "so far" (scoreSoFar:
+                  - the package SQS NUMBER and its tier (scoreSoFar:
                     packageSqs.package_sqs_score - the real, capped package
                     score the backend's one door computes from the facts as
-                    they stand, NEVER tier2_score). It can still move when
-                    forms are generated, and the line under it says so.
+                    they stand, NEVER tier2_score). The line under it says it
+                    needs no forms (14 Oct 2026, Brent: SQS must not read as
+                    forms-dependent; the "so far" wording went).
                   - the Tier 1 + Tier 2 checklist, split into what is in place
                     and what is missing. Audience-neutral wording on purpose:
                     NAICS / SIC are producer-only (master-plan 4.4, principle
@@ -8067,10 +8068,10 @@ const AcordModal = forwardRef(function AcordModal({
                   {soFar && (
                     <>
                       <div className="tier2-header">
-                        <span className="tier2-label">{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score so far"}</span>
+                        <span className="tier2-label">{pkgGen.state === GEN_DONE ? scoreHeading(GEN_DONE) : "Submission Quality Score"}</span>
                         <span className="tier2-status" style={{ color: gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) }}>{soFar.text}</span>
                       </div>
-                      {pkgGen.state !== GEN_DONE && <div className="tier2-detail">It can change when forms are generated.</div>}
+                      {pkgGen.state !== GEN_DONE && <div className="tier2-detail">Scored from your documents and answers - no forms needed.</div>}
                     </>
                   )}
                   {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}

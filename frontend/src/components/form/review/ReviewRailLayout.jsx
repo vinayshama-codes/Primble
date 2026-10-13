@@ -428,7 +428,7 @@ export default function ReviewRailLayout(props) {
   const tierName = packageSqs?.tier || null;
   const tierIndex = tierName ? TIER_LADDER.findIndex((t) => t.name === tierName) : -1;
   const tierColor = tierName ? gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) : "#64748b";
-  // The package SQS so far (Orbin item 2, 29 Sep 2026): the one door's number,
+  // The package SQS before forms (Orbin item 2, 29 Sep 2026): the one door's number,
   // printed with the gauge and in the rail footer. Null means "Not scored yet".
   const soFar = scoreSoFar(packageSqs);
 
@@ -693,7 +693,7 @@ export default function ReviewRailLayout(props) {
                 )}
                 {soFar && (formsExist
                   ? <div className="rr-ready__note">Total Package Score</div>
-                  : <div className="rr-ready__note">Submission Quality Score so far. It can change when forms are generated.</div>)}
+                  : <div className="rr-ready__note">Submission Quality Score. Scored from your documents and answers - no forms needed.</div>)}
                 {/* With and without forms (13 Oct 2026): why the number moved at generation. */}
                 {formsExist && (() => {
                   const fx = formsEffect(packageSqs);

@@ -10,7 +10,7 @@ from fastapi import Request
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query, Form
 from fastapi.responses import JSONResponse, Response
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL, FREE_PACKAGE_LIMIT
@@ -219,6 +219,29 @@ async def _refuse_once_forms_exist(session: dict) -> None:
         raise HTTPException(409, reason)
 
 
+async def _remember_pre_form_score(session_id: str, row: Optional[dict], pkg: Any) -> None:
+    """The dashboard reads a SAVED score (`list_sessions_for_user`), and before
+    forms nothing was saved until the first answer - so a new package showed
+    "SQS -" until forms existed (Orbin 22 Sep item 2, Brent: "we should not be
+    requiring the forms to be created in order to get the score"). The score
+    the pre-form screen shows is copied to `pre_form_score` - display only:
+    `package_sqs`, its history and the delta baseline stay untouched, and once
+    `package_sqs` is saved the dashboard reads that first. Only the pre-form
+    actions that change the package call this (upload, integrity resolve,
+    reclassify, confirm value); a page view never writes. Never raises."""
+    if not isinstance(row, dict) or row.get("generated_forms"):
+        return
+    score = pkg.get("package_sqs_score") if isinstance(pkg, dict) else None
+    snap = ({"package_sqs_score": int(round(float(score))), "tier": pkg.get("tier")}
+            if isinstance(score, (int, float)) and not isinstance(score, bool) else None)
+    if row.get("pre_form_score") == snap:
+        return
+    try:
+        await upd_processing_session(session_id, {"pre_form_score": snap})
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.warning(f"pre-form score not saved for the dashboard [session={session_id}]: {_ex}")
+
+
 async def _pre_form_status(
     session_id: str,
     facts: dict,
@@ -226,6 +249,7 @@ async def _pre_form_status(
     integrity: dict,
     current_user: dict,
     session_row: Optional[dict] = None,
+    remember_score: bool = False,
 ) -> tuple:
     """V1 H2 (client section 7, 2026-08-27): what the pre-form Review screen
     prints instead of the old Tier 2 percentage - `(package_sqs, key_details)`.
@@ -256,6 +280,8 @@ async def _pre_form_status(
         logger.error(f"pre-form status: package SQS unavailable [session={session_id} "
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
         pkg = None
+    if remember_score:
+        await _remember_pre_form_score(session_id, row, pkg)
     # Recommendations section (Choice Electric #22, 7 Oct 2026): each Best
     # Solutions row a person can answer carries the fix window it opens - the
     # same descriptor (and choices) a card on that fact offers. Adds a key to
@@ -644,7 +670,8 @@ async def upload_declaration(
         # exactly as tier2_score is below. Scored BEFORE the grouped view so
         # any 60-cap the package scorer holds privately can be rendered as the
         # hard stop it is.
-        _status_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
+        _status_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user,
+                                             remember_score=True)
         _pkg_now, _key_now = _status_now
         _grouped_issues = _grouped_with_package_caps(
             structured_issues, hard_stops, _final_soft_stops, _pkg_now, facts=merged_facts)
@@ -891,7 +918,7 @@ async def submission_integrity_resolve(
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _status_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
-        result.get("mflags") or {}, integrity, current_user,
+        result.get("mflags") or {}, integrity, current_user, remember_score=True,
     )
     _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(
@@ -1021,7 +1048,7 @@ async def document_reclassify(
         # no-form path instead of skipped. Persist + snapshot are unchanged.
         _status_now = await _pre_form_status(
             result["session_id"], result.get("merged_facts") or {},
-            result.get("mflags") or {}, integrity, current_user,
+            result.get("mflags") or {}, integrity, current_user, remember_score=True,
         )
         _pkg_now, _key_now = _status_now
         _dry_now = getattr(_status_now, "dry_run", None)
@@ -1221,7 +1248,7 @@ async def underwriting_confirm_value(
     # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _status_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
-        result.get("mflags") or {}, integrity, current_user,
+        result.get("mflags") or {}, integrity, current_user, remember_score=True,
     )
     _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(

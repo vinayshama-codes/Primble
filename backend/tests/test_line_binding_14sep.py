@@ -406,9 +406,16 @@ def test_orbin_keeps_the_term_its_policies_print(merged):
     assert not es._fv(mf, "is_renewal")
     assert es._fv(mf, "prior_effective_date") == "07/15/25"
     assert es._fv(mf, "prior_expiration_date") == "07/15/26"
-    if datetime.now() + timedelta(days=es._STALE_PROPOSAL_GRACE_DAYS) < datetime(2027, 7, 15):
+    # 14 Oct 2026 (owner): once that next term is more than 30 days under way
+    # the proposal rolls on to the next anniversary (Brent's own retype); a
+    # next term that has ENDED is asked.
+    now = datetime.now()
+    if now < datetime(2026, 7, 15) + timedelta(days=es._ROLL_FORWARD_AFTER_DAYS):
         assert es._fv(mf, "effective_date") == "07/15/2026"
         assert es._fv(mf, "expiration_date") == "07/15/2027"
+    elif now < datetime(2027, 7, 15):
+        assert es._fv(mf, "effective_date") == "07/15/2027"
+        assert es._fv(mf, "expiration_date") == "07/15/2028"
     else:
         assert not es._fv(mf, "effective_date") and not es._fv(mf, "expiration_date")
 

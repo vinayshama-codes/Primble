@@ -247,13 +247,16 @@ def test_the_orbin_replay_proposes_the_next_term_and_nothing_else_moves():
     docs = [{"doc_type": "dec_page", "facts": {"effective_date": _v(mf["effective_date"]),
                                                "expiration_date": _v(mf["expiration_date"])}}]
     es._route_renewal_dates(mf, docs)
-    assert _v(mf["effective_date"]) == _mdY(exp)
-    assert _v(mf["expiration_date"]) == _mdY(_year_shift(exp, 1))
+    # 14 Oct 2026 (owner): the next term is 76 days under way, so the proposal
+    # is its next anniversary - one more term on (Brent's Choice Electric retype).
+    assert _v(mf["effective_date"]) == _mdY(_year_shift(exp, 1))
+    assert _v(mf["expiration_date"]) == _mdY(_year_shift(exp, 2))
     schema = _schema("ACORD_125")
     facts_for = {**mf, "_form_id": "ACORD_125"}
-    assert ps._resolve_renewal_proposed_period("Policy_EffectiveDate_A", facts_for) == _mdY(exp)
-    assert ps._resolve_renewal_proposed_period("Policy_ExpirationDate_A", facts_for) == \
+    assert ps._resolve_renewal_proposed_period("Policy_EffectiveDate_A", facts_for) == \
         _mdY(_year_shift(exp, 1))
+    assert ps._resolve_renewal_proposed_period("Policy_ExpirationDate_A", facts_for) == \
+        _mdY(_year_shift(exp, 2))
     assert "Policy_EffectiveDate_A" in schema
 
 
@@ -928,8 +931,12 @@ _ACORD_MODAL = _FRONTEND_SRC / "components" / "form" / "AcordModal.jsx"
 _RAIL = _FRONTEND_SRC / "components" / "form" / "review" / "ReviewRailLayout.jsx"
 _FORMATTERS = _FRONTEND_SRC / "utils" / "formatters.js"
 _OLD_LINE = "calculated after forms are generated"
+# 14 Oct 2026 (owner, Orbin item 2 - Brent: SQS must not read as forms-
+# dependent): the "so far ... It can change when forms are generated" wording
+# went. The TESTS changed with it.
 _CAN_CHANGE = "It can change when forms are generated."
-_RAIL_NOTE = "Submission Quality Score so far. " + _CAN_CHANGE
+_NO_FORMS = "Scored from your documents and answers - no forms needed."
+_RAIL_NOTE = "Submission Quality Score. " + _NO_FORMS
 _EM_DASHES = ("\u2014", "\u2013")   # em dash, en dash
 
 
@@ -944,8 +951,8 @@ def test_neither_review_screen_says_the_score_waits_for_forms(path):
     src = _src(path)
     assert _OLD_LINE not in src
     assert "scoreSoFar(packageSqs)" in src
-    assert _CAN_CHANGE in src
-    assert "so far" in src
+    assert _NO_FORMS in src
+    assert _CAN_CHANGE not in src and "Score so far" not in src
 
 
 def test_the_rail_prints_the_number_with_the_gauge_and_in_the_footer():
@@ -956,13 +963,13 @@ def test_the_rail_prints_the_number_with_the_gauge_and_in_the_footer():
     assert '{tierName || "Not scored yet"}' in gauge
     # the note replaces the old line, only when there is a score
     assert "{soFar && (" in src and _RAIL_NOTE in src
-    # the rail footer. Its label is "Score so far" before generation and "Total
-    # Package Score" once forms exist (Orbin item 1, owner, 1 Oct 2026 - the
-    # TEST changed: the label used to be fixed text). `scoreHeading` is run for
-    # real in tests/test_package_page_1oct.py.
+    # the rail footer. Its label is "Submission Score" before generation (was
+    # "Score so far" until 14 Oct 2026) and "Total Package Score" once forms
+    # exist (Orbin item 1, owner, 1 Oct 2026). `scoreHeading` is run for real
+    # in tests/test_package_page_1oct.py.
     assert '<div className="rr-rail-foot__label">{scoreHeading(genState)}</div>' in src
     pg = (_FRONTEND_SRC / "utils" / "packageGeneration.js").read_text(encoding="utf-8")
-    assert 'state === GEN_DONE ? "Total Package Score" : "Score so far"' in pg
+    assert 'state === GEN_DONE ? "Total Package Score" : "Submission Score"' in pg
     assert 'soFar ? soFar.text : "Not scored yet"' in src
     assert "Submission readiness</div>" not in src
     # kept: the panel title, the key-details lines, the tier ladder, Progress
@@ -978,9 +985,9 @@ def test_the_classic_card_prints_the_score_so_far():
     assert "Current Submission Readiness" not in src
     card = src[src.index("const soFar = scoreSoFar(packageSqs);"):]
     card = card[:card.index("})()}")]
-    assert "Submission Quality Score so far" in card
+    assert '"Submission Quality Score"' in card and "so far" not in card
     assert "{soFar.text}" in card
-    assert _CAN_CHANGE in card
+    assert _NO_FORMS in card and _CAN_CHANGE not in card
     # same colour as before: the grade of the package score
     assert "gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score))" in card
     assert "Key details in place:" in card and "<KeyDetailsMissing keyDetails={keyDetails}" in card
@@ -988,8 +995,8 @@ def test_the_classic_card_prints_the_score_so_far():
 
 def test_the_new_copy_carries_no_em_dash():
     rail, modal = _src(_RAIL), _src(_ACORD_MODAL)
-    for text, where in ((_RAIL_NOTE, rail), ("Score so far", rail),
-                        ("Submission Quality Score so far", modal), (_CAN_CHANGE, modal)):
+    for text, where in ((_RAIL_NOTE, rail), ('"Submission Quality Score"', modal),
+                        (_NO_FORMS, modal)):
         assert text in where, text
         assert not any(d in text for d in _EM_DASHES), text
     for src in (rail, modal):

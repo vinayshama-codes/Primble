@@ -38,10 +38,10 @@ export const sqsGradeFromScore = (v) => {
   return "F";
 };
 
-// The pre-form Review screen's "score so far" (Orbin 22 Sep item 2, 29 Sep
-// 2026): the package SQS the backend's one door computed from the facts as
-// they stand, printed as "<n> / 100 - <tier>". It can still move when forms
-// are generated, hence "so far". Null when there is no finite score, so a
+// The pre-form Review screen's score (Orbin 22 Sep item 2, 29 Sep 2026): the
+// package SQS the backend's one door computed from the facts as they stand,
+// printed as "<n> / 100 - <tier>". No forms needed (Brent: SQS must not read
+// as forms-dependent - the "so far" wording went 14 Oct). Null when there is no finite score, so a
 // missing score reads "Not scored yet" and never "0 / 100" (Number(null) and
 // Number("") are both 0).
 export const scoreSoFar = (pkg) => {

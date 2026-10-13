@@ -300,12 +300,18 @@ class TestRenewalDateRouting:
         _route_renewal_dates(mf)
         assert mf["prior_effective_date"] and mf["prior_expiration_date"]
         assert mf["renewal_dates_routed"] is True
-        # Proposed effective == the expiring policy's expiration date.
-        assert mf["effective_date"]["value"] == _past_date(31)
+        # Proposed effective == the expiring policy's expiration date - and
+        # since 14 Oct 2026 (owner), once that next term is more than 30 days
+        # under way (31 here), its next anniversary instead.
+        assert mf["effective_date"]["value"] == _future_date(334)
         assert mf["effective_date"]["source"] == "derived"
         assert mf["effective_date"]["confidence"] == "low_confidence"
+        assert mf["effective_date"]["derivation"]["rolled_to_next_anniversary"] is True
         # ...and a full annual term follows it.
-        assert mf["expiration_date"]["value"] == _future_date(334)
+        from datetime import datetime as _dt
+        _eff = _dt.strptime(mf["effective_date"]["value"], "%m/%d/%Y")
+        _exp = _dt.strptime(mf["expiration_date"]["value"], "%m/%d/%Y")
+        assert 360 <= (_exp - _eff).days <= 370
 
     def test_a_derived_renewal_term_is_never_treated_as_producer_asserted(self):
         from services.sqs_service import _dates_are_producer_asserted
