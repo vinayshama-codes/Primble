@@ -2649,6 +2649,12 @@ def _resolve_auto_liability_limit_cell(field_name: str, facts: dict):
     """
     if _state_auto_grid_decides(field_name, facts):
         return _SCHED_SKIP            # 137's "CSL / BI EA PER" box - see state_auto_grid
+    if str(field_name or "").startswith("UnderlyingPolicy_"):
+        # ACORD 131's underlying-policy grid (its OTHER policy's CSL, a CSL
+        # PREMIUM box) belongs to `_resolve_underlying_policy_row`: on a package
+        # with no coverage lines this cell printed the auto limit there
+        # (14 Oct 2026 review, reachable once a typed limit reads as an amount).
+        return _SCHED_SKIP
     is_csl_box = _CSL_FIELD_TOKEN in field_name and "Indicator" not in field_name
     split_fact = next(
         (fact for token, fact in _SPLIT_FIELD_FACTS if token in field_name), None
@@ -7703,6 +7709,14 @@ def _applicant_gl_codes_from_schedule(facts: dict):
             return _SCHED_SKIP
         if code not in codes:
             codes.append(code)
+    if not codes:
+        # No rating schedule: the code a PERSON gave (14 Oct 2026, run
+        # `b117f010`). The "no class codes" card's answer printed on the 126
+        # grid (W7, 13 Oct) and never in this box - one answer, two readers.
+        for row in _gl_code_only_rows(facts):
+            code = str(row.get("class_code") or "").strip()
+            if code and _ISO_GL_CLASS_CODE_RE.match(code) and code not in codes:
+                codes.append(code)
     if not codes or len(codes) > _GL_CODE_BOX_MAX_CODES:
         return _SCHED_SKIP
     return ", ".join(codes)

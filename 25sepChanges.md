@@ -826,12 +826,59 @@ stored package keeps its dates until re-uploaded.**
 
 Tests: `tests/test_orbin_items_2_4_14oct.py` (new); TESTS updated, not code, where they pinned the old wording or the
 29 Sep date rule: `test_step2_orbin_29sep`, `test_package_page_1oct`, `test_remaining_items_15sep`,
-`test_relationship_preservation_20260815`, `test_line_binding_14sep`. Frontend build clean.
+`test_relationship_preservation_20260815`, `test_line_binding_14sep`. Frontend build clean. Full suite 14,022 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.
 
 **Still open on the Orbin document (for Brent / Michelle):** item 8's Umbrella / Inland Marine premiums (ask Brent -
 the Other column); items 5 and 12 declined, Michelle never told; item 14 - do carriers accept the built-in signature;
 item 15 lowers some weak packages; item 17's retype check never run; nothing verified on the deployed site with
 Michelle's account (set her Contact Phone / Agency Address first).
+
+### Z13. A person's pre-form answers reach their own boxes - and only those (14 Oct 2026, live Render run `b117f010`)
+
+**The live run** (Choice Electric, 6 decs, the Business Auto Policy held back for the item 25 test; 41 -> 100 before forms;
+generated 125 / 126 / 127 / 130 / 131 / 131 Excess / 137_CO / 140; 99 with forms, 100 without). Render's merged facts
+are under Render's key, so the check was: the session's 19 logged answers (`field_source_audit`) replayed read-only
+through the real fix routes on facts rebuilt from the documents' own readings (40 vs the screen's 41 - the account's
+agency details), then each answer removed in turn and all 8 forms re-stamped (`<scratchpad>/live14/reach.py`): the
+boxes that move are the boxes that answer fills, compared with what Render printed. **Every answer that has a box
+reached it** (location table 53 boxes, contact, mailing, revenue, payroll, "Check if none", remarks, hydrant, FEIN,
+NAICS, SIC, employees, years, operations). Score-only (no box on these forms): occupancy, period of restoration, fire
+department type. The owner confirmed typing FT 90 / PT 100 / 8500 sq ft on both rows (own values print).
+
+**Fixed (each measured):**
+1. **ACORD 125 GL CODE ignored the person's code** - `_applicant_gl_codes_from_schedule` read only the rating
+   schedule; the "no class codes" card's answer (`gl_class_codes_by_location`) printed on the 126 (W7, Z11) and not
+   here. Falls back to `_gl_code_only_rows` (5-digit ISO codes only; a schedule still wins).
+2. **A typed auto limit could never print** - stored as bare digits ("$1,000,000" -> "1000000"), which
+   `coverage_evidence._labelled_amounts` refuses (to keep policy numbers inside a printing out). A printing that is
+   WHOLLY one bare number of 5+ digits is now that amount: the 131's underlying auto CSL prints 1,000,000.
+3. **A person's value was evidence for EVERY AI box holding the same text** (`ai_answer_guards._judge`) - the
+   hydrant "500" stood as miles to the fire station, the auto limit as the 137's UM limits, the roof year as heating /
+   wiring / other years, a contact's name as the contact TYPE. Now only for the question they answered
+   (`person_value_facts`, `box_question_facts` = `pdf_service.source_fact_for_field` + the schedule column + the
+   one-premises twin + `_FACT_FALLBACKS`). Round 9's own case holds (a person's year built / protection class on
+   building 2).
+4. **`_COPE_ATTRIBUTE_BOXES` had no exposure DISTANCE and no TOWING** - the 140's four exposure distances "500" and
+   the 137's towing "1,000,000" were checked by nothing. Added (exposure wording only; towing wording).
+
+**Measured.** `b117f010`: only the intended boxes move (125 GL CODE 92478, 131 auto CSL 1,000,000; refused: 140 fire
+station x2, exposure distances x4, 137 UM x3, towing). `ba7c709d`: + 125 GL CODE, - three improvement years 2015
+(W12). **611 stored packages** (99 Render-keyed skipped): 19 stored AI values now refused, **all junk** (towing
+1,000,000 x4 / $0, exposure "0" x6, improvement years from the roof year / year built, fire station 500, fire
+department type as the district, a contact's name as the contact type x2); **0 correct values lost**. **94 stored
+packages: 0 score changes** before or after forms. Tests: `tests/test_answers_reach_forms_14oct.py`.
+
+**"Your forms will need" (owner asked whether we had decided to remove it): no.** A 4-agent check of every chat and
+doc: the owner approved the group on 7 Oct ("okay built it like this the way you suggested"), asked on 8 Oct for MORE
+before forms (cross-form issues), and on 13 Oct removed only its "Why other boxes are not listed" breakdown. The six
+items are Brent #22 ("addressable prior to (and independently of) the forms") and the owner's Z11 "fix them all".
+
+**Still open on `b117f010` (AI values, noted, not fixed):** 137 "Other symbol" codes 1-7; 126 other deductible $5,000
+(property), "type of work subcontracted" from the narrative, products row = the business description; 130 rating /
+anniversary dates 01/01/2025 (W15), "Item 3A State: CO", the contact as accounting / claims / inspection contact; 131
+underlying description "The Schedule of Underlying Insurance is part of Policy No."; 125 contact type "Accounting"
+(W3); 127 garaging with no vehicles (auto policy not yet uploaded). Next live step: add the Business Auto Policy
+(item 25) - it re-stamps the forms in place, so the fixes show on this package without regenerating.
 
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below

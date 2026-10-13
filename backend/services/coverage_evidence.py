@@ -503,9 +503,24 @@ def _printing(text: Any) -> str:
     return _LIMIT_EDITION_RE.sub(" ", s)
 
 
+# A limit that is nothing but one number. A person's typed limit is stored that
+# way ("$1,000,000" -> "1000000"), and the bare-number refusal below - there to
+# keep a policy number or a count INSIDE a printing out of the amounts - read
+# it as no amount at all: the 131's underlying auto limit stayed blank on run
+# `b117f010` (14 Oct 2026) although the answer had cleared the score's warning.
+# Five digits or more, so a year or a count alone is never a limit.
+_WHOLE_BARE_AMOUNT_RE = re.compile(r"\s*(\d{5,}(?:\.\d{2})?)\s*")
+
+
 def _labelled_amounts(text: Any) -> List[Tuple[float, str, bool]]:
     """(dollars, the label nearest the amount, is_premium) for each money amount."""
     s = _printing(text)
+    whole = _WHOLE_BARE_AMOUNT_RE.fullmatch(s)
+    if whole:
+        num = whole.group(1)
+        v = float(num)
+        # A premium carries cents ("16818.00"); a limit printed with them is round.
+        return [(v, "", bool(re.search(r"\.\d{2}$", num)) and v % 1000 != 0)]
     found = []
     for m in _LIMIT_MONEY_RE.finditer(s):
         dollar, num = m.group(1), m.group(2)
@@ -687,11 +702,23 @@ def _human_liability_reading(facts: Optional[dict]) -> Optional[str]:
         if r:
             said.add(r)
     if _human_set(facts, "auto_liability_limit"):
+        # The person's OWN WORDS first (14 Oct 2026): a typed answer is stored
+        # as bare digits ("$500,000 per person / $1,000,000 per accident" ->
+        # "500000"), and one bare amount reads as a CSL - the words say split.
+        held = (facts or {}).get("auto_liability_limit")
+        words = held.get("answer_text") if isinstance(held, dict) else None
         limit = _fv(facts, "auto_liability_limit")
-        r, _ = read_liability_printing(limit)
+        r = None
+        for text in (words, limit):
+            if text:
+                r, _ = read_liability_printing(text)
+                if r:
+                    break
         if r:
             said.add(r)
-        elif len(set(liability_amounts(limit))) == 1:
+        elif words and _structure_reading(words) == "split":
+            said.add("split")
+        elif len(set(liability_amounts(words or limit))) == 1:
             said.add("csl")             # a person typed one amount for the limit
     if any(_human_set(facts, k) and _fv(facts, k)
            for k in ("auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")):

@@ -845,6 +845,12 @@ _COPE_ATTRIBUTE_BOXES: Tuple[Tuple[re.Pattern, re.Pattern, int], ...] = (
      re.compile(r"alarm|central\s+station|sprinkl|fire\s+(?:department|protection)", re.I), 80),
     (re.compile(r"BuildingExposure_\w*Description", re.I),
      re.compile(r"exposure|adjacent|adjoin\w*|\bfeet\b|\bft\b|distance|vacant", re.I), 80),
+    # ...and its DISTANCE (14 Oct 2026, run `b117f010`): ACORD 140 printed all
+    # four exposure distances as "500" - the producer's hydrant answer - on a
+    # package whose documents state no exposure. Only exposure wording counts:
+    # a "500 FT" printed for a hydrant is not a distance to an exposure.
+    (re.compile(r"BuildingExposure_\w*Distance", re.I),
+     re.compile(r"exposure|adjacent|adjoin\w*|clearance|separation", re.I), 80),
     # An AUTO COVERAGE's own amount (8 Oct 2026): ACORD 137 printed UM / UIM
     # limits of $1,000,000 three times - the liability limit - on a dec whose
     # Uninsured Motorists line reads "$SEE SCHEDULE" and whose schedule states
@@ -856,6 +862,9 @@ _COPE_ATTRIBUTE_BOXES: Tuple[Tuple[re.Pattern, re.Pattern, int], ...] = (
      re.compile(r"medical\s+payments|med\.?\s*pay", re.I), 200),
     (re.compile(r"PersonalInjuryProtection", re.I),
      re.compile(r"personal\s+injury\s+protection|\bp\.?i\.?p\.?\b", re.I), 200),
+    # Towing (14 Oct 2026, run `b117f010`): ACORD 137 printed a towing and
+    # labour limit of $1,000,000 - the liability limit - with no towing line.
+    (re.compile(r"TowingAndLabou?r", re.I), re.compile(r"towing", re.I), 200),
 )
 _SIG_WORD_RE = re.compile(r"[a-z]{4,}")
 _YES_NO_TOKEN_RE = re.compile(r"(?:y|n|yes|no|true|false|x|on|off|1|0)", re.I)
@@ -1005,14 +1014,50 @@ def _norm_answer(v: Any) -> str:
     return digits if digits and re.fullmatch(r"[\d\s.,%$]+", s) else re.sub(r"\s+", " ", s)
 
 
-def person_values(facts: Any) -> Set[str]:
-    out: Set[str] = set()
+def person_value_facts(facts: Any) -> Dict[str, Set[str]]:
+    """{normalised value: the facts a PERSON gave that value for}."""
+    out: Dict[str, Set[str]] = {}
     for k, v in (facts or {}).items() if isinstance(facts, dict) else ():
         if isinstance(v, dict) and str(v.get("source") or "").lower() in _PERSON_SOURCES:
             n = _norm_answer(v.get("value"))
             if n:
-                out.add(n)
+                out.setdefault(n, set()).add(str(k))
     return out
+
+
+def person_values(facts: Any) -> Set[str]:
+    return set(person_value_facts(facts))
+
+
+def box_question_facts(field: str, facts: Any, form_id: str = "") -> Set[str]:
+    """The facts a box's own question is about: what the stamper reads for it
+    (`pdf_service.source_fact_for_field`), its schedule column, the business fact
+    a one-premises box twins, the auto grid's own fact for a coverage box
+    (`state_auto_grid.box_facts`), and the one documented fallback hop."""
+    keys: Set[str] = set()
+    try:
+        ps = _ps()
+        src = ps.source_fact_for_field(field, facts if isinstance(facts, dict) else {}, form_id)
+        if src:
+            keys.add(str(src))
+        m = ps._SCHED_ROW_RE.match(field or "")
+        d = ps._schedule_def_for_base(m.group(1)) if m else None
+        if d is not None and d.sub_key:
+            keys.add(str(d.sub_key))
+        twin = ps.premises_twin_key(field)
+        if twin:
+            keys.add(str(twin))
+        # An auto coverage box the 137 / 138 grid reads a fact for (the UM,
+        # medical payments, liability and owned-deductible boxes).
+        from services.state_auto_grid import box_facts as _auto_box_facts
+        keys |= set(_auto_box_facts(field))
+        for k in list(keys):
+            alt = (getattr(ps, "_FACT_FALLBACKS", {}) or {}).get(k)
+            if alt:
+                keys.add(str(alt))
+    except Exception:                                      # noqa: BLE001
+        pass
+    return keys
 
 
 # ══ A business start date is not a policy date (8 Oct 2026) ══════════════════
@@ -1056,6 +1101,13 @@ class _Context:
         self.form_id = _base_form(form_id or (self.facts.get("_form_id") if self.facts else ""))
         self._parties: Optional[List[str]] = None
         self._classes: Optional[Set[str]] = None
+        self._person_value_facts: Optional[Dict[str, Set[str]]] = None
+
+    @property
+    def person_value_facts(self) -> Dict[str, Set[str]]:
+        if self._person_value_facts is None:
+            self._person_value_facts = person_value_facts(self.facts)
+        return self._person_value_facts
 
     @property
     def parties(self) -> List[str]:
@@ -1167,8 +1219,17 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
         return f"{REASON_ONE_WORD_OPERATIONS}: {text[:40]!r} is one word"
     if narrative and echoes_its_question(field, text, ctx.schema):
         return f"{REASON_ECHO}: {text[:40]!r} is the box's own question"
-    if _norm_answer(text) in getattr(ctx, "person_values", set()):
-        return None                       # a person stated this value
+    # A PERSON's value is evidence for the question they answered, never for
+    # every box that happens to hold the same text (14 Oct 2026, live run
+    # `b117f010`): the producer's hydrant distance "500" let the AI's "500"
+    # stand as the 140's miles to the fire station and all four exposure
+    # distances, and the typed auto liability limit let "1,000,000" stand as
+    # the 137's uninsured motorist limits. Round 9's own case still holds: a
+    # year built / protection class a person gave prints on building 2's boxes,
+    # which ask that same question.
+    _said_for = ctx.person_value_facts.get(_norm_answer(text))
+    if _said_for and _said_for & box_question_facts(field, ctx.facts, ctx.form_id):
+        return None                       # a person stated this value for this question
     if _BUILDING_YEAR_BOX_RE.match(field or "") and year_not_printed_as_a_building_year(text, ctx.raw_text):
         return f"{REASON_YEAR_FROM_A_DATE}: {text[:10]!r} is printed only inside dates"
     if _START_DATE_BOX_RE.search(field or "") and policy_date_as_business_start(text, ctx.raw_text):

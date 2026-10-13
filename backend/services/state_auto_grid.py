@@ -486,6 +486,25 @@ def _cell(family: str, base: str, facts: Any):
     return SKIP
 
 
+def box_facts(field_name: str) -> frozenset:
+    """The facts an auto coverage box's own question is about, by its name -
+    the facts `_cell` reads for it - on any form that prints the box (the 137
+    and the 138 name these boxes alike). Empty for any other box."""
+    m = re.match(r"^Vehicle_(?P<base>.+)_[A-Z]\d?$", str(field_name or ""))
+    if not m:
+        return frozenset()
+    base = m.group("base")
+    if base in _LIABILITY_PART:
+        return frozenset({"auto_liability_limit", "auto_bi_per_person",
+                          "auto_bi_per_accident", "auto_pd_per_accident"})
+    if base == "MedicalPayments_PerPersonLimitAmount":
+        return frozenset({"auto_med_pay_limit"})
+    if base in _UM_PART:
+        return frozenset({"auto_um_uim_limit"})
+    fact = _OWNED_PD_DEDUCTIBLE_FACT.get(base)
+    return frozenset({fact}) if fact else frozenset()
+
+
 # ── The door ─────────────────────────────────────────────────────────────────
 
 def resolve(form_id: str, field_name: str, facts: Any):
