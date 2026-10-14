@@ -1188,6 +1188,14 @@ sprinkler, none of which could move the score yet. `recommendations.pillarGates`
 answer is MEASURED to raise the score; every other row of that pillar is listed with "Adds points once Occupancy type is
 answered." (`heldBy`). Frontend only, no score moves. Tests: `test_held_pillar_rows_14oct.py` (3, on the replayed screen).
 
+**Z19 addendum 2 - typed addresses (owner, run 823d58a0).** "402 , dana street , Dnver,CO, 20132" raised "Address
+missing valid US state" beside a typed CO: `validators.validate_address` split on spaces only ("DNVER,CO," was one
+token), and `helpers._parse_address` read "Denver, CO, 80216" as city "CO" / state "80216". Now the check splits on commas
+too, and the parser joins a bare US ZIP after a bare state code ("CO, 80216") and a bare house number before a street
+part ("402, Dana Street"). Measured on 401 stored document addresses: 1 parse changed (a stored "..., Aurora, CO, 80011"
+that printed city CO / state 80011 - now right), 0 checks changed. A ZIP from another state still corrects the state (the
+existing rule). Tests: `test_address_parts_14oct.py`; 629 passed across the address tests.
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,

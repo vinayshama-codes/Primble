@@ -64,7 +64,9 @@ def validate_address(addr: str) -> Tuple[bool, str]:
     """
     if not addr:
         return True, ""
-    parts       = addr.upper().split()
+    # Commas split too (owner, 14 Oct 2026): "Dnver,CO, 20132" was one token,
+    # so a typed CO read as "missing valid US state".
+    parts       = [p for p in re.split(r"[\s,]+", addr.upper()) if p]
     addr_lower  = addr.lower()
     state_found = (
         any(p.strip(",.") in US_STATES for p in parts)

@@ -166,6 +166,8 @@ _ADDR_TRAILING_UNIT_RE = re.compile(
 )
 
 
+_BARE_ZIP_PART_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
+_HOUSE_NUMBER_PART_RE = re.compile(r"^\d{1,6}[A-Za-z]?$")
 _US_COUNTRY_PART_RE = re.compile(
     r"^(?:u\.?\s?s(?:\.?\s?a)?|united\s+states(?:\s+of\s+america)?)$", re.I)
 _OTHER_COUNTRY_PART_RE = re.compile(r"^(?:canada|india|mexico)$", re.I)
@@ -204,6 +206,18 @@ def _parse_address(addr: str) -> dict:
         parts.pop()
     if parts:
         parts[-1] = _TRAILING_US_COUNTRY_RE.sub("", parts[-1]).strip()
+    # A STATE AND ZIP TYPED AS TWO PARTS ("Denver, CO, 80216") are one part, and
+    # a HOUSE NUMBER TYPED AS ITS OWN PART ("402, Dana Street, ...") belongs to
+    # the street (owner, 14 Oct 2026: "402 , dana street , Dnver,CO, 20132" read
+    # "CO" as the city and the ZIP as the state, and the check said "Address
+    # missing valid US state" beside a typed CO). Each merge needs its exact
+    # shape: a bare US ZIP after a bare US state code; a bare house number
+    # before a part that starts with a word.
+    if len(parts) >= 3 and _BARE_ZIP_PART_RE.match(parts[-1]) \
+            and parts[-2].strip().upper() in _US_ZIP_STATES:
+        parts[-2:] = [f"{parts[-2].strip()} {parts[-1].strip()}"]
+    if len(parts) >= 3 and _HOUSE_NUMBER_PART_RE.match(parts[0]) and parts[1][:1].isalpha():
+        parts[:2] = [f"{parts[0]} {parts[1]}"]
     result = {}
     if len(parts) >= 1:
         result["line1"] = parts[0]
