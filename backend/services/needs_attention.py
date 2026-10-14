@@ -829,20 +829,82 @@ def _unanswered_high_impact_question_test(form_id: str, schema: dict, mapped: di
     return test
 
 
+def _unanswered_high_impact_box_test(form_id: str, schema: dict, mapped: dict,
+                                     labels: dict, facts: Optional[dict],
+                                     flags: Optional[dict]):
+    """A predicate: is this empty box a high-impact BOX (not a question) the AI
+    was asked and left blank - the `field_qa` "high-impact box the AI left
+    blank" finding (Figure 33), read with field QA's own tests: an empty box
+    labelled low_confidence, high-impact by `is_high_impact_field`, not an
+    explanation box (it follows its question), not an unticked option, not a
+    spare row of an answered section, no resolver owns the blank. Built once
+    per form. Fails closed (never lists)."""
+    try:
+        from services.field_mapping_integrity import is_high_impact_field
+        from services.field_qa import _is_explanation_box, _spare_row_of_an_answered_group
+        from services.pdf_service import _is_nonfillable_field, _owned_blank_claim, _schema_context
+    except Exception:                                      # pragma: no cover
+        return lambda _f: False
+    owned_facts = {**(facts or {}), **(flags or {}), "_form_id": form_id}
+
+    def test(field: str) -> bool:
+        try:
+            if labels.get(field) != "low_confidence" or _has_value(mapped.get(field)):
+                return False
+            if is_question_box(schema, field) or _is_nonfillable_field(field):
+                return False
+            if _field_type(schema, field) == "/Btn":
+                return False                               # an unticked option
+            tip = _tooltip(schema, field) or None
+            if not is_high_impact_field(field, tip) or _is_explanation_box(field, tip):
+                return False
+            if _spare_row_of_an_answered_group(field, mapped):
+                return False
+            with _schema_context(schema):
+                return not bool(_owned_blank_claim(field, owned_facts))
+        except Exception:                                  # noqa: BLE001
+            return False
+    return test
+
+
+# The side panel's words for the findings that used to surface only at
+# download (Figure 33; owner, 14 Oct 2026: shown here first, then the review).
+HIGH_IMPACT_BLANK_REASON = "A high-impact box the AI left blank: no value was found in your documents."
+HIGH_IMPACT_BLANK_WHAT = "Enter it on the form if it applies."
+FINDING_WHAT = "Check it against your documents and correct it on the form if it is wrong."
+FINDING_HIGH_IMPACT_BLANK = "high_impact_blank"
+FINDING_VALUE_MISMATCH = "value_mismatch"
+FINDING_NOT_THE_INSURED = "not_the_insured"
+
+
 def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_id: str,
                     *, flags: Optional[dict] = None,
                     package_sqs: Optional[dict] = None,
-                    doc_haystack: Optional[str] = None) -> List[dict]:
+                    doc_haystack: Optional[str] = None,
+                    hard_blocks: Optional[List[dict]] = None,
+                    findings: Optional[dict] = None) -> List[dict]:
     """Rows for ONE generated form, in the order the form prints its boxes.
 
     Each row: form_id, form_label, field, page (1-based, None if the template
     has no widget for it), label, status, tag, required, reason, what_to_do,
     value / found_value, score_effect, score_effect_exact, score_text,
-    fact_key, answer_mode, applicant_step.
+    fact_key, answer_mode, applicant_step (and `blocks_download` on a box the
+    download gate holds).
 
     `doc_haystack`: the uploaded documents' text, folded by
     `document_haystack` - lets a "Please verify" reason say whether the
     documents print the value. Without it the reason claims nothing about them.
+
+    `hard_blocks`: this form's download-gate findings (`hard_block_findings`).
+    Each box is listed so the side panel shows it BEFORE the download review
+    does (owner, 14 Oct 2026: the download screen lists only what the producer
+    has already seen). None = not asked for (every caller but the
+    needs-attention route) - the rows are exactly as before.
+
+    `findings`: the Figure 33 findings the review used to show first, for this
+    form (`review_findings_for_form`) - {"high_impact_boxes": bool, "values":
+    [{field, finding, reason}]}. A box already listed keeps its one row (its
+    reason becomes the finding's); None = not asked for, rows as before.
     """
     fr = generated_form or {}
     # A form's second copy (ACORD 131 for the excess layer, 7 Oct 2026) is
@@ -897,6 +959,9 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
     # the blank, it is not a spare row, and no guard refused an answer.
     _unanswered_question = _unanswered_high_impact_question_test(_base, schema, mapped, labels,
                                                                 facts, flags)
+    # ...and, asked for by the side panel only, high-impact BOXES (Figure 33).
+    _unanswered_box = (_unanswered_high_impact_box_test(_base, schema, mapped, labels, facts, flags)
+                       if (findings or {}).get("high_impact_boxes") else None)
 
     sqs = fr.get("sqs") or {}
     recs = _recs_by_fact(sqs.get("recommendations"),
@@ -960,6 +1025,10 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             if status is None and gb is None and _unanswered_question(field):
                 status = STATUS_MISSING
                 reason = "UNANSWERED"
+            elif (status is None and gb is None and not applicant_step
+                  and _unanswered_box is not None and _unanswered_box(field)):
+                status = STATUS_MISSING
+                reason = "UNANSWERED_BOX"
         if status is None:
             continue
 
@@ -975,9 +1044,13 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
         text = _trim(text + _row_suffix(schema, field), _LABEL_MAX + 10)
 
         is_box = _field_type(schema, field) == "/Btn"
+        unanswered_box = status == STATUS_MISSING and reason == "UNANSWERED_BOX"
         if unanswered_q:
             what = "Answer it on the form if it applies."
             reason = "An underwriting question your documents do not answer."
+        elif unanswered_box:
+            what = HIGH_IMPACT_BLANK_WHAT
+            reason = HIGH_IMPACT_BLANK_REASON
         elif status == STATUS_MISSING:
             if applicant_step and applicant_state == "stale" and _signature_kind(field, tip) in ("signature", "date"):
                 what = APPLICANT_SIGNATURE_STALE
@@ -1024,6 +1097,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             "fact_key": fact_key,
             "answer_mode": _answer_mode(fact_key, facts),
             "applicant_step": bool(applicant_step and status == STATUS_MISSING),
+            **({"finding": FINDING_HIGH_IMPACT_BLANK} if unanswered_box else {}),
             "_sort": _print_order(field),
         })
 
@@ -1100,6 +1174,17 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                 "producer_todo": True,
                 "_sort": _print_order(anchor),
             })
+
+    if (findings or {}).get("values"):
+        rows = _with_value_findings(rows, findings["values"], schema=schema, form_id=form_id,
+                                    positions=positions, print_order=_print_order,
+                                    labels=labels, mapped=mapped, client_filled=client_filled,
+                                    facts=facts)
+
+    if hard_blocks:
+        rows = _with_hard_block_rows(rows, hard_blocks, schema=schema, form_id=form_id,
+                                     positions=positions, print_order=_print_order,
+                                     recs=recs, facts=facts)
 
     if _base == "ACORD_125":
         rows = _collapse_tick_groups(rows)
@@ -1189,9 +1274,251 @@ def _collapse_tick_groups(rows: List[dict]) -> List[dict]:
         grp.sort(key=lambda r: r["_sort"])
         keep = dict(grp[0], label=label, what_to_do=what, box_count=len(grp),
                     reason="Required on this form and none is ticked yet.")
+        if any(r.get("blocks_download") for r in grp):
+            keep["blocks_download"] = True
         drop = {id(r) for r in grp}
         out = [r for r in out if id(r) not in drop] + [keep]
     return out
+
+
+# ── The download gate's boxes, in the side panel (owner, 14 Oct 2026) ─────────
+# The download review lists only what an earlier screen showed and is still
+# open. The ONE exception to dropping is the download gate itself
+# (`field_qa.check_hard_block`: a placeholder value, or an ACORD 140 COPE box a
+# filled sibling makes required) - it cannot be dropped, because the server
+# refuses a clean download over it. Until now the side panel never listed those
+# boxes (`missing_required_gate` is deliberately not a Required label, and a
+# placeholder is a value), so they surfaced for the first time at download.
+# Now each is a side-panel row flagged `blocks_download`; the download review
+# lists it once, under Hard Stops (frontend `withoutHardStopBoxes`).
+
+# The row's own line says it blocks the download (`blocks_download`, drawn by
+# the side panel), so what to do is only what to do.
+HARD_BLOCK_WHAT_TO_DO = "Enter it on the form."
+_PLACEHOLDER_WHAT_TO_DO = "Enter the correct value on the form."
+
+
+def _could_block(fr: Optional[dict]) -> bool:
+    """True when this form can hold a download-gate finding at all - a box
+    labelled `missing_required_gate` or a value that reads as a placeholder.
+    A cheap superset of `field_qa.check_hard_block`, so the full check runs only
+    on forms that can block (most packages: none)."""
+    if not isinstance(fr, dict):
+        return False
+    if any(v == "missing_required_gate" for v in (fr.get("confidence") or {}).values()):
+        return True
+    try:
+        from services.field_qa import _has_value as _qa_has_value
+        from services.placeholder_detector import is_placeholder_value
+    except Exception:                                      # pragma: no cover
+        return True
+    mapped = fr.get("field_state") or fr.get("mapped") or {}
+    return any(_qa_has_value(v) and is_placeholder_value(v)[0] for v in mapped.values())
+
+
+def hard_block_findings(generated_forms: Optional[dict], facts: Optional[dict],
+                        form_ids: Optional[Iterable[str]] = None) -> List[dict]:
+    """The findings `field_qa.check_hard_block` (the download gate) returns for
+    these forms, computed the same way - read fresh from the stored forms, never
+    from a stored review row.
+
+    Cost: the gate's value-vs-source pass maps every fact onto every schema
+    (`pdf_service.fact_to_form_fields`, 4-13 s on one ACORD 140). It can only
+    move a finding for a gate box that HOLDS a value (an empty box is never a
+    mismatch; a placeholder is judged before it), so it runs only when such a
+    box exists - and then it is the gate itself, on that form. Measured equal to
+    `check_hard_block` on the stored packages (tests pin it)."""
+    from services.field_qa import (_HARD_BLOCK_REASON_CODES, _has_value as _qa_has_value,
+                                   check_hard_block, run_field_qa)
+    gen = generated_forms or {}
+    wanted = set(form_ids) if form_ids is not None else None
+    cand = [fid for fid, fr in gen.items()
+            if (wanted is None or fid in wanted) and _could_block(fr)]
+    if not cand:
+        return []
+    qa = run_field_qa({fid: gen[fid] for fid in cand}, merged_facts=facts or {},
+                      confirmations=None, unanswered=False, mismatches=False)
+    found = [r for r in (qa.get("results") or []) if r.get("reason_code") in _HARD_BLOCK_REASON_CODES]
+
+    def _holds_value(r: dict) -> bool:
+        fr = gen.get(r.get("form_id")) or {}
+        mapped = fr.get("field_state") or fr.get("mapped") or {}
+        return _qa_has_value(mapped.get(r.get("field")))
+
+    exact = sorted({r.get("form_id") for r in found
+                    if r.get("reason_code") == "missing_required_gate" and _holds_value(r)})
+    if exact:
+        found = [r for r in found if r.get("form_id") not in exact] + list(
+            check_hard_block(gen, form_ids=exact, merged_facts=facts or {}))
+    return found
+
+
+# ── Figure 33's findings, in the side panel first (owner, 14 Oct 2026) ───────
+# Field QA's value-vs-source mismatch and the field-mapping check's "a carrier
+# or policy value in an insured / owner box" were listed ONLY by the download
+# review. Each is now a row of the box it names, in the form's words, with its
+# reason - so the producer sees it where it is fixed, and the review lists it
+# through this door like every other row. A value a person typed or confirmed
+# is their decision and is never flagged here.
+
+_MISMATCH_RE = re.compile(r'shows "(?P<stamped>.*?)" but the source value is "(?P<expected>.*)"\.\s*Fix:',
+                          re.DOTALL)
+
+
+def _not_the_insured_reason(finding: dict) -> str:
+    value = _snippet(finding.get("value"), 60)
+    policy = str(finding.get("reason_code") or "").startswith("policy")
+    if finding.get("matched_fact_key"):
+        return (f'Shows "{value}", which matches your {"policy" if policy else "carrier"} '
+                "information, not the insured or owner.")
+    if policy:
+        return f'Shows "{value}", which reads like a policy number, not an insured or owner name.'
+    return f'Shows "{value}", which reads like an insurance company\'s name, not the insured or owner.'
+
+
+def review_findings_for_form(form_id: str, generated_form: Optional[dict], facts: Optional[dict], *,
+                             mismatch_rows: Optional[Iterable[dict]] = None,
+                             confirmations: Optional[dict] = None) -> dict:
+    """The Figure 33 findings for ONE form, as `needs_attention(findings=)`
+    takes them: high-impact blank boxes (judged in the loop), carrier / policy
+    values in insured or owner boxes (`field_mapping_integrity`, read live - it
+    is cheap), and value-vs-source mismatches - the STORED field-QA rows of this
+    form (the live check maps every fact onto every schema, 4-13 s per form),
+    each kept only while its box still shows the value it was measured on."""
+    fr = generated_form or {}
+    mapped = fr.get("field_state") or fr.get("mapped") or {}
+    values: List[dict] = []
+    try:
+        from services.field_mapping_integrity import detect_field_mapping_contamination
+        res = detect_field_mapping_contamination({form_id: fr}, merged_facts=facts or {},
+                                                 confirmations=confirmations or {})
+        for f in res.get("findings") or []:
+            if isinstance(f, dict) and f.get("field"):
+                values.append({"field": str(f["field"]), "finding": FINDING_NOT_THE_INSURED,
+                               "reason": _not_the_insured_reason(f)})
+    except Exception as exc:                               # noqa: BLE001
+        logger.warning("needs_attention: owner-box check skipped (%s) - %s", form_id, exc)
+    for r in mismatch_rows or ():
+        if not isinstance(r, dict) or not r.get("field"):
+            continue
+        if (r.get("component") or r.get("form_id")) != form_id:
+            continue
+        m = _MISMATCH_RE.search(str(r.get("message") or ""))
+        if not m:
+            continue
+        stamped, expected = m.group("stamped"), m.group("expected")
+        if _NORM.sub("", str(mapped.get(r["field"]) or "").lower()) != _NORM.sub("", stamped.lower()):
+            continue                                       # the box changed since it was measured
+        values.append({"field": str(r["field"]), "finding": FINDING_VALUE_MISMATCH,
+                       "reason": f'Shows "{_snippet(stamped, 60)}" but the source value is '
+                                 f'"{_snippet(expected, 60)}".'})
+    return {"high_impact_boxes": True, "values": values}
+
+
+def _with_value_findings(rows: List[dict], values: List[dict], *, schema: dict, form_id: str,
+                         positions: dict, print_order, labels: dict, mapped: dict,
+                         client_filled: set, facts: dict) -> List[dict]:
+    """`rows` with each finding on the box it names: a box already listed keeps
+    its ONE row and takes the finding's reason; otherwise the box is a "Please
+    verify" row (it holds a value - Confirm keeps it as the producer's)."""
+    by_field = {r["field"]: r for r in rows}
+    for v in values or []:
+        field = str(v.get("field") or "")
+        if not field or field in client_filled or labels.get(field) in ("producer", "client_arq"):
+            continue                                       # a person's own value
+        value = mapped.get(field)
+        if not _has_value(value) or str(value).strip() in _UNTICKED:
+            continue
+        row = by_field.get(field)
+        if row is not None:
+            if not row.get("finding"):
+                row["finding"] = v.get("finding")
+                row["reason"] = v.get("reason")
+            continue
+        label = labels.get(field)
+        fact_key = box_fact_key(field)
+        pos = positions.get(field)
+        new = {
+            "form_id": form_id,
+            "form_label": form_label(form_id),
+            "field": field,
+            "page": pos[0] if pos else None,
+            "label": _trim(box_label(schema, field) + _row_suffix(schema, field), _LABEL_MAX + 10),
+            "status": STATUS_VERIFY,
+            "tag": STATUS_TAG[STATUS_VERIFY],
+            "required": bool(label in _REQUIRED_LABELS),
+            "reason": v.get("reason"),
+            "what_to_do": FINDING_WHAT,
+            "value": str(value),
+            "found_value": None,
+            "score_effect": 0,
+            "score_effect_exact": True,
+            "score_text": VERIFY_SCORE_TEXT if label in CONFIRMABLE_LABELS else score_text(0, True),
+            "fact_key": fact_key,
+            "answer_mode": _answer_mode(fact_key, facts),
+            "applicant_step": False,
+            "finding": v.get("finding"),
+            "_sort": print_order(field),
+        }
+        rows.append(new)
+        by_field[field] = new
+    return rows
+
+
+def _with_hard_block_rows(rows: List[dict], findings: List[dict], *, schema: dict, form_id: str,
+                          positions: dict, print_order, recs: dict, facts: dict) -> List[dict]:
+    """`rows` with every download-gate box of this form listed ONCE, flagged
+    `blocks_download`. A placeholder is Missing whatever row the box had (a
+    Confirm would keep the placeholder, and the gate still holds); a gate box
+    already listed (a value under the gate label is "Please verify" - Confirm
+    clears the gate) keeps its row and gains the flag; otherwise a Missing row
+    is added."""
+    by_field = {r["field"]: r for r in rows}
+    for item in findings or []:
+        field = str(item.get("field") or "")
+        if not field or (item.get("form_id") and item.get("form_id") != form_id):
+            continue
+        placeholder = item.get("reason_code") == "placeholder_value"
+        row = by_field.get(field)
+        if row is not None and not placeholder:
+            row["blocks_download"] = True
+            row["required"] = True
+            continue
+        is_box = _field_type(schema, field) == "/Btn"
+        fact_key = box_fact_key(field)
+        pts, exact = _points(recs.get(fact_key or ""))
+        pos = positions.get(field)
+        stamped = item.get("stamped")
+        new = {
+            "form_id": form_id,
+            "form_label": form_label(form_id),
+            "field": field,
+            "page": pos[0] if pos else None,
+            "label": _trim(box_label(schema, field) + _row_suffix(schema, field), _LABEL_MAX + 10),
+            "status": STATUS_MISSING,
+            "tag": STATUS_TAG[STATUS_MISSING],
+            "required": True,
+            "reason": (f'Holds a placeholder ("{_snippet(stamped, 40)}"), not real data.'
+                       if placeholder else
+                       "Required here because another box in this section is filled."),
+            "what_to_do": (_PLACEHOLDER_WHAT_TO_DO if placeholder else
+                           ("Answer it on the form." if is_box else HARD_BLOCK_WHAT_TO_DO)),
+            "value": None,
+            "found_value": None,
+            "score_effect": pts,
+            "score_effect_exact": bool(exact),
+            "score_text": score_text(pts, exact),
+            "fact_key": fact_key,
+            "answer_mode": _answer_mode(fact_key, facts),
+            "applicant_step": False,
+            "blocks_download": True,
+            "_sort": print_order(field),
+        }
+        if row is not None:
+            rows = [r for r in rows if r is not row]
+        rows.append(new)
+        by_field[field] = new
+    return rows
 
 
 def count_rows(rows: List[dict]) -> Dict[str, int]:
@@ -1207,13 +1534,32 @@ def needs_attention_for_session(generated_forms: Optional[dict], facts: Optional
                                 *, flags: Optional[dict] = None,
                                 package_sqs: Optional[dict] = None,
                                 form_ids: Optional[Iterable[str]] = None,
-                                docs: Any = None) -> dict:
+                                docs: Any = None,
+                                hard_blocks: bool = False,
+                                findings: bool = False,
+                                mismatch_rows: Optional[Iterable[dict]] = None,
+                                confirmations: Optional[dict] = None) -> dict:
     """{"forms": [{form_id, form_label, rows, counts}], "counts": {...}} for
     every generated form (or `form_ids`), in the order the session holds them.
     Every count is summed from the rows - never computed beside them.
-    `docs`: the session's documents (or their text), read once for every form."""
+    `docs`: the session's documents (or their text), read once for every form.
+    `hard_blocks`: also list the download gate's boxes (`hard_block_findings`) -
+    the side panel and the download review ask for them (the needs-attention
+    route); the stored E&O rows, the cover and the dry run keep their own.
+    `findings`: also list Figure 33's findings (`review_findings_for_form`):
+    high-impact blank boxes, carrier / policy values in owner boxes, and the
+    stored value mismatches in `mismatch_rows` - same callers, same reason."""
     wanted = set(form_ids) if form_ids else None
     haystack = document_haystack(docs)
+    mismatch_rows = [r for r in (mismatch_rows or []) if isinstance(r, dict)]
+    blocking: Dict[str, List[dict]] = {}
+    if hard_blocks:
+        try:
+            for item in hard_block_findings(generated_forms, facts, form_ids=wanted):
+                blocking.setdefault(str(item.get("form_id") or ""), []).append(item)
+        except Exception as exc:                           # noqa: BLE001
+            # Fails open: the download review still lists the gate's own rows.
+            logger.warning("needs_attention: download-gate boxes skipped - %s", exc)
     out_forms: List[dict] = []
     total = {s: 0 for s in STATUS_ORDER}
     for fid, fr in (generated_forms or {}).items():
@@ -1221,8 +1567,12 @@ def needs_attention_for_session(generated_forms: Optional[dict], facts: Optional
             continue
         ok = True
         try:
+            found = (review_findings_for_form(fid, fr, facts, mismatch_rows=mismatch_rows,
+                                              confirmations=confirmations)
+                     if findings else None)
             rows = needs_attention(fr, facts, fid, flags=flags, package_sqs=package_sqs,
-                                   doc_haystack=haystack)
+                                   doc_haystack=haystack, hard_blocks=blocking.get(fid),
+                                   findings=found)
         except Exception as exc:                           # noqa: BLE001
             logger.warning("needs_attention: %s skipped - %s", fid, exc)
             rows, ok = [], False
@@ -1315,6 +1665,226 @@ def attention_recommendation_rows(attention: Optional[dict], shown: int = 6) -> 
                     "score_impact": None,
                 })
     return out
+
+
+# ── The download review lists only what the producer has already seen ─────────
+# Brent (14 Oct 2026): "Even after everything has seemingly been addressed on
+# the forms, the download modal is flooded with what appears to be new flags and
+# issues that were not present prior to form selection or during form
+# fulfillment." Owner's rule: the download screen shows recommendations,
+# warnings and hard stops only when an EARLIER screen showed them and they are
+# still open. The review reads two lists:
+#   * GET /api/needs-attention - the side panel's own rows (every form) and its
+#     New document choices: shown earlier by construction (the same door).
+#   * GET /api/audit/open - the stored rows, decided here:
+#       - a recommendation card is listed while a form's side panel shows it (its
+#         id is in that form's `sqs.recommendations`); a card no form shows any
+#         more was never in front of the producer in that state;
+#       - a download-gate row is the gate's LIVE finding (`hard_block_findings`),
+#         which the side panel now lists too - never a stale stored copy;
+#       - a stored needs-attention summary (`row_superseded_by_attention`) stays
+#         as before: the review shows it only for a form the live list could not
+#         read;
+#       - every other field-QA / field-mapping row (a value-vs-source mismatch, a
+#         high-impact box left blank, a schedule-row defect, a carrier name in an
+#         owner box) is shown on no earlier screen, so it is not listed. A box it
+#         names that the side panel lists is still listed - as that row.
+# Display only: the download gate, the stored rows, the cover and the E&O
+# record are untouched.
+
+_FINDING_PREFIXES = ("fieldqa_", "fieldmap_")
+
+
+def is_hard_block_row(rec_id: Optional[str]) -> bool:
+    return "hardblock_" in str(rec_id or "")
+
+
+# ── The review page's hard stops and warnings, on the download screen too ────
+# (owner, 14 Oct 2026). A hard stop or warning the Review page or the editor's
+# Cross-Form panel lists, still firing and not dismissed, is on the download
+# screen - "Driver schedule not provided" was open on 18ecbfa8's Review page
+# and absent at download. ONE PROBLEM, ONE LINE: an issue and a card (or a
+# side-panel box) that ask for the same thing are one line - the issue's, with
+# the card's points. "The same thing" is read off what each one FIXES, never
+# off its words: the facts / schedule an issue's fix window writes
+# (`resolution`), the fact a card answers (`field`, and the table it is derived
+# from), the fact a side-panel box writes back (`fact_key`).
+
+# A fact rebuilt from a schedule table: the table is how it is fixed.
+# Mirrors `extraction_service.sync_location_list` (pinned by a test).
+_FACT_DERIVED_FROM_SCHEDULE = {"locations": "property_locations"}
+
+# A card whose `field` names only ONE of the facts its rule reads. The Minimum
+# Viable COPE card (`sqs_service`, ACORD 140 / 141) is stored as `locations`
+# but asks for whichever of its four parts is missing - so beside the Review
+# page's COPE hard stop (whose fix writes occupancy, construction and the
+# building / BPP value) it is the same problem. The parts are read off the
+# scorer's own `_min_cope_parts` (pinned by a test, so they cannot drift).
+_CARD_READS = {
+    "rec_min_cope": ("locations", "occupancy_type", "construction_type",
+                     "property_building_value", "property_bpp_value"),
+}
+
+
+def _flat_names(value: Any) -> List[str]:
+    out: List[str] = []
+    if isinstance(value, str):
+        if value.strip():
+            out.append(value.strip())
+    elif isinstance(value, (list, tuple, set)):
+        for v in value:
+            out.extend(_flat_names(v))
+    return out
+
+
+def issue_fix_keys(item: Optional[dict]) -> set:
+    """What a hard stop / warning's own fix writes: its resolution's facts and
+    `needs`, its schedule table, and the fact it names."""
+    item = item or {}
+    res = item.get("resolution") if isinstance(item.get("resolution"), dict) else {}
+    keys = set(_flat_names(res.get("facts"))) | set(_flat_names(res.get("needs")))
+    keys |= set(_flat_names(res.get("schedule_key")))
+    keys |= set(_flat_names(item.get("source_fact")))
+    return {k for k in keys if k}
+
+
+def card_fix_keys(row: Optional[dict]) -> set:
+    """What a recommendation card answers: its fact, the table that fact is
+    derived from, and the table its answer opens (`answer_routing`)."""
+    field = str((row or {}).get("field") or "").strip()
+    if not field:
+        return set()
+    keys = {field} | set(_CARD_READS.get(str((row or {}).get("rec_id") or ""), ()))
+    if field in _FACT_DERIVED_FROM_SCHEDULE:
+        keys.add(_FACT_DERIVED_FROM_SCHEDULE[field])
+    try:
+        from services.answer_routing import answer_mode
+        sk = (answer_mode(field, {}) or {}).get("schedule_key")
+        if sk:
+            keys.add(str(sk))
+    except Exception:                                      # pragma: no cover
+        pass
+    return keys
+
+
+def _view_items(view: Optional[dict]):
+    """(severity, item) for every row a grouped view draws: its Hard Stops and
+    every Warnings tier, the way the screen reads a cluster (its items, or the
+    one issue a single-item cluster carries on itself)."""
+    if not isinstance(view, dict):
+        return
+    sections = [("hard_stop", view.get("hard_stops") or [])]
+    warn = view.get("warnings") or {}
+    tiers = warn.values() if isinstance(warn, dict) else [warn]
+    sections += [("soft_warning", t or []) for t in tiers]
+    for severity, clusters in sections:
+        for c in clusters or []:
+            if not isinstance(c, dict):
+                continue
+            items = c.get("items") if isinstance(c.get("items"), list) and c.get("items") else [
+                {"issue_id": c.get("issue_id"), "message": c.get("primary_message"),
+                 "forms": c.get("forms"), "resolution": c.get("resolution"), "code": c.get("code")}]
+            for it in items:
+                if isinstance(it, dict):
+                    yield severity, it
+
+
+def review_issue_rows(views: Iterable[Optional[dict]], statuses: Optional[Iterable[dict]] = None) -> List[dict]:
+    """The hard stops and warnings the given grouped views draw (the Review
+    page's, then the Cross-Form panel's), each ONCE (by issue id), minus every
+    one the producer dismissed - as download-review rows. A "resolved" status
+    on an issue that still fires keeps it: the Review page lists it too (its
+    answer did not clear it)."""
+    dismissed = {str(s.get("issue_id")) for s in (statuses or [])
+                 if isinstance(s, dict) and s.get("status") == "dismissed"}
+    seen: set = set()
+    out: List[dict] = []
+    for view in views or []:
+        for severity, it in _view_items(view):
+            msg = str(it.get("message") or "").strip()
+            iid = str(it.get("issue_id") or "") or ("issf:" + msg)
+            if not msg or iid in seen or iid in dismissed:
+                continue
+            seen.add(iid)
+            forms = [f for f in (it.get("forms") or []) if f]
+            out.append({
+                "rec_id": iid,
+                "issue_id": iid,
+                "recommendation_type": severity,
+                "message": msg,
+                "score_impact": None,
+                "field": None,
+                "component": forms[0] if len(forms) == 1 else None,
+                "forms": forms,
+                "code": it.get("code"),
+                "fix_facts": sorted(issue_fix_keys(it)),
+                "review_issue": True,
+            })
+    return out
+
+
+def download_review_rows(stored_rows: Iterable[dict], generated_forms: Optional[dict],
+                         live_hard_blocks: Optional[List[dict]] = None,
+                         review_issues: Optional[List[dict]] = None) -> List[dict]:
+    """The stored open rows the download review lists (see the note above),
+    then the download gate's live rows, then the Review page's open hard stops
+    and warnings (`review_issue_rows`). `live_hard_blocks`: the gate's rows now
+    (`field_qa.to_recommendation_rows` over `hard_block_findings`); None = the
+    live check failed, so the stored gate rows stay (a blocker is never hidden
+    by a failure). A card whose fix an issue's fix covers is that issue's line
+    (the issue keeps the card's points). Every card and issue carries
+    `fix_facts`, so the review can leave out a side-panel box it already names.
+    No generated forms = nothing to compare with: the rows are returned as they
+    are."""
+    rows = [r for r in (stored_rows or []) if isinstance(r, dict)]
+    gen = generated_forms or {}
+    if not gen:
+        return rows
+    from services.audit_service import live_card_ids
+    from services.field_qa import row_superseded_by_attention
+    shown_cards = live_card_ids([(fr or {}).get("sqs") for fr in gen.values() if isinstance(fr, dict)])
+    issues = [dict(i) for i in (review_issues or []) if isinstance(i, dict) and i.get("rec_id")]
+    out: List[dict] = []
+    for r in rows:
+        rid = str(r.get("rec_id") or "")
+        if is_hard_block_row(rid):
+            if live_hard_blocks is None:
+                out.append(r)
+            continue
+        if rid.startswith(_FINDING_PREFIXES):
+            if row_superseded_by_attention(r):
+                out.append(r)
+            continue
+        if rid not in shown_cards:
+            continue
+        keys = card_fix_keys(r)
+        owner = next((i for i in issues if keys & set(i.get("fix_facts") or [])), None)
+        if owner is not None:
+            # One problem, one line: the issue's words, the card's points.
+            pts = r.get("score_impact")
+            if isinstance(pts, (int, float)) and not isinstance(pts, bool) and pts > (owner.get("score_impact") or 0):
+                owner["score_impact"] = pts
+            if r.get("recommendation_type") == "hard_stop":
+                owner["recommendation_type"] = "hard_stop"   # the stronger of the two
+            owner["fix_facts"] = sorted(set(owner.get("fix_facts") or []) | keys)
+            owner.setdefault("absorbed_cards", []).append(rid)
+            continue
+        out.append(dict(r, fix_facts=sorted(keys)))
+    for h in live_hard_blocks or []:
+        if not isinstance(h, dict) or not h.get("rec_id"):
+            continue
+        out.append({
+            "rec_id": h["rec_id"],
+            "field": h.get("field"),
+            "recommendation_type": h.get("type") or "suggestion",
+            "message": h.get("message"),
+            "score_impact": h.get("score_impact"),
+            # The box it names, so the review lists the box once (frontend
+            # `withoutListedBoxes`).
+            "component": h.get("component"),
+            "form_id": h.get("component"),
+        })
+    return out + issues
 
 
 # ── A document added after forms disagrees with the AI (C103, 7 Oct 2026) ─────

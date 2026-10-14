@@ -131,14 +131,25 @@ def test_the_door_reads_the_stored_facts_not_the_stored_lists():
     assert any("Minimum Viable COPE incomplete" in m for m in out["hard"])
 
 
-def test_pre_form_demotes_cross_form_hard_stops_and_generation_does_not():
+def test_cross_form_hard_stops_are_warnings_before_and_after_generation():
+    """REVERSED 14 Oct 2026 (owner, one status from start to finish): this test
+    pinned generation re-promoting the C75-demoted cross-form hard stops. The
+    TEST was wrong for the new rule, not the code: a check keeps its status
+    before and after forms (tests/test_one_status_14oct.py)."""
     facts = _property_facts()
     facts.pop("occupancy_type")
     session = {"facts": facts, "flags": dict(_PROPERTY_FLAGS)}
     pre = sn.stops_now(session, ["ACORD_140"], pre_form=True)
     gen = sn.stops_now(session, ["ACORD_140"], pre_form=False)
     assert all(i.get("type") != "hard_stop" for i in pre["cross_issues"])
-    assert any(i.get("type") == "hard_stop" for i in gen["cross_issues"])
+    assert all(i.get("type") != "hard_stop" for i in gen["cross_issues"])
+    # same status per rule (a form choice is deferred before forms - 13 Oct)
+    pre_types = {i.get("code"): i.get("type") for i in pre["cross_issues"] if not i.get("form_choice")}
+    gen_types = {i.get("code"): i.get("type") for i in gen["cross_issues"] if i.get("code") in pre_types}
+    assert pre_types and gen_types == pre_types
+    # the field-level legacy copy is hard both times
+    assert any("Minimum Viable COPE incomplete" in m for m in pre["hard"])
+    assert any("Minimum Viable COPE incomplete" in m for m in gen["hard"])
     # one form is scored with field-level stops only (spec 10)
     assert set(gen["form_hard"]) <= set(gen["hard"])
     assert not any("(Affects:" in m for m in gen["form_hard"] + gen["form_soft"])

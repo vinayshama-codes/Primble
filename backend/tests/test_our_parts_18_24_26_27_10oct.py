@@ -271,17 +271,24 @@ def _owners_run():
     return recs, attention
 
 
-def test_the_owners_run_has_47_things_to_fix_not_190(tmp_path):
+def test_the_owners_run_counts_the_listed_fix_items_and_each_group(tmp_path):
+    # 14 Oct 2026 (owner): the review LISTS one by one only the items to fix -
+    # hard stops (the gate's boxes included), warnings, recommendation cards and
+    # Missing boxes - and shows "Please verify", "AI held back" and the
+    # applicant's steps as ONE line each with its own count. The headline counts
+    # the listed fix-items. (10 Oct: hard stops + Missing, the rest on an "Also
+    # listed" line - the TEST pinned that rule and is updated with it.)
     recs, attention = _owners_run()
     out = _node(tmp_path, {"A": _attention_module(tmp_path)}, f"""
 const c = A.downloadReviewCounts({json.dumps(recs)}, {json.dumps(attention)});
-console.log(JSON.stringify({{ c, also: A.alsoListedText(c), head: A.downloadReviewHeadline(c) }}));
+const lines = ["verify", "heldBack", "applicant", "choices"].map(k => A.groupLineText(k, c[k]));
+console.log(JSON.stringify({{ c, lines, head: A.downloadReviewHeadline(c) }}));
 """)
-    assert out["c"] == {"hard": 8, "missing": 39, "applicant": 16, "verify": 26, "heldBack": 93,
-                        "choices": 0, "recommendations": 8, "toFix": 47, "total": 190}
-    assert out["head"] == "47 items to fix - review before downloading"
-    assert out["also"] == ("26 to verify, 93 held back by the AI, 16 for the applicant to sign, "
-                           "8 recommendations")
+    assert out["c"] == {"hard": 8, "warnings": 0, "recommendations": 8, "missing": 39, "verify": 26,
+                        "heldBack": 93, "applicant": 16, "choices": 0, "toFix": 55, "total": 190}
+    assert out["head"] == "55 items to fix - review before downloading"
+    assert out["lines"] == ["26 values to confirm", "93 values the AI held back",
+                            "16 boxes for the applicant to sign", ""]
 
 
 def test_the_headline_for_nothing_to_fix_one_item_and_all_clear(tmp_path):
@@ -289,13 +296,13 @@ def test_the_headline_for_nothing_to_fix_one_item_and_all_clear(tmp_path):
 const only = A.downloadReviewCounts([], {forms: [{rows: [{status: "verify"}]}], document_suggestions: [{id: "s"}]});
 const one = A.downloadReviewCounts([{recommendation_type: "hard_stop"}], null);
 const none = A.downloadReviewCounts(null, undefined);
-console.log(JSON.stringify([A.downloadReviewHeadline(only), A.alsoListedText(only),
-  A.downloadReviewHeadline(one), A.alsoListedText(one), A.downloadReviewHeadline(none), A.alsoListedText(none)]));
+console.log(JSON.stringify([A.downloadReviewHeadline(only), A.groupLineText("verify", only.verify),
+  A.groupLineText("choices", only.choices), A.downloadReviewHeadline(one), A.downloadReviewHeadline(none)]));
 """)
-    assert out == ["Nothing to fix - look over the list before downloading",
-                   "1 to verify, 1 new-document choice",
-                   "1 item to fix - review before downloading", "",
-                   "All clear - review the SQS summary below", ""]
+    assert out == ["Nothing to fix - look over the groups below before downloading",
+                   "1 value to confirm", "1 new-document choice",
+                   "1 item to fix - review before downloading",
+                   "All clear - review the SQS summary below"]
 
 
 def test_both_download_screens_read_the_counts_and_list_hard_stops_first():
@@ -304,17 +311,26 @@ def test_both_download_screens_read_the_counts_and_list_hard_stops_first():
     assert "Unresolved items ({" not in body
     pre = body[body.index("function DownloadPreflightModal"):body.index("function DashboardAssistant")]
     assert "downloadReviewCounts(openRecs, attention)" in pre
-    assert "downloadReviewHeadline(counts)" in pre and "Also listed: {alsoListed}" in pre
+    assert "downloadReviewHeadline(counts)" in pre and "Also listed" not in pre
     i = body.index("Post-download checklist")
-    post = body[i:i + 6000]
+    post = body[i:i + 4000]
     assert "downloadReviewCounts(recs, preflightAttention)" in post
     assert "To fix before sending (${counts.toFix})" in post
-    assert post.index("{hardRecs.map(") < post.index("<NeedsAttentionSummary")
-    # a required box blocking the download is a hard stop on both screens
-    assert 'includes("hardblock_")' in post
+    # one list for both screens; hard stops first, the download gate's boxes
+    # first among them (a required box blocking the download is a hard stop)
+    assert body.count("<DownloadReviewList ") == 2
+    panel = _src(_PANEL)
+    fn = panel[panel.index("export function DownloadReviewList"):]
+    assert fn.index('title="Hard Stops"') < fn.index('title="Warnings"') < fn.index("Missing on the forms") \
+        < fn.index('title="Recommendations"') < fn.index("download-groups")
+    util = _src(_ATTN_JS)
+    assert 'includes("hardblock_")' in util
 
 
 def test_the_forms_list_counts_each_kind_on_its_own():
+    # 14 Oct 2026: each group is ONE line with its own count (`groupLineText`),
+    # never one total over every kind.
     panel = _src(_PANEL)
     assert "Needs attention on the forms ({total})" not in panel
-    assert "attentionGroups(forms.flatMap(f => f.rows || []))" in panel
+    assert "groupLineText(g.key, groupCount(g.key))" in panel
+    assert "Missing on the forms ({missingCount})" in panel

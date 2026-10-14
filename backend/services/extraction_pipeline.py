@@ -1660,10 +1660,14 @@ async def _finalize_pipeline(
         #
         # Generic by construction: every cross-form rule is form-scoped, so
         # this demotes the whole class rather than special-casing builders
-        # risk. The issue is NOT discarded - it becomes a warning, stays
-        # visible with its own card, and returns to full hard-stop force the
-        # moment the producer actually selects that form (the post-selection
-        # path re-runs this validation with the SELECTED ids).
+        # risk. The issue is NOT discarded - it becomes a warning and stays
+        # visible with its own card.
+        #
+        # ONE STATUS FROM START TO FINISH (14 Oct 2026, owner): it STAYS a
+        # warning once forms exist. Generation used to re-promote it to a hard
+        # stop (capping the package at 60 for a check this screen called a
+        # warning); every scorer now asks `stops_now.cross_form_severity`,
+        # before forms and after.
         if cf_hard:
             logger.info(
                 "Cross-form hard stops demoted to warnings pre-selection "
@@ -1688,6 +1692,10 @@ async def _finalize_pipeline(
                 # UX-05: keep the Add-form affordance on the card copy too.
                 add_forms=(_cf_issue.get("resolution") or {}).get("add_forms"),
             ))
+        # The stored copy carries the same severity as the card and the lists
+        # (the ARQ cross-form questions read it), never the rule's raw one.
+        from services.stops_now import cross_form_severity
+        cross_form_issues = cross_form_severity(cross_form_issues)
 
     # Human-friendly label for the submissions history (Beta Report §4.1). Prefer
     # an explicit label (e.g. a split cluster's insured name from "Create separate

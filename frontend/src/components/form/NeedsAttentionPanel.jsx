@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../../config/constants";
-import { ATTENTION_TAG_STYLE, attentionGroups, fetchNeedsAttention, isApplicantStep } from "../../utils/needsAttention";
+import { ATTENTION_TAG_STYLE, DOWNLOAD_GROUPS, attentionGroups, downloadReviewParts, fetchNeedsAttention, groupLineText, isApplicantStep } from "../../utils/needsAttention";
+import { positiveScoreWording } from "../../utils/positiveWording";
+import { formLabel } from "../../utils/formInstances";
 import { confirmableRows, rowKey } from "../../utils/confirmValues";
 
 // C103 (7 Oct 2026): a document added after forms that answers a box the AI
@@ -111,6 +113,9 @@ function DocumentSuggestions({ sessionId, formId, refreshTick, onJump, onApplySu
 
 const scoreColor = (row) => (row?.score_effect > 0 ? "#b45309" : "#94a3b8");
 
+// The line a row of the download gate carries (backend `blocks_download`).
+export const BLOCKS_DOWNLOAD_TEXT = "Blocks a clean download until it is fixed.";
+
 function Tag({ status }) {
   const t = ATTENTION_TAG_STYLE[status] || ATTENTION_TAG_STYLE.missing;
   return (
@@ -143,11 +148,18 @@ function AttentionRow({ row, onJump, onConfirm, busy = false, locked = false }) 
         <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, color: "#0f172a", lineHeight: 1.35 }}>{row.label}</span>
         <Tag status={isApplicantStep(row) ? "applicant" : row.status} />
       </div>
-      {row.status !== "missing" && row.reason && (
+      {/* A Missing row's reason is the same sentence every time - except a
+          download-gate box and a Figure 33 finding, which say why. */}
+      {(row.status !== "missing" || row.blocks_download || row.finding) && row.reason && (
         <div style={{ fontSize: 10.5, color: "#475569", marginTop: 2, lineHeight: 1.4 }}>{row.reason}</div>
       )}
-      {row.status === "ai_held_back" && row.required && (
+      {row.status === "ai_held_back" && row.required && !row.blocks_download && (
         <div style={{ fontSize: 10, color: "#92400e", marginTop: 2 }}>Required on this form.</div>
+      )}
+      {/* A box the download gate holds (14 Oct 2026): said here, before the
+          download review lists it as a hard stop. */}
+      {row.blocks_download && (
+        <div data-testid="blocks-download" style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", marginTop: 2 }}>{BLOCKS_DOWNLOAD_TEXT}</div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, fontSize: 10.5 }}>
         <span style={{ color: "#334155" }}><b>What to do:</b> {row.what_to_do}</span>
@@ -321,47 +333,101 @@ function NeedsAttentionSections({ sessionId, formId, formSqs, packageSqs, refres
   );
 }
 
-// Pre-download review and post-download checklist: the same rows, every form,
-// named by form and by the box as the form prints it. Not clickable - the
+// THE DOWNLOAD REVIEW'S LIST - both download screens (the pre-download review
+// and the post-download checklist) draw exactly this (owner, 14 Oct 2026). One
+// by one: the items to fix - Hard Stops (the download gate's boxes included),
+// Warnings, Missing boxes, Recommendations. Then "Please verify", "AI held
+// back", the applicant's steps and new-document choices as ONE line each, with
+// its count and Show, which opens the group in place. Not clickable - the
 // review is a last look, and the side panel is where boxes are fixed.
-export function NeedsAttentionSummary({ attention }) {
-  const forms = (attention?.forms || []).filter(f => (f.rows || []).length > 0);
-  const suggestions = Array.isArray(attention?.document_suggestions) ? attention.document_suggestions : [];
-  if (!forms.length && !suggestions.length) return null;
-  // Each kind counted on its own, never one total (Choice Electric #27: "174"
-  // here added Please verify and AI held back rows to the boxes to fill).
-  const byKind = attentionGroups(forms.flatMap(f => f.rows || []))
-    .map(g => `${g.label} ${g.rows.length}`).join(", ");
+const pts = (r) => (typeof r?.score_impact === "number" && r.score_impact > 0 ? r.score_impact : 0);
+const plusPoints = (r) => (pts(r) ? (r.impact_is_exact === true ? `+${pts(r)} pts` : `up to +${pts(r)} pts`) : "");
+const formsOf = (r) => (Array.isArray(r?.forms) && r.forms.length ? r.forms : []);
+
+function RecBox({ title, rows, tone, testId }) {
+  if (!rows.length) return null;
+  const t = {
+    hard: { bg: "#fef2f2", border: "#fca5a5", head: "#991b1b", text: "#7f1d1d", pts: "#dc2626" },
+    warn: { bg: "#fffbeb", border: "#fde68a", head: "#92400e", text: "#78350f", pts: "#d97706" },
+    rec:  { bg: "#f8fafc", border: "#e2e8f0", head: "#334155", text: "#334155", pts: "#d97706" },
+  }[tone];
   return (
-    <>
-    {suggestions.length > 0 && (
-      <div data-testid="document-suggestions-summary" style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>New document ({suggestions.length})</div>
-        <div style={{ fontSize: 10.5, color: "#64748b" }}>A document you added says something different. Choose in the form's side panel.</div>
-        {suggestions.map(s => (
-          <div key={s.id || `${s.form_id}:${s.field}`} style={{ fontSize: 11.5, color: "#334155", marginTop: 6, lineHeight: 1.45 }}>
-            <strong>{s.form_label}</strong>{" - "}{s.label}: the document says {s.suggested_display || s.suggested}, the form says {s.current_display || s.current || "nothing"}
-          </div>
-        ))}
-      </div>
-    )}
-    {forms.length > 0 && (
-    <div data-testid="needs-attention-summary" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>Needs attention on the forms</div>
-      <div style={{ fontSize: 10.5, color: "#64748b" }}>{byKind}. The same list as each form's side panel.</div>
-      {forms.map(f => (
-        <div key={f.form_id} style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#334155" }}>
-            {f.form_label}
-            <span style={{ fontWeight: 500, color: "#64748b" }}>
-              {" - "}{attentionGroups(f.rows).map(g => `${g.label} ${g.rows.length}`).join(", ")}
-            </span>
-          </div>
-          <StatusGroups rows={f.rows} />
+    <div data-testid={testId} style={{ background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: t.head, marginBottom: 6 }}>{title} ({rows.length})</div>
+      {rows.map((r, i) => (
+        <div key={`${r.rec_id || ""}:${i}`} style={{ fontSize: 12, color: t.text, padding: "2px 0", lineHeight: 1.45 }}>
+          {"• "}
+          {formsOf(r).length > 0 && <span style={{ fontWeight: 700, color: "#E61B84" }}>{formsOf(r).map(formLabel).join(", ")}: </span>}
+          {positiveScoreWording(r.message)}
+          {tone === "hard"
+            ? (pts(r) ? <span style={{ color: t.pts, fontWeight: 700 }}> (-{pts(r)} pts)</span> : null)
+            : (plusPoints(r) ? <span style={{ color: t.pts, fontWeight: 600 }}> ({plusPoints(r)})</span> : null)}
         </div>
       ))}
     </div>
-    )}
-    </>
+  );
+}
+
+function SuggestionLines({ rows }) {
+  return (
+    <div data-testid="document-suggestions-summary">
+      <div style={{ fontSize: 10.5, color: "#64748b", marginTop: 4 }}>A document you added says something different. Choose in the form's side panel.</div>
+      {rows.map((s) => (
+        <div key={s.id || `${s.form_id}:${s.field}`} style={{ fontSize: 11.5, color: "#334155", marginTop: 6, lineHeight: 1.45 }}>
+          <strong>{s.form_label}</strong>{" - "}{s.label}: the document says {s.suggested_display || s.suggested}, the form says {s.current_display || s.current || "nothing"}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FormRows({ groups, heading = false }) {
+  return groups.map((f) => (
+    <div key={f.form_id} style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#334155" }}>{f.form_label}</div>
+      <StatusGroups rows={f.rows} showAll hideHeading={!heading} />
+    </div>
+  ));
+}
+
+export function DownloadReviewList({ openRecs, attention }) {
+  const [open, setOpen] = useState({});
+  const p = downloadReviewParts(openRecs, attention);
+  const missingCount = p.missing.reduce((n, f) => n + f.rows.length, 0);
+  const groupRows = { verify: p.verify, heldBack: p.heldBack, applicant: p.applicant, choices: p.choices };
+  const groupCount = (key) => (key === "choices" ? p.choices.length
+    : groupRows[key].reduce((n, f) => n + f.rows.length, 0));
+  const lines = DOWNLOAD_GROUPS.filter((g) => groupCount(g.key) > 0);
+  return (
+    <div data-testid="download-review-list">
+      <RecBox title="Hard Stops" rows={p.hard} tone="hard" testId="download-hard-stops" />
+      <RecBox title="Warnings" rows={p.warnings} tone="warn" testId="download-warnings" />
+      {missingCount > 0 && (
+        <div data-testid="download-missing" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>Missing on the forms ({missingCount})</div>
+          <FormRows groups={p.missing} />
+        </div>
+      )}
+      <RecBox title="Recommendations" rows={p.recommendations} tone="rec" testId="download-recommendations" />
+      {lines.length > 0 && (
+        <div data-testid="download-groups" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+          {lines.map((g) => (
+            <div key={g.key} data-testid={`download-group-${g.key}`} style={{ padding: "4px 0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#334155" }}>{groupLineText(g.key, groupCount(g.key))}</span>
+                <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.key]: !o[g.key] }))}
+                  aria-expanded={!!open[g.key]}
+                  style={{ ...FIX_LOOK, cursor: "pointer" }}>
+                  {open[g.key] ? "Hide" : "Show"}
+                </button>
+              </div>
+              {open[g.key] && (g.key === "choices"
+                ? <SuggestionLines rows={p.choices} />
+                : <FormRows groups={groupRows[g.key]} />)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

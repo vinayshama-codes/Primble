@@ -30,22 +30,27 @@ The recipe, in the pipeline's own order:
      so the cap and the card cannot disagree;
   4. field-level source conflicts between documents;
   5. OCR "confirm this field" warnings, until a person supplies the field;
-  6. cross-form rules for `form_ids`; before forms exist (`pre_form=True`)
-     every cross-form hard stop is demoted to a warning (owner C75 - a form
-     we merely suggested may not become a blocker). That severity rule is
-     unchanged here; this door only stops reading a stale list.
+  6. cross-form rules for `form_ids`; every cross-form hard stop is a
+     WARNING - before forms AND after them (`cross_form_severity`).
+
+ONE STATUS FROM START TO FINISH (14 Oct 2026, owner; Brent: "Why do we have
+something flagged as a warning pre-form that is re-flagged as a hard stop once
+the form exists?"). C75 demoted a cross-form hard stop before forms (a form we
+merely suggested may not become a blocker) and generation re-promoted it at
+full force, so a package the Review screen called "warnings only" was capped at
+60 the moment its forms existed. The demotion is now permanent: a check keeps
+the status it had before forms, at generation and on every re-score after
+(answers, saves, re-stamps, added documents, the worker). Field-level stops,
+cross-DOCUMENT identity conflicts and blocking Data Consistency conflicts are
+untouched - hard before forms, hard after. `pre_form` now decides only the
+forms the rules are scoped to and whether a form choice is deferred.
 
 Pure: no I/O, no LLM. Every piece fails open to "no stops from this piece"
 and logs, so a scorer is never broken by one detector.
-
-`becomes_hard_at_generation` (7 Oct 2026, round 5 #15) is the other half of
-step 6: before forms, which demoted warnings generation will make hard stops,
-and on which forms - so the pre-form screen can say so (Brent #18).
 """
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -223,126 +228,24 @@ def cross_form_run(facts: dict, flags: dict, form_ids: Iterable[str]) -> List[di
     return out
 
 
-# ── WHAT GENERATION WILL MAKE A HARD STOP (7 Oct 2026, round 5 #15) ─────────
-# Brent #18: "There were no Hard Stops in the initial SQS prior to form
-# selection, but there's Hard Stops now. Why? This should all be addressable
-# prior to forms." Before forms, C75 shows a cross-form hard stop as a warning
-# (a form we merely suggested may not block - Brent's pending call, unchanged
-# here); generation re-runs the same rules on the forms being generated at full
-# force. The pre-form screen now says which warnings that will promote, and on
-# which forms - read off the SAME run the demotion reads (`cross_form_run` on
-# the recommended forms), never a second rule list.
+# ── ONE STATUS FROM START TO FINISH (14 Oct 2026, owner) ─────────────────────
+# The ONE answer to "what severity does a cross-form rule's hard stop carry?":
+# a warning, before forms and after. Every path that runs the cross-form rules
+# for scoring asks this function - this door, the post-form recalculation
+# (`arq_service.recalculate_session_scores`) and the field-edit re-score
+# (`form_routes.update_pdf`) - so the severity is decided once, one way.
 #
-# WHICH FORMS: the rules gate on the form set in different ways (ACORD 140;
-# ACORD 140 or 160; no form at all), so the forms are MEASURED, never read off
-# the issue's own "Affects" list (it names ACORD 125 beside ACORD 130 on a
-# rule only ACORD 130 triggers). In order:
-#   * fires with NO form chosen   -> any generation ("when forms are generated");
-#   * forms whose removal from the recommended set retires it -> each is needed
-#     ("when ACORD 127 and ACORD 131 are generated");
-#   * else the forms that fire it on their own ("ACORD 140 or ACORD 160");
-#   * else "when forms are generated".
-# ~3 ms a run once warm; at most 1 + 2 x (recommended forms) runs.
+# Replaces round 5 #15's `becomes_hard_at_generation` / `generation_tag`
+# ("Becomes a hard stop when ACORD 140 is generated"): nothing becomes a hard
+# stop at generation any more, so there is nothing to announce. Both, and the
+# `with_generation_hard_stops` shim, were removed once nothing called them.
 
-def _forms_text(labels: List[str], joiner: str) -> str:
-    if len(labels) == 1:
-        return labels[0]
-    return ", ".join(labels[:-1]) + f" {joiner} " + labels[-1]
-
-
-def _form_order(form_id: str) -> tuple:
-    """ACORD 130 before ACORD 140 before ACORD 160, whatever order the
-    recommender listed them in."""
-    m = re.search(r"\d+", str(form_id or ""))
-    return (int(m.group(0)) if m else 10 ** 6, str(form_id or ""))
-
-
-def generation_tag(form_ids: List[str], all_needed: bool = True) -> str:
-    """"Becomes a hard stop when ACORD 140 is generated" (no em-dash: UI copy)."""
-    if not form_ids:
-        return "Becomes a hard stop when forms are generated"
-    try:
-        from services.form_instances import instance_label
-        labels = [instance_label(f) for f in form_ids]
-    except Exception:                                         # noqa: BLE001
-        labels = [str(f).replace("_", " ") for f in form_ids]
-    verb = "are" if (all_needed and len(labels) > 1) else "is"
-    return (f"Becomes a hard stop when {_forms_text(labels, 'and' if all_needed else 'or')} "
-            f"{verb} generated")
-
-
-def becomes_hard_at_generation(session: Optional[dict],
-                               form_ids: Optional[Iterable[str]] = None, *,
-                               facts: Optional[dict] = None,
-                               flags: Optional[dict] = None) -> List[dict]:
-    """[{code, message, forms, tag}] - the cross-form hard stops C75 shows as
-    warnings before forms, i.e. the warnings generation will promote (see the
-    note above). Empty once forms exist, while a Submission Integrity review is
-    pending (the door runs no cross-form rule then) or when the run fails.
-    Display only: nothing here adds, removes or re-ranks a stop."""
-    session = session or {}
-    if session.get("generated_forms") or (session.get("integrity") or {}).get("review_required"):
-        return []
-    facts = session.get("facts") if facts is None else facts
-    flags = session.get("flags") if flags is None else flags
-    facts = facts if isinstance(facts, dict) else {}
-    flags = flags if isinstance(flags, dict) else {}
-    scope = [str(f) for f in (recommended_form_ids(session) if form_ids is None else form_ids) if f]
-    if not scope:
-        return []
-    try:
-        hard = [i for i in cross_form_run(facts, flags, scope) if i.get("type") == "hard_stop"]
-        if not hard:
-            return []
-        from services.form_instances import base_form_id
-        bases: List[str] = []
-        for f in scope:
-            b = base_form_id(f)
-            if b not in bases:
-                bases.append(b)
-        runs: Dict[Any, set] = {}
-
-        def _hard_codes(ids: tuple) -> set:
-            if ids not in runs:
-                runs[ids] = {str(i.get("code") or "") for i in cross_form_run(facts, flags, list(ids))
-                             if i.get("type") == "hard_stop"}
-            return runs[ids]
-
-        out: List[dict] = []
-        for issue in hard:
-            code = str(issue.get("code") or "")
-            if code and code in _hard_codes(()):
-                forms, all_needed = [], True
-            else:
-                forms = [b for b in bases
-                         if code not in _hard_codes(tuple(f for f in scope if base_form_id(f) != b))]
-                all_needed = True
-                if not forms:
-                    forms = [b for b in bases if code in _hard_codes((b,))]
-                    all_needed = False
-            forms = sorted(forms, key=_form_order)
-            out.append({"code": code, "message": issue.get("message") or "",
-                        "forms": forms, "tag": generation_tag(forms, all_needed)})
-        return out
-    except Exception as exc:                                  # noqa: BLE001
-        logger.warning("stops_now: generation hard stops skipped (%s)", exc)
-        return []
-
-
-def with_generation_hard_stops(pkg: Optional[dict], session: Optional[dict], *,
-                               facts: Optional[dict] = None,
-                               flags: Optional[dict] = None) -> Optional[dict]:
-    """The pre-form package payload plus `becomes_hard_at_generation` - a COPY
-    when there is anything to add, the same object otherwise (so a package with
-    nothing to promote keeps its exact shape). `issue_registry.
-    grouped_with_package_caps` tags the Review cards from it; every pre-form
-    response and the resolve / reopen card come through here (one shape)."""
-    if not isinstance(pkg, dict):
-        return pkg
-    items = becomes_hard_at_generation(session, facts=facts, flags=flags)
-    if not items:
-        return pkg
-    return {**pkg, "becomes_hard_at_generation": items}
+def cross_form_severity(issues: Optional[Iterable[Any]]) -> List[Any]:
+    """`issues` with every cross-form `hard_stop` as a `soft_warning` (a copy
+    of each changed issue; everything else, advisories and form choices
+    included, unchanged)."""
+    return [dict(i, type="soft_warning") if isinstance(i, dict) and i.get("type") == "hard_stop"
+            else i for i in (issues or [])]
 
 
 def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None, *,
@@ -353,9 +256,11 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
 
     `form_ids`: the forms cross-form rules are scoped to - the forms being
     generated, or before forms exist the recommended forms (the default).
-    `pre_form`: True before any form is generated; cross-form hard stops are
-    then warnings (C75). Required on purpose - a generation call that forgot
-    to say so would silently demote its blockers.
+    `pre_form`: True before any form is generated - the rules are then scoped
+    to the recommended forms (the default) and a check whose only fix is
+    choosing a form is deferred. Required on purpose: it picks the scope. It
+    no longer picks the severity - a cross-form hard stop is a warning either
+    way (`cross_form_severity`, 14 Oct 2026).
 
     Returns:
       hard / soft          - the package scorer's stop lists (field-level +
@@ -364,7 +269,7 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
                              cross-document identity stops only (spec 10:
                              cross-form conflicts never cap an individual form)
       evaluate_hard / evaluate_soft - `evaluate_stops` alone, shaped
-      cross_issues         - the cross-form issue dicts (demoted pre-form)
+      cross_issues         - the cross-form issue dicts (hard stops demoted)
       form_ids             - the scope used
     """
     session = session or {}
@@ -412,16 +317,14 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
                 # forms) - outside both lists, marked `form_choice`.
                 cross = defer_form_choices(cross)
             cf_hard, cf_soft, _adv = split_cross_form_issues(cross)
-            if pre_form:
-                # C75, in the pipeline's own order: the demoted hard stops
-                # first, then the warnings not already listed.
-                soft += list(cf_hard)
-                soft += [m for m in cf_soft if m not in soft]
-                cross = [dict(i, type="soft_warning") if i.get("type") == "hard_stop" else i
-                         for i in cross]
-            else:
-                hard += list(cf_hard)
-                soft += [m for m in cf_soft if m not in soft]
+            # ONE STATUS FROM START TO FINISH (14 Oct 2026): C75's demotion,
+            # before forms and after, in the pipeline's own order - the
+            # demoted hard stops first, then the warnings not already listed.
+            # Generation no longer re-promotes them (a 60 cap the pre-form
+            # screen never showed).
+            soft += list(cf_hard)
+            soft += [m for m in cf_soft if m not in soft]
+            cross = cross_form_severity(cross)
         except Exception as exc:                              # noqa: BLE001
             logger.warning("stops_now: cross-form validation skipped (%s)", exc)
 

@@ -33,6 +33,13 @@ TWO DISPLAY FIXES, no stop added or removed, no cap / score / severity moved
     the grouped view tags the rows ("Becomes a hard stop when ACORD 140 is
     generated"); both Review layouts render the tag and "1 hard stop now, 1 more
     when forms are generated".
+
+REVERSED 14 Oct 2026 (owner, one status from start to finish - see
+`tests/test_one_status_14oct.py`): generation no longer re-promotes a
+cross-form hard stop, so (b) is gone - nothing becomes a hard stop at
+generation, and the backend emits no tag and no count. The (b) tests below now
+pin that. (a) stays: it settles a row stored before that day, whose lists were
+written at full severity.
 """
 import ast
 import asyncio
@@ -215,13 +222,18 @@ def test_the_editor_hard_stops_block_names_the_cope_problem_once_with_its_fix():
 
 def test_the_scorer_still_reads_both_twins():
     """Display only: the door's lists - what caps the score - keep every
-    sentence, the twin included; only what is DRAWN collapses."""
+    sentence, the twin included; only what is DRAWN collapses.
+
+    14 Oct 2026 (one status from start to finish): after forms the coded twin
+    and BI keep the WARNING status they had before forms - the TEST pinned the
+    re-promotion the owner removed; the field-level legacy copy stays hard."""
     facts = dict(_two_buildings(), business_income_limit=F("$100,000"))
     out = sn.stops_now({"facts": facts, "flags": {"has_property_coverage": True}},
                        ["ACORD_140"], pre_form=False)
     assert any("Minimum Viable COPE incomplete" in m for m in out["hard"])
-    assert any(m.startswith("Property submission missing Minimum Viable COPE") for m in out["hard"])
-    assert any(m.startswith(BI) for m in out["hard"])
+    assert any(m.startswith("Property submission missing Minimum Viable COPE") for m in out["soft"])
+    assert any(m.startswith(BI) for m in out["soft"])
+    assert not any(m.startswith(BI) or m.startswith("Property submission missing") for m in out["hard"])
 
 
 # ── the bare-sentence door (Submission Brief, Lite screen) ───────────────────
@@ -270,7 +282,11 @@ def test_the_brief_and_the_lite_screen_print_through_the_door():
     assert "hard_stops=hard_stops, soft_stops=soft_stops" in brief
 
 
-# ── (b) before forms: what generation will make a hard stop ──────────────────
+# ── (b) REVERSED 14 Oct 2026: nothing becomes a hard stop at generation ──────
+# The tests here pinned `becomes_hard_at_generation` / `generation_tag` and the
+# tagged rows. The TEST was right for the 7 Oct rule and is wrong for the
+# owner's 14 Oct decision (a check keeps its status before and after forms),
+# so it now pins the reversal.
 
 def _property_session(recs=("ACORD_125", "ACORD_140")):
     facts = dict(_two_buildings(), business_income_limit=F("$100,000"),
@@ -279,66 +295,23 @@ def _property_session(recs=("ACORD_125", "ACORD_140")):
             "recommendations": [{"form_id": f} for f in recs]}
 
 
-def test_the_live_pair_becomes_hard_on_acord_140():
-    out = sn.becomes_hard_at_generation(_property_session())
-    by_code = {e["code"]: e for e in out}
-    assert set(by_code) == {"minimum_viable_cope_missing", "bi_missing_period_of_restoration"}
-    for e in out:
-        assert e["forms"] == ["ACORD_140"]
-        assert e["tag"] == "Becomes a hard stop when ACORD 140 is generated"
-        assert "—" not in e["tag"]
+def test_the_live_pair_stays_a_warning_on_acord_140():
+    session = _property_session()
+    assert not hasattr(sn, "becomes_hard_at_generation")
+    gen = sn.stops_now(session, ["ACORD_125", "ACORD_140"], pre_form=False)
+    assert not any(m.startswith(BI) or m.startswith("Property submission missing") for m in gen["hard"])
+    assert {i["code"]: i["type"] for i in gen["cross_issues"]
+            if i["code"] in ("minimum_viable_cope_missing", "bi_missing_period_of_restoration")} == {
+        "minimum_viable_cope_missing": "soft_warning", "bi_missing_period_of_restoration": "soft_warning"}
 
 
-def test_the_forms_are_measured_not_read_off_the_affects_list():
-    # BI fires on ACORD 140 OR 160: either alone makes it a hard stop (named
-    # in form order, whatever order the recommender listed them in).
-    out = {e["code"]: e for e in sn.becomes_hard_at_generation(
-        _property_session(("ACORD_125", "ACORD_160", "ACORD_140")))}
-    assert out["bi_missing_period_of_restoration"]["tag"] == \
-        "Becomes a hard stop when ACORD 140 or ACORD 160 is generated"
-    assert out["minimum_viable_cope_missing"]["forms"] == ["ACORD_140"]
-    # WC payroll names ACORD 125 beside ACORD 130, but only ACORD 130 triggers it.
-    wc = {"facts": {"wc_payroll": F("100000"), "total_payroll": F("500000")},
-          "flags": {"has_workers_comp": True},
-          "recommendations": [{"form_id": "ACORD_125"}, {"form_id": "ACORD_130"}]}
-    assert [(e["code"], e["forms"]) for e in sn.becomes_hard_at_generation(wc)] == \
-        [("wc_payroll_mismatch", ["ACORD_130"])]
-    # a rule no form gates fires on any generation
-    umb = {"facts": {}, "flags": {"has_umbrella": True},
-           "recommendations": [{"form_id": "ACORD_125"}, {"form_id": "ACORD_131"}]}
-    tags = {e["code"]: e["tag"] for e in sn.becomes_hard_at_generation(umb)}
-    assert tags["umbrella_no_underlying_coverage"] == "Becomes a hard stop when forms are generated"
-
-
-def test_nothing_becomes_hard_after_forms_or_while_integrity_is_pending():
-    base = _property_session()
-    assert sn.becomes_hard_at_generation(dict(base, generated_forms={"ACORD_140": {}})) == []
-    assert sn.becomes_hard_at_generation(dict(base, integrity={"review_required": True})) == []
-    assert sn.becomes_hard_at_generation(dict(base, recommendations=[])) == []
-    assert sn.becomes_hard_at_generation(dict(base, flags={})) == []
-    assert sn.becomes_hard_at_generation(None) == []
-
-
-def test_generation_tag_wording():
-    assert sn.generation_tag([]) == "Becomes a hard stop when forms are generated"
-    assert sn.generation_tag(["ACORD_140"]) == "Becomes a hard stop when ACORD 140 is generated"
-    assert sn.generation_tag(["ACORD_127", "ACORD_131"]) == \
-        "Becomes a hard stop when ACORD 127 and ACORD 131 are generated"
-    assert sn.generation_tag(["ACORD_140", "ACORD_160"], all_needed=False) == \
-        "Becomes a hard stop when ACORD 140 or ACORD 160 is generated"
-    assert sn.generation_tag(["ACORD_125", "ACORD_130", "ACORD_131__excess"]) == \
-        "Becomes a hard stop when ACORD 125, ACORD 130 and ACORD 131 (Excess) are generated"
-
-
-def test_the_payload_copy_keeps_shape_when_there_is_nothing_to_say():
-    pkg = {"package_sqs_score": 70}
-    assert sn.with_generation_hard_stops(pkg, {"facts": {}, "flags": {}}) is pkg
-    assert sn.with_generation_hard_stops(None, _property_session()) is None
-    before = copy.deepcopy(pkg)
-    out = sn.with_generation_hard_stops(pkg, _property_session())
-    assert out is not pkg and pkg == before
-    assert [e["code"] for e in out["becomes_hard_at_generation"]] == \
-        ["minimum_viable_cope_missing", "bi_missing_period_of_restoration"]
+def test_no_generation_tag_and_the_shims_are_gone():
+    # 14 Oct 2026: the retired helpers (`becomes_hard_at_generation`,
+    # `with_generation_hard_stops`) were removed once nothing called them.
+    for name in ("generation_tag", "becomes_hard_at_generation", "with_generation_hard_stops"):
+        assert not hasattr(sn, name), name
+    src = (BACKEND / "routes" / "audit_routes.py").read_text(encoding="utf-8")
+    assert "with_generation_hard_stops" not in src
 
 
 def _pre_form_view(session):
@@ -351,38 +324,22 @@ def _pre_form_view(session):
     return structured, st
 
 
-def test_the_pre_form_screen_tags_the_warning_and_counts_it_once():
+def test_the_pre_form_screen_carries_no_becomes_hard_tag():
     session = _property_session()
     structured, st = _pre_form_view(session)
-    plain = grouped_with_package_caps(structured, st["hard"], st["soft"], {}, facts=session["facts"])
-    pkg = sn.with_generation_hard_stops({}, session)
-    view = grouped_with_package_caps(structured, st["hard"], st["soft"], pkg, facts=session["facts"])
-    # tagging never moves a row or a count
-    assert view["counts"] == plain["counts"]
-    assert [r["code"] for r in _rows(view)] == [r["code"] for r in _rows(plain)]
-    # the COPE problem is ONE hard stop now (the legacy copy; its demoted twin
-    # is hidden, so it is neither tagged nor counted as "more")
+    view = grouped_with_package_caps(structured, st["hard"], st["soft"], {}, facts=session["facts"])
+    # the COPE problem is ONE hard stop (the legacy copy; its demoted twin is
+    # hidden) and BI is a warning - exactly what generation will score
     assert [r["code"] for r in _rows(view, "hard")] == ["legacy_minimum_viable_cope"]
-    tagged = [r for r in _rows(view) if r.get("becomes_hard_tag")]
-    assert [(r["code"], r["severity"]) for r in tagged] == \
-        [("bi_missing_period_of_restoration", "soft_warning")]
-    assert tagged[0]["becomes_hard_tag"] == "Becomes a hard stop when ACORD 140 is generated"
-    assert tagged[0]["becomes_hard_forms"] == ["ACORD_140"]
-    assert view["becomes_hard"] == 1 and plain["becomes_hard"] == 0
-
-
-def test_a_hard_row_is_never_tagged():
-    entries = [{"code": "minimum_viable_cope_missing", "message": CODED, "forms": ["ACORD_140"],
-                "tag": "Becomes a hard stop when ACORD 140 is generated"}]
-    view = build_grouped_view([make_issue("minimum_viable_cope_missing", "hard_stop", CODED)],
-                              [CODED], [], becomes_hard=entries)
-    assert view["becomes_hard"] == 0
+    assert ("bi_missing_period_of_restoration", "soft_warning") in \
+        [(r["code"], r["severity"]) for r in _rows(view)]
     assert not any(r.get("becomes_hard_tag") for r in _rows(view))
+    assert "becomes_hard" not in view
 
 
-def test_every_pre_form_payload_carries_it(monkeypatch):
+def test_every_pre_form_payload_carries_none(monkeypatch):
     """`_pre_form_status` (the five form_routes responses) and
-    `_pre_form_readiness` (resolve / reopen) - one shape."""
+    `_pre_form_readiness` (resolve / reopen) - one shape, no generation list."""
     from routes import form_routes as fr
     from routes import audit_routes as ar
     from services import form_dry_run as fdr
@@ -395,76 +352,38 @@ def test_every_pre_form_payload_carries_it(monkeypatch):
     row = _property_session()
     pkg, _kd = asyncio.run(fr._pre_form_status("sid-r5", row["facts"], row["flags"], {},
                                                {"id": "u"}, session_row=row))
-    assert [e["code"] for e in pkg["becomes_hard_at_generation"]] == \
-        ["minimum_viable_cope_missing", "bi_missing_period_of_restoration"]
-    # after forms: the persisted package, untouched
-    done = dict(row, generated_forms={"ACORD_140": {}})
-    pkg2, _ = asyncio.run(fr._pre_form_status("sid-r5", row["facts"], row["flags"], {},
-                                              {"id": "u"}, session_row=done))
-    assert pkg2 == {"package_sqs_score": 41}
-    # the resolve / reopen card, scored by the recalc
+    assert pkg == {"package_sqs_score": 41}
     card = asyncio.run(ar._pre_form_readiness(row, "sid-r5", {"id": "u"},
                                               scored={"package_sqs_score": 41}))
-    assert [e["code"] for e in card["package_sqs"]["becomes_hard_at_generation"]] == \
-        ["minimum_viable_cope_missing", "bi_missing_period_of_restoration"]
+    assert "becomes_hard_at_generation" not in (card["package_sqs"] or {})
 
 
-def test_the_grouped_view_reads_it_from_the_door_package():
+def test_the_grouped_view_no_longer_reads_it():
     src = (BACKEND / "services" / "issue_registry.py").read_text(encoding="utf-8")
     fn = next(n for n in ast.walk(ast.parse(src))
               if isinstance(n, ast.FunctionDef) and n.name == "grouped_with_package_caps")
     seg = ast.get_source_segment(src, fn)
-    assert 'becomes_hard=pkg.get("becomes_hard_at_generation")' in seg
+    assert "becomes_hard=" not in seg
 
 
 # ── the two Review layouts ───────────────────────────────────────────────────
+# 14 Oct 2026: the frontend leftovers of the retired "becomes a hard stop" rule
+# are gone - `utils/generationStops.js` (its helpers and their unit test,
+# `test_the_progress_line_wording`, deleted with it) and the per-row
+# `BecomesHardTag`. `test_both_layouts_render_it` is rewritten below to pin
+# the opposite: neither layout renders a tag the backend no longer sends.
 
-def _run_node(tmp_path, body: str) -> dict:
-    script = tmp_path / "check.mjs"
-    script.write_text(f"import * as G from {json.dumps(GEN_UTIL.as_uri())};\n{body}\n", encoding="utf-8")
-    run = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=60)
-    assert run.returncode == 0, run.stderr
-    return json.loads(run.stdout)
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_the_progress_line_wording(tmp_path):
-    out = _run_node(tmp_path, """
-console.log(JSON.stringify({
-  a: G.hardStopsNowAndLaterText(1, 1),
-  b: G.hardStopsNowAndLaterText(0, 1),
-  c: G.hardStopsNowAndLaterText(2, 3),
-  d: G.hardStopsNowAndLaterText(2, 0),
-  e: G.laterHardStopsNote(1),
-  f: G.laterHardStopsNote(2),
-  g: G.laterHardStopsNote(0),
-  h: G.becomesHardCount({ becomes_hard: 2 }),
-  i: G.becomesHardCount(null),
-  j: G.becomesHardCount({ becomes_hard: "x" }),
-}));""")
-    assert out["a"] == "1 hard stop now, 1 more when forms are generated"
-    assert out["b"] == "No hard stops now, 1 when forms are generated"
-    assert out["c"] == "2 hard stops now, 3 more when forms are generated"
-    assert out["d"] is None and out["g"] is None
-    assert out["e"] == "1 warning becomes a hard stop when forms are generated."
-    assert out["f"] == "2 warnings become hard stops when forms are generated."
-    assert (out["h"], out["i"], out["j"]) == (2, 0, 0)
-
-
-def test_both_layouts_render_it():
+def test_both_layouts_render_no_becomes_hard_tag():
+    assert not GEN_UTIL.exists(), "utils/generationStops.js is retired"
     modal = MODAL.read_text(encoding="utf-8")
     rail = RAIL.read_text(encoding="utf-8")
-    util = GEN_UTIL.read_text(encoding="utf-8")
-    # the per-row tag lives in the ONE per-row action door both layouts call
-    # (8 Oct 2026: the door takes the review screen's context - no Resolve there,
-    # the page rides along with a status - and the rail passes it in.)
-    start = modal.index("const itemResolveAndStatus = (it, forms, ctx = {}) => {")
-    door = modal[start:modal.index("const sectionProgress", start)]
-    assert door.count("<BecomesHardTag text={becomesHard} />") == 2, "both return branches"
+    for name, text in (("AcordModal", modal), ("ReviewRailLayout", rail)):
+        for gone in ("generationStops", "BecomesHardTag", "becomes_hard_tag", "becomesHardCount",
+                     "laterHard"):
+            assert gone not in text, f"{name} still carries {gone}"
+    # the rows still go through the ONE per-row action door both layouts call
     assert ("renderItemActions={(it, forms, tone) => itemResolveAndStatus(it, forms, "
-            "{ reviewScreen: true, tone })}") in modal                # the rail's rows
-    for text in (util, door):
-        assert "—" not in text, "no em-dashes in UI copy"
+            "{ reviewScreen: true, tone })}") in modal
 
 
 def test_no_layout_announces_a_future_hard_stop():
@@ -477,10 +396,9 @@ def test_no_layout_announces_a_future_hard_stop():
     announcing a future problem, in a section where nothing can be done about
     it, is not a fix.
 
-    The per-row `becomes_hard_tag` STAYS (pinned above): it sits beside that
-    row's own "Open to fix", where a person can act on it. The helpers keep
-    their unit tests - they are still exported and still correct - this only
-    pins that no layout renders their sentences."""
+    The per-row `becomes_hard_tag` and the helpers were removed on 14 Oct 2026
+    (a check keeps one status before and after forms); this still pins that no
+    layout renders the sentences."""
     modal = MODAL.read_text(encoding="utf-8")
     rail = RAIL.read_text(encoding="utf-8")
     for name, text in (("AcordModal", modal), ("ReviewRailLayout", rail)):

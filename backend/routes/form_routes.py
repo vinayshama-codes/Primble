@@ -292,18 +292,9 @@ async def _pre_form_status(
     except Exception as _ex:                                     # noqa: BLE001
         logger.warning(f"pre-form status: recommendation fix routes skipped "
                        f"[session={session_id}]: {_ex}")
-    # Round 5 #15 (Brent #18): the warnings generation will make hard stops,
-    # through the one stops door, on a COPY - the Review cards are tagged from
-    # it (`grouped_with_package_caps`). Nothing to add (after forms, no
-    # recommended form, nothing demoted) leaves the payload exactly as it was.
-    try:
-        from services.stops_now import with_generation_hard_stops
-        pkg = with_generation_hard_stops(
-            pkg, row, facts=facts if facts is not None else (row or {}).get("facts"),
-            flags=flags if flags is not None else (row or {}).get("flags"))
-    except Exception as _ex:                                     # noqa: BLE001
-        logger.warning(f"pre-form status: generation hard stops skipped "
-                       f"[session={session_id}]: {_ex}")
+    # Round 5 #15's "Becomes a hard stop when ACORD 140 is generated" payload
+    # is gone (14 Oct 2026, one status from start to finish): generation no
+    # longer promotes a warning, so there is nothing to announce.
     try:
         kd = key_details(facts or {}, flags or {})
     except Exception as _ex:                                     # noqa: BLE001
@@ -1745,7 +1736,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         # the stored `hard_stops` / `soft_stops`, which a pipeline re-run can
         # leave describing facts the row no longer holds (live ca93ed8f: a 60
         # cap for an occupancy the producer had answered). Cross-form rules are
-        # scoped to the forms being generated, at full severity.
+        # scoped to the forms being generated; a cross-form hard stop stays the
+        # warning it was before forms (14 Oct 2026 - one status from start to
+        # finish: generation never promotes a check).
         from services.stops_now import stops_now
         _gen_stops           = stops_now(session, combined_ids, pre_form=False)
         cross_issues_deduped = _gen_stops["cross_issues"]
@@ -2554,6 +2547,15 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         _triggered_ids = set(session.get("selected_form_ids") or []) | {form_id}
         _cf_issues = run_cross_form_validation(updated_facts, fresh_flags, _triggered_ids)
         _cf_hard, _cf_soft, _cf_advisories = split_cross_form_issues(_cf_issues)
+        # ONE STATUS FROM START TO FINISH (14 Oct 2026, owner): a cross-form
+        # hard stop is a warning before forms AND after - the stops door's
+        # severity (`stops_now.cross_form_severity`), in its order (the demoted
+        # ones first). A field edit used to re-promote it and cap the package
+        # at 60 for a check the Review screen had always called a warning.
+        from services.stops_now import cross_form_severity
+        _cf_soft = list(_cf_hard) + [m for m in _cf_soft if m not in _cf_hard]
+        _cf_hard = []
+        _cf_issues = cross_form_severity(_cf_issues)
         fresh_hard_stops = list(_re_hard) + list(_cf_hard)
         fresh_soft_stops = list(_re_soft) + list(_cf_soft)
 

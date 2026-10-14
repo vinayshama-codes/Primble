@@ -233,8 +233,11 @@ def test_the_applicant_group_reads_as_the_review_names_it():
     assert f'export const APPLICANT_GROUP_LABEL = "{na._APPLICANT_ROW_TITLE}";' in util
     assert f'hint: "{na._APPLICANT_ROW_NEXT}"' in util
     panel = _src(PANEL)
-    # one split for the panel, the review and the review's counts
-    assert "attentionGroups(rows).map(" in panel and "attentionGroups(f.rows).map(" in panel
+    # one split for the panel, the review and the review's counts - the
+    # download review splits through `downloadReviewParts` (14 Oct 2026: its
+    # list moved into utils/needsAttention.js), which calls `attentionGroups`
+    assert "attentionGroups(rows).map(" in panel
+    assert "attentionGroups(f?.rows).map(" in util
     assert "ATTENTION_STATUS_ORDER" not in panel
     assert '<Tag status={isApplicantStep(row) ? "applicant" : row.status} />' in panel
 

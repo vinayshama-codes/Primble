@@ -1491,6 +1491,10 @@ def _make_clusters(items: List[dict]) -> List[dict]:
 # in the final HARD list is a hard stop whatever severity it was emitted with;
 # a hard row the caller moved to the soft list (classify_stops) is a warning;
 # anything else keeps its own. The twin rule and the renderer both ask this.
+#
+# Since 14 Oct 2026 (one status from start to finish) generation no longer
+# re-promotes a cross-form rule, so the lists and the card copies agree on a
+# fresh session; this rule still settles a row stored before that day.
 
 def _listed_in(message: str, final_list: List[str]) -> bool:
     """Is this row's sentence in a FINAL stop list? Exact, or carried with a
@@ -1653,7 +1657,6 @@ def build_grouped_view(
     cross_issues: Optional[List[dict]] = None,
     promote_codes: Optional[List[str]] = None,
     facts: Optional[dict] = None,
-    becomes_hard: Optional[List[dict]] = None,
     form_choices: Optional[List[dict]] = None,
 ) -> dict:
     """Group structured issues into clustered Hard Stop / tiered Warning
@@ -1703,10 +1706,10 @@ def build_grouped_view(
     carry none of it. Nothing here changes a score; the caller's stop arrays are
     untouched.
 
-    `becomes_hard` (optional, before forms only - 7 Oct 2026, round 5 #15):
-    `stops_now.becomes_hard_at_generation`'s entries. Each warning row one of
-    them names carries `becomes_hard_tag` / `becomes_hard_forms`, and the view
-    returns how many rows it tagged as `becomes_hard`. Display only.
+    No row is tagged "Becomes a hard stop when ... is generated" (14 Oct 2026,
+    one status from start to finish): round 5 #15's `becomes_hard` input, the
+    `becomes_hard_tag` row key and the `becomes_hard` count are gone, because a
+    cross-form warning stays a warning at generation.
     """
     hard_stops = hard_stops or []
     soft_stops = soft_stops or []
@@ -1997,13 +2000,6 @@ def build_grouped_view(
         except Exception as _rx:                              # noqa: BLE001
             logger.warning("issue_registry: COPE card routing skipped: %s", _rx)
 
-    # ── WHAT GENERATION WILL MAKE A HARD STOP (7 Oct 2026, round 5 #15) ─────
-    # Brent #18: "There were no Hard Stops in the initial SQS prior to form
-    # selection, but there's Hard Stops now. Why?" C75 shows a cross-form hard
-    # stop as a warning until its form is generated (unchanged, Brent's call);
-    # the warning now SAYS so. Tags only the rows this view draws as warnings.
-    _becomes_hard_rows = _tag_becomes_hard(enriched, becomes_hard)
-
     hard_items = [i for i in enriched if i["severity"] == "hard_stop"]
     hard_clusters = _make_clusters(hard_items)
 
@@ -2107,45 +2103,7 @@ def build_grouped_view(
         # Before forms: checks whose only fix is choosing a form - not counted,
         # not capping, listed where forms are chosen (13 Oct 2026).
         "form_choices": _choice_rows,
-        # The warning rows drawn above that generation will make hard stops
-        # (each row carries its `becomes_hard_tag`). Before forms only; beside
-        # `counts`, never inside it - those rows ARE warnings now.
-        "becomes_hard": _becomes_hard_rows,
     }
-
-
-def _tag_becomes_hard(rows: List[dict], entries: Optional[List[dict]]) -> int:
-    """Tag each WARNING row that generation will make a hard stop with the
-    entry's `tag` ("Becomes a hard stop when ACORD 140 is generated") and
-    `forms`; return how many rows were tagged. `entries` come from
-    `stops_now.becomes_hard_at_generation` (code, message, forms, tag). A row
-    matches its entry by sentence (exact or prefix, the lists' own rule) and,
-    when the row carries a real rule code, by that code too. Hard rows are
-    never tagged - they are hard stops already."""
-    todo = [e for e in (entries or []) if isinstance(e, dict)
-            and str(e.get("message") or "").strip() and e.get("tag")]
-    if not todo:
-        return 0
-    tagged = 0
-    for row in rows or []:
-        if row.get("severity") == "hard_stop":
-            continue
-        msg = str(row.get("message") or "").strip()
-        if not msg:
-            continue
-        code = str(row.get("code") or "")
-        coded = bool(code) and not code.startswith("uncovered_") and code not in (
-            "uncategorized", "cross_form_legacy")
-        for e in todo:
-            if coded and e.get("code") and str(e.get("code")) != code:
-                continue
-            emsg = str(e.get("message")).strip()
-            if msg == emsg or msg.startswith(emsg) or emsg.startswith(msg):
-                row["becomes_hard_tag"] = str(e["tag"])
-                row["becomes_hard_forms"] = [str(f) for f in (e.get("forms") or [])]
-                tagged += 1
-                break
-    return tagged
 
 
 def _form_choice_row(entry: dict, issue: Optional[dict]) -> dict:
@@ -2306,10 +2264,10 @@ def grouped_with_package_caps(
     Display only. The caller's own arrays - which drive capping, dismiss credit
     and issue_id hashing - are never touched, and no score moves.
 
-    Before forms the door's package also names the warnings generation will
-    make hard stops (`becomes_hard_at_generation`, attached by
-    `stops_now.with_generation_hard_stops` - 7 Oct 2026, round 5 #15); the
-    view tags those rows, so every pre-form response says it the same way.
+    No "Becomes a hard stop when ... is generated" tag any more (14 Oct 2026,
+    one status from start to finish): a cross-form warning stays a warning at
+    generation, so a stored package's `becomes_hard_at_generation` (written
+    before that day) is ignored.
     """
     pkg = pkg or {}
     codes = [c for c in (pkg.get("cap_hard_stop_codes") or []) if c]
@@ -2327,7 +2285,6 @@ def grouped_with_package_caps(
         cross_issues=cross_issues,
         promote_codes=codes,
         facts=facts,
-        becomes_hard=pkg.get("becomes_hard_at_generation"),
         form_choices=pkg.get("form_choices"),
     )
 

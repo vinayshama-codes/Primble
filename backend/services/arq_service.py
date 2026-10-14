@@ -7225,13 +7225,20 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
                      if isinstance(r, dict) and r.get("form_id")}
     cf_issues        = run_cross_form_validation(facts, flags, triggered)
     if _pre_form:
-        cf_issues = [dict(i, type="soft_warning")
-                     if isinstance(i, dict) and i.get("type") == "hard_stop" else i
-                     for i in cf_issues]
         # A form choice is not a stop before forms (13 Oct 2026) - as stops_now.
         from services.cross_form_validator import defer_form_choices
         cf_issues = defer_form_choices(cf_issues)
     cf_hard, cf_soft, _cf_adv = split_cross_form_issues(cf_issues)
+    # ONE STATUS FROM START TO FINISH (14 Oct 2026, owner): a cross-form hard
+    # stop is a warning before forms AND after - the severity the stops door
+    # gives it (`stops_now.cross_form_severity`), in the door's order (the
+    # demoted ones first). This post-form branch used to re-promote it, so an
+    # answer given after generation could cap the package at 60 for a check
+    # the Review screen had always called a warning.
+    from services.stops_now import cross_form_severity
+    cf_soft = list(cf_hard) + [m for m in cf_soft if m not in cf_hard]
+    cf_hard = []
+    cf_issues = cross_form_severity(cf_issues)
     hard_stops = list(re_hard) + list(cf_hard)
     soft_stops = list(re_soft) + list(cf_soft)
     if _pre_form:

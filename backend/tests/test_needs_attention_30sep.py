@@ -543,7 +543,8 @@ def test_pre_download_review_reads_the_same_door():
     assert "fetchNeedsAttention(sessionId)," in modal
     assert "withoutSupersededRecs(recsData?.open_recommendations || [], attention)" in modal
     assert "if (openRecs.length === 0 && attentionTotal === 0) { downloadFn({}); return; }" in modal
-    assert modal.count("<NeedsAttentionSummary attention=") == 2       # review + post-download checklist
+    # review + post-download checklist draw ONE list (14 Oct 2026: DownloadReviewList)
+    assert modal.count("<DownloadReviewList ") == 2
     util = _read(FRONTEND / "utils" / "needsAttention.js")
     assert "/api/needs-attention/" in util and "attention_superseded" in util
     assert "f?.ok === false" in util                                   # fail open per form

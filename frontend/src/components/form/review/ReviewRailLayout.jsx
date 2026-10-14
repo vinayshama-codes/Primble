@@ -16,7 +16,6 @@ import {
   RESOLVED_LABELS, NO_LONGER_APPLIES, liveIdsOf, splitClusters, storedHandledRows, resolvedRows, reopenKind,
   pageProgress,
 } from "../../../utils/resolvedIssues";
-import { becomesHardCount } from "../../../utils/generationStops";
 import { positiveScoreWording } from "../../../utils/positiveWording";
 import { formsEffect } from "../../../utils/scoreWithForms";
 import { documentTypeTag, documentInsuredTag, INSURED_TAG_STYLE } from "../../../utils/addDocuments";
@@ -448,13 +447,6 @@ export default function ReviewRailLayout(props) {
   // The footer (Choice Electric #2): the page the main button opens next, or
   // null when it is the continue button (see utils/packageGeneration).
   const step = nextReviewStep(SECTIONS, section, genState);
-  // Round 5 #15 (Brent #18): before forms, the warnings generation will make
-  // hard stops (each row carries its own tag) - "1 hard stop now, 1 more when
-  // forms are generated" on the Overview, a line on the Hard Stops page.
-  // Kept only to steer the Overview tile at a warning that will promote; the
-  // SENTENCES are gone (owner, 8 Oct 2026 - Brent asked a question, not for a
-  // disclaimer). The per-row `becomes_hard_tag` still shows beside its own fix.
-  const laterHard = afterForms ? 0 : becomesHardCount(groupedIssues);
 
   // Recommendations (Choice Electric #22 / #27): one model feeds the section,
   // its rail badge and the Overview's link, so the three counts agree. After
@@ -764,8 +756,8 @@ export default function ReviewRailLayout(props) {
                   <i />{plural(docsOpen, "document")} to review<span className="rr-stat__go"><ArrowIcon /></span>
                 </button>
               )}
-              <button type="button" className={`rr-stat${hardOpen || laterHard ? "" : " is-done"}`}
-                onClick={() => onSectionChange(hardOpen || !laterHard ? "hardstops" : "warnings")}
+              <button type="button" className={`rr-stat${hardOpen ? "" : " is-done"}`}
+                onClick={() => onSectionChange("hardstops")}
                 data-testid="overview-hard-stops-line">
                 <i />{hardOpen ? `${plural(hardOpen, "blocker")} left` : "No blockers left"}<span className="rr-stat__go"><ArrowIcon /></span>
               </button>
@@ -1074,9 +1066,8 @@ export default function ReviewRailLayout(props) {
             screen. A sentence announcing a future problem, in the one section
             where nothing can be done about it, is not the fix - the fix is
             that the item is actionable BEFORE generation, which is what the
-            Recommendations section now carries. The per-row
-            `becomes_hard_tag` stays: it sits beside that row's own
-            "Open to fix", where a person can act on it. */}
+            Recommendations section now carries. (A check now keeps one
+            status before and after forms, 14 Oct 2026.) */}
         {/* Positive wording throughout (Choice Electric #16, 9 Oct 2026). */}
         {!hasHardStops && <EmptyState title="No hard stops." sub="Your Submission Quality Score (SQS)™ is clear of hard stops." />}
         {hasHardStops && (groupedHard

@@ -6,8 +6,8 @@ import { formLabel, fileStem, baseFormId } from "../../utils/formInstances";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
-import NeedsAttentionPanel, { NeedsAttentionSummary } from "./NeedsAttentionPanel";
-import { alsoListedText, downloadReviewCounts, downloadReviewHeadline, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
+import NeedsAttentionPanel, { DownloadReviewList } from "./NeedsAttentionPanel";
+import { downloadReviewCounts, downloadReviewHeadline, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
 import { confirmFieldUpdates } from "../../utils/confirmValues";
 import { formsEffect } from "../../utils/scoreWithForms";
 import KeyDetailsMissing from "./review/KeyDetailsMissing";
@@ -32,7 +32,6 @@ import {
 } from "../../utils/resolvedIssues";
 import { positiveScoreWording } from "../../utils/positiveWording";
 import { ANCHOR_FORM_ID, withAnchorForm, checkedFormsForReview } from "../../utils/formSelection";
-import { becomesHardCount } from "../../utils/generationStops";
 import ReviewRailLayout from "./review/ReviewRailLayout";
 import PoliciesTable from "./review/PoliciesTable";
 import AddDocumentsPanel from "./review/AddDocumentsPanel";
@@ -1040,21 +1039,6 @@ function ScoreNeutralNote({ show }) {
   return (
     <div style={{ fontSize: 10.5, color: "#94a3b8", fontStyle: "italic", marginTop: 4 }}>
       Advice only - this does not affect your score.
-    </div>
-  );
-}
-
-// Round 5 #15 (Brent #18): a pre-form warning that generation will make a hard
-// stop says so - the server's `becomes_hard_tag` ("Becomes a hard stop when
-// ACORD 140 is generated"). Rendered by the one per-row action door, so both
-// Review layouts show it. Missing tag (after forms, older payloads) renders nothing.
-function BecomesHardTag({ text }) {
-  if (!text) return null;
-  return (
-    <div data-becomes-hard="true" style={{ marginTop: 4 }}>
-      <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: "1px 8px" }}>
-        {text}
-      </span>
     </div>
   );
 }
@@ -2417,14 +2401,10 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
   // display is deliberately UNIFIED with the ordinary Hard Stops box - same title,
   // same box, same "Download Anyway" label - so this doesn't read as a new/
   // different feature to the producer.
-  const hardBlockItems = openRecs.filter(r => (r.rec_id || "").includes("hardblock_"));
-  const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
-  const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
-  const allHardRecs = [...hardBlockItems, ...hardRecs];
-  // The headline counts what there is to FIX; the rest is named, not added in
-  // (Choice Electric #27 - "176 items flagged" was every row of every kind).
+  // The list is the one both download screens draw (`DownloadReviewList`): the
+  // items to fix one by one, the rest as one line per group with its count and
+  // Show (owner, 14 Oct 2026). The headline counts the listed fix-items only.
   const counts = downloadReviewCounts(openRecs, attention);
-  const alsoListed = alsoListedText(counts);
   const reasonRequired = hasHardBlock && !overrideReason.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -2433,31 +2413,12 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
             <div style={{ fontSize: 12, color: "#64748b" }}>{downloadReviewHeadline(counts)}</div>
-            {alsoListed && (
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Also listed: {alsoListed}</div>
-            )}
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
-          {allHardRecs.length > 0 && (
-            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({allHardRecs.length})</div>
-              {allHardRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {positiveScoreWording(r.message)}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</div>
-              ))}
-            </div>
-          )}
-          <NeedsAttentionSummary attention={attention} />
-          {softRecs.length > 0 && (
-            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
-              {softRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {positiveScoreWording(r.message)}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</div>
-              ))}
-            </div>
-          )}
+          <DownloadReviewList openRecs={openRecs} attention={attention} />
           {narrative && (
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: softRecs.length > 0 || hardRecs.length > 0 ? 10 : 0 }}>
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: counts.toFix > 0 ? 10 : 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>SQS Analysis Summary</div>
               <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.75, margin: 0 }}>{narrative.replace(/\n+/g, " ").trim()}</p>
             </div>
@@ -3849,13 +3810,9 @@ const AcordModal = forwardRef(function AcordModal({
     //    - client review #4 "align them") is what separates it from the message
     //    text above; kept equal to the fixable branch below so the vertical
     //    rhythm never depends on whether a row also has a fix button.
-    // Round 5 #15: before forms, a warning generation will make a hard stop
-    // carries the server's tag (both Review layouts render rows through here).
-    const becomesHard = !formsGenerated ? it?.becomes_hard_tag : null;
     if (!inDataConsistency && !canResolve && !explainOnly && !addable.length && !ticked.length) {
       return (
         <div>
-          <BecomesHardTag text={becomesHard} />
           <ScoreNeutralNote show={it?.score_neutral} />
           <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms, ctx)}</div>
         </div>
@@ -3867,7 +3824,6 @@ const AcordModal = forwardRef(function AcordModal({
     // the same baseline instead of drifting per-button.
     return (
       <div>
-        <BecomesHardTag text={becomesHard} />
         {explainOnly && <ResolutionHint mode={mode} note={res && res.note} />}
         {/* The producer has already ticked the form this row asked for. Say so
             - the alternative was silence or, worse, the generic "can't be
@@ -6542,7 +6498,10 @@ const AcordModal = forwardRef(function AcordModal({
       // will 409 unless the request explicitly asks for a watermarked draft with a
       // reason. Identified by the "hardblock_" marker services.field_qa.
       // to_recommendation_rows puts in rec_id - see backend/services/field_qa.py.
-      const hasHardBlock = openRecs.some(r => (r.rec_id || "").includes("hardblock_"));
+      // The side panel's own rows say the same (`blocks_download`, 14 Oct 2026),
+      // so a review whose stored rows failed to load still asks for the note.
+      const hasHardBlock = openRecs.some(r => (r.rec_id || "").includes("hardblock_"))
+        || (attention?.forms || []).some(f => (f?.rows || []).some(r => r?.blocks_download));
       setPreflightHardBlock(hasHardBlock);
       if (openRecs.length === 0 && attentionTotal === 0) { downloadFn({}); return; }
       setPreflightOverrideReason("");
@@ -10331,13 +10290,11 @@ const AcordModal = forwardRef(function AcordModal({
                 is clean. Surface unresolved issues + next actions so nothing is assumed. */}
             {(() => {
               const recs     = preflightRecs || [];
-              // A required box blocking the download is a hard stop here too, as
-              // on the review before it - one rule, `downloadReviewCounts`.
-              const isHard   = r => r.recommendation_type === "hard_stop" || (r.rec_id || "").includes("hardblock_");
-              const hardRecs = recs.filter(isHard);
-              const softRecs = recs.filter(r => !isHard(r));
+              // The same list, split and counted the same way, as the review
+              // before the download (`DownloadReviewList` / `downloadReviewCounts`,
+              // owner 14 Oct 2026): the items to fix one by one, hard stops first,
+              // then one line per group with its count and Show.
               const counts   = downloadReviewCounts(recs, preflightAttention);
-              const alsoListed = alsoListedText(counts);
               const hasIssues = counts.total > 0;
               const score = packageSqs?.package_sqs_score;
               const nextAction = (sqsNarrative || "").replace(/\n+/g, " ").trim();
@@ -10362,27 +10319,10 @@ const AcordModal = forwardRef(function AcordModal({
 
                   {hasIssues && (
                     <>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: alsoListed ? 2 : 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
                         {counts.toFix > 0 ? `To fix before sending (${counts.toFix})` : "Nothing to fix - still listed"}
                       </div>
-                      {alsoListed && (
-                        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>Also listed: {alsoListed}</div>
-                      )}
-                      {/* Hard stops FIRST (Choice Electric #27: they sat at the end,
-                          under every needs-attention row of every form). */}
-                      {hardRecs.map((r, i) => (
-                        <div key={`h${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#7f1d1d", padding: "4px 0", lineHeight: 1.5 }}>
-                          <span style={{ color: "#dc2626", fontWeight: 700 }}>☐</span>
-                          <span>{positiveScoreWording(r.message)}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</span>
-                        </div>
-                      ))}
-                      <NeedsAttentionSummary attention={preflightAttention} />
-                      {softRecs.map((r, i) => (
-                        <div key={`s${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#334155", padding: "4px 0", lineHeight: 1.5 }}>
-                          <span style={{ color: "#94a3b8", fontWeight: 700 }}>☐</span>
-                          <span>{positiveScoreWording(r.message)}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</span>
-                        </div>
-                      ))}
+                      <DownloadReviewList openRecs={recs} attention={preflightAttention} />
                       {nextAction && (
                         <div style={{ marginTop: 14, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
                           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Recommended next action</div>

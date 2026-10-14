@@ -3936,7 +3936,71 @@ def _other_policy_rows(facts: dict) -> Optional[List[dict]]:
         printed = _printed_line_name_for(facts, r.get("policy_number"))
         if printed:
             r["line"] = printed
+    rows.extend(_unnumbered_other_policy_rows(facts, rows, _receiving, _entity))
     return rows
+
+
+def _unnumbered_other_policy_rows(facts: dict, rows: List[dict], receiving: Optional[str],
+                                  entity) -> List[dict]:
+    """Question 4 rows for the package's own policies whose declarations print
+    no number (a redacted dec) - Brent, 14 Oct 2026, answer 1C: "Yes, we should
+    still list the policy". The line prints; the POLICY NUMBER cell stays blank.
+
+    Read off the per-policy records (`policy_line_records`, the review table's
+    rows), never the raw coverage rows - a coverage PART carries its policy's
+    carrier and term too. A record qualifies only through
+    `_redacted_policy_is_listable` (its own carrier, its own term, its own
+    declarations or a producer's statement), with the receiving-carrier filter
+    the numbered rows obey. A record of a line and carrier a numbered row
+    already lists is that row. ROOM, NOT A SLOT RULE: added only when every one
+    fits in the rows ACORD 125 prints beside the numbered ones; otherwise
+    nothing is added (which policy takes a scarce row is the open slot
+    question)."""
+    records = _fv(facts, "_line_records")
+    if not isinstance(records, list) or not records:
+        return []
+    try:
+        from services.extraction_service import policy_line_records
+        from services.lob_canon import canon_line as _canon
+        from services.policy_lines import _line_label
+    except Exception:                                     # noqa: BLE001
+        return []
+    listed = {(_canon(str(r.get("line") or "")), _carrier_entity_key(str(r.get("carrier") or "")))
+              for r in rows}
+    found: Dict[tuple, dict] = {}
+    for rec in policy_line_records(records):
+        number = str(rec.get("policy_number") or "").strip()
+        if number and not (_looks_like_a_form_number(number) or _not_a_policy_number(number, facts)):
+            continue                       # a numbered policy: the rows above decide it
+        if not _redacted_policy_is_listable(rec, facts):
+            continue
+        fam = str(rec.get("line") or "").strip()
+        ckey = _carrier_entity_key(str(rec.get("carrier_name") or ""))
+        if not fam or not ckey:
+            continue
+        if receiving and entity is not None and entity(rec.get("carrier_name")) != receiving:
+            continue                       # another company's policy
+        # The same line and carrier as a numbered row, or a line a numbered row
+        # lists for a carrier it does not name, is that row's policy.
+        if (fam, ckey) in listed or (fam, "") in listed:
+            continue
+        name = str(_line_label(rec) or "").strip()
+        if not name:
+            continue
+        found.setdefault((fam, ckey), {"line": name, "policy_number": "",
+                                       "carrier": rec.get("carrier_name"), "_unnumbered": True})
+    if not found:
+        return []
+    schema = _all_form_schemas().get("ACORD_125") or {}
+    room = len([f for f in schema if _OTHER_POLICY_LINE_RE.match(f)
+                and f.startswith("OtherPolicy_LineOfBusinessCode_")])
+    if len(rows) + len(found) > room:
+        logger.info(
+            "other_policy: %d policy(ies) whose declarations print no number do not fit "
+            "beside %d rows in %d - left off; which policy takes a row is the open slot "
+            "question", len(found), len(rows), room)
+        return []
+    return list(found.values())
 
 
 def _printed_line_name_for(facts: dict, number: Any) -> Optional[str]:
@@ -3966,7 +4030,9 @@ def _resolve_other_policy_cell(field_name: str, facts: dict):
         return None
     entry = rows[idx]
     key = "line" if attr == "LineOfBusinessCode" else "policy_number"
-    value = str(entry[key]).strip()
+    value = str(entry.get(key) or "").strip()
+    if not value:
+        return None                        # a redacted dec's policy: its number is unknown
     if key == "line":
         # Label sanity: extraction attached the line name "Property" to the
         # INLAND MARINE policy number on two consecutive live runs — on a
@@ -4430,6 +4496,11 @@ def _resolve_estimated_total(field_name: str, facts: dict):
                         "carriers' rows the grid prints - using their sum (%s)",
                         _stated_txt, _printed_row_carriers(facts, printed), f"${_computed:,}")
                     return f"${_computed:,}"
+                if any(r.get("_unpriced") for r in (_other_lob_rows(facts) or [])):
+                    # One policy's total, and the rows' sum misses a policy the
+                    # grid lists with its premium redacted (Brent, 14 Oct 2026,
+                    # 1C): neither is the package total - blank.
+                    return None
             return _stated_txt
         # The stated figure is arithmetically not a total. Fall back to the sum
         # of the printed rows ONLY if it is complete - see
@@ -4485,7 +4556,10 @@ def _printed_sum(facts: dict, printed: Optional[List[int]]) -> Optional[int]:
         def _grants(_e):                                  # type: ignore
             return True
     schema = _all_form_schemas().get("ACORD_125") or {}
-    other_names = {r["name"] for r in (_other_lob_rows(facts) or [])}
+    _other_rows = _other_lob_rows(facts) or []
+    other_names = {r["name"] for r in _other_rows}
+    if any(r.get("_unpriced") for r in _other_rows):
+        return None                        # a policy the grid lists with its premium redacted
     for e in lines:
         if not isinstance(e, dict) or not _grants(e):
             continue
@@ -5551,7 +5625,107 @@ def _other_lob_rows(facts: dict) -> Optional[List[dict]]:
                 continue
             names.add(name)
             rows.append({"name": name, "premium": str(lines[i].get("premium")).strip() if amt > 0 else None})
+    # 3. then every policy whose premium is redacted or blank (Brent, 14 Oct
+    #    2026, answer 1C) - `_unpriced_other_lob_rows`.
+    rows.extend(_unpriced_other_lob_rows(facts, rows))
     return rows
+
+
+def _unpriced_other_lob_rows(facts: dict, rows: List[dict]) -> List[dict]:
+    """OTHER rows for the policies `rows` leave out only because they print no
+    premium (Brent, 14 Oct 2026, answer 1C: "Yes, we should still list the
+    policy"). Choice Electric's redacted Federal EPL dec - its own carrier,
+    its own term, no premium - was on the review's policies table and nowhere
+    on ACORD 125.
+
+    A policy record (`extraction_service.policy_line_records` - the review
+    table's own rows) with no premium, carrier and its own dates known
+    (`_redacted_policy_is_listable`), whose line has no named box of its own on
+    the form, that no row names yet and that ACORD's vocabulary places as a
+    line of business. One row per line, premium blank (never "$0").
+
+    ROOM, NOT A SLOT RULE: they are added only when every one of them fits in
+    the OTHER rows the form prints beside the rows already there. More than
+    that and nothing is added - which line takes a scarce OTHER row, and where
+    the rest go, is the open question (Michelle); today's rows stand."""
+    records = _fv(facts, "_line_records")
+    if not isinstance(records, list) or not records:
+        return []
+    try:
+        from services.extraction_service import policy_line_records
+        from services.lob_canon import canon_line as _canon
+        from services.policy_lines import _line_label
+    except Exception:                                     # noqa: BLE001
+        return []
+    shown_names = {str(r.get("name") or "").strip().lower() for r in rows}
+    shown_fams = {_canon(str(r.get("name") or "")) for r in rows} - {None}
+    # The tests `_nonstandard_lob_rows` puts a PRICED line through, every one
+    # but the premium - an unpriced policy is never listed where a priced one
+    # of its line would not be (workers comp is not a 125 OTHER row: its name
+    # is coverage-part vocabulary).
+    try:
+        from services.extraction_service import _line_entry_grants_coverage as _grants
+    except Exception:                                     # noqa: BLE001
+        return []
+    lines = _fv(facts, "coverage_lines")
+    standard_numbers = {re.sub(r"[^a-z0-9]", "", str(e.get("policy_number") or "").lower())
+                        for e in (lines if isinstance(lines, list) else [])
+                        if isinstance(e, dict) and _grants(e)
+                        and _fits_a_standard_lob_box(str(e.get("line") or "").strip())} - {""}
+    vocab = _coverage_part_vocab()
+    found: Dict[str, dict] = {}
+    for rec in policy_line_records(records):
+        if rec.get("premium") is not None or not _redacted_policy_is_listable(rec, facts):
+            continue
+        fam = str(rec.get("line") or "").strip()
+        name = str(_line_label(rec) or "").strip()
+        if not fam or not name or fam in shown_fams or name.lower() in shown_names:
+            continue
+        if not _lob_tokens(name) or _fits_a_standard_lob_box(name) \
+                or _names_only_coverage_part_words(name, vocab) \
+                or not _names_a_line_of_business(name):
+            continue
+        if re.sub(r"[^a-z0-9]", "", str(rec.get("policy_number") or "").lower()) in standard_numbers:
+            continue                       # rides a standard line's policy number
+        found.setdefault(fam, {"name": name, "premium": None, "_unpriced": True})
+    if not found:
+        return []
+    room = len(_other_lob_premium_boxes(_all_form_schemas().get("ACORD_125") or {}))
+    if len(rows) + len(found) > room:
+        logger.info(
+            "other-lob: %d policy(ies) with no premium (%s) do not fit beside %d rows in "
+            "%d OTHER rows - left off; which line takes an OTHER row is the open slot "
+            "question", len(found), [r["name"][:30] for r in found.values()], len(rows), room)
+        return []
+    return list(found.values())
+
+
+def _names_only_coverage_part_words(name: str, vocab: Optional[frozenset] = None) -> bool:
+    """Every significant word of `name` is coverage-feature vocabulary - a
+    coverage PART ("Uninsured Motorists", "Medical Payments"), not a line of
+    its own for an OTHER row (`_nonstandard_lob_rows`)."""
+    vocab = _coverage_part_vocab() if vocab is None else vocab
+    toks = [w for w in re.findall(r"[a-z0-9]+", str(name or "").lower())
+            if len(w) >= 3 and w not in _COVERAGE_PART_GENERIC]
+    return bool(toks) and all(t in vocab for t in toks)
+
+
+def _fits_a_standard_lob_box(name: str) -> bool:
+    """A line ACORD 125 prints a named box for - the test `_nonstandard_lob_rows`
+    applies (ACORD's own checkbox wording, or the line family one of those
+    boxes names through the one line canon)."""
+    index = _lob_indicator_index()
+    doc = _lob_tokens(name)
+    if doc and any(_tokens_describe_same_line(doc, ts)
+                   for token_sets in index.values() for ts in token_sets):
+        return True
+    try:
+        from services.lob_canon import canon_line as _canon
+    except Exception:                                     # noqa: BLE001
+        return False
+    fam = _canon(name)
+    return bool(fam) and any(_canon(" ".join(sorted(ts))) == fam
+                             for token_sets in index.values() for ts in token_sets)
 
 
 def _nonstandard_lob_rows(facts: dict) -> Optional[List[dict]]:
@@ -5648,9 +5822,7 @@ def _nonstandard_lob_rows(facts: dict) -> Optional[List[dict]]:
         # "Collision", "Medical Payments"), or it rides a standard line's own
         # policy number. Either signal excludes it; a genuine odd line
         # ("Employment Practices Liability") carries words of its own.
-        toks = [w for w in re.findall(r"[a-z0-9]+", name.lower())
-                if len(w) >= 3 and w not in _COVERAGE_PART_GENERIC]
-        if toks and all(t in vocab for t in toks):
+        if _names_only_coverage_part_words(name, vocab):
             continue
         pn = _norm_pn(entry)
         if pn and pn in standard_numbers:
@@ -11729,6 +11901,63 @@ def _specialty_leftover_lines(lines, covered_canons) -> Tuple[list, bool]:
     return leftovers, unplaceable
 
 
+def _unpriced_specialty_leftovers(lines, covered_canons, facts: dict) -> list:
+    """Leftover liability lines (`_specialty_leftover_lines`' own test) that
+    test skips only because their policy prints no premium and no number -
+    a redacted declarations page (Brent, 14 Oct 2026, answer 1C: "Yes, we
+    should still list the policy").
+
+    An entry qualifies when its policy prints its OWN declarations
+    (`_line_entry_evidences_policy(entry, facts)`), the entry names its carrier
+    and both dates of its term (Brent's condition), ACORD's vocabulary places
+    it as a line of business, and no other evidenced line is a leftover of the
+    same family and carrier. One entry per policy (line family + carrier),
+    preferring the name the policy's own record prints - a coverage part rides
+    its policy's carrier and term too. Lines the policy-grade test already
+    accepts are never returned here: today's leftovers decide those."""
+    try:
+        from services.lob_canon import canon_line as _canon_line
+        from services.normalization import normalize_date
+    except Exception:                                     # noqa: BLE001
+        return []
+    records = _fv(facts, "_line_records") if isinstance(facts, dict) else None
+    printed = {(str(r.get("line") or ""), _carrier_entity_key(str(r.get("carrier_name") or ""))):
+               str(r.get("line_printed") or "").strip()
+               for r in (records if isinstance(records, list) else [])
+               if isinstance(r, dict) and r.get("own_declarations")}
+    today = {(_canon_line(str(e.get("line") or "")), _carrier_entity_key(str(e.get("carrier") or "")))
+             for e in (lines if isinstance(lines, list) else [])
+             if isinstance(e, dict) and _line_entry_evidences_policy(e)}
+    out: Dict[tuple, dict] = {}
+    for e in lines if isinstance(lines, list) else []:
+        if not isinstance(e, dict) or _line_entry_evidences_policy(e):
+            continue
+        if not _line_entry_evidences_policy(e, facts):
+            continue
+        name = str(e.get("line") or "").strip()
+        canon = _canon_line(name)
+        carrier = _carrier_entity_key(str(e.get("carrier") or ""))
+        if canon is None or not carrier:
+            continue
+        if canon == "general_liab":
+            if set(re.findall(r"[a-z]+", name.lower())) <= _GL_GENERIC_TOKENS:
+                continue
+        elif canon in covered_canons:
+            continue
+        eff = normalize_date(str(e.get("effective_date") or "")) or None
+        exp = normalize_date(str(e.get("expiration_date") or "")) or None
+        if not eff or not exp or exp <= eff or not _names_a_line_of_business(name):
+            continue
+        key = (canon, carrier)
+        if key in today:
+            continue
+        held = out.get(key)
+        if held is None or (name == printed.get(key)
+                            and str(held.get("line") or "").strip() != printed.get(key)):
+            out[key] = e
+    return list(out.values())
+
+
 def _line_declared_absent(facts: dict, phrases) -> bool:
     """True only on positive evidence: the document DENIES this line ("No
     Coverage") and nothing grants it. Absence of any mention is not evidence.
@@ -11913,6 +12142,12 @@ def _resolve_underlying_policy_row(field_name: str, facts: dict):
         # insurance lists (round 5, Brent #4): a carried cyber or EBL policy is
         # not underlying to it. See scoped_evidence.scheduled_underlying_leftovers.
         leftovers = _scheduled_underlying(leftovers, facts)
+        if not unplaceable and not leftovers:
+            # ...or, with no such line, the one policy whose premium and number
+            # are redacted (Brent, 14 Oct 2026, answer 1C - never beside a
+            # line that already holds the row).
+            leftovers = _scheduled_underlying(
+                _unpriced_specialty_leftovers(lines, _UNDERLYING_COVERED_CANONS, facts), facts)
         if unplaceable or len(leftovers) != 1:
             return None
         e = leftovers[0]
@@ -12123,6 +12358,17 @@ def _resolve_underlying_coverage_grid(field_name: str, facts: dict):
     # here although its umbrella schedules GL / Auto / WC-EL only and EXCLUDES
     # Employee Benefits. See scoped_evidence.scheduled_underlying_leftovers.
     leftovers = _scheduled_underlying(leftovers, facts)
+    # A scheduled line whose policy prints no premium and no number (Brent,
+    # 14 Oct 2026, answer 1C) takes a row after them - only when every such
+    # line fits in the rows the form prints (which line takes a scarce row is
+    # the open slot question).
+    _extra = _scheduled_underlying(
+        _unpriced_specialty_leftovers(lines, _UNDERLYING_COVERED_CANONS, facts), facts)
+    if _extra:
+        _room = len([f for f in (_all_form_schemas().get("ACORD_131") or {})
+                     if _UNDERLYING_COV_OTHER_RE.match(f) and "OtherIndicator" in f])
+        if len(leftovers) + len(_extra) <= _room:
+            leftovers = list(leftovers) + _extra
     idx = _ROW_LETTER_TO_IDX[m.group(2)]
     if idx >= len(leftovers):
         return None
@@ -13323,15 +13569,55 @@ def _current_policy_grid_rows(facts: dict, term: Tuple[Optional[str], Optional[s
             premium = f"${rec['premium']:,.0f}"        # the record's own rows (POL, 6 Oct)
         effective = _us_date(rec.get("effective_date")) or term[0]
         expiration = _us_date(rec.get("expiration_date")) or term[1]
+        unpriced = False
         if not number and not premium:
-            continue                       # nothing makes it a policy of its own
-        out.append({
+            # Brent, 14 Oct 2026 (answer 1C): "Yes, we should still list the
+            # policy" when its premium is redacted or blank. Its own carrier and
+            # term must be known (`_redacted_policy_is_listable`); the premium box
+            # stays blank. Such a row never takes a box from a policy listed
+            # before - see `_prior_coverage_grid_build`.
+            if not _redacted_policy_is_listable(rec, facts):
+                continue                   # nothing makes it a policy of its own
+            unpriced = True
+        row = {
             "line": _PRIOR_GRID_FAMILY_LINE.get(fam, fam.replace("_", " ").title()),
             "carrier": carrier, "policy_no": number or None, "premium": premium,
             "effective": effective, "expiration": expiration,
             "_current_term": True,
-        })
+        }
+        if unpriced:
+            row["_unpriced"] = True
+        out.append(row)
     return out
+
+
+def _redacted_policy_is_listable(rec: Any, facts: Optional[dict] = None) -> bool:
+    """A per-policy record (`extraction_service.policy_line_records`) whose
+    premium - or, on a redacted dec, number - is not printed is still a policy
+    to list. Brent, 14 Oct 2026, answer 1C: "Yes, we should still list the
+    policy" (redacted declarations come from cautious test users).
+
+    Brent's own condition: the CARRIER and the DATES are still known. Both
+    dates must be the record's own (never the package term) and in order, and
+    something must make the record a policy of its own - its own declarations
+    document (`own_declarations`: the redacted dec), a producer's statement,
+    or a real policy number. A requirement-shaped schedule row, a common
+    declarations' menu row or a coverage part has none of the three."""
+    if not isinstance(rec, dict) or not str(rec.get("carrier_name") or "").strip():
+        return False
+    try:
+        from services.normalization import normalize_date
+    except Exception:                                     # noqa: BLE001
+        return False
+    eff = normalize_date(str(rec.get("effective_date") or "")) or None
+    exp = normalize_date(str(rec.get("expiration_date") or "")) or None
+    if not eff or not exp or exp <= eff:
+        return False
+    if rec.get("own_declarations") or rec.get("producer_added"):
+        return True
+    number = str(rec.get("policy_number") or "").strip()
+    return bool(number) and not (_looks_like_a_form_number(number)
+                                 or _not_a_policy_number(number, facts))
 
 
 def _not_a_policy_number(value: Any, facts: Optional[dict] = None) -> bool:
@@ -13495,7 +13781,12 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
         _current = _prior_rows_from_current_policies(facts)
         _under = _prior_rows_from_underlying_policies(facts)
         if _current and _under:
-            _cols = {_prior_coverage_column(str(e.get("line") or "")) for e in _current}
+            # A current policy listed with no premium (`_unpriced`) never sets
+            # aside the underlying schedule's row for its column - that row is
+            # listed today and may carry the number (Brent's 1C adds, never
+            # displaces).
+            _cols = {_prior_coverage_column(str(e.get("line") or "")) for e in _current
+                     if not e.get("_unpriced")}
             entries = _current + [u for u in _under
                                   if _prior_coverage_column(str(u.get("line") or "")) not in _cols]
         else:
@@ -13593,9 +13884,29 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
     if not parsed:
         return {}, []
 
+    # A POLICY LISTED WITHOUT A PREMIUM (Brent, 14 Oct 2026, answer 1C - see
+    # `_redacted_policy_is_listable`) ADDS, IT NEVER DISPLACES. It takes a box no
+    # policy listed today claims; a box another policy holds, or one several
+    # policies already contest (the OTHER column on a package with more lines
+    # than columns), is exactly as before - WHICH policy takes a shared box is
+    # the open slot question (Michelle), not decided here. It adds a year row
+    # only while the grid has room, so no listed year is pushed off the form.
+    def _unpriced(e: dict) -> bool:
+        return bool(e.get("_unpriced"))
+
+    def _contract(e: dict) -> tuple:
+        key = (_pn(e.get("policy_no")), _same_value_key(e.get("carrier") or ""))
+        # Two unnumbered policies of one carrier are two policies when their
+        # lines differ (an EPL and a D&O from one insurer).
+        return key + ((str(e.get("line") or "").strip().lower(),)
+                      if _unpriced(e) and not key[0] else ())
+
     grid: Dict[Tuple[str, int], dict] = {}
     if all(y for _, y, _ in parsed):
-        years = sorted({y for _, y, _ in parsed}, reverse=True)[:3]
+        years = sorted({y for _, y, e in parsed if not _unpriced(e)}, reverse=True)[:3]
+        _added_years = sorted({y for _, y, e in parsed if _unpriced(e)} - set(years),
+                              reverse=True)[:max(0, 3 - len(years))]
+        years = sorted(set(years) | set(_added_years), reverse=True)
         cells: Dict[Tuple[str, int], List[dict]] = {}
         for col, year, e in parsed:
             if year in years:
@@ -13604,8 +13915,14 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
         # column for one year - an inland marine AND an umbrella both belong to
         # OTHER - kept whichever came last. One box cannot name both.
         for cell, group in cells.items():
-            contracts = {(_pn(e.get("policy_no")), _same_value_key(e.get("carrier") or ""))
-                         for e in group}
+            listed = [e for e in group if not _unpriced(e)]
+            if listed and len(listed) < len(group):
+                logger.info("prior-coverage: %s row %d - %d policy(ies) with no premium "
+                            "not placed; the box is held as before (the shared-box rule "
+                            "is the open slot question)", cell[0], cell[1],
+                            len(group) - len(listed))
+            group = listed or group
+            contracts = {_contract(e) for e in group}
             if len(contracts) == 1:
                 grid[cell] = group[0]
             else:
@@ -13614,7 +13931,10 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
         return grid, years
 
     per_col: Dict[str, int] = {}
+    _listed_cols = {col for col, _year, e in parsed if not _unpriced(e)}
     for col, _year, e in parsed:
+        if _unpriced(e) and col in _listed_cols:
+            continue                       # never beside a column's listed rows
         idx = per_col.get(col, 0)
         if idx < 3:
             grid[(col, idx)] = e

@@ -40,54 +40,115 @@ export function attentionGroups(rows) {
   return groups.filter((g) => g.rows.length > 0);
 }
 
-// THE DOWNLOAD REVIEW'S COUNTS (Brent's Choice Electric #27, 10 Oct 2026). The
-// headline read "176 items flagged": every open card plus every needs-attention
-// row - Please verify and AI held back included - added into one number. On the
-// owner's run `2076fe35` that was 190, of which 47 were things to FIX: the hard
-// stops (a required box blocking the download included) and the Missing boxes
-// the producer fills. The rest are listed, and counted, as what they are.
+// THE DOWNLOAD REVIEW (owner, 14 Oct 2026). Brent: "the download modal is
+// flooded with what appears to be new flags". Two rules:
+//   1. It lists only what an earlier screen showed and is still open (the
+//      server decides the rows: `needs_attention.download_review_rows`).
+//   2. It lists ONE BY ONE only the items to fix - hard stops (the download
+//      gate's boxes included), warnings, recommendation cards and Missing
+//      boxes. "Please verify", "AI held back", the applicant's signing steps
+//      and new-document choices are each ONE line with its count and a Show
+//      link that opens the group in place. Nothing is hidden; it is not a
+//      flood. The headline counts the listed fix-items only; each group line
+//      carries its own count. (Before: Choice Electric #27, 10 Oct - the
+//      headline counted hard stops + Missing, the rest named on one line.)
 const isHardRec = (r) => r?.recommendation_type === "hard_stop"
   || String(r?.rec_id || "").includes("hardblock_");
+const isWarningRec = (r) => !isHardRec(r) && r?.recommendation_type === "soft_warning";
+
+// ONE PROBLEM, ONE LINE. A box the download gate holds is a side-panel row
+// (`blocks_download`) AND a hard stop: listed once, under Hard Stops - its row
+// is left out only when a hard stop names that very box, so nothing is lost if
+// the hard stops did not load. A Missing or AI-held-back box whose fact a
+// listed card or issue fixes (`fix_facts`, from the server) is that line's.
+const boxKey = (formId, field) => `${formId || ""}\u0000${field || ""}`;
+const absorbable = (r) => !r?.blocks_download
+  && ((r?.status === "missing" && !isApplicantStep(r)) || r?.status === "ai_held_back");
+
+export function withoutListedBoxes(openRecs, attention) {
+  const recs = Array.isArray(openRecs) ? openRecs : [];
+  const boxes = new Set(recs
+    .filter((r) => String(r?.rec_id || "").includes("hardblock_") && r?.field && (r?.component || r?.form_id))
+    .map((r) => boxKey(r.component || r.form_id, r.field)));
+  const facts = new Set(recs.flatMap((r) => (Array.isArray(r?.fix_facts) ? r.fix_facts : [])));
+  if (!attention || (!boxes.size && !facts.size) || !Array.isArray(attention.forms)) return attention;
+  return {
+    ...attention,
+    forms: attention.forms.map((f) => ({
+      ...f,
+      rows: (Array.isArray(f?.rows) ? f.rows : []).filter((r) =>
+        !boxes.has(boxKey(r?.form_id || f?.form_id, r?.field))
+        && !(absorbable(r) && r?.fact_key && facts.has(r.fact_key))),
+    })),
+  };
+}
+
+// The review's parts, each list exactly as drawn. `missing` / `verify` /
+// `heldBack` / `applicant` are per form ([{ form_id, form_label, rows }]).
+export function downloadReviewParts(openRecs, attention) {
+  const recs = Array.isArray(openRecs) ? openRecs : [];
+  const listed = withoutListedBoxes(recs, attention);
+  const forms = Array.isArray(listed?.forms) ? listed.forms : [];
+  // ONE split for the side panel, the review and its counts: `attentionGroups`.
+  const split = forms.map((f) => ({ f, by: Object.fromEntries(attentionGroups(f?.rows).map((g) => [g.key, g.rows])) }));
+  const byForm = (key) => split
+    .map(({ f, by }) => ({ form_id: f?.form_id, form_label: f?.form_label || f?.form_id, rows: by[key] || [] }))
+    .filter((f) => f.rows.length > 0);
+  const gate = (r) => String(r?.rec_id || "").includes("hardblock_");
+  return {
+    // the download gate's boxes first (it is what a clean download waits on)
+    hard: [...recs.filter(gate), ...recs.filter((r) => isHardRec(r) && !gate(r))],
+    warnings: recs.filter(isWarningRec),
+    recommendations: recs.filter((r) => !isHardRec(r) && !isWarningRec(r)),
+    missing: byForm("missing"),
+    verify: byForm("verify"),
+    heldBack: byForm("ai_held_back"),
+    applicant: byForm("applicant"),
+    choices: Array.isArray(attention?.document_suggestions) ? attention.document_suggestions : [],
+  };
+}
+
+const rowCount = (groups) => groups.reduce((n, g) => n + g.rows.length, 0);
 
 export function downloadReviewCounts(openRecs, attention) {
-  const recs = Array.isArray(openRecs) ? openRecs : [];
-  const rows = (Array.isArray(attention?.forms) ? attention.forms : [])
-    .flatMap((f) => (Array.isArray(f?.rows) ? f.rows : []));
-  const hard = recs.filter(isHardRec).length;
-  const missing = rows.filter((r) => r?.status === "missing" && !isApplicantStep(r)).length;
+  const p = downloadReviewParts(openRecs, attention);
   const counts = {
-    hard,
-    missing,
-    applicant: rows.filter(isApplicantStep).length,
-    verify: rows.filter((r) => r?.status === "verify").length,
-    heldBack: rows.filter((r) => r?.status === "ai_held_back").length,
-    choices: Array.isArray(attention?.document_suggestions) ? attention.document_suggestions.length : 0,
-    recommendations: recs.length - hard,
+    hard: p.hard.length,
+    warnings: p.warnings.length,
+    recommendations: p.recommendations.length,
+    missing: rowCount(p.missing),
+    verify: rowCount(p.verify),
+    heldBack: rowCount(p.heldBack),
+    applicant: rowCount(p.applicant),
+    choices: p.choices.length,
   };
-  counts.toFix = hard + missing;
-  counts.total = recs.length + rows.length + counts.choices;
+  // Exactly what is listed one by one ...
+  counts.toFix = counts.hard + counts.warnings + counts.recommendations + counts.missing;
+  // ... and everything on the screen, the groups by their own counts.
+  counts.total = counts.toFix + counts.verify + counts.heldBack + counts.applicant + counts.choices;
   return counts;
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// "26 to verify, 93 held back by the AI, ..." - everything listed that is not a
-// thing to fix, nonzero parts only; "" when there is none.
-export function alsoListedText(c) {
-  if (!c) return "";
-  return [
-    c.verify ? `${c.verify} to verify` : "",
-    c.heldBack ? `${c.heldBack} held back by the AI` : "",
-    c.applicant ? `${c.applicant} for the applicant to sign` : "",
-    c.choices ? plural(c.choices, "new-document choice", "new-document choices") : "",
-    c.recommendations ? plural(c.recommendations, "recommendation", "recommendations") : "",
-  ].filter(Boolean).join(", ");
+// The groups shown as ONE line each, in this order, with their words.
+export const DOWNLOAD_GROUPS = [
+  { key: "verify", one: "value to confirm", many: "values to confirm" },
+  { key: "heldBack", one: "value the AI held back", many: "values the AI held back" },
+  { key: "applicant", one: "box for the applicant to sign", many: "boxes for the applicant to sign" },
+  { key: "choices", one: "new-document choice", many: "new-document choices" },
+];
+
+// "45 values to confirm" - the group line's words; "" for an empty group.
+export function groupLineText(key, n) {
+  const g = DOWNLOAD_GROUPS.find((x) => x.key === key);
+  return g && n > 0 ? plural(n, g.one, g.many) : "";
 }
 
-// The review's one-line headline.
+// The review's one-line headline: the listed fix-items only.
 export function downloadReviewHeadline(c) {
   if (!c || !c.total) return "All clear - review the SQS summary below";
-  if (!c.toFix) return "Nothing to fix - look over the list before downloading";
+  if (!c.toFix) return "Nothing to fix - look over the groups below before downloading";
   return `${plural(c.toFix, "item", "items")} to fix - review before downloading`;
 }
 

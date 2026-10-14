@@ -1166,11 +1166,7 @@ async def _pre_form_readiness(sess: dict, session_id: str,
             # The Recommendations section's "Open to fix" needs each Best
             # Solutions row's fix window - the same copy `_pre_form_status` returns.
             from services.review_recommendations import with_fix_routes
-            # ...and the warnings generation will make hard stops, through
-            # the same door `_pre_form_status` uses (round 5 #15) - one shape.
-            from services.stops_now import with_generation_hard_stops
-            card = {"package_sqs": with_generation_hard_stops(
-                        with_fix_routes(scored, sess.get("facts") or {}), sess),
+            card = {"package_sqs": with_fix_routes(scored, sess.get("facts") or {}),
                     "key_details": key_details(sess.get("facts") or {},
                                                sess.get("flags") or {})}
             dry = await _pre_form_dry_run(
@@ -2062,21 +2058,71 @@ async def resolve_recommendation(
     return JSONResponse({"success": success})
 
 
+def _review_page_view(session: dict) -> Optional[dict]:
+    """The Hard Stops / Warnings view the Review page draws for this stored
+    session - the same inputs `form_routes.get_extraction_result` (the page's
+    reload) hands `grouped_with_package_caps` (pinned by a test)."""
+    from services.issue_registry import grouped_with_package_caps
+    from services.sqs_service import current_package_sqs
+    pkg = None
+    if not (session.get("integrity") or {}).get("review_required"):
+        try:
+            pkg = current_package_sqs(session)
+        except Exception:                                      # noqa: BLE001
+            pkg = None
+    return grouped_with_package_caps(
+        session.get("structured_issues") or [], session.get("hard_stops") or [],
+        session.get("soft_stops") or [], pkg,
+        cross_issues=session.get("cross_issues_last") or [],
+        facts=session.get("facts") or {},
+    )
+
+
 @router.get("/api/audit/open/{session_id}")
 async def get_open_recs(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    await _verify_session_owner(session_id, current_user)
-    # include_acknowledged: EVERY still-unresolved item (contamination warnings,
-    # field-QA items, and SQS recs) re-appears on the pre-download modal and the
-    # post-download checklist on EVERY download, any number of times, until it is
-    # actually fixed (resolved) or explicitly dismissed. A prior "Download Anyway"
-    # acknowledges but does not suppress. This route is the sole feeder of the
-    # download preflight (frontend AcordModal), so the change is scoped to the
-    # download flow; the non-download callers of get_open_recommendations keep the
-    # default (action IS NULL) behavior.
+    session = await _verify_session_owner(session_id, current_user)
+    # include_acknowledged: EVERY still-unresolved item re-appears on the
+    # pre-download modal and the post-download checklist on EVERY download, any
+    # number of times, until it is actually fixed (resolved) or explicitly
+    # dismissed. A prior "Download Anyway" acknowledges but does not suppress.
+    # This route is the sole feeder of the download preflight (frontend
+    # AcordModal), so the change is scoped to the download flow; the non-download
+    # callers of get_open_recommendations keep the default (action IS NULL).
     recs = await get_open_recommendations(session_id, include_acknowledged=True)
+    # ONLY WHAT AN EARLIER SCREEN SHOWED (owner, 14 Oct 2026 - Brent: "the
+    # download modal is flooded with what appears to be new flags"): a card the
+    # side panel shows, the download gate's live boxes (the side panel lists
+    # them too), and the stored summaries the live list stands in for -
+    # `needs_attention.download_review_rows`. A failure lists every row as before.
+    generated = (session or {}).get("generated_forms") if isinstance(session, dict) else None
+    if generated:
+        try:
+            import asyncio
+            from services.field_qa import to_recommendation_rows
+            from services.needs_attention import (download_review_rows, hard_block_findings,
+                                                  review_issue_rows)
+            live_hard = None
+            try:
+                found = await asyncio.to_thread(hard_block_findings, generated, session.get("facts") or {})
+                live_hard = to_recommendation_rows({"results": found})
+            except Exception as _hx:                          # noqa: BLE001
+                logger.warning(f"download review: live gate rows skipped for session {session_id}: {_hx}")
+            # ...and the Review page's open hard stops and warnings, plus the
+            # editor's Cross-Form panel (owner, 14 Oct 2026), each once.
+            issues = []
+            try:
+                issues = review_issue_rows(
+                    [_review_page_view(session), _grouped_cross_issues_for_panel(
+                        session.get("cross_issues_last") or [], facts=session.get("facts") or {})],
+                    await get_issue_statuses(session_id))
+            except Exception as _ix:                          # noqa: BLE001
+                logger.warning(f"download review: review-page issues skipped for session {session_id}: {_ix}")
+            recs = download_review_rows(recs, generated, live_hard, review_issues=issues)
+        except Exception as _rx:                              # noqa: BLE001
+            logger.warning(f"download review: earlier-screen filter skipped for session {session_id}: {_rx}")
     # Rows the live needs-attention list (GET /api/needs-attention) shows box by
     # box are MARKED, never dropped: the review hides them only when that list
     # loaded, so a failed fetch still shows every finding.
@@ -2088,6 +2134,30 @@ async def get_open_recs(
     except Exception as _ex:                              # noqa: BLE001
         logger.warning(f"attention marker skipped for session {session_id}: {_ex}")
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
+
+
+async def _stored_mismatch_rows(session_id: str) -> list:
+    """Field QA's open value-vs-source rows for this session (rebuilt at
+    generation and on every saved edit) - read, never written. A failure is
+    no rows: the side panel then lists the boxes without them."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT rec_id, field, component, form_id, message
+                     FROM sqs_recommendation_audit
+                    WHERE session_id=$1 AND rec_id LIKE 'fieldqa%'
+                      AND message LIKE '%but the source value is%'
+                      AND action IS DISTINCT FROM 'resolved'
+                      AND action IS DISTINCT FROM 'dismissed'""",
+                session_id,
+            )
+        # A long box name truncates the id's "_mismatch" (`field_qa._rec_id`
+        # keeps 80 characters), so the row is known by field QA's own words.
+        return [dict(r) for r in rows if str(r["rec_id"]).startswith("fieldqa_")
+                and "hardblock" not in str(r["rec_id"])]
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"needs-attention: stored mismatch rows skipped for session {session_id}: {ex}")
+        return []
 
 
 @router.get("/api/needs-attention/{session_id}")
@@ -2118,6 +2188,14 @@ async def get_needs_attention(
         flags=session.get("flags") or {},
         package_sqs=session.get("package_sqs") or None,
         form_ids=[form_id] if form_id else None,
+        # The download gate's boxes and Figure 33's findings (high-impact blank
+        # boxes, carrier / policy values in owner boxes, value mismatches) are
+        # listed here, so the side panel shows them before the download review
+        # does (owner, 14 Oct 2026).
+        hard_blocks=True,
+        findings=True,
+        mismatch_rows=await _stored_mismatch_rows(session_id),
+        confirmations=session.get("underwriting_confirmations") or {},
     )
     # A document added after forms may disagree with an AI box (C103) - the
     # download review lists those open choices too, as the side panel does.

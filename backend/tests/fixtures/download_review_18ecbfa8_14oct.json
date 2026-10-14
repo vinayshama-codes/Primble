@@ -1,0 +1,336 @@
+{
+ "_about": "Session 18ecbfa8 (owner's run, 12 Oct 2026): the stored inputs of the Review page's Hard Stops / Warnings (read-only, 14 Oct 2026). Messages and rule codes only - no insured data.",
+ "structured_issues": [
+  {
+   "code": "minimum_viable_cope_missing",
+   "tier": null,
+   "forms": [
+    "ACORD_140"
+   ],
+   "cluster": null,
+   "message": "Property submission missing Minimum Viable COPE: occupancy type. These fields are required to submit property to underwriting.",
+   "severity": "soft_warning",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "occupancy_type",
+     "construction_type",
+     "property_building_value",
+     "property_bpp_value"
+    ],
+    "controls": {
+     "occupancy_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Office",
+       "Retail store",
+       "Restaurant or food service",
+       "Warehouse or storage",
+       "Light manufacturing",
+       "Heavy manufacturing",
+       "Apartment or residential rental",
+       "Mixed use - retail with residential above",
+       "Contractor shop or yard",
+       "Auto service or repair",
+       "Medical or dental office",
+       "School or daycare",
+       "Church or place of worship",
+       "Hotel or motel",
+       "Self-storage",
+       "Vacant building",
+       "Other"
+      ]
+     },
+     "construction_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Frame - wood construction",
+       "Joisted Masonry - masonry walls with a combustible roof or floor",
+       "Non-Combustible - metal walls and roof",
+       "Masonry Non-Combustible - masonry walls, non-combustible roof",
+       "Modified Fire Resistive",
+       "Fire Resistive - concrete or protected steel",
+       "Other"
+      ]
+     },
+     "property_bpp_value": {
+      "control": "currency"
+     },
+     "property_building_value": {
+      "control": "currency"
+     }
+    }
+   },
+   "score_neutral": false
+  },
+  {
+   "code": "legacy_minimum_viable_cope",
+   "tier": "required",
+   "forms": [],
+   "cluster": "Property COPE completeness",
+   "message": "Property Minimum Viable COPE incomplete - missing: occupancy type Fix: Review and correct this before proceeding.",
+   "severity": "hard_stop",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "occupancy_type",
+     "construction_type",
+     "property_building_value",
+     "property_bpp_value"
+    ],
+    "controls": {
+     "occupancy_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Office",
+       "Retail store",
+       "Restaurant or food service",
+       "Warehouse or storage",
+       "Light manufacturing",
+       "Heavy manufacturing",
+       "Apartment or residential rental",
+       "Mixed use - retail with residential above",
+       "Contractor shop or yard",
+       "Auto service or repair",
+       "Medical or dental office",
+       "School or daycare",
+       "Church or place of worship",
+       "Hotel or motel",
+       "Self-storage",
+       "Vacant building",
+       "Other"
+      ]
+     },
+     "construction_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Frame - wood construction",
+       "Joisted Masonry - masonry walls with a combustible roof or floor",
+       "Non-Combustible - metal walls and roof",
+       "Masonry Non-Combustible - masonry walls, non-combustible roof",
+       "Modified Fire Resistive",
+       "Fire Resistive - concrete or protected steel",
+       "Other"
+      ]
+     },
+     "property_bpp_value": {
+      "control": "currency"
+     },
+     "property_building_value": {
+      "control": "currency"
+     }
+    }
+   },
+   "score_neutral": false
+  },
+  {
+   "code": "tier1_missing_Applicant mailing address",
+   "tier": "required",
+   "forms": [],
+   "cluster": "Missing baseline ACORD 125 fields",
+   "message": "ACORD 125 minimum field missing: Applicant mailing address (Fix: Provide this value manually, or upload a document that states it.)",
+   "severity": "soft_warning",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "mailing_address"
+    ],
+    "controls": {
+     "mailing_address": {
+      "control": "text"
+     }
+    }
+   },
+   "score_neutral": false
+  },
+  {
+   "code": "tier1_missing_Contact information",
+   "tier": "required",
+   "forms": [],
+   "cluster": "Missing baseline ACORD 125 fields",
+   "message": "ACORD 125 minimum field missing: Contact information (Fix: Provide this value manually, or upload a document that states it.)",
+   "severity": "soft_warning",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "contact_name",
+     "contact_phone",
+     "contact_email"
+    ],
+    "controls": {
+     "contact_name": {
+      "control": "text"
+     },
+     "contact_email": {
+      "control": "text"
+     },
+     "contact_phone": {
+      "control": "code"
+     }
+    }
+   },
+   "score_neutral": false
+  },
+  {
+   "code": "legacy_gl_no_class_codes",
+   "tier": "recommended",
+   "forms": [],
+   "cluster": "GL class code alignment",
+   "message": "GL coverage detected but no class codes found Fix: Review and correct this before proceeding.",
+   "severity": "soft_warning",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "gl_class_codes_by_location"
+    ],
+    "controls": {
+     "gl_class_codes_by_location": {
+      "control": "code"
+     }
+    }
+   },
+   "score_neutral": false
+  },
+  {
+   "code": "legacy_auto_driver_schedule_missing",
+   "tier": "recommended",
+   "forms": [],
+   "cluster": "Auto completeness",
+   "message": "Driver schedule not provided - list the drivers of the scheduled vehicles (name, licence, date of birth) Fix: Review and correct this before proceeding.",
+   "severity": "soft_warning",
+   "resolution": {
+    "mode": "schedule",
+    "schedule_key": "auto_drivers"
+   },
+   "score_neutral": false
+  }
+ ],
+ "hard_stops": [
+  "Property Minimum Viable COPE incomplete - missing: occupancy type",
+  "Property submission missing Minimum Viable COPE: occupancy type. These fields are required to submit property to underwriting. (Affects: ACORD 140. Fix: Review the coverage/limit details for the affected form(s).)"
+ ],
+ "soft_stops": [
+  "ACORD 125 minimum field missing: Applicant mailing address (Fix: Provide this value manually, or upload a document that states it.)",
+  "ACORD 125 minimum field missing: Contact information (Fix: Provide this value manually, or upload a document that states it.)",
+  "GL coverage detected but no class codes found",
+  "Driver schedule not provided - list the drivers of the scheduled vehicles (name, licence, date of birth)"
+ ],
+ "cross_issues_last": [
+  {
+   "code": "minimum_viable_cope_missing",
+   "type": "hard_stop",
+   "forms": [
+    "ACORD_140"
+   ],
+   "message": "Property submission missing Minimum Viable COPE: occupancy type. These fields are required to submit property to underwriting.",
+   "issue_id": "iss_ba8717518c57",
+   "resolution": {
+    "mode": "field",
+    "facts": [
+     "occupancy_type",
+     "construction_type",
+     "property_building_value",
+     "property_bpp_value"
+    ],
+    "controls": {
+     "occupancy_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Office",
+       "Retail store",
+       "Restaurant or food service",
+       "Warehouse or storage",
+       "Light manufacturing",
+       "Heavy manufacturing",
+       "Apartment or residential rental",
+       "Mixed use - retail with residential above",
+       "Contractor shop or yard",
+       "Auto service or repair",
+       "Medical or dental office",
+       "School or daycare",
+       "Church or place of worship",
+       "Hotel or motel",
+       "Self-storage",
+       "Vacant building",
+       "Other"
+      ]
+     },
+     "construction_type": {
+      "multi": false,
+      "control": "select",
+      "options": [
+       "Frame - wood construction",
+       "Joisted Masonry - masonry walls with a combustible roof or floor",
+       "Non-Combustible - metal walls and roof",
+       "Masonry Non-Combustible - masonry walls, non-combustible roof",
+       "Modified Fire Resistive",
+       "Fire Resistive - concrete or protected steel",
+       "Other"
+      ]
+     },
+     "property_bpp_value": {
+      "control": "currency"
+     },
+     "property_building_value": {
+      "control": "currency"
+     }
+    }
+   }
+  }
+ ],
+ "package_sqs": {
+  "cap_hard_stops": [],
+  "cap_hard_stop_codes": [],
+  "cap_hard_stop_items": [
+   {
+    "code": "legacy_minimum_viable_cope",
+    "forms": [],
+    "message": "Property Minimum Viable COPE incomplete - missing: occupancy type",
+    "severity": "hard_stop",
+    "resolution": {
+     "mode": "schedule",
+     "note": "This package has 2 buildings - check or enter each building's values in its own row.",
+     "facts": [
+      "occupancy_type"
+     ],
+     "columns": [
+      "construction_type",
+      "building_value",
+      "bpp_value"
+     ],
+     "controls": {
+      "occupancy_type": {
+       "multi": false,
+       "control": "select",
+       "options": [
+        "Office",
+        "Retail store",
+        "Restaurant or food service",
+        "Warehouse or storage",
+        "Light manufacturing",
+        "Heavy manufacturing",
+        "Apartment or residential rental",
+        "Mixed use - retail with residential above",
+        "Contractor shop or yard",
+        "Auto service or repair",
+        "Medical or dental office",
+        "School or daycare",
+        "Church or place of worship",
+        "Hotel or motel",
+        "Self-storage",
+        "Vacant building",
+        "Other"
+       ]
+      }
+     },
+     "schedule_key": "property_locations"
+    }
+   }
+  ]
+ }
+}

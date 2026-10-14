@@ -1204,6 +1204,50 @@ addresses / sentences and a French address test - both caught by measurement, na
 their county-as-city stays, pre-existing), 0 checks changed. Tests: `test_address_parts_14oct.py`; the address test
 files 4,686 passed (the 1 known failure).
 
+### Z20. Brent's answer of 14 Oct - built the same evening (offline, uncommitted)
+
+**Brent (#3):** "Why do we have something flagged as a warning pre-form that is re-flagged as a hard stop once the form
+exists?" and "the download modal is flooded with what appears to be new flags"; "hard stop" implies "cannot move
+forward"; #1C "Yes, we should still list the policy" (redacted premium). V2: SQS / e-labels independent of forms first,
+then E&O fact lineage, SMS sharing, captcha, Apple Pay, email extraction via Transcriber. Owner: "download screen should
+have recommendations, warnings, hard stops etc if these things have been seen by user earlier and he hasn't fixed them".
+
+1. **One status from start to finish** (owner took the recommendation). C75's demotion of cross-form hard stops is now
+   permanent: `stops_now.cross_form_severity` is the one door, used by the stops door, the post-form recalculation
+   (`arq_service.recalculate_session_scores` - it re-promoted) and the field-edit re-score (`form_routes.update_pdf` - it
+   re-promoted inline). Field-level stops and blocking document / Data Consistency conflicts stay hard before and after.
+   The "Becomes a hard stop when ..." tag, count and payload are gone. **D6 (94 stored packages):** pre-form 0 moves;
+   after forms 11 of 61 up 1-3 points (Exposure: a cross-form check costs 5 as a warning, not 15); 2 move from a 60 cap to
+   85 (10d39f15, 805049a7 - their only hard stop was a promoted check); the rest stay at 60 on the field-level Minimum COPE
+   stop (hard before forms too). Old sessions change only when re-scored. Tests: `test_one_status_14oct.py` (11, incl.
+   an AST check that every scorer running the cross-form rules goes through the door).
+2. **#1C - a policy with a redacted premium is still listed** (`pdf_service._redacted_policy_is_listable`: a carrier, its
+   own two dates in order, and its own declarations / a producer-added line / a real number). It only ever ADDS - a box no
+   listed policy claims, a row only when every such policy fits (125 page one has 6 OTHER rows A-F, not 2). Choice
+   Electric: the Federal EPL policy prints as 125 OTHER row C, premium blank. A listed line with no premium makes the 125
+   POLICY PREMIUM total partial, so it blanks (fresh renewal runs were blank already by Brent's 8 Oct rule; 10 older stored
+   CE rows lose a total that never counted EPL). Measured on 27 stored packages: nothing else moves; FR125 tests 7 / 8
+   stay 312 of 312. Which policy takes a scarce shared slot (the prior grid's one OTHER column per year - 8 CE lines
+   compete) waits on Michelle. Tests: `test_redacted_policies_listed_14oct.py` (30).
+3. **The download screen lists only what an earlier screen showed and is still open** (owner's rule). `/api/audit/open`
+   goes through `needs_attention.download_review_rows`: a recommendation card only while some form's side panel shows it;
+   the Review page's open hard stops / warnings and the editor's Cross-Form panel (`review_issue_rows` via
+   `audit_routes._review_page_view`, which mirrors the page's reload); download-gate boxes from the gate's live findings
+   (`hard_block_findings` - now also side-panel rows with "Blocks a clean download until it is fixed."); Figure 33
+   findings (high-impact boxes the AI left blank, a carrier / policy value in an insured box, value mismatches) are
+   side-panel rows first, so they reach the download screen through the same door. One problem, one line - matched on
+   what each item FIXES, never its words (a card or box an issue fixes becomes that line, keeping the stronger severity).
+   **Owner's layout:** both download screens draw `DownloadReviewList` - hard stops (gate boxes first), warnings, Missing
+   boxes and cards are listed and counted in "N items to fix"; Please verify / AI held back / applicant steps /
+   new-document choices are ONE counted line each with Show. Cover and E&O unchanged (Brent's call). Removed the retired
+   "becomes a hard stop" code (`generationStops.js`, `BecomesHardTag`, `laterHard`, the stops_now shims). Measured on two
+   packages only (owner): 18ecbfa8 233 rows (11 never shown earlier) -> 54 listed + group lines (0 never shown);
+   18f6914f 188 (6) -> 27 (0). Tests: `test_download_review_seen_earlier_14oct.py` (36).
+**Full suite on the Z20 code: 14,481 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.**
+4. **"Hard stop" today** = caps the score at 60 and is listed first; it does not stop a download. Only the download gate
+   (`field_qa.check_hard_block`: ACORD 140 COPE / placeholders) blocks a clean download (409, or a watermarked DRAFT).
+   Brent asked for our interpretation - answered in the owner's status update; rename / true block is his call.
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,
