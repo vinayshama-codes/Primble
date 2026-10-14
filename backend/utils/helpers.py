@@ -166,6 +166,15 @@ _ADDR_TRAILING_UNIT_RE = re.compile(
 )
 
 
+def _is_us_state_word(value) -> bool:
+    """A US state code ("CO", any case) or a full state name ("Colorado")."""
+    text = str(value or "").strip().strip(".,")
+    if text.upper() in _US_ZIP_STATES:
+        return True
+    from services.display_canonicalizer import _STATE_ABBR   # stdlib-only module, no cycle
+    return text.lower() in _STATE_ABBR
+
+
 _BARE_ZIP_PART_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
 _HOUSE_NUMBER_PART_RE = re.compile(r"^\d{1,6}[A-Za-z]?$")
 _US_COUNTRY_PART_RE = re.compile(
@@ -249,6 +258,32 @@ def _parse_address(addr: str) -> dict:
             result["zip"]   = last[1]
         elif len(last) == 1:
             result["state"] = last[0]
+    # A STATE THAT IS NOT A STATE (owner, 14 Oct 2026). With no state typed,
+    # "402 Dana Street, Denver 80216" read "Denver" as the state, and
+    # "Street, Denver, 80216" read the ZIP as the state. A value in the state
+    # slot that is neither a US state code nor a full state name is given back:
+    # a bare ZIP to the zip, words to the city (what stood in the city slot on
+    # a 3+ part address moves to line 2). No state is invented.
+    _st = result.get("state")
+    if _st is not None and not _is_us_state_word(_st):
+        _tail = parts[-1].split() if parts else []
+        _words = [t for t in _tail if not _BARE_ZIP_PART_RE.match(t)]
+        if _BARE_ZIP_PART_RE.match(str(_st)) and not result.get("zip"):
+            result.pop("state", None)
+            result["zip"] = str(_st)                          # "Street, Denver, 80216"
+        elif (_tail and _BARE_ZIP_PART_RE.match(_tail[-1]) and _words and len(_words) <= 4
+              and all(w.isalpha() for w in _words)):
+            # Only a US address: the last part ends in a bare US ZIP and the rest
+            # of it is plain words (never prose, never a non-US postal code).
+            result.pop("state", None)
+            if _is_us_state_word(" ".join(_words)):
+                result["state"] = " ".join(_words)            # "New York 10001"
+            elif _US_COUNTRY_PART_RE.match(" ".join(_words).strip(" .")):
+                pass                                          # "Anytown, USA 12345": a country is no city
+            else:
+                if result.get("city") and len(parts) >= 3:
+                    result["line2"] = ", ".join(x for x in (result.get("line2"), result["city"]) if x)
+                result["city"] = " ".join(_words)             # "Denver 80216"
     # ── Comma-free tail recovery (2026-08-14) ────────────────────────────────
     # Dec pages routinely print the whole address as ONE comma-free run
     # ("4800 DAHLIA ST # D13 DENVER CO 80216-3121"), and comma-splitting then
