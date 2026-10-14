@@ -1566,6 +1566,18 @@ def gl_class_codes_present(facts: Optional[dict]) -> bool:
     return False
 
 
+def _term_not_ended(value: Any) -> bool:
+    """True when `value` reads as a date today or later (a term still to run)."""
+    iso = normalize_date(str(value)) if value not in (None, "") else ""
+    if not iso:
+        return False
+    try:
+        from datetime import datetime as _dt
+        return _dt.strptime(iso, "%Y-%m-%d").date() >= _dt.now().date()
+    except (TypeError, ValueError):
+        return False
+
+
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
@@ -1943,7 +1955,20 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         # its EXPIRING one, and no document states the term being applied for.
         # That is a genuine gap in the submission - recommended, not a hard
         # stop (it caps nothing), and resolvable by typing the two dates.
-        if "Umbrella" in (_fv(facts, "renewal_lines_expiring") or []):
+        # The mark is the merge's reading of the DOCUMENTS; its fix window asks
+        # for the umbrella's two dates. A typed term that has not ended answers
+        # it (15 Oct 2026: typing the proposed term left this warning - and its
+        # 85 cap - in place, because only a re-merge recomputes the mark, from
+        # the documents alone). And it is a RENEWAL's question: once the package
+        # no longer says renewal (the application that said "Renew" excluded, or
+        # a person's "not a renewal"), a stored mark asks nothing.
+        try:
+            from services.extraction_service import renewal_is_stated as _says_renewal
+        except Exception:                                  # noqa: BLE001
+            _says_renewal = lambda _f: True                # noqa: E731
+        if "Umbrella" in (_fv(facts, "renewal_lines_expiring") or []) \
+                and _says_renewal(facts) \
+                and not _term_not_ended(_fv(facts, "umbrella_expiration_date")):
             soft.append(
                 "Renewal: the umbrella's proposed policy term is not stated in "
                 "the documents - confirm the proposed effective and expiration "

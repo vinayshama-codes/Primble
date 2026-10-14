@@ -1382,6 +1382,43 @@ the text). The keyword order is restored. Tests: `tests/test_exclude_takes_back_
 `bbd4acb`, pass now). Full suite on `bbd4acb`: 14,500 passed / 1 failed (that pin) / 19 skipped, the known
 `test_arq_acord125_missing_only` excluded. **Final tree (review fix + pin): 14,509 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.**
 
+**Z23 live check (15 Oct, 03:53 IST, `fe11b8c` deployed on Render, run `0353c36b`):** the owner excluded
+`ACORD_125_FILLED 2.pdf` (Harborline). Read-only on the stored row: the door moved 205 boxes back on 9 forms (the add had
+moved 213), retracted Harborline's own facts (contacts, named insureds, loss history, website, contractor type ...),
+"FEIN differs" cleared, warnings 11 -> 8, and the side panel's "New document says" rows 44 -> 2 (both control_dec's).
+What is left (1 hard stop "Applicant name differs", 8 warnings, 6 Data Consistency conflicts) is all control_dec's
+(MERIDIAN: its 09/01 term, "Corporation", its building values) - next: exclude it. **Found: a stale form offer** - the
+Harborline add had offered "Add ACORD 186" (its contractor facts); the exclude retracted them and the recommender no
+longer lists 186 at all, but `form_offers` kept every prior offer whose LINE was still evidenced (GL is). Now a prior
+offer also needs a current recommendation (any tier but optional); with no recommendations to judge by it is kept as
+before. Test: `test_a_previous_offer_needs_a_current_recommendation`. Live after the next deploy + document change.
+
+**Z23 live check, part 2 (15 Oct, 04:03 IST - the owner excluded `control_dec.pdf` too):** 83 boxes back on 8 forms
+(exactly the 83 the add moved), Meridian's mortgagee / additional interest retracted, 0 hard stops, 0 Data Consistency
+conflicts, 0 "New document says" rows, integrity sees only CHOICE ELECTRIC LLC. **CE 25 closes** (add, exclude, take-back
+all seen live). **But the score came back 85, not 99**: one warning left, "Renewal: the umbrella's proposed policy term
+is not stated in the documents". Two defects, both fixed offline:
+1. **A fact the merge DERIVED from a document stayed after the document left.** The Harborline 125 said "renewal"
+   (`is_renewal`); the merge then marked the umbrella's ended term as expiring (`renewal_lines_expiring`). The exclude
+   retracted `is_renewal` (stated) but not the mark (derived) - retraction only ever covered STATED facts. Now the door
+   also runs the merge over the old and the new document sets (current code, documents only, ~1.6 s each on Choice
+   Electric) and retracts what only the old set derived (`session_documents.merge_only_keys`); a person's answer and
+   anything the re-merge produces are still kept. Replayed on the live documents: 38 keys only the Harborline 125 made
+   the merge produce, incl. the mark.
+2. **The renewal warning could not be cleared by its own fix window** (older than tonight): typing the proposed
+   umbrella term left it firing, because the rule read only the stored mark, which only a re-merge recomputes, from the
+   documents. Now a typed umbrella expiration that has not passed answers it (`sqs_service._term_not_ended`).
+3. **The warning now also needs the package to SAY renewal** (`extraction_service.renewal_is_stated` - the merge's own
+   test, one reading for both): a stored mark asks nothing once the application that said "Renew" is excluded or a
+   person answers "not a renewal".
+**Why it appeared at all:** Choice Electric's own decs never say renewal; the Harborline 125 has "Renew" ticked and the
+owner chose "It is this insured - use its values", so the package became a renewal and the umbrella's ended term was
+asked for (01:52 IST, hidden among 11 warnings and two hard stops at 60). On `f83757cf` the same two documents raised
+nothing - the filled 125's typed values were unread until Z18 fix A. **On `0353c36b` after the deploy:** `is_renewal` was
+already retracted by the Harborline exclude, so the next re-score (any save - e.g. one Confirm) drops the warning and the
+package returns to 99; no typing needed. Tests: `tests/test_exclude_takes_back_15oct.py` 24 -> 28 (the 4 new ones, with the ACORD 186 offer
+test, fail on `fe11b8c` and pass now).
+
 ### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
 
 Wrong values found in our own runs, NOT on Brent's 27 or Michelle's 22. Owner: "keep these and we will fix later on".

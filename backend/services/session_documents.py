@@ -154,6 +154,37 @@ def stated_fact_keys(docs: Iterable[dict]) -> set:
     return out
 
 
+def merge_only_keys(docs_before: Iterable[dict], docs_after: Iterable[dict]) -> set:
+    """Facts the MERGE derives from the old document set and no longer derives
+    from the new one (15 Oct 2026, live `0353c36b`): the Harborline 125 said
+    "renewal", so the merge marked the umbrella's ended term as expiring
+    (`renewal_lines_expiring`); excluding the 125 retracted "renewal" itself -
+    a value it STATED - but kept the mark the merge had DERIVED from it, an 85
+    cap with no document behind it. Both merges run on the current code over
+    the documents alone (no person's answers), so their difference is exactly
+    what the change of documents changed; `_document_retractions` still keeps
+    a person's answer and anything the re-merge produces. Empty when the merge
+    cannot run."""
+    try:
+        from services.extraction_service import merge_facts, select_primary_truth
+    except Exception:                                          # noqa: BLE001
+        return set()
+
+    def _keys(docs: Iterable[dict]) -> set:
+        active = [copy.deepcopy(d) for d in active_documents(docs)]
+        if not active:
+            return set()
+        facts, _flags = merge_facts(active, select_primary_truth(active))
+        return {str(k) for k, v in (facts or {}).items()
+                if k and not str(k).startswith("_") and _states_a_value(v)}
+
+    try:
+        return _keys(docs_before) - _keys(docs_after)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("documents door: derived-fact comparison skipped: %s", ex)
+        return set()
+
+
 def _box_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()
 
@@ -407,21 +438,30 @@ def form_offers(recommendations: Iterable[dict], package_ids: Iterable[str],
     evidence and that the recommender now recommends (anything but its own
     "optional" tier), when either its line is newly evidenced or the
     recommendation is new (an excess layer's own 131). A previous offer stays
-    while its line is still evidenced and its form is still missing."""
+    while its line is still evidenced, its form is still missing and the
+    recommender still recommends it (15 Oct 2026, live `0353c36b`: excluding
+    the Harborline 125 kept "Add ACORD 186", which only that document's
+    contractor facts had called for - the GL line was still there). With no
+    recommendations to judge by, a previous offer is kept."""
     try:
         from services.form_service import TIER_OPTIONAL
     except Exception:                                          # noqa: BLE001
         TIER_OPTIONAL = "optional"
+    recommendations = [r for r in (recommendations or ()) if isinstance(r, dict)]
     present = {str(f) for f in (package_ids or []) if f}
     before_ids = {str(f) for f in (recommended_before or []) if f}
     new_lines = set(lines_after or ()) - set(lines_before or ())
+    judged = any(r.get("form_id") for r in recommendations)
+    still_recommended = {str(r.get("form_id")) for r in recommendations
+                         if r.get("form_id") and r.get("tier") != TIER_OPTIONAL}
     out: List[dict] = []
     seen: set = set()
     for offer in prior_offers or ():
         if not isinstance(offer, dict):
             continue
         fid = str(offer.get("form_id") or "")
-        if fid and fid not in present and fid not in seen and offer.get("line") in (lines_after or ()):
+        if fid and fid not in present and fid not in seen and offer.get("line") in (lines_after or ()) \
+                and (not judged or fid in still_recommended):
             out.append(dict(offer))
             seen.add(fid)
     now = datetime.now(timezone.utc).isoformat()
@@ -512,7 +552,14 @@ async def remerge_package(
                                           session, plan["verdict"], changed_documents))
 
     from services.extraction_pipeline import _finalize_pipeline
-    retract = sorted(stated_fact_keys(docs_before) - stated_fact_keys(docs_after))
+    # What a document STATED and no active document states any more, and what
+    # the merge DERIVED from the old set and no longer derives (a renewal mark
+    # the excluded document caused) - `_document_retractions` keeps a person's
+    # answer and anything the re-merge still produces.
+    loop0 = asyncio.get_event_loop()
+    derived_gone = await loop0.run_in_executor(
+        None, functools.partial(merge_only_keys, docs_before, docs_after))
+    retract = sorted((stated_fact_keys(docs_before) - stated_fact_keys(docs_after)) | set(derived_gone))
     common = dict(
         session_id=session_id,
         integrity_override=plan["override"],

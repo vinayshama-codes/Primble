@@ -18377,6 +18377,15 @@ def _park_stale_term(mf: dict, iso: str, next_iso: str) -> None:
     mf["renewal_dates_routed"] = True
 
 
+def renewal_is_stated(facts: Optional[dict]) -> bool:
+    """Does the package say this submission is a RENEWAL (`is_renewal`)? The one
+    reading for the merge's renewal routing and for the score's "confirm the
+    umbrella's proposed term" warning (15 Oct 2026: the warning outlived the
+    excluded application that said "Renew")."""
+    return str(_fv(facts or {}, "is_renewal") or "").strip().lower() in (
+        "yes", "y", "true", "1", "renewal", "renew")
+
+
 def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
     """On a Renewal, an already-ENDED extracted term is the EXPIRING policy's
     term, not the term being applied for - route it to the prior_* namespace.
@@ -18422,8 +18431,7 @@ def _route_renewal_dates(mf: dict, docs: Any = None) -> None:
       * the old term is not one we repeat (outside 300-400 days) on a
         non-renewal (`_park_ended_current_term`, the 15 Sep behaviour).
     """
-    renewal = str(_fv(mf, "is_renewal") or "").strip().lower() in (
-        "yes", "y", "true", "1", "renewal", "renew")
+    renewal = renewal_is_stated(mf)
     exp_raw = _fv(mf, "expiration_date")
     if not exp_raw:
         return

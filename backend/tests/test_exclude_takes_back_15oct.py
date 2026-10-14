@@ -346,3 +346,95 @@ def test_join_confirming_documents_rule():
     gen["ACORD_125"]["field_state"]["Box_A"] = "Typed over"                 # the box moved on: no join
     out, changed = sd.join_confirming_documents([r], plans, gen)
     assert not changed and out[0]["doc_ids"] == ["d1"]
+
+
+# ══ 6. An offer the excluded document made goes with it (live 0353c36b, 15 Oct) ══
+
+def test_a_previous_offer_needs_a_current_recommendation():
+    prior = [{"form_id": "ACORD_186", "line": "general_liab", "label": "ACORD 186", "tier": "recommended"}]
+    lines = {"general_liab", "auto"}
+    pkg = ["ACORD_125", "ACORD_126"]
+    recs_without = [{"form_id": "ACORD_125", "tier": "required"}, {"form_id": "ACORD_126", "tier": "required"}]
+    # the live shape: the GL line is still there, the recommender no longer asks for 186
+    assert sd.form_offers(recs_without, pkg, [], lines, lines, prior) == []
+    recs_with = recs_without + [{"form_id": "ACORD_186", "tier": "recommended"}]
+    assert [o["form_id"] for o in sd.form_offers(recs_with, pkg, ["ACORD_186"], lines, lines, prior)] == ["ACORD_186"]
+    recs_optional = recs_without + [{"form_id": "ACORD_186", "tier": "optional"}]
+    assert sd.form_offers(recs_optional, pkg, [], lines, lines, prior) == []
+    # nothing to judge by: kept, as before
+    assert [o["form_id"] for o in sd.form_offers([], pkg, [], lines, lines, prior)] == ["ACORD_186"]
+
+
+# ══ 7. A fact the merge DERIVED from an excluded document goes too (live 0353c36b) ══
+# The Harborline 125 said "renewal"; the merge then marked the umbrella's ended
+# term as expiring ("renewal_lines_expiring"), which raises an 85-cap warning.
+# Excluding the 125 retracted "renewal" (a value it stated) but kept the mark.
+
+UMB_TEXT = ("COMMERCIAL UMBRELLA DECLARATIONS\nNAMED INSURED: Bluebird Electric LLC\n"
+            "POLICY PERIOD: 01/01/2025 TO 01/01/2026\n")
+UMB_FACTS = {"applicant_name": "Bluebird Electric LLC", "carrier_name": "Acme Casualty Company",
+             "umbrella_limit": "$5,000,000", "umbrella_effective_date": "01/01/2025",
+             "umbrella_expiration_date": "01/01/2026", "effective_date": "01/01/2025",
+             "expiration_date": "01/01/2026", "lines_of_business": ["Commercial Umbrella"]}
+APP_TEXT = "COMMERCIAL INSURANCE APPLICATION\nRENEW\nApplicant: Bluebird Electric LLC\n"
+APP_FACTS = {"applicant_name": "Bluebird Electric LLC", "is_renewal": "Y"}
+
+
+def _umb():
+    return _doc("d-umb", "umbrella.pdf", "dec_page", UMB_TEXT, UMB_FACTS)
+
+
+def _app():
+    return _doc("d-app", "application.pdf", "application", APP_TEXT, APP_FACTS)
+
+
+def test_merge_only_keys_names_what_the_left_document_caused():
+    gone = sd.merge_only_keys([_umb(), _app()], [_umb(), dict(_app(), excluded=True)])
+    assert {"is_renewal", "renewal_lines_expiring"} <= gone
+    assert sd.merge_only_keys([_umb()], [_umb()]) == set()          # nothing changed, nothing named
+    assert "renewal_lines_expiring" not in sd.merge_only_keys([_umb()], [_umb(), _app()])   # an add
+
+
+def test_excluding_the_document_takes_the_derived_mark_with_it(env):
+    from tests.test_new_document_fill_7oct import DEC
+    make_package(env, docs=[DEC(), _umb()])
+    run(sd.add_documents(SID, [_app()], user_id="u1", purge_dec_index=True))
+    facts = env["store"].rows[SID]["facts"]
+    assert "Umbrella" in (facts.get("renewal_lines_expiring") or [])  # the add caused it
+    run(sd.change_document(SID, doc_id="d-app", action="exclude", user_id="u1"))
+    facts = env["store"].rows[SID]["facts"]
+    assert not facts.get("renewal_lines_expiring")                    # and the exclude takes it back
+    assert not facts.get("is_renewal")
+    from services.sqs_service import evaluate_stops
+    _hard, soft = evaluate_stops(facts, env["store"].rows[SID].get("flags") or {})
+    assert not any("umbrella's proposed policy term" in s for s in soft)
+
+
+def test_a_typed_umbrella_term_answers_the_renewal_warning():
+    from services.sqs_service import evaluate_stops
+    msg = "umbrella's proposed policy term"
+    facts = {"renewal_lines_expiring": ["Umbrella"], "is_renewal": {"value": "Y", "source": "ai"},
+             "umbrella_effective_date": {"value": "01/01/2025", "source": "ai"},
+             "umbrella_expiration_date": {"value": "01/01/2026", "source": "ai"}}
+    flags = {"has_umbrella": True}
+    assert any(msg in s for s in evaluate_stops(facts, flags)[1])     # the documents' ended term: asked
+    typed = dict(facts, umbrella_effective_date={"value": "01/01/2027", "source": "producer"},
+                 umbrella_expiration_date={"value": "01/01/2028", "source": "producer"})
+    assert not any(msg in s for s in evaluate_stops(typed, flags)[1])  # the fix window's answer clears it
+
+
+def test_a_stored_mark_asks_nothing_once_the_package_no_longer_says_renewal():
+    """The live shape of 0353c36b after both excludes: the mark is stored, the
+    application that said "Renew" is gone - and a person's "not a renewal"."""
+    from services.sqs_service import evaluate_stops
+    msg = "umbrella's proposed policy term"
+    flags = {"has_umbrella": True}
+    base = {"renewal_lines_expiring": ["Umbrella"],
+            "umbrella_effective_date": {"value": "01/01/2025", "source": "ai"},
+            "umbrella_expiration_date": {"value": "01/01/2026", "source": "ai"}}
+    assert not any(msg in s for s in evaluate_stops(base, flags)[1])
+    said_no = dict(base, is_renewal={"value": "No", "source": "producer"})
+    assert not any(msg in s for s in evaluate_stops(said_no, flags)[1])
+    from services.extraction_service import renewal_is_stated
+    assert renewal_is_stated({"is_renewal": "Renew"}) and renewal_is_stated({"is_renewal": {"value": "Y"}})
+    assert not renewal_is_stated({}) and not renewal_is_stated({"is_renewal": "New"})
