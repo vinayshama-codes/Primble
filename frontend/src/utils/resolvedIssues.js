@@ -80,6 +80,44 @@ export const recDryIssueId = (itemId) => (itemId ? `${REC_ID_PREFIX}dry:${itemId
 export const recChoiceIssueId = (choiceId) => (choiceId ? `${REC_ID_PREFIX}choice:${choiceId}` : null);
 export const isRecommendationId = (iid) => String(iid || "").startsWith(REC_ID_PREFIX);
 
+// A row ANOTHER fix answered (14 Oct 2026, run 91c865a5: rows that left the
+// list "didnt go into resolved"). Its status is "resolved" like a row fixed in
+// its own window, and says which fix it was: the status `reason` is the
+// sentence the row shows ("Cleared by your answer to <row>"), and `rule_code`
+// carries the id that fix was filed under ("" when it has none - a key detail).
+// A recommendation has no rule code of its own, and the reason - unlike the
+// rule code, which the store keeps when a later write sends none - is rewritten
+// by every status change: a row later fixed in its own window, or reopened, is
+// never read as cleared by the old fix.
+export const CLEARED_BY_PREFIX = "Cleared by your answer to ";
+
+export function clearedByReason(title) {
+  const t = String(title ?? "").trim().replace(/[.\s]+$/, "");
+  return t ? `${CLEARED_BY_PREFIX}${t}.` : "";
+}
+
+// { iid, title } of the fix that cleared a row, from its stored status; null
+// when the row was not cleared by another fix.
+export function clearedByOf(st) {
+  const reason = String((st && st.reason) || "");
+  if (!reason.startsWith(CLEARED_BY_PREFIX)) return null;
+  const iid = String((st && st.rule_code) || "").trim();
+  return { iid: iid || null, title: reason.slice(CLEARED_BY_PREFIX.length).replace(/\.$/, "").trim() };
+}
+
+// The rows a fix cleared that are still filed "resolved" under it.
+// `entries`: [[issue_id, status], ...].
+export function rowsClearedBy(entries, clearingIid) {
+  if (!clearingIid) return [];
+  const out = [];
+  for (const [iid, st] of entries || []) {
+    if (!st || st.status !== "resolved") continue;
+    const by = clearedByOf(st);
+    if (by && by.iid === clearingIid) out.push(iid);
+  }
+  return out;
+}
+
 // The page a stored status belongs to: "hard", "warning" or "recommendation"
 // (unknown -> warning). A recommendation is known by its page or its id - an
 // older status never recorded a page, and one must never land under Warnings.

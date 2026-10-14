@@ -121,15 +121,21 @@ def test_the_pipeline_emits_it_as_advisory_and_touches_no_stop_array():
     import os
     src = open(os.path.join(os.path.dirname(__file__), "..", "services",
                             "extraction_pipeline.py"), encoding="utf-8").read()
-    start = src.index("unmapped_coverage_line")
-    block = src[max(0, start - 1500):start + 800]
-    assert '"advisory"' in block, "the unmapped-line issue must be advisory"
-    emit = src[src.index("from services.lob_canon import unmapped_material_lines"):
-               start + 800]
+    # 14 Oct 2026: the card is built by `issue_registry.unmapped_line_issue`,
+    # the one builder the Review screen also redraws it with. The emission site
+    # must still only APPEND it to structured_issues.
+    start = src.index("_card = unmapped_line_issue(merged_facts)")
+    emit = src[src.index("from services.issue_registry import unmapped_line_issue"):
+               start + 600]
+    assert "structured_issues.append(_card)" in emit
     for forbidden in ("hard_stops = ", "soft_stops = "):
         assert forbidden not in emit, (
             f"the unmapped-line block writes {forbidden.strip()} - an advisory "
             "must not cap or deduct the score")
+    from services.issue_registry import unmapped_line_issue
+    card = unmapped_line_issue({"coverage_lines": [_row("Kidnap and Ransom", limit="$500,000")]})
+    assert card["code"] == "unmapped_coverage_line"
+    assert card["severity"] == "advisory", "the unmapped-line issue must be advisory"
 
 
 def test_canon_line_still_returns_none_for_the_unknown_case():

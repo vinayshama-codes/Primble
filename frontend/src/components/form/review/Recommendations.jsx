@@ -17,7 +17,7 @@
 import { useState } from "react";
 import useAttentionList from "./useAttentionList";
 import {
-  buildRecommendations, pointsText, recommendationResolvedRows, liveRecommendationIds,
+  buildRecommendations, pointsText, recommendationResolvedRows, liveRecommendationIds, clearedByText,
 } from "../../../utils/recommendations";
 import { itemsText } from "../../../utils/dryRun";
 import { formLabel } from "../../../utils/formInstances";
@@ -89,7 +89,10 @@ function ReopenIcon() {
 
 // The page's Resolved list (owner, 13 Oct 2026): closed by default, like the
 // Hard Stops and Warnings ones. "Open again" takes a fix - and its points -
-// back, or unticks an added form (rules: utils/recommendations).
+// back, or unticks an added form (rules: utils/recommendations). A row another
+// fix answered says which (14 Oct 2026); its "Open again" takes THAT answer
+// back, which brings back every row it cleared. One a key detail cleared has
+// no fix on file to take back, so it offers none.
 function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
   const [open, setOpen] = useState(false);
   if (!rows.length) return null;
@@ -101,8 +104,10 @@ function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
       {open && (
         <div className="rec-list">
           {rows.map((r) => {
-            const busy = !!reopeningIds?.has?.(r.iid);
-            const note = reopenNotices?.get?.(r.iid);
+            const by = r.clearedBy || null;
+            const busy = !!reopeningIds?.has?.(r.iid) || !!(by?.iid && reopeningIds?.has?.(by.iid));
+            const note = reopenNotices?.get?.(r.iid) || (by?.iid ? reopenNotices?.get?.(by.iid) : null);
+            const canReopen = typeof onReopen === "function" && (!by || !!by.iid);
             const title = r.kind === "choice"
               ? `Add ${(r.asked || []).map(formLabel).join(" and ")}`
               : positiveScoreWording(r.title);
@@ -111,11 +116,16 @@ function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
                 <div className="rec-row__main">
                   <div className="rec-row__title">{title}</div>
                   {r.kind === "choice" && r.message && <div className="rec-row__detail">{positiveScoreWording(r.message)}</div>}
+                  {by && (
+                    <div className="rec-row__detail" data-rec-cleared-by={by.iid || ""}>
+                      {positiveScoreWording(clearedByText(by))}
+                    </div>
+                  )}
                   <div className="rec-resolved__actions">
                     <span className={`rec-resolved__label rec-resolved__label--${r.status}`}>
                       {r.status === "added" ? "Added" : "Resolved"}
                     </span>
-                    {typeof onReopen === "function" && (
+                    {canReopen && (
                       <button type="button" className="issue-status-btn rec-resolved__open"
                         disabled={busy} onClick={() => onReopen(r)}>
                         {!busy && <ReopenIcon />}

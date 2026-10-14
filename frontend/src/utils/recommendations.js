@@ -26,7 +26,10 @@
 // Pure functions, no React and no DOM, so a node test runs them.
 
 import { renderedCardRows } from "./keyDetailCards.js";
-import { REC_ID_PREFIX, REC_PAGE, isRecommendationId, recChoiceIssueId, recDryIssueId, recScoreIssueId } from "./resolvedIssues.js";
+import {
+  REC_ID_PREFIX, REC_PAGE, isRecommendationId, recChoiceIssueId, recDryIssueId, recScoreIssueId,
+  clearedByOf,
+} from "./resolvedIssues.js";
 
 export const HARD_STOPS_ROW = "hard_stops_present";
 
@@ -111,11 +114,33 @@ function fallbackResolution(row) {
 // "+3 pts" / "up to +5 pts": what answering adds to the package score - the
 // measured gain of the answer the row asks for when there is one, else the
 // pillar's gap as a bound. Null = it adds nothing.
+//
+// A MEASURED 0 ON A ROW WORTH LESS THAN A POINT IS THE FLOOR, NOT "NOTHING"
+// (owner, 14 Oct 2026, run 91c865a5: "2 of the recommendations disappeared").
+// The package score is its weighted sum rounded DOWN (spec section 2), and the
+// gain is measured on that whole number. The hydrant row lifted 70.90 to 71.65
+// (+1); the no-loss answer took Loss History out, the others re-weighted, the
+// sum landed on 79.00 and the same row lifted it to 79.88 (+0). Both COPE rows
+// measured 0 and left the list - their boxes still empty, Property Integrity
+// still 90 - and came back the moment "Open again" moved the sum to 70.90.
+// Such a row adds up to one point whenever it is answered (both together lift
+// 79.00 to 80.76), so it stays listed as "up to +1 pts".
+// A pillar at 0 is the exception: there a 0 is real (the COPE minimum is
+// missing - nothing in that pillar counts yet), and the row stays out. A row
+// worth a point or more that measures 0 adds nothing now, and one that
+// measures LESS than 0 costs points (the floor never turns a gain negative) -
+// both stay out, as before.
+function belowOnePoint(row) {
+  const avail = num(row?.points_available);
+  const pillar = num(row?.score);
+  return avail !== null && avail > 0 && avail < 1 && (pillar === null || pillar > 0);
+}
+
 export function pointsFor(row) {
   const gain = num(row?.answer_gain);
   if (gain !== null) {
     const n = Math.round(gain);
-    if (n <= 0) return null;
+    if (n <= 0) return n === 0 && belowOnePoint(row) ? { points: 1, exact: false } : null;
     return { points: n, exact: row.answer_gain_is_exact === true };
   }
   const avail = num(row?.points_available);
@@ -392,10 +417,11 @@ export const recommendationsText = (n) => `${n} recommendation${n === 1 ? "" : "
 // "a resolved section similar to hard stops and warnings ... they can be
 // reopened and score goes back". A row fixed through its own "Open to fix"
 // leaves its list and sits under a collapsed "Resolved (n)" with "Open again"
-// (ids and page: utils/resolvedIssues). Only a fix made from the row's own
-// window is listed - the server holds that fix's changes under the row's id, so
-// "Open again" can always take it back. A row that vanished because another
-// fix answered it has nothing of its own to take back.
+// (ids and page: utils/resolvedIssues). The server holds a fix's changes under
+// the id it was made with, so "Open again" can take it back. A row another fix
+// answered (14 Oct 2026) is listed too, "Cleared by your answer to <row>": it
+// has nothing of its own to take back, so its "Open again" reopens the fix that
+// cleared it (`recommendationReopenTarget`).
 
 // Did a save fix its row? "fixed" | "open" | "unknown".
 //   score - fixed once the package scorer no longer asks for it, read with
@@ -420,6 +446,147 @@ export function recommendationFixState(kind, itemId, { packageSqs, dryRun, formI
   return "unknown";
 }
 
+// ── Rows another fix cleared (owner, 14 Oct 2026, run 91c865a5: "2 of the
+// recommendations disappeared from there and they didnt go into resolved") ──
+// One save can answer more than its own row: "No known losses" takes Loss
+// History out of the score, and every other row of that pillar goes with it; a
+// card's table can fill a value a row asked for. Such a row left the list
+// because the fix answered it, so it must land in Resolved - "Cleared by your
+// answer to <row>" - never vanish. The hard stop / warning pages already file
+// the blockers a save clears (`resolvedIssues.clearedBlockers`); this is the
+// same rule for this page. A page reload never files anything: only a save
+// does, against the list that was on screen when it was made.
+
+// Every fix target the scorer still asks for - any row with a fix route,
+// whatever its points and whether or not a card covers it.
+export function askedScoreKeys(packageSqs) {
+  const keys = new Set();
+  const rows = Array.isArray(packageSqs?.top_recommendations) ? packageSqs.top_recommendations : [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || row.pillar === HARD_STOPS_ROW) continue;
+    const res = row.resolution && row.resolution.mode && row.resolution.mode !== "none"
+      ? row.resolution : fallbackResolution(row);
+    fixKeys(res).forEach((k) => keys.add(k));
+  }
+  return keys;
+}
+
+// The items a pillar still names as missing - its rows' `missing` lists and its
+// score breakdown's. A pillar's one row shows its FIRST gap; a fix that puts a
+// new gap ahead of it changes the row without answering the old one.
+function stillMissingLabels(packageSqs, pillar) {
+  const out = new Set();
+  const rows = Array.isArray(packageSqs?.top_recommendations) ? packageSqs.top_recommendations : [];
+  for (const row of rows) {
+    if (!row || row.pillar !== pillar) continue;
+    (Array.isArray(row.missing) ? row.missing : []).forEach((m) => out.add(clean(m)));
+  }
+  const parts = packageSqs?.category_breakdown?.[pillar];
+  for (const part of Object.values(parts && typeof parts === "object" ? parts : {})) {
+    (Array.isArray(part?.missing) ? part.missing : []).forEach((m) => out.add(clean(m)));
+  }
+  out.delete("");
+  return out;
+}
+
+// Is a row's target still asked for? A table is asked while any row asks for
+// it or for one of its cells; a cell, while a row asks for it or for its whole
+// table (errs toward "still asked": a row wrongly kept open is still on screen,
+// one wrongly filed as Resolved hides a gap that still costs points).
+function stillAsked(key, asked) {
+  if (asked.has(key)) return true;
+  if (key.startsWith("table:")) {
+    const sk = key.slice(6);
+    for (const a of asked) if (a.startsWith(`col:${sk}:`)) return true;
+  }
+  if (key.startsWith("col:")) {
+    const sk = key.split(":")[1];
+    if (asked.has(`table:${sk}`)) return true;
+  }
+  return false;
+}
+
+const SCORER_TARGET = /^(fact|col|table):/;
+
+// The "Raise your score" rows a save CLEARED besides its own: listed before it
+// (`listed`, the page's score items), and now asked for nowhere - no row of the
+// new score carries any of their targets, and their pillar no longer names
+// them missing. A row still asked for is not cleared, whether it now sits
+// behind a card (it is on screen there), was part-fixed (a new row carries
+// what is left), or stopped being worth points (`pointsFor`). `skipIds`: the
+// save's own row (its status is the fix window's rule). No new score: nothing
+// is known, nothing is filed.
+export function clearedScoreItems(listed, packageSqsAfter, skipIds = new Set()) {
+  if (!packageSqsAfter || typeof packageSqsAfter !== "object") return [];
+  const asked = askedScoreKeys(packageSqsAfter);
+  const out = [];
+  for (const it of (Array.isArray(listed) ? listed : [])) {
+    if (!it || it.kind !== "score" || !it.id || skipIds.has(it.id)) continue;
+    const keys = Array.isArray(it.keys) ? it.keys : [];
+    // Only a scorer row (the Form Fill Rate row's fix is on the forms).
+    if (!keys.length || !keys.every((k) => SCORER_TARGET.test(k))) continue;
+    if (keys.some((k) => stillAsked(k, asked))) continue;
+    if (clean(it.detail) && stillMissingLabels(packageSqsAfter, it.pillar).has(clean(it.detail))) continue;
+    out.push(it);
+  }
+  return out;
+}
+
+// The fix that cleared them, as the cleared rows name it and as "Open again"
+// reopens it: { iid, title }. `iid` is the id the server filed the fix under
+// (its undo receipt) - null for a fix with no record (a key detail, which is
+// not an issue), whose rows say what cleared them and offer no "Open again".
+// A card's message without the "Fix: ..." advice it carries ("... occupancy
+// type Fix: Review and correct this before proceeding.", "... address (Fix:
+// Provide this value ...)") - the row names the item, not the instructions.
+const withoutFixAdvice = (text) => clean(text).replace(/\s*\(?\s*Fix:[\s\S]*$/, "").replace(/[\s.]+$/, "");
+
+export function clearingFixOf(issue, idOf) {
+  if (!issue || typeof issue !== "object") return { iid: null, title: "" };
+  if (issue.__keyDetail) return { iid: null, title: clean(issue.__keyDetailLabel) || withoutFixAdvice(issue.message) };
+  if (issue.__scoreItem || issue.__dryRun) {
+    return { iid: clean(issue.issue_id) || null, title: clean(issue.__recTitle) || withoutFixAdvice(issue.message) };
+  }
+  const iid = typeof idOf === "function" ? clean(idOf(issue)) : clean(issue.issue_id);
+  return { iid: iid || null, title: withoutFixAdvice(issue.message ?? issue.primary_message) };
+}
+
+// The sentence a cleared row shows under its title.
+export function clearedByText(by) {
+  if (!by) return "";
+  const what = clean(by.title).replace(/[.\s]+$/, "") || "another item";
+  return `Cleared by your answer to ${what}.${by.iid ? " Open again takes that answer back." : ""}`;
+}
+
+// What "Open again" on a Resolved row reopens: the row's own fix, or - for a
+// row another fix cleared - THAT fix (its values come off, and every row it
+// cleared comes back with the row that asked for it). Null when there is
+// nothing to take back (cleared by a key detail) or the row is an added form.
+// `statusOf(iid)`: the stored status of an id ({form_id, rule_code, message,
+// severity}) or null.
+export function recommendationReopenTarget(row, statusOf = () => null) {
+  if (!row || !row.iid || row.kind === "choice") return null;
+  const by = row.clearedBy;
+  if (by) {
+    if (!by.iid) return null;
+    const st = (typeof statusOf === "function" && statusOf(by.iid)) || {};
+    const rec = isRecommendationId(by.iid);
+    return {
+      iid: by.iid,
+      meta: {
+        form_id: st.form_id || null,
+        rule_code: rec ? null : (clean(st.rule_code) || null),
+        message: clean(st.message) || clean(by.title) || null,
+        severity: rec ? REC_PAGE : (st.severity ?? null),
+      },
+    };
+  }
+  return {
+    iid: row.iid,
+    meta: { form_id: (row.forms || [])[0] || null, rule_code: null, message: row.title || null, severity: REC_PAGE },
+  };
+}
+
 // Every row the scorer and the form check still raise, by its fix id - listed,
 // or hidden behind a card that asks for the same value. A stored "resolved"
 // row whose id is live again is open, not Resolved.
@@ -436,7 +603,7 @@ export function liveRecommendationIds({ packageSqs, dryRun } = {}) {
 // raise (rebuilt from their stored status, oldest first), then the form choices
 // already ticked ("Added" - "Open again" unticks them).
 // [{ iid, kind: "score" | "dry" | "choice", status: "resolved" | "added",
-//    title, forms, asked?, message? }]
+//    title, forms, clearedBy?: { iid, title } | null, asked?, message? }]
 export function recommendationResolvedRows({ statusEntries = [], liveIds = new Set(), formChoices = [] } = {}) {
   const out = [];
   const seen = new Set();
@@ -450,6 +617,8 @@ export function recommendationResolvedRows({ statusEntries = [], liveIds = new S
       status: "resolved",
       title: clean(st.message),
       forms: st.form_id ? [st.form_id] : [],
+      // Another fix answered it: { iid, title } of that fix (resolvedIssues).
+      clearedBy: clearedByOf(st),
     });
   }
   for (const c of (Array.isArray(formChoices) ? formChoices : [])) {

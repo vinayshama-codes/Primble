@@ -156,6 +156,15 @@ def _entity_type_is_recognized(v: str) -> bool:
     return entity_family(v) is not None
 
 
+def _coverage_part_lines_answer(v: str) -> bool:
+    """The coverage-part card's answer: every "<part key>=<line>" pair names a
+    line the canon knows (`lob_canon.is_valid_part_lines`, the reader of the
+    same text). Not `_is_*`, for the dec-entry backfill reason above: this is
+    a person's choice, never read off a printed label."""
+    from services.lob_canon import is_valid_part_lines
+    return is_valid_part_lines(v)
+
+
 # ---------------------------------------------------------------------------
 # FACT_REGISTRY
 # ---------------------------------------------------------------------------
@@ -1607,6 +1616,19 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
+    },
+    # The producer's answer to "which line is this coverage part?" (14 Oct
+    # 2026, owner - the coverage-part card on the Review screen). One stored
+    # text, "<part key>=<line>; ...", composed by that card's choice list
+    # (`lob_canon.part_line_choices`) and read by `lob_canon.parse_part_lines`
+    # for the review alone: it prints on no form, no scorer reads it and no
+    # questionnaire asks it (no form binds it). `lob_canon.PART_LINES_FACT`.
+    "coverage_part_lines": {
+        "forms":       set(),
+        "question":    "Which line does each listed coverage part belong to?",
+        "tier": None, "required": False,
+        "validate":    _coverage_part_lines_answer,
+        "format_hint": "A line chosen for each coverage part",
     },
 
 }

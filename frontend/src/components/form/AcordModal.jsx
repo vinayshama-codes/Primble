@@ -13,7 +13,10 @@ import { formsEffect } from "../../utils/scoreWithForms";
 import KeyDetailsMissing from "./review/KeyDetailsMissing";
 import Recommendations from "./review/Recommendations";
 import { dryRunFixIssue } from "../../utils/dryRun";
-import { scoreFixIssue, recommendationFixState } from "../../utils/recommendations";
+import {
+  scoreFixIssue, recommendationFixState, scoreItems, onScreenFixKeys, clearedScoreItems, clearingFixOf,
+  recommendationReopenTarget, liveRecommendationIds,
+} from "../../utils/recommendations";
 import { withKeyDetailCards } from "../../utils/keyDetailCards";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
@@ -24,7 +27,9 @@ import { useToasts } from "../../hooks/useToasts";
 import { getReviewLayout } from "../../utils/reviewLayout";
 import { packageCapReasons, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
 import { listedIssues, fixLeftOpen } from "../../utils/fixProgress";
-import { clearedBlockers, pageOfStatus, isRecommendationId, REC_PAGE } from "../../utils/resolvedIssues";
+import {
+  clearedBlockers, pageOfStatus, isRecommendationId, REC_PAGE, recScoreIssueId, clearedByReason, rowsClearedBy,
+} from "../../utils/resolvedIssues";
 import { positiveScoreWording } from "../../utils/positiveWording";
 import { ANCHOR_FORM_ID, withAnchorForm, checkedFormsForReview } from "../../utils/formSelection";
 import { becomesHardCount } from "../../utils/generationStops";
@@ -3647,7 +3652,9 @@ const AcordModal = forwardRef(function AcordModal({
       const n = new Map(prev);
       const existing = prev.get(issueId) || {};
       n.set(issueId, {
-        status, reason: "",
+        // A status change rewrites the reason, as the store does (a row
+        // another fix cleared carries "Cleared by your answer to ...").
+        status, reason: meta.reason ?? "",
         message:   meta.message   ?? existing.message   ?? null,
         form_id:   meta.form_id   ?? existing.form_id   ?? null,
         rule_code: meta.rule_code ?? existing.rule_code ?? null,
@@ -3672,6 +3679,7 @@ const AcordModal = forwardRef(function AcordModal({
           source_fact: meta.source_fact ?? null,
           message:     meta.message     ?? null,
           severity:    meta.severity    ?? null,
+          reason:      meta.reason      ?? null,
         }),
       });
     } catch { /* keep optimistic value; non-fatal */ }
@@ -6003,6 +6011,36 @@ const AcordModal = forwardRef(function AcordModal({
     } catch { /* tracking only - never blocks a fix */ }
   };
 
+  // "Raise your score" rows a save cleared besides its own (owner, 14 Oct 2026,
+  // run 91c865a5: rows left the list and "didnt go into resolved"). The same
+  // rule as the blockers above, for the Recommendations page: a row listed
+  // before the save that the new score no longer asks for at all is filed
+  // "resolved" under that page, saying which answer cleared it and carrying the
+  // id that answer's fix was filed under - its "Open again" takes that answer
+  // back (`recommendationReopenTarget`). Read against the list on screen when
+  // the save was made (this closure's state), never on a reload.
+  const markClearedRecommendations = (data, issue) => {
+    try {
+      const after = data?.package_sqs !== undefined ? data.package_sqs : data?.editor_package_sqs;
+      const listed = scoreItems(packageSqs, onScreenFixKeys(groupedIssues, keyDetails));
+      const own = issue?.__scoreItem && issue.__recItemId ? [issue.__recItemId] : [];
+      const cleared = clearedScoreItems(listed, after, new Set(own));
+      if (!cleared.length) return;
+      const by = clearingFixOf(issue, issueIdOf);
+      for (const it of cleared) {
+        setIssueStatus(recScoreIssueId(it.id), "resolved", {
+          form_id: null,
+          // "" (not null) when the answer has no fix on file: the store keeps an
+          // older rule code when a write sends none.
+          rule_code: by.iid || "",
+          message: scoreFixIssue(it).__recTitle,
+          severity: REC_PAGE,
+          reason: clearedByReason(by.title || "another item"),
+        });
+      }
+    } catch { /* tracking only - never blocks a fix */ }
+  };
+
   // A Recommendations row fixed through its own window (owner, 13 Oct 2026:
   // "a resolved section similar to hard stops and warnings"): marked "resolved"
   // under that page only when the save FIXED it - the score no longer asks for
@@ -6036,6 +6074,7 @@ const AcordModal = forwardRef(function AcordModal({
   const handleIssueResolved = (data, issue) => {
     if (!data?.success) return;
     markClearedBlockers(data, issue);
+    markClearedRecommendations(data, issue);
     _applyCrossIssuePanelUpdate(data);
     // A pre-form key detail is not an issue: no status chip to flip.
     // "Before you generate" items are not issues either (Choice Electric #27).
@@ -6155,7 +6194,8 @@ const AcordModal = forwardRef(function AcordModal({
         }),
       });
       const data = await res.json();
-      if (data?.success && data.cleared) { if (!optimistic) markOpen(); _applyCrossIssuePanelUpdate(data); return; }
+      // The rows this fix had cleared on the Recommendations page are open again.
+      if (data?.success && data.cleared) { reopenRowsClearedBy(issueId, data); if (!optimistic) markOpen(); _applyCrossIssuePanelUpdate(data); return; }
       // Status-only reopen of an item that is firing again: it is back in its list.
       if (!optimistic && data?.success && data.cleared === false && data.still_live && !data.changed_since) markOpen();
       // The fix's values were changed after it (owner, 9 Oct 2026): taking it
@@ -6248,10 +6288,27 @@ const AcordModal = forwardRef(function AcordModal({
       setFormTicksTouched(true);
       return;
     }
-    handleReopenIssue(row.iid, "open", {
-      form_id: (row.forms || [])[0] || null, rule_code: null,
-      message: row.title || null, severity: REC_PAGE,
-    }, { optimistic: false });
+    // The row's own fix - or, for a row another answer cleared (14 Oct 2026),
+    // THAT answer's fix: it is the one change that can bring the row back.
+    const target = recommendationReopenTarget(row, (iid) => issueStatuses.get(iid) || null);
+    if (!target) return;
+    handleReopenIssue(target.iid, "open", target.meta, { optimistic: false });
+  };
+
+  // A fix was taken back: the rows it had cleared are open again - each one the
+  // new score asks for again goes back to its list ("open"), so it never sits
+  // under Resolved naming an answer that is no longer there (14 Oct 2026).
+  const reopenRowsClearedBy = (clearingIid, data) => {
+    try {
+      const ids = rowsClearedBy(Array.from(issueStatuses.entries()), clearingIid);
+      if (!ids.length) return;
+      const pkg = data?.package_sqs !== undefined ? data.package_sqs : data?.editor_package_sqs;
+      const live = liveRecommendationIds({ packageSqs: pkg });
+      for (const iid of ids) {
+        if (!live.has(iid)) continue;
+        setIssueStatus(iid, "open", { rule_code: "", severity: REC_PAGE });
+      }
+    } catch { /* tracking only */ }
   };
 
   // Open the inline-resolution modal for a validation row/cluster that carries a
@@ -6274,6 +6331,8 @@ const AcordModal = forwardRef(function AcordModal({
       code: null, issue_id: null, forms: [],
       resolution: item.resolution,
       __keyDetail: true,
+      // What a Recommendations row this answer clears says cleared it.
+      __keyDetailLabel: item.label || null,
     });
   };
 

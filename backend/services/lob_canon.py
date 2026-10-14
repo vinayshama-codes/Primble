@@ -36,9 +36,10 @@ requires the same.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -653,7 +654,7 @@ def _same_contract_number(a: str, b: str) -> bool:
     return len(short) >= 5 and long_.startswith(short) and len(long_) - len(short) <= 3
 
 
-def unmapped_material_lines(coverage_lines: Any) -> list:
+def unmapped_material_lines(coverage_lines: Any, part_lines: Any = None) -> list:
     """Line names this module cannot place that the package actually CARRIES.
 
     Client 1.7, the half that was never built: *"If terminology is not covered
@@ -669,6 +670,11 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
     limit is a certificate row or a placeholder; surfacing those would put a
     review item on every ordinary COI (D26: silence is not evidence).
 
+    PLACED BY ITS DOCUMENT OR BY THE PRODUCER (14 Oct 2026, see the block below
+    `_grants_coverage`): a row its own single-line declarations attribute to
+    their line (`PART_OF_KEY`), and a part the producer answered
+    (`part_lines`, the stored `PART_LINES_FACT`), is placed and not routed.
+
     Returns the ORIGINAL printed names, de-duplicated, in first-seen order -
     the producer needs to see the phrase the document actually used. Returns
     [] for anything it cannot read, so a package with no `coverage_lines`
@@ -678,6 +684,17 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
     seen: set = set()
     if not isinstance(coverage_lines, list):
         return out
+    answers = parse_part_lines(part_lines)
+    # One printing attributed by its own declarations places every printing of
+    # that name (the same coverage part read again off another document).
+    attributed = {_dedupe_key(e.get("line")) for e in coverage_lines
+                  if isinstance(e, dict) and is_known_family(e.get(PART_OF_KEY))} - {""}
+
+    def _placed_by_document_or_producer(entry: dict, raw: str) -> bool:
+        if is_known_family(entry.get(PART_OF_KEY)) or _dedupe_key(raw) in attributed:
+            return True
+        return bool(answers) and part_key(raw) in answers
+
     # SYS-05: a coverage PART is placeable even though it does not NAME a line,
     # so it is not "terminology not covered by a known rule" and must not reach
     # the producer as one. Resolved against the families this package's own
@@ -716,6 +733,8 @@ def unmapped_material_lines(coverage_lines: Any) -> list:
             continue                      # we can place it
         if is_container_label(raw) and _container_is_placed(entry):
             continue                      # the contract's heading; its lines are placed
+        if _placed_by_document_or_producer(entry, raw):
+            continue                      # its own declarations or the producer placed it
         if not _grants_coverage(entry):
             continue                      # not carried -> not material
         key = _dedupe_key(raw)
@@ -760,6 +779,174 @@ def _grants_coverage(entry: dict) -> bool:
         if any(ch.isdigit() for ch in text):
             return True
     return False
+
+
+# ── A COVERAGE PART PLACED BY ITS DOCUMENT OR BY THE PRODUCER (14 Oct 2026) ──
+# Owner, live package 91c865a5 (Choice Electric): the Cyber policy's own
+# declarations print its insuring agreements as rows - "Non-Panel Response
+# Provider", "Digital Data Recovery", "Network Extortion", "Payment Card Loss",
+# "Regulatory Proceeding", "Electronic, Social And Printed Media Liability" -
+# each with its own limit, and all six reached the producer as "Coverage part
+# not recognised ... no normalization rule" over a note saying we could not
+# tell which line they belong to. They are not unknown terminology. A
+# declarations page that names ONE line prints that line's coverage grid, so a
+# row of it this module cannot otherwise place is a PART of that line - the
+# same idea as `extraction_service.attach_generic_rows_to_document_line`.
+#
+# Two ways a row is placed, both read by `unmapped_material_lines` ONLY:
+#   * by its DOCUMENT - `attribute_parts_to_document_line` marks the row
+#     `PART_OF_KEY` (per document, in the merge's pre-pass);
+#   * by the PRODUCER - the card offers the standard lines plus "Part of another
+#     policy"; the answer is the fact `PART_LINES_FACT`, keyed by `part_key`.
+#
+# NEITHER IS EVIDENCE OF A LINE. The marker and the answer never reach
+# `canon_line` / `canon_part` / `coverage_families_present` /
+# `evidenced_line_families`, so no family is created, no line becomes carried
+# and the form recommender cannot move. A part is placed for the producer
+# review, never promoted (a new family is a product decision - D9).
+PART_OF_KEY = "_part_of"
+PART_LINES_FACT = "coverage_part_lines"
+PART_OF_ANOTHER_POLICY = "other_policy"
+PART_OF_ANOTHER_POLICY_LABEL = "Part of another policy - not a separate line"
+
+# The choice list's words, one per family this module knows - and nothing else:
+# a producer places a part on a line the canon already has.
+FAMILY_LABELS: Dict[str, str] = {
+    GENERAL_LIAB:       "General Liability",
+    AUTO:               "Commercial Auto",
+    PROPERTY:           "Commercial Property",
+    WORKERS_COMP:       "Workers Compensation",
+    UMBRELLA:           "Umbrella / Excess Liability",
+    INLAND_MARINE:      "Inland Marine",
+    CRIME:              "Crime",
+    CYBER:              "Cyber",
+    PROFESSIONAL:       "Professional Liability",
+    EPLI:               "Employment Practices Liability",
+    POLLUTION:          "Pollution Liability",
+    DIRECTORS_OFFICERS: "Directors and Officers",
+    EMPLOYEE_BENEFITS:  "Employee Benefits Liability",
+    LIQUOR:             "Liquor Liability",
+}
+_PART_LINE_TOKENS = frozenset(FAMILY_LABELS) | {PART_OF_ANOTHER_POLICY}
+_PART_KEY_RE = re.compile(r"^[0-9a-f]{10}$")
+
+
+def part_key(name: Any) -> str:
+    """Stable key for one coverage-part NAME: its de-duplicated wording, hashed
+    (so "Kidnap & Ransom" and "Kidnap and Ransom" share one). Hex only, so a
+    stored answer never carries the printed words through the answer readers.
+    "" for a name with no words."""
+    key = _dedupe_key(name)
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:10] if key else ""
+
+
+def parse_part_lines(value: Any) -> Dict[str, str]:
+    """The producer's answers, {part key: family or PART_OF_ANOTHER_POLICY},
+    read from the stored fact - an envelope, its text ("key=line; key=line") or
+    a dict. A pair that does not read is left out; never raises."""
+    if isinstance(value, dict) and "value" in value:
+        value = value.get("value")
+    pairs: list = []
+    if isinstance(value, dict):
+        pairs = list(value.items())
+    elif isinstance(value, str):
+        for chunk in value.split(";"):
+            k, sep, v = chunk.partition("=")
+            if sep:
+                pairs.append((k, v))
+    out: Dict[str, str] = {}
+    for k, v in pairs:
+        k, v = str(k or "").strip().lower(), str(v or "").strip().lower()
+        if _PART_KEY_RE.match(k) and v in _PART_LINE_TOKENS:
+            out[k] = v
+    return out
+
+
+def format_part_lines(answers: Any) -> str:
+    """The stored text for a set of answers - sorted, so one set has one text."""
+    clean = parse_part_lines(dict(answers) if isinstance(answers, dict) else answers)
+    return "; ".join(f"{k}={clean[k]}" for k in sorted(clean))
+
+
+def is_valid_part_lines(text: Any) -> bool:
+    """FACT_REGISTRY's validator for `PART_LINES_FACT`: at least one pair, and
+    every pair names a part key and a line this module knows."""
+    s = str(text or "").strip()
+    chunks = [c for c in s.split(";") if c.strip()]
+    return bool(chunks) and len(parse_part_lines(s)) == len(chunks)
+
+
+def part_line_choices(present_families: Any = ()) -> List[Dict[str, str]]:
+    """The choice list for "which line is this coverage part of?": the standard
+    lines - the ones this package already carries first - then "Part of
+    another policy". `value` is the family token the answer stores."""
+    try:
+        present = set(present_families or ())
+    except TypeError:                                        # pragma: no cover
+        present = set()
+    order = ([f for f in FAMILY_LABELS if f in present]
+             + [f for f in FAMILY_LABELS if f not in present])
+    out = [{"value": f, "label": FAMILY_LABELS[f]} for f in order]
+    out.append({"value": PART_OF_ANOTHER_POLICY, "label": PART_OF_ANOTHER_POLICY_LABEL})
+    return out
+
+
+def attribute_parts_to_document_line(rows: Any) -> List[str]:
+    """Mark ONE document's unplaceable rows as parts of the one line it names.
+
+    `rows` is that document's own `coverage_lines`, mutated in place (each
+    attributed row gets `PART_OF_KEY` = the family); returns the names marked.
+
+    The document's line: the families its rows NAME (`canon_line`, a denied or
+    container row aside), or - when no row names a line - the families its
+    unambiguous parts establish. Exactly one, or nothing is marked: a package
+    policy names several lines and its unknown rows stay for the producer.
+
+    A row is attributed only when nothing contradicts it belonging to that
+    line's contract: a policy number of its own that is not the line's, or a
+    carrier other than the line's, keeps it out (another policy printed on the
+    same page). A row any rule here already places keeps its own placement, so
+    a known part ("Business Interruption") is never re-attributed.
+    """
+    if not isinstance(rows, list):
+        return []
+    rows = [r for r in rows if isinstance(r, dict)]
+    if len(rows) < 2:
+        return []
+    # The rows that say which line this document is: the ones NAMING a line,
+    # or - when none does - its unambiguous parts ("Collision", "Towing").
+    anchors = [r for r in rows
+               if canon_line(r.get("line")) and not denies_coverage(r)
+               and not is_container_label(r.get("line"))]
+    families = {canon_line(r.get("line")) for r in anchors}
+    if not families:
+        anchors = [r for r in rows if canon_part(r.get("line")) and not denies_coverage(r)]
+        families = {canon_part(r.get("line")) for r in anchors}
+    if len(families) != 1:
+        return []
+    family = next(iter(families))
+    present = coverage_families_present(rows)
+    by_policy = policy_number_families(rows)
+    line_numbers = {_policy_key(r) for r in anchors if _policy_key(r)}
+    line_carriers = {_clean(r.get("carrier")) for r in anchors if _clean(r.get("carrier"))}
+    marked: List[str] = []
+    for r in rows:
+        raw = str(r.get("line") or "").strip()
+        if not raw or not _dedupe_key(raw):
+            continue
+        if canon_line(raw) or is_charge_label(raw) or is_container_label(raw):
+            continue
+        if canon_part(raw, present, by_policy.get(_policy_key(r))):
+            continue                     # a known part keeps its own placement
+        num = _policy_key(r)
+        if num and line_numbers and not any(_same_contract_number(num, n) for n in line_numbers):
+            continue                     # another contract printed on this page
+        car = _clean(r.get("carrier"))
+        if car and line_carriers and car not in line_carriers:
+            continue                     # another company's policy
+        r[PART_OF_KEY] = family
+        marked.append(raw)
+    return marked
 
 
 # ── WHICH LINES DOES THIS SUBMISSION ACTUALLY CARRY? ─────────────────────────

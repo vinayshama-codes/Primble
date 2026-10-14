@@ -575,7 +575,9 @@ _NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
     # carrier). The one door agrees - neither backing key is writable.
     "legacy_wc_monopolistic_state": (),
     "legacy_wc_monopolistic_private_carrier": (),
-    # Primble cannot tell which line the value belongs to. Nothing to offer.
+    # The STATIC entry only: what a view drawn without the facts can say. On the
+    # Review screen the card is rebuilt per package with a choice of line for
+    # each part (issue_registry.unmapped_line_issue, 14 Oct 2026).
     "unmapped_coverage_line": (),
     # ── Named, and left as `none` by a HUMAN decision (not by drift) ─────────
     # These fire on a value that is PRESENT and looks wrong for the risk, not on
@@ -587,7 +589,9 @@ _NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
     # Tier 1 sentence is classified by label before this row is consulted and
     # gets `_r_field` naming the exact fact - see _tier1_code_from_message.
     "legacy_tier1_unrecognised_field": (),
-    "acv_high_value_building": ("valuation_method",),
+    # `acv_high_value_building` left this list on 14 Oct 2026 (owner: "if we
+    # have any other similar like this, fix them too"): its fix IS the
+    # valuation choice, offered as `valuation_method`'s own list.
     "rcv_old_building": ("valuation_method",),
     "auto_drive_other_car_not_specified": ("auto_drivers",),
 }

@@ -155,7 +155,9 @@ CLUSTER_MAP: Dict[str, str] = {
     # pillar-capping loss conflict in ONE cluster headed "Other validations" -
     # so neither read as what it is, and the cluster could not carry the
     # "does not affect your score" note because its members disagreed.
-    "unmapped_coverage_line": "Coverage terminology not recognised",
+    # Renamed 14 Oct 2026 (owner): the heading asks for the line, it does not
+    # announce that we have nothing ("not recognised").
+    "unmapped_coverage_line": "Coverage part placement",
     "loss_history_attestation_conflict": "Loss history conflict",
 }
 
@@ -216,9 +218,10 @@ TIER_MAP: Dict[str, str] = {
     "acv_high_value_building": "binder_followup",
     "rcv_old_building": "binder_followup",
     "legal_name_equals_dba": "binder_followup",
-    # Advice only, and nothing can be typed to clear it - the lowest tier is
-    # where it belongs, so it stops displacing a real Required/Recommended item
-    # from the IMPORTANT band (that promotion skips binder_followup by design).
+    # Advice only - the lowest tier is where it belongs, so it stops displacing
+    # a real Required/Recommended item from the IMPORTANT band (that promotion
+    # skips binder_followup by design). Since 14 Oct 2026 it can be answered
+    # (pick the line for each part), which does not change its tier.
     "unmapped_coverage_line": "binder_followup",
 }
 
@@ -397,8 +400,17 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "property_deductible_basis_missing": _r_field("deductible_basis"),
     # ── Property valuation ──
     "property_valuation_method_missing": _r_field("valuation_method"),
-    "acv_high_value_building": _R_NONE,   # advisory: consider RCV (coverage choice)
-    "rcv_old_building": _R_NONE,          # advisory: verify reconstruction cost
+    # 14 Oct 2026 (owner: no card may end at "nothing to enter"). The ACV
+    # advisory asks the producer to consider RCV, and `valuation_method` is a
+    # writable fact with its own choice list - choosing Replacement Cost clears
+    # it, keeping Actual Cash Value is a dismiss.
+    "acv_high_value_building": _r_field("valuation_method"),
+    # A VERIFY advisory on values that are present: nothing to retype unless the
+    # value is wrong, so it says what to check and where.
+    "rcv_old_building": _r_review(
+        "Check the building value against today's reconstruction cost with the "
+        "insured. If it needs to change, update the building value; if it is "
+        "right, dismiss this."),
     # ── Property coinsurance ──
     "property_coinsurance_missing": _r_field("coinsurance_percentage", "agreed_value_endorsement"),
     "property_coinsurance_unreasonable": _r_field("coinsurance_percentage"),
@@ -490,10 +502,25 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # which left a typeable advisory rendering a dead button.
     "auto_um_uim_not_specified": _r_field("auto_um_uim_limit"),
     "auto_pip_medpay_not_specified": _r_field("auto_med_pay_limit"),
-    "auto_drive_other_car_not_specified": _R_NONE,        # advisory (DOC symbol not writable)
+    # Advisory; Drive Other Car is an endorsement on the auto policy, recorded
+    # per driver - the note says what to ask and where it goes.
+    "auto_drive_other_car_not_specified": _r_review(
+        "Ask the insured whether owners or officers drive vehicles the business "
+        "does not own. If they do, Drive Other Car can be added to the auto "
+        "policy; either way, dismiss this once it is discussed."),
     # ── Silent exposure (coverage decisions - handled on their own forms) ──
-    "crime_silent_exposure": _R_NONE,
-    "cyber_silent_exposure": _R_NONE,
+    # A coverage decision, or a document we do not have yet - each note names
+    # which (14 Oct 2026, owner).
+    "crime_silent_exposure": _r_review(
+        "If the insured already carries Crime coverage, add that policy's "
+        "declarations page with Add documents in the Documents section - this "
+        "clears once it is read. If not, discuss adding Crime coverage with the "
+        "insured, then dismiss this."),
+    "cyber_silent_exposure": _r_review(
+        "If the insured already carries Cyber coverage, add that policy's "
+        "declarations page with Add documents in the Documents section - this "
+        "clears once it is read. If not, discuss adding Cyber coverage with the "
+        "insured, then dismiss this."),
     # ── Certificates / evidence ──
     # `none` MODE, but no longer a dead end (UX-05, 2026-09-08): the emitting
     # rule declares `add_forms`, so the modal draws an "Add ACORD 25 / 28"
@@ -507,16 +534,18 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "legal_name_equals_dba": _r_field("dba_name"),
     # ── Narrative requirement ──
     "acord101_required": _R_NARRATIVE,
-    # ── Coverage terminology we could not place (client 1.7 / SYS-05) ──
-    # NO typed fix exists and pretending otherwise is the defect this replaces:
-    # the message said "Confirm which line it belongs to" over a button that
-    # opened nothing, because the code was absent from this map entirely.
-    # Clearing it would need a canonical "this part belongs to line X" fact,
-    # a writer for it and a re-canonicalisation path - none of which exist, so
-    # the honest answer is a note, not a dead input (owner, 2026-09-03).
+    # ── A coverage part to place on a line (client 1.7 / SYS-05) ──
+    # 14 Oct 2026 (owner: "give user to enter the correct option"). The fact
+    # this note said did not exist now does: `lob_canon.PART_LINES_FACT`, one
+    # answer per part, honoured by `unmapped_material_lines`. The ANSWERABLE
+    # form of this card is per package - its parts and their choice list come
+    # from the facts - so it is built by `unmapped_line_issue` and the Review
+    # screen's door (`grouped_with_package_caps`) redraws it from the facts on
+    # every response. This static entry is only what a view drawn WITHOUT the
+    # facts can say, and it says where the choice is made.
     "unmapped_coverage_line": _r_review(
-        "Primble can't tell which line this belongs to. Check the source "
-        "document, then mark it resolved."
+        "Pick the line for each coverage part on the Review screen, where each "
+        "part is listed with the standard lines to choose from."
     ),
     # ── Loss history attestation vs the uploaded loss runs (client C2 2.6) ──
     # Owner 2026-09-03: this one is a PROPER warning, because the condition
@@ -570,8 +599,8 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
 
 
 _CONFLICT_REVIEW_NOTE = (
-    "Documents disagree on this value. Confirm the correct one on the relevant "
-    "form, then mark it resolved - it can't be applied automatically."
+    "The documents give different values here. Enter the correct one in its box "
+    "on the form, then mark this resolved."
 )
 
 
@@ -612,9 +641,10 @@ SCORE_NEUTRAL_CODES: frozenset = frozenset({
     # Client 1.7 / SYS-05. Verified end to end: emitted to `structured_issues`
     # only (never hard_stops / soft_stops, pinned by
     # test_unmapped_coverage_line), and there is no FACT behind it to deduct
-    # against - it is raw terminology we could not place. Principle 7 states the
-    # rule outright: "give it no new scoring effect until a rule is explicitly
-    # defined."
+    # against - it is terminology no rule places. Its answer (14 Oct 2026,
+    # `lob_canon.PART_LINES_FACT`) is read by `unmapped_material_lines` alone,
+    # never by a scorer. Principle 7 states the rule outright: "give it no new
+    # scoring effect until a rule is explicitly defined."
     "unmapped_coverage_line",
 })
 
@@ -867,8 +897,7 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # way to know which field an unrecognised label meant.
     ("ACORD 125 minimum field missing", "Missing baseline ACORD 125 fields", "required",
      "legacy_tier1_unrecognised_field", _r_review(
-         "This ACORD 125 baseline field could not be matched to a known item. "
-         "Open the ACORD 125 form, fill the field the message names, then mark "
+         "Fill the field this message names on the ACORD 125 form, then mark "
          "this resolved.")),
     # ── Property COPE / deductibles / valuation / BI ─────────────────────────
     ("Minimum Viable COPE incomplete", "Property COPE completeness", "required",
@@ -1006,12 +1035,13 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_wc_monopolistic_payroll_missing", _r_field("wc_monopolistic_payroll")),
     ("Monopolistic WC state (ND/OH/WA/WY) requires the state fund", "Monopolistic WC state requirements", "required",
      "legacy_wc_monopolistic_private_carrier", _r_review(
-         "This clears by changing the WC placement - remove the private-carrier "
-         "request or acknowledge state-fund handling. No value can be typed here.")),
+         "This clears when the WC placement changes: in ND, OH, WA and WY workers "
+         "compensation is written by the state fund, so remove the private-carrier "
+         "request or confirm state-fund handling with the insured.")),
     ("Monopolistic WC state detected", "Monopolistic WC state requirements", "recommended",
      "legacy_wc_monopolistic_state", _r_review(
-         "Advisory: WC in ND/OH/WA/WY must be placed with the state fund. "
-         "Confirm the placement, then mark this resolved.")),
+         "In ND, OH, WA and WY workers compensation is placed with the state fund. "
+         "Confirm the placement with the insured, then dismiss this.")),
     # Per-state payroll has no live capture schedule and no writable scalar -
     # same call as the cross-form twin wc_multi_state_no_breakdown.
     ("Multi-state WC", "WC payroll reconciliation", "required",
@@ -2134,6 +2164,109 @@ def _form_choice_row(entry: dict, issue: Optional[dict]) -> dict:
     }
 
 
+# ── "Which line is this coverage part?" - built from the facts (14 Oct 2026) ──
+# Owner, live package 91c865a5: the card read "Coverage terminology not
+# recognised ... Primble has no normalization rule ... Primble can't tell which
+# line this belongs to. Check the source document, then mark it resolved." -
+# a dead end. Now the card ASKS: each part it lists gets a choice of the
+# standard lines (`lob_canon.part_line_choices`) plus "Part of another policy",
+# and the answer is the producer fact `lob_canon.PART_LINES_FACT`, written
+# through the ordinary field door (answer_routing: field; resolve-issue ->
+# apply_producer_answer_to_session), so its receipt lets "Open again" take it
+# back. `unmapped_material_lines` honours the answer and the card stops firing.
+#
+# ONE BUILDER, TWO CALLERS: the pipeline stores the card with it, and the
+# Review screen's door (`grouped_with_package_caps`) redraws it with it from the
+# facts on every response - so an answer clears the card on the response that
+# saved it, "Open again" brings it back on the response that undid it, and a
+# package stored before this change shows the new words and inputs at once.
+# Advice only, always: the card is never a hard stop or a warning, so no score
+# moves whatever it lists (SCORE_NEUTRAL_CODES).
+UNMAPPED_LINE_CODE = "unmapped_coverage_line"
+
+_PART_LINES_NOTE = (
+    "Pick the line each part belongs to. If it is a coverage inside a policy "
+    "that is already listed, choose \"Part of another policy - not a separate "
+    "line\"."
+)
+
+
+def _fact_raw(facts: dict, key: str):
+    v = (facts or {}).get(key)
+    return v.get("value") if isinstance(v, dict) and "value" in v else v
+
+
+def unmapped_line_message(parts: List[str]) -> str:
+    """The card's sentence for the parts it asks about, in plain words."""
+    parts = [str(p) for p in (parts or []) if str(p or "").strip()]
+    shown = ", ".join(parts[:4])
+    if len(parts) > 4:
+        shown += f", +{len(parts) - 4} more"
+    if len(parts) == 1:
+        return (f"Choose the line for this coverage part: {shown}. The documents "
+                "show it is carried, but its name does not say which policy it "
+                "belongs to.")
+    return (f"Choose the line for these coverage parts: {shown}. The documents "
+            "show they are carried, but their names do not say which policy they "
+            "belong to.")
+
+
+def unmapped_line_issue(facts: Any) -> Optional[dict]:
+    """The coverage-part card for these facts, or None when no part is left to
+    place. It lists every part the producer can be asked about (an answered one
+    keeps its choice on screen), and fires while any of them is unanswered."""
+    if not isinstance(facts, dict):
+        return None
+    from services.lob_canon import (
+        PART_LINES_FACT, coverage_families_present, parse_part_lines, part_key,
+        part_line_choices, unmapped_material_lines,
+    )
+    rows = _fact_raw(facts, "coverage_lines")
+    if not isinstance(rows, list):
+        return None
+    saved = facts.get(PART_LINES_FACT)
+    if not unmapped_material_lines(rows, saved):
+        return None
+    parts = unmapped_material_lines(rows)
+    answers = parse_part_lines(saved)
+    listed = [{"key": part_key(p), "label": p, "value": answers.get(part_key(p), "")}
+              for p in parts]
+    on_screen = {p["key"] for p in listed}
+    issue = make_issue(UNMAPPED_LINE_CODE, "advisory", unmapped_line_message(parts))
+    issue["resolution"] = {
+        "mode": "field",
+        "facts": [PART_LINES_FACT],
+        "note": _PART_LINES_NOTE,
+        "controls": {PART_LINES_FACT: {
+            "control": "part_lines",
+            "label": "Line for each coverage part",
+            "parts": listed,
+            "options": part_line_choices(coverage_families_present(rows)),
+            # Answers for parts no longer listed are kept when the window saves.
+            "keep": {k: v for k, v in answers.items() if k not in on_screen},
+        }},
+    }
+    return issue
+
+
+def refresh_unmapped_line_issue(structured_issues, facts) -> List[dict]:
+    """`structured_issues` with the coverage-part card redrawn from `facts`:
+    the stored copy is replaced by the current card, or removed when every part
+    is placed. Without the facts (or their coverage rows) the list is returned
+    as it was - a view that cannot see the rows cannot judge them."""
+    issues = list(structured_issues or [])
+    if not isinstance(facts, dict) or "coverage_lines" not in facts:
+        return issues
+    try:
+        fresh = unmapped_line_issue(facts)
+    except Exception as _ux:                                 # noqa: BLE001
+        logger.warning("issue_registry: coverage-part card refresh skipped: %s", _ux)
+        return issues
+    kept = [i for i in issues
+            if not (isinstance(i, dict) and i.get("code") == UNMAPPED_LINE_CODE)]
+    return kept + ([fresh] if fresh else [])
+
+
 def grouped_with_package_caps(
     structured_issues,
     hard_stops,
@@ -2183,6 +2316,10 @@ def grouped_with_package_caps(
     # A message whose card is being promoted must NOT also be appended, or the
     # same problem prints twice under two different wordings.
     extra = [] if codes else [m for m in (pkg.get("cap_hard_stops") or []) if m]
+    # The coverage-part card is drawn from the facts this screen is for (an
+    # answer clears it here, "Open again" brings it back) - see
+    # `refresh_unmapped_line_issue`. Advice only: no stop list is touched.
+    structured_issues = refresh_unmapped_line_issue(structured_issues, facts)
     return build_grouped_view(
         structured_issues or [],
         list(hard_stops or []) + extra,

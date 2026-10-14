@@ -1152,6 +1152,35 @@ per-project aggregate tick (need a live run - their quotes are not stored), X3-X
 inspection contacts stay blank unless a document names the role (17 stored packages lose a copied general contact).
 **Full suite on the final Z18 code: 14,361 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.**
 
+### Z19. Live run `91c865a5` (14 Oct 2026, evening, both Z18 deploys live) - two dead ends fixed
+
+Pre-form start as expected: 7 decs typed right, one insured, no false Data Consistency conflict, 41 with 1 hard stop + 7
+warnings (the 13 Oct run's start). Two owner reports, both real:
+1. **"Coverage terminology not recognised" told the user we had nothing** ("Primble can't tell which line this belongs
+   to. Check the source document, then mark it resolved"). Root cause: `lob_canon.unmapped_material_lines` judged each
+   coverage row by its name alone, and the Cyber dec prints its insuring agreements (Non-Panel Response Provider,
+   Digital Data Recovery, Network Extortion, Payment Card Loss, ...) as rows of its own grid. Now a row no rule places,
+   printed on a single policy's own paperwork that names exactly one line (no other policy number / carrier on it), is a
+   part of that line (`lob_canon.attribute_parts_to_document_line` via `extraction_service.mark_parts_of_document_line`,
+   marker `_part_of`, read ONLY by `unmapped_material_lines` - no family, no recommender move). When the line still
+   cannot be told, the card ASKS: one choice per part (the standard lines, the package's own first, plus "Part of another
+   policy - not a separate line"), saved as the producer fact `coverage_part_lines` through the field door; the card is
+   redrawn from the facts on every Review response (`issue_registry.refresh_unmapped_line_issue` in
+   `grouped_with_package_caps`), so a save clears it and "Open again" brings it back. Advice only - no score moves.
+   Measured on 1,699 stored documents / 367 packages: the card on 24 packages before, 22 after, 0 new (the 22: TRIA,
+   Kidnap & Ransom, AMS codes...). Sweep of the other dead-end notes: `acv_high_value_building` now types the valuation
+   method; the Crime / Cyber silent-exposure cards name the document to add; the rest reworded so none claims we have
+   nothing. Tests: `test_coverage_part_lines_14oct.py` (31).
+2. **Two Recommendations rows vanished when "No known losses" was answered** (and came back on "Open again"). They were
+   NOT answered: Distance to the nearest fire hydrant and Fire department type. "No known losses" took Loss History out,
+   the other pillars re-weighted, the sum landed on 79.00, the package score rounds DOWN, so each row (0.88 points)
+   measured +0 and `pointsFor` hid it while its boxes were still empty. Now a measured 0 on a row worth under one point,
+   in a pillar above 0, stays listed "up to +1 pts" (both together: 79 -> 80). And a row another fix really answers
+   (the same run: the COPE card's location table filled year built / roof year / sprinkler / protection class and four
+   rows left silently) goes to Resolved - "Cleared by your answer to <row>" - whose "Open again" reopens that fix
+   (`recommendations.clearedScoreItems` / `recommendationReopenTarget`, `AcordModal.markClearedRecommendations`). Only a
+   fix-window save files; a reload never does. Frontend only, no score moves. Tests: `test_recommendations_cleared_14oct.py` (7).
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,

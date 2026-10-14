@@ -35,16 +35,24 @@ def test_unmapped_coverage_line_has_a_resolution_at_all():
 
 
 def test_it_offers_a_note_and_never_a_typed_input():
+    """The STATIC entry - what a view drawn without the facts can say. Since
+    14 Oct 2026 (owner: "give user to enter the correct option") the Review
+    screen rebuilds the card per package with a choice of line for each part
+    (`issue_registry.unmapped_line_issue`, tests/test_coverage_part_lines_14oct.py),
+    so the static entry must never offer a free-text box over that answer."""
     res = resolution_for("unmapped_coverage_line")
-    assert res["mode"] == "none", "no value clears it - a typed input would lie"
+    assert res["mode"] == "none", "a free-text box over the part-to-line answer would lie"
     assert res.get("note"), "mode 'none' without a note is the dead button again"
     assert "facts" not in res and "schedule_key" not in res
 
 
 def test_the_note_says_what_to_actually_do():
+    # Owner, 14 Oct 2026: it says where the line is chosen - never that we
+    # cannot tell, never "check the source document".
     note = resolution_for("unmapped_coverage_line")["note"]
     assert len(note) <= 140, "the owner asked for short"
-    assert "source document" in note.lower()
+    assert "review screen" in note.lower() and "pick the line" in note.lower()
+    assert "source document" not in note.lower() and "can't" not in note.lower()
 
 
 # ── 2. Score-neutral is declared, never inferred ─────────────────────────────
@@ -115,7 +123,7 @@ def _clusters(view):
 
 def test_the_flag_reaches_the_cluster_the_screen_renders():
     v = _view(make_issue("unmapped_coverage_line", "advisory", "Coverage part not recognised: X."))
-    cl = _clusters(v)["Coverage terminology not recognised"]
+    cl = _clusters(v)["Coverage part placement"]
     assert cl["score_neutral"] is True
     assert cl["resolution"]["mode"] == "none"
 
@@ -142,7 +150,7 @@ def test_the_flag_is_re_derived_from_the_code_not_trusted_from_the_payload():
     lying = [{"code": "unmapped_coverage_line", "severity": "advisory",
               "message": "x", "score_neutral": False}]
     assert _clusters(build_grouped_view(lying, [], []))[
-        "Coverage terminology not recognised"]["score_neutral"] is True
+        "Coverage part placement"]["score_neutral"] is True
 
     lying_other_way = [{"code": "loss_history_attestation_conflict",
                         "severity": "soft_warning", "message": "y",
@@ -161,7 +169,7 @@ def test_it_no_longer_displaces_a_real_item_from_important():
         make_issue("acord125_missing", "soft_warning", "Missing baseline form."),
     )
     important = [c["cluster"] for c in v["important"]]
-    assert "Coverage terminology not recognised" not in important
+    assert "Coverage part placement" not in important
     assert "Missing baseline form" in important
 
 
@@ -174,7 +182,7 @@ def test_the_two_no_longer_share_one_generic_cluster():
         make_issue("loss_history_attestation_conflict", "soft_warning", "b"),
     )
     names = set(_clusters(v))
-    assert {"Coverage terminology not recognised", "Loss history conflict"} <= names
+    assert {"Coverage part placement", "Loss history conflict"} <= names
     assert "Other validations" not in names
 
 
@@ -194,4 +202,4 @@ def test_a_score_neutral_item_is_still_counted_and_still_listed():
     """Owner: keep them in the warnings list. The note explains, it never hides."""
     v = _view(make_issue("unmapped_coverage_line", "advisory", "Coverage part not recognised: X."))
     assert v["counts"]["warnings"] == 1
-    assert "Coverage terminology not recognised" in _clusters(v)
+    assert "Coverage part placement" in _clusters(v)

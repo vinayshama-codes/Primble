@@ -308,8 +308,11 @@ def test_the_screens_wire_it_through_the_one_reopen_door():
     # judged on save; a check still running is judged when it finishes
     assert "try { markRecommendationFix(data, issue); }" in modal
     assert 'recommendationFixState("dry", p.itemId, { dryRun, formId: p.meta.form_id })' in modal
-    # "Open again" is the one reopen door; never optimistic (the row stays put until the server answers)
-    assert 'handleReopenIssue(row.iid, "open", {' in modal and "severity: REC_PAGE," in modal
+    # "Open again" is the one reopen door; never optimistic (the row stays put until the server answers).
+    # 14 Oct 2026: the id it reopens is the row's own fix, or the fix that cleared it
+    # (`recommendationReopenTarget` - tests/test_recommendations_cleared_14oct.py).
+    assert 'handleReopenIssue(target.iid, "open", target.meta, { optimistic: false });' in modal
+    assert "severity: REC_PAGE," in modal
     # the editor's Cross-Form Resolved list never shows a recommendation
     assert "&& pageOfStatus(st, iid) !== REC_PAGE)" in modal
     # both layouts render it

@@ -1376,20 +1376,23 @@ async def _finalize_pipeline(
     # is appended to `structured_issues` ONLY - it never enters hard_stops or
     # soft_stops, so it renders on the review screen, moves no score and caps
     # nothing. When Brent rules on a specific line, it graduates.
+    #
+    # 14 Oct 2026 (owner, live package 91c865a5): the card ASKS. Each part it
+    # lists takes a line from a choice list, answered as the producer fact
+    # `lob_canon.PART_LINES_FACT`, and a part its own single-line declarations
+    # place (`extraction_service.mark_parts_of_document_line`) is never listed.
+    # The card is built by the one function the Review screen redraws it with
+    # (`issue_registry.grouped_with_package_caps`), so the stored and the shown
+    # card are one card - still an advisory, structured_issues only.
     try:
-        from services.lob_canon import unmapped_material_lines
-        _unmapped = unmapped_material_lines(merged_facts.get("coverage_lines"))
+        from services.lob_canon import PART_LINES_FACT, unmapped_material_lines
+        from services.issue_registry import unmapped_line_issue
+        _unmapped = unmapped_material_lines(merged_facts.get("coverage_lines"),
+                                            merged_facts.get(PART_LINES_FACT))
         if _unmapped:
-            _shown = ", ".join(_unmapped[:4])
-            if len(_unmapped) > 4:
-                _shown += f", +{len(_unmapped) - 4} more"
-            structured_issues.append(make_issue(
-                "unmapped_coverage_line", "advisory",
-                f"Coverage part not recognised: {_shown}. The documents show it "
-                "is carried, but Primble has no normalization rule for this "
-                "terminology, so it is not matched to a standard line of "
-                "business. Confirm which line it belongs to.",
-            ))
+            _card = unmapped_line_issue(merged_facts)
+            if _card:
+                structured_issues.append(_card)
             logger.info("lines_of_business: %d material line(s) could not be "
                         "canonicalised - routed to the producer: %s",
                         len(_unmapped), _unmapped)

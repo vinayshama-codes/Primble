@@ -29,6 +29,7 @@ import { positiveScoreWording } from '../../utils/positiveWording';
 import { applyLabel, fieldsToApply } from '../../utils/fixWindow';
 import { missingRequiredSummary } from '../../utils/scheduleImport';
 import { stillMissing as windowStillMissing, unmetNeeds, rowNeedsSummary, unfinishedStarters, textForCoverage, gapCovered } from '../../utils/fixProgress';
+import { composePartLines, partPicks, partsLeft } from '../../utils/partLines';
 
 const PINK = '#E61B84';
 
@@ -53,6 +54,9 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // typed inputs above it - the table never has to hold them.
   const extraFacts = mode === 'schedule' && Array.isArray(resolution.facts) ? resolution.facts.filter(Boolean) : [];
   const fieldFacts = mode === 'field' ? (resolution.facts || []) : extraFacts;
+  // The coverage-part window (14 Oct 2026): its one fact lists a choice per part.
+  const partLinesWindow = mode === 'field'
+    && fieldFacts.some((f) => ((resolution.controls || {})[f] || {}).control === 'part_lines');
 
   const [values, setValues] = useState({});     // field mode: fact -> typed value
   // Which facts the producer put into "Other" (free-text) mode. Tracked
@@ -325,7 +329,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     // on file is a finished fix's step, not a partial one's.
     const { send: filled, error } = fieldsToApply(fieldFacts, values, touched.current,
                                                   { allowConfirm: !note && !progressGap });
-    if (!filled.length) { setErr(error || 'Enter at least one value.'); return; }
+    if (!filled.length) {
+      setErr(partLinesWindow ? 'Pick a line for at least one coverage part.' : (error || 'Enter at least one value.'));
+      return;
+    }
     setBusy(true); setErr(''); setNote('');
     let last = null;
     try {
@@ -618,6 +625,58 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                 // `resolution.controls`), so a hard stop or warning is never
                 // resolved by guessing at wording. "Other" reveals free text.
                 const ctl = (resolution.controls || {})[fact] || {};
+                // "Which line is this coverage part?" (owner, 14 Oct 2026): one
+                // choice per part the server lists, saved as ONE answer - the
+                // parts, their choices and what an answer means are the
+                // server's (issue_registry.unmapped_line_issue); this only
+                // composes the text (utils/partLines).
+                if (ctl.control === 'part_lines') {
+                  const parts = Array.isArray(ctl.parts) ? ctl.parts : [];
+                  const choices = Array.isArray(ctl.options) ? ctl.options : [];
+                  const picks = partPicks(ctl, values[fact]);
+                  const left = partsLeft(ctl, picks);
+                  return (
+                    <div key={fact} data-testid="part-lines">
+                      <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>{ctl.label || humanizeFact(fact)}</span>
+                      {resolution.note && (
+                        <div style={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.5, marginBottom: 8 }}>{resolution.note}</div>
+                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                        {parts.map((p, i) => (
+                          <label key={p.key} style={{ display: 'block' }}>
+                            <span style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 4 }}>{p.label}</span>
+                            <select
+                              style={inputStyle}
+                              value={picks[p.key] || ''}
+                              disabled={busy}
+                              autoFocus={i === 0}
+                              onChange={(e) => {
+                                const chosen = e.target.value;
+                                touched.current.add(fact);
+                                setValues((v) => ({
+                                  ...v,
+                                  [fact]: composePartLines(ctl, { ...partPicks(ctl, v[fact]), [p.key]: chosen }),
+                                }));
+                                if (err) setErr('');
+                              }}
+                              onFocus={() => { if (note) setNote(''); }}
+                            >
+                              <option value="">Select a line...</option>
+                              {choices.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                      {parts.length > 1 && left > 0 && (
+                        <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 8 }}>
+                          {left === parts.length
+                            ? `Pick a line for each of the ${parts.length} parts.`
+                            : `${left} of ${parts.length} parts still need a line - the item stays open until each has one.`}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
                 const opts = Array.isArray(ctl.options) ? ctl.options : null;
                 const picked = values[fact] || '';
                 const isOther = !!opts && (otherFacts.has(fact) || picked === 'Other');
@@ -794,7 +853,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
           {mode === 'none' && addForms.length === 0 && addedForms.length === 0 && (
             <div style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.55, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
               {resolution.note
-                || "This validation can't be fixed by entering a single value - it usually means adding or adjusting a coverage or form. Handle it on the relevant form, then mark it resolved here, or dismiss it with a note."}
+                || "This one is settled by a coverage or form decision rather than a typed value. Make the change on the form it names, then mark it resolved here, or dismiss it with a note."}
             </div>
           )}
 
@@ -869,7 +928,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                     ? (noteSettleHere ? 'Apply the fix' : 'Done')
                     : progressGap
                       ? 'Save progress'
-                      : (mode === 'field' && !prefillLoading
+                      : (mode === 'field' && !prefillLoading && !partLinesWindow
                         ? applyLabel(fieldFacts, values, touched.current)
                         : 'Apply')}
               </button>

@@ -16185,6 +16185,31 @@ def attach_generic_rows_to_document_line(doc: Any) -> List[str]:
     return renamed
 
 
+# A COVERAGE PART ON A SINGLE-LINE DECLARATIONS IS THAT LINE'S (14 Oct 2026).
+# The owner's live package 91c865a5: the Cyber dec printed its six insuring
+# agreements ("Network Extortion", "Payment Card Loss", ...) as rows, and the
+# review screen asked which line they belong to. The rule and its guards live
+# in `lob_canon.attribute_parts_to_document_line`; this applies it to one
+# document, only to a single policy's own paperwork (a certificate lists
+# several POLICIES, an application the lines requested - neither is one
+# policy's coverage grid). The row is MARKED, never renamed: the marker is read
+# by the unrecognised-coverage review alone, so no line becomes carried and the
+# recommender cannot move.
+def mark_parts_of_document_line(doc: Any) -> List[str]:
+    """Mark a single-policy document's unplaceable coverage rows as parts of its
+    one line. Mutates the document's ``coverage_lines``; returns the names."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("facts"), dict):
+        return []
+    if str(doc.get("doc_type") or "").strip().lower() not in _DOCUMENT_CARRIER_ROLES:
+        return []
+    rows = _unwrap_fact(doc["facts"].get("coverage_lines"))
+    try:
+        from services.lob_canon import attribute_parts_to_document_line
+        return attribute_parts_to_document_line(rows)
+    except Exception:                                        # noqa: BLE001
+        return []
+
+
 def drop_flags_of_lines_not_carried(doc: Any) -> List[str]:
     """Clear a line-attribute flag (`_LINE_ATTRIBUTE_FLAGS`) on a document that
     carries no such line. Mutates ``doc["flags"]``; returns what was cleared."""
@@ -16395,6 +16420,16 @@ def merge_facts(docs: List[dict], primary: dict,
                             "line: %s", _cd.get("filename"), _gr[:4])
         except Exception as exc:  # noqa: BLE001 - never block the pipeline
             logger.warning("merge_facts: generic-row check failed: %s", exc)
+        # A coverage part on a single-line declarations is that line's
+        # (mark_parts_of_document_line) - per document, while its rows are
+        # still its own.
+        try:
+            _pp = mark_parts_of_document_line(_cd)
+            if _pp:
+                logger.info("merge_facts: %s - coverage parts of the document's own "
+                            "line: %s", _cd.get("filename"), _pp[:6])
+        except Exception as exc:  # noqa: BLE001 - never block the pipeline
+            logger.warning("merge_facts: coverage-part attribution failed: %s", exc)
         # A line's attribute only from a document carrying that line (see
         # drop_flags_of_lines_not_carried) - per document, before the flags
         # are OR-merged into the package.
