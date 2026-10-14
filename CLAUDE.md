@@ -3324,7 +3324,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **14,361 passed, 1 failed, 19 skipped** (~17 min; 14 Oct 2026, after part Z18; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **14,400 passed, 1 failed, 19 skipped** (~18 min; 14 Oct 2026, after part Z19; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

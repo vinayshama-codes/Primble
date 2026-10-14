@@ -64,6 +64,9 @@ function ScoreGroup({ items, onOpenFix }) {
                 {it.closesWith === "document" && (
                   <div className="rec-row__also">A supporting document also closes this.</div>
                 )}
+                {it.heldBy && (
+                  <div className="rec-row__also" data-held-by="gate">Adds points once {it.heldBy} is answered.</div>
+                )}
               </div>
               <span className="rec-pts">{pointsText(it.points)}</span>
               {typeof onOpenFix === "function" && (

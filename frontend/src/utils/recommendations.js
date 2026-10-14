@@ -150,10 +150,29 @@ export function pointsFor(row) {
 
 export const pointsText = (p) => (p ? `${p.exact ? "" : "up to "}+${p.points} pts` : "");
 
+// A pillar HELD AT 0 by one missing value (owner, 14 Oct 2026, run 823d58a0:
+// Property Integrity is 0 until occupancy is entered - the COPE minimum - while
+// its parts score 28 / 60). Its other rows add nothing until that value is in,
+// so they measure +0 or nothing, and the list showed some ("up to +1") and hid
+// others. The gate is the row of that pillar whose answer is MEASURED to raise
+// the score; every other row of the pillar is held by it: listed, with the line
+// "Adds points once <gate> is answered", never hidden and never promising points
+// it cannot give yet. {pillar: gate label}.
+export function pillarGates(rows) {
+  const gates = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== "object" || row.pillar === HARD_STOPS_ROW) continue;
+    if (num(row.score) !== 0 || !(num(row.answer_gain) > 0)) continue;
+    if (!gates[row.pillar]) gates[row.pillar] = clean(row.action) || pillarLabel(row.pillar);
+  }
+  return gates;
+}
+
 export function scoreItems(packageSqs, covered = new Set()) {
   const rows = Array.isArray(packageSqs?.top_recommendations) ? packageSqs.top_recommendations : [];
   const out = [];
   const seen = new Set();
+  const gates = pillarGates(rows);
   for (const row of rows) {
     if (!row || typeof row !== "object" || row.pillar === HARD_STOPS_ROW) continue;
     let resolution = row.resolution && row.resolution.mode && row.resolution.mode !== "none"
@@ -163,7 +182,12 @@ export function scoreItems(packageSqs, covered = new Set()) {
     if (resolution.mode === "narrative" && Array.isArray(row.narrative_gaps) && row.narrative_gaps.length) {
       resolution = { ...resolution, gaps: row.narrative_gaps };
     }
-    const points = pointsFor(row);
+    const gate = gates[row.pillar];
+    const heldBy = gate && !(num(row.answer_gain) > 0) && num(row.score) === 0 ? gate : null;
+    const avail = num(row.points_available);
+    const points = heldBy
+      ? (avail !== null && avail > 0 ? { points: Math.max(1, Math.round(avail)), exact: false } : null)
+      : pointsFor(row);
     if (!points) continue;                           // answering adds nothing
     const keys = fixKeys(resolution);
     if (!keys.length || allCovered(keys, covered)) continue;   // a card already asks
@@ -181,6 +205,7 @@ export function scoreItems(packageSqs, covered = new Set()) {
       resolution,
       keys,
       alsoOnForms: [],
+      heldBy,
     });
   }
   return out;

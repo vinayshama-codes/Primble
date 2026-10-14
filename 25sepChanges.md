@@ -1181,6 +1181,13 @@ warnings (the 13 Oct run's start). Two owner reports, both real:
    (`recommendations.clearedScoreItems` / `recommendationReopenTarget`, `AcordModal.markClearedRecommendations`). Only a
    fix-window save files; a reload never does. Frontend only, no score moves. Tests: `test_recommendations_cleared_14oct.py` (7).
 
+**Z19 addendum - a pillar held at 0 lists its rows with the gate named (owner, same evening, run 823d58a0).** Property
+Integrity is 0 until occupancy is entered (the COPE minimum) while its parts score 28 / 60, so its other rows measured +0
+or nothing: the list showed year built / roof year / protection class ("up to +1") and hid hydrant / fire department /
+sprinkler, none of which could move the score yet. `recommendations.pillarGates`: the gate is the row of a 0 pillar whose
+answer is MEASURED to raise the score; every other row of that pillar is listed with "Adds points once Occupancy type is
+answered." (`heldBy`). Frontend only, no score moves. Tests: `test_held_pillar_rows_14oct.py` (3, on the replayed screen).
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,
