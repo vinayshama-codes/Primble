@@ -36,11 +36,18 @@ def test_only_the_row_being_saved_says_confirming():
 
 
 def test_page_and_show_on_form_are_small_stacked_labels_on_one_line_each():
+    # 14 Oct 2026 (owner): the page number is a plain label (no border) and every
+    # action in the panel - Show on form, Confirm, the New document choices - is
+    # the "Open to fix" button: pink outline, #fdf2f8, #be185d, radius 6.
     src = _panel()
-    chip = src[src.index("const rowChip = (pink) => ({"):src.index("});", src.index("const rowChip"))]
-    assert 'whiteSpace: "nowrap"' in chip                                   # never "Page / 1"
-    assert "borderRadius: 4" in chip                                        # a small button, not a pill
-    assert '<span style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 3, flexShrink: 0 }}>' in src
-    assert "<span style={rowChip(false)}>Page {row.page}</span>" in src
-    assert "{clickable ? <span style={rowChip(true)}>Show on form</span> : null}" in src
+    look = src[src.index("export const FIX_LOOK = {"):src.index("};", src.index("export const FIX_LOOK"))]
+    for needle in ('border: "1px solid #f9a8d4"', 'background: "#fdf2f8"', 'color: "#be185d"', "borderRadius: 6", 'whiteSpace: "nowrap"'):
+        assert needle in look, needle
+    page = src[src.index("const PAGE_TEXT = {"):src.index("};", src.index("const PAGE_TEXT"))]
+    assert "border" not in page and 'whiteSpace: "nowrap"' in page          # never "Page / 1", no box
+    assert "const smallBtn = (_primary, disabled) => ({\n  ...FIX_LOOK" in src
+    assert '<span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>' in src
+    assert "<span style={PAGE_TEXT}>Page {row.page}</span>" in src
+    assert "{clickable ? <span style={FIX_LOOK}>Show on form <Chevron /></span> : null}" in src
+    assert "rowChip" not in src
     assert "—" not in src                                              # no em-dashes in UI text

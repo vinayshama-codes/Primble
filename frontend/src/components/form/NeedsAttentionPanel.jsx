@@ -28,12 +28,25 @@ async function keepDocumentSuggestion(sessionId, id) {
 
 export const DOCUMENT_SUGGESTIONS_TIP = "A document you added gives a different value for these boxes. Choose which one the form keeps.";
 
-const smallBtn = (primary, disabled) => ({
-  fontSize: 10.5, fontWeight: 600, padding: "3px 9px", borderRadius: 6, fontFamily: "inherit",
-  border: `1px solid ${primary ? "#E61B84" : "#cbd5e1"}`,
-  background: primary ? (disabled ? "#f9a8d4" : "#E61B84") : "#fff",
-  color: primary ? "#fff" : "#334155", cursor: disabled ? "not-allowed" : "pointer",
+// Every action in this panel looks like "Open to fix" (owner, 14 Oct 2026: "the
+// button should be same" - Show on form, Confirm, the New document choices): the
+// same small pink outline button with the same chevron. A page number is a
+// plain label, never a button.
+export const FIX_LOOK = {
+  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
+  fontSize: 10, fontWeight: 700, lineHeight: 1.4, padding: "2px 9px", borderRadius: 6,
+  border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d",
+  fontFamily: "inherit", whiteSpace: "nowrap",
+};
+const smallBtn = (_primary, disabled) => ({
+  ...FIX_LOOK, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1,
 });
+const PAGE_TEXT = { fontSize: 10, fontWeight: 600, color: "#64748b", whiteSpace: "nowrap" };
+const Chevron = () => (
+  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path d="M3 2l4 4-4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 function SuggestionRow({ row, busy, onJump, onUse, onKeep }) {
   return (
@@ -114,17 +127,9 @@ function Tag({ status }) {
 export const CONFIRM_TIP = "Keep this value. It is marked as checked by you.";
 export const CONFIRM_ALL_TIP = "Keep every value in this list. Each is marked as checked by you.";
 
-// "Page 3" and "Show on form" (owner, 13 Oct 2026): each on one line, as small
-// square-cornered buttons stacked one above the other at the row's right - not
-// pills, never wrapped to "Page / 3". The row itself is the click (it shows the
-// box), so these are its labels, drawn as buttons.
-const rowChip = (pink) => ({
-  display: "block", whiteSpace: "nowrap", textAlign: "center", fontSize: 10, fontWeight: 600, lineHeight: 1.4,
-  padding: "1px 7px", borderRadius: 4,
-  border: `1px solid ${pink ? "rgba(230,27,132,0.45)" : "#cbd5e1"}`,
-  background: pink ? "rgba(230,27,132,0.06)" : "#f8fafc",
-  color: pink ? "#E61B84" : "#475569",
-});
+// "Page 3" above "Show on form" at the row's right, each on one line (owner, 13 Oct
+// 2026), never wrapped to "Page / 3"; the page is a plain label and the button is
+// the panel's one button look (owner, 14 Oct 2026). The row itself is the click.
 
 // `busy`: THIS row's confirm is being saved. `locked`: another confirm is in
 // flight - the button waits (two saves of one form must not race) but keeps its
@@ -150,9 +155,9 @@ function AttentionRow({ row, onJump, onConfirm, busy = false, locked = false }) 
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 3, fontSize: 10 }}>
         <span style={{ flex: "1 1 auto", minWidth: 0, color: scoreColor(row), fontWeight: row.score_effect > 0 ? 700 : 500 }}>{row.score_text || "No score effect"}</span>
         {row.page ? (
-          <span style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 3, flexShrink: 0 }}>
-            <span style={rowChip(false)}>Page {row.page}</span>
-            {clickable ? <span style={rowChip(true)}>Show on form</span> : null}
+          <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
+            <span style={PAGE_TEXT}>Page {row.page}</span>
+            {clickable ? <span style={FIX_LOOK}>Show on form <Chevron /></span> : null}
           </span>
         ) : null}
       </div>

@@ -252,7 +252,7 @@ export default function ReviewRailLayout(props) {
     dryRun, dryRunSessionId, dryRunFormIds, onDryRunUpdate, onFixDryRunItem,
     // Recommendations section (#22): a score row's fix; a form (and box) to open;
     // a form to tick before generation (a form choice, 13 Oct 2026).
-    onFixScoreItem, onOpenFormAt, onAddForm,
+    onFixScoreItem, onOpenFormAt, onAddForm, formOffers, onAddOffer,
     // The Resolved section (8 Oct 2026): "Open again" and its in-flight state.
     onReopenIssue, reopeningIds, reopenNotices,
     // Recommendations' own Resolved list (13 Oct 2026): "Open again" there.
@@ -1152,7 +1152,7 @@ export default function ReviewRailLayout(props) {
         <Recommendations model={recModel} attention={recAttention} packageSqs={packageSqs}
           dryRun={dryRun} sessionId={dryRunSessionId} tickedFormIds={dryRunFormIds || []}
           onDryRunUpdate={onDryRunUpdate} onOpenDryRunFix={onFixDryRunItem}
-          onOpenScoreFix={onFixScoreItem} onAddForm={onAddForm}
+          onOpenScoreFix={onFixScoreItem} onAddForm={onAddForm} formOffers={formOffers} onAddOffer={onAddOffer}
           onOpenForm={onOpenFormAt || (packageGen?.onOpenForm ? (formId) => packageGen.onOpenForm(formId) : undefined)}
           formsExist={formsExist} generating={genState === GEN_RUNNING}
           issueStatuses={issueStatuses} onReopenResolved={onReopenRecommendation}

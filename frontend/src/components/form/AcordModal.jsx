@@ -4988,6 +4988,26 @@ const AcordModal = forwardRef(function AcordModal({
     if (p) handleReclassify(p.docId, p.action, p.newType, p.busyBtn, { confirmed: true, confirmSameInsured: !!p.sameInsured });
   };
 
+  // Add a form the documents call for, from Recommendations (owner, 14 Oct 2026) -
+  // the same door the add-document box uses.
+  const addOfferedForm = async (offer) => {
+    if (!sessionId || !offer?.form_id) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/session/${sessionId}/documents/add-form`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ form_id: offer.form_id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data?.detail || "The form could not be added. Please try again.");
+      }
+      await handleDocumentsChanged({ ...data, __formAdded: offer.form_id });
+    } catch (e) {
+      throw new Error(e?.message || "The form could not be added: network error");
+    }
+  };
+
   const renderAddDocumentsPanel = () => (
     <AddDocumentsPanel
       sessionId={sessionId}
@@ -7967,7 +7987,7 @@ const AcordModal = forwardRef(function AcordModal({
             onDryRunUpdate={setDryRun}
             onFixDryRunItem={openDryRunFix}
             onFixScoreItem={openScoreFix}
-            onAddForm={addFormBeforeGeneration}
+            onAddForm={addFormBeforeGeneration} formOffers={documentFormOffers} onAddOffer={addOfferedForm}
             onOpenFormAt={openFormAtBox}
             packageGen={{
               state: pkgGen.state,
@@ -8601,7 +8621,7 @@ const AcordModal = forwardRef(function AcordModal({
               <Recommendations heading packageSqs={packageSqs} groupedIssues={groupedIssues} keyDetails={keyDetails}
                 dryRun={dryRun} sessionId={sessionId} tickedFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
                 onDryRunUpdate={setDryRun} onOpenDryRunFix={openDryRunFix} onOpenScoreFix={openScoreFix}
-                onAddForm={addFormBeforeGeneration}
+                onAddForm={addFormBeforeGeneration} formOffers={documentFormOffers} onAddOffer={addOfferedForm}
                 onOpenForm={openFormAtBox} formsExist={pkgGen.state === GEN_DONE}
                 generating={pkgGen.state === GEN_RUNNING}
                 refreshKey={`${packageSqs?.package_sqs_score ?? ""}|${packageSqs?.timestamp ?? ""}`}

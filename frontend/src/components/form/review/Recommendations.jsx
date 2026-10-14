@@ -134,10 +134,42 @@ function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
   );
 }
 
-function AfterFormsGroup({ forms, ready, onOpenForm }) {
+// A form the documents call for that is not in the package ("Your documents now
+// show Commercial Auto. ACORD 127 is not in this package.") - the add-document
+// answer's offers (`document_form_offers`), listed here too (owner, 14 Oct 2026).
+function OfferRows({ offers, onAddOffer }) {
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState("");
+  if (!offers.length) return null;
+  return (
+    <div className="rec-form" data-testid="rec-form-offers">
+      <div className="rec-form__head"><span className="rec-form__name">Forms your documents call for</span></div>
+      {offers.map((o) => (
+        <div key={o.form_id} className="rec-row">
+          <div className="rec-row__main">
+            <div className="rec-row__title">{o.line_label ? `Your documents show ${o.line_label}. ` : ""}{o.label || formLabel(o.form_id)} is not in this package.</div>
+            {o.reason && <div className="rec-row__detail">{positiveScoreWording(o.reason)}</div>}
+          </div>
+          {typeof onAddOffer === "function" && (
+            <button type="button" className="rec-link" disabled={!!busy}
+              onClick={async () => {
+                setBusy(o.form_id); setErr("");
+                try { await onAddOffer(o); } catch (e) { setErr(e?.message || "The form could not be added."); } finally { setBusy(null); }
+              }}>
+              {busy === o.form_id ? "Adding..." : `Add ${o.label || formLabel(o.form_id)}`}
+            </button>
+          )}
+        </div>
+      ))}
+      {err && <div className="rec-row__detail" role="alert" style={{ color: "#b91c1c" }}>{err}</div>}
+    </div>
+  );
+}
+
+function AfterFormsGroup({ forms, ready, onOpenForm, offers = [], onAddOffer }) {
   const [open, setOpen] = useState({});
   const [groupOpen, setGroupOpen] = useState(true);
-  const count = forms.reduce((n, f) => n + f.items.length, 0);
+  const count = forms.reduce((n, f) => n + f.items.length, 0) + offers.length;
   return (
     <section className="rec-group" aria-label="Your forms will need" data-rec-group="forms">
       <FoldHead open={groupOpen} onToggle={() => setGroupOpen((o) => !o)} title="Your forms will need">
@@ -146,6 +178,7 @@ function AfterFormsGroup({ forms, ready, onOpenForm }) {
       {groupOpen && (
       <>
       <div className="rec-group__sub">Boxes still empty on your generated forms. Fill them in the editor.</div>
+      <OfferRows offers={offers} onAddOffer={onAddOffer} />
       {ready === undefined && <div className="rec-empty">Checking your forms...</div>}
       {ready === null && <div className="rec-empty">Your forms could not be checked just now. Open a form to see what it needs.</div>}
       {ready && count === 0 && <div className="rec-empty">Nothing to add - your forms have what they need from you.</div>}
@@ -195,7 +228,7 @@ export default function Recommendations({
   model = null, packageSqs, groupedIssues, keyDetails,
   dryRun, sessionId, tickedFormIds = [], onDryRunUpdate, onOpenDryRunFix,
   onOpenScoreFix, onOpenForm, formsExist = false, generating = false,
-  attention, refreshKey = "", heading = false, onAddForm,
+  attention, refreshKey = "", heading = false, onAddForm, formOffers = [], onAddOffer,
   // The Resolved list (13 Oct 2026): the stored statuses, "Open again" and its
   // in-flight state - the same ones the Hard Stops / Warnings lists use.
   issueStatuses = null, onReopenResolved, reopeningIds, reopenNotices,
@@ -214,7 +247,8 @@ export default function Recommendations({
     })
     : [];
   // Before forms there is no forms group (owner, 14 Oct 2026): nothing to wait for.
-  const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 : true;
+  const offers = formsExist && Array.isArray(formOffers) ? formOffers.filter((o) => o && o.form_id) : [];
+  const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 && offers.length === 0 : true;
   const allGood = rec.score.length === 0 && formsQuiet && !generating;
 
   return (
@@ -231,7 +265,8 @@ export default function Recommendations({
       <div className="rec" hidden={allGood}>
       <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix} />
       {formsExist && (
-        <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm} />
+        <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm}
+          offers={offers} onAddOffer={onAddOffer} />
       )}
       </div>
       {/* Outside the hidden block: what was handled stays reachable when

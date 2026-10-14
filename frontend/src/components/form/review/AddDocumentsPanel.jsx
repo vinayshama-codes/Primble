@@ -51,6 +51,10 @@ export default function AddDocumentsPanel({
   const [integrity, setIntegrity] = useState(null);
   const [offerBusy, setOfferBusy] = useState(null);
   const [offerNote, setOfferNote] = useState("");
+  // The result box closes with its own x (owner, 14 Oct 2026); a new answer
+  // opens it again. The forms it offers stay listed under Recommendations.
+  const [resultClosed, setResultClosed] = useState(false);
+  useEffect(() => { setResultClosed(false); }, [result]);
   const inputRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -211,9 +215,14 @@ export default function AddDocumentsPanel({
           )}
         </div>
       )}
-      {lines.length > 0 && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3, ...(isAddAfterForms ? { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "8px 10px" } : {}) }}
+      {lines.length > 0 && !resultClosed && (
+        <div style={{ position: "relative", marginTop: 8, display: "flex", flexDirection: "column", gap: 3, ...(isAddAfterForms ? { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "8px 28px 8px 10px" } : { paddingRight: 24 }) }}
           data-testid="add-documents-result">
+          <button type="button" aria-label="Close" title="Close" data-testid="add-documents-result-close"
+            onClick={() => { setResultClosed(true); setOfferNote(""); }}
+            style={{ position: "absolute", top: 4, right: 6, width: 20, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: "#64748b", fontSize: 15, lineHeight: 1, cursor: "pointer", borderRadius: 4, fontFamily: "inherit" }}>
+            ×
+          </button>
           {lines.map((l, i) => (
             <div key={i} style={{ fontSize: 12, color: LINE_COLOR[l.kind] || "#334155", display: "flex", alignItems: "center", gap: 6 }}>
               {isAddAfterForms && fillRunning && i === lines.length - 1 && (
@@ -233,7 +242,7 @@ export default function AddDocumentsPanel({
           )}
         </div>
       )}
-      {offers.length > 0 && (
+      {offers.length > 0 && !resultClosed && (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
           {offers.map((o) => (
             <div key={o.form_id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#334155" }}>
@@ -246,7 +255,7 @@ export default function AddDocumentsPanel({
           ))}
         </div>
       )}
-      {offerNote && <div style={{ marginTop: 6, fontSize: 12, color: "#166534" }}>{offerNote}</div>}
+      {offerNote && !resultClosed && <div style={{ marginTop: 6, fontSize: 12, color: "#166534" }}>{offerNote}</div>}
     </div>
   );
 }
