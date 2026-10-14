@@ -290,9 +290,86 @@ export function offerItems(formOffers) {
   return out;
 }
 
+// The last points after forms are the Form Fill Rate (14 Oct 2026, owner: "package
+// score is 99/100 and I can't see anything to make it 100"): AI values on the
+// forms nobody confirmed (0.85 / 0.50 against a confirmed 1.00). The scorer's row
+// for it has no fix window, so `scoreItems` never listed it. Its fix is each
+// form's "Confirm all"; this row opens the form with the most Please verify
+// values. Listed only while the needs-attention list has some - a fill rate held
+// by anything else is not a promise this row can keep.
+function verifyCounts(attention) {
+  const out = [];
+  for (const f of (Array.isArray(attention?.forms) ? attention.forms : [])) {
+    const n = (Array.isArray(f?.rows) ? f.rows : []).filter((r) => r && r.status === "verify").length;
+    if (n && f.form_id) out.push({ form_id: f.form_id, n });
+  }
+  return out.sort((a, b) => b.n - a.n);
+}
+
+function fillPoints(packageSqs, fill) {
+  const rows = Array.isArray(packageSqs?.top_recommendations) ? packageSqs.top_recommendations : [];
+  const own = rows.find((r) => r && r.pillar === "structural_completeness" && !clean(r.field)
+    && !(r.resolution && r.resolution.mode && r.resolution.mode !== "none"));
+  if (own) return pointsFor(own);
+  // No scorer row (a Tier 1 / Tier 2 gap took it): the fill slice's own bound.
+  const w = packageSqs?.weights_used || {};
+  const pillars = packageSqs?.pillars || {};
+  let total = 0;
+  for (const [k, v] of Object.entries(pillars)) {
+    const sc = v && typeof v === "object" ? num(v.score) : num(v);
+    if (sc !== null && num(w[k]) !== null) total += w[k];
+  }
+  const fw = num(packageSqs?.category_breakdown?.structural_completeness?.fill?.weight);
+  const sw = num(w.structural_completeness);
+  if (!total || fw === null || sw === null) return null;
+  return pointsFor({ points_available: ((100 - fill) * fw * sw) / total });
+}
+
+export function fillRateItem(packageSqs, attention) {
+  const fill = num(packageSqs?.category_breakdown?.structural_completeness?.fill?.score);
+  if (fill === null || fill >= 100) return null;
+  const forms = verifyCounts(attention);
+  if (!forms.length) return null;
+  const points = fillPoints(packageSqs, fill);
+  if (!points) return null;
+  const n = forms.length;
+  return {
+    id: "score:fill", kind: "score", pillar: "structural_completeness",
+    title: pillarLabel("structural_completeness"),
+    detail: `Confirm the Please verify values on ${n} form${n === 1 ? "" : "s"} (Form Fill Rate ${Math.round(fill)}%). Each form's side panel has "Confirm all".`,
+    points,
+    closesWith: null,
+    resolution: { mode: "forms", form_id: forms[0].form_id, forms: forms.map((f) => f.form_id) },
+    keys: ["forms:verify"], alsoOnForms: [],
+  };
+}
+
+// The Overview's "last points are on your forms" notice (owner, 14 Oct 2026): after
+// forms, the review page can be finished - nothing open on it, no cap, no "Raise
+// your score" row it can fix itself - while the score is under 100 because AI
+// values on the forms wait to be confirmed. Null whenever the review page itself
+// can still raise the score, or the forms cannot (no Please verify values).
+// `openOnPage`: what the page still lists (documents, values to confirm, hard
+// stops, warnings, key details).
+export function scoreLeftOnForms({ packageSqs, model, openOnPage = 0 } = {}) {
+  const score = num(packageSqs?.package_sqs_score);
+  if (score === null || score >= 100 || Number(openOnPage) > 0) return null;
+  if (packageSqs?.cap_applied || packageSqs?.cap_reason) return null;
+  const items = Array.isArray(model?.score) ? model.score : [];
+  if (items.some((s) => s?.resolution?.mode !== "forms")) return null;
+  const row = items.find((s) => s?.resolution?.mode === "forms");
+  if (!row) return null;
+  const forms = Array.isArray(row.resolution.forms) ? row.resolution.forms : [];
+  // "To reach 100" only when everything but the forms is already full marks.
+  const reaches100 = (num(packageSqs?.without_forms?.score) ?? 0) >= 100;
+  return { score, points: row.points || null, formId: row.resolution.form_id || null, formCount: forms.length, reaches100, item: row };
+}
+
 export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist, formOffers } = {}) {
   const covered = onScreenFixKeys(groupedIssues, keyDetails);
   const score = scoreItems(packageSqs, covered);
+  const fillRow = formsExist ? fillRateItem(packageSqs, attention) : null;
+  if (fillRow) score.push(fillRow);
   // BEFORE FORMS THIS SECTION IS THE SCORE ONLY (owner, 14 Oct 2026: "we are
   // trying to make SQS independent of forms ... this section does not increase
   // score so why show it before even generating the forms"). What a form will

@@ -575,6 +575,13 @@
 .rr-note strong { font-weight: 700; }
 .rr-note--amber { background: #fffbeb; border-color: #fde68a; color: #78350f; }
 .rr-note--blue { background: #f0f9ff; border-color: #bae6fd; color: #0c4a6e; }
+/* The Overview's "last points are on your forms" notice (14 Oct 2026): neutral, not a warning. */
+.rr-forms-left { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #334155; font-size: 12px; line-height: 1.5; }
+.rr-forms-left__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rr-forms-left__text strong { color: #0f172a; font-weight: 700; }
+.rr-forms-left__btn { flex: none; padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #0f172a; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rr-forms-left__btn:hover { background: #f1f5f9; }
+@media (max-width: 640px) { .rr-forms-left { flex-direction: column; align-items: stretch; } }
 .rr-linked { margin-top: 6px; font-size: 11.5px; font-style: italic; color: #0369a1; }
 .rr-conf__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .rr-conf__input {

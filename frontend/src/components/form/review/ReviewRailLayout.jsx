@@ -4,7 +4,7 @@ import { formLabel } from "../../../utils/formInstances";
 import KeyDetailsMissing from "./KeyDetailsMissing";
 import Recommendations from "./Recommendations";
 import useAttentionList from "./useAttentionList";
-import { buildRecommendations, recommendationsText, considerText } from "../../../utils/recommendations";
+import { buildRecommendations, recommendationsText, considerText, scoreLeftOnForms, pointsText } from "../../../utils/recommendations";
 import PoliciesTable from "./PoliciesTable";
 import {
   GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED, documentsLockedReason, confirmLockedReason, continueLabel, scoreHeading,
@@ -19,6 +19,7 @@ import {
 import { becomesHardCount } from "../../../utils/generationStops";
 import { positiveScoreWording } from "../../../utils/positiveWording";
 import { formsEffect } from "../../../utils/scoreWithForms";
+import { documentTypeTag, documentInsuredTag, INSURED_TAG_STYLE } from "../../../utils/addDocuments";
 import "./ReviewRailLayout.css";
 
 // The "rail" layout of the pre-form Review step - the default layout
@@ -467,6 +468,12 @@ export default function ReviewRailLayout(props) {
     tickedFormIds: dryRunFormIds || [], formOffers,
   });
   const recChecking = !formsExist && genState !== GEN_RUNNING && dryRun?.status === "pending";
+  // After forms with this page finished and the score under 100 only because of
+  // unconfirmed AI values on the forms: say where the last points are.
+  const formsLeft = formsExist
+    ? scoreLeftOnForms({ packageSqs, model: recModel,
+      openOnPage: docsOpen + conflictsOpen + hardOpen + warnOpen + (keyDetails?.missing || []).length })
+    : null;
 
   const integrityStatus = integrity?.status;
   const integrityContent = renderIntegrityStatus();
@@ -673,6 +680,24 @@ export default function ReviewRailLayout(props) {
         {genState === GEN_INTERRUPTED && (
           <div className="rr-note rr-note--amber rr-gen-note"><strong>{GENERATION_DIDNT_FINISH}.</strong> {GENERATION_DIDNT_FINISH_NEXT}</div>
         )}
+        {formsLeft && (
+          <div className="rr-forms-left" role="status" data-testid="overview-forms-left">
+            <div className="rr-forms-left__text">
+              <strong>Everything on this review is done. Your last points are on the forms.</strong>
+              <span>
+                Your score is {formsLeft.score}. {formsLeft.reaches100 ? "To reach 100" : "To raise it"}, confirm the values the AI filled on your forms
+                {formsLeft.formCount > 1 ? ` (${formsLeft.formCount} forms have some)` : ""}: open a form and, in its side
+                panel under Please verify, check each value and click Confirm, or Confirm all.
+                {formsLeft.points ? ` That adds ${pointsText(formsLeft.points)}.` : ""}
+              </span>
+            </div>
+            {typeof onFixScoreItem === "function" && (
+              <button type="button" className="rr-forms-left__btn" onClick={() => onFixScoreItem(formsLeft.item)}>
+                Open {formsLeft.formId ? formLabel(formsLeft.formId) : "forms"}
+              </button>
+            )}
+          </div>
+        )}
         <div className="rr-overview-grid">
           <Panel title="Submission Readiness" right={<span className="rr-panel__meta rr-panel__meta--inline">Updates as you fix items</span>}>
             <div className="rr-ready">
@@ -806,7 +831,7 @@ export default function ReviewRailLayout(props) {
         {docLockText
           ? <div className="rr-note rr-note--blue rr-gen-note">{docLockText}</div>
           : formsExist && <div className="rr-note rr-note--blue rr-gen-note">{DOCUMENTS_AFTER_FORMS_NOTE}</div>}
-        <Panel title={`Documents Processed (${docSummary.length})`} meta="Type, match strength and how each file is used" bodyClassName="rr-rows">
+        <Panel title={`Documents Processed (${docSummary.length})`} meta="Type, insured and how each file is used" bodyClassName="rr-rows">
           {docSummary.length === 0 && (
             <div className="rr-doc-empty">No document details are available for this submission.</div>
           )}
@@ -821,8 +846,11 @@ export default function ReviewRailLayout(props) {
             const busy = reclassDocId && reclassDocId === d.doc_id;
             const anyReclassBusy = reclassDocId !== null;
             const reviewBusy = reviewLoadingId === d.doc_id;
-            const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
-            const confLabel = conf === "high" ? "Strong match" : conf === "medium" ? "Likely match" : "Needs review";
+            // Two tags, two questions (14 Oct 2026, utils/addDocuments): how sure
+            // we are of the TYPE, and - only for another insured's document -
+            // whose it is (decided by the server, `insured_status`).
+            const typeTag = documentTypeTag(d);
+            const insuredTag = documentInsuredTag(d);
             return (
               <div key={d.doc_id || i} className={`rr-doc${needsReview ? " is-review" : ""}${excluded ? " is-excluded" : ""}`}>
                 <span className="rr-doc__icon"><FileIcon /></span>
@@ -830,9 +858,8 @@ export default function ReviewRailLayout(props) {
                   <div className="rr-doc__name" title={d.filename}>{d.filename}</div>
                   <div className="rr-doc__meta">
                     <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
-                    {d.doc_type_overridden
-                      ? <span title="You set this type" className="rr-doc__conf" style={{ color: "#2563eb", fontWeight: 600 }}>you set this</span>
-                      : conf && <span title={`How confident Primble is about this document's type: ${confLabel}`} className="rr-doc__conf" style={{ color: confColor }}>{confLabel}</span>}
+                    {typeTag && <span title={typeTag.title} className="rr-doc__conf" style={{ color: typeTag.color }} data-testid="doc-type-tag">{typeTag.label}</span>}
+                    {insuredTag && <span title={insuredTag.title} style={INSURED_TAG_STYLE} data-testid="doc-insured-tag">{insuredTag.label}</span>}
                     {excluded && <span className="rr-doc__note">excluded from scoring</span>}
                     {supportingOnly && !excluded && <span className="rr-doc__note" title="Facts contribute, but this document is never treated as the primary source">supporting only</span>}
                   </div>

@@ -367,30 +367,66 @@ def _grouped_with_package_caps(
     )
 
 
-def _doc_summary_entry(d: dict, primary_filename: str = "") -> dict:
+def _doc_summary_entry(d: dict, primary_filename: str = "", insured_status: Optional[dict] = None) -> dict:
     """Build a uniform per-document summary for the frontend (Beta Report §4.2).
 
     Carries the canonical doc_type plus the classification metadata the UI needs
     to show confidence, the reason it was classified, and the manual-correction
     affordance (doc_id + whether the type was user-overridden).
+
+    14 Oct 2026 (`services/document_tags.py`): the label names a printed ACORD
+    form ("Commercial Insurance Application (ACORD 125)"), and
+    `insured_status` says whose document it is (see `_doc_summaries`).
     """
+    from services.document_tags import document_type_label
     dt  = d.get("doc_type") or "unknown"
     cls = d.get("classification") or {}
     return {
         "doc_id":                d.get("doc_id"),
         "filename":              d.get("filename", ""),
         "doc_type":              dt,
-        "doc_type_label":        DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title()),
+        "doc_type_label":        document_type_label(d),
         "doc_type_confidence":   d.get("doc_type_confidence") or cls.get("confidence"),
         "doc_type_source":       d.get("doc_type_source") or cls.get("source"),
         "doc_type_overridden":   bool(d.get("doc_type_overridden")),
         "excluded":              bool(d.get("excluded")),
         "supporting_only":       bool(d.get("supporting_only")),
+        "evidence_only":         bool(d.get("evidence_only") and d.get("excluded")),
         "narrative_categories":  cls.get("narrative_categories", []),
         "is_primary":            bool(primary_filename) and d.get("filename") == primary_filename,
         "low_confidence_tokens": d.get("low_confidence_tokens", []),
         "truncation_warning":    d.get("truncation_warning"),
+        "insured_status":        insured_status,
     }
+
+
+def _doc_summaries(docs, primary_filename: str = "", integrity: Optional[dict] = None,
+                   confirmations: Optional[dict] = None, consistency: Optional[dict] = None) -> list:
+    """Every document's summary, each with its `insured_status` - whose
+    document it is, judged once for the package from its Submission Integrity
+    record (`document_tags.document_insured_statuses`): "different" (with the
+    insured's name and whether the producer kept it), "same", or "none" (it
+    prints no insured). Both review layouts read it; neither compares names."""
+    try:
+        from services.document_tags import document_insured_statuses
+        statuses = document_insured_statuses(integrity, confirmations, consistency)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"document summaries: insured status unavailable: {ex}")
+        statuses = {}
+    return [_doc_summary_entry(d, primary_filename, statuses.get(str(d.get("doc_id"))) or _evidence_status(d))
+            for d in (docs or []) if isinstance(d, dict)]
+
+
+def _evidence_status(d: dict) -> Optional[dict]:
+    """A document kept as EVIDENCE ONLY is excluded, so the integrity record
+    (active documents only) never judges it; its tag comes from the insured it
+    printed when it was added (`session_documents_routes._keep_as_evidence`).
+    Included again, it is judged like any other document."""
+    if not (d.get("evidence_only") and d.get("excluded")):
+        return None
+    name = str(d.get("evidence_insured") or "").strip()
+    return {"state": "different" if name else "none", "name": name or None,
+            "kept_by_you": False, "evidence_only": True}
 
 # Drop the declarations index from the session once forms have been generated.
 # ON by default because the owner's product rule makes it dead weight: a package
@@ -678,7 +714,7 @@ async def upload_declaration(
 
         return JSONResponse({
             "success": True, "session_id": sid,
-            "doc_summary": [_doc_summary_entry(d, primary["filename"]) for d in processed_docs],
+            "doc_summary": _doc_summaries(processed_docs, primary["filename"], integrity),
             "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
             "primary_doc": primary["filename"], "flags": mflags,
             # Submission Integrity (§4.1): withhold the lightweight readiness number
@@ -949,10 +985,10 @@ async def submission_integrity_resolve(
         "package_sqs": _pkg_now,
         "key_details": _key_now,
         "dry_run": _status_now.dry_run,
-        "doc_summary": [
-            _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
-            for d in (result.get("processed_docs") or [])
-        ],
+        "doc_summary": _doc_summaries(
+            result.get("processed_docs") or [], (result.get("primary") or {}).get("filename", ""),
+            integrity, session.get("underwriting_confirmations"),
+            result.get("underwriting_consistency")),
         "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
         "underwriting_consistency": result.get("underwriting_consistency") or {},
         # Populated only for the 'create_separate_submissions' action: the list of
@@ -1092,10 +1128,10 @@ async def document_reclassify(
         "success": True,
         "session_id": result["session_id"],
         "action": req.action,
-        "doc_summary": [
-            _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
-            for d in (result.get("processed_docs") or [])
-        ],
+        "doc_summary": _doc_summaries(
+            result.get("processed_docs") or [], (result.get("primary") or {}).get("filename", ""),
+            integrity, session.get("underwriting_confirmations"),
+            result.get("underwriting_consistency")),
         "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
         "recommendations": result.get("recommendations") or [],
         "account_profile": result.get("account_profile") or {},
@@ -2995,7 +3031,9 @@ async def get_extraction_result(
     docs        = proc_session.get("docs", [])
     primary_doc = proc_session.get("primary_doc", "")
 
-    doc_summary = [_doc_summary_entry(d, primary_doc) for d in docs]
+    doc_summary = _doc_summaries(docs, primary_doc, proc_session.get("integrity"),
+                                 proc_session.get("underwriting_confirmations"),
+                                 proc_session.get("underwriting_consistency"))
 
     hard_stops = proc_session.get("hard_stops", [])
     mflags     = proc_session.get("flags", {})
@@ -3095,12 +3133,13 @@ async def get_document_extracted_data(
     fields = _document_fact_rows(doc.get("facts") or {})
 
     dt = doc.get("doc_type") or "unknown"
+    from services.document_tags import document_type_label
     return JSONResponse({
         "success":               True,
         "doc_id":                str(doc.get("doc_id")),
         "filename":              doc.get("filename", ""),
         "doc_type":              dt,
-        "doc_type_label":        DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title()),
+        "doc_type_label":        document_type_label(doc),
         "fields":                fields,
         "field_count":           len(fields),
         "narrative_categories":  (doc.get("classification") or {}).get("narrative_categories", []),

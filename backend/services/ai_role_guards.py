@@ -22,6 +22,9 @@ records (`_guard_reasons`), the reason is logged with it.
 (The fifth class of the round - a BINDER date on a package with no binder - is
 an owned blank, not a guard: see `binder_box_owned_blank`, which
 `pdf_service._resolve_policy_status` consults, so the model is never asked.)
+
+Fix C (14 Oct 2026) adds (e2): the applicant's general contact copied into an
+accounting / claims / inspection contact no document names.
 """
 from __future__ import annotations
 
@@ -702,6 +705,79 @@ def _producer_role_copy(mapped: dict, schema: dict, facts: dict, raw_text: str,
     return out
 
 
+# ══ (e2) THE APPLICANT'S CONTACT IN A ROLE NOBODY STATED (14 Oct 2026) ════════
+# The same rule for the applicant's side of the form. ACORD 130 asks for an
+# ACCOUNTING, a CLAIMS and an INSPECTION contact - "an individual under the
+# insured's employment" for each role - and the live Choice Electric runs
+# printed the one contact the producer typed ("Dana Whitfield", her phone)
+# in all three; 13 stored packages did the same with a document's general
+# "Contact:" line. A role box (its name qualifies the contact: Accounting /
+# Claim / Inspection ...) may hold the general contact's name, phone or
+# e-mail only when a document prints that value on a line that names the
+# role, or under a heading naming it a line or two above ("Accounting Contact
+# Name: Priya Raman" stays). A different person the AI found is not this
+# rule's question. Measured over the stored corpus: 122 boxes on 17 packages,
+# none with a role word within three lines of the value.
+_GENERAL_CONTACT_FACTS: Tuple[str, ...] = ("contact_name", "contact_phone", "contact_email")
+_ROLE_HEADING_LINES = 2          # "ACCOUNTING CONTACT" above "Name: ..." / "Phone: ..."
+
+
+def _labelled_in_block(value: Any, role: Set[str], raw_text: str) -> bool:
+    """`_labelled_in_text` with the role allowed on a heading line just above
+    the value (a block laid out "ACCOUNTING CONTACT / Name: X / Phone: Y")."""
+    if not raw_text or not role:
+        return False
+    vk = _contact_key(value)
+    lines = str(raw_text).splitlines()
+    for i, line in enumerate(lines):
+        if vk.startswith("tel:"):
+            if vk[4:] not in re.sub(r"\D", "", line):
+                continue
+        elif vk not in _key(line):
+            continue
+        block = lines[max(0, i - _ROLE_HEADING_LINES):i + 1]
+        if any(set(_words(b)) & role for b in block):
+            return True
+    return False
+
+
+_ROLE_CONTACT_BOX_RE = re.compile(r"^(?P<who>[A-Za-z]+)_(?P<role>[A-Z][a-z]+)Contact_\w+_[A-N]$")
+R_CONTACT_ROLE = "CONTACT_ROLE_NOT_STATED"
+
+
+def _applicant_contact_role_copy(mapped: dict, facts: dict, raw_text: str,
+                                 ai: Iterable[str]) -> Dict[str, str]:
+    """(e2) See the block comment above."""
+    out: Dict[str, str] = {}
+    general: Dict[str, str] = {}
+    for fk in _GENERAL_CONTACT_FACTS:
+        v = _fv(facts, fk)
+        if v is None or isinstance(v, (list, dict)) or not str(v).strip():
+            continue
+        k = _contact_key(v)
+        if k and len(k.replace("tel:", "")) >= 3:
+            general.setdefault(k, fk)
+    if not general:
+        return out
+    for field in sorted(ai):
+        m = _ROLE_CONTACT_BOX_RE.match(field or "")
+        if not m or m.group("who").startswith("Producer"):
+            continue
+        val = mapped.get(field)
+        if val is None or not str(val).strip():
+            continue
+        holder = general.get(_contact_key(val))
+        if not holder:
+            continue
+        role = {m.group("role").lower()}
+        role |= {f"{w}s" for w in role}
+        if _labelled_in_block(val, role, raw_text):
+            continue
+        out[field] = (f"{R_CONTACT_ROLE}: the general {holder.replace('_', ' ')}, never stated as "
+                      f"the {m.group('role').lower()} contact")
+    return out
+
+
 # ══ (d) BINDER BOXES ══════════════════════════════════════════════════════════
 # ACORD 130 prints "BOUND (Give Date and/or Attach Copy)": the date the binder
 # took effect. On a package with no binder it is a decision the producer makes
@@ -740,7 +816,7 @@ def binder_box_owned_blank(field_name: str, facts: Any) -> bool:
 
 def drop_role_mismatches(mapped: dict, schema: dict, facts: dict, raw_text: str,
                          gpt_filled_set: Optional[set], form_id: str = "") -> Dict[str, str]:
-    """Blank every AI value the four rules above refuse. Returns
+    """Blank every AI value the rules above refuse. Returns
     {field: "CODE: reason"}. Never raises on bad input; a rule that fails is
     skipped and logged."""
     out: Dict[str, str] = {}
@@ -764,6 +840,7 @@ def drop_role_mismatches(mapped: dict, schema: dict, facts: dict, raw_text: str,
                                                       ai, form_id or str(facts.get("_form_id") or ""),
                                                       cache)),
         ("producer_role", lambda: _producer_role_copy(mapped, schema, facts, raw_text or "", ai)),
+        ("contact_role", lambda: _applicant_contact_role_copy(mapped, facts, raw_text or "", ai)),
     )
     for name, rule in rules:
         try:

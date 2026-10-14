@@ -1380,7 +1380,13 @@ def document_suggestion_rows(generated_forms: Optional[dict], suggestions: Itera
             "label": _trim(box_label(schema, field), _LABEL_MAX + 10),
             "status": STATUS_DOCUMENT_SAYS,
             "tag": _DOCUMENT_SAYS_TAG,
-            "reason": f'New document says "{suggested}" - the form says "{current}".',
+            # A blank box reads as blank, not as an empty quote; a document that
+            # names another insured says so (14 Oct 2026, `f83757cf`).
+            "reason": (f'New document says "{suggested}" - '
+                       + (f'the form says "{current}".' if str(current or "").strip() else "this box is empty.")
+                       + (f' This document names a different insured ({str(s.get("other_insured")).strip()}).'
+                          if str(s.get("other_insured") or "").strip() else "")),
+            "other_insured": str(s.get("other_insured") or "").strip() or None,
             "what_to_do": _DOCUMENT_SAYS_WHAT,
             "current": s.get("current"),
             "suggested": s.get("suggested"),

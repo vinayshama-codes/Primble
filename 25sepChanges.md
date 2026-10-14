@@ -1039,9 +1039,118 @@ Tests: `tests/test_per_form_exposure_readers_14oct.py` (new); `test_verify_rows_
 
 | | Closed (verified live) | Our part done, waits on Brent / Michelle | Ours open |
 |---|---|---|---|
-| Choice Electric (27) | **17**: 1, 2, 3, 5, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 24 | **9**: 4, 6, 7, 15, 18, 20, 22, 26, 27 | **1**: 25 (works; the "No new issues" notice is wrong) |
-| Orbin (22) | **15**: 1, 2, 3, 4, 6, 7, 9, 10, 11, 13, 16, 18, 19, G1, Q | **5**: 5, 12 (tell Michelle), 8 (Umbrella / IM premiums), 14 (signature acceptance), 15 (score effect) | **2**: 17 (owner's retype check), G2 (client path live) |
-| **Total** | **32** | **14** | **3** |
+| Choice Electric (27) | **17**: 1, 2, 3, 5, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 24 | **9**: 4, 6, 7, 15, 18, 20, 22, 26, 27 | **1**: 25 - message fixed and replayed in Z18; needs the owner's live look |
+| Orbin (22) | **17**: 1, 2, 3, 4, 6, 7, 9, 10, 11, 13, 16, 17, 18, 19, G1, G2, Q (17 and G2 verified live by the owner, 14 Oct) | **5**: 5, 12 (tell Michelle), 8 (Umbrella / IM premiums), 14 (signature acceptance), 15 (score effect) | **0** |
+| **Total** | **34** | **14** | **1** (CE 25 - fixed, live look owed) |
+
+### Z17. 99 after forms with nothing on the review page to reach 100 (14 Oct 2026, `f83757cf`)
+
+**Owner:** "package score is 99/100 now and I can't see any warning or anything on the pre form screen to make it
+100, why?" **Cause:** the last point is the Form Fill Rate slice (93%, weight 0.25 of Structural) - 57 boxes on 8 forms
+hold AI values nobody confirmed (`ai_verified` 0.85 / `low_confidence` 0.50 against a confirmed 1.00): ACORD 28 22,
+137 CO 7, 125 6, 127 6, 140 6, 131 5, 126 4, 131 Excess 1. Without forms the package is 100. The scorer did say it
+("Confirm the Please verify values on each form (Form Fill Rate 93%)", `points_available` 0.6) but its row has no fix
+window (`answer_mode` none), and the Recommendations section lists only rows it can open - so the page showed
+nothing. **Measured on the stored row (read-only):** after "Confirm all" every form reaches 100% - no box sits on a
+label Confirm cannot move.
+**Built (frontend only, no score moves):** `recommendations.fillRateItem` - after forms, "Raise your score" lists
+"Confirm the Please verify values on N forms (Form Fill Rate X%). Each form's side panel has "Confirm all"." with the
+scorer row's own points ("up to +1 pts"; with no scorer row, the fill slice's bound), listed only while the
+needs-attention list holds Please verify rows (a fill rate held by anything else is not a promise the row can keep).
+"Open to fix" opens the form with the most of them (`AcordModal.openScoreFix`, mode `forms` -> `openFormAtBox`), never
+a fix window, so no resolve-issue receipt is written. **Risk to say out loud:** Confirm all vouches for every value
+(label `producer`) - the parked W-class AI values are exactly these boxes; read before confirming.
+Tests: `tests/test_fill_rate_row_14oct.py` (6, the live package's numbers). The 55 test files that read the two
+changed frontend files: 2,954 passed, 0 failed.
+
+**Z17 addendum - the Overview says where the last points are (owner, same day).** After forms, when the review page
+is finished (no document, value, hard stop, warning or key detail open; no cap; no "Raise your score" row but the forms
+one) and the score is under 100 only because of Please verify values, the Overview shows a neutral note:
+"Everything on this review is done. Your last points are on the forms." + how to confirm + "Open ACORD 28"
+(`recommendations.scoreLeftOnForms`, `ReviewRailLayout` `overview-forms-left`, `.rr-forms-left`). It promises "To reach
+100" only when the score without forms is 100 (else "To raise it"). Tests: `test_fill_rate_row_14oct.py` (10). The
+test files that read the changed frontend files: 2,958 passed, 0 failed.
+**Integrity on an added document (owner's question, answered from the code):** every document-set change re-runs
+Submission Integrity (`session_documents.integrity_plan`); after forms a different insured is REFUSED (409, nothing
+stored) with the amber "These documents name a different insured ... Nothing was added" box and "They belong to this
+insured - add them" / Cancel (seen live 8 Oct, Harborline on `b4d18e8e`); confirming records an override and
+`insured_scope` still keeps the other company's applicant facts out. **Blind spot to tell Brent:** a document with the
+insured's name blacked out (all 7 Choice Electric decs) cannot be judged - no box.
+
+### Z18. Two documents added to `f83757cf` (14 Oct 2026, afternoon) - what they exposed
+
+**Orbin 17 and G2 verified live by the owner** (retyping a client's box drops the green "Client"; Send to Client ->
+"Tenant" -> the landlord question follows, per location). Board: 34 closed, 14 wait on Brent / Michelle, 1 ours.
+
+**1. A filled ACORD 125 was typed "Commercial Insurance Application" - and its values were never read.** The type is
+right (the ACORD 125's printed title IS "COMMERCIAL INSURANCE APPLICATION"; rules key on `application`), the label
+did not say it was an ACORD form. The real defect: `ACORD_125_FILLED 2.pdf` is a fillable PDF whose 234 typed values
+live in form-field values (`/V`, NeedAppearances), which pdfplumber's text never contains. Its stored text is the
+blank template only, so extraction found no applicant and read the template's printed menus as facts (every line of
+business, "cyber MFA: False"), and **Submission Integrity listed it as "(no applicant name detected)" - the form is
+Harborline Plumbing & Mechanical's, a different insured, and it went in with no warning.**
+
+**2. "Strong match" beside another insured's dec.** The tag is the document TYPE confidence ("this is a dec page"),
+never the insured. Integrity DID catch `control_dec.pdf` (MERIDIAN FABRICATION INC) and asked; after "They belong to
+this insured - add them" the package took an applicant-name hard stop (99 -> 60), seven new warnings (entity type,
+dates, umbrella / GL anniversary from Meridian's GL term, building / BPP / construction conflicts) and **the
+new-document AI fill wrote 8 boxes from Meridian's dec into ACORD 28 / 127 / 131.**
+
+**3. CE 25 "No new issues".** The message compares COUNTS (after minus before): one new warning plus one that went
+away nets to zero. On this add the counts rose (before 0 / 0 / 0), so this run would not have shown it.
+
+**Built and reviewed (14 Oct, offline):**
+- **A - a fillable PDF's typed values reach extraction** (`utils/form_field_text.py`, `ocr_service`): each page's filled
+  form fields follow its text under "[Filled form fields - page N]", one "label: value" per line (labels from the field
+  name - tooltip labels made the 125s read as a dec page; Y/N boxes carry their question; ticks read "ticked"), exactly
+  once whichever way the page was read (text layer, reflow, Vision, mixed). 66 of 69 local PDFs read byte for byte as
+  before (all 17 blank templates); the owner's three filled 125s gain 233 / 63 / 309 values and still classify as an
+  application. Fails open to the old text; bounded decoding (a crafted value no longer reaches ~420 MB). `OCR_FORM_FIELDS=0`
+  turns it off. improving-ll.md C107 (+1k-5k input tokens on such files only). Tests: `test_filled_form_fields_14oct.py` (42).
+- **B - the documents side** (`services/document_tags.py`, `form_routes`, `session_documents(_routes)`, frontend): the type
+  tag reads "Type: sure / likely / unsure / set by you"; a separate amber "Different insured: <NAME>" tag (decided on the
+  server, names compared only by `same_entity_name`); the label names a printed ACORD form ("Commercial Insurance
+  Application (ACORD 125)", the recommender's own stamp reader); the add message compares the review page BY ISSUE ID and
+  carries the score - replayed, the Business Auto add (CE 25) now says "New on the review page: 1 warning. Your score went
+  from 99 to 85." instead of "No new issues" (one warning left, one arrived); the new-document AI fill writes nothing from
+  a document naming another insured (control_dec.pdf: 8 boxes -> 0; its values become "New document says" choices).
+  Tests: `test_add_document_insured_14oct.py` (72).
+- **Owner's choice: two answers to "these documents name a different insured" after forms** - "Add as evidence only"
+  (stored, listed, EXCLUDED: the merge, the forms, the score and Submission Integrity read only active documents; no AI
+  fill; tag "Different insured: X - evidence only"; "Include" asks again) or "It is this insured - use its values" (full
+  merge, as before). Without it, keeping control_dec.pdf re-stamped 112 boxes, 57 of them Meridian-only (Great Plains
+  Casualty over Amerisure on five forms, its policy numbers, its bank, its VIN). Tests: `test_add_as_evidence_14oct.py` (6).
+- **One stop drawn once** (`issue_registry._drop_numbered_echoes`): a stop sentence stored twice (its coded row plus a
+  NUMBERED `legacy_hard_0` copy) printed up to three times and defeated the picker's supersession - f83757cf showed 4 hard
+  stops for 2 problems; now 2 hard / 4 warnings (the four Data Consistency rows live in their section). Display only.
+  Tests: `test_numbered_echo_rows_14oct.py` (4).
+- Side panel: a blank-box suggestion reads "this box is empty", and names the other insured.
+**Deploy 1 (owner, 14 Oct):** B + the above + Z17, proven on a clean HEAD copy with only those files (1,218 passed; the two
+failures there were the copy's missing `node_modules`, green in the real tree).
+**Open (A's questions):** Submission Integrity could also read `NamedInsured_FullName_A` straight from a filled ACORD form
+(no LLM) as a second witness - recommended, not built; typed PII in fillable PDFs now reaches the extraction model like
+printed text (security note); a fully filled ACORD 28 classifies as an SOV; XFA-only forms are not read.
+**C - the parked class "an AI value whose only evidence is the wrong source" (owner: "fix them all, once and for all").**
+14 generic rules, each on AI values only and each with a structural second condition (`ai_answer_guards`, `ai_role_guards`
+(e2), `pdf_service` OTHER-row sweep + meaning gate): a person's identity answer copied to another question (W16 + its
+Yes); the box's own tooltip example nothing states (W3 "Accounting"); a subcontracted / foreign-sales / retro-plan box
+without its qualifier beside the value (W6, retro "Annual"); a middle initial made from the row's own name (W8); another
+party's address on a driver row (W9); a rating factor as an identifier; a row reference as a description (X7); a form's
+unfilled label ("... is part of Policy No."); an auto symbol nothing states (137 other symbols 1-7); a coverage-table row
+as an explanation (W10); a 130 worksheet OTHER row naming its own row (X2); the general contact in an accounting /
+claims / inspection box no document names; an AI deductible in an OTHER row with nothing named (the parked $5,000); the
+meaning gate now reads enveloped payroll / sales / cost facts (W4, the WC payroll as "paid to subcontractors"). Already
+fixed earlier and confirmed by replay: W5, W7, W11, W12 and the run-7 list's years / alarm / fire protection / claims-made
+/ 100% / NCCI / WC state items. **Measured on a SAMPLE of 12 packages (owner's call, not the whole corpus):** f83757cf,
+b117f010, ba7c709d, 18f6914f, 805049a7 (redacted), bfa8711d (Orbin), 4c734a06 (FR125), a573c70f (WC-heavy), 09cdcfeb
+(property), 250c767a (auto fleet), 97a5651e (umbrella), e3e5ab5d (another client) - 86 boxes change in 8 packages, all junk
+refused, 0 correct lost, 0 score moves; Orbin / FR125 / property / umbrella unchanged. Tests:
+`test_fix_c_borrowed_values_14oct.py` (74); 1,645 passed over 28 files. **Still open (owner / Brent):** W1 / W2 / the AZ
+mailing state (extraction-side producer routing - a carrier's details read as the insured's), W13, W15 (130 rating dates on
+a renewal), the products row = business description, b117f010's garaging fragments, "Item 3A State", X1 and the
+per-project aggregate tick (need a live run - their quotes are not stored), X3-X6. Confirm: the 130 accounting / claims /
+inspection contacts stay blank unless a document names the role (17 stored packages lose a copied general contact).
+**Full suite on the final Z18 code: 14,361 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.**
 
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below

@@ -106,9 +106,9 @@ def _integrity_refusal(ex: IntegrityReviewRequired, change: str = "added") -> HT
     names = [str(e) for e in (ex.verdict.get("detected_entities") or []) if str(e or "").strip()]
     who = f" ({', '.join(names)})" if names else ""
     if change == "added":
-        message = ("These documents name a different insured" + who + ". Nothing was added. "
-                   "Add them only if they belong to this insured - otherwise start a "
-                   "separate package for them.")
+        # Two answers since 14 Oct 2026 (owner): keep them as evidence only, or
+        # use their values because they ARE this insured (the panel's buttons).
+        message = ("These documents name a different insured" + who + ". Nothing was added yet.")
     else:
         message = ("This document names a different insured" + who + ". Nothing was changed. "
                    "Include it only if it belongs to this insured.")
@@ -207,21 +207,27 @@ async def add_session_documents(
     as_supporting: bool = Form(False),
     doc_type: Optional[str] = Form(None),
     confirm_same_insured: bool = Form(False),
+    as_evidence: bool = Form(False),
     current_user: dict = Depends(get_current_user),
 ):
     from utils.rate_limiter import check_upload_rate_limit
+    # Only a real True: called as a plain function, the unset default is the
+    # Form() marker itself, which is truthy.
+    as_evidence = as_evidence is True
     await check_upload_rate_limit(current_user["id"])
     session = await _owned_session(session_id, current_user)
     check_payment_access(current_user.get("payment_status", "ok"), "upload")
     await _refuse_while_generating(session)
     _refuse_while_filling(session)
-    # After forms: the review page's open items BEFORE this add, so the answer
-    # (and the AI reading's status, later) can say what is NEW on it.
+    # After forms: the review page's open items BEFORE this add - by identity,
+    # with the package score - so the answer (and the AI reading's status,
+    # later) can say what is NEW on it.
     counts_before = None
     if session.get("generated_forms"):
-        from services.session_documents import review_counts
+        from services.session_documents import review_snapshot
         try:
-            counts_before = review_counts(await _package_page(session_id, current_user))
+            counts_before = review_snapshot(await _package_page(session_id, current_user),
+                                            await _dismissed_issue_ids(session_id))
         except Exception as ex:                                # noqa: BLE001
             logger.warning(f"add documents: review counts before unavailable: {ex}")
 
@@ -280,6 +286,8 @@ async def add_session_documents(
             known.add(document_text_key(doc.get("text")))
             if as_supporting:
                 doc["supporting_only"] = True
+            if as_evidence:
+                _keep_as_evidence(doc)
             new_docs.append(doc)
         if not new_docs and duplicates:
             raise HTTPException(409, "These documents are already in this package.")
@@ -334,6 +342,7 @@ async def add_session_documents(
             "added_to_package": True,
             "after_forms": bool(door.get("forms_exist")),
             "as_supporting": bool(as_supporting),
+            "as_evidence": bool(as_evidence),
             "stated_doc_type": stated_type or None,
         })
         await log_integrity_assessed(session_id, uid, door.get("integrity_verdict") or {})
@@ -353,19 +362,24 @@ async def add_session_documents(
     page = await _package_page(session_id, current_user)
     page.update({"documents_added": [_doc_summary_entry(d) for d in added],
                  "duplicates_skipped": duplicates,
+                 "evidence_only": [str(d.get("filename") or "") for d in added if d.get("evidence_only")],
                  **_door_fields(door)})
+    # Evidence-only documents are not read into the forms (owner, 14 Oct 2026).
+    fill_docs = [d for d in added if not d.get("excluded")]
     background = None
-    if door.get("forms_exist"):
+    if door.get("forms_exist") and fill_docs:
         # What is NEW on the review page after the documents door, and the AI
         # reading of the new documents (C103) - recorded RUNNING now (the lock
         # starts with the answer), started once the answer has gone out.
         from services.session_documents import (
-            launch_new_document_fill, new_on_review, review_counts, start_new_document_fill,
+            launch_new_document_fill, new_on_review, review_counts, review_snapshot,
+            start_new_document_fill,
         )
         page["review_counts"] = review_counts(page)
-        page["new_on_review"] = new_on_review(counts_before, page["review_counts"])
+        page["new_on_review"] = new_on_review(
+            counts_before, review_snapshot(page, await _dismissed_issue_ids(session_id)))
         try:
-            fill = await start_new_document_fill(session_id, added, uid,
+            fill = await start_new_document_fill(session_id, fill_docs, uid,
                                                  review_counts_before=counts_before)
         except Exception as ex:                                # noqa: BLE001
             logger.error(f"add documents: AI fill not started [session={session_id}]: {ex}",
@@ -377,11 +391,43 @@ async def add_session_documents(
     return JSONResponse(page, background=background)
 
 
+def _keep_as_evidence(doc: dict) -> None:
+    """"Add as evidence only" (owner, 14 Oct 2026 - the choice offered when a
+    document names a different insured after forms): the file is kept with the
+    package and listed, but EXCLUDED - the merge, the forms, the score and
+    Submission Integrity all read only the active documents - and no AI fill
+    reads it. `evidence_insured` keeps the insured it prints, for its tag.
+    "Include" in the Documents list brings it in (and asks again)."""
+    doc["excluded"] = True
+    doc["evidence_only"] = True
+    facts = doc.get("facts") if isinstance(doc.get("facts"), dict) else {}
+    name = facts.get("applicant_name")
+    name = name.get("value") if isinstance(name, dict) else name
+    if isinstance(name, str) and name.strip():
+        doc["evidence_insured"] = name.strip()
+
+
 def _public_fill(status: Optional[dict]) -> Optional[dict]:
-    """The fill status as the screen reads it (the run's ids stay server-side)."""
+    """The fill status as the screen reads it (the run's ids and the review
+    page snapshot it is compared with stay server-side)."""
     if not isinstance(status, dict):
         return None
-    return {k: v for k, v in status.items() if k not in ("run_id", "doc_ids")}
+    return {k: v for k, v in status.items()
+            if k not in ("run_id", "doc_ids", "review_counts_before")}
+
+
+async def _dismissed_issue_ids(session_id: str) -> set:
+    """The issue ids the review page hides - the DISMISSED ones (a resolved
+    item that still fires stays listed: `utils/resolvedIssues.splitClusters`).
+    Empty when the statuses cannot be read."""
+    try:
+        from services.audit_service import get_issue_statuses
+        rows = await get_issue_statuses(session_id) or []
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"add documents: issue statuses unavailable: {ex}")
+        return set()
+    return {str(r.get("issue_id")) for r in rows
+            if isinstance(r, dict) and r.get("issue_id") and r.get("status") == "dismissed"}
 
 
 @router.get("/api/session/{session_id}/documents/ai-fill")
@@ -396,16 +442,20 @@ async def document_fill_status_route(
     session = await _owned_session(session_id, current_user)
     from services.generation_state import document_fill_status
     from services.needs_attention import document_suggestion_rows
-    from services.session_documents import SUGGESTIONS_KEY, new_on_review, review_counts
+    from services.session_documents import (
+        SUGGESTIONS_KEY, new_on_review, review_counts, review_snapshot,
+    )
     status = document_fill_status(session)
     rows = document_suggestion_rows(session.get("generated_forms") or {},
                                     session.get(SUGGESTIONS_KEY) or [], form_id=form_id)
     out = {"success": True, "ai_fill": _public_fill(status), "suggestions": rows}
     if status and status.get("state") != "running" and not form_id:
         try:
-            now = review_counts(await _package_page(session_id, current_user))
-            out["review_counts"] = now
-            out["new_on_review"] = new_on_review(status.get("review_counts_before"), now)
+            page = await _package_page(session_id, current_user)
+            out["review_counts"] = review_counts(page)
+            out["new_on_review"] = new_on_review(
+                status.get("review_counts_before"),
+                review_snapshot(page, await _dismissed_issue_ids(session_id)))
         except Exception as ex:                                # noqa: BLE001
             logger.warning(f"document fill status: review counts unavailable: {ex}")
     return JSONResponse(out)

@@ -62,6 +62,13 @@ export function documentsResultLines(result) {
   if (result.integrity_review_required) {
     lines.push({ kind: "warn", text: "The documents may belong to more than one insured - review them before continuing." });
   }
+  const evidence = (Array.isArray(result.evidence_only) ? result.evidence_only : []).filter(Boolean);
+  if (evidence.length) {
+    lines.push({
+      kind: "info",
+      text: `Kept as evidence only: ${joinNames(evidence)}. Nothing from ${evidence.length === 1 ? "it" : "them"} reaches your forms or your score - use Include in Documents if ${evidence.length === 1 ? "it is" : "they are"} this insured.`,
+    });
+  }
   return lines;
 }
 
@@ -93,6 +100,26 @@ export function fillStatusLines(fill) {
   if (!fill || typeof fill !== "object" || !fill.state || fill.state === "off") return [];
   const docs = joinNames(Array.isArray(fill.documents) ? fill.documents : []) || "your document";
   if (fill.state === "running") return [{ kind: "info", text: `Reading ${docs} into your forms...` }];
+  if (fill.state === "done" && fill.other_insured) {
+    // Another insured's document (backend session_documents.plan_form_fill,
+    // 14 Oct 2026): the AI wrote nothing from it - every value it read waits
+    // for the producer under New document. One line: which document names
+    // whom. ("Nothing was written" would be untrue: the documents door has
+    // already re-stamped the boxes its facts move - the line above says so.)
+    const sugg = Number(fill.suggestions) || 0;
+    const all = (Array.isArray(fill.documents) ? fill.documents : []).filter(Boolean);
+    const named = (Array.isArray(fill.other_insured_documents) ? fill.other_insured_documents : []).filter(Boolean);
+    const who = named.length ? joinNames(named) : docs;
+    const verb = (named.length || all.length || 1) > 1 ? "name" : "names";
+    const from = !named.length || named.length === all.length
+      ? (Math.max(named.length, all.length) > 1 ? "them" : "it")
+      : docs;
+    return [{
+      kind: "warn",
+      text: `${who} ${verb} a different insured (${fill.other_insured}), so the AI did not fill your forms from ${from}`
+        + (sugg > 0 ? ` - ${plural(sugg, "value")} to review under New document.` : "."),
+    }];
+  }
   if (fill.state === "done") {
     const filled = Number(fill.boxes_filled) || 0;
     const sugg = Number(fill.suggestions) || 0;
@@ -127,19 +154,37 @@ const NEW_KINDS = [
   ["data_consistency", "Data Consistency item", "consistency"],
 ];
 
-// "New on the review page: 1 hard stop, 2 warnings" / "No new issues" / ""
-// (unknown). Counts are the server's: after minus before.
+// "Your score went from 99 to 60" when the add took the package score DOWN
+// (the server sends `score_before` / `score_after` when it knows both), else "".
+export function scoreDropText(counts) {
+  if (!counts || typeof counts !== "object") return "";
+  const before = counts.score_before;
+  const after = counts.score_after;
+  if (!Number.isFinite(before) || !Number.isFinite(after) || after >= before) return "";
+  return `Your score went from ${before} to ${after}`;
+}
+
+// "New on the review page: 1 hard stop, 2 warnings." / "Your score went from
+// 99 to 60 - see the review page." / "No new issues on the review page." / ""
+// (unknown). The server compares the page's items by identity (a new warning
+// beside one that went away is still new - Choice Electric #25, 14 Oct 2026),
+// so this never says "No new issues" while the score dropped.
 export function newOnReviewText(counts) {
   if (!counts || typeof counts !== "object") return "";
   const parts = NEW_KINDS.filter(([k]) => Number(counts[k]) > 0)
     .map(([k, word]) => plural(Number(counts[k]), word));
-  return parts.length ? `New on the review page: ${parts.join(", ")}.` : "No new issues on the review page.";
+  const drop = scoreDropText(counts);
+  if (parts.length) return `New on the review page: ${parts.join(", ")}.${drop ? ` ${drop}.` : ""}`;
+  if (drop) return `${drop} - see the review page.`;
+  return "No new issues on the review page.";
 }
 
-// The review section the "Review them" button opens: the first kind with new items.
+// The review section the "Review them" button opens: the first kind with new
+// items, else the Overview when only the score dropped.
 export function firstNewSection(counts) {
   const hit = NEW_KINDS.find(([k]) => counts && Number(counts[k]) > 0);
-  return hit ? hit[2] : null;
+  if (hit) return hit[2];
+  return scoreDropText(counts) ? "overview" : null;
 }
 
 // Open items on the review page, for the editor's "Back to review" button:
@@ -210,3 +255,60 @@ export function errorText(body, fallback) {
   if (body && typeof body.message === "string" && body.message) return body.message;
   return fallback;
 }
+
+// ── The Documents list: what each row says about its document (14 Oct 2026) ──
+// Two questions, two tags (owner: "after adding the tag is showing 'strong
+// match' even if they are from different insured"):
+//   * the TYPE pill says how sure we are of the document's type, in words that
+//     cannot be read as "matches this insured";
+//   * the INSURED tag appears only when the document names a different insured
+//     than the package's applicant. The server decides it (backend
+//     services/document_tags.py, `insured_status` on each doc_summary row) -
+//     names are never compared here.
+
+const TYPE_TAGS = {
+  high: { label: "Type: sure", color: "#16a34a" },
+  medium: { label: "Type: likely", color: "#d97706" },
+};
+const TYPE_TAG_UNSURE = { label: "Type: unsure", color: "#dc2626" };
+
+// The type pill for one row: {label, color, title}, or null when the row
+// carries no confidence. A type the producer set reads "Type: set by you".
+export function documentTypeTag(row) {
+  if (!row || typeof row !== "object") return null;
+  if (row.doc_type_overridden) {
+    return { label: "Type: set by you", color: "#2563eb", title: "You set this document's type." };
+  }
+  const conf = typeof row.doc_type_confidence === "string" ? row.doc_type_confidence : "";
+  if (!conf) return null;
+  const tag = TYPE_TAGS[conf] || TYPE_TAG_UNSURE;
+  return { ...tag, title: "How sure Primble is of this document's TYPE - not whose document it is." };
+}
+
+// The amber "Different insured: <name>" tag, or null (the applicant's own
+// document, a document naming nobody, or an older payload).
+export function documentInsuredTag(row) {
+  const st = row && typeof row === "object" ? row.insured_status : null;
+  if (!st || st.state !== "different" || !String(st.name || "").trim()) return null;
+  const name = String(st.name).trim();
+  // Kept as evidence only (owner, 14 Oct 2026): listed, never read into the forms or the score.
+  if (st.evidence_only) {
+    return {
+      label: `Different insured: ${name} - evidence only`,
+      title: `This document names ${name}, not this package's applicant. It is kept as evidence only - nothing from it reaches your forms or your score. Use Include if it is this insured.`,
+    };
+  }
+  return {
+    label: `Different insured: ${name}${st.kept_by_you ? " - kept by you" : ""}`,
+    title: st.kept_by_you
+      ? `This document names ${name}, not this package's applicant. You chose to keep it in this package.`
+      : `This document names ${name}, not this package's applicant.`,
+  };
+}
+
+// The amber pill both layouts draw for the insured tag.
+export const INSURED_TAG_STYLE = {
+  display: "inline-block", fontSize: 10.5, fontWeight: 700, color: "#92400e",
+  background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 9, padding: "1px 7px",
+  whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis",
+};

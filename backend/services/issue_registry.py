@@ -1580,6 +1580,42 @@ def _collapse_twins(structured_issues, cross_issues, hard_stops, soft_stops,
     return structured_issues, hard_stops, soft_stops
 
 
+_NUMBERED_LEGACY_RE = re.compile(r"^legacy_(?:hard|soft)_\d+$")
+
+
+def _drop_numbered_echoes(structured_issues: Optional[List[dict]]) -> List[dict]:
+    """A stop sentence no rule row classifies gets a NUMBERED code
+    (`legacy_hard_0`). When a row with a real code carries the very same
+    sentence, the numbered row is that stop stored a second time (the pipeline
+    keeps the stop arrays AND the coded issue) - the same sentence, so the same
+    issue id. Drawing both printed one problem twice, and the copy also defeated
+    the picker's supersession below, whose guard refuses to trim a sentence
+    another row still carries (14 Oct 2026, `f83757cf`: "Applicant name differs"
+    three times - 4 hard stops on screen for 2 problems). A hard copy is never
+    dropped beside a coded twin that is only a warning. Display only: the stop
+    arrays, caps and issue ids are untouched."""
+    rows = list(structured_issues or [])
+    coded: Dict[str, set] = {}
+    for i in rows:
+        if not isinstance(i, dict):
+            continue
+        code = str(i.get("code") or "")
+        msg = str(i.get("message") or "").strip()
+        if code and msg and not _NUMBERED_LEGACY_RE.match(code):
+            coded.setdefault(msg, set()).add(normalize_issue_type(i.get("severity") or i.get("type")))
+
+    def _echo(i: Any) -> bool:
+        if not isinstance(i, dict) or not _NUMBERED_LEGACY_RE.match(str(i.get("code") or "")):
+            return False
+        sevs = coded.get(str(i.get("message") or "").strip())
+        if not sevs:
+            return False
+        own = normalize_issue_type(i.get("severity") or i.get("type"))
+        return own != "hard_stop" or "hard_stop" in sevs
+
+    return [i for i in rows if not _echo(i)]
+
+
 def build_grouped_view(
     structured_issues: List[dict],
     hard_stops: List[str],
@@ -1645,6 +1681,7 @@ def build_grouped_view(
     hard_stops = hard_stops or []
     soft_stops = soft_stops or []
     _promote = {c for c in (promote_codes or []) if c}
+    structured_issues = _drop_numbered_echoes(structured_issues)
 
     if cross_issues:
         _seen_msgs = {

@@ -78,10 +78,12 @@ export default function AddDocumentsPanel({
   const fillRunning = !!fill && fill.state === "running";
   const lockText = lockedText || (fillRunning ? FILL_LOCK_TEXT : null);
 
-  const send = async (confirmSameInsured) => {
+  // `asEvidence` (owner, 14 Oct 2026): the second answer to "these documents
+  // name a different insured" - keep the file, read nothing from it.
+  const send = async (confirmSameInsured, asEvidence = false) => {
     if (!sessionId || !files.length || busy || lockText) return;
     setBusy(true); setError(""); setOfferNote("");
-    if (!confirmSameInsured) setIntegrity(null);
+    if (!confirmSameInsured && !asEvidence) setIntegrity(null);
     setProgress(afterForms ? "Reading your documents - your forms update when they are read..." : "Reading your documents...");
     const token = newToken();
     startPolling(token);
@@ -92,6 +94,7 @@ export default function AddDocumentsPanel({
       body.append("as_supporting", asSupporting ? "true" : "false");
       if (docType) body.append("doc_type", docType);
       body.append("confirm_same_insured", confirmSameInsured ? "true" : "false");
+      body.append("as_evidence", asEvidence ? "true" : "false");
       const res = await fetch(`${apiBase}/api/session/${sessionId}/documents`, {
         method: "POST", credentials: "include", body,
       });
@@ -206,12 +209,23 @@ export default function AddDocumentsPanel({
         <div style={{ marginTop: 8, fontSize: 12, color: "#78350f", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 10px" }} role="alert">
           <div>{integrity.message}</div>
           {integrity.canConfirm && (
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <button type="button" style={btn(true, busy)} disabled={busy} onClick={() => send(true)}>
-                They belong to this insured - add them
-              </button>
-              <button type="button" style={btn(false, busy)} disabled={busy} onClick={() => setIntegrity(null)}>Cancel</button>
-            </div>
+            <>
+              <div style={{ marginTop: 6 }}>
+                Evidence only keeps {files.length === 1 ? "the file" : "the files"} with this package but reads nothing
+                into your forms or your score. Use its values only if it is this insured.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                <button type="button" style={btn(false, busy)} disabled={busy} onClick={() => send(false, true)}
+                  data-testid="add-as-evidence">
+                  Add as evidence only
+                </button>
+                <button type="button" style={btn(true, busy)} disabled={busy} onClick={() => send(true)}
+                  data-testid="add-same-insured">
+                  It is this insured - use its values
+                </button>
+                <button type="button" style={btn(false, busy)} disabled={busy} onClick={() => setIntegrity(null)}>Cancel</button>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -236,7 +250,9 @@ export default function AddDocumentsPanel({
               data-testid="add-documents-new-on-review">
               <span>{reviewText}</span>
               {reviewSection && typeof onReview === "function" && (
-                <button type="button" style={btn(true, false)} onClick={() => onReview(reviewSection)}>Review them</button>
+                <button type="button" style={btn(true, false)} onClick={() => onReview(reviewSection)}>
+                  {reviewSection === "overview" ? "Open the review page" : "Review them"}
+                </button>
               )}
             </div>
           )}

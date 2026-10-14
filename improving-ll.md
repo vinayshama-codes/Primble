@@ -4574,3 +4574,16 @@ are commercial remodels") failed it - the card stayed with no way to tell why (o
 **Cost:** one call per narrative save (~2-3k input tokens, a few hundred out) - fractions of a cent; no call
 on scoring, recalculation or generation. **Off:** `NARRATIVE_READER=0` (the test suite sets it; a failed or
 refused call leaves the keyword pass alone).
+
+## C107 - 2026-10-14 Fillable PDFs: the typed values reach extraction (more input tokens on such files only)
+**No prompt, call site, chunker or batch size changed.** A fillable PDF keeps what a person typed in its form
+fields (/V), never in the page content stream pdfplumber reads, so the owner's filled ACORD 125 (package `f83757cf`)
+reached LLM call 1 as the BLANK template: no applicant, the printed menus read as facts. `utils/form_field_text.py`,
+called from `ocr_service.extract_text_from_pdf`, now appends each page's filled values after that page's text under
+`[Filled form fields - page N]`, one `label: value` per line, once whichever route the page took.
+**Cost, measured offline (Vision stubbed):** a PDF without filled values is byte-identical - 66 of 69 local PDFs,
+all 17 blank templates. The owner's three filled ACORD 125s add 4,193 / 15,463 / 20,952 characters (~1.0k / 3.9k /
+5.2k tokens, under $0.004 per extraction read at $0.75 / 1M) and stay ONE extraction chunk; the same text rides the
+gap-fill document block (cached prefix). A form with EVERY box filled grows to 2-3 extraction chunks (ACORD 125
+1 -> 2, ACORD 127 1 -> 2, ACORD 160 1 -> 3). Bounds: 8,000 chars per value, 100,000 per page, 2,000,000 per document.
+Off: `OCR_FORM_FIELDS=0`. Tests: `tests/test_filled_form_fields_14oct.py`.

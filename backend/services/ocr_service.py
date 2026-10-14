@@ -25,6 +25,9 @@ from utils.text_cleaner import clean_text
 from utils.page_layout import (
     page_words, page_text, detect_tables, render_tables, vision_words,
 )
+# What a person typed into a fillable PDF lives in its form fields, not in the
+# content stream pdfplumber reads - appended per page at assembly below.
+from utils.form_field_text import read_filled_fields, form_field_block
 
 logger = logging.getLogger(__name__)
 
@@ -1636,6 +1639,20 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
         page_tables = list(page_tables) + [""] * (fitz_pages - len(page_texts))
         page_texts = list(page_texts) + [""] * (fitz_pages - len(page_texts))
 
+    # Filled AcroForm values, by page ({} for every PDF without one - the text
+    # below is then byte-identical to what it always was). Read AFTER the native
+    # pass so the "already drawn in the text layer" check can use its text, and
+    # kept OUT of page_texts: a scanned form with typed boxes must still reach
+    # Vision (the < _MIN_NATIVE_TEXT_LEN test), not look native because of them.
+    try:
+        form_fields = await loop.run_in_executor(
+            _OCR_EXECUTOR, read_filled_fields, pdf_path, list(page_texts)
+        )
+    except Exception as ex:                                  # noqa: BLE001 - fail open
+        logger.warning("ocr_service: form fields not read from %s: %s",
+                       os.path.basename(pdf_path), ex)
+        form_fields = {}
+
     total_pages = len(page_texts)
     budget = _DocBudget()
     page_ocr_text: Dict[int, str] = {}
@@ -1786,13 +1803,16 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
     # Per page, in order: [Document page N] marker (multi-page only, and only
     # when the page has something under it) -> page text -> that page's table
     # block (native detector, or Vision-box detector on a scanned page) ->
-    # embedded-image OCR blocks. Tables sit WITH their page; the old end-of-
-    # document append (extraction_pipeline, removed 2026-08-22) put a page-1
-    # schedule 270 pages away from page 1.
+    # embedded-image OCR blocks -> the page's filled form fields. Tables sit WITH
+    # their page; the old end-of-document append (extraction_pipeline, removed
+    # 2026-08-22) put a page-1 schedule 270 pages away from page 1. The form-field
+    # block is built here, from the text the page actually ended up with, so it is
+    # emitted exactly once whichever route the page took (native, reflow, Vision).
     parts: List[str] = []
     markers = _PAGE_MARKERS_ON and total_pages > 1
     tables_emitted = 0
     tables_unsectioned: Dict[int, int] = {}      # page -> tables with no section heading
+    field_lines = 0
     for idx in range(total_pages):
         native = page_texts[idx]
         chosen = page_ocr_text.get(idx) or native
@@ -1801,7 +1821,16 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
         else:
             table_block = page_tables[idx] if idx < len(page_tables) else ""
         blocks = image_blocks.get(idx, [])
-        if markers and (chosen.strip() or table_block or blocks):
+        field_block = ""
+        if form_fields:
+            try:
+                field_block = form_field_block(
+                    form_fields.get(idx), idx + 1, chosen, ocr_text=idx in page_ocr_text
+                )
+            except Exception as ex:                          # noqa: BLE001 - never costs the page
+                logger.warning("ocr_service: form-field block failed on page %d of %s: %s",
+                               idx + 1, os.path.basename(pdf_path), ex)
+        if markers and (chosen.strip() or table_block or blocks or field_block):
             parts.append(_PAGE_MARKER.format(page=idx + 1))
         if chosen.strip():
             parts.append(chosen)
@@ -1814,9 +1843,20 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
                 tables_unsectioned[idx + 1] = _unsectioned
         for block in blocks:
             parts.append(block)
+        if field_block:
+            parts.append(field_block)
+            field_lines += field_block.count("\n")
     if tables_emitted:
         logger.info("ocr_service: %s - %d table(s) emitted inline across %d page(s)",
                     os.path.basename(pdf_path), tables_emitted, total_pages)
+    if form_fields:
+        logger.info("ocr_service: %s - %d filled form-field line(s) appended",
+                    os.path.basename(pdf_path), field_lines)
+        stray = sorted(p + 1 for p in form_fields if p >= total_pages)
+        if stray:
+            logger.warning("ocr_service: %s - filled form fields on page(s) %s lie beyond "
+                           "the %d page(s) read and were NOT appended",
+                           os.path.basename(pdf_path), stray, total_pages)
     if tables_unsectioned:
         logger.info(
             "ocr_service: %s - %d of %d emitted table(s) carry no section heading "

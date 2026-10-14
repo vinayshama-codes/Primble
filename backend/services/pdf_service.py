@@ -25390,6 +25390,9 @@ _PREMIUM_BASIS_CATEGORY: Dict[str, str] = {
 }
 _CAMEL_SPLIT_RE = re.compile(r"(?<!^)(?=[A-Z])")
 _VEHICLE_VALUE_BOX_RE = re.compile(r"^Vehicle_(?:CostNewAmount|Coverage_AgreedOrStatedAmount)_[A-Z]$")
+# The categories an ENVELOPED fact may witness for the meaning gate (Fix C):
+# the exposure bases only - see `_build_amount_witnesses`.
+_ENVELOPE_WITNESS_CATEGORIES = frozenset({"payroll", "sales", "cost"})
 # One amount, end to end - "$2,145,000", "1804000", "12.5". Anything carrying a
 # second figure or any wording is NOT a single amount and is never witnessed.
 _SINGLE_AMOUNT_RE = re.compile(r"^\$?\s*\d[\d,]*(?:\.\d+)?$")
@@ -25532,6 +25535,31 @@ def _build_amount_witnesses(facts: dict) -> Dict[int, set]:
         _fcat = _amount_category(_CAMEL_SPLIT_RE.sub(" ", _fk).replace("_", " "))
         if _fcat:
             out.setdefault(_currency_to_int(_fvs), set()).add(_fcat)
+    # ── ...and an ENVELOPED fact (Fix C, 14 Oct 2026) ────────────────────────
+    # The loop above skips every fact held as {"value": ..., "source": ...} -
+    # and every merged fact on a session row is held that way, so I7 never
+    # fired outside a test. Live `ba7c709d` (W4): ACORD 126 "paid to
+    # subcontractors" printed $2,626,500 - the WC payroll (`wc_payroll`,
+    # derived; the producer's typed `total_payroll`) - and the gate, which
+    # classes the box as COST, found no witness at all. Only the EXPOSURE
+    # categories are read from an envelope: an exposure is one figure in one
+    # sense, while limit / value / deductible / premium facts legitimately
+    # share amounts (a building's VALUE is its LIMIT on ACORD 140 - measured
+    # over the stored corpus, unwrapping every envelope would have refused 20+
+    # correct property limits; this cut refuses 7 boxes, all borrowed: a
+    # revenue as the policy's cost, a vehicle's cost new or subcontract cost,
+    # the payroll as subcontract cost). 141 / 160 are frozen.
+    if str(_facts_map.get("_form_id") or "").split("__")[0] not in ("ACORD_141", "ACORD_160"):
+        for _fk, _fvraw in _facts_map.items():
+            if not isinstance(_fk, str) or _fk.startswith("_") \
+                    or not isinstance(_fvraw, dict) or "value" not in _fvraw:
+                continue
+            _fvs = str(_fvraw.get("value") if _fvraw.get("value") is not None else "").strip()
+            if not _SINGLE_AMOUNT_RE.match(_fvs):
+                continue
+            _fcat = _amount_category(_CAMEL_SPLIT_RE.sub(" ", _fk).replace("_", " "))
+            if _fcat in _ENVELOPE_WITNESS_CATEGORIES:
+                out.setdefault(_currency_to_int(_fvs), set()).add(_fcat)
     # The applicant's own address facts are address witnesses too, so the rule
     # still holds on a legacy session whose dec entries were never recorded.
     for fact_key in ("mailing_address", "physical_address"):
@@ -26325,8 +26353,70 @@ def _unnamed_other_ticks(mapped: dict, schema: dict, ai_filled: set,
     return out
 
 
-def _blank_unnamed_other_rows(mapped: dict) -> None:
-    """Blank an "other coverage" amount whose description box is empty."""
+# An OTHER row's DEDUCTIBLE amount (ACORD 126 `GeneralLiability_OtherDeductible
+# Amount_A`, 138 `Vehicle_OtherCoverage_DeductibleAmount_A`) - named by its own
+# "<stem>DeductibleDescription" box, else by the row's description.
+_OTHER_ROW_DEDUCTIBLE_RE = re.compile(
+    r"^(?P<stem>.*Other(?:Coverage)?)(?P<sep>_?)DeductibleAmount(?P<row>_[A-N])$")
+
+
+def _blank_unnamed_other_deductibles(mapped: dict, ai_fields, form_id: Any = "") -> List[str]:
+    """Fix C (14 Oct 2026): an AI deductible in an OTHER row with nothing named.
+
+    The parked case: ACORD 126 printed "OTHER $5,000" under DEDUCTIBLES on four
+    Choice Electric runs (`b117f010`, `f83757cf`, `18ecbfa8`, `805049a7`) - the
+    package's PROPERTY deductible (and, after the auto policy was added, the
+    vehicles' deductible) with no deductible type named. The amount is printed
+    in the Package Policy, which speaks for GL too, so the per-policy rule
+    could not refuse it; what makes it nothing is the row: the same half-fix
+    `_blank_unnamed_other_rows` exists for ("a naked amount in an OTHER row
+    asserts a coverage nobody can name"), on the deductible row that rule's
+    pattern never matched. AI values only - a stated deductible with no
+    description (`$1,000 Each Pollution Incident`, stamped by a rule) is a
+    rule's own decision and is never touched here. 141 / 160 are frozen."""
+    dropped: List[str] = []
+    if not ai_fields:
+        return dropped
+    if str(form_id or "").split("__")[0] in ("ACORD_141", "ACORD_160"):
+        return dropped
+    for field in list(mapped.keys()):
+        m = _OTHER_ROW_DEDUCTIBLE_RE.match(field or "")
+        if not m or field not in ai_fields or not str(mapped.get(field) or "").strip():
+            continue
+        stem, sep, row = m.group("stem"), m.group("sep"), m.group("row")
+        own = f"{stem}{sep}DeductibleDescription{row}"
+        names = [own] if own in mapped else [f"{stem}{s}Description{row}" for s in ("", "_")]
+        names = [n for n in names if n in mapped]
+        if not names:
+            continue                     # no naming box: no opinion (as the rule above)
+        if any(str(mapped.get(n) or "").strip() for n in names):
+            continue
+        # The row's AI tick goes with its amount (half a relationship is its
+        # own defect); a rule's tick is never this guard's.
+        tick = f"{stem}{sep}DeductibleIndicator{row}"
+        for f in (field, tick):
+            if f != field and (f not in ai_fields or not str(mapped.get(f) or "").strip()):
+                continue
+            mapped[f] = None
+            dropped.append(f)
+            try:
+                from services.ai_answer_guards import REASON_OTHER_ROW_UNNAMED
+                _note_guard_reason(f, REASON_OTHER_ROW_UNNAMED)
+            except Exception:                             # noqa: BLE001
+                pass
+        logger.info("post_fill_guard unnamed_other_deductible blanked=%s - an AI deductible in "
+                    "an OTHER row with no deductible named", field)
+    return dropped
+
+
+def _blank_unnamed_other_rows(mapped: dict, ai_fields=None, form_id: Any = "") -> None:
+    """Blank an "other coverage" amount whose description box is empty - and,
+    given the AI's own set, an AI deductible in an OTHER row with nothing
+    named (`_blank_unnamed_other_deductibles`)."""
+    if ai_fields:
+        for _f in _blank_unnamed_other_deductibles(mapped, ai_fields, form_id):
+            if isinstance(ai_fields, set):
+                ai_fields.discard(_f)
     for field in list(mapped.keys()):
         m = _OTHER_ROW_AMOUNT_RE.match(field or "")
         if not m or not str(mapped.get(field) or "").strip():
@@ -35458,8 +35548,10 @@ def map_facts_to_form(
     # Extension" - a PREMIUM line - was refused out of the OTHER COVERAGE
     # description after the sweep had passed, and its $500 shipped as a limit
     # with no coverage named. The sweep is idempotent, so it runs once more
-    # here, after the last guard that can empty a description box.
-    _blank_unnamed_other_rows(mapped)
+    # here, after the last guard that can empty a description box - and, with
+    # the AI's own set, takes an AI deductible in an OTHER row with nothing
+    # named (Fix C, 14 Oct 2026: the property deductible as ACORD 126 "OTHER").
+    _blank_unnamed_other_rows(mapped, gpt_filled_set, form_id)
 
     # ── A deductible amount without its coverage tick (15 Sep 2026) ──────────
     # ACORD prints each physical-damage deductible beside the tick that says

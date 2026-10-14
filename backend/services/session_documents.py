@@ -828,7 +828,16 @@ async def add_offered_form(session_id: str, form_id: str) -> Tuple[str, Dict[str
 #     the producer-edit door, `/api/update-pdf`, and is labelled "producer" like
 #     any value a person chose; "Keep current" retires it);
 #   * typed by a person (producer / client, or edited since generation) or
-#     printed by a rule -> never touched.
+#     printed by a rule -> never touched;
+#   * the new document names ANOTHER insured than the package's applicant
+#     (`document_tags`, the Documents list's own rule, the applicant decided
+#     without the new documents; 14 Oct 2026) -> the AI writes nothing: every
+#     value it offers that the document prints - a blank box's too - is a
+#     suggestion. NOT covered here: the documents door above has already
+#     merged that document's facts and re-stamped the boxes they move
+#     (`insured_scope` scopes only the applicant's own identity facts) - on
+#     `f83757cf` that door printed MERIDIAN's carrier, policy numbers, mortgagee
+#     and vehicle on the Choice Electric forms (57 boxes); an owner decision.
 # Crash-safe: the forms are written ONCE, at the end, after re-checking every
 # box against the row as it stands then (a box a person typed meanwhile wins).
 # A failure before that write leaves the forms exactly as the door left them
@@ -890,23 +899,173 @@ def review_counts(page: Optional[dict]) -> dict:
     as the fallback, as `packageIssueCounts` reads them) and the Data
     Consistency values that need confirming (status "conflict")."""
     page = page if isinstance(page, dict) else {}
-    counts = (page.get("grouped_issues") or {}).get("counts") or {}
+    # Every shape is checked: the add route builds its answer from this after
+    # the documents door has already changed the package - a malformed page
+    # must never turn that answer into a 500.
+    grouped = page.get("grouped_issues")
+    counts = grouped.get("counts") if isinstance(grouped, dict) else None
+    counts = counts if isinstance(counts, dict) else {}
     hard, warn = counts.get("hard_stops"), counts.get("warnings")
     if not isinstance(hard, int) or not isinstance(warn, int):
-        hard, warn = len(page.get("hard_stops") or []), len(page.get("soft_stops") or [])
-    fields = (page.get("underwriting_consistency") or {}).get("fields") or []
-    dc = sum(1 for f in fields if isinstance(f, dict) and f.get("status") == "conflict")
+        hs, ss = page.get("hard_stops"), page.get("soft_stops")
+        hard = len(hs) if isinstance(hs, list) else 0
+        warn = len(ss) if isinstance(ss, list) else 0
+    uc = page.get("underwriting_consistency")
+    fields = uc.get("fields") if isinstance(uc, dict) else None
+    dc = sum(1 for f in (fields if isinstance(fields, list) else [])
+             if isinstance(f, dict) and f.get("status") == "conflict")
     return {"hard_stops": int(hard), "warnings": int(warn), "data_consistency": int(dc)}
 
 
+_REVIEW_KINDS = ("hard_stops", "warnings", "data_consistency")
+# Codes the grouped view gives a sentence no rule claims - two such items are
+# never "the same rule under new words".
+_CATCH_ALL_CODES = frozenset({"uncovered_hard_stop", "uncovered_soft_stop", "uncategorized"})
+
+
+def _cluster_items(clusters: Any) -> List[Tuple[str, Optional[str]]]:
+    """(issue id, rule code) for every item a list of grouped-view clusters
+    lists - each item's own id, the cluster's when it carries no items (the
+    review page's `clusterItems` rule). An item the view sent without an id
+    gets the one the view stamps (`issue_registry.issue_id_for`)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    for cluster in clusters if isinstance(clusters, list) else []:
+        if not isinstance(cluster, dict):
+            continue
+        raw = cluster.get("items")
+        items = [i for i in raw if isinstance(i, dict)] if isinstance(raw, list) else []
+        for item in items or [cluster]:
+            iid = str(item.get("issue_id") or "").strip()
+            if not iid:
+                message = str(item.get("message") or item.get("primary_message") or "").strip()
+                if not message:
+                    continue
+                try:
+                    from services.issue_registry import issue_id_for
+                    forms = item.get("forms") if isinstance(item.get("forms"), list) else []
+                    iid = issue_id_for(message, [str(f) for f in forms])
+                except Exception:                              # noqa: BLE001
+                    continue
+            code = str(item.get("code") or "").strip()
+            out.append((iid, code if code and code not in _CATCH_ALL_CODES else None))
+    return out
+
+
+def _package_score(page: dict) -> Optional[int]:
+    pkg = page.get("package_sqs")
+    score = pkg.get("package_sqs_score") if isinstance(pkg, dict) else None
+    if isinstance(score, bool):
+        return None
+    try:
+        return int(score) if score is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def review_snapshot(page: Optional[dict], dismissed: Iterable[str] = ()) -> Optional[dict]:
+    """The review page's open items BY IDENTITY, plus the package score
+    (Choice Electric #25, 14 Oct 2026). `review_counts` plus:
+      * `ids`: the hard stops and warnings by the issue id the review page
+        files their statuses under (each grouped-view item's `issue_id`),
+        minus the ones it hides (`dismissed` - a dismissed item leaves its
+        list; a resolved one that still fires stays listed); the Data
+        Consistency values that need confirming by fact key;
+      * `rules`: each listed hard stop's / warning's rule code, so a rule
+        that fires under NEW words (a part-fixed card renames what is still
+        missing - a new id) is not read as a new item (`new_on_review`);
+      * `score`: the package score the page shows.
+    None for a page that carries no review data at all (it could not be
+    built) - "unknown", never "nothing open".
+    Counting alone reads a new warning plus one that went away as "No new
+    issues". On `f83757cf` (14 Oct, 00:36 UTC) adding the Business Auto Policy
+    raised "Driver schedule not provided" (score 99 -> 85, its ceiling reason)
+    in the same recalculation that retired the one warning the page held
+    ("Employee Count appears inconsistently across generated forms") - one in,
+    one out, and the screen said "No new issues on the review page". Replayed
+    from the stored rows, the identity diff says "New on the review page: 1
+    warning. Your score went from 99 to 85." instead."""
+    if not isinstance(page, dict):
+        return None
+    grouped = page.get("grouped_issues")
+    has_view = isinstance(grouped, dict) and (isinstance(grouped.get("hard_stops"), list)
+                                              or isinstance(grouped.get("warnings"), dict))
+    if not has_view and not isinstance(grouped, dict) \
+            and not isinstance(page.get("hard_stops"), list) and not isinstance(page.get("soft_stops"), list):
+        return None
+    hide = {str(i) for i in (dismissed or ()) if i}
+    out: dict = dict(review_counts(page))
+    if has_view:
+        warnings = grouped.get("warnings") if isinstance(grouped.get("warnings"), dict) else {}
+        warning_clusters = [c for tier in warnings.values() if isinstance(tier, list) for c in tier]
+        hard = [(i, r) for i, r in _cluster_items(grouped.get("hard_stops")) if i not in hide]
+        warn = [(i, r) for i, r in _cluster_items(warning_clusters) if i not in hide]
+        fields = (page.get("underwriting_consistency") or {}).get("fields") \
+            if isinstance(page.get("underwriting_consistency"), dict) else None
+        out["ids"] = {
+            "hard_stops": sorted({i for i, _r in hard}),
+            "warnings": sorted({i for i, _r in warn}),
+            "data_consistency": sorted({str(f.get("fact_key")) for f in (fields if isinstance(fields, list) else [])
+                                        if isinstance(f, dict) and f.get("status") == "conflict"
+                                        and f.get("fact_key")}),
+        }
+        out["rules"] = {i: r for i, r in hard + warn if r}
+    score = _package_score(page)
+    if score is not None:
+        out["score"] = score
+    return out
+
+
+def _new_by_identity(before_ids: Iterable[str], after_ids: Iterable[str],
+                     before_rules: dict, after_rules: dict) -> int:
+    """Items listed after that were not listed before. One that is NEW only
+    in its words - its rule's item went away in the same change - is the same
+    item renamed (`fixProgress.fixLeftOpen`'s rule on the review page), one
+    pair per item that went away."""
+    before_set, after_set = set(before_ids or ()), set(after_ids or ())
+    gone: Dict[str, int] = {}
+    for iid in before_set - after_set:
+        rule = (before_rules or {}).get(iid)
+        if rule:
+            gone[rule] = gone.get(rule, 0) + 1
+    new = 0
+    for iid in sorted(after_set - before_set):
+        rule = (after_rules or {}).get(iid)
+        if rule and gone.get(rule, 0) > 0:
+            gone[rule] -= 1
+            continue
+        new += 1
+    return new
+
+
 def new_on_review(before: Optional[dict], after: Optional[dict]) -> Optional[dict]:
-    """NEW open items on the review page: after minus before, never below 0.
+    """NEW open items on the review page. Both sides carry `ids`
+    (`review_snapshot`): the items listed after that were not listed before -
+    a swap (one new, one gone) is one new item, never "nothing new"; a rule
+    firing under new words is not new. An older side without ids (a fill
+    started before this change): after minus before, never below 0. Adds
+    `score_before` / `score_after` when both sides know the package score.
     None when either side is unknown."""
     if not isinstance(before, dict) or not isinstance(after, dict):
         return None
-    out = {k: max(0, int(after.get(k) or 0) - int(before.get(k) or 0))
-           for k in ("hard_stops", "warnings", "data_consistency")}
+    b_ids, a_ids = before.get("ids"), after.get("ids")
+    if isinstance(b_ids, dict) and isinstance(a_ids, dict):
+        b_rules = before.get("rules") if isinstance(before.get("rules"), dict) else {}
+        a_rules = after.get("rules") if isinstance(after.get("rules"), dict) else {}
+        out = {k: _new_by_identity(b_ids.get(k) or [], a_ids.get(k) or [],
+                                   b_rules if k != "data_consistency" else {},
+                                   a_rules if k != "data_consistency" else {})
+               for k in _REVIEW_KINDS}
+    else:
+        def _n(side: dict, k: str) -> int:
+            try:
+                return int(side.get(k) or 0)
+            except (TypeError, ValueError):
+                return 0
+        out = {k: max(0, _n(after, k) - _n(before, k)) for k in _REVIEW_KINDS}
     out["total"] = sum(out.values())
+    sb, sa = before.get("score"), after.get("score")
+    if isinstance(sb, int) and isinstance(sa, int) and not isinstance(sb, bool) and not isinstance(sa, bool):
+        out["score_before"], out["score_after"] = sb, sa
     return out
 
 
@@ -995,7 +1154,7 @@ def _says_it(value: Any, new_text: Optional[str]) -> bool:
 def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
                    base_mapped: dict, new_guard: Iterable[dict] = (),
                    base_guard: Iterable[dict] = (), *, documents: Iterable[str] = (),
-                   new_text: Optional[str] = None) -> dict:
+                   new_text: Optional[str] = None, other_insured: Optional[str] = None) -> dict:
     """What the new document's answers do to ONE stored form (pure).
     {"fills": {field: {value, label}}, "suggestions": [...], "held_back": [...]}
     - a box moves only where the stamp WITH the answers differs from the stamp
@@ -1006,10 +1165,32 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
     differ from the box by more than punctuation (owner's run `18ecbfa8`, 12 Oct
     2026: adding the Cyber policy offered "Prem #: 001 Bldg #: 001" against the
     box's "Prem. #: 001 Bldg #: 001" - text the Cyber policy does not contain,
-    which the AI read from the package's facts)."""
+    which the AI read from the package's facts).
+
+    `other_insured` (14 Oct 2026, owner's run `f83757cf`): the new document
+    names a DIFFERENT insured than the package's applicant
+    (`document_tags`). Another company's document never speaks for the
+    applicant (`insured_scope`), so nothing is written: a blank box it
+    answers is a suggestion too (current "") when the document prints the
+    value (`_says_it`) and it shows something (an unticked checkbox on a blank
+    box shows nothing), and nothing it read is listed as "AI held back" on
+    the applicant's forms. Adding control_dec.pdf (MERIDIAN FABRICATION INC)
+    to the Choice Electric package wrote 8 boxes on ACORD 28 / 127 / 131
+    before this - mostly unticked "No"s and values the document does not
+    print; replayed, none is written and at most one is offered."""
     docs = [str(d) for d in (documents or ()) if str(d or "").strip()]
+    hold = bool(str(other_insured or "").strip())
     fills: Dict[str, dict] = {}
     suggestions: List[dict] = []
+
+    def _suggest(field: str, current: Any, new: Any, label: str) -> None:
+        row = {"form_id": form_id, "field": field,
+               "current": _box_text(current), "suggested": new if isinstance(new, str) else str(new),
+               "label": label, "documents": docs}
+        if hold:
+            row["other_insured"] = str(other_insured).strip()
+        suggestions.append(row)
+
     for field, new in (new_mapped or {}).items():
         if not _box_text(new) or _same(new, (base_mapped or {}).get(field)):
             continue
@@ -1019,21 +1200,77 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
         owner = box_owner(stored, field)
         current = _box_value(stored, field)
         if owner == "blank":
-            fills[field] = {"value": new, "label": label}
+            if not hold:
+                fills[field] = {"value": new, "label": label}
+            elif _says_it(new, new_text) and not _unticked_checkbox(stored, field, new):
+                _suggest(field, "", new, label)
         elif (owner == "ai" and not _same(new, current)
               and _words_only(new) != _words_only(current) and _says_it(new, new_text)):
-            suggestions.append({
-                "form_id": form_id, "field": field,
-                "current": _box_text(current), "suggested": new if isinstance(new, str) else str(new),
-                "label": label, "documents": docs,
-            })
-    base_fields = {g.get("field") for g in (base_guard or ()) if isinstance(g, dict)}
+            _suggest(field, current, new, label)
     held = []
-    for g in new_guard or ():
-        f = g.get("field") if isinstance(g, dict) else None
-        if f and f not in base_fields and f not in fills and box_owner(stored, f) == "blank":
-            held.append(dict(g, form_id=form_id))
+    if not hold:
+        base_fields = {g.get("field") for g in (base_guard or ()) if isinstance(g, dict)}
+        for g in new_guard or ():
+            f = g.get("field") if isinstance(g, dict) else None
+            if f and f not in base_fields and f not in fills and box_owner(stored, f) == "blank":
+                held.append(dict(g, form_id=form_id))
     return {"fills": fills, "suggestions": suggestions, "held_back": held}
+
+
+def names_another_insured(session: Optional[dict], docs: Iterable[dict]) -> Optional[dict]:
+    """{"name": <the insured(s) named>, "documents": [filenames]} when any of
+    `docs` names an insured that is NOT the package's applicant - e.g.
+    "MERIDIAN FABRICATION INC" from control_dec.pdf - judged by the Documents
+    list's own rule over the session's Submission Integrity record
+    (`document_tags`), with the applicant decided WITHOUT `docs` (two of
+    another company's documents cannot outvote the package's own). None when
+    every one of them names the applicant or nobody (positive evidence only),
+    or the package has no integrity record."""
+    try:
+        from services.document_tags import (
+            different_insured_ids, other_insured_of, session_insured_statuses,
+        )
+        docs = [d for d in (docs or ()) if isinstance(d, dict)]
+        ids = [str(d.get("doc_id") or "").strip() for d in docs]
+        ids = [i for i in ids if i]
+        statuses = session_insured_statuses(session, judge_without=ids)
+        name = other_insured_of(statuses, ids)
+        if not name:
+            return None
+        hit = set(different_insured_ids(statuses, ids))
+        files = [str(d.get("filename") or "") for d in docs
+                 if str(d.get("doc_id") or "").strip() in hit and str(d.get("filename") or "").strip()]
+        return {"name": name, "documents": files}
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("document fill: insured check skipped: %s", ex)
+        return None
+
+
+def _unticked_checkbox(form: Optional[dict], field: str, value: Any) -> bool:
+    """A checkbox (per the form's own schema) the value leaves unticked - on a
+    blank box that changes nothing the form shows, so it is no suggestion."""
+    schema = (form or {}).get("schema") if isinstance(form, dict) else None
+    meta = schema.get(field) if isinstance(schema, dict) else None
+    if not isinstance(meta, dict) or meta.get("ft") != "/Btn":
+        return False
+    try:
+        from services.needs_attention import _is_ticked
+        return not _is_ticked(value)
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _suggestion_stands(form: Optional[dict], suggestion: dict) -> bool:
+    """A suggestion is live while its box still shows what it was measured
+    against: the AI value it would replace, or - a value another insured's
+    document offered for a blank box - still blank and nobody's."""
+    field = suggestion.get("field")
+    if not field:
+        return False
+    owner = box_owner(form, field)
+    if not _box_text(suggestion.get("current")):
+        return owner == "blank"
+    return owner == "ai" and _same(_box_value(form, field), suggestion.get("current"))
 
 
 def _suggestion_id(form_id: str, field: str, suggested: Any) -> str:
@@ -1077,7 +1314,7 @@ def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) ->
             conf[field] = fill["label"]
             done.append(field)
         for s in plan.get("suggestions") or []:
-            if box_owner(form, s["field"]) == "ai" and _same(_box_value(form, s["field"]), s["current"]):
+            if _suggestion_stands(form, s):
                 suggestions.append(dict(s, id=_suggestion_id(fid, s["field"], s["suggested"]),
                                         created_at=datetime.now(timezone.utc).isoformat()))
         held = [g for g in (plan.get("held_back") or [])
@@ -1115,7 +1352,7 @@ def merge_suggestions(existing: Iterable[dict], new: Iterable[dict], generated: 
         if key in seen:
             continue
         form = (generated or {}).get(s["form_id"])
-        if box_owner(form, s["field"]) != "ai" or not _same(_box_value(form, s["field"]), s.get("current")):
+        if not isinstance(form, dict) or not _suggestion_stands(form, s):
             continue
         seen.add(key)
         out.append(s)
@@ -1236,9 +1473,15 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
     new_docs = [d for d in docs if str(d.get("doc_id") or "") in wanted
                 and not d.get("excluded") and str(d.get("text") or "").strip()]
     names = [str(d.get("filename") or "") for d in new_docs]
+    # Whose documents are these? The package's integrity record (re-assessed
+    # by the documents door with them in it) answers through the Documents
+    # list's own rule. Another insured's document only ever suggests.
+    another = names_another_insured(session, new_docs)
+    other = (another or {}).get("name")
     status = {**base, "run_id": run_id, "state": FILL_DONE, "boxes_filled": 0,
               "filled_by_form": {}, "suggestions": 0, "held_back": 0, "stale_signatures": [],
-              "message": ""}
+              "message": "", "other_insured": other,
+              "other_insured_documents": (another or {}).get("documents") or []}
     if generated and new_docs:
         per_form = await loop.run_in_executor(
             None, functools.partial(_new_document_answers, session, new_docs, list(generated)))
@@ -1264,7 +1507,7 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
             base_m, _bc, base_g = await loop.run_in_executor(None, functools.partial(
                 _stamp_with_answers, session, fid, empty, raw_all, schema))
             plan = plan_form_fill(fid, generated[fid], new_m, new_c, base_m, new_g, base_g,
-                                  documents=names, new_text=new_text)
+                                  other_insured=other, documents=names, new_text=new_text)
             if plan["fills"] or plan["suggestions"] or plan["held_back"]:
                 plans[fid] = plan
         if plans:
@@ -1316,12 +1559,13 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
             "suggestions": status["suggestions"],
             "held_back": status["held_back"],
             "stale_signatures": [s["form_id"] for s in status["stale_signatures"]],
+            "other_insured": status.get("other_insured"),
         })
     except Exception as ex:                                    # noqa: BLE001
         logger.warning("document fill: audit event failed: %s", ex)
-    logger.info("document fill: session=%s docs=%s filled=%s suggestions=%d held=%d",
+    logger.info("document fill: session=%s docs=%s filled=%s suggestions=%d held=%d other_insured=%s",
                 session_id, names, status["filled_by_form"], status["suggestions"],
-                status["held_back"])
+                status["held_back"], status.get("other_insured"))
     await _write_status(session_id, str(run_id or ""), status)
     return status
 

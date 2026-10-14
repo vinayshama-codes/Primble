@@ -32,7 +32,9 @@ import ReviewRailLayout from "./review/ReviewRailLayout";
 import PoliciesTable from "./review/PoliciesTable";
 import AddDocumentsPanel from "./review/AddDocumentsPanel";
 import DocumentChangeConfirm from "./review/DocumentChangeConfirm";
-import { integrityRefusal, reviewOpenItems } from "../../utils/addDocuments";
+import {
+  integrityRefusal, reviewOpenItems, documentTypeTag, documentInsuredTag, INSURED_TAG_STYLE,
+} from "../../utils/addDocuments";
 import { SignatureStatusList } from "../signature/ApplicantSignature";
 import { fetchSignatureStatus } from "../../utils/applicantSignature";
 import {
@@ -5024,7 +5026,14 @@ const AcordModal = forwardRef(function AcordModal({
       onChanged={handleDocumentsChanged}
       fill={fillOf?.status || null}
       newOnReview={fillOf?.newOnReview || null}
-      onReview={(section) => { if (reviewRail) showReviewSection(section); else if (section === "consistency") jumpToDataConsistency(); }}
+      // Classic layout: one page - Data Consistency has its own anchor; the
+      // hard stops, warnings and the score sit at its top (14 Oct 2026: the
+      // button used to do nothing there for anything but Data Consistency).
+      onReview={(section) => {
+        if (reviewRail) showReviewSection(section);
+        else if (section === "consistency") jumpToDataConsistency();
+        else window.scrollTo({ top: 0, behavior: "smooth" });
+      }}
     />
   );
 
@@ -6282,6 +6291,9 @@ const AcordModal = forwardRef(function AcordModal({
   // the score no longer asks for it.
   const openScoreFix = (item) => {
     if (!item?.resolution) return;
+    // The Form Fill Rate row (14 Oct 2026): its fix is on the forms - open the
+    // first one with Please verify values; its side panel has "Confirm all".
+    if (item.resolution.mode === "forms") { openFormAtBox(item.resolution.form_id || null); return; }
     setResolutionIssue(scoreFixIssue(item));
   };
 
@@ -8187,12 +8199,14 @@ const AcordModal = forwardRef(function AcordModal({
                   // 7 Oct 2026 - once forms exist a change re-stamps them).
                   const reclassLocked = !!documentsLockedReason(pkgGen.state);
                   const reviewBusy = reviewLoadingId === d.doc_id;
-                  const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
-                  // Figure 3 relabel: this pill answers "how sure are we about the
-                  // document TYPE" - a different question from issue severity or
-                  // suggested-value confidence. Give it its own words so a bare
-                  // "HIGH/MEDIUM/LOW" can never be mistaken for one of those.
-                  const confLabel = conf === "high" ? "Strong match" : conf === "medium" ? "Likely match" : "Needs review";
+                  // Two tags, two questions (14 Oct 2026, utils/addDocuments - the
+                  // rail draws the same two): how sure we are of the document's
+                  // TYPE ("Strong match" beside another company's dec read as
+                  // "matches this insured"), and - only for a document naming a
+                  // different insured - whose it is, decided by the server
+                  // (`insured_status`, backend services/document_tags.py).
+                  const typeTag = documentTypeTag(d);
+                  const insuredTag = documentInsuredTag(d);
                   return (
                     <div key={d.doc_id || i} style={{
                       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
@@ -8206,9 +8220,8 @@ const AcordModal = forwardRef(function AcordModal({
                       opacity: excluded ? 0.6 : 1,
                     }}>
                       <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
-                      {d.doc_type_overridden
-                        ? <span title="You set this type" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>you set this</span>
-                        : conf && <span title={`How confident Primble is about this document's type: ${confLabel}`} style={{ fontSize: 10, color: confColor, fontWeight: 700 }}>{confLabel}</span>}
+                      {typeTag && <span title={typeTag.title} style={{ fontSize: 10, color: typeTag.color, fontWeight: 700 }} data-testid="doc-type-tag">{typeTag.label}</span>}
+                      {insuredTag && <span title={insuredTag.title} style={INSURED_TAG_STYLE} data-testid="doc-insured-tag">{insuredTag.label}</span>}
                       <span className="doc-filename" style={{ flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</span>
                       {excluded && <span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>excluded from scoring</span>}
                       {supportingOnly && !excluded && <span title="Facts contribute, but this document is never treated as the primary source" style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>supporting only</span>}
