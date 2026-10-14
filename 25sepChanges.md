@@ -1194,7 +1194,15 @@ token), and `helpers._parse_address` read "Denver, CO, 80216" as city "CO" / sta
 too, and the parser joins a bare US ZIP after a bare state code ("CO, 80216") and a bare house number before a street
 part ("402, Dana Street"). Measured on 401 stored document addresses: 1 parse changed (a stored "..., Aurora, CO, 80011"
 that printed city CO / state 80011 - now right), 0 checks changed. A ZIP from another state still corrects the state (the
-existing rule). Tests: `test_address_parts_14oct.py`; 629 passed across the address tests.
+existing rule). **Then (owner: "if user types in a different format is it ineligible?")** - never: a typed value is
+saved as typed and the check only warns. A value in the state slot that is no state is given back
+(`helpers._is_us_state_word`): a bare ZIP to the zip ("Street, Denver, 80216"), plain words before a bare US ZIP to the
+city ("Street, Denver 80216"), a full name stays the state ("New York 10001"); never on prose, a non-US postal code, a
+country ("USA 12345") or a lone 2-letter foreign code ("Paris, FR 75001"). The first cut rewrote 19 stored non-US
+addresses / sentences and a French address test - both caught by measurement, narrowed. Final, 401 stored addresses:
+5 parses changed, all better (Aurora; "Anytown, USA"; three county-shaped addresses no longer print the ZIP as the state -
+their county-as-city stays, pre-existing), 0 checks changed. Tests: `test_address_parts_14oct.py`; the address test
+files 4,686 passed (the 1 known failure).
 
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below

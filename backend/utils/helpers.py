@@ -272,7 +272,10 @@ def _parse_address(addr: str) -> dict:
             result.pop("state", None)
             result["zip"] = str(_st)                          # "Street, Denver, 80216"
         elif (_tail and _BARE_ZIP_PART_RE.match(_tail[-1]) and _words and len(_words) <= 4
-              and all(w.isalpha() for w in _words)):
+              and all(w.isalpha() for w in _words)
+              and not (len(_words) == 1 and len(_words[0]) == 2)):
+            # (a lone 2-letter code there is a foreign region / country code -
+            # "Paris, FR 75001" - never a city)
             # Only a US address: the last part ends in a bare US ZIP and the rest
             # of it is plain words (never prose, never a non-US postal code).
             result.pop("state", None)
