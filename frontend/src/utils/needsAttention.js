@@ -78,7 +78,10 @@ export function withoutListedBoxes(openRecs, attention) {
       ...f,
       rows: (Array.isArray(f?.rows) ? f.rows : []).filter((r) =>
         !boxes.has(boxKey(r?.form_id || f?.form_id, r?.field))
-        && !(absorbable(r) && r?.fact_key && facts.has(r.fact_key))),
+        && !(absorbable(r) && ((r?.fact_key && facts.has(r.fact_key))
+          // what the box answers besides its own fact - its table, the
+          // premises interest (needs_attention.box_fold_keys, 14 Oct 2026)
+          || (Array.isArray(r?.fold_keys) && r.fold_keys.some((k) => facts.has(k)))))),
     })),
   };
 }

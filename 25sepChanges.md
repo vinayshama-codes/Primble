@@ -1248,6 +1248,102 @@ have recommendations, warnings, hard stops etc if these things have been seen by
    (`field_qa.check_hard_block`: ACORD 140 COPE / placeholders) blocks a clean download (409, or a watermarked DRAFT).
    Brent asked for our interpretation - answered in the owner's status update; rename / true block is his call.
 
+### Z21. Live run `0353c36b` (14 Oct 2026, night - all of Z17-Z20 deployed) - pre-form verified, generation next
+
+**Pre-form, checked read-only on the stored row:** 7 decs typed right (WC "likely", the rest "sure"); one insured
+(CHOICE ELECTRIC LLC), no integrity flag; no "coverage terminology" card; no Data Consistency conflict (no Umbrella vs
+Excess card - item 4; no website row - item 6); start 40 with 1 hard stop (COPE occupancy), 5 warnings (mailing, contact,
+Period of Restoration, driver schedule, GL class codes) and 8 Key details. The owner's driver CSV
+(`Downloads/choice_electric_test_drivers.csv`, 8 drivers) matched the table's six columns and closed the driver warning;
+a location CSV was written for him (`Downloads/choice_electric_test_locations.csv` - his typed rows had "Joisted Masonry"
+in the street column and a Houston ZIP 77001; the importer APPENDS, so the two old rows are deleted first). **Reached 100
+before forms.** Forms to generate: 125, 126, 127, 130, 131 (+ its Excess copy), 137 CO, 140 (+ 28 if offered; 101 to see
+the narrative printed). The answer sheet and where each value should stamp are in this chat (14 Oct night); every box is
+traced from the stored row after generation.
+
+**Brent's special list (4, 5, 6, 7, 18, 20, 21, 22, 23, 26, 27) - where each stands:**
+
+| # | Status | What the live run must show after generation |
+|---|---|---|
+| 5, 21, 23 | **Closed (verified live earlier)** | re-check only: 125 audit "A" + 130 "At expiration"; 125 OTHER row "Excess (Following Form) Liability"; the location table keeps its saved values |
+| 22 | **Pre-form part verified tonight** (every item fixed from the review page, 100 before forms) | after forms nothing new appears (one status, Z20) -> closes |
+| 18 | built (Z20 one status + Z11 answers to boxes) | 0 hard stops after generation; GL code 92478 on 125 + 126; hydrant on both 140 buildings; revenue on the 125 premises -> closes |
+| 27 | built (Z20 download screen) | Download: "N items to fix", hard stops first, only items seen earlier, the rest as counted lines -> closes |
+| 4 | our part built | two ACORD 131s (Amerisure umbrella $5M / Travelers excess $4M, Excess ticked, umbrella as its underlying); **Brent: should the excess list GL / Auto / EL + SIR / attachment** |
+| 6 | our part verified tonight (no website row anywhere) | **Brent: which box a carrier website belongs in** |
+| 7 | built (8 Oct page-one rule + Z20 #1C) | 125 page-one premiums blank; Prior Carrier grid GL / Auto / Property premiums; 130 WC premium; EPL as 125 OTHER row C, premium blank; **Michelle Q1: the Other slots** |
+| 20 | built | 125 page-one Carrier blank + the "carrier receiving this submission" card; grid carriers; **Michelle Q1: the 4 carriers with no slot** |
+| 26 | built (Z6 / Z14 Exposure readers) | panel Exposure rows "-N pts" adding up, no false "WC payroll is missing"; **Michelle Q4: should values a dec never prints cost Exposure points** |
+
+Tally: **3 closed; 3 can close on this run (18, 22, 27 - Brent's #3 answer is built); 5 built and verifiable tonight but
+each still waits on a Brent / Michelle answer (4, 6, 7, 20, 26).**
+
+**After generation (10 forms: 28, 101, 125, 126, 127, 130, 131, 131 Excess, 137 CO, 140), read from the stored row:**
+99 (100 without forms; Form Fill Rate 93 = unconfirmed AI values - the Z17 row / Overview note), 0 hard stops, 0
+warnings, 0 structured issues - none of the 14 resolved items came back. **Every typed answer reached its boxes:**
+location table -> 125 premises (descriptions A / B, sq ft, revenue, FT 90 / PT 10) + 140 per building (FRAME / NON-
+COMBUSTIBLE, 1998 / 2003, roofs 2016 / 2017, values 798,556 / 421,714, BPP 73,008, hydrant 500 on both); mailing,
+contact (name / phone / e-mail), FEIN, NAICS / SIC on 125 (+ 130); GL 92478 on 125 GL CODE + 126 hazard class;
+operations on 125 / 130 / both 131s; drivers on 127 (name, DOB, licence); no-losses ticks on 125 / 131 / 131 Excess;
+narrative on 101 + 125 remarks. Items: **5** (125 "A", 130 At expiration), **21** (OTHER B "Excess (Following Form)
+Liability"), **23**, **18** CLOSED; **4** (131 Amerisure Mutual umbrella $5M occurrence, Umbrella ticked; 131 Excess
+Travelers $4M, Excess ticked, underlying = the umbrella), **6**, **7** (page-one premiums blank, grid GL $16,818 /
+Property $6,275, 130 WC $29,278, EPL as OTHER C), **20** (page-one carrier blank + card, grid Amerisure), **26** (Exposure
+100) - our parts verified, waiting on Brent / Michelle. **Found:** four cards appear only AFTER forms - "No Known Losses
+attested ..." (an unscored note confirming the producer's own answer) on all 10 forms' side panels, and three unscored /
+0-point per-form asks (125 receiving carrier, 125 own or rent, 130 officer inclusion / exclusion) that no pre-form screen
+shows since Z15 removed "Your forms will need" before forms. 22 / 27 wait on that and on the download screen.
+
+### Z22. The download screen of `0353c36b` read against the rule (14 Oct 2026, night)
+
+The owner's download screen: "29 items to fix" = 25 Missing + 4 Recommendations, 0 hard stops, 0 warnings, then "74
+values to confirm / 129 the AI held back / 16 for the applicant" as counted lines - the rule held. Three defects, fixed:
+1. **"Own or rent?" printed twice** (the 125 interest ticks as a Missing box AND the card) and **the 130 officers three
+   times + the card**: the boxes had no fact to fold on (`box_fact_key` is None for both). `needs_attention.
+   box_fold_keys` (what a box ANSWERS - its fact, its schedule table from the stamper's own binding, the premises interest
+   for `premises_interest.FORM_INTEREST_BOXES`, the boxes the interest card itself checks) rides each row as
+   `fold_keys`; the tick-group collapse keeps the group's union; `_CARD_READS` links the officer card to the `wc_officers`
+   table (`coverage_evidence.wc_officer_treatment_status` is satisfied by either); the frontend fold reads them. One line each.
+2. **"No Known Losses attested ..." was a card** on all 10 forms and counted as an item to fix - the producer's own
+   answer read back. The three loss status notices are no longer cards (`sqs_service`, the per-form loop); the score
+   panel's Loss History row already says it. `test_step2_orbin_29sep` updated (the TEST pinned the card).
+3. The Overview's button reads "Start with ACORD 28 (most to confirm)" when several forms have values to confirm.
+**For Brent (owner):** (a) to keep the SQS independent of the forms, form-specific questions (125 "carrier receiving
+this submission", 125 own or rent, 130 officers) appear once forms are selected and never move the score - the owner
+decided not to show them before forms; (b) the package went 100 before forms -> 99 after: the Form Fill Rate (25% of
+Structural, AI values 0.85 vs confirmed 1.00 - his approved blend) costs ~0.5 points until the producer confirms 74 values
+on 10 forms. Recommendation to Brent: take the Form Fill Rate out of the SQS (100 stays 100) and show form completeness
+separately ("Forms: 74 values to confirm") - his call, it changes the approved blend.
+Tests: `tests/test_download_one_line_14oct.py`.
+
+### F01. FOR THE BRENT MAIL (owner, 15 Oct 2026) - the owner sends one batched mail; these are its points
+
+1. **Proposal: make the package SQS fully independent of the forms.** Today the score reaches 100 from the documents and
+   answers, then generation adds the Form Fill Rate (25% of Structural; a box the AI filled counts 0.85 if found in the
+   documents, 0.50 if not, 1.00 once the producer confirms) and the package drops (0353c36b: 100 -> 99 at 93-94% fill;
+   confirming 74 values earns ~0.6). Proposal: the package SQS is always the score without forms (it is already computed
+   after generation as `without_forms`), and form work gets its own meter ("Forms ready: N values to confirm, M boxes to
+   fill") on the forms and download screens. For: one number before and after forms (dashboard, cover, E&O), his #1
+   priority, the ASG flow (Transcriber makes the forms), the standalone triage / validation product. Side effects to say:
+   confirming AI values no longer moves the score (the meter, the download screen and E&O fact lineage - his V2 #1 -
+   carry it); past packages with AI-filled forms move UP to their without-forms number (send a D6 table first); it
+   changes his approved 40/35/25 Structural blend; each form's own score stays as the form-readiness view. Small to build.
+2. **Form questions appear once forms are selected** (owner's decision): the 125 "carrier receiving this submission", the
+   125 own or rent, the 130 officers. They never move the score, which is what keeps the SQS independent of the forms.
+3. **One status from start to finish** (his #3, built): a pre-form warning stays a warning after generation; D6 on 94
+   stored packages - pre-form 0 moves, after forms 11 of 61 up 1-3 points, 2 from a 60 cap to 85.
+4. **"Hard stop" today** caps the score at 60 and is listed first; it does not stop a download (only the ACORD 140 COPE
+   gate does, allowing a watermarked draft). His call: rename it (e.g. "score blocker") or make it truly block.
+5. **The download screen** now lists only what the producer already saw and has not fixed; confirm / held-back /
+   applicant items are one counted line each.
+6. **#1C built:** a redacted-premium policy is still listed (Choice Electric's EPL is ACORD 125 OTHER row C, premium blank).
+7. **For Michelle (5):** which line takes the prior-carrier "Other" column per year (8 Choice Electric lines compete);
+   which lines take the six page-one OTHER rows beyond six; page-one total blank or partial when a listed premium is
+   redacted; where EBL goes; how strict on values a dec never prints (occupancy, Period of Restoration) and whether they
+   cost Exposure points. Also tell Michelle that Orbin items 5 and 12 were declined (and why).
+8. **Status:** Choice Electric 18 of 27 closed and verified live, 2 ours to re-check live (25, 27), 7 wait on answers;
+   Orbin 17 of 22 closed, 5 wait on answers.
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,

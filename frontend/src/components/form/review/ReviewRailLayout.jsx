@@ -685,7 +685,11 @@ export default function ReviewRailLayout(props) {
             </div>
             {typeof onFixScoreItem === "function" && (
               <button type="button" className="rr-forms-left__btn" onClick={() => onFixScoreItem(formsLeft.item)}>
-                Open {formsLeft.formId ? formLabel(formsLeft.formId) : "forms"}
+                {formsLeft.formId
+                  ? (formsLeft.formCount > 1
+                    ? `Start with ${formLabel(formsLeft.formId)} (most to confirm)`
+                    : `Open ${formLabel(formsLeft.formId)}`)
+                  : "Open forms"}
               </button>
             )}
           </div>

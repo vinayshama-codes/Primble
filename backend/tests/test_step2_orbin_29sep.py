@@ -799,17 +799,17 @@ class TestItem15TheLedgerReconciles:
 
 
 class TestItem15TheNoticeAndTheCard:
-    def test_the_notice_is_informational(self):
-        recs = [r for r in _loss_recs(_form(*_attested()))
-                if r["message"] == sq._ATTESTED_NOT_APPLICABLE_REC]
-        assert len(recs) == 1
-        rec = recs[0]
-        assert rec["score_impact"] == 0 and rec["priority"] == 3
-        assert rec["requires_doc"] is False
-        assert rec["field"] is None
-        assert sq.loss_recommendation_field(rec["message"]) is None
-        assert any(p in rec["message"].lower() for p, _f in sq._LOSS_RECOMMENDATION_FIELDS)
-        assert "\u2014" not in rec["message"], "no em-dash in UI text"
+    def test_the_notice_is_not_a_card(self):
+        # Owner, 14 Oct 2026 (run 0353c36b): the notice sat on all ten forms'
+        # side panels and in the download screen's "items to fix" - the
+        # producer's own answer read back to him. The TEST was right about the
+        # notice and is updated for the card: the notice stays the pillar's own
+        # record (the score panel's Loss History row says it), never a card.
+        assert not [r for r in _loss_recs(_form(*_attested()))
+                    if r["message"] in sq._LOSS_NOT_APPLICABLE_NOTICES]
+        assert sq.loss_recommendation_field(sq._ATTESTED_NOT_APPLICABLE_REC) is None
+        assert any(p in sq._ATTESTED_NOT_APPLICABLE_REC.lower() for p, _f in sq._LOSS_RECOMMENDATION_FIELDS)
+        assert "\u2014" not in sq._ATTESTED_NOT_APPLICABLE_REC, "no em-dash in UI text"
 
     def test_the_card_is_worth_exactly_zero_when_attesting_cannot_raise_the_score(self):
         """An EMPTY package: the pillars that remain average below the 25 the

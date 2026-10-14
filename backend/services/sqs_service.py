@@ -9041,6 +9041,15 @@ def calculate_sqs(
     )
     _loss_doc_phrases = ("no loss history provided", "loss runs", "required for carrier")
     for rec_msg in loss_recs:
+        # A STATUS NOTICE IS NOT A CARD (owner, 14 Oct 2026, run 0353c36b): "No
+        # Known Losses attested - Loss History is Not Applicable ..." sat on all
+        # ten forms' side panels and in the download screen's "items to fix" -
+        # the producer's own answer read back to him ten times. The score panel
+        # already says it on the Loss History row ("Not applicable - No Known
+        # Losses attested"). The three notices stay in `loss_recs` (the pillar's
+        # own record); they are never a card.
+        if rec_msg in _LOSS_NOT_APPLICABLE_NOTICES:
+            continue
         # C2 2.1 (found on the 2026-08-24 live run): an "Underwriting advisory
         # (no score effect)" card - and the informational New Venture notices -
         # must not carry the typed +8 literal. The chip ("up to +8 pts") would

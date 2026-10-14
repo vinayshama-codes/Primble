@@ -327,6 +327,35 @@ def _row_suffix(schema: dict, field: str) -> str:
 
 # ── Which fact a box feeds, and what closing it is worth ─────────────────────
 
+def box_fold_keys(field: str) -> List[str]:
+    """What a box ANSWERS, so the download screen can fold it into the card or
+    issue that asks the same thing (owner, 14 Oct 2026, run 0353c36b - "own or
+    rent?" and the 130 officers each printed twice): the fact an edit writes
+    (`box_fact_key`), the schedule table its row belongs to (the stamper's own
+    binding), and the premises interest for the ACORD 125 interest ticks the
+    own-or-rent card itself checks (`premises_interest.FORM_INTEREST_BOXES`).
+    Display only - nothing is written or scored from it."""
+    keys: List[str] = []
+    fk = box_fact_key(field)
+    if fk:
+        keys.append(fk)
+    try:
+        from services.pdf_service import _SCHED_ROW_RE, _schedule_def_for_base
+        m = _SCHED_ROW_RE.match(str(field or ""))
+        d = _schedule_def_for_base(m.group(1)) if m else None
+        if d is not None and d.list_key and d.list_key not in keys:
+            keys.append(d.list_key)
+    except Exception:                                      # pragma: no cover
+        pass
+    try:
+        from services.premises_interest import FORM_INTEREST_BOXES, PREMISES_INTEREST_FACT
+        if field in FORM_INTEREST_BOXES and PREMISES_INTEREST_FACT not in keys:
+            keys.append(PREMISES_INTEREST_FACT)
+    except Exception:                                      # pragma: no cover
+        pass
+    return keys
+
+
 def box_fact_key(field: str) -> Optional[str]:
     """The fact a producer's edit of this box writes - exactly the loop
     `form_routes.update_pdf` runs (first `_ACORD_FIELD_RULES` pattern with a
@@ -1095,6 +1124,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
             "score_effect_exact": bool(exact),
             "score_text": VERIFY_SCORE_TEXT if status == STATUS_VERIFY else score_text(pts, exact),
             "fact_key": fact_key,
+            "fold_keys": box_fold_keys(field),
             "answer_mode": _answer_mode(fact_key, facts),
             "applicant_step": bool(applicant_step and status == STATUS_MISSING),
             **({"finding": FINDING_HIGH_IMPACT_BLANK} if unanswered_box else {}),
@@ -1276,6 +1306,7 @@ def _collapse_tick_groups(rows: List[dict]) -> List[dict]:
                     reason="Required on this form and none is ticked yet.")
         if any(r.get("blocks_download") for r in grp):
             keep["blocks_download"] = True
+        keep["fold_keys"] = sorted({k for r in grp for k in (r.get("fold_keys") or [])})
         drop = {id(r) for r in grp}
         out = [r for r in out if id(r) not in drop] + [keep]
     return out
@@ -1455,6 +1486,7 @@ def _with_value_findings(rows: List[dict], values: List[dict], *, schema: dict, 
             "score_effect_exact": True,
             "score_text": VERIFY_SCORE_TEXT if label in CONFIRMABLE_LABELS else score_text(0, True),
             "fact_key": fact_key,
+            "fold_keys": box_fold_keys(field),
             "answer_mode": _answer_mode(fact_key, facts),
             "applicant_step": False,
             "finding": v.get("finding"),
@@ -1509,6 +1541,7 @@ def _with_hard_block_rows(rows: List[dict], findings: List[dict], *, schema: dic
             "score_effect_exact": bool(exact),
             "score_text": score_text(pts, exact),
             "fact_key": fact_key,
+            "fold_keys": box_fold_keys(field),
             "answer_mode": _answer_mode(fact_key, facts),
             "applicant_step": False,
             "blocks_download": True,
@@ -1723,6 +1756,12 @@ _FACT_DERIVED_FROM_SCHEDULE = {"locations": "property_locations"}
 _CARD_READS = {
     "rec_min_cope": ("locations", "occupancy_type", "construction_type",
                      "property_building_value", "property_bpp_value"),
+    # ACORD 130's officer card asks for `wc_officer_exclusions`; the officer
+    # TABLE (`wc_officers`, the 130's "partner or executive officer" rows)
+    # answers the same question - `coverage_evidence.wc_officer_treatment_status`
+    # is satisfied by either (owner, 14 Oct 2026: the card and three officer
+    # boxes were two lines for one problem on the download screen).
+    "rec_wc_officer_exclusions": ("wc_officer_exclusions", "wc_officers"),
 }
 
 
