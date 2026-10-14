@@ -423,15 +423,16 @@ console.log(JSON.stringify({
     assert out["pre"] is None
 
 
-def test_form_choices_are_listed_and_counted_until_ticked(tmp_path):
+def test_form_choices_are_not_listed_before_forms(tmp_path):
+    # 14 Oct 2026 (owner): before forms the Recommendations section is the score
+    # only, so a form choice ("Add ACORD 25") is neither listed nor counted there;
+    # the score still leaves it out before forms (defer_form_choices, unchanged).
     out = _node(tmp_path, "recommendations.js", """
 const grouped = {form_choices: [{issue_id: "i1", code: "certificate_requested_but_acord25_missing",
   message: "Add ACORD 25.", resolution: {mode: "none", add_forms: ["ACORD_25"]}}]};
 const open = M.buildRecommendations({groupedIssues: grouped, formsExist: false, tickedFormIds: []});
-const done = M.buildRecommendations({groupedIssues: grouped, formsExist: false, tickedFormIds: ["ACORD_25"]});
 const after = M.buildRecommendations({groupedIssues: grouped, formsExist: true, tickedFormIds: []});
-console.log(JSON.stringify({open: [open.choicesOpen, open.count, M.considerText(open)],
-  done: [done.choicesOpen, done.formChoices[0].done], after: after.formChoices.length}));""")
-    assert out["open"] == [1, 1, "1 your forms need"]
-    assert out["done"] == [0, True]
+console.log(JSON.stringify({open: [open.choicesOpen, open.count, open.formChoices.length],
+  after: after.formChoices.length}));""")
+    assert out["open"] == [0, 0, 0]
     assert out["after"] == 0

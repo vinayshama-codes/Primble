@@ -15732,6 +15732,196 @@ def _currency_to_int_safe(raw: Any) -> int:
     return int(digits) if digits.isdigit() else 0
 
 
+# A DOCUMENT'S OWN CARRIER FOR ITS OWN UNNAMED ROWS (14 Oct 2026, Choice
+# Electric live run f83757cf). The redacted "25-26 Package Policy.pdf" prints
+# AMERISURE INSURANCE COMPANY at the head of its common declarations and no
+# policy number anywhere. Run b117f010 read that carrier onto all five coverage
+# rows (GL $16,818, Inland Marine $2,431, Property $6,275, Crime $500, Employee
+# Benefits $425, each 01/01/2025 - 01/01/2026); the next run of the SAME PDF
+# returned the same five rows with carrier None, while the document's own
+# `carrier_name` and its index entry "CARRIER NAME: AMERISURE INSURANCE
+# COMPANY" still named the company. The header binder
+# (`_bind_carriers_to_contracts`) joins a header carrier to a row only THROUGH
+# A POLICY NUMBER, and a redacted dec has none - so the GL and Property line
+# records had no insurer and ACORD 125's PRIOR CARRIER INFORMATION printed only
+# the Auto row (read from the umbrella's schedule). Extraction is not
+# repeatable; a fact the forms need is derived, never left to the model.
+#
+# A document that is ONE carrier's own paperwork gives that carrier to its own
+# rows that name none - only when all of these hold:
+#   1. ROLE: the policy's own paperwork (declarations, policy, binder, quote,
+#      endorsement). A certificate, an ACORD form, a loss run or an application
+#      names insurers it does not issue.
+#   2. CORROBORATED: the document's `carrier_name` is named again by one of its
+#      own index entries whose LABEL is a carrier label ("Carrier", "Carrier
+#      Name", "Company", "Insuring Company" - `_is_carrier_label` reads the
+#      label, never a sentence), as the same entity, with the VALUE printed in
+#      the document - and either the label printed too (a verified entry) or
+#      the name printed at the head of a page. The Amerisure page prints the
+#      name as an unlabelled header line; "CARRIER NAME" is the model's label
+#      for it and is printed nowhere, so the header is what verifies it.
+#   3. ONE CARRIER PER DOCUMENT: no row, no carrier-labelled entry (label or
+#      value) and no page header names a different insurer. Orbin's EMC package
+#      - Employers Mutual and EMC Property & Casualty in one PDF - does nothing.
+#   4. NEVER OVERWRITES: a row naming a carrier or a NAIC, a row a person
+#      touched, a row denying its line and a bare menu row (no premium, number
+#      or date - "COMMERCIAL AUTOMOBILE COVERAGE PART $" is an option list, not
+#      a policy) keep what they have; a person-sourced `carrier_name` or
+#      `coverage_lines` stops the step.
+# The company is written as the corroborating entry prints it.
+# Measured over all 1,704 stored documents (scratchpad carrier14): 4 documents
+# touched, 12 rows - each a single-carrier declarations (the Choice Electric
+# package in f83757cf and 8a61a2a6, the H7A test package twice); every other
+# document with unnamed rows prints two or more insurers or is a certificate.
+_DOCUMENT_CARRIER_ROLES = frozenset({"dec_page", "policy", "binder", "quote", "endorsement"})
+_CARRIER_LABEL_WORDS = frozenset({"carrier", "insurer", "company", "insurance", "insuring",
+                                  "issuing", "writing", "name", "the", "of", "by"})
+_CARRIER_LABEL_NOUNS = frozenset({"carrier", "insurer", "company"})
+_CARRIER_ROLE_WORD_RE = re.compile(
+    r"\b(?:carriers?|insurers?|compan(?:y|ies)|insuring|issuing|writing|underwriters?)\b", re.I)
+_PERSON_ROW_MARKERS = ("_producer_added", "_producer_fields", "_document_values",
+                       "_policy_key", "_confirmed")
+
+
+def _is_carrier_label(label: Any) -> bool:
+    """A label that names the CARRIER and nothing else ("Carrier Name",
+    "INSURING COMPANY:", "Item 2. Insurer"). A sentence, an address or contact
+    label, a "servicing" / "prior" carrier and a per-line heading are not."""
+    toks = re.sub(r"[^a-z0-9]+", " ", str(label or "").lower()).split()
+    while len(toks) > 1 and (toks[0] == "item" or toks[0].isdigit() or len(toks[0]) == 1):
+        toks = toks[1:]                     # "Item 2." / "1." / "A." enumerators
+    return (bool(toks) and set(toks) <= _CARRIER_LABEL_WORDS
+            and bool(set(toks) & _CARRIER_LABEL_NOUNS))
+
+
+def _insurer_named_in(text: Any) -> Optional[str]:
+    """The insurer legal name ``text`` is, or starts with ("EMC Property &
+    Casualty Company" in "EMC Property & Casualty Company NAIC No. 21415"),
+    or None - an agency, a rating bureau, or words that do not read as an
+    insurer (`field_mapping_integrity.looks_like_carrier`)."""
+    try:
+        from services.field_mapping_integrity import looks_like_carrier
+        from services.normalization import is_insurance_bureau
+    except Exception:                                         # noqa: BLE001
+        return None
+    s = re.sub(r"\s+", " ", str(text or "")).strip(" ,*:")
+    if not s:
+        return None
+    head = _header_carrier_name(s)
+    name = head.strip(" ,*") if head else s
+    if (not looks_like_carrier(name) or is_insurance_bureau(name)
+            or _NOT_A_CARRIER_RE.search(name)):
+        return None
+    return name
+
+
+def _page_header_insurers(text: Any) -> List[str]:
+    """Every insurer a page HEADER prints - the header binder's own reading
+    (`_header_carrier_name` over each page's first `_HEADER_LINE_COUNT`
+    lines), every matching line rather than only the first."""
+    out: List[str] = []
+    for _pno, body in _page_blocks(text):
+        for ln in body.strip().splitlines()[:_HEADER_LINE_COUNT]:
+            name = _insurer_named_in(ln) if _header_carrier_name(ln.strip()) else None
+            if name:
+                out.append(name)
+    return out
+
+
+def _row_takes_document_carrier(row: Any) -> bool:
+    """A coverage row that may take its document's carrier: it names no
+    insurer (no carrier, no NAIC), no person touched it, it does not deny its
+    line, and it states something of its own - a premium, a number or a date
+    (the same test `_sources_are_own_declarations` uses for a speaking row)."""
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("carrier") or "").strip() or str(row.get("naic") or "").strip():
+        return False
+    if any(row.get(k) for k in _PERSON_ROW_MARKERS) or _line_entry_denies_coverage(row):
+        return False
+    return (_line_row_premium(row.get("premium")) is not None
+            or bool(str(row.get("policy_number") or "").strip())
+            or bool(str(row.get("effective_date") or "").strip())
+            or bool(str(row.get("expiration_date") or "").strip()))
+
+
+def assign_document_carrier_to_rows(doc: Any) -> List[str]:
+    """Give a single-carrier document's own unnamed coverage rows the carrier
+    the document itself names (see the block above). Mutates the document's
+    ``coverage_lines``; returns the rows written ("<line>=<carrier>")."""
+    if not isinstance(doc, dict) or doc.get("excluded") or not isinstance(doc.get("facts"), dict):
+        return []
+    if str(doc.get("doc_type") or "").strip().lower() not in _DOCUMENT_CARRIER_ROLES:
+        return []
+    facts = doc["facts"]
+    held_rows, held_name = facts.get("coverage_lines"), facts.get("carrier_name")
+    if any(isinstance(h, dict) and str(h.get("source") or "").strip().lower()
+           in _PERSON_FACT_SOURCES for h in (held_rows, held_name)):
+        return []
+    rows, carrier = _unwrap_fact(held_rows), _unwrap_fact(held_name)
+    if not isinstance(rows, list) or not isinstance(carrier, str) or not carrier.strip():
+        return []
+    carrier = re.sub(r"\s+", " ", carrier).strip()
+    rows = [r for r in rows if isinstance(r, dict)]
+    targets = [r for r in rows if _row_takes_document_carrier(r)]
+    if not targets:
+        return []
+    try:
+        from services.normalization import is_insurance_bureau, same_entity_name
+    except Exception:                                         # noqa: BLE001
+        return []
+    if is_insurance_bureau(carrier) or _NOT_A_CARRIER_RE.search(carrier):
+        return []
+    # 3. One carrier per document - its own rows.
+    own_naic = str(_unwrap_fact(facts.get("carrier_naic")) or "").strip()
+    for r in rows:
+        name = str(r.get("carrier") or "").strip()
+        if name and not is_insurance_bureau(name) and not same_entity_name(name, carrier):
+            return []
+        naic = str(r.get("naic") or "").strip()
+        if naic and not name and naic != own_naic:
+            return []                       # an insurer named only by its code
+    # 2. Corroboration, and 3. one carrier - its own carrier-labelled entries.
+    text = str(doc.get("text") or "")
+    hay = _dec_norm(text)
+    labelled: Optional[str] = None
+    unlabelled: Optional[str] = None
+    raw = _unwrap_fact(facts.get("dec_page_entries"))
+    for e in raw if isinstance(raw, list) else []:
+        if not isinstance(e, dict):
+            continue
+        owner = str(e.get("owner") or "").strip().lower()
+        label = str(e.get("label") or "")
+        value = re.sub(r"\s+", " ", str(e.get("value") or "")).strip()
+        if owner in ("applicant", "producer") or not (
+                owner == "carrier" or _CARRIER_ROLE_WORD_RE.search(label)):
+            continue
+        for printed in (label, value):
+            other = _insurer_named_in(printed)
+            if other and not same_entity_name(other, carrier):
+                return []                   # a second company in this document
+        if (_is_carrier_label(label) and same_entity_name(value, carrier)
+                and _entry_is_printed(_dec_norm(value), hay)):
+            if _entry_is_printed(_dec_norm(label), hay):
+                labelled = labelled or value
+            else:
+                unlabelled = unlabelled or value
+    # 3. One carrier per document - its page headers; and 2. the header that
+    # verifies an entry whose label the page does not print.
+    heads = _page_header_insurers(text)
+    if any(not same_entity_name(h, carrier) for h in heads):
+        return []
+    printing = labelled or (unlabelled if any(same_entity_name(h, carrier) for h in heads)
+                            else None)
+    if not printing:
+        return []
+    written: List[str] = []
+    for r in targets:
+        r["carrier"] = printing
+        written.append(f"{str(r.get('line') or '')[:40]}={printing}")
+    return written
+
+
 # THE BUILDING / BPP VALUE THE PREMISES SCHEDULE PRINTS (8 Oct 2026, run
 # 2076fe35). Two runs of the identical Package Policy: one extraction returned
 # `property_building_value` $798,556 and `property_bpp_value` $73,008, the next
@@ -16240,6 +16430,16 @@ def merge_facts(docs: List[dict], primary: dict,
                             "%s; its unpriced rows take it", _cd.get("filename"), _dp)
         except Exception as exc:  # noqa: BLE001 - never block the pipeline
             logger.warning("merge_facts: declared-premium check failed: %s", exc)
+        # The carrier a single-carrier document names, on its own rows that
+        # name none (assign_document_carrier_to_rows) - a redacted dec has no
+        # policy number for the header binder to join through.
+        try:
+            _dc = assign_document_carrier_to_rows(_cd)
+            if _dc:
+                logger.info("merge_facts: %s - one carrier's own declarations; its "
+                            "unnamed rows take it: %s", _cd.get("filename"), _dc[:6])
+        except Exception as exc:  # noqa: BLE001 - never block the pipeline
+            logger.warning("merge_facts: document-carrier check failed: %s", exc)
         # The coverage TRIGGER, per document for the same reason: a form title
         # or a form number in `gl_form_type` is no basis, and the card, the
         # merge and the stamper must all read one value. See coverage_basis.

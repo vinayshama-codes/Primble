@@ -332,9 +332,9 @@ def test_every_recommendations_group_folds_like_hard_stops_and_warnings():
     for title in ('title="Raise your score"', 'title="Your forms will need"', 'title="Resolved"'):
         assert title in recs, title
     assert "const [open, setOpen] = useState(true);" in recs            # Raise your score: open
-    assert "const [formsOpen, setFormsOpen] = useState(true);" in recs  # Your forms will need: open
     assert "const [groupOpen, setGroupOpen] = useState(true);" in recs  # after forms: open
     resolved = recs[recs.index("function ResolvedGroup"):recs.index("function AfterFormsGroup")]
     assert "useState(false)" in resolved                                # Resolved: closed
-    assert "<div hidden={!formsOpen}>" in recs and "<BeforeYouGenerate" in recs
+    # 14 Oct 2026 (owner): no forms group before forms at all.
+    assert "formsOpen" not in recs and "<BeforeYouGenerate" not in recs
     assert '.rec-fold[aria-expanded="true"] > .rec-tri { transform: rotate(90deg); }' in css

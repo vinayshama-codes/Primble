@@ -23327,6 +23327,22 @@ def authoritative_expected_value(
             if _is_empty_llm_value(out) or str(out or "").strip() == "":
                 return None                               # owned blank
             return out
+        # A TABLE ROW owns its own cells (14 Oct 2026, live run f83757cf). The
+        # location table printed building 1's full-time staff "90" and its
+        # "Office and electrical shop" on ACORD 125, and Field QA compared them
+        # with the package's employee count (100) and business description - a
+        # false "shows 90 but the source value is 100. Re-confirm" whose
+        # re-confirm would write a building's count over the company's. A cell
+        # the schedule resolver fills is compared with its row; a row with no
+        # value for it has nothing to compare.
+        try:
+            out = _resolve_schedule_row(field_name, scoped)
+        except Exception:                                 # noqa: BLE001
+            out = _SCHED_SKIP
+        if out is not _SCHED_SKIP:
+            if _is_empty_llm_value(out) or str(out or "").strip() == "":
+                return None
+            return out
     finally:
         if isinstance(schema, dict):
             _set_schema_context(prev)

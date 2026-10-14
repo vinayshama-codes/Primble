@@ -12,9 +12,9 @@
 //      lists), each with the fix window the server attached
 //      (`resolution`, services/review_recommendations.py). No percentages
 //      (owner, 1 Oct 2026).
-//   2. "Your forms will need" - before forms: the "Before you generate" dry run
-//      (`dry_run`, services/form_dry_run.py); after forms: the editor's
-//      needs-attention Missing rows (GET /api/needs-attention).
+//   2. "Your forms will need" - after forms only: the editor's needs-attention
+//      Missing rows (GET /api/needs-attention). Before forms nothing about the
+//      forms is listed (owner, 14 Oct 2026 - see buildRecommendations).
 //
 // ONE TO-DO, ONE PLACE. An item whose whole fix is already offered by a Hard
 // Stop or Warning card on this screen, or by a "Key details missing" link, is
@@ -274,19 +274,21 @@ export function formChoiceItems(groupedIssues, tickedFormIds = []) {
 // `formsExist`: forms are generated (group 2 reads `attention`); otherwise
 // group 2 reads `dryRun`. `count` = the unique items the section lists - the
 // number the Overview's link prints.
-export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, dryRun, attention, formsExist, tickedFormIds } = {}) {
+export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist } = {}) {
   const covered = onScreenFixKeys(groupedIssues, keyDetails);
   const score = scoreItems(packageSqs, covered);
+  // BEFORE FORMS THIS SECTION IS THE SCORE ONLY (owner, 14 Oct 2026: "we are
+  // trying to make SQS independent of forms ... this section does not increase
+  // score so why show it before even generating the forms"). What a form will
+  // need - the dry run's boxes, the per-form cards, a form to add - moves no
+  // score; it is listed after generation as each form's Missing rows. Reverses
+  // the 7 Oct pre-form group (Brent #22's per-form cards now wait for the forms).
   const forms = formsExist
     ? { ...formItemsAfterForms(attention, covered, score), source: "attention", hiddenIds: new Set() }
-    : { ...formItemsBeforeForms(dryRun, covered, score), source: "dry_run" };
-  // Before forms, a dry run that is still checking (or could not) has no
-  // items yet - it never counts.
-  const formsReady = formsExist ? !!attention : dryRun?.status === "ready";
-  const formChoices = formsExist ? [] : formChoiceItems(groupedIssues, tickedFormIds);
-  const choicesOpen = formChoices.filter((c) => !c.done).length;
-  const formsCount = (formsReady ? forms.count : 0) + choicesOpen;
-  return { score, forms, formsReady, formChoices, choicesOpen, count: score.length + formsCount };
+    : { forms: [], count: 0, hiddenIds: new Set(), source: "none" };
+  const formsReady = formsExist ? !!attention : true;
+  const formsCount = formsExist && formsReady ? forms.count : 0;
+  return { score, forms, formsReady, formChoices: [], choicesOpen: 0, count: score.length + formsCount };
 }
 
 export const recommendationsText = (n) => `${n} recommendation${n === 1 ? "" : "s"}`;

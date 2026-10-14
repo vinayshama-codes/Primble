@@ -6,17 +6,15 @@
 // Two groups (rules and data: utils/recommendations.js):
 //   "Raise your score"     - the package scorer's Best Solutions rows a person
 //                            can answer, each opening the page's fix window.
-//   "Your forms will need" - before forms, the "Before you generate" dry run
-//                            (BeforeYouGenerate, unchanged behaviour: polling,
-//                            cache, re-check on ticks); after forms, each
-//                            form's needs-attention Missing rows with "Open in
-//                            editor".
+//   "Your forms will need" - after forms only: each form's needs-attention
+//                            Missing rows with "Open in editor". Before forms
+//                            the section is the score only (owner, 14 Oct 2026:
+//                            the SQS is independent of the forms).
 // Anything already on a Hard Stop / Warning card or a key-details link is not
 // repeated. Presentation only: every fix goes through the page's handlers.
 // Used by the rail layout (its own section) and the classic layout.
 
 import { useState } from "react";
-import BeforeYouGenerate from "./BeforeYouGenerate";
 import useAttentionList from "./useAttentionList";
 import {
   buildRecommendations, pointsText, recommendationResolvedRows, liveRecommendationIds,
@@ -80,32 +78,6 @@ function ScoreGroup({ items, onOpenFix }) {
     </section>
   );
 }
-
-// Before forms: a check whose only fix is choosing a form (13 Oct 2026). Not in
-// the score - "Add" ticks the form in Select forms; a ticked one says so, or -
-// where the page keeps a Resolved list - moves there as "Added".
-function FormChoices({ choices, onAddForm }) {
-  if (!choices.length) return null;
-  return (
-    <div className="rec-list" data-rec-group="form-choices">
-      {choices.map((c) => (
-        <div key={c.id} className="rec-row" data-rec-id={c.id}>
-          <div className="rec-row__main">
-            <div className="rec-row__title">Add {c.asked.map(formLabel).join(" and ")}</div>
-            {c.message && <div className="rec-row__detail">{c.message}</div>}
-            {c.done && <div className="rec-row__also">Ticked in Select forms.</div>}
-          </div>
-          {!c.done && typeof onAddForm === "function" && c.forms.map((f) => (
-            <button key={f} type="button" className="rec-link" onClick={() => onAddForm(f)}>Add {formLabel(f)}</button>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// A turn-back arrow for "Open again" (the row returns to its list) - the Hard
-// Stops / Warnings Resolved lists' icon.
 function ReopenIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -233,9 +205,7 @@ export default function Recommendations({
   const att = attention !== undefined ? attention : ownAttention;
   const rec = model || buildRecommendations({ packageSqs, groupedIssues, keyDetails, dryRun, attention: att, formsExist, tickedFormIds });
   const allChoices = Array.isArray(rec.formChoices) ? rec.formChoices : [];
-  // With a Resolved list, a ticked form choice moves there as "Added".
   const keepsResolved = typeof onReopenResolved === "function";
-  const choices = keepsResolved ? allChoices.filter((c) => !c.done) : allChoices;
   const resolved = keepsResolved
     ? recommendationResolvedRows({
       statusEntries: issueStatuses?.entries ? Array.from(issueStatuses.entries()) : [],
@@ -243,14 +213,8 @@ export default function Recommendations({
       formChoices: allChoices,
     })
     : [];
-  // Before forms the group counts its dry-run items and the form choices not yet ticked.
-  const formsBadge = rec.forms.count + (formsExist ? 0 : (rec.choicesOpen || 0));
-  // The "Your forms will need" group folds like the others (13 Oct 2026), open
-  // to start.
-  const [formsOpen, setFormsOpen] = useState(true);
-  const formsQuiet = formsExist
-    ? rec.formsReady && rec.forms.count === 0
-    : (dryRun?.status === "ready" && rec.forms.count === 0 && !(rec.choicesOpen > 0));
+  // Before forms there is no forms group (owner, 14 Oct 2026): nothing to wait for.
+  const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 : true;
   const allGood = rec.score.length === 0 && formsQuiet && !generating;
 
   return (
@@ -258,43 +222,16 @@ export default function Recommendations({
       {heading && (
         <div>
           <h3 className="rec-heading">Recommendations</h3>
-          <p className="rec-heading-sub">Optional to-dos that raise your score or complete your forms. None of them stops you.</p>
+          <p className="rec-heading-sub">{formsExist
+            ? "Optional to-dos that raise your score or complete your forms. None of them stops you."
+            : "Optional to-dos that raise your score. None of them stops you."}</p>
         </div>
       )}
       {allGood && <div className="rec-empty--good">Nothing to add - your package is in good shape.</div>}
-      {/* Hidden, not unmounted, when there is nothing to list: the dry run
-          still re-checks when the ticked forms change. */}
       <div className="rec" hidden={allGood}>
       <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix} />
-      {formsExist ? (
+      {formsExist && (
         <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm} />
-      ) : generating ? (
-        <section className="rec-group" aria-label="Your forms will need">
-          <FoldHead open={formsOpen} onToggle={() => setFormsOpen((o) => !o)} title="Your forms will need" />
-          {formsOpen && <div className="rec-empty">Your forms are being generated. What they need appears here when they are ready.</div>}
-        </section>
-      ) : (
-        <section className="rec-group" aria-label="Your forms will need" data-rec-group="forms">
-          <FoldHead open={formsOpen} onToggle={() => setFormsOpen((o) => !o)} title="Your forms will need">
-            {/* Its count beside its title, like "Raise your score" (owner, 13 Oct
-                2026: "2 to consider" with one card on screen - the other count
-                sat beside "Check again" and read as that button's). */}
-            {formsBadge > 0 && <span className="rec-count">{formsBadge}</span>}
-          </FoldHead>
-          {/* Closed is hidden, not unmounted: the form check keeps polling and
-              re-checking on the ticks while the group is folded. */}
-          <div hidden={!formsOpen}>
-          <div className="rec-group__sub">Checked on the forms before they are generated.</div>
-          <FormChoices choices={choices} onAddForm={onAddForm} />
-          {dryRun ? (
-            <BeforeYouGenerate dryRun={dryRun} sessionId={sessionId} tickedFormIds={tickedFormIds}
-              onUpdate={onDryRunUpdate} onOpenFix={onOpenDryRunFix}
-              title={null} bare hiddenIds={rec.forms.hiddenIds} />
-          ) : (
-            <div className="rec-empty">The forms are checked once the package has recommended forms.</div>
-          )}
-          </div>
-        </section>
       )}
       </div>
       {/* Outside the hidden block: what was handled stays reachable when

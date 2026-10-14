@@ -244,15 +244,14 @@ def test_one_to_do_one_place_before_forms(tmp_path):
     # The mailing address is the warning card's (never twice); the synthetic
     # hard-stops row and the routeless pillar are not listed; points are the
     # answer's own gain, never a percentage.
-    assert o["score"] == [["Loss History", "+3 pts", "field", ["ACORD 127"]],
+    # 14 Oct 2026 (owner): before forms the section is the SCORE only - "we are
+    # trying to make SQS independent of forms ... this section does not increase
+    # score". The dry run's items are not listed or counted, and no score row is
+    # tagged with a form that does not exist yet.
+    assert o["score"] == [["Loss History", "+3 pts", "field", []],
                           ["Narrative Quality", "up to +5 pts", "narrative", []]]
-    # The COPE stop asks for construction (hidden), not year built / roof (kept);
-    # the driver warning only opens the driver table - it never hides WHICH
-    # cells a form needs (kept); the mailing address is the card's; the loss
-    # statement is the score row's.
-    assert o["forms"] == [["ACORD_125", ["a1", "a2"]], ["ACORD_140", ["b1"]], ["ACORD_127", ["c1"]]]
-    assert o["hidden"] == ["a3", "b2", "c2"]
-    assert o["count"] == 2 + 4
+    assert o["forms"] == [] and o["hidden"] == []
+    assert o["count"] == 2
     assert o["issue"]["__scoreItem"] is True and o["issue"]["resolution"]["mode"] == "field"
     assert "+3 pts" in o["issue"]["message"] and "%" not in o["issue"]["message"]
 
@@ -374,11 +373,14 @@ def test_the_classic_layout_lists_them_after_the_warnings():
     assert "onFixScoreItem={openScoreFix}" in src and "issue?.__scoreItem" in src
 
 
-def test_before_you_generate_keeps_its_behaviour_and_is_composed():
+def test_before_forms_the_section_is_the_score_only():
+    """14 Oct 2026 (owner): "Your forms will need" is gone before forms - the dry run is
+    not rendered (BeforeYouGenerate stays as a component, unused) and the forms group
+    appears only once forms exist (each form's Missing rows)."""
     rec = RECS_JSX.read_text(encoding="utf-8")
     byg = BYG.read_text(encoding="utf-8")
-    assert "<BeforeYouGenerate" in rec and "hiddenIds={rec.forms.hiddenIds}" in rec
-    # polling, "Check again" and the re-check on ticks are untouched
+    assert "<BeforeYouGenerate" not in rec and "import BeforeYouGenerate" not in rec
+    assert "{formsExist && (" in rec and "<AfterFormsGroup" in rec
     for needle in ("MAX_POLLS = 12", "POLL_MS = 2500", "dryRunMatchesTicks(dryRun, tickedFormIds)", "Check again"):
         assert needle in byg
 

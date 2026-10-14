@@ -176,10 +176,9 @@ console.log(JSON.stringify([
     assert json.loads(run.stdout) == ["1 to raise your score · 1 your forms need",
                                       "2 to raise your score", "3 your forms need"]
     rec = (_FRONT / "components" / "form" / "review" / "Recommendations.jsx").read_text(encoding="utf-8")
-    # The forms group's badge also counts the form choices not yet ticked (13 Oct 2026,
-    # the SQS without forms - "Add ACORD 25" is listed in this group).
-    assert '{formsBadge > 0 && <span className="rec-count">{formsBadge}</span>}' in rec
-    assert "const formsBadge = rec.forms.count + (formsExist ? 0 : (rec.choicesOpen || 0));" in rec
+    # 14 Oct 2026 (owner): no forms group before forms, so no pre-form forms badge;
+    # after forms the group's badge is its own items.
+    assert "formsBadge" not in rec and '{count > 0 && <span className="rec-count">{count}</span>}' in rec
     byg = (_FRONT / "components" / "form" / "review" / "BeforeYouGenerate.jsx").read_text(encoding="utf-8")
     assert "status === DRY_RUN_READY && count > 0 && !bare && (" in byg
 

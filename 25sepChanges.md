@@ -970,6 +970,38 @@ Z13 / Z14's other fixes show on a NEW package (same 6 PDFs): 125 GL CODE 92478, 
 station / exposure distances blank, 137 UM / towing blank. Tests: `tests/test_gl_code_answers_14oct.py` (65); `test_form_findings_11sep_round3` updated (its by-location fixture
 held a dummy code "1" - the TEST was outdated: the home now needs a GL code). Suite 14,102 / 1 / 19.
 
+### Z15. Live run `f83757cf` (14 Oct 2026, Z14 deployed; 6 decs, auto held back; 41 -> 100 before forms, 99 / 100 after)
+
+Graded box by box from the stored row. Verified on the forms: 125 GL CODE and 126 row A 92478; 131 auto CSL
+1,000,000; Excess 131 Travelers $4M / umbrella 131 Amerisure $5M; 140 fire station, exposure distances and improvement
+years blank (hydrant 500 on both buildings); 137 UM / towing blank; proposed term 01/01/2027-01/01/2028 (Please
+verify); page-one premiums and carrier blank + the receiving-carrier card (Brent 8 Oct); 125 lines incl. Other: EBL and
+Excess; one location, two buildings; no "COMMERCIAL AUTO"; Exposure 100. Three changes (uncommitted until deployed):
+1. **"Your forms will need" is gone before forms (owner: "this section does not increase score so why show it before
+   even generating the forms").** `utils/recommendations.buildRecommendations` lists and counts nothing about forms
+   before generation (dry run, per-form cards, form choices); `Recommendations.jsx` renders the group only once forms
+   exist. Reverses the 7 Oct pre-form group: Brent #22's per-form cards (125 receiving carrier, 126 GL form type, 130
+   officers) now appear after forms. A deferred form choice ("Add ACORD 25") surfaces after generation. TESTS updated
+   (not code): `test_recommendations_section_7oct`, `test_recommendations_resolved_13oct`,
+   `test_sqs_without_forms_13oct`, `test_narrative_options_and_reader_13oct`. `BeforeYouGenerate.jsx` is now unused.
+2. **Field QA compared a location row's own cells with package facts** ("Number of full time employees shows 90 but
+   the source value is 100. Re-confirm"; the premises' "Office and electrical shop" vs the business description).
+   `pdf_service.authoritative_expected_value` (the one door) now asks the schedule resolver: a table cell's owner is
+   its row. Proven on the live forms (2 false rows gone, nothing else); the page-one carrier / question 4 callers are
+   untouched (no table cell). Tests: `tests/test_field_qa_table_rows_14oct.py`.
+3. **The 125 prior-carrier grid lost GL and Property** - this run's Package Policy rows came back with no carrier (the
+   last run's had "AMERISURE INSURANCE COMPANY"); the header carrier only bound through policy numbers and these decs
+   are redacted. `extraction_service.assign_document_carrier_to_rows` (per-document pre-pass in `merge_facts`): a document that is one
+   carrier's own paperwork, whose `carrier_name` a carrier-labelled index entry corroborates and which names no other
+   carrier, gives it to its own rows that print none (never over a carrier, a NAIC or a person's value). Measured on
+   all 1,704 stored documents: 4 touched (12 rows), all that document's only carrier. `f83757cf` now prints GL /
+   Property prior rows (Amerisure, 01/01/2025); `b117f010` unchanged. Acts at the merge: adding the 7th PDF re-merges
+   the package. Tests: `tests/test_document_carrier_rows_14oct.py`.
+Suite 14,150 / 1 / 19. **Download review, read with the owner:** after these deploy, 12 "to fix" are real (LLC
+members, own / rent, leased area x2, 126 code-only row's 6 cells, 131 hazardous materials x2); signatures (12) and
+"AI held back" (58, refusals working) stay by design. **Open, ours:** CE 25 (add the auto policy after this deploy),
+Orbin 17 (retype check), G2 client path live; tell Michelle 5 / 12.
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,
