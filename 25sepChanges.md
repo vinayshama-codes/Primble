@@ -1419,6 +1419,18 @@ already retracted by the Harborline exclude, so the next re-score (any save - e.
 package returns to 99; no typing needed. Tests: `tests/test_exclude_takes_back_15oct.py` 24 -> 28 (the 4 new ones, with the ACORD 186 offer
 test, fail on `fe11b8c` and pass now).
 
+**Z23 live check, part 3 (15 Oct, 04:50 IST, `df3e981` deployed):** the owner confirmed one value. The PACKAGE went to
+99 with no stops - but nine forms stayed at 85 under the old warning and the review page kept listing it. Cause (older
+than tonight): the save route re-scores only the edited form, the forms its edit propagated to and the package; the
+stored issue list and every other form's score are rebuilt only by `recalculate_session_scores`. So any save that clears
+a package-wide warning (typing a mailing address into a form box, say) left the review page and the other forms stale.
+**Fixed offline:** a save whose fresh stops differ from the stored ones - or whose stored issue list still holds a
+stop-built ("legacy_") warning the stops no longer raise (`form_routes.issue_list_outdated`; checked on 17 stored
+snapshots: only the live stale one trips it) - runs that one full recalculation and returns every form's score
+(`forms_sqs`); the screen merges them (`utils/formScores.withFormScores`, all three save handlers). Tests:
+`tests/test_save_refreshes_every_form_15oct.py` (5). On `0353c36b` after the deploy: any one Confirm refreshes all 10
+forms and the review page.
+
 ### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
 
 Wrong values found in our own runs, NOT on Brent's 27 or Michelle's 22. Owner: "keep these and we will fix later on".

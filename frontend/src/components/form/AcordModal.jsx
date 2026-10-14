@@ -10,6 +10,7 @@ import NeedsAttentionPanel, { DownloadReviewList } from "./NeedsAttentionPanel";
 import { downloadReviewCounts, downloadReviewHeadline, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
 import { confirmFieldUpdates } from "../../utils/confirmValues";
 import { formsEffect } from "../../utils/scoreWithForms";
+import { withFormScores } from "../../utils/formScores";
 import KeyDetailsMissing from "./review/KeyDetailsMissing";
 import Recommendations from "./review/Recommendations";
 import { dryRunFixIssue } from "../../utils/dryRun";
@@ -4870,6 +4871,7 @@ const AcordModal = forwardRef(function AcordModal({
         return false;
       }
       if (data.sqs) setGeneratedForms((prev) => (prev[row.form_id] ? { ...prev, [row.form_id]: { ...prev[row.form_id], sqs: data.sqs } } : prev));
+      if (data.forms_sqs) setGeneratedForms((prev) => withFormScores(prev, data.forms_sqs));
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       setPdfRefreshTick((t) => t + 1);
       return true;
@@ -4901,6 +4903,7 @@ const AcordModal = forwardRef(function AcordModal({
         return false;
       }
       if (data.sqs) setGeneratedForms((prev) => (prev[formId] ? { ...prev, [formId]: { ...prev[formId], sqs: data.sqs } } : prev));
+      if (data.forms_sqs) setGeneratedForms((prev) => withFormScores(prev, data.forms_sqs));
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       setPdfRefreshTick((t) => t + 1);
       return true;
@@ -10254,10 +10257,10 @@ const AcordModal = forwardRef(function AcordModal({
                   // A score has arrived for the saved state, so nothing is stale.
                   setPendingEdits(false);
                   refreshSigStatus();        // a save can end an applicant signature (Orbin item 14)
-                  setGeneratedForms(prev => ({
+                  setGeneratedForms(prev => withFormScores({
                     ...prev,
                     [fid]: { ...prev[fid], sqs: newSqs }
-                  }));
+                  }, extras?.formsSqs));
                   if (extras?.packageSqs) setPackageSqs(extras.packageSqs);
                   if (Array.isArray(extras?.crossIssues)) setCrossIssues(extras.crossIssues);
                   if (extras?.groupedCrossIssues !== undefined) setCrossGrouped(extras.groupedCrossIssues || null);

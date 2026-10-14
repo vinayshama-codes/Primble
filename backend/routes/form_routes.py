@@ -2291,6 +2291,31 @@ def label_producer_edits(confidence: dict, client_filled: set, field_updates: di
             confidence[k] = "low_confidence"
 
 
+def stop_signature(hard_stops: Any, soft_stops: Any) -> tuple:
+    """The package's stops as a comparable value (order and duplicates ignored)."""
+    def _norm(stops: Any) -> tuple:
+        return tuple(sorted({str(x) for x in (stops or []) if str(x or "").strip()}))
+    return (_norm(hard_stops), _norm(soft_stops))
+
+
+def issue_list_outdated(structured_issues: Any, hard_stops: Any, soft_stops: Any) -> bool:
+    """Does the stored issue list hold a stop-built issue (a "legacy_" code)
+    the current stops no longer raise? That list is rebuilt only by the full
+    recalculation, so such an issue is the review page listing a warning the
+    score no longer has (15 Oct 2026, live `0353c36b`). A stored message
+    carries its fix sentence after the stop's own words ("... Fix: Review and
+    correct this before proceeding."), so a live stop is matched as its start."""
+    live = [str(x).strip() for x in list(hard_stops or []) + list(soft_stops or [])
+            if str(x or "").strip()]
+    for issue in structured_issues or ():
+        if not isinstance(issue, dict) or not str(issue.get("code") or "").startswith("legacy_"):
+            continue
+        message = str(issue.get("message") or "").strip()
+        if message and not any(message == stop or message.startswith(stop) for stop in live):
+            return True
+    return False
+
+
 @router.post("/api/update-pdf")
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
     import hashlib, json
@@ -2300,6 +2325,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = session.get("generated_forms", {})
     active_id = session.get("active_form_id")
+    # The package's stops as stored BEFORE this save - see "A SAVE THAT MOVES
+    # THE PACKAGE'S STOPS" below.
+    _stops_before = stop_signature(session.get("hard_stops"), session.get("soft_stops"))
 
     form_id = req.field_updates.pop("__form_id__", active_id)
     req.field_updates.pop("__signed__", None)
@@ -2922,11 +2950,45 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             updated_facts, session.get("underwriting_confirmations") or {},
         )
 
+        # ── A SAVE THAT MOVES THE PACKAGE'S STOPS REFRESHES EVERY FORM ────────
+        # (15 Oct 2026, live `0353c36b`.) This path re-scores the edited form,
+        # the forms the edit propagated to and the package, and stores the fresh
+        # stops - but every OTHER form kept the cap of a warning that no longer
+        # fires, and the review page kept listing it: the stored issue list is
+        # rebuilt only by `recalculate_session_scores`. Confirming one value took
+        # the package to 99 while nine forms stayed at 85 under the old warning.
+        # When the stops moved - or the stored issue list still holds a warning
+        # the stops no longer raise (a package left that way before this fix) -
+        # that one full recalculation runs (every form, the issue list, the
+        # cards, the credits) and the response carries every form's score, so
+        # the screen updates them all.
+        _forms_sqs = None
+        if stop_signature(fresh_hard_stops, fresh_soft_stops) != _stops_before \
+                or issue_list_outdated(session.get("structured_issues"),
+                                       fresh_hard_stops, fresh_soft_stops):
+            try:
+                from services.arq_service import recalculate_session_scores
+                await recalculate_session_scores(req.session_id)
+                _fresh_row = await get_processing_session(req.session_id)
+                _forms_sqs = {
+                    fid: fd.get("sqs")
+                    for fid, fd in (_fresh_row.get("generated_forms") or {}).items()
+                    if isinstance(fd, dict) and isinstance(fd.get("sqs"), dict)
+                }
+                if isinstance(_fresh_row.get("package_sqs"), dict):
+                    pkg_sqs = _fresh_row["package_sqs"]
+                if isinstance(_forms_sqs.get(form_id), dict):
+                    sqs = _forms_sqs[form_id]
+            except Exception as _rx:                               # noqa: BLE001
+                logger.warning("update_pdf: full recalculation after a stop change skipped: %s", _rx)
+                _forms_sqs = None
+
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
                              "package_sqs": pkg_sqs, "cross_issues": _display_cross,
                              "grouped_cross_issues": _grouped_cross_issues_or_none(
                                  _display_cross, facts=updated_facts),
-                             "stamp_consistency": _stamp_check})
+                             "stamp_consistency": _stamp_check,
+                             **({"forms_sqs": _forms_sqs} if _forms_sqs else {})})
     except HTTPException:
         raise
     except Exception as ex:
