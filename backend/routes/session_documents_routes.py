@@ -103,12 +103,16 @@ async def _package_page(session_id: str, current_user: dict) -> dict:
 
 
 def _integrity_refusal(ex: IntegrityReviewRequired, change: str = "added") -> HTTPException:
-    names = [str(e) for e in (ex.verdict.get("detected_entities") or []) if str(e or "").strip()]
-    who = f" ({', '.join(names)})" if names else ""
+    # Only the OTHER insured(s) - never the package's own applicant (15 Oct
+    # 2026: the verdict's entity list put CHOICE ELECTRIC LLC first in "These
+    # documents name a different insured (...)" on Choice Electric's package).
+    other = str(getattr(ex, "other_insured", None) or "").strip()
+    who = f" ({other})" if other else ""
     if change == "added":
         # Two answers since 14 Oct 2026 (owner): keep them as evidence only, or
         # use their values because they ARE this insured (the panel's buttons).
-        message = ("These documents name a different insured" + who + ". Nothing was added yet.")
+        subject = "This document names" if len(ex.documents or []) == 1 else "These documents name"
+        message = (subject + " a different insured" + who + ". Nothing was added yet.")
     else:
         message = ("This document names a different insured" + who + ". Nothing was changed. "
                    "Include it only if it belongs to this insured.")
@@ -117,6 +121,7 @@ def _integrity_refusal(ex: IntegrityReviewRequired, change: str = "added") -> HT
         "message": message,
         "integrity": ex.verdict,
         "documents": ex.documents,
+        "other_insured": other or None,
         "can_confirm": True,
     })
 
@@ -132,6 +137,7 @@ def _door_fields(door: dict) -> dict:
         "form_offers": door.get("form_offers") or [],
         "forms_without_line": door.get("forms_without_line") or [],
         "integrity_override_recorded": bool(door.get("integrity_override_recorded")),
+        "boxes_taken_back": int(door.get("boxes_taken_back") or 0),
     }
 
 
@@ -447,7 +453,8 @@ async def document_fill_status_route(
     )
     status = document_fill_status(session)
     rows = document_suggestion_rows(session.get("generated_forms") or {},
-                                    session.get(SUGGESTIONS_KEY) or [], form_id=form_id)
+                                    session.get(SUGGESTIONS_KEY) or [], form_id=form_id,
+                                    docs=session.get("docs") or [])
     out = {"success": True, "ai_fill": _public_fill(status), "suggestions": rows}
     if status and status.get("state") != "running" and not form_id:
         try:

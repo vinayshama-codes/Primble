@@ -90,10 +90,15 @@ class IntegrityReviewRequired(Exception):
     """After forms exist, the changed document set names an insured nobody
     acknowledged. Carries the verdict and the documents that were NOT applied."""
 
-    def __init__(self, verdict: dict, documents: List[str]):
+    def __init__(self, verdict: dict, documents: List[str], other_insured: Optional[str] = None):
         super().__init__("submission_integrity_review_required")
         self.verdict = verdict or {}
         self.documents = list(documents or [])
+        # The insured(s) the changed documents name that are NOT the package's
+        # applicant (`other_insured_named`) - what the refusal names. None when
+        # none can be told (the refusal then names nobody but the applicant's
+        # rivals in the verdict).
+        self.other_insured = other_insured
 
 
 class AlreadyInPackage(Exception):
@@ -236,6 +241,44 @@ def integrity_plan(prior_integrity: Optional[dict], docs_after: Iterable[dict], 
                 "review_needed": False, "override_recorded": True}
     return {"verdict": verdict, "override": None, "review_needed": True,
             "override_recorded": False}
+
+
+def other_insured_named(session: Optional[dict], verdict: Optional[dict],
+                        changed_documents: Iterable[dict] = ()) -> Optional[str]:
+    """The insured(s) the CHANGED documents name that are not the package's
+    applicant - judged over the FRESH verdict (the stored record does not hold
+    them yet) by the Documents list's own rule (`document_tags`), the
+    applicant decided without them. Failing that, every insured the verdict
+    detected except the applicant. None when nobody can be named.
+
+    15 Oct 2026, owner's run `0353c36b`: adding control_dec.pdf answered
+    "These documents name a different insured (CHOICE ELECTRIC LLC, MERIDIAN
+    FABRICATION INC)" - the verdict's whole entity list, the package's own
+    applicant first."""
+    try:
+        from services.document_tags import (
+            _same as _same_insured, document_insured_statuses, other_insured_of, package_applicant,
+        )
+        session = session if isinstance(session, dict) else {}
+        verdict = verdict if isinstance(verdict, dict) else {}
+        ids = [str(d.get("doc_id") or "").strip() for d in (changed_documents or ())
+               if isinstance(d, dict)]
+        ids = [i for i in ids if i]
+        confirmations = session.get("underwriting_confirmations")
+        consistency = session.get("underwriting_consistency")
+        statuses = document_insured_statuses(verdict, confirmations, consistency, judge_without=ids)
+        named = other_insured_of(statuses, ids)
+        if named:
+            return named
+        applicant = (package_applicant(verdict, confirmations, consistency, judge_without=ids)
+                     or {}).get("name")
+        if not applicant:
+            return None
+        rivals = [str(e).strip() for e in (verdict.get("detected_entities") or [])
+                  if str(e or "").strip() and not _same_insured(e, applicant)]
+        return ", ".join(dict.fromkeys(rivals)) or None
+    except Exception:                                          # noqa: BLE001
+        return None
 
 
 # ── 3. The forms: what the engine prints before and after ────────────────────
@@ -464,7 +507,9 @@ async def remerge_package(
                           confirm_same_insured=confirm_same_insured, user_id=uid)
     forms_exist = bool(session.get("generated_forms"))
     if forms_exist and plan["review_needed"]:
-        raise IntegrityReviewRequired(plan["verdict"], changed_names)
+        raise IntegrityReviewRequired(plan["verdict"], changed_names,
+                                      other_insured=other_insured_named(
+                                          session, plan["verdict"], changed_documents))
 
     from services.extraction_pipeline import _finalize_pipeline
     retract = sorted(stated_fact_keys(docs_before) - stated_fact_keys(docs_after))
@@ -491,6 +536,8 @@ async def remerge_package(
         "form_offers": [],
         "forms_without_line": [],
         "retracted_facts": [],
+        "boxes_taken_back": 0,
+        "held_back_dropped": 0,
         "score_before": None,
         "score_after": None,
     }
@@ -567,6 +614,18 @@ async def remerge_package(
         None, functools.partial(restamp_forms, generated, before_view, after_view,
                                 raw_text_before=_text_before, raw_text_after=_text_after))
 
+    # What the AI reading of a document that has now LEFT the package wrote or
+    # held back is taken back too (see `take_back_document_fills`).
+    receipts_before = [r for r in (session.get(RECEIPTS_KEY) or []) if isinstance(r, dict)]
+    taken, receipts_left, held_dropped = take_back_document_fills(generated, receipts_before, docs_after)
+    for fid, boxes in taken.items():
+        if fid not in touched:
+            touched.append(fid)
+        if boxes:
+            moved[fid] = sorted(set(moved.get(fid) or []) | set(boxes))
+    door["boxes_taken_back"] = sum(len(v) for v in taken.values())
+    door["held_back_dropped"] = held_dropped
+
     stale = []
     for fid, fd in generated.items():
         if signed_before.get(fid) == STATE_SIGNED and applicant_signature_state \
@@ -580,6 +639,8 @@ async def remerge_package(
     # ONE write: the re-merged row, the re-stamped forms, the offers - and the
     # declarations index purged again (it was rebuilt by the re-merge).
     row_update[OFFERS_KEY] = offers
+    if receipts_left != receipts_before:
+        row_update[RECEIPTS_KEY] = receipts_left
     if touched:
         row_update["generated_forms"] = {fid: generated[fid] for fid in touched}
     if purge_dec_index and _DEC_INDEX not in row_deletes:
@@ -622,6 +683,8 @@ async def remerge_package(
             "stale_signatures": [s["form_id"] for s in stale],
             "forms_offered": [o["form_id"] for o in offers],
             "facts_retracted": door["retracted_facts"],
+            "boxes_taken_back": door["boxes_taken_back"],
+            "held_back_dropped": door["held_back_dropped"],
         })
     except Exception as ex:                                    # noqa: BLE001
         logger.warning("documents door: audit event failed: %s", ex)
@@ -846,6 +909,10 @@ async def add_offered_form(session_id: str, form_id: str) -> Tuple[str, Dict[str
 FILL_KEY = "document_ai_fill"                    # = generation_state.DOCUMENT_FILL_KEY
 FILL_BEAT_KEY = "document_ai_fill_beat_at"       # = generation_state.DOCUMENT_FILL_BEAT_KEY
 SUGGESTIONS_KEY = "document_fill_suggestions"
+# Every box the AI reading of an added document WROTE (15 Oct 2026): which
+# document, and a hash of the value (never the value - the box holds it), so
+# excluding that document takes the box back (`take_back_document_fills`).
+RECEIPTS_KEY = "document_fill_receipts"
 FILL_RUNNING, FILL_DONE, FILL_FAILED, FILL_OFF = "running", "done", "failed", "off"
 FILL_FAILED_TEXT = ("Reading the new document into your forms did not finish. Your forms keep "
                     "the values its facts gave them.")
@@ -1154,6 +1221,7 @@ def _says_it(value: Any, new_text: Optional[str]) -> bool:
 def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
                    base_mapped: dict, new_guard: Iterable[dict] = (),
                    base_guard: Iterable[dict] = (), *, documents: Iterable[str] = (),
+                   doc_ids: Iterable[str] = (),
                    new_text: Optional[str] = None, other_insured: Optional[str] = None) -> dict:
     """What the new document's answers do to ONE stored form (pure).
     {"fills": {field: {value, label}}, "suggestions": [...], "held_back": [...]}
@@ -1179,6 +1247,7 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
     before this - mostly unticked "No"s and values the document does not
     print; replayed, none is written and at most one is offered."""
     docs = [str(d) for d in (documents or ()) if str(d or "").strip()]
+    ids = [str(d) for d in (doc_ids or ()) if str(d or "").strip()]
     hold = bool(str(other_insured or "").strip())
     fills: Dict[str, dict] = {}
     suggestions: List[dict] = []
@@ -1186,7 +1255,7 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
     def _suggest(field: str, current: Any, new: Any, label: str) -> None:
         row = {"form_id": form_id, "field": field,
                "current": _box_text(current), "suggested": new if isinstance(new, str) else str(new),
-               "label": label, "documents": docs}
+               "label": label, "documents": docs, "doc_ids": ids}
         if hold:
             row["other_insured"] = str(other_insured).strip()
         suggestions.append(row)
@@ -1213,7 +1282,7 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
         for g in new_guard or ():
             f = g.get("field") if isinstance(g, dict) else None
             if f and f not in base_fields and f not in fills and box_owner(stored, f) == "blank":
-                held.append(dict(g, form_id=form_id))
+                held.append(dict(g, form_id=form_id, documents=docs, doc_ids=ids))
     return {"fills": fills, "suggestions": suggestions, "held_back": held}
 
 
@@ -1285,12 +1354,14 @@ def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) ->
     when the plan was made; a suggestion stands only while the box still shows
     the AI value it was measured against. Returns
     {"filled": {form: [boxes]}, "suggestions": [...], "held_back": n,
-     "stale_signatures": [...]}."""
+     "stale_signatures": [...], "receipts": [...]} - one receipt per box
+    written (`fill_receipt`: what the box showed before, its hash after)."""
     try:
         from services.signature_boxes import STATE_SIGNED, STATE_STALE, applicant_signature_state
     except Exception:                                          # noqa: BLE001
         applicant_signature_state, STATE_SIGNED, STATE_STALE = None, "signed", "stale"
     filled: Dict[str, List[str]] = {}
+    receipts: List[dict] = []
     suggestions: List[dict] = []
     held_total = 0
     stale: List[dict] = []
@@ -1309,6 +1380,8 @@ def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) ->
         for field, fill in (plan.get("fills") or {}).items():
             if box_owner(form, field) != "blank" or not _same(_box_value(form, field), _box_value(snap, field)):
                 continue                       # a person or a re-stamp got there first
+            receipts.append(fill_receipt(fid, field, state.get(field), mapped.get(field),
+                                         conf.get(field), fill["value"]))
             state[field] = fill["value"]
             mapped[field] = fill["value"]      # machine-stamped, as generation stamps
             conf[field] = fill["label"]
@@ -1336,7 +1409,7 @@ def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) ->
                     and applicant_signature_state(form) == STATE_STALE:
                 stale.append({"form_id": fid, "label": _form_label(fid)})
     return {"filled": filled, "suggestions": suggestions, "held_back": held_total,
-            "stale_signatures": stale}
+            "stale_signatures": stale, "receipts": receipts}
 
 
 def merge_suggestions(existing: Iterable[dict], new: Iterable[dict], generated: dict) -> List[dict]:
@@ -1357,6 +1430,133 @@ def merge_suggestions(existing: Iterable[dict], new: Iterable[dict], generated: 
         seen.add(key)
         out.append(s)
     return out
+
+
+# ── What an added document's AI reading leaves behind, and taking it back ────
+#
+# 15 Oct 2026 (owner, run `0353c36b`): "after removing that doc, will it also
+# reverse the data or warnings it has added, and will the forms be updated?"
+# The documents door already reverses its FACTS: a fact only it stated is
+# retracted, every box those facts moved is re-stamped, the stops, the score
+# and Data Consistency are re-scored. Its AI READING left three things nobody
+# took back: the "New document says" rows (excluding ACORD_125_FILLED 2.pdf
+# kept its 42 listed), the boxes it wrote into blank boxes, and the "AI held
+# back" rows it added. Each now carries the document's id (rows stored before
+# 15 Oct carry its file name, which is matched instead), and:
+#   * a suggestion or held-back row speaks only while one of its documents is
+#     in the package - read-time for suggestions (`suggestions_from_active_
+#     documents`, so including the document again lists them again), at the
+#     door for the held-back rows;
+#   * a box its reading wrote is blanked again by the door when every document
+#     behind it has left the package - only while it still shows exactly the
+#     value written and is still the AI's (a person who typed over it, or a
+#     rule that re-stamped it since, keeps it). The box returns to what it
+#     showed before (it was blank - the reading writes blank boxes only).
+# NOT covered, by measurement: an AI value written at GENERATION is not traced
+# to a document. The presence check cannot stand in for that trace - on
+# `0353c36b` it called the owner's own typed "Material and equipment storage"
+# (a location-table answer, ACORD 140) a value only the Harborline 125 printed.
+
+def fill_receipt(form_id: str, field: str, before_state: Any, before_mapped: Any,
+                 label_before: Any, written: Any) -> dict:
+    """One box an added document's reading wrote: where, what the box showed
+    before (blank by the reading's own rule - nothing private), and a hash of
+    what it wrote. The documents are added by the caller."""
+    return {"form_id": form_id, "field": field, "before_state": before_state,
+            "before_mapped": before_mapped, "label_before": label_before,
+            "value_hash": _value_hash(written)}
+
+
+def _value_hash(value: Any) -> str:
+    import hashlib
+    return hashlib.sha1(_box_text(value).casefold().encode("utf-8")).hexdigest()[:16]
+
+
+def _document_refs(docs: Iterable[dict]) -> Tuple[set, set]:
+    """(ids, file names) of the package's ACTIVE documents (`active_documents`
+    - excluded and evidence-only documents are out)."""
+    active = active_documents(docs)
+    ids = {str(d.get("doc_id") or "").strip() for d in active} - {""}
+    names = {str(d.get("filename") or "").strip() for d in active} - {""}
+    return ids, names
+
+
+def speaks_for_active_document(row: Optional[dict], ids: set, names: set) -> bool:
+    """Is a row an added document's reading made still backed by a document in
+    the package? By id when it carries ids, by file name otherwise; a row
+    naming no document (an older shape) is kept - no evidence either way."""
+    row = row if isinstance(row, dict) else {}
+    row_ids = [str(x).strip() for x in (row.get("doc_ids") or []) if str(x or "").strip()]
+    if row_ids:
+        return bool(ids.intersection(row_ids))
+    row_names = [str(x).strip() for x in (row.get("documents") or []) if str(x or "").strip()]
+    if row_names:
+        return bool(names.intersection(row_names))
+    return True
+
+
+def suggestions_from_active_documents(suggestions: Iterable[dict],
+                                      docs: Optional[Iterable[dict]]) -> List[dict]:
+    """The stored suggestions whose documents are still in the package. `docs`
+    None = not judged (every row kept)."""
+    rows = [s for s in (suggestions or ()) if isinstance(s, dict)]
+    if docs is None:
+        return rows
+    ids, names = _document_refs(docs)
+    return [s for s in rows if speaks_for_active_document(s, ids, names)]
+
+
+def take_back_document_fills(generated: dict, receipts: Iterable[dict],
+                             docs_after: Iterable[dict]) -> Tuple[Dict[str, List[str]], List[dict], int]:
+    """Blank again (in place) every box a reading wrote from documents no
+    longer in the package, while it still shows the value written and is still
+    the AI's; drop those documents' "AI held back" rows. Returns ({form: boxes
+    taken back}, the receipts still standing, held-back rows dropped)."""
+    ids, names = _document_refs(docs_after)
+    taken: Dict[str, List[str]] = {}
+    standing: List[dict] = []
+    for r in receipts or ():
+        if not isinstance(r, dict) or not r.get("form_id") or not r.get("field"):
+            continue
+        form = (generated or {}).get(r["form_id"])
+        field = r["field"]
+        ours = (isinstance(form, dict) and box_owner(form, field) == "ai"
+                and _value_hash(_box_value(form, field)) == r.get("value_hash"))
+        if speaks_for_active_document(r, ids, names):
+            if ours:
+                standing.append(r)
+            continue
+        if not ours:
+            continue                       # a person or a rule has the box now
+        state = form.get("field_state")
+        if not isinstance(state, dict):
+            state = dict(form.get("mapped") or {})
+        mapped = dict(form.get("mapped") or {})
+        conf = dict(form.get("confidence") or {})
+        state[field] = r.get("before_state")
+        mapped[field] = r.get("before_mapped")
+        if r.get("label_before") is None:
+            conf.pop(field, None)
+        else:
+            conf[field] = r.get("label_before")
+        form["field_state"], form["mapped"], form["confidence"] = state, mapped, conf
+        form["_pdf_cache_hash"] = ""
+        form["pdf_bytes"] = None
+        form["_applicant_render"] = None
+        taken.setdefault(r["form_id"], []).append(field)
+    dropped = 0
+    for fid, form in (generated or {}).items():
+        if not isinstance(form, dict) or not isinstance(form.get("guard_blanks"), list):
+            continue
+        rows = form["guard_blanks"]
+        keep = [g for g in rows if not isinstance(g, dict)
+                or not (g.get("doc_ids") or g.get("documents"))
+                or speaks_for_active_document(g, ids, names)]
+        if len(keep) != len(rows):
+            dropped += len(rows) - len(keep)
+            form["guard_blanks"] = keep
+            taken.setdefault(fid, [])
+    return taken, standing, dropped
 
 
 class _BeatQueue:
@@ -1507,7 +1707,8 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
             base_m, _bc, base_g = await loop.run_in_executor(None, functools.partial(
                 _stamp_with_answers, session, fid, empty, raw_all, schema))
             plan = plan_form_fill(fid, generated[fid], new_m, new_c, base_m, new_g, base_g,
-                                  other_insured=other, documents=names, new_text=new_text)
+                                  other_insured=other, documents=names, new_text=new_text,
+                                  doc_ids=[str(d.get("doc_id") or "") for d in new_docs])
             if plan["fills"] or plan["suggestions"] or plan["held_back"]:
                 plans[fid] = plan
         if plans:
@@ -1522,6 +1723,12 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
                 suggestions = merge_suggestions(fresh.get(SUGGESTIONS_KEY) or [],
                                                 applied["suggestions"], forms_now)
                 update: Dict[str, Any] = {SUGGESTIONS_KEY: suggestions}
+                if applied.get("receipts"):
+                    _ids = [str(d.get("doc_id") or "") for d in new_docs]
+                    update[RECEIPTS_KEY] = [r for r in (fresh.get(RECEIPTS_KEY) or [])
+                                            if isinstance(r, dict)] + [
+                        dict(r, doc_ids=_ids, documents=names, run_id=run_id)
+                        for r in applied["receipts"]]
                 if touched:
                     update["generated_forms"] = {fid: {
                         k: forms_now[fid].get(k) for k in (

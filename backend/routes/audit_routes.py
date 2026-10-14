@@ -2203,7 +2203,8 @@ async def get_needs_attention(
         from services.needs_attention import document_suggestion_rows
         from services.session_documents import SUGGESTIONS_KEY
         result["document_suggestions"] = document_suggestion_rows(
-            generated, session.get(SUGGESTIONS_KEY) or [], form_id=form_id)
+            generated, session.get(SUGGESTIONS_KEY) or [], form_id=form_id,
+            docs=session.get("docs") or [])
     except Exception as _sx:                                   # noqa: BLE001
         logger.warning(f"needs-attention: document suggestions skipped: {_sx}")
     return JSONResponse({"success": True, **result})

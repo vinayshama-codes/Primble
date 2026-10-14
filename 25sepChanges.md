@@ -1316,6 +1316,54 @@ on 10 forms. Recommendation to Brent: take the Form Fill Rate out of the SQS (10
 separately ("Forms: 74 values to confirm") - his call, it changes the approved blend.
 Tests: `tests/test_download_one_line_14oct.py`.
 
+### Z23. Another company's documents added after forms, and what Exclude takes back (15 Oct 2026, run `0353c36b`)
+
+**Live (read-only check of the stored row):** the owner added `control_dec.pdf` (MERIDIAN FABRICATION INC) and a filled
+`ACORD_125_FILLED 2.pdf` (Harborline Plumbing & Mechanical, LLC) to the generated Choice Electric package, both with
+"It is this insured - use its values".
+- **Z18 fix A verified live:** the filled 125's typed values were read (`[Filled form fields - page N]`): type
+  "Commercial Insurance Application (ACORD 125)", sure, insured Harborline. The tag is right - it IS a filled ACORD 125.
+- **Z18 B4 verified live:** the AI reading wrote 0 boxes for either document and held their values as "New document
+  says" rows naming the other insured (Meridian 3, Harborline 42; 44 stored).
+- "Use its values" did what it says: the documents door merged their FACTS and moved 83 (Meridian) and 213
+  (Harborline) boxes on 8-9 forms; the package went to 60 - hard stops "Applicant name differs" and "FEIN differs",
+  11 warnings, 9 Data Consistency conflicts. That is the integrity check working on a package that now holds three
+  companies.
+
+**Fixed offline (two defects):**
+1. **Exclude left the AI reading's leftovers.** The door already reverses a document's facts (retracted), the boxes they
+   moved (re-stamped), the stops / warnings / score / Data Consistency (re-scored) and its form offers. Its AI reading
+   left three things: its "New document says" rows (excluding the Harborline 125 would have kept all 42 listed), the
+   boxes it wrote into blank boxes, and the "AI held back" rows it added. Each now carries the document's id
+   (`doc_ids`; rows stored before today carry the file name, matched instead):
+   - a suggestion is listed only while one of its documents is in the package (`session_documents.
+     suggestions_from_active_documents`, read by `needs_attention.document_suggestion_rows(docs=)` at both readers -
+     the side panel / download list and the AI-fill status); read-time, so including the document again lists them
+     again;
+   - every box the reading writes gets a receipt (`document_fill_receipts`: form, box, what it showed before - blank
+     by the reading's own rule - and a HASH of the value, never the value); excluding its document blanks the box
+     again while it still shows that value and is still the AI's (`take_back_document_fills`, in `remerge_package`
+     after the re-stamp; a person's typing or a rule's re-stamp keeps the box); its held-back rows go too.
+     `door.boxes_taken_back` / `held_back_dropped`, counted in the "N boxes updated" line and the audit event.
+2. **The refusal named the applicant as "a different insured":** "These documents name a different insured (CHOICE
+   ELECTRIC LLC, MERIDIAN FABRICATION INC)" was the verdict's whole entity list. Now only the other insured(s)
+   (`session_documents.other_insured_named` - the Documents list's own rule over the FRESH verdict, the applicant
+   judged without the new documents), and "This document names ..." for one file.
+
+**Named limit, measured, not built:** an AI value written at GENERATION is not traced to a document, so excluding a
+document that was there at generation does not take back AI values read from its text (facts and rule boxes do
+reverse). The presence check cannot stand in for the trace: on `0353c36b` it called the owner's own typed "Material and
+equipment storage" (location table -> ACORD 140) a value only the Harborline 125 printed. Including an excluded document
+again brings back its facts, rule boxes and suggestions, not the boxes its AI reading wrote (re-add it for a fresh read).
+
+**What the owner sees if they Exclude now (read-only replay of the stored documents, three sets):** Harborline out ->
+its facts and the boxes they moved go back, its 42 suggestions leave the side panel and the download list, the "FEIN
+differs" hard stop clears (Meridian is then the only document printing a FEIN), "Applicant name differs" stays (Choice
+Electric vs Meridian), warnings 21 -> 20 in the replay's frame. Both out -> both identity hard stops clear and the
+replay's warnings drop 21 -> 13: the package is back to Choice Electric's own seven documents (a person's typed answers
+and Data Consistency choices are kept; the score is re-calculated).
+Tests: `tests/test_exclude_takes_back_15oct.py` (17, the real door + AI reading on the 7 Oct harness).
+
 ### F01. FOR THE BRENT MAIL (owner, 15 Oct 2026) - the owner sends one batched mail; these are its points
 
 1. **Proposal: make the package SQS fully independent of the forms.** Today the score reaches 100 from the documents and

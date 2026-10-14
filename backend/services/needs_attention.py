@@ -1948,13 +1948,20 @@ def _shown_value(schema: dict, field: str, value: Any) -> str:
 
 
 def document_suggestion_rows(generated_forms: Optional[dict], suggestions: Iterable[dict],
-                             form_id: Optional[str] = None) -> List[dict]:
+                             form_id: Optional[str] = None,
+                             docs: Optional[Iterable[dict]] = None) -> List[dict]:
     """One row per live suggestion (all forms, or `form_id`'s), in the order the
     forms print their boxes. Each row: id, form_id, form_label, field, page,
     label, status ("document_says"), tag, reason, what_to_do, current,
     suggested (the raw value "Use this value" writes), current_display,
-    suggested_display, documents."""
+    suggested_display, documents. `docs` (the package's documents): a
+    suggestion whose documents have all left the package (excluded, evidence
+    only) is not listed (15 Oct 2026 - `session_documents.
+    suggestions_from_active_documents`)."""
     rows: List[dict] = []
+    if docs is not None:
+        from services.session_documents import suggestions_from_active_documents
+        suggestions = suggestions_from_active_documents(suggestions, docs)
     for s in suggestions or ():
         if not isinstance(s, dict):
             continue
