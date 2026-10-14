@@ -238,3 +238,111 @@ def test_with_nobody_to_name_the_applicant_is_still_left_out():
 def test_the_door_passes_the_other_insured():
     src = (BACKEND / "services" / "session_documents.py").read_text(encoding="utf-8")
     assert "other_insured=other_insured_named(" in src
+
+
+# ══ 5. Review of Z23 (15 Oct night): whose value is it? ══════════════════════
+# Two defects the adversarial review reproduced: files added in ONE upload all
+# shared one document list (excluding one took back nothing), and a later
+# document answering a box with the value it already showed got no receipt
+# (excluding the first one blanked a value the second still gave).
+
+from tests.test_new_document_fill_7oct import _doc  # noqa: E402
+
+OTHER_TEXT = "LOSS RUN REPORT\nNo claims were reported for the experience period.\n"
+NARR2_TEXT = ("SECOND UNDERWRITING NARRATIVE\nOperations: commercial electrical installation, service and repair.\n"
+              "The office is open on weekdays.\n")
+OTHER_OPS = "Residential electrical service calls and panel upgrades"
+NARR3_TEXT = f"THIRD NARRATIVE\nOperations: {OTHER_OPS}.\n"
+
+
+def _read(env, docs):
+    """The documents door adds `docs` in ONE add, then the AI reading runs."""
+    result = run(sd.add_documents(SID, docs, user_id="u1", purge_dec_index=True))
+    status = run(sd.start_new_document_fill(SID, result["documents_added"], "u1",
+                                            review_counts_before={"hard_stops": 0, "warnings": 0,
+                                                                  "data_consistency": 0}))
+    return run(sd.run_new_document_fill(SID, status["doc_ids"], "u1", run_id=status["run_id"]))
+
+
+def _receipt_ids(env):
+    return [sorted(r["doc_ids"]) for r in env["store"].rows[SID].get(sd.RECEIPTS_KEY) or []]
+
+
+def test_each_value_names_the_document_that_prints_it():
+    texts = {"d1": ("harborline.pdf", na.document_haystack("Insured: Harborline Plumbing & Mechanical, LLC")),
+             "d2": ("cyber.pdf", na.document_haystack("Cyber declarations, retention $5,000"))}
+    stored = {"field_state": {}, "mapped": {}, "confidence": {}, "client_filled_fields": [], "schema": {}}
+    plan = sd.plan_form_fill("ACORD_125", stored,
+                             {"Box_A": "Harborline Plumbing & Mechanical", "Box_B": "Y", "Box_C": "Made up words here"},
+                             {"Box_A": "ai_verified", "Box_B": "low_confidence", "Box_C": "low_confidence"}, {},
+                             documents=["harborline.pdf", "cyber.pdf"], doc_ids=["d1", "d2"], document_texts=texts)
+    assert plan["fills"]["Box_A"]["doc_ids"] == ["d1"]
+    assert plan["fills"]["Box_A"]["documents"] == ["harborline.pdf"]
+    assert plan["fills"]["Box_B"]["doc_ids"] == ["d1", "d2"]        # a tick: cannot be told apart
+    assert plan["fills"]["Box_C"]["doc_ids"] == ["d1", "d2"]        # printed by neither: every document
+
+
+def test_one_upload_two_files_excluding_the_other_one_keeps_the_box(env):
+    make_package(env)
+    env["model"].answers = {OPS_BOX: OPS}
+    from tests.test_new_document_fill_7oct import NARR
+    _read(env, [NARR(), _doc("d-other", "loss_run.pdf", "loss_run", OTHER_TEXT, {})])
+    assert form(env)["field_state"][OPS_BOX] == OPS
+    assert _receipt_ids(env) == [["d-narr"]]                        # the narrative prints it, the loss run does not
+    run(sd.change_document(SID, doc_id="d-other", action="exclude", user_id="u1"))
+    assert form(env)["field_state"][OPS_BOX] == OPS                 # its own document is still in
+    run(sd.change_document(SID, doc_id="d-narr", action="exclude", user_id="u1"))
+    assert not form(env)["field_state"].get(OPS_BOX)                # now nothing that printed it is
+
+
+def test_a_later_document_giving_the_same_value_keeps_the_box(env):
+    make_package(env)
+    env["model"].answers = {OPS_BOX: OPS}
+    add_narrative(env)
+    assert _receipt_ids(env) == [["d-narr"]]
+    _read(env, [_doc("d-narr2", "narrative2.txt", "narrative", NARR2_TEXT, {})])
+    assert _receipt_ids(env) == [["d-narr", "d-narr2"]]             # the second reading joined the receipt
+    run(sd.change_document(SID, doc_id="d-narr", action="exclude", user_id="u1"))
+    assert form(env)["field_state"][OPS_BOX] == OPS                 # the second narrative still gives it
+    run(sd.change_document(SID, doc_id="d-narr2", action="exclude", user_id="u1"))
+    assert not form(env)["field_state"].get(OPS_BOX)
+
+
+def test_a_document_that_said_something_else_is_still_offered_on_the_emptied_box(env):
+    make_package(env)
+    env["model"].answers = {OPS_BOX: OPS}
+    add_narrative(env)
+    env["model"].answers = {OPS_BOX: OTHER_OPS}
+    _read(env, [_doc("d-narr3", "narrative3.txt", "narrative", NARR3_TEXT, {})])
+    row = env["store"].rows[SID]
+    sug = [s for s in row.get(sd.SUGGESTIONS_KEY) or [] if s.get("field") == OPS_BOX]
+    assert sug and sug[0]["suggested"] == OTHER_OPS and sug[0]["doc_ids"] == ["d-narr3"]
+    run(sd.change_document(SID, doc_id="d-narr", action="exclude", user_id="u1"))
+    row = env["store"].rows[SID]
+    assert not form(env)["field_state"].get(OPS_BOX)                # the narrative's value is taken back
+    rows = na.document_suggestion_rows(row["generated_forms"], row.get(sd.SUGGESTIONS_KEY) or [],
+                                       docs=row.get("docs") or [])
+    mine = [r for r in rows if r["field"] == OPS_BOX]
+    assert mine and mine[0]["suggested"] == OTHER_OPS and "this box is empty" in mine[0]["reason"]
+
+
+def test_offers_on_emptied_boxes_rule():
+    sug = [{"form_id": "ACORD_125", "field": "Box_A", "current": "Old", "suggested": "New"},
+           {"form_id": "ACORD_125", "field": "Box_B", "current": "Kept", "suggested": "Other"}]
+    out = sd.offers_on_emptied_boxes(sug, {"ACORD_125": ["Box_A"]})
+    assert [s["current"] for s in out] == ["", "Kept"]
+    assert sd.offers_on_emptied_boxes(sug, {}) is None
+    assert sd.offers_on_emptied_boxes(sug, {"ACORD_125": ["Box_Z"]}) is None
+
+
+def test_join_confirming_documents_rule():
+    gen = {"ACORD_125": {"field_state": {"Box_A": "Written"}, "mapped": {"Box_A": "Written"},
+                         "confidence": {"Box_A": "ai_verified"}}}
+    r = dict(sd.fill_receipt("ACORD_125", "Box_A", None, None, None, "Written"), doc_ids=["d1"], documents=["a.pdf"])
+    plans = {"ACORD_125": {"confirms": [{"field": "Box_A", "value_hash": r["value_hash"],
+                                          "doc_ids": ["d2"], "documents": ["b.pdf"]}]}}
+    out, changed = sd.join_confirming_documents([r], plans, gen)
+    assert changed and out[0]["doc_ids"] == ["d1", "d2"] and out[0]["documents"] == ["a.pdf", "b.pdf"]
+    gen["ACORD_125"]["field_state"]["Box_A"] = "Typed over"                 # the box moved on: no join
+    out, changed = sd.join_confirming_documents([r], plans, gen)
+    assert not changed and out[0]["doc_ids"] == ["d1"]

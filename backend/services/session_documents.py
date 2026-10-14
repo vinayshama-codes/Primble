@@ -625,6 +625,9 @@ async def remerge_package(
             moved[fid] = sorted(set(moved.get(fid) or []) | set(boxes))
     door["boxes_taken_back"] = sum(len(v) for v in taken.values())
     door["held_back_dropped"] = held_dropped
+    # A document still in the package that said something ELSE for a box just
+    # taken back keeps its say: its suggestion now reads against a blank box.
+    suggestions_after = offers_on_emptied_boxes(session.get(SUGGESTIONS_KEY) or [], taken)
 
     stale = []
     for fid, fd in generated.items():
@@ -641,6 +644,8 @@ async def remerge_package(
     row_update[OFFERS_KEY] = offers
     if receipts_left != receipts_before:
         row_update[RECEIPTS_KEY] = receipts_left
+    if suggestions_after is not None:
+        row_update[SUGGESTIONS_KEY] = suggestions_after
     if touched:
         row_update["generated_forms"] = {fid: generated[fid] for fid in touched}
     if purge_dec_index and _DEC_INDEX not in row_deletes:
@@ -1222,11 +1227,23 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
                    base_mapped: dict, new_guard: Iterable[dict] = (),
                    base_guard: Iterable[dict] = (), *, documents: Iterable[str] = (),
                    doc_ids: Iterable[str] = (),
+                   document_texts: Optional[Dict[str, Tuple[str, Optional[str]]]] = None,
                    new_text: Optional[str] = None, other_insured: Optional[str] = None) -> dict:
     """What the new document's answers do to ONE stored form (pure).
-    {"fills": {field: {value, label}}, "suggestions": [...], "held_back": [...]}
+    {"fills": {field: {value, label, doc_ids, documents}}, "suggestions": [...],
+     "held_back": [...], "confirms": [...]}
     - a box moves only where the stamp WITH the answers differs from the stamp
     without them, and only with an AI label (a rule's box is the door's).
+
+    Whose value is it (15 Oct 2026, review of Z23)? `document_texts` {doc_id:
+    (file name, folded text)} for each document of the run: every fill,
+    suggestion and held-back row names the documents whose OWN text prints its
+    value - several files added in one upload are told apart, so excluding one
+    takes back only what it printed. A value no single document prints (or too
+    short to look for - a tick, a code) names every document of the run.
+    `confirms`: an AI box this reading answers with the value it already shows
+    - the run joins that box's receipt, so excluding the document that first
+    wrote it keeps the value while this one is still in the package.
 
     A SUGGESTION reads "the new document says X" - so X must be printed in the
     new document's own text (`new_text`, folded like the stamper folds it) and
@@ -1251,11 +1268,23 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
     hold = bool(str(other_insured or "").strip())
     fills: Dict[str, dict] = {}
     suggestions: List[dict] = []
+    confirms: List[dict] = []
+
+    def _sources(value: Any) -> Dict[str, List[str]]:
+        """The documents whose own text prints `value` - every document of the
+        run when none (or all) can be told apart."""
+        texts = document_texts if isinstance(document_texts, dict) else {}
+        if value is not None and _box_text(value) and texts:
+            hits = [(str(i), str(name or "")) for i, (name, text) in texts.items()
+                    if str(i or "").strip() and _says_it(value, text)]
+            if hits:
+                return {"doc_ids": [i for i, _n in hits], "documents": [n for _i, n in hits if n]}
+        return {"doc_ids": list(ids), "documents": list(docs)}
 
     def _suggest(field: str, current: Any, new: Any, label: str) -> None:
         row = {"form_id": form_id, "field": field,
                "current": _box_text(current), "suggested": new if isinstance(new, str) else str(new),
-               "label": label, "documents": docs, "doc_ids": ids}
+               "label": label, **_sources(new)}
         if hold:
             row["other_insured"] = str(other_insured).strip()
         suggestions.append(row)
@@ -1270,11 +1299,13 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
         current = _box_value(stored, field)
         if owner == "blank":
             if not hold:
-                fills[field] = {"value": new, "label": label}
+                fills[field] = {"value": new, "label": label, **_sources(new)}
             elif _says_it(new, new_text) and not _unticked_checkbox(stored, field, new):
                 _suggest(field, "", new, label)
-        elif (owner == "ai" and not _same(new, current)
-              and _words_only(new) != _words_only(current) and _says_it(new, new_text)):
+        elif owner == "ai" and (_same(new, current) or _words_only(new) == _words_only(current)):
+            if not hold:
+                confirms.append({"field": field, "value_hash": _value_hash(current), **_sources(new)})
+        elif owner == "ai" and _says_it(new, new_text):
             _suggest(field, current, new, label)
     held = []
     if not hold:
@@ -1282,8 +1313,8 @@ def plan_form_fill(form_id: str, stored: dict, new_mapped: dict, new_conf: dict,
         for g in new_guard or ():
             f = g.get("field") if isinstance(g, dict) else None
             if f and f not in base_fields and f not in fills and box_owner(stored, f) == "blank":
-                held.append(dict(g, form_id=form_id, documents=docs, doc_ids=ids))
-    return {"fills": fills, "suggestions": suggestions, "held_back": held}
+                held.append(dict(g, form_id=form_id, **_sources(g.get("removed_value"))))
+    return {"fills": fills, "suggestions": suggestions, "held_back": held, "confirms": confirms}
 
 
 def names_another_insured(session: Optional[dict], docs: Iterable[dict]) -> Optional[dict]:
@@ -1380,8 +1411,12 @@ def apply_form_fills(generated: dict, snapshot: dict, plans: Dict[str, dict]) ->
         for field, fill in (plan.get("fills") or {}).items():
             if box_owner(form, field) != "blank" or not _same(_box_value(form, field), _box_value(snap, field)):
                 continue                       # a person or a re-stamp got there first
-            receipts.append(fill_receipt(fid, field, state.get(field), mapped.get(field),
-                                         conf.get(field), fill["value"]))
+            receipt = fill_receipt(fid, field, state.get(field), mapped.get(field),
+                                   conf.get(field), fill["value"])
+            for key in ("doc_ids", "documents"):
+                if fill.get(key):
+                    receipt[key] = list(fill[key])
+            receipts.append(receipt)
             state[field] = fill["value"]
             mapped[field] = fill["value"]      # machine-stamped, as generation stamps
             conf[field] = fill["label"]
@@ -1559,6 +1594,57 @@ def take_back_document_fills(generated: dict, receipts: Iterable[dict],
     return taken, standing, dropped
 
 
+def offers_on_emptied_boxes(suggestions: Iterable[dict],
+                            taken: Dict[str, List[str]]) -> Optional[List[dict]]:
+    """After a take-back empties a box, another document's "New document says
+    X - the form says Y" row for it would vanish (it no longer matches the
+    box). It now reads against the blank box ("this box is empty"), so a value
+    a document still in the package gives is still offered - never written
+    (an exclusion takes back; it never adds). None when nothing changed."""
+    emptied = {(fid, f) for fid, fields in (taken or {}).items() for f in (fields or [])}
+    if not emptied:
+        return None
+    out: List[dict] = []
+    changed = False
+    for s in suggestions or ():
+        if not isinstance(s, dict):
+            continue
+        if (s.get("form_id"), s.get("field")) in emptied and _box_text(s.get("current")):
+            s = dict(s, current="")
+            changed = True
+        out.append(s)
+    return out if changed else None
+
+
+def join_confirming_documents(receipts: Iterable[dict], plans: Dict[str, dict],
+                              generated: dict) -> Tuple[List[dict], bool]:
+    """A later reading that answers an AI box with the value it already shows
+    (`plan_form_fill` "confirms") joins that box's receipt: the value then
+    stands while ANY document that printed it is in the package (review of
+    Z23: excluding the first document blanked a value the second still
+    gave). Only while the box still shows the receipt's value. Returns (the
+    receipts, whether any changed)."""
+    out = [dict(r) for r in (receipts or ()) if isinstance(r, dict)]
+    changed = False
+    for fid, plan in (plans or {}).items():
+        form = (generated or {}).get(fid)
+        for c in (plan or {}).get("confirms") or []:
+            if not isinstance(c, dict) or not c.get("field") or not isinstance(form, dict):
+                continue
+            if _value_hash(_box_value(form, c["field"])) != c.get("value_hash"):
+                continue
+            for r in out:
+                if r.get("form_id") != fid or r.get("field") != c["field"] \
+                        or r.get("value_hash") != c.get("value_hash"):
+                    continue
+                for key in ("doc_ids", "documents"):
+                    merged = list(dict.fromkeys(list(r.get(key) or []) + list(c.get(key) or [])))
+                    if merged != list(r.get(key) or []):
+                        r[key] = merged
+                        changed = True
+    return out, changed
+
+
 class _BeatQueue:
     """`generation_state.GenerationHeartbeat` beats a queue's `touch`; the
     document fill beats its session row instead."""
@@ -1694,6 +1780,14 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
         except Exception:                                      # noqa: BLE001
             new_text = None
         empty = {"filled_values": {}, "raw_text_fields": set(), "question_grounding": {}}
+        # Each new document's own text, so every row names the documents that
+        # print its value (several files added in one upload are told apart).
+        try:
+            from services.needs_attention import document_haystack as _haystack
+            document_texts = {str(d.get("doc_id") or ""): (str(d.get("filename") or ""), _haystack([d]))
+                              for d in new_docs if str(d.get("doc_id") or "").strip()}
+        except Exception:                                      # noqa: BLE001
+            document_texts = None
         plans: Dict[str, dict] = {}
         for fid in generated:
             answers = per_form.get(fid) or {}
@@ -1707,9 +1801,11 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
             base_m, _bc, base_g = await loop.run_in_executor(None, functools.partial(
                 _stamp_with_answers, session, fid, empty, raw_all, schema))
             plan = plan_form_fill(fid, generated[fid], new_m, new_c, base_m, new_g, base_g,
-                                  other_insured=other, documents=names, new_text=new_text,
-                                  doc_ids=[str(d.get("doc_id") or "") for d in new_docs])
-            if plan["fills"] or plan["suggestions"] or plan["held_back"]:
+                                  other_insured=other,
+                                  doc_ids=[str(d.get("doc_id") or "") for d in new_docs],
+                                  document_texts=document_texts,
+                                  documents=names, new_text=new_text)
+            if plan["fills"] or plan["suggestions"] or plan["held_back"] or plan.get("confirms"):
                 plans[fid] = plan
         if plans:
             async with _Serialized(session_id):
@@ -1723,12 +1819,14 @@ async def _fill_once(session_id: str, doc_ids: List[str], uid: str, run_id: Opti
                 suggestions = merge_suggestions(fresh.get(SUGGESTIONS_KEY) or [],
                                                 applied["suggestions"], forms_now)
                 update: Dict[str, Any] = {SUGGESTIONS_KEY: suggestions}
-                if applied.get("receipts"):
+                receipts, joined = join_confirming_documents(
+                    fresh.get(RECEIPTS_KEY) or [], plans, forms_now)
+                if applied.get("receipts") or joined:
                     _ids = [str(d.get("doc_id") or "") for d in new_docs]
-                    update[RECEIPTS_KEY] = [r for r in (fresh.get(RECEIPTS_KEY) or [])
-                                            if isinstance(r, dict)] + [
-                        dict(r, doc_ids=_ids, documents=names, run_id=run_id)
-                        for r in applied["receipts"]]
+                    update[RECEIPTS_KEY] = receipts + [
+                        dict(r, doc_ids=r.get("doc_ids") or _ids, documents=r.get("documents") or names,
+                             run_id=run_id)
+                        for r in applied.get("receipts") or []]
                 if touched:
                     update["generated_forms"] = {fid: {
                         k: forms_now[fid].get(k) for k in (

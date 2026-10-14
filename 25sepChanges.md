@@ -1364,6 +1364,43 @@ replay's warnings drop 21 -> 13: the package is back to Choice Electric's own se
 and Data Consistency choices are kept; the score is re-calculated).
 Tests: `tests/test_exclude_takes_back_15oct.py` (17, the real door + AI reading on the 7 Oct harness).
 
+**Z23 review (15 Oct night, after the push of `bbd4acb`) - an adversarial reviewer reproduced three gaps; two fixed:**
+1. **Files added in ONE upload shared one document list** - every row of the run named all of them, so excluding one
+   (Brent's natural test: several files at once) took back nothing. Now each fill, suggestion, held-back row and receipt
+   names the documents whose OWN text prints its value (`plan_form_fill(document_texts=)`, built per document in
+   `_fill_once`); a tick / code / value no single document prints names every document of the run (cannot be told apart).
+2. **A later document giving the same value got no receipt** - excluding the first blanked a value the second still gave.
+   Now a reading that answers an AI box with the value it already shows joins that box's receipt
+   (`plan_form_fill` "confirms" -> `join_confirming_documents`). And a document still in the package that said something
+   ELSE for a box just taken back keeps its say: its suggestion reads against the blank box (`offers_on_emptied_boxes`) -
+   offered, never written (an exclusion takes back; it never adds).
+3. **Not fixed, by design:** documents added after forms BEFORE this deploy have no receipts and untagged held-back rows -
+   excluding them hides their suggestions only. Test Exclude on documents added after the deploy.
+Also: `bbd4acb` turned `test_live_run_12oct::test_the_fill_passes_the_new_documents_text` red - it pins the call's text
+`documents=names, new_text=new_text)` and the new keyword followed it (the TEST pinned formatting; the code still passed
+the text). The keyword order is restored. Tests: `tests/test_exclude_takes_back_15oct.py` 17 -> 23 (the 6 new ones fail on
+`bbd4acb`, pass now). Full suite on `bbd4acb`: 14,500 passed / 1 failed (that pin) / 19 skipped, the known
+`test_arq_acord125_missing_only` excluded. **Final tree (review fix + pin): 14,509 passed / 1 failed (the known `test_arq_acord125_missing_only`) / 19 skipped.**
+
+### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
+
+Wrong values found in our own runs, NOT on Brent's 27 or Michelle's 22. Owner: "keep these and we will fix later on".
+All seven are AI / gap-fill values (no rule printed them). Read the source part before starting each one.
+
+| # | What is wrong | Seen on | Source | Fix idea / note |
+|---|---|---|---|---|
+| P15-1 | ACORD 130 rating / normal anniversary dates print the EXPIRING term's 01/01/2025 on a renewal application for 01/01/2026 | `ba7c709d`, `b117f010` | Z10 table W15; Z13 "Still open on `b117f010`" | on a renewal the 130's rating / anniversary dates follow the PROPOSED term (or stay blank), never the expiring one |
+| P15-2 | ACORD 126 PRODUCTS / COMPLETED OPERATIONS row filled with the business description | `b117f010` | Z13 "Still open"; Z18 "Still open" | an AI products row equal to (or a sentence of) the operations description is refused - same door as `_product_rows_to_refuse` |
+| P15-3 | ACORD 127 garaging address printed with NO vehicles (address fragments; the auto policy was not uploaded yet) | `b117f010` | Z13 "Still open"; Z18 "b117f010's garaging fragments" | a garaging box needs a vehicle row (no vehicle schedule = owned blank) |
+| P15-4 | "Item 3A State: CO" printed as a box value (the WC dec's item LABEL kept with the value) | `b117f010` | Z13 "Still open"; Z18 "Still open" | an AI value that starts with a document item label ("Item 3A ...:") is refused or stripped to its value |
+| P15-5 | ACORD 137 "hired physical damage: primary" ticked with no document stating the basis | `805049a7` / `15f43bba` runs | X1 (top of this file); Z18 "Still open" | rule: a basis tick needs "primary" (or "excess") beside that coverage in its own policy's text. **Needs a live run** - the evidence quotes are not stored |
+| P15-6 | ACORD 126 per-project aggregate ticked Yes from the UMBRELLA's endorsement list | `805049a7` (part R list) | Part R "ACORD 126"; Z18 "Still open" | scoped evidence: a GL question answered only by another policy's text is refused. **Needs a live run** - quotes not stored |
+| P15-7 | ACORD 131 "Any auto" tick (deterministic) is blanked by the naked-Yes guard when its paired description box is empty | Choice Electric runs | X3 (top of this file) | exempt a tick a deterministic rule printed from the Yes / explanation pairing |
+
+When fixed: replay the stored rows named above read-only (round-5 corpus harness for AI values - an
+`allow_llm=False` replay never sees them), measure on a few packages (owner: a few, not all), and move the row here to
+DONE with the part that fixed it.
+
 ### F01. FOR THE BRENT MAIL (owner, 15 Oct 2026) - the owner sends one batched mail; these are its points
 
 1. **Proposal: make the package SQS fully independent of the forms.** Today the score reaches 100 from the documents and
