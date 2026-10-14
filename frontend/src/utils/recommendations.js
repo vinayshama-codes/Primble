@@ -274,7 +274,23 @@ export function formChoiceItems(groupedIssues, tickedFormIds = []) {
 // `formsExist`: forms are generated (group 2 reads `attention`); otherwise
 // group 2 reads `dryRun`. `count` = the unique items the section lists - the
 // number the Overview's link prints.
-export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist } = {}) {
+// A form the documents call for that is not in the package (the documents
+// door's `document_form_offers`: "Your documents now show Commercial Auto.
+// ACORD 127 is not in this package."), one per form, after forms only (owner,
+// 14 Oct 2026: "i need the Add form thing in recommendations").
+export function offerItems(formOffers) {
+  const out = [];
+  const seen = new Set();
+  for (const o of (Array.isArray(formOffers) ? formOffers : [])) {
+    const id = clean(o && o.form_id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ ...o, form_id: id });
+  }
+  return out;
+}
+
+export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist, formOffers } = {}) {
   const covered = onScreenFixKeys(groupedIssues, keyDetails);
   const score = scoreItems(packageSqs, covered);
   // BEFORE FORMS THIS SECTION IS THE SCORE ONLY (owner, 14 Oct 2026: "we are
@@ -288,7 +304,9 @@ export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, at
     : { forms: [], count: 0, hiddenIds: new Set(), source: "none" };
   const formsReady = formsExist ? !!attention : true;
   const formsCount = formsExist && formsReady ? forms.count : 0;
-  return { score, forms, formsReady, formChoices: [], choicesOpen: 0, count: score.length + formsCount };
+  const offers = formsExist ? offerItems(formOffers) : [];
+  return { score, forms, formsReady, offers, formChoices: [], choicesOpen: 0,
+           count: score.length + formsCount + offers.length };
 }
 
 export const recommendationsText = (n) => `${n} recommendation${n === 1 ? "" : "s"}`;
@@ -374,8 +392,10 @@ export { REC_PAGE };
 export function considerText(model) {
   const score = Array.isArray(model?.score) ? model.score.length : 0;
   const forms = (Number(model?.forms?.count) || 0) + (Number(model?.choicesOpen) || 0);
+  const offers = Array.isArray(model?.offers) ? model.offers.length : 0;
   const parts = [];
   if (score) parts.push(`${score} to raise your score`);
+  if (offers) parts.push(`${offers} form${offers === 1 ? "" : "s"} to add`);
   if (forms) parts.push(`${forms} your forms need`);
   return parts.length ? parts.join(" · ") : `${Number(model?.count) || 0} to consider`;
 }

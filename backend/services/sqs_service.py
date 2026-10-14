@@ -8753,15 +8753,21 @@ def calculate_sqs(
             exp_score = min(100, exp_score + 5)
 
     elif fid == "ACORD_126":
+        # One reader for each (14 Oct 2026, live run f83757cf: 126 Exposure 60 on a
+        # package printing $1,000,000 / $2,000,000 and the code the producer typed).
+        # GL class codes through `gl_class_codes_present` (both homes, any shape - a
+        # rating schedule or a typed answer counted as "no codes" here, -15), and
+        # the GL limits as the 126's own structural check reads them (the composite
+        # OR each occurrence OR aggregate - the composite alone is often absent).
+        _gl_codes_here = gl_class_codes_present(facts)
         chks = [
-            bool(_fv(facts, "gl_class_codes_by_location")),
+            _gl_codes_here,
             bool(_fv(facts, "total_payroll") or _fv(facts, "total_revenue")),
             bool(_fv(facts, "operations_description")),
-            bool(_fv(facts, "gl_limits")),
+            bool(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence") or _fv(facts, "gl_aggregate")),
         ]
         exp_score = int(sum(chks) / len(chks) * 100)
-        _gl_codes = _fv(facts, "gl_class_codes_by_location")
-        if isinstance(_gl_codes, list) and _gl_codes:
+        if _gl_codes_here:
             exp_score = min(100, exp_score + 10)
         else:
             exp_score = max(0, exp_score - 15)
@@ -8787,11 +8793,20 @@ def calculate_sqs(
             })
 
     elif fid == "ACORD_127":
+        # The radius through the one reader the 127's structural check uses
+        # (`coverage_evidence.auto_radius_known` - a stated radius OR the rating
+        # table's radius class, "LOCAL"); the bare fact docked 20 points on a
+        # package whose radius the documents state (14 Oct 2026, f83757cf).
+        try:
+            from services.coverage_evidence import auto_radius_known as _radius_known
+            _radius_here = _radius_known(facts)
+        except Exception:                                      # noqa: BLE001
+            _radius_here = bool(_fv(facts, "auto_radius_of_operation"))
         chks = [
             _auto_liability_stated(facts),
             bool(_fv(facts, "auto_liability_structure")),
             bool(_fv(facts, "auto_covered_symbols")),
-            bool(_fv(facts, "auto_radius_of_operation")),
+            _radius_here,
             bool(_fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")),
         ]
         exp_score = int(sum(chks) / len(chks) * 100)

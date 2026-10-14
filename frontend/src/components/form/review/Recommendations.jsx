@@ -137,39 +137,49 @@ function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
 // A form the documents call for that is not in the package ("Your documents now
 // show Commercial Auto. ACORD 127 is not in this package.") - the add-document
 // answer's offers (`document_form_offers`), listed here too (owner, 14 Oct 2026).
-function OfferRows({ offers, onAddOffer }) {
+function OffersGroup({ offers, onAddOffer }) {
+  const [open, setOpen] = useState(true);
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
   if (!offers.length) return null;
   return (
-    <div className="rec-form" data-testid="rec-form-offers">
-      <div className="rec-form__head"><span className="rec-form__name">Forms your documents call for</span></div>
-      {offers.map((o) => (
-        <div key={o.form_id} className="rec-row">
-          <div className="rec-row__main">
-            <div className="rec-row__title">{o.line_label ? `Your documents show ${o.line_label}. ` : ""}{o.label || formLabel(o.form_id)} is not in this package.</div>
-            {o.reason && <div className="rec-row__detail">{positiveScoreWording(o.reason)}</div>}
+    <section className="rec-group" aria-label="Forms to add" data-rec-group="offers" data-testid="rec-form-offers">
+      <FoldHead open={open} onToggle={() => setOpen((o) => !o)} title="Forms to add">
+        <span className="rec-count">{offers.length}</span>
+      </FoldHead>
+      {open && (
+      <>
+      <div className="rec-group__sub">Your documents call for these forms. Adding one generates it and re-runs the checks.</div>
+      <div className="rec-list">
+        {offers.map((o) => (
+          <div key={o.form_id} className="rec-row">
+            <div className="rec-row__main">
+              <div className="rec-row__title">{o.line_label ? `Your documents show ${o.line_label}. ` : ""}{o.label || formLabel(o.form_id)} is not in this package.</div>
+              {o.reason && <div className="rec-row__detail">{positiveScoreWording(o.reason)}</div>}
+            </div>
+            {typeof onAddOffer === "function" && (
+              <button type="button" className="rec-link" disabled={!!busy}
+                onClick={async () => {
+                  setBusy(o.form_id); setErr("");
+                  try { await onAddOffer(o); } catch (e) { setErr(e?.message || "The form could not be added."); } finally { setBusy(null); }
+                }}>
+                {busy === o.form_id ? "Adding..." : `Add ${o.label || formLabel(o.form_id)}`}
+              </button>
+            )}
           </div>
-          {typeof onAddOffer === "function" && (
-            <button type="button" className="rec-link" disabled={!!busy}
-              onClick={async () => {
-                setBusy(o.form_id); setErr("");
-                try { await onAddOffer(o); } catch (e) { setErr(e?.message || "The form could not be added."); } finally { setBusy(null); }
-              }}>
-              {busy === o.form_id ? "Adding..." : `Add ${o.label || formLabel(o.form_id)}`}
-            </button>
-          )}
-        </div>
-      ))}
+        ))}
+      </div>
       {err && <div className="rec-row__detail" role="alert" style={{ color: "#b91c1c" }}>{err}</div>}
-    </div>
+      </>
+      )}
+    </section>
   );
 }
 
-function AfterFormsGroup({ forms, ready, onOpenForm, offers = [], onAddOffer }) {
+function AfterFormsGroup({ forms, ready, onOpenForm }) {
   const [open, setOpen] = useState({});
   const [groupOpen, setGroupOpen] = useState(true);
-  const count = forms.reduce((n, f) => n + f.items.length, 0) + offers.length;
+  const count = forms.reduce((n, f) => n + f.items.length, 0);
   return (
     <section className="rec-group" aria-label="Your forms will need" data-rec-group="forms">
       <FoldHead open={groupOpen} onToggle={() => setGroupOpen((o) => !o)} title="Your forms will need">
@@ -178,7 +188,6 @@ function AfterFormsGroup({ forms, ready, onOpenForm, offers = [], onAddOffer }) 
       {groupOpen && (
       <>
       <div className="rec-group__sub">Boxes still empty on your generated forms. Fill them in the editor.</div>
-      <OfferRows offers={offers} onAddOffer={onAddOffer} />
       {ready === undefined && <div className="rec-empty">Checking your forms...</div>}
       {ready === null && <div className="rec-empty">Your forms could not be checked just now. Open a form to see what it needs.</div>}
       {ready && count === 0 && <div className="rec-empty">Nothing to add - your forms have what they need from you.</div>}
@@ -236,7 +245,7 @@ export default function Recommendations({
   // The classic layout passes no list: this section reads it itself.
   const ownAttention = useAttentionList(sessionId, formsExist && attention === undefined && !model, refreshKey);
   const att = attention !== undefined ? attention : ownAttention;
-  const rec = model || buildRecommendations({ packageSqs, groupedIssues, keyDetails, dryRun, attention: att, formsExist, tickedFormIds });
+  const rec = model || buildRecommendations({ packageSqs, groupedIssues, keyDetails, dryRun, attention: att, formsExist, tickedFormIds, formOffers });
   const allChoices = Array.isArray(rec.formChoices) ? rec.formChoices : [];
   const keepsResolved = typeof onReopenResolved === "function";
   const resolved = keepsResolved
@@ -247,7 +256,7 @@ export default function Recommendations({
     })
     : [];
   // Before forms there is no forms group (owner, 14 Oct 2026): nothing to wait for.
-  const offers = formsExist && Array.isArray(formOffers) ? formOffers.filter((o) => o && o.form_id) : [];
+  const offers = Array.isArray(rec.offers) ? rec.offers : [];
   const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 && offers.length === 0 : true;
   const allGood = rec.score.length === 0 && formsQuiet && !generating;
 
@@ -264,9 +273,9 @@ export default function Recommendations({
       {allGood && <div className="rec-empty--good">Nothing to add - your package is in good shape.</div>}
       <div className="rec" hidden={allGood}>
       <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix} />
+      {formsExist && <OffersGroup offers={offers} onAddOffer={onAddOffer} />}
       {formsExist && (
-        <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm}
-          offers={offers} onAddOffer={onAddOffer} />
+        <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm} />
       )}
       </div>
       {/* Outside the hidden block: what was handled stays reachable when

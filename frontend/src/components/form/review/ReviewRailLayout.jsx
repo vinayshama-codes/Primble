@@ -464,7 +464,7 @@ export default function ReviewRailLayout(props) {
     `${section === "overview" || section === "recommendations"}|${packageSqs?.package_sqs_score ?? ""}|${packageSqs?.timestamp ?? ""}`);
   const recModel = buildRecommendations({
     packageSqs, groupedIssues, keyDetails, dryRun, attention: recAttention, formsExist,
-    tickedFormIds: dryRunFormIds || [],
+    tickedFormIds: dryRunFormIds || [], formOffers,
   });
   const recChecking = !formsExist && genState !== GEN_RUNNING && dryRun?.status === "pending";
 

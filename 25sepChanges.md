@@ -1002,6 +1002,47 @@ members, own / rent, leased area x2, 126 code-only row's 6 cells, 131 hazardous 
 "AI held back" (58, refusals working) stay by design. **Open, ours:** CE 25 (add the auto policy after this deploy),
 Orbin 17 (retype check), G2 client path live; tell Michelle 5 / 12.
 
+### Z16. `f83757cf` after the 7th PDF + the owner's UI asks (14 Oct 2026, morning)
+
+**Adding the Business Auto Policy after forms (CE 25) - verified live on the stored row:** forms updated in place
+(125 10 boxes, 126 2, 131 4, 140 1, 137 CO 44, 131 Excess 2): 125 Business Auto ticked + vehicle schedule attached; the
+**carrier fix (Z15) verified live** - 125 Prior Carrier GL (Amerisure, 01/01/2025-01/01/2026, $16,818) and Property
+($6,275), 126 / 140 headers Amerisure; 131 hired / non-owned answered; 137 symbols (1 liability, 7 comp / collision),
+UM $1,000,000, med pay $5,000. **CE 9 PASS:** the policies table lists 11 policies incl. Auto Liability (Amerisure,
+$1,000,000 CSL); no "COMMERCIAL AUTO" policy number anywhere. A new warning "Driver schedule not provided" capped the
+package at 85 (correct - the policy schedules vehicles, no drivers); the owner added a driver and ACORD 127: package 99,
+100 without forms. **Open, ours:** the add notice said "No new issues on the review page" although that warning was
+new (before 0, after 1) - not reproduced yet. **Parked class (owner):** the new-document AI fill put the auto policy's
+5,000 into the 126 "other deductible".
+
+**Built (owner's asks), all frontend except the score fix:**
+1. The add-document result box closes with an x (`AddDocumentsPanel` `resultClosed`; a new answer reopens it).
+2. **"Forms to add" in Recommendations** - the documents door's offers (`document_form_offers`: "Your documents now
+   show Commercial Auto. ACORD 127 is not in this package") are part of the model (`recommendations.offerItems` ->
+   `buildRecommendations(... formOffers)`): their own group with "Add ACORD 127" (POST `documents/add-form`,
+   `AcordModal.addOfferedForm`), counted in the rail, the header and the Overview ("2 forms to add"). First cut
+   rendered them inside "Your forms will need" with no count - the rail said "Nothing to add" (owner: "they are not in
+   recommendations").
+3. Side panel: every action looks like "Open to fix" (`NeedsAttentionPanel.FIX_LOOK` - Show on form, Confirm,
+   Confirm all, Use this value / Keep current); the page number is a plain label.
+4. A dashboard click whose review page cannot load (a Render package opened on localhost - its facts are under
+   Render's key) still opens the forms but now says so.
+5. **Per-form Exposure readers (`sqs_service.calculate_sqs`, D6 - per-form up, package unaffected):** ACORD 126 read
+   only the composite `gl_limits` and gave -15 to any GL code not stored as a LIST (82 on this package, Exposure 60);
+   now `gl_class_codes_present` + each-occurrence / aggregate. ACORD 127 read the bare `auto_radius_of_operation`
+   while its structural check uses `coverage_evidence.auto_radius_known` (94, Exposure 80). The 131 Excess (86) is
+   docked for no SIR / attachment point - Brent's CE 4 question, unchanged.
+Tests: `tests/test_per_form_exposure_readers_14oct.py` (new); `test_verify_rows_13oct` updated (the TEST pinned the
+13 Oct chip design). Suite 14,153 / 1 / 19.
+
+**STATUS 14 Oct (both client documents, 49 points):**
+
+| | Closed (verified live) | Our part done, waits on Brent / Michelle | Ours open |
+|---|---|---|---|
+| Choice Electric (27) | **17**: 1, 2, 3, 5, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 24 | **9**: 4, 6, 7, 15, 18, 20, 22, 26, 27 | **1**: 25 (works; the "No new issues" notice is wrong) |
+| Orbin (22) | **15**: 1, 2, 3, 4, 6, 7, 9, 10, 11, 13, 16, 18, 19, G1, Q | **5**: 5, 12 (tell Michelle), 8 (Umbrella / IM premiums), 14 (signature acceptance), 15 (score effect) | **2**: 17 (owner's retype check), G2 (client path live) |
+| **Total** | **32** | **14** | **3** |
+
 ### F00. FINAL - only the questions that BLOCK the remaining test items (owner, 8 Oct night)
 Owner's answers: forms 152 / 834 / 827 - **leave for now, correct the 17 forms we have**; questions 9-17 below
 (excess 131 underlying, 130 audit tick, website, risk state, expired-dec dates, vehicle use, follow-form credit,

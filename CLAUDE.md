@@ -792,6 +792,7 @@ boxes in 2, both intended (a NAICS code off the 126; a grid with no GL code an o
 re-stamp door identical on 16 of 16 runs (6.4 s -> 3.9 s). Open (D6): the 126 per-form Exposure block reads one GL
 home (a full schedule scores 60); the score's "no class codes" warning fires on the three misfiled kits (shape-blind).
 **Live run `f83757cf` (part Z15, 14 Oct):** Z13 / Z14 verified on the forms. "Your forms will need" is gone before forms (owner; `utils/recommendations.buildRecommendations`); Field QA reads a table cell's own row (`pdf_service.authoritative_expected_value` asks `_resolve_schedule_row`); a document that is one carrier's own paperwork gives that carrier to its rows that print none (`extraction_service.assign_document_carrier_to_rows` - the 125 prior grid lost GL / Property when extraction left the carrier off). Suite 14,150 / 1 / 19.
+**`f83757cf` after the 7th PDF (part Z16, 14 Oct):** CE 25 and the carrier fix verified live; CE 9 PASS. Built: "Forms to add" in Recommendations (`recommendations.offerItems`, counted), the add-result box closes, side-panel actions share `NeedsAttentionPanel.FIX_LOOK`, per-form 126 / 127 Exposure read the one readers (`gl_class_codes_present`, `auto_radius_known`). Status: 32 of 49 client points closed, 14 wait on Brent / Michelle, 3 ours (CE 25's "No new issues" notice, Orbin 17, G2). Suite 14,153 / 1 / 19.
 **Re-run `2076fe35` (part T2): round 10 verified live, item 9 PASS. Status 10 Oct (board): 14 done, 7 built and waiting for a live look (2, 12, 13, 16, 17, 19, 24) plus our parts of 18 / 26 / 27, 6 waiting on Brent, 0 UI left.** Three more, offline:
 `extraction_service.derive_property_values_from_premises` (an empty building / BPP value from the premises rows of a
 document whose ROLE may state it - never a certificate's limit, D23); `scoped_evidence.trigger_values` (an AI
@@ -3320,7 +3321,7 @@ column there will not reach a real deployment.
 
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **14,150 passed, 1 failed, 19 skipped** (~16 min; 14 Oct 2026, after part Z15; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **14,153 passed, 1 failed, 19 skipped** (~16 min; 14 Oct 2026, after part Z16; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac
