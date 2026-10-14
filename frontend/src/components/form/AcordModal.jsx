@@ -4056,7 +4056,11 @@ const AcordModal = forwardRef(function AcordModal({
           const ok = await _restoreFromExtraction(sid, _freshSignal());
           if (!ok) {
             if (gen.state === GEN_DONE) {
-              // The package page could not load; the forms still can.
+              // The package page could not load; the forms still can - and the
+              // producer is told so, never moved silently (owner, 14 Oct 2026:
+              // a Render package opened on localhost, whose facts the local key
+              // cannot read, landed in the editor with no word why).
+              setError("This package's review page could not load here, so its forms opened instead.");
               setStep("editor");
             } else if (gen.state === GEN_RUNNING && await _resumeGeneration(sid, data)) {
               // reached the editor
