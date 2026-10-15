@@ -1699,6 +1699,17 @@ card's "Fix in Data Consistency" button shows the SAME number (`mirror`, counted
 Building Value +2, Entity Type / BPP Value / Total Policy Premium / Construction Type +1 each, total 63 = 100 - 37.
 Full suite before this frontend-only change: **14,693 passed / 1 failed (the documented `test_arq_acord125_missing_only`)
 / 19 skipped**.
+**"Answer everything" on a read-only copy of `7ed880d6` first ended at 85:** two warnings - "Policy date mismatch" /
+"Policy expiration date mismatch" across documents (several policies, each with its own term) - had no fix button and
+nothing cleared them (no picker row for a contract-scoped date; the build test harvested only cross-form and legacy rules,
+not `check_doc_consistency`). Their own message names the fix (an ACORD 101 explanation): `doc_conflict_(warn|hard)_
+(date|expiration)_conflict` now resolve to an explanation (`_DATE_CONFLICT_NOTE`), and a saved explanation stops them
+counting (`doc_consistency_stops` drops the explained codes; `retire_stopped_doc_conflict_issues(explained=)` retires the
+stored copy; `issue_registry.explained_doc_conflict_codes`). Re-run: **37 -> 100 exactly**. Two things the run exposed
+for the producer: the Applicant row SUGGESTS "MERIDIAN FABRICATION INC" - the other insured's `control_dec.pdf` (a picker
+bug, open: never suggest a value only another insured's document prints); and "Total Policy Premium" lists five
+policies' own premiums, none of them the total - the right answer is typed. Tests: +1 in
+`tests/test_warnings_a_correct_answer_clears_15oct.py`.
 
 ### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
 

@@ -3037,6 +3037,15 @@ def doc_consistency_stops(session_data: dict, with_conflicts: bool = False):
         hard, soft, _info, _conf = split_doc_consistency_issues(
             check_doc_consistency(docs, confirmed)
         )
+        # A difference a saved explanation answered no longer counts (15 Oct 2026).
+        from services.issue_registry import explained_doc_conflict_codes
+        _explained = explained_doc_conflict_codes((session_data or {}).get("facts"))
+        if _explained:
+            _gone = {c["message"] for c in _conf
+                     if f"doc_conflict_{'hard' if c.get('hard_stop') else 'warn'}_{c.get('code')}" in _explained}
+            hard = [m for m in hard if m not in _gone]
+            soft = [m for m in soft if m not in _gone]
+            _conf = [c for c in _conf if c["message"] not in _gone]
         return (hard, soft, _conf) if with_conflicts else (hard, soft)
     except Exception as exc:                                   # pragma: no cover
         logger.error("doc_consistency_stops failed (non-fatal): %s", exc, exc_info=True)

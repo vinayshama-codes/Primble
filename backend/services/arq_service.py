@@ -7471,14 +7471,14 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
         # 2026): one the documents no longer raise leaves the screen too.
         try:
             from services.issue_registry import (
-                person_settled_keys, retire_settled_source_conflicts,
-                retire_stopped_doc_conflict_issues,
+                explained_doc_conflict_codes, person_settled_keys,
+                retire_settled_source_conflicts, retire_stopped_doc_conflict_issues,
             )
             from services.underwriting_consistency import confirmed_fact_keys
             fresh_structured = retire_stopped_doc_conflict_issues(
                 fresh_structured, _docs,
                 set(confirmed_fact_keys(proc.get("underwriting_confirmations") or {}))
-                | person_settled_keys(facts))
+                | person_settled_keys(facts), explained_doc_conflict_codes(facts))
             fresh_structured = retire_settled_source_conflicts(fresh_structured, facts)
         except Exception as _dc_ex:                          # noqa: BLE001
             logger.warning("doc-conflict retirement skipped: %s", _dc_ex)

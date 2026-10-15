@@ -599,6 +599,13 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
         return _source_conflict_resolution(code)
     if code.startswith(_OCR_ISSUE_PREFIX):
         return _ocr_resolution(code[len(_OCR_ISSUE_PREFIX):])
+    m = _DOC_CONFLICT_CODE_RE.match(code)
+    if m and m.group(1) in _DATE_CONFLICT_TOKENS:
+        # A policy-term difference (15 Oct 2026, live 7ed880d6: several policies,
+        # each with its own term, held 85 with no button). Its own message names
+        # the fix - explain the difference on ACORD 101 - and a saved explanation
+        # settles it (`doc_consistency_stops`, `retire_stopped_doc_conflict_issues`).
+        return {**_R_NARRATIVE, "note": _DATE_CONFLICT_NOTE}
     if code.startswith("doc_conflict_warn_"):
         # Only the fields a person's value settles (`person_settled_keys`); the
         # identity / date ones stay with the Data Consistency picker.
@@ -621,6 +628,19 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
 #    reach the underwriter in the ACORD 101 remarks. "Open again" takes it back.
 DOC_WARNING_FIELDS = ("dba_name", "entity_type", "mailing_address", "physical_address",
                       "lines_of_business")
+
+# A difference in policy dates across documents: explained, never typed.
+_DATE_CONFLICT_TOKENS = frozenset({"date_conflict", "expiration_conflict"})
+_DATE_CONFLICT_NOTE = (
+    "The documents print different policy dates. Explain the difference - for example "
+    "that each policy has its own term, and which term this submission is for - and "
+    "saving the explanation settles it. A date confirmed in Data Consistency settles it too.")
+
+
+def explained_doc_conflict_codes(facts: Any) -> set:
+    """The document-conflict card codes a saved explanation has answered."""
+    return {c for c in explained_issue_codes(facts)
+            if c.startswith("doc_conflict_") and explains_away(c)}
 
 
 def person_settled_keys(facts: Any) -> set:
@@ -2609,6 +2629,7 @@ def doc_conflict_code(issue: Any) -> Optional[str]:
 
 def retire_stopped_doc_conflict_issues(
     persisted: Optional[List[dict]], docs: Any, confirmed_keys: Any = (),
+    explained: Any = (),
 ) -> List[dict]:
     """Drop the persisted copy of every document-conflict issue the documents no
     longer raise (15 Oct 2026, run 9acec031).
@@ -2630,7 +2651,7 @@ def retire_stopped_doc_conflict_issues(
         if len(active) >= 2:
             for finding in check_doc_consistency(active, set(confirmed_keys or ())):
                 code = doc_conflict_code(finding)
-                if code:
+                if code and code not in set(explained or ()):
                     live.add(code)
     except Exception:                                     # noqa: BLE001
         return list(persisted or [])

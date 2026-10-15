@@ -171,3 +171,23 @@ def test_the_real_fix_route_records_the_explained_card():
     assert out.get("success") is True
     from services.issue_registry import explained_issue_codes
     assert "wc_gl_class_code_mismatch" in explained_issue_codes(s.store.get("facts"))
+
+
+# ── A policy-date difference across documents (15 Oct, live 7ed880d6) ─────────
+# Several policies, each with its own term: the warning held 85 with no button.
+# Its own message names the fix - explain the difference - and a saved
+# explanation stops it counting.
+def test_a_policy_date_difference_is_explained_and_then_stops_counting(monkeypatch):
+    import services.sqs_service as S
+    from services.issue_registry import resolution_for
+    for code in ("doc_conflict_warn_date_conflict", "doc_conflict_warn_expiration_conflict",
+                 "doc_conflict_hard_date_conflict", "doc_conflict_hard_expiration_conflict"):
+        res = resolution_for(code)
+        assert res["mode"] == "narrative" and "Explain the difference" in res["note"]
+    monkeypatch.setattr(S, "check_doc_consistency", lambda docs, confirmed=None: [
+        "[warning] code=date_conflict Policy date mismatch across documents. Each policy carries its own term."])
+    docs = [{"facts": {"effective_date": "01/16/2025"}}, {"facts": {"effective_date": "07/15/2025"}}]
+    hard, soft = S.doc_consistency_stops({"docs": docs, "facts": {}})
+    assert soft and not hard
+    explained = {"_explained_issue_codes": {"value": ["doc_conflict_warn_date_conflict"], "source": "producer"}}
+    assert S.doc_consistency_stops({"docs": docs, "facts": explained}) == ([], [])
