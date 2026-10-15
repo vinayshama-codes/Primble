@@ -1291,11 +1291,8 @@ def validate_policy_term_not_expired(facts: dict) -> tuple | None:
     return None
 
 
-_VALID_NAICS_PREFIXES = {
-    "11","21","22","23","31","32","33","42","44","45",
-    "48","49","51","52","53","54","55","56","61","62",
-    "71","72","81","92"
-}
+# ONE list, shared with the answer box (15 Oct 2026, fact_registry._is_naics).
+from services.fact_registry import VALID_NAICS_SECTORS as _VALID_NAICS_PREFIXES  # noqa: E402
 
 def validate_naics_code(facts: dict) -> tuple | None:
     code = str(_fv(facts, "naics_code") or "").strip()
@@ -1654,8 +1651,8 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     from services.coverage_evidence import gl_is_claims_made as _gl_cm
     if _gl_cm(facts, flags) and not _fv(facts, "retro_date"):
         soft.append("GL policy is claims-made - retro date is required")
-    if (flags.get("has_general_liability") and not _fv(facts, "total_revenue")
-            and not _fv(facts, "total_payroll")
+    if (flags.get("has_general_liability") and not _answered(facts, "total_revenue")
+            and not _answered(facts, "total_payroll")
             and not _dec_entries_state_payroll(facts)):
         soft.append("GL coverage detected but no revenue or payroll found")
     if flags.get("has_general_liability"):
@@ -1777,14 +1774,19 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         if flags.get("wc_has_monopolistic_state"):
             # Spec: Monopolistic WC (ND/OH/WA/WY) - soft if state-fund is acknowledged;
             # HARD STOP if private-carrier WC is being requested for those states.
+            # The placement answer (15 Oct 2026): "Yes - ... state fund" confirms
+            # what the warning asks and clears it; "No - private carrier ..." is
+            # a private-carrier request, which those states do not allow.
+            _placement = str(_fv(facts, "wc_state_fund_acknowledged") or "").strip().lower()
             private_wc_requested = bool(
                 flags.get("wc_private_carrier_requested")
                 or flags.get("wc_requested_private_carrier")
                 or (_fv(facts, "wc_carrier_type") or "").lower() in ("private", "voluntary")
+                or _placement.startswith("no")
             )
             state_fund_ack = bool(
                 flags.get("wc_state_fund_acknowledged")
-                or _fv(facts, "wc_state_fund_acknowledged")
+                or _placement.startswith("yes")
             )
             if private_wc_requested and not state_fund_ack:
                 hard.append(
@@ -1792,7 +1794,9 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                     "private-carrier WC cannot be quoted. Remove private-carrier "
                     "request or acknowledge state-fund handling."
                 )
-            else:
+            elif not state_fund_ack:
+                # Asked until the placement is confirmed; once it is, there is
+                # nothing left to warn about (it used to fire either way).
                 soft.append("Monopolistic WC state detected (ND/OH/WA/WY) - must use state fund")
             if not _fv(facts, "wc_monopolistic_payroll"):
                 hard.append("Monopolistic WC state detected but wc_monopolistic_payroll breakdown is missing")
@@ -2373,11 +2377,31 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # fix that looks applied and is not is worse than no fix.)
     _pkg_ctx = _build_pkg_context(None, docs)
 
+    # Entity type is read the way every other reader reads it (15 Oct 2026, run
+    # 9acec031): `normalization.settle_document_entity_type`, through Submission
+    # Integrity's own door - a menu value only as its ticked option, a legal-form
+    # designator in the insured's own name over an incompatible reading. The
+    # merge settles each stored document in place, but a package stored before
+    # that rule (7 Oct) still holds the raw reading, and this warning then read
+    # "Corporation, LLC" for an insured named "... LLC" - pointing at a Data
+    # Consistency picker that saw agreement and offered nothing to confirm, so
+    # the score sat at 85 with no fix anywhere on the screen.
+    _entity_type_of = None
+    try:
+        from services.submission_integrity import _document_entity_type, package_identity_names
+        _names = package_identity_names(docs)
+        _entity_type_of = lambda d: _document_entity_type(d, _names)  # noqa: E731
+    except Exception:                                         # noqa: BLE001
+        _entity_type_of = None
+
     def _raw(key: str) -> List:
         # Role scope (client 1.2): a document is only read as stating a fact its
         # ROLE covers. See fact_comparison.document_witnesses.
-        return [_fv(d["facts"], key) for d in docs
-                if _fv(d["facts"], key) and _doc_witnesses(d.get("doc_type"), key)]
+        stated = [d for d in docs
+                  if _fv(d["facts"], key) and _doc_witnesses(d.get("doc_type"), key)]
+        if key == "entity_type" and _entity_type_of is not None:
+            return [v for v in (_entity_type_of(d) for d in stated) if v]
+        return [_fv(d["facts"], key) for d in stated]
 
     def _conflicts(key: str, raw_values: List) -> bool:
         """True when the documents genuinely disagree about ``key``.
@@ -2819,7 +2843,8 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             "lines_of_business: %s is DENIED by one document and listed as "
             "active by another - a real coverage contradiction",
             ", ".join(sorted(_contradicted)))
-    if len(lob_norm_sets) >= 2 and len(set(lob_norm_sets)) > 1 and _lob_disagree:
+    if ("lines_of_business" not in confirmed_keys and len(lob_norm_sets) >= 2
+            and len(set(lob_norm_sets)) > 1 and _lob_disagree):
         _lob_display = "; ".join(lob_raw_display)
         # Not a Data Consistency reconcilable field (no picker exists for it) -
         # the only real fix is checking the source documents directly.
@@ -2978,7 +3003,7 @@ def split_doc_consistency_issues(
     return hard, soft, info, conflicts
 
 
-def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
+def doc_consistency_stops(session_data: dict, with_conflicts: bool = False):
     """Re-run the cross-document identity checks against a STORED session.
 
     The rescore paths rebuild `hard_stops` from scratch; without this they drop
@@ -2988,6 +3013,9 @@ def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
 
     Fails open (returns empty lists) - a rescore must never break because a
     legacy session stored its documents in an older shape.
+
+    `with_conflicts`: also the run's conflicts (`[{code, message, hard_stop}]`)
+    - the review screen finds each one's Data Consistency row by them.
     """
     try:
         docs = [
@@ -2995,21 +3023,24 @@ def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
             if isinstance(d, dict) and not d.get("excluded") and isinstance(d.get("facts"), dict)
         ]
         if len(docs) < 2:
-            return [], []          # nothing to compare against
+            return ([], [], []) if with_conflicts else ([], [])   # nothing to compare against
         # The extraction path passes the BASE key of every confirmation
         # (`parse_confirmation_key`), so a line-scoped answer ("effective_date
         # @auto") settles its comparison there. This path read the raw keys, and
         # the same confirmation stopped counting on the first rescore (5 Oct).
         from services.underwriting_consistency import confirmed_fact_keys
-        confirmed = confirmed_fact_keys(
-            (session_data or {}).get("underwriting_confirmations") or {})
+        from services.issue_registry import person_settled_keys
+        confirmed = set(confirmed_fact_keys(
+            (session_data or {}).get("underwriting_confirmations") or {}))
+        # A warning field a person typed is settled (15 Oct 2026).
+        confirmed |= person_settled_keys((session_data or {}).get("facts"))
         hard, soft, _info, _conf = split_doc_consistency_issues(
             check_doc_consistency(docs, confirmed)
         )
-        return hard, soft
+        return (hard, soft, _conf) if with_conflicts else (hard, soft)
     except Exception as exc:                                   # pragma: no cover
         logger.error("doc_consistency_stops failed (non-fatal): %s", exc, exc_info=True)
-        return [], []
+        return ([], [], []) if with_conflicts else ([], [])
 
 
 def doc_consistency_normalizations(session_data: dict) -> List[dict]:
@@ -4655,7 +4686,7 @@ def exposure_deduction_items(
             # GL class code does not match operations description
             _add("operations_description", 15, "gl_class_codes_by_location",
                  "GL class codes that match the operations described")
-        if not _fv(facts, "gl_limits") and not _fv(facts, "gl_each_occurrence"):
+        if not _answered(facts, "gl_limits") and not _answered(facts, "gl_each_occurrence"):
             _add("coverage_information", 8, "gl_each_occurrence", "GL each occurrence limit")
 
     # ── Payroll / revenue exposure base (L41, L121) ──────────────────────────
@@ -4701,22 +4732,22 @@ def exposure_deduction_items(
 
     # ── WC: payroll + class codes + multi-state (L121, L143-150) ─────────────
     if flags.get("has_workers_comp"):
-        if not _fv(facts, "wc_payroll") and not _fv(facts, "total_payroll"):
+        if not _answered(facts, "wc_payroll") and not _answered(facts, "total_payroll"):
             _add("payroll_employee_information", 12, "wc_payroll", "Workers comp payroll")
-        if not _fv(facts, "wc_class_codes"):
+        if not _answered(facts, "wc_class_codes"):
             _add("operations_description", 10, "wc_class_codes", "Workers comp class codes")
         elif _is_ops_class_code_mismatch(facts, flags, "wc"):
             # WC class code does not match operations description
             _add("operations_description", 15, "wc_class_codes",
                  "Workers comp class codes that match the operations described")
-        if flags.get("wc_multi_state") and not _fv(facts, "wc_payroll_by_state"):
+        if flags.get("wc_multi_state") and not _answered(facts, "wc_payroll_by_state"):
             # The breakdown by state IS the class table (V1 H3).
             _add("payroll_employee_information", 8, "wc_class_codes",
                  "Workers comp payroll by state")
 
     # ── Contractor: subcontracting % reconciliation (L91, L458) ──────────────
     if flags.get("is_contractor") or flags.get("has_subcontractors"):
-        if not _fv(facts, "percent_subcontracted"):
+        if not _answered(facts, "percent_subcontracted"):
             _add("operations_description", 8, "percent_subcontracted",
                  "Percent of work subcontracted")
 
@@ -4726,7 +4757,7 @@ def exposure_deduction_items(
         # design and was charged -10 for "no liability limit" (live P5).
         if not _auto_liability_stated(facts):
             _add("coverage_information", 10, "auto_liability_limit", "Auto liability limit")
-        if not _fv(facts, "auto_covered_symbols"):
+        if not _answered(facts, "auto_covered_symbols"):
             _add("coverage_information", 5, "auto_covered_symbols", "Covered auto symbols")
 
     # ── V1 H1 6.3 - Auto Completeness (owned / scheduled exposure only) ─────
@@ -5813,20 +5844,21 @@ def _umbrella_underlying_stated(facts: dict) -> bool:
     return bool(str(gl_raw or "").strip() or str(auto_raw or "").strip())
 
 
-def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
-    """P5 - Umbrella & Limit Adequacy (10% of SQS).
-
-    Returns None when not applicable (no umbrella in submission). Callers must
-    exclude this pillar from the weighted sum and re-normalise weights.
+def umbrella_deduction_items(facts: dict, flags: dict) -> List[dict]:
+    """Every Umbrella & Limit Adequacy deduction, ONE item each: {points, fact,
+    label} (15 Oct 2026). The pillar is 100 minus their sum, floored at 0
+    (`_calculate_umbrella_adequacy`) - the same items the Best Solutions rows are
+    built from (`umbrella_gap_items`), so a row can never name a deduction the
+    pillar does not take, or miss one it does.
 
     Client-approved thresholds (Q1/Q2 answers):
       GL:   $1M each occurrence - reduce score if below, do NOT hard-stop
       Auto: $1M CSL             - reduce score if below, do NOT hard-stop
       EL:   $1M = full credit | $500K = acceptable | <$500K = reduction
-    """
-    if not flags.get("has_umbrella"):
-        return None  # Not Applicable - fixes the confirmed 100% bug (§6.5)
-
+    Empty when there is no umbrella, or no underlying limit at all (the pillar
+    is then N/A or 0 - see `_calculate_umbrella_adequacy`)."""
+    if not flags.get("has_umbrella") or not _umbrella_has_underlying(facts):
+        return []
     # Prefer the clean per-occurrence scalar; fall back to the combined field.
     # This matches validator.py precedence and avoids feeding the combined-limit
     # string ($1M/$2M) directly to _to_int when the clean field is available.
@@ -5837,12 +5869,7 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # below-$1M comparison is CSL-only and is not attempted on split parts -
     # no opinion, never a guess.
     _auto_split = auto_val is None and _auto_liability_stated(facts)
-    has_underlying = _umbrella_has_underlying(facts)
-
-    if not has_underlying:
-        return 0  # hard-stop scenario per evaluate_stops()
-
-    score = 100
+    items: List[dict] = []
 
     # AC#4 (§6.5): an umbrella whose OWN limit is missing is "Insufficient
     # Information" evidence - the §6.5 finding requires that case to surface a
@@ -5860,16 +5887,20 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # retained by owner decision even though the client's approved deduction table
     # does not enumerate it; do not remove without re-checking the state/score
     # agreement in _get_umbrella_state.
-    if not _fv(facts, "umbrella_limit"):
-        score -= 25
+    if not _answered(facts, "umbrella_limit"):
+        items.append({"points": 25, "fact": "umbrella_limit", "label": "Umbrella limit"})
 
     # GL - penalise both "present but below minimum" AND "required but absent".
     # A submission with GL exposure (has_general_liability) but no GL limits
     # is a gap; umbrella spec §218 requires underlying GL (client Q1 / M4 fix).
     if gl_val is not None and gl_val < _UMB_GL_OCC_MIN:
-        score -= 20              # Present but below $1M - warn, don't block (Q1)
+        # Present but below $1M - warn, don't block (Q1)
+        items.append({"points": 20, "fact": "gl_each_occurrence",
+                      "label": f"Underlying general liability each occurrence limit is below ${_UMB_GL_OCC_MIN:,}"})
     elif gl_val is None and flags.get("has_general_liability"):
-        score -= 20              # Required underlying GL missing (M4)
+        # Required underlying GL missing (M4)
+        items.append({"points": 20, "fact": "gl_each_occurrence",
+                      "label": "Underlying general liability each occurrence limit"})
 
     # GL aggregate (client Q1 baseline: $2M / occurrence $1M). The aggregate is the
     # other half of the client's stated GL baseline, so an extracted aggregate below
@@ -5877,29 +5908,38 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # NOT penalised, to avoid a false warning when only the occurrence was captured.
     gl_agg = _to_int(_fv(facts, "gl_aggregate"))
     if gl_agg is not None and gl_agg < _UMB_GL_AGG_MIN:
-        score -= 20
+        items.append({"points": 20, "fact": "gl_aggregate",
+                      "label": f"Underlying general liability aggregate is below ${_UMB_GL_AGG_MIN:,}"})
 
     # Auto - same logic: present-and-low OR required-but-absent.
     if auto_val is not None and auto_val < _UMB_AUTO_CSL_MIN:
-        score -= 20              # Present but below $1M CSL - warn, don't block (Q1)
+        # Present but below $1M CSL - warn, don't block (Q1)
+        items.append({"points": 20, "fact": "auto_liability_limit",
+                      "label": f"Underlying auto liability limit is below ${_UMB_AUTO_CSL_MIN:,}"})
     elif auto_val is None and flags.get("has_auto_coverage") and not _auto_split:
-        score -= 20              # Required underlying Auto missing (M4)
+        # Required underlying Auto missing (M4)
+        items.append({"points": 20, "fact": "auto_liability_limit",
+                      "label": "Underlying auto liability limit"})
 
     # EL tiers (client Q2: $1M full, $500K acceptable, <$500K reduction)
     if _wc_carried(flags):
         el_val = _to_int(_fv(facts, "employers_liability_limits"))
         if el_val is None:
-            score -= 25          # Missing EL
+            items.append({"points": 25, "fact": "employers_liability_limits",
+                          "label": "Underlying employers liability limit"})
         elif el_val >= _UMB_EL_FULL:
             pass                 # Full credit ($1M+)
         elif el_val >= _UMB_EL_OK:
-            score -= 10          # Acceptable ($500K–$999K)
+            items.append({"points": 10, "fact": "employers_liability_limits",
+                          "label": f"Underlying employers liability limit is below ${_UMB_EL_FULL:,}"})
         else:
-            score -= 25          # Below minimum (<$500K)
+            items.append({"points": 25, "fact": "employers_liability_limits",
+                          "label": f"Underlying employers liability limit is below ${_UMB_EL_OK:,}"})
 
     # Schedule of Underlying Insurance: -15 when absent (client V1 requirement)
     if not _umbrella_schedule_present(facts):
-        score -= 15
+        items.append({"points": 15, "fact": "schedule_of_underlying_insurance",
+                      "label": "Schedule of underlying insurance"})
 
     # Follow-form evidence: -10 when unable to confirm (Option B per client Q4)
     _ff_combined = " ".join([
@@ -5908,9 +5948,55 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
         str(_fv(facts, "policy_notes") or ""),
     ])
     if not _has_explicit_follow_form(_ff_combined):
-        score -= 10  # Follow-form status unable to determine
+        items.append({"points": 10, "fact": "umbrella_follow_form",
+                      "label": "Does the umbrella follow form over the underlying policies?"})
+    return items
 
-    return max(0, score)
+
+def umbrella_gap_items(facts: dict, flags: dict) -> List[dict]:
+    """The Umbrella pillar's gap as Best Solutions items (15 Oct 2026, owner: the
+    score must reach 100 from the review page - the 13 Oct decision built this
+    for Exposure and Property; the Umbrella pillar still showed ONE row with no
+    box, "Improve umbrella limit adequacy", so an umbrella package could never
+    reach 100 before forms).
+
+    The deductions of `umbrella_deduction_items`, each with its box. When they
+    add up to more than the pillar can lose (it floors at 0), each keeps its
+    share of the 100 points the pillar has to give (largest remainder), so the
+    items still add up to the gap. No underlying limit at all: the pillar is 0
+    and the one thing that lifts it is an underlying liability limit."""
+    if not flags.get("has_umbrella"):
+        return []
+    if not _umbrella_has_underlying(facts):
+        fact = ("auto_liability_limit"
+                if flags.get("has_auto_coverage") and not flags.get("has_general_liability")
+                else "gl_each_occurrence")
+        return [{"points": 100, "fact": fact,
+                 "label": "Underlying liability limit (general liability or auto)"}]
+    items = umbrella_deduction_items(facts, flags)
+    total = sum(int(i["points"]) for i in items)
+    if total <= 100:
+        return items
+    quotas = [int(i["points"]) * 100 / total for i in items]
+    shares = [int(q) for q in quotas]
+    left = 100 - sum(shares)
+    for n in sorted(range(len(items)), key=lambda n: -(quotas[n] - shares[n]))[:left]:
+        shares[n] += 1
+    return [{**i, "points": shares[n]} for n, i in enumerate(items)]
+
+
+def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
+    """P5 - Umbrella & Limit Adequacy (10% of SQS): 100 minus every deduction
+    of `umbrella_deduction_items`, floored at 0.
+
+    Returns None when not applicable (no umbrella in submission). Callers must
+    exclude this pillar from the weighted sum and re-normalise weights.
+    """
+    if not flags.get("has_umbrella"):
+        return None  # Not Applicable - fixes the confirmed 100% bug (§6.5)
+    if not _umbrella_has_underlying(facts):
+        return 0  # hard-stop scenario per evaluate_stops()
+    return max(0, 100 - sum(int(i["points"]) for i in umbrella_deduction_items(facts, flags)))
 
 
 def _calculate_narrative_quality(
@@ -6192,15 +6278,18 @@ def property_gap_items(facts: dict, flags: dict) -> List[dict]:
     """
     if not flags.get("has_property_coverage"):
         return []
+    # PRESENCE = ANSWERED (15 Oct 2026): a person's "none" / "not applicable"
+    # is stored as an empty value with its state, and a bare-value test kept
+    # charging it as missing - the correct answer could never reach 100.
     present = {
-        "locations": bool(_fv(facts, "locations")),
-        "occupancy_type": bool(_fv(facts, "occupancy_type")),
-        "construction_type": bool(_fv(facts, "construction_type")),
-        "property_building_value": bool(_fv(facts, "property_building_value")
-                                        or _fv(facts, "property_bpp_value")),
+        "locations": _answered(facts, "locations"),
+        "occupancy_type": _answered(facts, "occupancy_type"),
+        "construction_type": _answered(facts, "construction_type"),
+        "property_building_value": (_answered(facts, "property_building_value")
+                                    or _answered(facts, "property_bpp_value")),
     }
     tier_missing = [(k, label) for k, label in _COPE_TIER1 + _COPE_TIER2
-                    if not bool(_fv(facts, k))]
+                    if not _answered(facts, k)]
     tier_filled = len(_COPE_TIER1) + len(_COPE_TIER2) - len(tier_missing)
     items: List[dict] = []
     min_missing = [(k, label) for k, label in _COPE_MINIMUM if not present[k]]
@@ -7089,11 +7178,13 @@ def calculate_package_sqs(
         # distance to a hydrant) could not be answered anywhere. Each deduction
         # is now its own row naming the box that closes it, read off the SAME
         # items the pillar is scored from.
-        if pillar in ("exposure_consistency", "property_integrity"):
+        if pillar in ("exposure_consistency", "property_integrity", "umbrella_limit_adequacy"):
             try:
                 _items = (exposure_deduction_items(facts, flags, hard_cross, warn_cross)
                           if pillar == "exposure_consistency"
-                          else property_gap_items(facts, flags))
+                          else property_gap_items(facts, flags)
+                          if pillar == "property_integrity"
+                          else umbrella_gap_items(facts, flags))
             except Exception as _gx:                           # noqa: BLE001
                 logger.warning("gap rows skipped for %s: %s", pillar, _gx)
                 _items = []
@@ -7244,12 +7335,20 @@ def calculate_package_sqs(
     review_items = _build_umbrella_review_items(flags, _follow_form, p5, facts)
     # Surface the follow-form review item in top_recs too when there is still room
     # (max 3). It is never lost regardless - review_items carries it unconditionally.
-    if review_items and len(top_recs) < 3:
-        top_recs.append(review_items[0])
+    # The follow-form one is not added when the umbrella rows already ask for the
+    # answer itself (15 Oct 2026, `umbrella_gap_items`): a second, box-less row
+    # for the same question is the one that could never be answered.
+    _asked = {r.get("field") for r in top_recs if isinstance(r, dict)}
+    _review_rows = [r for r in review_items
+                    if not ("umbrella follow-form confirmation" in (r.get("missing") or [])
+                            and "umbrella_follow_form" in _asked)]
+    if _review_rows and len(top_recs) < 3:
+        top_recs.append(_review_rows[0])
 
     # Umbrella warning messages for low underlying limits (client Q1/Q2: warn, not block)
     _umbrella_warnings = _build_umbrella_warnings(facts, flags, p5)
 
+    _screen_shares = None
     # ONE NUMBER PER CARD (1 Oct 2026, Orbin item 19) - see `_unify_card_points`.
     # Never inside a probe run: a probe asks only for the number.
     if not _probe:
@@ -7272,14 +7371,19 @@ def calculate_package_sqs(
             ).get("raw_sqs_score")
 
         try:
-            _unify_card_points(form_results, top_recs, facts, raw_uncapped,
-                               cap_applied, _headroom, _rescore)
+            if not SKIP_SHARE_OUT.get():
+                _screen_shares = _unify_card_points(
+                    form_results, top_recs, facts, raw_uncapped, cap_applied, _headroom, _rescore,
+                    screen=screen_fields(facts, flags, hard_stops, soft_stops, cross_issues))
         except Exception as _unify_ex:                       # noqa: BLE001
             # Never break scoring: the cards keep each form's own number.
             logger.warning("card points not unified: %s", _unify_ex)
 
     return {
         "package_sqs_score": raw,
+        # Every fact on the review screen -> [points, exact, alone] (15 Oct 2026,
+        # `screen_fields` / `_unify_card_points`); completed by the review screen.
+        "screen_shares":     _screen_shares or {},
         # Audit trail for the cap (2026-08-16). `package_sqs_score` is what the
         # user sees; these three say what it would have been and why it was held.
         # raw_sqs_score is also the base every later credit is added to, so a
@@ -7998,14 +8102,38 @@ def _measure_recommendation_impacts(
 # validator takes none of them cannot be stood in for, so a flat measurement
 # there keeps the bounded fallback ("up to"), as on a form.
 _PROBE_ANSWERS = ("Yes", "50", "100000", "123456789", "Answered by the producer.",
-                  "01/01/2030")
+                  "01/01/2030",
+                  # A year and a class (15 Oct 2026): year built, roof year and
+                  # protection class took none of the above, so their rows could
+                  # never be measured - only bounded. Last, so no field that
+                  # accepted an earlier answer is probed differently.
+                  "2015", "3")
 _CONTENT_SCORED_COMPONENTS = frozenset({"narrative_quality"})
 _MAX_PACKAGE_PROBES = 40
+import contextvars as _contextvars  # noqa: E402
+# Set while the review screen measures where answering EVERYTHING lands
+# (`form_routes._pre_form_status`, 15 Oct 2026): that one rescore needs the
+# score only, never another share-out.
+SKIP_SHARE_OUT = _contextvars.ContextVar("sqs_skip_share_out", default=False)
+# Limits the scorer compares with a threshold are probed AT that threshold (15
+# Oct 2026): the first value their check accepts ("50") is below every one, so a
+# row for a MISSING limit swapped "missing" for "below the minimum" and measured
+# nothing; and the free-text employers liability limit has no check at all, so
+# its "Yes" probe stated no amount. The values are the scorer's own constants.
+_THRESHOLD_PROBE_FACTS = {
+    "gl_each_occurrence": _UMB_GL_OCC_MIN,
+    "gl_aggregate": _UMB_GL_AGG_MIN,
+    "auto_liability_limit": _UMB_AUTO_CSL_MIN,
+    "employers_liability_limits": _UMB_EL_FULL,
+}
 
 
-def _package_probe_answer(field: str) -> Tuple[str, bool]:
+def _package_probe_answer(field: str, stated: bool = False) -> Tuple[str, bool]:
     """(the value a package probe fills `field` with, whether a person could
-    really answer the field with it)."""
+    really answer the field with it). `stated`: the package already holds a
+    value for it - a limit is then probed with the ordinary answer, never raised
+    to the threshold (a TRUE limit below the minimum is a coverage finding, and
+    a row must not promise points for typing a bigger one)."""
     try:
         from services.answer_routing import MODE_FIELD, answer_mode
         if (answer_mode(field) or {}).get("mode") != MODE_FIELD:
@@ -8013,8 +8141,8 @@ def _package_probe_answer(field: str) -> Tuple[str, bool]:
     except Exception:                                      # noqa: BLE001
         return _IMPACT_PROBE_VALUE, False
     try:
-        from services.fact_registry import FACT_REGISTRY
-        validate = (FACT_REGISTRY.get(field) or {}).get("validate")
+        from services.fact_registry import FACT_REGISTRY, answer_check
+        validate = answer_check(FACT_REGISTRY.get(field))
     except Exception:                                      # noqa: BLE001
         validate = None
     # A question with a choice list is probed with a CHOICE (13 Oct 2026): a
@@ -8033,6 +8161,8 @@ def _package_probe_answer(field: str) -> Tuple[str, bool]:
                 continue
     except Exception:                                      # noqa: BLE001
         pass
+    if field in _THRESHOLD_PROBE_FACTS and not stated:
+        return str(int(_THRESHOLD_PROBE_FACTS[field])), True
     if not callable(validate):
         return _IMPACT_PROBE_VALUE, True
     for answer in _PROBE_ANSWERS:
@@ -8070,8 +8200,248 @@ def _card_points(gain: Optional[float], valid: bool, declared: Optional[float],
     return int(round(bound)), False
 
 
+def screen_fields(facts: dict, flags: dict, hard_stops, soft_stops, cross_issues,
+                  with_key_details: bool = True) -> List[str]:
+    """Every fact an item on the pre-form review screen asks for, in the order
+    the screen shows them - hard stops, warnings, key details (15 Oct 2026, owner:
+    "every score adds up to 100, not more and not less"). Each card's typed
+    facts come from its own fix window (`issue_registry.resolution_for`), a key
+    detail's from its own (`_key_detail_actions`, "whichever applies" - its first
+    box). They join the share-out so every number on the screen is a share of
+    one total."""
+    out: List[str] = []
+
+    def _add(res) -> None:
+        if isinstance(res, dict) and res.get("mode") == "field":
+            for f in res.get("facts") or []:
+                if f and str(f) not in out:
+                    out.append(str(f))
+    try:
+        from services.issue_registry import classify_legacy, resolution_for
+    except Exception:                                          # noqa: BLE001
+        return out
+    for sev, stops, kind in (("hard_stop", hard_stops, "hard_stop"), ("soft_warning", soft_stops, "soft_warning")):
+        for msg in stops or []:
+            try:
+                _add(resolution_for(classify_legacy(str(msg), sev)[0]))
+            except Exception:                                  # noqa: BLE001
+                continue
+        for issue in cross_issues or []:
+            if isinstance(issue, dict) and issue.get("type") == kind and not issue.get("form_choice"):
+                try:
+                    _add(resolution_for(issue.get("code")))
+                except Exception:                              # noqa: BLE001
+                    continue
+    if not with_key_details:
+        return out
+    try:
+        for item in _key_detail_actions(facts or {}, flags or {}):
+            res = item.get("resolution") or {}
+            if res.get("mode") == "field" and res.get("facts"):
+                f = str(res["facts"][0])
+                if f not in out:
+                    out.append(f)
+    except Exception:                                          # noqa: BLE001
+        pass
+    return out
+
+
+def complete_screen_shares(row: dict, session_id: str, user_id: str,
+                           pkg: Optional[dict], kd: Optional[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+    """THE POINTS STILL MISSING, SPLIT BY CAUSE (15 Oct 2026, owner: "every score
+    adds up to 100, not more and not less").
+
+    The review screen's numbers are the score's own gaps, not estimates: every
+    missing key detail, every Exposure / Property / Umbrella deduction, the
+    Loss History and Narrative gaps - each in package points (its pillar points
+    times the pillar's weight) - and the cap a hard stop or warning holds plus
+    the cross-form deduction those cards carry, which go to the cards. Rounded
+    together (largest remainder), they add up to EXACTLY 100 minus the score on
+    screen, so answering everything the screen asks lands on 100. A gap no box
+    on the screen can answer (a coverage decision, a loss run to send, a card
+    with no fix) is listed apart with its points - the screen then says why the
+    package cannot reach 100. Before forms only. Never raises."""
+    try:
+        if not isinstance(pkg, dict) or not isinstance(row, dict) or row.get("generated_forms"):
+            return pkg, kd
+        now = pkg.get("package_sqs_score")
+        raw = pkg.get("raw_sqs_score")
+        pillars = {k: (v.get("score") if isinstance(v, dict) else v)
+                   for k, v in (pkg.get("pillars") or {}).items()}
+        if now is None or raw is None or not pillars:
+            return pkg, kd
+        facts = row.get("facts") or {}
+        flags = row.get("flags") or {}
+        live = sum(SPEC_PILLAR_WEIGHTS.get(k, 0.0) for k, v in pillars.items() if v is not None)
+        if live <= 0:
+            return pkg, kd
+
+        def _scale(pillar: str) -> float:
+            return SPEC_PILLAR_WEIGHTS.get(pillar, 0.0) / live
+
+        try:
+            from services.stops_now import stops_now as _stops_now
+            st = _stops_now(row, pre_form=True)
+        except Exception:                                      # noqa: BLE001
+            st = {}
+        cross = [i for i in (st.get("cross_issues") or []) if isinstance(i, dict)]
+        hard_cross = [i for i in cross if i.get("type") == "hard_stop"]
+        warn_cross = [i for i in cross if i.get("type") == "soft_warning"]
+
+        # (fact or None, float package points, label, kind) - kind: "fact" | "card" | "none"
+        gaps: List[Tuple[Optional[str], float, str, str]] = []
+        # Structural: each missing key detail, its tier's share of the pillar.
+        if pillars.get("structural_completeness") is not None:
+            sc = _scale("structural_completeness")
+            first_fact = {}
+            for it in _key_detail_actions(facts, flags):
+                res = it.get("resolution") or {}
+                if res.get("mode") == "field" and res.get("facts"):
+                    first_fact[it.get("label")] = str(res["facts"][0])
+            for (applicable, missing), w in ((_tier1_entries(facts, flags), _W_NOFORM_TIER1),
+                                             (_tier2_entries(facts), _W_NOFORM_TIER2)):
+                n = len(applicable)
+                for keys, label in missing:
+                    f = first_fact.get(label)
+                    gaps.append((f, (100.0 / n) * w * sc if n else 0.0, label, "fact" if f else "none"))
+        # Exposure / Property / Umbrella: the pillars ARE their items.
+        for pillar, builder in (("exposure_consistency", lambda: exposure_deduction_items(facts, flags, hard_cross, warn_cross)),
+                                ("property_integrity", lambda: property_gap_items(facts, flags)),
+                                ("umbrella_limit_adequacy", lambda: umbrella_gap_items(facts, flags))):
+            if pillars.get(pillar) is None:
+                continue
+            for it in builder() or []:
+                pts = float(it.get("points") or 0) * _scale(pillar)
+                if it.get("bucket") == "cross_document_consistency":
+                    gaps.append((None, pts, str(it.get("label") or ""), "card"))   # lifted by the cards
+                elif it.get("fact"):
+                    gaps.append((str(it["fact"]), pts, str(it.get("label") or ""), "fact"))
+                else:
+                    gaps.append((None, pts, str(it.get("label") or ""), "none"))
+        # Loss History and Narrative: one gap each, answered by its row.
+        rows = [r for r in (pkg.get("top_recommendations") or []) if isinstance(r, dict)]
+        for pillar, default_fact in (("loss_history_alignment", None), ("narrative_quality", "additional_remarks_text")):
+            sc_ = pillars.get(pillar)
+            if sc_ is None or sc_ >= 100:
+                continue
+            row_ = next((r for r in rows if r.get("pillar") == pillar and r.get("field")), None)
+            f = (row_ or {}).get("field") or default_fact
+            typed = f and (row_ or {}).get("closes_with") != "document"
+            label = (row_ or {}).get("action") or pillar.replace("_", " ")
+            gaps.append((str(f) if typed else None, (100.0 - float(sc_)) * _scale(pillar), str(label),
+                         "fact" if typed else "none"))
+        target = max(0, 100 - int(now))
+        # The cap a hard stop / warning holds: the cards' (and the Data Consistency
+        # rows') share. What clearing the stops adds depends on WHEN: first, it is
+        # raw - now - nothing while the score sits under the cap; last, it is all
+        # of the score above the cap. The share is the average of the two (Shapley
+        # over the two groups, 15 Oct 2026 - at 37 a conflict that holds a 60 cap
+        # printed no points), so a stop shows what it holds back before the score
+        # reaches it, and the numbers still add up to 100 minus the score.
+        cap = pkg.get("cap_applied")
+        stops_share = 0.0
+        if cap is not None and int(cap) < 100:
+            first = max(0, int(raw) - int(now))
+            last = max(0, target - max(0, int(cap) - int(now)))
+            stops_share = (first + last) / 2.0
+        answer_total = sum(g[1] for g in gaps)
+        if answer_total <= 0:
+            stops_share = float(target)
+        if target <= 0 or stops_share + answer_total <= 0:
+            return pkg, kd
+        quotas = [g[1] * (target - stops_share) / answer_total if answer_total > 0 else 0.0 for g in gaps]
+        if stops_share > 0:
+            gaps.append((None, stops_share, "the cap held by the hard stops and warnings", "card"))
+            quotas.append(stops_share)
+        ints = [int(q) for q in quotas]
+        spare = target - sum(ints)
+        # Every real gap shows at least one point while the total allows it (the
+        # 14 Oct floor rule: a gap under a point is listed "up to +1", never blank).
+        for n in sorted((n for n in range(len(gaps)) if ints[n] == 0 and quotas[n] > 0),
+                        key=lambda n: -quotas[n]):
+            if spare <= 0:
+                break
+            ints[n], spare = 1, spare - 1
+        for n in sorted(range(len(gaps)), key=lambda n: -(quotas[n] - ints[n]))[:max(0, spare)]:
+            ints[n] += 1
+
+        shares: Dict[str, List] = {}
+        card_pts = 0
+        unanswerable: List[dict] = []
+        for (f, _pts, label, kind), n, q in zip(gaps, ints, quotas):
+            if kind == "fact":
+                cur = shares.setdefault(f, [0, True, 0])
+                cur[0] += n
+                # A gap worth under a point prints as "up to +1": its answer alone may
+                # add nothing until the rest is in (14 Oct rule, the floor's bound).
+                cur[1] = bool(cur[1]) and q >= 1.0 - 1e-9
+            elif kind == "card":
+                card_pts += n
+            elif n:
+                unanswerable.append({"label": label, "points": n})
+        # The cards that hold the cap / the cross-form deduction share it, keyed by
+        # their rule code (screenPoints.js gives a code the page does not draw to
+        # the cards it does draw). A document disagreement is settled on its Data
+        # Consistency row, so its share is keyed by that row's fact
+        # (`screen_dc_points`): printed on the row, or on the card whose "Fix in
+        # Data Consistency" button leads there.
+        holders: List[Tuple[str, str]] = []
+        try:
+            from services.issue_registry import classify_legacy
+            from services.stops_now import conflict_stop_facts
+            dc_fact_of = conflict_stop_facts(row)
+            for sev, stops in (("hard_stop", st.get("hard")), ("soft_warning", st.get("soft"))):
+                for msg in stops or []:
+                    fact = dc_fact_of.get(str(msg))
+                    holders.append(("dc", fact) if fact
+                                   else ("card", str(classify_legacy(str(msg), sev)[0] or "")))
+            for i in hard_cross + warn_cross:
+                holders.append(("card", str(i.get("code") or "")))
+        except Exception:                                      # noqa: BLE001
+            pass
+        holders = [h for h in dict.fromkeys(holders) if h[1]]
+        card_points: Dict[str, List] = {}
+        dc_points: Dict[str, List] = {}
+        if card_pts and holders:
+            base, left = divmod(card_pts, len(holders))
+            for n, (kind, key) in enumerate(holders):
+                (dc_points if kind == "dc" else card_points)[key] = [base + (1 if n < left else 0), False]
+        elif card_pts:
+            unanswerable.append({"label": "the cap held by the hard stops and warnings", "points": card_pts})
+
+        pkg = dict(pkg)
+        pkg["screen_shares"] = shares
+        pkg["screen_card_points"] = card_points
+        pkg["screen_dc_points"] = dc_points
+        pkg["screen_unanswerable"] = unanswerable
+        pkg["screen_total"] = target
+        out_rows = []
+        for r in pkg.get("top_recommendations") or []:
+            f = r.get("field") if isinstance(r, dict) else None
+            if f and str(f) in shares:
+                r = dict(r, answer_gain=int(shares[str(f)][0]), answer_gain_is_exact=bool(shares[str(f)][1]),
+                         answer_gain_share=True,
+                         answer_gain_alone=int(r.get("answer_gain_alone") or shares[str(f)][0]))
+            out_rows.append(r)
+        pkg["top_recommendations"] = out_rows
+        if isinstance(kd, dict) and isinstance(kd.get("missing_items"), list):
+            kd = dict(kd)
+            items = []
+            for it in kd["missing_items"]:
+                res = (it or {}).get("resolution") or {}
+                f = str((res.get("facts") or [None])[0] or "")
+                if f in shares:
+                    it = dict(it, points=int(shares[f][0]), points_exact=bool(shares[f][1]))
+                items.append(it)
+            kd["missing_items"] = items
+        return pkg, kd
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("screen shares not completed: %s", exc)
+        return pkg, kd
+
 def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
-                       cap_applied: Optional[int], headroom_for, rescore) -> None:
+                       cap_applied: Optional[int], headroom_for, rescore,
+                       screen: Optional[List[str]] = None) -> Optional[Dict[str, List]]:
     """Write ONE package-measured number onto every copy of every card in
     `form_results` (in place - the per-form results are what every caller
     persists and every surface reads), and on each Best Solutions row the gain
@@ -8080,7 +8450,7 @@ def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
     Each copy keeps `declared_impact` (the typed literal, which a later call
     reads instead of a number this call wrote) and records `impact_scope`."""
     if raw_uncapped is None:
-        return
+        return None
     copies: Dict[str, List[dict]] = {}
     for result in form_results or []:
         if not isinstance(result, dict):
@@ -8090,15 +8460,17 @@ def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
                 copies.setdefault(str(rec["rec_id"]), []).append(rec)
 
     gains: Dict[str, Tuple[Optional[float], bool]] = {}
+    probed_with: Dict[str, Any] = {}
     probes = 0
 
     def _gain(field: str) -> Tuple[Optional[float], bool]:
         nonlocal probes
         if field in gains:
             return gains[field]
-        answer, valid = _package_probe_answer(field)
+        answer, valid = _package_probe_answer(field, stated=bool(_fv(facts or {}, field)))
         if field in _IMPACT_PROBE_IS_THE_ANSWER:
             answer, valid = _IMPACT_PROBE_VALUE, True
+        probed_with[field] = answer
         gain = None
         if probes < _MAX_PACKAGE_PROBES:
             probes += 1
@@ -8110,25 +8482,90 @@ def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
         gains[field] = (gain, valid)
         return gains[field]
 
+    # Every card's lone gain first, in the order they always ran (the probe
+    # budget is theirs first), then every row's.
+    groups = []
     for _rid, recs in copies.items():
         for rec in recs:
             if "declared_impact" not in rec:
                 rec["declared_impact"] = rec.get("score_impact")
-        declared = [r.get("declared_impact") for r in recs
-                    if isinstance(r.get("declared_impact"), (int, float))
-                    and not isinstance(r.get("declared_impact"), bool)]
-        component = next((r.get("component") for r in recs if r.get("component")), None)
         field = next((r.get("field") for r in recs if r.get("field")), None)
-        if any(r.get("unscored") for r in recs):
-            points = (0, True)
+        unscored = any(r.get("unscored") for r in recs)
+        if field and not unscored:
+            _gain(str(field))
+        groups.append((recs, field, unscored))
+    row_fields: List[str] = []
+    row_valid: Dict[str, bool] = {}
+    for row in top_recs or []:
+        field = row.get("field") if isinstance(row, dict) else None
+        if not field:
+            continue
+        _g, valid = _gain(str(field))
+        valid = valid and row.get("pillar") not in _CONTENT_SCORED_COMPONENTS
+        if field in _IMPACT_PROBE_IS_THE_ANSWER:
+            valid = True
+        if str(field) not in row_valid:
+            row_fields.append(str(field))
+        row_valid[str(field)] = row_valid.get(str(field), False) or valid
+    # The facts the review screen's cards and key details ask for share the
+    # same total (15 Oct 2026, `screen_fields`).
+    for field in screen or []:
+        if str(field) in row_valid:
+            continue
+        _g, valid = _gain(str(field))
+        row_fields.append(str(field))
+        row_valid[str(field)] = bool(valid)
+
+    share, share_base, room, _applied = _share_out_gains(
+        row_fields, [str(f) for _r, f, u in groups if f and not u],
+        gains, probed_with, row_valid, facts, int(raw_uncapped), rescore)
+
+    def _share_points(field: str) -> Tuple[int, bool]:
+        points = share[field]
+        if points <= 0:
+            return 0, True
+        alone = gains[field][0] or 0
+        exact = points <= alone and (cap_applied is None
+                                     or share_base[field] + points <= cap_applied)
+        return points, bool(exact)
+
+    # A number not shared out takes what is left below 100 - once per field:
+    # another copy asking the same thing takes no more room than the first did.
+    room_taken: Dict[str, int] = {}
+
+    def _within_room(field: Optional[str],
+                     points: Optional[Tuple[int, bool]]) -> Optional[Tuple[int, bool]]:
+        nonlocal room
+        if points is None or points[0] <= 0:
+            return points
+        key = str(field) if field else None
+        if key is not None and key in room_taken:
+            kept = min(points[0], room_taken[key])
         else:
+            kept = min(points[0], room)
+            room -= kept
+            if key is not None:
+                room_taken[key] = kept
+        return kept, bool(points[1]) and kept == points[0]
+
+    for recs, field, unscored in groups:
+        component = next((r.get("component") for r in recs if r.get("component")), None)
+        if unscored:
+            points = (0, True)
+        elif field and str(field) in share:
+            points = _share_points(str(field))
+        else:
+            declared = [r.get("declared_impact") for r in recs
+                        if isinstance(r.get("declared_impact"), (int, float))
+                        and not isinstance(r.get("declared_impact"), bool)]
             gain, valid = _gain(str(field)) if field else (None, False)
             moved_a_form = any(r.get("impact_measured") for r in recs)
             valid = (valid or moved_a_form) and component not in _CONTENT_SCORED_COMPONENTS
             if field in _IMPACT_PROBE_IS_THE_ANSWER:
                 valid = True
-            points = _card_points(gain, valid, max(declared) if declared else None,
-                                  headroom_for(component), raw_uncapped, cap_applied)
+            points = _within_room(field, _card_points(
+                gain, valid, max(declared) if declared else None,
+                headroom_for(component), raw_uncapped, cap_applied))
         if points is None:
             continue
         for rec in recs:
@@ -8143,18 +8580,118 @@ def _unify_card_points(form_results, top_recs, facts: dict, raw_uncapped: int,
     # A Best Solutions row is a pillar's whole gap (`points_available`); the
     # answer it asks for can be worth less - "No known losses" takes Loss
     # History out of the score and moves the package +7 of the row's 11.2.
+    # `answer_gain` is the row's share of the one total; `answer_gain_alone`
+    # what the answer adds on its own (a row held by another pillar's gate adds
+    # nothing alone, and says so - frontend `pillarGates`).
     for row in top_recs or []:
         field = row.get("field") if isinstance(row, dict) else None
         if not field:
             continue
-        gain, valid = _gain(str(field))
-        valid = valid and row.get("pillar") not in _CONTENT_SCORED_COMPONENTS
-        if field in _IMPACT_PROBE_IS_THE_ANSWER:
-            valid = True
-        points = _card_points(gain, valid, None, headroom_for(row.get("pillar")),
-                              raw_uncapped, cap_applied)
+        if str(field) in share:
+            points = _share_points(str(field))
+            row["answer_gain_share"] = True
+            row["answer_gain_alone"] = int(gains[str(field)][0] or 0)
+        else:
+            gain, valid = _gain(str(field))
+            valid = valid and row.get("pillar") not in _CONTENT_SCORED_COMPONENTS
+            if field in _IMPACT_PROBE_IS_THE_ANSWER:
+                valid = True
+            points = _within_room(field, _card_points(
+                gain, valid, None, headroom_for(row.get("pillar")),
+                raw_uncapped, cap_applied))
         if points is not None:
             row["answer_gain"], row["answer_gain_is_exact"] = points
+    return {f: list(_share_points(f)) + [int(gains[f][0] or 0)] for f in share}
+
+
+# ── ONE TOTAL, SHARED OUT (15 Oct 2026, live `5eb5b23c`; owner: "it should not
+# go past 100 ... correct for all the packages") ───────────────────────────────
+# Every number was each answer measured ALONE, so at 94 three rows read
+# +3 / +2 / +2 - "101" - while answering all three makes exactly 100: the score
+# is rounded DOWN, and every lone probe collected the same leftover fraction of
+# a point. Lone gains do not add up, ever - two answers can share one rounded
+# point, clear one deduction between them, or (a pillar held at 0 until its
+# gate is answered) be worth nothing alone and a lot together.
+#
+# So the numbers are SHARES of one measured total. The answers are applied one
+# after another and each takes what the score - rounded down, as the screen
+# shows it - moved when it went in. The steps add up exactly to answering them
+# all, and a score is never above 100, so neither is the list. The biggest lone
+# gains go first and keep their full value (a "+3" stays +3; the rounding comes
+# off the smaller rows), then the rows worth nothing alone, which take what the
+# answers before them unlocked. An answer that LOWERS the score after the others
+# takes no share, and what it costs comes off the smallest shares before it, so
+# the list still adds up to answering all of it. One number per field: every
+# card and row asking the same thing shows the same share.
+#
+# Rows go before cards on a tie. Card fields join only when worth something
+# alone (a card worth nothing shows nothing; a row is listed by its points).
+# A row's 0 joins only when its probe is trusted (`row_valid`): a probe of the
+# wrong shape never zeroes a row. Bounded by `_MAX_SHARE_PROBES`; anything not
+# shared out (no probe, a broken chain, a card's typed bound) is cut to the
+# `room` the shares leave below 100 by the caller.
+_MAX_SHARE_PROBES = 24
+
+
+def _share_out_gains(row_fields, card_fields, gains, probed_with, row_valid,
+                     facts, raw_now: int, rescore):
+    """(share, share_base, room, applied): each field's whole points of the one
+    total, the score its step started from, the points left below 100, and the
+    answers that went into the total."""
+    listed: List[str] = []
+    for f in list(row_fields) + list(card_fields):
+        if f not in listed:
+            listed.append(f)
+    alone = {f: (gains.get(f) or (None, False))[0] for f in listed}
+    positive = sorted((f for f in listed if f in probed_with
+                       and alone[f] is not None and alone[f] > 0),
+                      key=lambda f: -alone[f])
+    zero_rows = [f for f in row_fields if f in probed_with and alone.get(f) == 0
+                 and row_valid.get(f) and f not in positive]
+    share: Dict[str, int] = {}
+    share_base: Dict[str, int] = {}
+    applied: Dict[str, Any] = {}
+    now = int(raw_now)
+    owed = 0
+    probes = 0
+    for f in positive + zero_rows:
+        if not applied and f in positive:
+            after = now + int(alone[f])              # its lone probe, reused
+        else:
+            if probes >= _MAX_SHARE_PROBES:
+                break
+            probes += 1
+            try:
+                after = rescore({**(facts or {}), **applied, f: probed_with[f]})
+            except Exception as ex:                  # noqa: BLE001
+                logger.debug("share probe failed at %s: %s", f, ex)
+                break
+            if after is None:
+                break
+            after = int(after)
+        step = after - now
+        share_base[f] = now
+        share[f] = max(0, step)
+        if step < 0 and f not in positive:
+            continue            # worth nothing alone, less after the others: left out
+        # An answer listed for its own points goes in even when, after the
+        # others, it costs points - answering the list answers it too - and
+        # what it costs comes off the shares before it (below).
+        owed += max(0, -step)
+        applied[f] = probed_with[f]
+        now = after
+    # What a step cost comes off the smallest shares first - the last ones in
+    # (the rows worth nothing alone, then the smaller lone gains) - so the
+    # biggest answers keep their full value and the shares add up exactly.
+    for f in reversed(list(share)):
+        if owed <= 0:
+            break
+        taken = min(share[f], owed)
+        share[f] -= taken
+        owed -= taken
+    # A chain that ends BELOW where it started (answers that, together, cost
+    # points) leaves no more room than the start did.
+    return share, share_base, max(0, 100 - max(now, int(raw_now))), applied
 
 
 def _page_one_carrier_printed(facts: dict, mapped_data: Optional[dict]) -> bool:

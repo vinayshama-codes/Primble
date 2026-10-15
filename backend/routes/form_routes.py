@@ -301,6 +301,13 @@ async def _pre_form_status(
         logger.error(f"pre-form status: key_details failed [session={session_id} "
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
         kd = None
+    # Every number on the screen adds up (15 Oct 2026): the cards' share of
+    # the caps their answers lift, and each key detail's points.
+    try:
+        from services.sqs_service import complete_screen_shares
+        pkg, kd = complete_screen_shares(row, session_id, str(current_user["id"]), pkg, kd)
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.warning(f"pre-form status: screen shares skipped [session={session_id}]: {_ex}")
     return PreFormStatus(pkg, kd, await _pre_form_dry_run(session_id, facts, flags, row))
 
 

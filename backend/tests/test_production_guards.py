@@ -63,11 +63,15 @@ else:
         import psycopg2 as _psycopg2
         _psycopg2.pool = _stub_module("psycopg2.pool", ThreadedConnectionPool=object)
 
-# Minimal APScheduler stub
-if "apscheduler" not in sys.modules:
+# Minimal APScheduler stub - only where the library is genuinely missing (the
+# _importable rule above): stubbed while installed, it replaced the real
+# scheduler for every later test module (15 Oct 2026: the scheduler tests got
+# `object`). The stand-in accepts the constructor's keywords (timezone=).
+if "apscheduler" not in sys.modules and not _importable("apscheduler"):
     _aps = _stub_module("apscheduler")
     _stub_module("apscheduler.schedulers")
-    _stub_module("apscheduler.schedulers.asyncio", AsyncIOScheduler=object)
+    _stub_module("apscheduler.schedulers.asyncio",
+                 AsyncIOScheduler=type("AsyncIOScheduler", (), {"__init__": lambda self, *a, **kw: None}))
 
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("SECRET_KEY", "ci-test-secret")

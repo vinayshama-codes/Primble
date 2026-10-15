@@ -558,7 +558,7 @@ def test_pre_form_key_details_are_actions_in_both_layouts_and_no_em_dashes():
     modal = _read(FORM_DIR / "AcordModal.jsx")
     rail = _read(FORM_DIR / "review" / "ReviewRailLayout.jsx")
     assert "NEEDS_ATTENTION_PREFORM_NOTE" not in modal and "NEEDS_ATTENTION_PREFORM_NOTE" not in rail
-    assert "<KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix} />" in modal
+    assert "<KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix}" in modal
     assert "onFixKeyDetail={openKeyDetailFix}" in modal
     assert "<KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail}" in rail
     comp = _read(FORM_DIR / "review" / "KeyDetailsMissing.jsx")

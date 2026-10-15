@@ -123,7 +123,9 @@ def test_nested_structured_source_conflict_gets_review_note_not_a_button():
     isn't held by the Data-Consistency picker, so it gets an honest 'none'-mode
     review note - never a dead typed-value button."""
     res = resolution_for("source_conflict_risk_transfer.additional_insured_names")
-    assert res and res["mode"] == "none"
+    # 15 Oct 2026: explained, never typed - the explanation settles it (it was a
+    # review note, an 85 no answer could clear).
+    assert res and res["mode"] == "narrative"
     assert res.get("note")                       # context-specific wording
     assert "facts" not in res                    # no fabricated input
 
@@ -180,13 +182,11 @@ def test_non_typeable_legacy_stops_never_get_a_typed_input():
     The Monopolistic WC row stays: its fix is the PLACEMENT (state fund vs
     private carrier), and the one door agrees that neither backing key is
     writable."""
-    for msg in [
-        "Monopolistic WC state (ND/OH/WA/WY) requires the state fund.",
-    ]:
-        res = make_issue("legacy_soft_0", "soft_warning", msg).get("resolution")
-        assert res and res["mode"] == "none", msg
-        assert res.get("note"), f"{msg}: 'none' mode must explain why"
-        assert "facts" not in res and "schedule_key" not in res, msg
+    # Monopolistic WC left this list on 15 Oct 2026: the warning now asks the
+    # placement question its own rule reads.
+    res = make_issue("legacy_soft_0", "soft_warning",
+                     "Monopolistic WC state (ND/OH/WA/WY) requires the state fund.").get("resolution")
+    assert res and res["mode"] == "field" and res["facts"] == ["wc_state_fund_acknowledged"]
 
     # "Split liability limits incomplete" LEFT this list on 2026-08-26 (V1 H1
     # audit). It was here because the rule read `bi_per_person` /
@@ -249,7 +249,8 @@ def test_uncoded_and_legacy_issues_have_no_resolution():
     """Field-level / legacy stops (no cross-form code) must NOT get a resolution;
     they keep their existing Resolve/Dismiss controls."""
     assert resolution_for("legacy_hard_0") is None
-    assert resolution_for("ocr_low_confidence_applicant_name") is None
+    # A low-OCR card opens its own box (15 Oct 2026).
+    assert resolution_for("ocr_low_confidence_applicant_name")["facts"] == ["applicant_name"]
     assert resolution_for(None) is None
     assert make_issue("legacy_soft_3", "soft_warning", "x").get("resolution") is None
 

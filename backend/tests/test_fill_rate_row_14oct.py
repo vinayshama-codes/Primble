@@ -31,9 +31,9 @@ FILL_ROW = {"field": None, "score": 98, "pillar": "structural_completeness", "mi
             "answer_mode": "none", "closes_with": "review", "points_available": 0.6}
 
 
-def _pkg(fill=93, rows=None):
+def _pkg(fill=93, rows=None, score=99):
     return {
-        "package_sqs_score": 99, "without_forms": {"score": 100},
+        "package_sqs_score": score, "without_forms": {"score": 100},
         "weights_used": WEIGHTS, "pillars": PILLARS,
         "category_breakdown": {"structural_completeness": {
             "fill": {"label": "Form Fill Rate", "score": fill, "weight": 0.25},
@@ -108,12 +108,20 @@ def test_a_tier_gap_row_and_the_fill_row_are_both_listed(tmp_path):
     # and the fill slice's points come from its own bound
     tier_row = dict(FILL_ROW, field="mailing_address", answer_mode="field",
                     action="Applicant mailing address", points_available=3.2)
-    o = _build(tmp_path, _pkg(fill=80, rows=[tier_row]), ATTENTION)
+    # a 3.2-point tier gap and a 1.47-point fill gap leave the score near 95
+    # (15 Oct 2026: the fixture said 99, which no package with these gaps has)
+    o = _build(tmp_path, _pkg(fill=80, rows=[tier_row], score=95), ATTENTION)
     ids = [s["id"] for s in o["score"]]
     assert "score:fill" in ids and any(i != "score:fill" for i in ids)
     fill = [s for s in o["score"] if s["id"] == "score:fill"][0]
     # (100 - 80) x 0.25 x 0.25 / 0.85 = 1.47 -> "up to +1 pts"
     assert fill["points"] == {"points": 1, "exact": False}
+    # at 99 the list holds one point: the tier row takes it, the fill row stays
+    # listed with no number (owner, 15 Oct 2026: never past 100)
+    o = _build(tmp_path, _pkg(fill=80, rows=[tier_row], score=99), ATTENTION)
+    pts = {s["id"]: s["points"] for s in o["score"]}
+    assert pts["score:fill"] == {"points": 0, "exact": False}
+    assert sum(p["points"] for p in pts.values()) == 1
 
 
 @needs_node

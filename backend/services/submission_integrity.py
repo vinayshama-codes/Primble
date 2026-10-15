@@ -166,6 +166,22 @@ _POLICY_NUMBER_KEYS = ("policy_number", "policy_no", "policy_numbers")
 _CARRIER_KEYS = ("carrier_name", "carrier", "prior_carrier", "insurer_name")
 
 
+def package_identity_names(docs: Any) -> List[str]:
+    """Every insured name the package's documents print - the names a document's
+    entity type is settled against (`_document_entity_type`). A heading or a
+    role ("S.B. MO.") is nobody's name - it must not block the insured's "LLC"
+    from settling a document's entity type either. Shared with
+    `sqs_service.check_doc_consistency` so both read one value (15 Oct 2026)."""
+    names = [str(_fv(d.get("facts") or {}, k)) for d in (docs or []) if isinstance(d, dict)
+             for k in _IDENTITY_NAME_KEYS if _fv(d.get("facts") or {}, k)]
+    try:
+        from services.normalization import is_not_a_party_name as _not_a_name
+        names = [n for n in names if not _not_a_name(n)]
+    except Exception:                                         # noqa: BLE001
+        pass
+    return names
+
+
 def _document_entity_type(doc: dict, package_names: Optional[List[str]] = None) -> Any:
     """The document's entity type, read the way the merge reads it
     (`normalization.settle_document_entity_type`): a menu value only as its
@@ -369,15 +385,7 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
 
     # Attach a stable id/filename to each signature for the UI + removal flow.
     doc_sigs: List[dict] = []
-    package_names = [str(_fv(d.get("facts") or {}, k)) for d in docs if isinstance(d, dict)
-                     for k in _IDENTITY_NAME_KEYS if _fv(d.get("facts") or {}, k)]
-    # A heading or a role ("S.B. MO.") is nobody's name - it must not block
-    # the insured's "LLC" from settling a document's entity type either.
-    try:
-        from services.normalization import is_not_a_party_name as _not_a_name
-        package_names = [n for n in package_names if not _not_a_name(n)]
-    except Exception:                                         # noqa: BLE001
-        pass
+    package_names = package_identity_names(docs)
     for idx, d in enumerate(docs):
         sig = _doc_identity(d, package_names)
         sig["doc_id"] = str(d.get("doc_id") or idx)

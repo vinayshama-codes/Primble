@@ -629,7 +629,8 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
 
     # Type check from the fact's own declared validator, when it has one.
     entry = _registry_entry(field)
-    checker = (entry or {}).get("validate")
+    from services.fact_registry import answer_check
+    checker = answer_check(entry)
     if callable(checker):
         try:
             ok = bool(checker(text))
@@ -1489,6 +1490,21 @@ async def resolve_issue(
         applied, _ = await append_producer_narrative(req.session_id, text)
         if not applied:
             return JSONResponse({"success": False, "message": "Could not save the explanation."})
+        # The card this explains is answered (15 Oct 2026): its code is kept with
+        # the explanation, and a rule whose only fix is an explanation stops
+        # counting it (issue_registry.explained_issue_codes). "Open again" takes
+        # it back with the rest of the fix.
+        if req.code:
+            try:
+                _sess_now = await get_processing_session(req.session_id)
+                _now_facts = (_sess_now or {}).get("facts") or {}
+                from services.issue_registry import explained_issue_codes
+                from repositories.session_repository import upd_processing_session as _upd_ps
+                _codes = sorted(explained_issue_codes(_now_facts) | {str(req.code)})
+                await _upd_ps(req.session_id, {"facts": {"_explained_issue_codes": {
+                    "value": _codes, "source": "producer", "confidence": "producer"}}})
+            except Exception as _ex_e:                       # noqa: BLE001
+                logger.warning(f"resolve_issue: explained code not recorded: {_ex_e}")
         _log_field, _log_value = NARRATIVE_ANSWER_FIELD, text
     elif mode == "schedule":
         from services import schedule_capture

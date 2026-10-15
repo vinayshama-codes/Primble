@@ -80,19 +80,30 @@ def validate_address(addr: str) -> Tuple[bool, str]:
     return True, ""
 
 
+_PHONE_EXTENSION_RE = re.compile(r"(?i)\s*(?:x|ext\.?|extension)\s*\d{1,6}\s*$")
+
+
+def phone_main_digits(phone: str) -> str:
+    """The digits of the number itself - an extension ("x12", "ext. 12") is part
+    of a correct answer and never counted against the 10 digits."""
+    return re.sub(r"\D", "", _PHONE_EXTENSION_RE.sub("", str(phone or "")))
+
+
 def validate_phone(phone: str) -> Tuple[bool, str]:
     if not phone:
         return True, ""
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) not in (10, 11):
+    if len(phone_main_digits(phone)) not in (10, 11):
         return False, f"Phone '{phone}' should be 10 digits (11 with country code)"
     return True, ""
 
 
 def validate_email_format(email: str) -> Tuple[bool, str]:
+    """The same rule the answer box applies (fact_registry._is_email, 15 Oct
+    2026): a real address with an apostrophe (o'brien@...) is correct, and the
+    stricter pattern this used flagged it after the box had accepted it."""
     if not email:
         return True, ""
-    if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email.strip()):
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()):
         return False, f"Email '{email}' is not a valid email address"
     return True, ""
 

@@ -22,6 +22,7 @@ import {
 import { itemsText } from "../../../utils/dryRun";
 import { formLabel } from "../../../utils/formInstances";
 import { positiveScoreWording } from "../../../utils/positiveWording";
+import { screenPoints } from "../../../utils/screenPoints";
 import "./Recommendations.css";
 
 const ROWS_SHOWN = 6;
@@ -254,6 +255,8 @@ export default function Recommendations({
   // The Resolved list (13 Oct 2026): the stored statuses, "Open again" and its
   // in-flight state - the same ones the Hard Stops / Warnings lists use.
   issueStatuses = null, onReopenResolved, reopeningIds, reopenNotices,
+  // What no box on the page can answer, with its points (screenPoints).
+  screenUnanswerable = null,
 }) {
   // The classic layout passes no list: this section reads it itself.
   const ownAttention = useAttentionList(sessionId, formsExist && attention === undefined && !model, refreshKey);
@@ -271,7 +274,11 @@ export default function Recommendations({
   // Before forms there is no forms group (owner, 14 Oct 2026): nothing to wait for.
   const offers = Array.isArray(rec.offers) ? rec.offers : [];
   const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 && offers.length === 0 : true;
-  const allGood = rec.score.length === 0 && formsQuiet && !generating;
+  // What no box on this page can answer, with its points (15 Oct 2026): the
+  // numbers on the page add up to 100 minus the score, this included.
+  const unanswerable = formsExist ? [] : (Array.isArray(screenUnanswerable)
+    ? screenUnanswerable : screenPoints(packageSqs, groupedIssues, keyDetails).unanswerable);
+  const allGood = rec.score.length === 0 && formsQuiet && !generating && unanswerable.length === 0;
 
   return (
     <div className="rec" data-testid="recommendations">
@@ -286,6 +293,12 @@ export default function Recommendations({
       {allGood && <div className="rec-empty--good">Nothing to add - your package is in good shape.</div>}
       <div className="rec" hidden={allGood}>
       <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix} />
+      {unanswerable.length > 0 && (
+        <div className="rec-group__sub" data-rec-group="unanswerable" style={{ marginTop: 6 }}>
+          Not answerable on this page:{" "}
+          {unanswerable.map((u) => `${u.label} (${u.points} pts)`).join("; ")}.
+        </div>
+      )}
       {formsExist && <OffersGroup offers={offers} onAddOffer={onAddOffer} />}
       {formsExist && (
         <AfterFormsGroup forms={rec.forms.forms} ready={att === undefined ? undefined : (att ? true : null)} onOpenForm={onOpenForm} />

@@ -7467,6 +7467,21 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
         # answered occupancy no longer leaves "Minimum Viable COPE: occupancy
         # type" in Warnings (Choice Electric 805049a7, 8 Oct 2026).
         fresh_structured = retire_stopped_cross_form_issues(fresh_structured, cf_deduped)
+        # And the document-conflict findings, re-run for the stop lists (15 Oct
+        # 2026): one the documents no longer raise leaves the screen too.
+        try:
+            from services.issue_registry import (
+                person_settled_keys, retire_settled_source_conflicts,
+                retire_stopped_doc_conflict_issues,
+            )
+            from services.underwriting_consistency import confirmed_fact_keys
+            fresh_structured = retire_stopped_doc_conflict_issues(
+                fresh_structured, _docs,
+                set(confirmed_fact_keys(proc.get("underwriting_confirmations") or {}))
+                | person_settled_keys(facts))
+            fresh_structured = retire_settled_source_conflicts(fresh_structured, facts)
+        except Exception as _dc_ex:                          # noqa: BLE001
+            logger.warning("doc-conflict retirement skipped: %s", _dc_ex)
         # The view's stop lists must carry that same formatting or
         # build_grouped_view cannot match a structured issue to its final list,
         # which is what lets it honour classify_stops' hard->soft downgrades.

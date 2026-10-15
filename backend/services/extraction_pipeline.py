@@ -1316,6 +1316,7 @@ async def _finalize_pipeline(
     # downgrades a policy-date difference to a warning.
     _confirmed_keys = confirmed_fact_keys(confirmations)
     consistency_issues = check_doc_consistency(active_docs, _confirmed_keys)
+    from services.issue_registry import doc_conflict_code
     doc_conflicts: list[dict] = []
     # Rows, not sentences (client UI-04). Each carries `message` - the exact
     # string this list used to hold - plus the field, its label, the raw
@@ -1330,7 +1331,7 @@ async def _finalize_pipeline(
                 code      = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
                 doc_conflicts.append({"code": code, "message": msg, "hard_stop": True})
                 hard_stops = list(hard_stops) + [msg]
-                structured_issues.append(make_issue(f"doc_conflict_hard_{code}", "hard_stop", msg))
+                structured_issues.append(make_issue(doc_conflict_code(issue), "hard_stop", msg))
             elif issue.startswith("[warning]"):
                 # Spec: DBAs/address/LOB/revenue mismatches are warnings, not blockers.
                 rest = issue[len("[warning]"):].strip()
@@ -1342,7 +1343,7 @@ async def _finalize_pipeline(
                 # user sees only the plain-language message (Beta Report P2 #28).
                 rest = re.sub(r"^(?:field|code)=\S+\s*", "", rest)
                 soft_stops = list(soft_stops) + [rest]
-                structured_issues.append(make_issue(f"doc_conflict_warn_{_wcode}", "soft_warning", rest))
+                structured_issues.append(make_issue(doc_conflict_code(issue), "soft_warning", rest))
             elif issue.startswith("[info]"):
                 # Normalization notice: values differed in format but were treated
                 # as equivalent. Surface to the user as an informational notice

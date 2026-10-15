@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar } from "../../../utils/formatters";
 import { formLabel } from "../../../utils/formInstances";
 import KeyDetailsMissing from "./KeyDetailsMissing";
+import { screenPoints, screenPointsText } from "../../../utils/screenPoints";
+import { openConflictFacts } from "../../../utils/dcFacts";
 import Recommendations from "./Recommendations";
 import useAttentionList from "./useAttentionList";
 import { buildRecommendations, recommendationsText, considerText, scoreLeftOnForms, pointsText } from "../../../utils/recommendations";
@@ -356,6 +358,8 @@ export default function ReviewRailLayout(props) {
 
   // ── Derived numbers (one place, used by the rail, the Overview and the footer) ─
   const fields = underwriting?.fields || [];
+  // Every number on the review screen is a share of one total (15 Oct 2026).
+  const screenPts = screenPoints(packageSqs, groupedIssues, keyDetails, openConflictFacts(underwriting));
   const confirmedCount = fields.filter((f) => f.status === "confirmed").length;
   // A value the documents say CHANGED on a stated date (the umbrella cut from
   // $3,000,000 to $1,000,000 effective 7/25/25) is NOT shown here (owner, 27 Sep
@@ -680,7 +684,7 @@ export default function ReviewRailLayout(props) {
                 Your score is {formsLeft.score}. {formsLeft.reaches100 ? "To reach 100" : "To raise it"}, confirm the values the AI filled on your forms
                 {formsLeft.formCount > 1 ? ` (${formsLeft.formCount} forms have some)` : ""}: open a form and, in its side
                 panel under Please verify, check each value and click Confirm, or Confirm all.
-                {formsLeft.points ? ` That adds ${pointsText(formsLeft.points)}.` : ""}
+                {pointsText(formsLeft.points) ? ` That adds ${pointsText(formsLeft.points)}.` : ""}
               </span>
             </div>
             {typeof onFixScoreItem === "function" && (
@@ -785,7 +789,8 @@ export default function ReviewRailLayout(props) {
         {(keyDetails?.satisfied?.length > 0 || keyDetails?.missing?.length > 0) && (
           <Panel title="Key details" right={<span className="rr-panel__meta rr-panel__meta--inline">Used to calculate readiness</span>}>
             {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok rr-key-line">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
-            <KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail} onShowSection={onSectionChange} className="tier2-missing rr-key-line" />
+            <KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail} onShowSection={onSectionChange} className="tier2-missing rr-key-line"
+              points={screenPts.details} />
           </Panel>
         )}
         {genForms.length > 0 && (
@@ -964,6 +969,11 @@ export default function ReviewRailLayout(props) {
                   <div className="rr-conf__side">
                     <div className="rr-conf__label">{f.label}</div>
                     {isConflict && <div className="rr-conf__tag">Values differ - confirm</div>}
+                    {isConflict && screenPointsText(screenPts.dc.get(f.fact_key)) && (
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#be185d", marginTop: 2 }}>
+                        {screenPointsText(screenPts.dc.get(f.fact_key))}
+                      </div>
+                    )}
                     {isConflict && f.conflict_reason && <div className="rr-conf__why">{f.conflict_reason}</div>}
                     {confidence && (
                       <span className="rr-conf__pill" style={{ color: confidence.color, background: confidence.bg, borderColor: confidence.border }}>
@@ -1172,6 +1182,7 @@ export default function ReviewRailLayout(props) {
           : recChecking ? null : <Badge tone="green">Nothing to add</Badge>} />
       <div className="rr-stack">
         <Recommendations model={recModel} attention={recAttention} packageSqs={packageSqs}
+          screenUnanswerable={screenPts.unanswerable}
           dryRun={dryRun} sessionId={dryRunSessionId} tickedFormIds={dryRunFormIds || []}
           onDryRunUpdate={onDryRunUpdate} onOpenDryRunFix={onFixDryRunItem}
           onOpenScoreFix={onFixScoreItem} onAddForm={onAddForm} formOffers={formOffers} onAddOffer={onAddOffer}

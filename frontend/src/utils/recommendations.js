@@ -136,19 +136,47 @@ function belowOnePoint(row) {
   return avail !== null && avail > 0 && avail < 1 && (pillar === null || pillar > 0);
 }
 
+//
+// ONE TOTAL, SHARED OUT (owner, 15 Oct 2026, run 5eb5b23c: at 94 the rows read
+// +3 / +2 / +2 - "that will take my score to 101"). Each number was its answer
+// measured ALONE, and lone gains never add up: the score is rounded down, and
+// every lone answer collected the same leftover fraction. A row the scorer
+// marks `answer_gain_share` carries its SHARE of what answering every row makes
+// (sqs_service._share_out_gains): the shares add up to that score, never past
+// 100. A share of 0 is a row whose fraction of a point is already counted in
+// the rows above it - still listed while it adds anything on its own
+// (`answer_gain_alone`) or is worth under a point, with no number.
 export function pointsFor(row) {
   const gain = num(row?.answer_gain);
   if (gain !== null) {
     const n = Math.round(gain);
+    if (row?.answer_gain_share === true) {
+      if (n >= 1) return { points: n, exact: row.answer_gain_is_exact === true, share: true };
+      const alone = num(row?.answer_gain_alone);
+      // Listed with no number while it still adds something on its own, is worth
+      // under a point, or belongs to a pillar held at 0 - a pillar no single answer
+      // lifts (the COPE minimum: occupancy AND construction AND a value), where the
+      // last row takes the whole unlock and the ones before it are its prerequisites.
+      return (alone !== null && alone > 0) || belowOnePoint(row) || num(row?.score) === 0
+        ? { points: 0, exact: true, share: true } : null;
+    }
     if (n <= 0) return n === 0 && belowOnePoint(row) ? { points: 1, exact: false } : null;
     return { points: n, exact: row.answer_gain_is_exact === true };
   }
+  // An unmeasured row worth under half a point is still a gap (15 Oct 2026, owner:
+  // a package must not sit at 99 with "Nothing to add here"): listed "up to +1",
+  // and `withinHundred` keeps the list inside 100.
   const avail = num(row?.points_available);
-  if (avail === null || Math.round(avail) <= 0) return null;
-  return { points: Math.round(avail), exact: false };
+  if (avail === null || !(avail > 0)) return null;
+  return { points: Math.max(1, Math.round(avail)), exact: false };
 }
 
-export const pointsText = (p) => (p ? `${p.exact ? "" : "up to "}+${p.points} pts` : "");
+// A listed row with no points to its name prints nothing.
+export const pointsText = (p) => (p && p.points > 0 ? `${p.exact ? "" : "up to "}+${p.points} pts` : "");
+
+// What a row's answer adds ON ITS OWN: the scorer's lone measurement when the
+// row carries a share, else the number it carries.
+const aloneGain = (row) => num(row?.answer_gain_alone) ?? num(row?.answer_gain);
 
 // A pillar HELD AT 0 by one missing value (owner, 14 Oct 2026, run 823d58a0:
 // Property Integrity is 0 until occupancy is entered - the COPE minimum - while
@@ -162,7 +190,7 @@ export function pillarGates(rows) {
   const gates = {};
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!row || typeof row !== "object" || row.pillar === HARD_STOPS_ROW) continue;
-    if (num(row.score) !== 0 || !(num(row.answer_gain) > 0)) continue;
+    if (num(row.score) !== 0 || !(aloneGain(row) > 0)) continue;
     if (!gates[row.pillar]) gates[row.pillar] = clean(row.action) || pillarLabel(row.pillar);
   }
   return gates;
@@ -183,10 +211,14 @@ export function scoreItems(packageSqs, covered = new Set()) {
       resolution = { ...resolution, gaps: row.narrative_gaps };
     }
     const gate = gates[row.pillar];
-    const heldBy = gate && !(num(row.answer_gain) > 0) && num(row.score) === 0 ? gate : null;
+    const heldBy = gate && !(aloneGain(row) > 0) && num(row.score) === 0 ? gate : null;
     const avail = num(row.points_available);
+    // A held row carrying a share shows what it adds once the rows before it -
+    // the gate among them - are in; with no share left it is listed, unnumbered.
     const points = heldBy
-      ? (avail !== null && avail > 0 ? { points: Math.max(1, Math.round(avail)), exact: false } : null)
+      ? (row.answer_gain_share === true
+          ? (pointsFor(row) || { points: 0, exact: true, share: true })
+          : (avail !== null && avail > 0 ? { points: Math.max(1, Math.round(avail)), exact: false } : null))
       : pointsFor(row);
     if (!points) continue;                           // answering adds nothing
     const keys = fixKeys(resolution);
@@ -217,7 +249,8 @@ export function scoreItems(packageSqs, covered = new Set()) {
 // and its points - back.
 export function scoreFixIssue(item) {
   const what = [item?.title, item?.detail].filter(Boolean).join(": ");
-  const gain = item?.points ? ` Answering adds ${pointsText(item.points)} to your score.` : "";
+  const adds = pointsText(item?.points);
+  const gain = adds ? ` Answering adds ${adds} to your score.` : "";
   return {
     message: `${what}.${gain}`.replace(/\.\./g, ".").trim(),
     code: null,
@@ -415,11 +448,38 @@ export function scoreLeftOnForms({ packageSqs, model, openOnPage = 0 } = {}) {
   return { score, points: row.points || null, formId: row.resolution.form_id || null, formCount: forms.length, reaches100, item: row };
 }
 
+// THE LIST NEVER ADDS UP PAST 100 (owner, 15 Oct 2026: "score should be
+// distributed in such a manner that it should not go past 100 ... for all the
+// packages"). The scorer's shares already add up to what answering every row
+// makes. This is the guarantee for everything else the list prints - a payload
+// scored before the shares, a bound the page works out itself ("up to"), the
+// Form Fill Rate row: the shares first, then the rest, each in the order
+// listed, every number takes at most what is still left below 100. A number
+// cut down becomes "up to"; a row left with nothing stays listed, unnumbered.
+// Mutates and returns `items` (each is built fresh by this module).
+export function withinHundred(items, score) {
+  const list = Array.isArray(items) ? items : [];
+  const s = num(score);
+  if (s === null) return list;
+  let room = Math.max(0, 100 - Math.floor(s));
+  const take = (it) => {
+    const p = it && it.points;
+    if (!p || !(p.points > 0)) return;
+    const kept = Math.min(p.points, room);
+    room -= kept;
+    if (kept !== p.points) it.points = { ...p, points: kept, exact: false };
+  };
+  list.filter((it) => it?.points?.share).forEach(take);
+  list.filter((it) => !it?.points?.share).forEach(take);
+  return list;
+}
+
 export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist, formOffers } = {}) {
   const covered = onScreenFixKeys(groupedIssues, keyDetails);
   const score = scoreItems(packageSqs, covered);
   const fillRow = formsExist ? fillRateItem(packageSqs, attention) : null;
   if (fillRow) score.push(fillRow);
+  withinHundred(score, packageSqs?.package_sqs_score);
   // BEFORE FORMS THIS SECTION IS THE SCORE ONLY (owner, 14 Oct 2026: "we are
   // trying to make SQS independent of forms ... this section does not increase
   // score so why show it before even generating the forms"). What a form will

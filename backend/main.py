@@ -58,7 +58,11 @@ _DEV_ROUTES_ENABLED = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
 _ENVIRONMENT        = os.getenv("ENVIRONMENT", "development").lower()
 _IS_PROD            = _ENVIRONMENT == "production"
 _JOB_QUEUE_BACKEND  = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
-_SCHEDULER_ENABLED  = os.getenv("SCHEDULER_ENABLED", "false" if _IS_PROD else "true").lower() == "true"
+# Off unless asked for, in EVERY environment (15 Oct 2026): a laptop running the
+# backend points at the production database, and with the old "on outside
+# production" default it ran the client's daily jobs (retention deletes, reminder
+# and payment e-mails) whenever it was awake. Production sets it on Render.
+_SCHEDULER_ENABLED  = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"
 
 _json_handler = logging.StreamHandler()
 _json_handler.setFormatter(JsonFormatter())
@@ -359,7 +363,7 @@ async def startup():
     else:
         logger.info(
             "Scheduler disabled (SCHEDULER_ENABLED=false). "
-            "Run a dedicated scheduler process with SCHEDULER_ENABLED=true."
+            "Set SCHEDULER_ENABLED=true on the server that should run the daily jobs."
         )
 
 

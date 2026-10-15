@@ -248,6 +248,29 @@ def cross_form_severity(issues: Optional[Iterable[Any]]) -> List[Any]:
             else i for i in (issues or [])]
 
 
+def conflict_stop_facts(session: Optional[dict]) -> Dict[str, str]:
+    """{stop message: fact} for every stop a Data Consistency row settles - the
+    documents' identity disagreements and the picker's own open conflicts (15 Oct
+    2026: the review screen prints their points on that row, or on the card whose
+    "Fix in Data Consistency" button leads there). Same doors as `stops_now`, so
+    the messages match its lists. Never raises."""
+    session = session or {}
+    out: Dict[str, str] = {}
+    try:
+        from services.sqs_service import doc_consistency_stops
+        from services.issue_registry import _DOC_CONFLICT_CODE_TO_FACT
+        for c in doc_consistency_stops(session, with_conflicts=True)[2] or []:
+            code = str((c or {}).get("code") or "")
+            if code and (c or {}).get("message"):
+                out[str(c["message"])] = _DOC_CONFLICT_CODE_TO_FACT.get(code, code)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("conflict_stop_facts: document conflicts skipped (%s)", exc)
+    flags = session.get("flags") if isinstance(session.get("flags"), dict) else {}
+    for key, msg, _blocking in underwriting_conflict_stops(session.get("underwriting_consistency") or {}, flags):
+        out[str(msg)] = str(key)
+    return out
+
+
 def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None, *,
               pre_form: bool, facts: Optional[dict] = None,
               flags: Optional[dict] = None) -> Dict[str, Any]:
@@ -301,7 +324,16 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
     underwriting = session.get("underwriting_consistency") or {}
     for _key, msg, blocking in underwriting_conflict_stops(underwriting, flags):
         (hard if blocking else soft).append(msg)
+    try:
+        from services.issue_registry import explained_issue_codes, person_settled_fact
+        _explained = explained_issue_codes(facts)
+    except Exception:                                         # noqa: BLE001
+        _explained, person_settled_fact = set(), (lambda _f, _k: False)
     for _key, msg, _carrier in source_conflict_stops(docs, underwriting):
+        # Settled by a person's value, or explained (15 Oct 2026).
+        _code = f"source_conflict_{'carrier_' if _carrier else ''}{_key}"
+        if _code in _explained or person_settled_fact(facts, _key):
+            continue
         soft.append(msg)
     for _fld, msg in ocr_review_stops(docs, facts, session.get("underwriting_confirmations")):
         soft.append(msg)

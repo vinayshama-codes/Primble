@@ -1065,7 +1065,7 @@ def _check_crime_silent_exposure(
     """
     issues: List[dict] = []
 
-    if flags.get("has_crime") or _fv(facts, "crime_limit"):
+    if flags.get("has_crime") or _fv(facts, "crime_limit") or _fv(facts, "crime_coverage_decision"):
         return issues
 
     # THE EVIDENCE IS CASH HANDLING, NOT HEADCOUNT (fixed 2026-08-17).
@@ -1133,7 +1133,7 @@ def _check_cyber_silent_exposure(
     """
     issues: List[dict] = []
 
-    if flags.get("has_cyber") or _fv(facts, "cyber_limit"):
+    if flags.get("has_cyber") or _fv(facts, "cyber_limit") or _fv(facts, "cyber_coverage_decision"):
         return issues
 
     ops = (_fv(facts, "operations_description") or "").lower()
@@ -3056,6 +3056,16 @@ def run_cross_form_validation(
             )
 
     _filter_add_forms(all_issues, triggered_ids)
+    # A card whose only fix is an explanation is answered once the producer
+    # wrote it (15 Oct 2026, issue_registry.explained_issue_codes).
+    try:
+        from services.issue_registry import explained_issue_codes, explains_away
+        _explained = explained_issue_codes(facts)
+        if _explained:
+            all_issues = [i for i in all_issues
+                          if not (i.get("code") in _explained and explains_away(i.get("code")))]
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("cross_form_validator: explained filter skipped: %s", exc)
     return all_issues
 
 

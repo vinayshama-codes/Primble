@@ -68,6 +68,13 @@ services:
       # Pro's 500-connection cap.
       - key: DB_POOL_MAX
         value: "20"
+      # The daily jobs (payment follow-up, questionnaire reminders) run HERE,
+      # never on a laptop (15 Oct 2026). Every gunicorn worker starts the
+      # scheduler; a database lock asked at each run lets exactly one do the
+      # work and hands it over across deploys. Jobs that DELETE data stay off
+      # unless SCHEDULER_CLEANUP_JOBS=true. Set in the dashboard too.
+      - key: SCHEDULER_ENABLED
+        value: "true"
       # Optional: point this at Supabase's session-mode pooler (port 5432)
       # to enable PostgreSQL LISTEN/NOTIFY for instant worker wake-up. The
       # main DATABASE_URL should stay on transaction mode (port 6543).

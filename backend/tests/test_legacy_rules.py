@@ -512,8 +512,12 @@ def test_other_issue_sources_never_pick_up_a_legacy_resolution_by_substring():
     that appear verbatim inside cross-document conflict and low-OCR-confidence
     messages. Those families are resolved through the Data Consistency picker,
     not a typed box, so the message fallback must stay gated on the code."""
+    # A low-OCR card opens its OWN field by its code since 15 Oct 2026 (a person's
+    # value is what clears it - stops_now.ocr_review_stops); it still never picks up
+    # ANOTHER rule's resolution from its words - pinned just below.
+    ocr = make_issue("ocr_low_confidence_fein", "soft_warning", "FEIN read with low confidence - please confirm")
+    assert ocr["resolution"]["mode"] == "field" and ocr["resolution"]["facts"] == ["fein"]
     cases = [
-        ("ocr_low_confidence_fein", "FEIN read with low confidence - please confirm"),
         ("doc_conflict_hard_fein", "FEIN differs between documents: 12-3456789 vs 98-7654321"),
         ("doc_conflict_warn_effective_date", "Effective date differs between documents"),
         ("underwriting_reconciliation_total_revenue", "Total revenue differs across documents"),
@@ -573,8 +577,8 @@ _NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
     "cyber_silent_exposure": (),
     # WC in ND/OH/WA/WY: the fix is the PLACEMENT (state fund vs private
     # carrier). The one door agrees - neither backing key is writable.
-    "legacy_wc_monopolistic_state": (),
-    "legacy_wc_monopolistic_private_carrier": (),
+    # legacy_wc_monopolistic_state / _private_carrier left this list 15 Oct 2026:
+    # both now ask the placement question the rule reads (wc_state_fund_acknowledged).
     # The STATIC entry only: what a view drawn without the facts can say. On the
     # Review screen the card is rebuilt per package with a choice of line for
     # each part (issue_registry.unmapped_line_issue, 14 Oct 2026).

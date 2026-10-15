@@ -65,6 +65,53 @@ def _is_phone(v: str) -> bool:
     return bool(re.match(r'^[\d\s\-\(\)\+\.xX]{7,20}$', s)) and len(re.sub(r'\D', '', s)) >= 7
 
 
+# THE BOX REFUSES WHAT A LATER CHECK FLAGS (15 Oct 2026). An answer box applies
+# the same rule as the check that would raise a warning on the stored value
+# (`utils.validators.run_field_validations`, `sqs_service.validate_naics_code`),
+# so a value the box takes can never come back as a warning no correct answer
+# clears. BOX-ONLY, as `answer_validate` (read through `answer_check`): the
+# fact's own `validate` stays the shared SHAPE that the extraction merge, the
+# dec-entry backfill, the stamper's shape guard and the comparison door key on
+# by identity - swapping it there moved extraction (contact_phone left the
+# merge's phone partition).
+VALID_NAICS_SECTORS = frozenset({
+    "11", "21", "22", "23", "31", "32", "33", "42", "44", "45",
+    "48", "49", "51", "52", "53", "54", "55", "56", "61", "62",
+    "71", "72", "81", "92",
+})
+
+
+def _is_naics(v: str) -> bool:
+    s = str(v or "").strip()
+    return bool(re.match(r'^\d{2,6}$', s)) and s[:2] in VALID_NAICS_SECTORS
+
+
+def _is_full_phone(v: str) -> bool:
+    try:
+        from utils.validators import validate_phone
+        return _is_phone(v) and validate_phone(v)[0]
+    except Exception:                                          # noqa: BLE001
+        return _is_phone(v)
+
+
+def _is_us_mailing_address(v: str) -> bool:
+    if len(str(v or "").strip()) < 10:
+        return False
+    try:
+        from utils.validators import validate_address
+        return validate_address(v)[0]
+    except Exception:                                          # noqa: BLE001
+        return True
+
+
+def answer_check(entry: Optional[dict]):
+    """The check a PERSON's typed answer must pass: the box rule
+    (`answer_validate`) where it is stricter than the fact's shape, else the
+    shape (`validate`). Every door that judges a typed answer reads this."""
+    e = entry if isinstance(entry, dict) else {}
+    return e.get("answer_validate") or e.get("validate")
+
+
 def _is_url(v: str) -> bool:
     """A web address. Accepts bare domains ('acme.com', 'www.acme.com') as well
     as full URLs, because that is how they are printed on ACORD forms."""
@@ -191,6 +238,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "What is your business mailing address? (Street, City, State, ZIP)",
         "tier": 1, "required": True,
         "validate":    lambda v: len(v.strip()) >= 10,
+        "answer_validate": _is_us_mailing_address,
         "format_hint": "Full address including street, city, state, ZIP",
     },
     "physical_address": {
@@ -212,7 +260,8 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "What is the best phone number to reach you?",
         "tier": 1, "required": False,
         "validate":    _is_phone,
-        "format_hint": "Phone number (7–20 digits, dashes, parentheses allowed)",
+        "answer_validate": _is_full_phone,
+        "format_hint": "Phone number with area code (10 digits); an extension is fine",
     },
     "contact_email": {
         "forms":       {"ACORD_125"},
@@ -476,6 +525,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "Do you know your business's NAICS code?",
         "tier": None, "required": False,
         "validate":    lambda v: bool(re.match(r'^\d{2,6}$', v.strip())),
+        "answer_validate": _is_naics,
         "format_hint": "2–6 digit NAICS code",
     },
     "sic_code": {
@@ -679,6 +729,36 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": "List of class-code rows with rating basis and exposure",
+    },
+    # 15 Oct 2026: the facts two warnings wait for - neither could be typed, so
+    # the warning held the score at 85 whatever the producer answered.
+    "prior_acts_confirmation": {
+        "forms":       {"ACORD_126", "ACORD_131"},
+        "question":    "Does the claims-made general liability policy cover prior acts back to the retroactive date?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Yes / No (first claims-made policy) / nose or tail coverage",
+    },
+    "crime_coverage_decision": {
+        "forms":       set(),
+        "question":    "The business description suggests cash handling. Is Crime coverage requested, declined, already carried or not applicable?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Requested / Declined / Already carried / Not applicable",
+    },
+    "cyber_coverage_decision": {
+        "forms":       set(),
+        "question":    "The business description suggests customer data or digital exposure. Is Cyber coverage requested, declined, already carried or not applicable?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Requested / Declined / Already carried / Not applicable",
+    },
+    "wc_state_fund_acknowledged": {
+        "forms":       {"ACORD_130"},
+        "question":    "Is the workers compensation payroll in ND, OH, WA or WY placed with the state fund?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Yes (state fund) or No (private carrier requested)",
     },
     "retro_date": {
         "forms":       {"ACORD_126"},

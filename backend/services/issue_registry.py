@@ -471,8 +471,10 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "umbrella_el_below_minimum": _r_field("employers_liability_limits"),
     # ── Claims-made continuity ──
     "claims_made_missing_retro_date": _r_field("retro_date"),
-    # `prior_acts_confirmation` is not a writable canonical fact - explain via 101
-    "claims_made_missing_prior_acts": _R_NARRATIVE,
+    # The rule reads `prior_acts_confirmation` and nothing else; it is a typed
+    # fact with a choice list since 15 Oct 2026 (it used to send the producer to
+    # the remarks, which the rule never reads - an 85 no answer could clear).
+    "claims_made_missing_prior_acts": _r_field("prior_acts_confirmation"),
     # ── Auto ──
     # Split-limit components are not writable canonical facts; that one stays
     # read-only. The three symbol rules below used to be _R_NONE on the stated
@@ -511,16 +513,16 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # ── Silent exposure (coverage decisions - handled on their own forms) ──
     # A coverage decision, or a document we do not have yet - each note names
     # which (14 Oct 2026, owner).
-    "crime_silent_exposure": _r_review(
-        "If the insured already carries Crime coverage, add that policy's "
-        "declarations page with Add documents in the Documents section - this "
-        "clears once it is read. If not, discuss adding Crime coverage with the "
-        "insured, then dismiss this."),
-    "cyber_silent_exposure": _r_review(
-        "If the insured already carries Cyber coverage, add that policy's "
-        "declarations page with Add documents in the Documents section - this "
-        "clears once it is read. If not, discuss adding Cyber coverage with the "
-        "insured, then dismiss this."),
+    # A coverage question (15 Oct 2026): the producer's decision is the answer -
+    # requested, declined, already carried or not applicable all clear it.
+    "crime_silent_exposure": {**_r_field("crime_coverage_decision"), "note": (
+        "If the insured already carries Crime coverage, add that policy's declarations "
+        "page with Add documents in the Documents section, or record the decision here - "
+        "requested, declined, already carried or not applicable each clears it.")},
+    "cyber_silent_exposure": {**_r_field("cyber_coverage_decision"), "note": (
+        "If the insured already carries Cyber coverage, add that policy's declarations "
+        "page with Add documents in the Documents section, or record the decision here - "
+        "requested, declined, already carried or not applicable each clears it.")},
     # ── Certificates / evidence ──
     # `none` MODE, but no longer a dead end (UX-05, 2026-09-08): the emitting
     # rule declares `add_forms`, so the modal draws an "Add ACORD 25 / 28"
@@ -595,7 +597,71 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
         return _tier1_resolution(code[len("tier1_missing_"):])
     if code.startswith("source_conflict_"):
         return _source_conflict_resolution(code)
+    if code.startswith(_OCR_ISSUE_PREFIX):
+        return _ocr_resolution(code[len(_OCR_ISSUE_PREFIX):])
+    if code.startswith("doc_conflict_warn_"):
+        # Only the fields a person's value settles (`person_settled_keys`); the
+        # identity / date ones stay with the Data Consistency picker.
+        fk = doc_conflict_fact_key(code) or ""
+        return _ocr_resolution(fk) if fk in DOC_WARNING_FIELDS else None
     return None
+
+
+# ── Settled by a person / explained (15 Oct 2026) ────────────────────────────
+# The owner's rule: a warning a CORRECT answer cannot clear is a bug. Two shared
+# rules close the families that had no answer:
+#  * a document disagreement on a field a person then typed (or confirmed) is
+#    settled - the person's value is the one that applies, so it is no longer
+#    "the documents disagree" (lines of business, DBA, entity type, addresses;
+#    sub-values such as WC payroll per state). The four identity / date hard
+#    stops stay with the Data Consistency picker.
+#  * a card whose only fix is an explanation (narrative mode) is explained once
+#    the producer writes it - the code is recorded with the explanation
+#    (`_explained_issue_codes`) and the rule stops counting it; the words still
+#    reach the underwriter in the ACORD 101 remarks. "Open again" takes it back.
+DOC_WARNING_FIELDS = ("dba_name", "entity_type", "mailing_address", "physical_address",
+                      "lines_of_business")
+
+
+def person_settled_keys(facts: Any) -> set:
+    """The document-warning fields whose value a PERSON supplied."""
+    facts = facts if isinstance(facts, dict) else {}
+    return {k for k in DOC_WARNING_FIELDS if _is_human_supplied(facts.get(k))}
+
+
+def person_settled_fact(facts: Any, key: str) -> bool:
+    """A (possibly dotted) fact whose top-level value a person supplied."""
+    facts = facts if isinstance(facts, dict) else {}
+    return _is_human_supplied(facts.get(str(key or "").split(".")[0]))
+
+
+def explained_issue_codes(facts: Any) -> set:
+    facts = facts if isinstance(facts, dict) else {}
+    raw = facts.get("_explained_issue_codes")
+    val = raw.get("value") if isinstance(raw, dict) else raw
+    return {str(c) for c in (val or []) if c} if isinstance(val, (list, tuple, set)) else set()
+
+
+def explains_away(code: Any) -> bool:
+    """A code whose fix IS an explanation (its card writes the remarks)."""
+    res = resolution_for(str(code or "")) or {}
+    return res.get("mode") == "narrative"
+
+
+def _ocr_resolution(fact: str) -> Optional[dict]:
+    """A low-OCR "confirm this field" card opens that field (15 Oct 2026). The
+    warning clears once a person supplies the value (`stops_now.
+    ocr_review_stops` / `drop_confirmed_ocr_issues`), and the card had no box -
+    an 85 only Dismiss could touch, and Dismiss never moves the score. The fix
+    window shows the value on file, so confirming it as read is one click. Only
+    a fact a person can type gets a box (the one door, `answer_routing`)."""
+    try:
+        from services.answer_routing import answer_mode
+        if (answer_mode(fact) or {}).get("mode") != "field":
+            return None
+    except Exception:                                     # noqa: BLE001
+        return None
+    return _copy_resolution(_r_field(fact))
 
 
 _CONFLICT_REVIEW_NOTE = (
@@ -697,9 +763,13 @@ def _source_conflict_resolution(code: str) -> Optional[dict]:
             field = stripped
     if not field:
         return None
-    # Nested sub-field (dotted) or anything not writable as a scalar -> review note.
+    # Nested sub-field (dotted) or anything not writable as a scalar: the
+    # producer explains which document is right (15 Oct 2026 - it was a review
+    # note, an 85 no answer could clear). Saving the explanation settles it.
     if "." in field or not _writable_fact(field):
-        return _r_review(_CONFLICT_REVIEW_NOTE)
+        return {**_R_NARRATIVE, "note": (
+            "The documents give different values here and no single box holds it. "
+            "Explain which document is right - saving the explanation settles it.")}
     return _r_field(field)
 
 
@@ -1034,14 +1104,12 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     ("Monopolistic WC state detected but wc_monopolistic_payroll", "Monopolistic WC state requirements", "required",
      "legacy_wc_monopolistic_payroll_missing", _r_field("wc_monopolistic_payroll")),
     ("Monopolistic WC state (ND/OH/WA/WY) requires the state fund", "Monopolistic WC state requirements", "required",
-     "legacy_wc_monopolistic_private_carrier", _r_review(
-         "This clears when the WC placement changes: in ND, OH, WA and WY workers "
-         "compensation is written by the state fund, so remove the private-carrier "
-         "request or confirm state-fund handling with the insured.")),
+     "legacy_wc_monopolistic_private_carrier", _r_field("wc_state_fund_acknowledged")),
+    # 15 Oct 2026: both ask the one question the rule reads - is the payroll in
+    # those states placed with the state fund? (They were review-only, and the
+    # warning fired even after the placement was confirmed: an 85 for good.)
     ("Monopolistic WC state detected", "Monopolistic WC state requirements", "recommended",
-     "legacy_wc_monopolistic_state", _r_review(
-         "In ND, OH, WA and WY workers compensation is placed with the state fund. "
-         "Confirm the placement with the insured, then dismiss this.")),
+     "legacy_wc_monopolistic_state", _r_field("wc_state_fund_acknowledged")),
     # Per-state payroll has no live capture schedule and no writable scalar -
     # same call as the cross-form twin wc_multi_state_no_breakdown.
     ("Multi-state WC", "WC payroll reconciliation", "required",
@@ -2517,6 +2585,77 @@ def retire_stopped_cross_form_issues(
         code = str(i.get("code") or "") if isinstance(i, dict) else ""
         if code in codes and (code, str(i.get("message") or "").strip()) not in live:
             continue
+        out.append(i)
+    return out
+
+
+def doc_conflict_code(issue: Any) -> Optional[str]:
+    """The structured-issue code the upload gives one `check_doc_consistency`
+    string - ONE derivation, shared by the upload (`extraction_pipeline`) and the
+    recalculation's retirement below, so the two cannot drift. None for an
+    [info] normalisation notice (never an issue)."""
+    s = str(issue or "")
+    if s.startswith("[hard_stop]"):
+        code_part = s[len("[hard_stop]"):].strip().partition(" ")[0]
+        code = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
+        return f"doc_conflict_hard_{code}"
+    if s.startswith("[warning]"):
+        m = re.match(r"^(?:field|code)=(\S+)", s[len("[warning]"):].strip())
+        return f"doc_conflict_warn_{m.group(1) if m else 'conflict'}"
+    if s.startswith("[info]"):
+        return None
+    return "doc_conflict_warn_unknown"
+
+
+def retire_stopped_doc_conflict_issues(
+    persisted: Optional[List[dict]], docs: Any, confirmed_keys: Any = (),
+) -> List[dict]:
+    """Drop the persisted copy of every document-conflict issue the documents no
+    longer raise (15 Oct 2026, run 9acec031).
+
+    The upload copies each `check_doc_consistency` finding into
+    ``structured_issues`` as ``doc_conflict_(hard|warn)_*``; the recalculation
+    re-runs that check for its stop lists (`stops_now.doc_consistency_stops`),
+    so a finding that stopped firing left the score but stayed on screen - an
+    "Entity type differs across documents" warning, settled by the same rule
+    every other reader uses, kept rendering with nothing to fix. Same shape as
+    ``retire_stopped_cross_form_issues``: a copy goes only when its code is a
+    document-conflict code and the fresh run does not raise it; every other
+    issue is kept exactly as it was. A check that cannot run keeps everything."""
+    try:
+        from services.sqs_service import check_doc_consistency
+        active = [d for d in (docs or []) if isinstance(d, dict) and not d.get("excluded")
+                  and isinstance(d.get("facts"), dict)]
+        live = set()
+        if len(active) >= 2:
+            for finding in check_doc_consistency(active, set(confirmed_keys or ())):
+                code = doc_conflict_code(finding)
+                if code:
+                    live.add(code)
+    except Exception:                                     # noqa: BLE001
+        return list(persisted or [])
+    out: List[dict] = []
+    for i in persisted or []:
+        code = str(i.get("code") or "") if isinstance(i, dict) else ""
+        if code.startswith("doc_conflict_") and code not in live:
+            continue
+        out.append(i)
+    return out
+
+
+def retire_settled_source_conflicts(persisted: Optional[List[dict]], facts: Any) -> List[dict]:
+    """Drop a stored `source_conflict_*` copy a person settled (typed the value)
+    or explained (15 Oct 2026). Every other issue is kept."""
+    explained = explained_issue_codes(facts)
+    out: List[dict] = []
+    for i in persisted or []:
+        code = str(i.get("code") or "") if isinstance(i, dict) else ""
+        if code.startswith("source_conflict_"):
+            key = code[len("source_conflict_"):]
+            if key.startswith("carrier_") and not person_settled_fact(facts, key):
+                key = key[len("carrier_"):]
+            if code in explained or person_settled_fact(facts, key):
+                continue
         out.append(i)
     return out
 

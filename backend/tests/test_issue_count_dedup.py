@@ -265,5 +265,7 @@ def test_structured_dict_conflict_splits_into_separate_cross_document_items():
     # risk_transfer sub-fields have no scalar apply path.
     for it in cluster["items"]:
         res = it.get("resolution") or {}
-        assert res.get("mode") == "none", "nested sub-field must not get a typed-value button"
+        # 15 Oct 2026: an explanation settles it - still never a typed value.
+        assert res.get("mode") == "narrative" and "facts" not in res, \
+            "nested sub-field must not get a typed-value button"
         assert res.get("note"), "review note explaining why it can't be auto-applied"

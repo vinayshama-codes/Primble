@@ -180,6 +180,37 @@ UMBRELLA_FOLLOW_FORM_OPTIONS = _with_other(
     "Not stated - underwriter review recommended",
 )
 
+# Claims-made GL continuity (15 Oct 2026): the rule waits for this answer and,
+# until now, nothing on the screen could give it - its card wrote the remarks.
+PRIOR_ACTS_OPTIONS = _with_other(
+    "Yes - prior acts are covered back to the retroactive date",
+    "No - this is the first claims-made policy, so there are no prior acts",
+    "Nose or tail coverage applies - see the remarks",
+)
+
+# Monopolistic WC states (15 Oct 2026): ND, OH, WA and WY are written by the
+# state fund. "Yes" is the placement the rule asks to confirm; "No" is a
+# private-carrier request, which those states do not allow (it stays a stop).
+WC_STATE_FUND_OPTIONS = _with_other(
+    "Yes - the payroll in ND, OH, WA or WY is placed with the state fund",
+    "No - private-carrier coverage is being requested for those states",
+)
+
+# Silent-exposure decisions (15 Oct 2026): the crime / cyber warnings are a
+# coverage question; the producer's decision IS the answer.
+CRIME_DECISION_OPTIONS = _with_other(
+    "Requested - quote Crime coverage with this submission",
+    "Declined - the insured does not want Crime coverage",
+    "Already carried - Crime coverage is on another policy",
+    "Not applicable - the business does not handle cash or securities",
+)
+CYBER_DECISION_OPTIONS = _with_other(
+    "Requested - quote Cyber coverage with this submission",
+    "Declined - the insured does not want Cyber coverage",
+    "Already carried - Cyber coverage is on another policy",
+    "Not applicable - the business holds no customer data or digital exposure",
+)
+
 # ── Auto ────────────────────────────────────────────────────────────────────
 VEHICLES_RETURN_OPTIONS = _with_other(
     "Yes - all vehicles return to the premises nightly",
@@ -329,6 +360,10 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     # the tick door can read the ACORD 131 umbrella Occurrence / Claims-Made boxes.
     "umbrella_form_type":          (GL_FORM_TYPE_OPTIONS, False),
     "umbrella_follow_form":        (UMBRELLA_FOLLOW_FORM_OPTIONS, False),
+    "prior_acts_confirmation":     (PRIOR_ACTS_OPTIONS, False),
+    "crime_coverage_decision":     (CRIME_DECISION_OPTIONS, False),
+    "cyber_coverage_decision":     (CYBER_DECISION_OPTIONS, False),
+    "wc_state_fund_acknowledged":  (WC_STATE_FUND_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
     "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
     "auto_radius_of_operation":    (RADIUS_OF_OPERATION_OPTIONS, False),

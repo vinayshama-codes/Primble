@@ -559,7 +559,8 @@ def canonical_option_value(fact_key: str, label: str,
     of a malformed decimal. Never raises.
     """
     entry = entry if entry is not None else _registry_entry(fact_key)
-    checker = entry.get("validate")
+    from services.fact_registry import answer_check
+    checker = answer_check(entry)
     if not callable(checker):
         return label          # nothing declares a shape - the label IS the value
     seen = set()

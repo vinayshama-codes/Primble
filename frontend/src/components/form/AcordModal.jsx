@@ -1,5 +1,7 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
+import { screenPoints, screenPointsText, cardKey } from "../../utils/screenPoints";
+import { issueFactKey, openConflictFacts } from "../../utils/dcFacts";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor, deductionText, deductionColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar } from "../../utils/formatters";
 import { formLabel, fileStem, baseFormId } from "../../utils/formInstances";
@@ -1044,31 +1046,7 @@ function ScoreNeutralNote({ show }) {
   );
 }
 
-// A conflict-family issue (documents disagree on a value) is reconciled in the
-// Data Consistency picker, keyed by its canonical fact. Its issue `code` encodes
-// that fact; derive it so a banner issue can be matched to its Data Consistency
-// row. Purely a display-routing hint - returns null when the code isn't a
-// conflict-family code, so non-conflict issues fall through untouched. Kept in
-// sync with the code prefixes emitted in extraction_pipeline.py.
-const _DOC_CONFLICT_CODE_TO_FACT = {
-  name_conflict:       "applicant_name",
-  fein_conflict:       "fein",
-  date_conflict:       "effective_date",
-  expiration_conflict: "expiration_date",
-  // dba_name / lines_of_business / revenue arrive as `field=<fact>`, already the
-  // fact key, so they need no remap.
-};
-function issueFactKey(it) {
-  const code = (it && it.code) || "";
-  let m;
-  if ((m = code.match(/^underwriting_reconciliation_(.+)$/))) return m[1];
-  if ((m = code.match(/^source_conflict_(?:carrier_)?(.+)$/)))  return m[1];
-  if ((m = code.match(/^doc_conflict_(?:hard|warn)_(.+)$/))) {
-    const c = m[1];
-    return _DOC_CONFLICT_CODE_TO_FACT[c] || c;
-  }
-  return null;
-}
+// A conflict-family issue's Data Consistency fact: `issueFactKey` (utils/dcFacts).
 
 // `renderItemActions(item)` builds the Resolve/Dismiss control for ONE issue.
 // Client review #8: a "(15)" cluster used to carry a single control below the
@@ -3839,6 +3817,11 @@ const AcordModal = forwardRef(function AcordModal({
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms), __severity: reviewSeverity(ctx.tone) })} />}
+          {(canResolve || inDataConsistency) && !formsGenerated && screenPointsText(screenPts.cards.get(cardKey(it))) && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#be185d", whiteSpace: "nowrap" }}>
+              {screenPointsText(screenPts.cards.get(cardKey(it)))}
+            </span>
+          )}
           {addable.map((fid) => (
             <AddFormButton key={fid} formId={fid} onClick={() => (formsGenerated
               ? openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })
@@ -5554,6 +5537,10 @@ const AcordModal = forwardRef(function AcordModal({
   // Orbin item 3 (1 Oct 2026): a missing key detail that has its own Warnings /
   // Hard Stops card is listed on the card only - both layouts read this.
   const keyDetails = withKeyDetailCards(keyDetailsRaw, groupedIssues);
+  // Every number on the review screen is a share of one total (15 Oct 2026).
+  const screenPts = useMemo(
+    () => screenPoints(packageSqs, groupedIssues, keyDetails, openConflictFacts(underwriting)),
+    [packageSqs, groupedIssues, keyDetails, underwriting]);
 
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
   // A 60 cap that has no entry in the package Hard Stops list. The COPE,
@@ -8132,7 +8119,7 @@ const AcordModal = forwardRef(function AcordModal({
                     </>
                   )}
                   {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
-                  <KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix} />
+                  <KeyDetailsMissing keyDetails={keyDetails} onFix={openKeyDetailFix} points={screenPts.details} />
                 </div>
               );
             })()}
@@ -8436,6 +8423,11 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                           {isConflict && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", textTransform: "uppercase" }}>Values differ - confirm</span>}
+                          {isConflict && !formsGenerated && screenPointsText(screenPts.dc.get(f.fact_key)) && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#be185d", whiteSpace: "nowrap" }}>
+                              {screenPointsText(screenPts.dc.get(f.fact_key))}
+                            </span>
+                          )}
                           {/* V1 C1 F10: why they conflict, in plain language. */}
                           {isConflict && f.conflict_reason && (
                             <span style={{ fontSize: 10.5, color: "#64748b" }}>{f.conflict_reason}</span>
@@ -8657,6 +8649,7 @@ const AcordModal = forwardRef(function AcordModal({
                 section of the same name, same data and handlers. */}
             <div style={{ margin: "14px 0" }}>
               <Recommendations heading packageSqs={packageSqs} groupedIssues={groupedIssues} keyDetails={keyDetails}
+                screenUnanswerable={screenPts.unanswerable}
                 dryRun={dryRun} sessionId={sessionId} tickedFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
                 onDryRunUpdate={setDryRun} onOpenDryRunFix={openDryRunFix} onOpenScoreFix={openScoreFix}
                 onAddForm={addFormBeforeGeneration} formOffers={documentFormOffers} onAddOffer={addOfferedForm}

@@ -151,7 +151,9 @@ def test_what_a_measured_zero_means(tmp_path):
     assert o["floor"] == "up to +1 pts" and o["small"] == "up to +1 pts" and o["noScore"] == "up to +1 pts"
     assert o["gated"] == "" and o["worthMore"] == "" and o["exactlyOne"] == ""
     assert o["noGap"] == "" and o["noBound"] == "" and o["negative"] == ""
-    assert o["gain"] == "+1 pts" and o["bound"] == "up to +1 pts" and o["tinyBound"] == ""
+    # 15 Oct 2026 (owner): a gap under half a point is listed too - a package must
+    # not sit at 99 with nothing to add; the list's 100 cap keeps it honest.
+    assert o["gain"] == "+1 pts" and o["bound"] == "up to +1 pts" and o["tinyBound"] == "up to +1 pts"
 
 
 # ══ Rows another fix cleared ═════════════════════════════════════════════════

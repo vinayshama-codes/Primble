@@ -1431,6 +1431,275 @@ snapshots: only the live stale one trips it) - runs that one full recalculation 
 `tests/test_save_refreshes_every_form_15oct.py` (5). On `0353c36b` after the deploy: any one Confirm refreshes all 10
 forms and the review page.
 
+**Z23 live check, part 4 - CLOSED (15 Oct, 05:19 IST, `988fc83` deployed):** one Confirm on one form ran the full
+recalculation: package 99 "Submission Ready", 0 hard stops, 0 warnings, the stale issue gone from the stored list, and
+EVERY form re-scored with no cap - 125 / 126 / 127 / 131 / 140 / 137 CO 100, 130 94, 101 85, 131 Excess 85 (no SIR /
+attachment, its own checklist), 28 73 (its own blank boxes). Download screen: "15 items to fix" = 14 Missing + 1
+Recommendation (130 officers), no hard stops, no stray warning; 67 values to confirm and 129 held back as counted lines.
+**CE 25 and CE 27 are CLOSED live.** Board: Choice Electric 20 of 27 closed (adds 25, 27), 7 wait on Brent / Michelle
+(4, 6, 7, 15, 20, 22, 26), 0 ours; Orbin 17 of 22 closed, 5 wait (5, 8, 12, 14, 15). Total 37 of 49 closed, 12 wait,
+0 ours. Left on this test package only: the stale "Add ACORD 186" offer (refreshes on the next document change).
+
+### AUDIT 15 Oct 2026 (two read-only agents, item by item against the clients' own documents) - THE BOARD OVERCLAIMED
+
+**Corrections to "CE 25 and CE 27 CLOSED" above:** CE 25 is NOT closed - after both excludes the Choice Electric 125
+still prints Harborline's question 4 ("Any other insurance with this company?" = Y, CPP-4418820-03, BA-4418821-03,
+UMB-7720145-03, IM-3301877-02, three lines): the exclude moved back 205 of the 213 boxes the add moved; these 8 stayed
+(label "filled", written into `field_state` by the add's re-stamp). The add / exclude code also changed three times after
+the last live use. CE 27 is PARTIAL: the download screen is right, but Brent's core ask (raise these items at the start)
+is unmet for 15 items by the owner's 14 Oct choice, not accepted by Brent.
+
+**Choice Electric, by evidence (not the board):** seen working on the DEPLOYED site on current code: 4, 5, 8, 12 (fix path
+only - no dismissal ever ran on Render), 14, 18 (happy path; "Confirm this value" never seen live), 21, 23. Seen on
+LOCALHOST only (8-12 Oct), code unchanged since: 2, 10, 11, 13, 16, 17, 19, 24. Code changed after the last live check: 1
+(header, re-fixed 13 Oct). Built, never used live: 9's edit / add / remove a policy line (the row count is right; the
+11th row is Employee Benefit Liability, not Crime - Brent's own screenshot lists Crime). Defect: 25. Partial: 27.
+Waiting on Brent / Michelle: 6, 7, 15, 20, 22, 26. Praise, nothing to check: 3.
+
+**Orbin, by evidence:** 0 of 22 seen on the Orbin package on the deployed site with current code. The last Orbin run
+anywhere was 1 Oct 23:07 IST (`f46bdccb`, Render, the 1 Oct build); Z12 was an offline re-stamp. Most points were seen on
+localhost 29 Sep - 1 Oct and the code was rebuilt 13-15 Oct. 9 and 19 work on current code but were seen on Choice
+Electric. "17 and G2 verified live 14 Oct" (Z18) has no trace: no questionnaire was sent or answered after 1 Oct.
+7, 8 and 11 changed on purpose (Brent's 8 Oct rules) and 4 / 11 now roll the term to 07/15/2027 - none seen on Orbin.
+Michelle's account still has no Contact Phone or Agency Address; her real upload was three files (dec, certificate,
+narrative), last run 27 Sep. Item 17 regressed on the client's own 5 Oct session (`ca93ed8f`, 32 producer boxes
+labelled Client) - fixed in `cc031bb`, no Client labels on the Render runs since.
+Agent reports: `scratchpad/honest/` (read-only scripts, the Orbin document's text).
+
+### Z24. Orbin on the deployed site, today's code - the live run `5eb5b23c` (15 Oct 2026, 11:13 IST onward)
+
+**Why:** the audit above found 0 of the 22 Orbin points seen on the Orbin package on the deployed site with current code
+(last Orbin run 1 Oct). **Setup:** the database moved to Brent's Supabase organisation (same project
+`yyueozimrmrwygknpxuj`, so nothing else changed - the owner's org had passed its egress limit with a 17 Oct cutoff).
+Uploaded: the 271-page dec alone (`~/Downloads/2526 Package Policy (Complete Copy) (4).pdf`). Michelle's other two files
+from 22 Sep - "CRS COI FIO - Orbin CERT ONLY.pdf" and "ORBIN CONTRACTING LLC submission narrative-20260530144518.pdf" -
+are not on the Mac (her e-mail). The owner's Account Settings: phone set, **Agency Address still empty** - fill it before
+generating (the producer box reads it at generation).
+
+**Pre-form screen, checked read-only on the stored row and rebuilt with the deployed code - correct:** the dec typed as a
+dec (high), no integrity flag, no Data Consistency conflict, applicant ORBIN CONTRACTING LLC; score 63 "Major Gaps"
+(Orbin 2: a score before forms); 0 hard stops; two warnings - Contact information (the dec prints no insured contact -
+Orbin 5, declined) and Driver schedule not provided (the policy lists a vehicle, no drivers - the Orbin 6 test); proposed
+term 07/15/2027 - 07/15/2028, rolled forward, "Please verify" (Orbin 4 / 11 - changed on purpose, tell Michelle); GL codes
+91580 / 91585 from the class schedule (Orbin 13), SIC / NAICS blank and listed for the agency; "No loss history provided"
+row (Orbin 15). Forms suggested: 125 / 126 / 127 / 131 required, 137 CO to confirm, 186 recommended, 160 optional.
+
+**The owner's answers (11:20 IST):** contact (Erin Royal, phone, e-mail), the Choice Electric driver CSV (8 rows - the
+warning cleared: Orbin 6 works), "No known losses" (Loss History Not applicable - Orbin 15). Score 76 "Needs Work", 0
+hard stops, 0 warnings.
+
+**Answer sheet to 100, replayed through the real fix routes on that package (starts at the live 76, ends 100 with every
+pillar at 100):** FEIN 84-1234567; revenue 1200000; employees **0**; years in business 14; NAICS 236220; 60%
+subcontracted; radius "Local (up to 50 miles)"; vehicle use "Service - technicians or crews driving to job sites"; and a
+narrative covering every topic AND the depth check's "scope of work ... primarily" wording (the first draft scored 94 -
+it lacked that phrase). **Employees = 0 on purpose:** 8 employees with no WC policy raises the genuine "Employees are
+listed but no workers comp coverage is carried" deduction and the score stops near 96 - correct underwriting, not a bug.
+The narrative fix window sends its text as `text`, not `value` (`resolve-issue` mode narrative). Replay:
+`scratchpad/live18/orbin_100.py`.
+
+**Next:** Agency Address -> generate 125 / 126 / 127 / 131 / 186 -> editor checks (Orbin 1, 3, 7, 8, 9, 10, 13, 16 with
+a prepared hard stop, 18, 19) -> Send to Client to the owner's own e-mail (sign, Tenant, landlord, submit; Orbin 12, 14,
+G1, G2, Q) -> retype a green Client box (Orbin 17) -> read-only verification of every point from the stored record.
+**Still open from the audit:** the CE 25 fix (an excluded document's 125 question 4 answers stay) - prepare offline,
+deploy only after this run (a deploy restarts the server); the CE click-through items (2, 10, 11, 13, 16, 17, 19, 24, policy
+edit / add / remove, Dismiss, "Confirm this value", the Template download, the top-bar scroll).
+
+### Z25. The points the screen lists add up - never past 100 (15 Oct 2026, run `5eb5b23c`) - offline, deploy after the Orbin run
+
+**Reported (owner, at 94):** Recommendations listed Percent of work subcontracted +3, Radius of operation +2, Vehicle-use
+information +2 - "that will take my score to 101, but that's wrong". **Owner's rule:** "score should be distributed in
+such a manner that it should not go past 100 ... correct for all the packages, not just Orbin or Choice Electric".
+
+**Cause:** every number was its answer measured ALONE, and the package score is the weighted sum ROUNDED DOWN (spec
+section 2). Orbin's sum stood at 94.6; the three answers are 2.4 / 1.5 / 1.5; each lone probe crossed a whole point with
+the same leftover 0.6 (97.0, 96.1, 96.1 -> +3 +2 +2), while all three together make exactly 100. Lone gains never add up,
+on any package: two answers can share one rounded point, clear one deduction between them (a bucket cap), or - a pillar
+held at 0 until its gate is answered - be worth nothing alone and a lot together. The page then added its own bounds
+("up to +1" for a sub-point row, "up to +gap" for a held row), which could pass 100 too.
+
+**Fix - one door, `sqs_service._share_out_gains` (called from `_unify_card_points`):** every number is a SHARE of one
+measured total. The answers go in one after another - biggest lone gain first, then the rows worth nothing alone - and
+each takes what the rounded score moved; the steps add up exactly to answering them all, and a score is never above 100,
+so neither is the list. Cards and rows share the ordering and one number per field. An answer that LOWERS the score
+after the others takes no share, and its cost comes off the smallest shares before it. Rows carry `answer_gain` (the
+share), `answer_gain_alone`, `answer_gain_share`; a share above the lone gain is "up to". Anything not shared (no
+probe, a broken chain, a card's typed bound) takes at most what is left below 100, once per field.
+**Frontend (`utils/recommendations.js`):** `pointsFor` reads shares; a share of 0 stays listed with no number while it
+adds anything alone or is worth under a point; a held row names its gate and shows its share; `withinHundred` caps
+everything the list prints - a payload scored before this change, the page's own bounds, the Form Fill Rate row - shares
+first, then the rest, in list order (a number cut down becomes "up to"; one left with nothing stays listed, unnumbered).
+`_PROBE_ANSWERS` gained "2015" and "3": year built, roof year and protection class could never be measured, only bounded.
+
+**Replayed on `5eb5b23c` (the owner's 94, `scratchpad/live18/orbin_points.py`):** rows +3 / +1 / +2 = 6; answered in
+that order the score goes 97 -> 98 -> 100. A recalc stays ~1.4 s (a probe is ~0.1 s; the shares add at most one probe
+per listed answer, capped by `_MAX_SHARE_PROBES` = 24).
+
+**D6 - display only, no score moves:** card and row numbers become shares (some lower than before; a row held by a gate
+now shows what it adds once the gate is in, as "up to"). A dismissal with a typed reason credits the card's number, so
+those credits now stay inside 100 too. A stored package shows shares after its next scoring; until then the page's cap
+keeps its list inside 100.
+
+**Tests:** `tests/test_points_add_up_15oct.py` (77 - the live case, overlap, gate, fractions, a costly answer, a ceiling,
+cards, a typed bound, 60 seeded fuzz runs x 40 packages, the real scorer end to end, the page). `tests/test_fill_rate_row_14oct.py`:
+its fixture said 99 while carrying 4.7 points of gaps - a score no such package has; now 95, plus the 99 case (the TEST
+was wrong, not the code). Related tests 1,714 passed; full suite **14,614 passed / 1 failed (the documented
+`test_arq_acord125_missing_only`) / 19 skipped**; frontend build clean.
+
+**Deploy only after the Orbin live run finishes** (a deploy restarts the server and kills a run in progress).
+
+### Z26. Does answering everything on the pre-form screen reach 100? - measured (15 Oct 2026) - offline, deploy after the Orbin run
+
+**Owner's question:** on any package, are the points distributed over the whole package, does answering every item
+on the pre-form screen make the score 100, and can it ever go past 100? **Owner: "just a few" packages, not all 94.**
+
+**Method:** `scratchpad/solve100/solve.py` - read-only (DB / Redis / network / LLM blocked), on the 13 Oct corpus
+snapshot. For each package it answers EVERY hard stop, warning, key detail, Recommendations row and Data Consistency
+pick through the real routes the way a careful producer would (realistic values consistent with the package's own
+figures, the window's own choices, a table's missing cells from its column examples, the narrative from the scorer's
+own phrases; one answer per fact, never overwritten), round after round, and records the score and the numbers the
+page prints (the real `recommendations.js` via node) at every round. **First cuts of the solver typed garbage ($50
+payroll, a date as the operations description) and manufactured blockers - every finding below was re-checked after
+the solver answered like a producer.**
+
+**Result on the final code, 14 packages:** **13 reach exactly 100**; **0 rounds anywhere where the score plus the
+numbers shown passed 100**; on all 14 the numbers shown at the start cover only PART of what answering everything
+gains (key details and the caps held by warnings carry no number) - they never over-promise, they under-promise. The
+one package below 100 (b601fad1) is genuine: 50 real claims (Loss History 45), its own documents disagree on payroll
+($4.9M vs $7.29M), and an OLD stored Data Consistency policy-number conflict that current code no longer raises
+(the picker can confirm it).
+
+**Fixed (offline), each a reason a package could not reach 100 whatever was typed:**
+1. **The Umbrella pillar had no box.** Exposure / Property list one row per deduction with its box (13 Oct decision:
+   the SQS reaches 100 before forms); Umbrella listed one box-less "Improve umbrella limit adequacy" row (+ a box-less
+   follow-form review row). `sqs_service.umbrella_deduction_items` now holds the pillar's deductions (the pillar is
+   100 minus their sum, floored - scores byte-identical, fuzzed against the client table) and `umbrella_gap_items`
+   lists each with its box (largest-remainder shares when the deductions exceed 100); the follow-form review row is not
+   added beside its own box. c7c4cdb5: 94 -> 100.
+2. **An entity-type warning nothing could clear.** `check_doc_consistency` compared each document's RAW entity type
+   ("Corporation" on decs whose insured is "... LLC") while the picker, the merge and Submission Integrity read the
+   SETTLED one - the warning said "fix in Data Consistency", the picker showed agreement and nothing to confirm, 85
+   for good (stored before the 7 Oct settle rule). It now reads through Integrity's door
+   (`submission_integrity._document_entity_type`, new `package_identity_names`). 9acec031: 85 -> 100.
+3. **A stale copy stayed on screen.** The recalculation re-runs the document check for its stop lists but kept the
+   upload's `doc_conflict_*` issue copies; now `issue_registry.retire_stopped_doc_conflict_issues` drops a copy the
+   documents no longer raise (one code derivation, `doc_conflict_code`, shared with the upload).
+4. **Review of the share-out (an adversarial audit):** a MISSING underlying limit is probed AT the scorer's own
+   threshold (`_THRESHOLD_PROBE_FACTS` - "50" sat below every threshold, so a missing-limit row measured nothing); a
+   STATED limit below the minimum is a coverage finding and is never probed up to it (no points for typing a bigger
+   limit than the policy has); the room
+   below 100 never exceeds what the start score leaves; the prerequisite rows of a pillar held at 0 (the COPE minimum)
+   stay listed, unnumbered.
+
+**Verified OPEN - what still keeps a package below 100 after everything on the screen is answered** (two read-only
+auditors + two adversarial verifiers over the code; each item confirmed or partly confirmed):
+* GENUINE, correct underwriting (no fix): real losses (Loss History needs 5 years of matching, recent loss runs);
+  employees with no WC policy (-8 Exposure); vehicles with no auto policy (-8); a TRUE underlying limit below the
+  umbrella minimum; an umbrella that does not follow form (-1 package point); payroll / revenue checks on true figures.
+* PRODUCT GAPS (a warning holds 85 and no typed answer clears it; Dismiss / Resolve never move the score before forms):
+  claims-made GL "prior acts confirmation" (reads a fact nothing writes); monopolistic WC state (ND / OH / WA / WY);
+  crime / cyber "silent exposure" (fires on words in the operations description); low-OCR "confirm this field" (no box);
+  "lines of business differ across documents" (no picker row); conflicts on sub-values (WC payroll per state);
+  narrative-only cards whose rule never reads the narrative (WC / GL class-code mismatch, builders risk overlap,
+  umbrella period alignment).
+* ANSWER HANDLING: the box accepts values a later check flags (a NAICS sector that does not exist, a phone with an
+  extension, an e-mail with an apostrophe); an honest "None" / "N/A" is stored empty, so Property / Exposure / Umbrella
+  still count it missing (typing "0" or the list's option works).
+* DISPLAY: a gap under half a point is never listed (a stuck 99 with "Nothing to add here"); coverage findings (-8 for
+  employees / vehicles) are never listed, so the page can say nothing is left while the score is below 100; after
+  forms the editor's Best Solutions / "N points remaining" / duplicate cards / dismissal credits can still read past
+  100 (the pre-form list cannot); a row is measured with today's stops, so a real answer that raises a NEW warning can
+  deliver less than its row said (the total never passes 100).
+
+**Fixed the same afternoon (owner: "we need to fix these", 30 minutes) - three warnings no correct answer could clear:**
+* claims-made GL "prior acts confirmation": `prior_acts_confirmation` is a typed fact (FACT_REGISTRY + a choice list in
+  `answer_options.PRIOR_ACTS_OPTIONS`); its card asks it (`RESOLUTION_MAP["claims_made_missing_prior_acts"]`, was the
+  remarks, which the rule never reads);
+* monopolistic WC state: `wc_state_fund_acknowledged` is a typed fact with `WC_STATE_FUND_OPTIONS`; both legacy cards
+  ask it; `evaluate_stops` reads the answer - "Yes - ... state fund" clears the warning (it fired even after the
+  placement was confirmed), "No - private carrier" is the hard stop (a true one: those states do not allow it);
+* low-OCR "confirm this field": the card opens its own field (`issue_registry._ocr_resolution`, typed facts only) -
+  a person's value is what clears it (`stops_now.ocr_review_stops`).
+Two guard tests updated on purpose (`test_legacy_rules`: the monopolistic codes leave `_NO_FIX_CAUSE`; the OCR card now
+resolves to its own field by code, never by message). Tests: `tests/test_warnings_a_correct_answer_clears_15oct.py`.
+**Then the rest of that list (owner: "do it faster ... for all identified cases") - two shared rules and one question:**
+* EXPLAINED: a card whose only fix is an explanation (narrative mode - WC / GL class-code mismatch, builders risk
+  overlap, umbrella period alignment, and every other) is answered once the producer writes it: `resolve_issue`
+  records the card's code with the explanation (`_explained_issue_codes`, producer source - "Open again" takes it
+  back), and `cross_form_validator.run_cross_form_validation` drops an explained narrative-mode issue
+  (`issue_registry.explained_issue_codes` / `explains_away`). The words still reach the underwriter in the remarks.
+* SETTLED BY A PERSON: a document disagreement on a field a person then typed is settled - `issue_registry.
+  person_settled_keys` (DBA, entity type, addresses, lines of business; the identity / date hard stops stay with the
+  picker) joins the confirmed keys in `doc_consistency_stops` and the recalc's retirement; the LOB check honours a
+  confirmation; a `doc_conflict_warn_*` card on those fields opens the field. Source conflicts on a person-supplied
+  fact (WC payroll per state from a saved table) are no stop (`stops_now`) and their stored copies retire
+  (`retire_settled_source_conflicts`); a nested conflict nobody can type is explained in its card (was a review note).
+* CRIME / CYBER: `crime_coverage_decision` / `cyber_coverage_decision` (requested / declined / already carried / not
+  applicable) - any decision clears the silent-exposure warning.
+Tests: `tests/test_warnings_a_correct_answer_clears_15oct.py` (14, incl. the real fix route).
+
+**Tests:** `tests/test_reach_100_before_forms_15oct.py` (35), `tests/test_points_add_up_15oct.py` (+4, 81). Related
+files 2,124 passed; full suite **14,652 passed / 1 failed (the documented `test_arq_acord125_missing_only`) / 19
+skipped**; frontend build clean.
+
+**The four left over (owner: "fix these first then run the suite") - offline, deploy after the Orbin run:**
+1. **An absence a person gave is an answer.** "None" / "N/A" is stored blank, and the Exposure items (GL limits,
+   payroll, WC class codes / payroll by state, percent subcontracted, covered-auto symbols), the Property `present`
+   set and Tier list, the Umbrella limit and the GL revenue / payroll stop counted it as missing. They now read
+   `_answered(facts, key)` (the `answer_semantics` door). The vehicle presence check is unchanged.
+2. **A box accepts only what the later check accepts.** NAICS: `fact_registry.VALID_NAICS_SECTORS` is the one sector
+   list (the scorer's `_VALID_NAICS_PREFIXES` reads it). Contact phone: a full 10-digit number, an extension allowed
+   (`validators.phone_main_digits`, shared with `validate_phone`). Mailing address: a US address. The e-mail box and
+   the e-mail warning use one pattern.
+3. **A gap under half a point is listed** ("up to +1", `recommendations.pointsFor` for an unmeasured row) - a package
+   no longer sits at 99 with nothing to add. `withinHundred` keeps the list inside 100.
+4. **The numbers on the pre-form screen add up to exactly 100 - score.** `sqs_service.complete_screen_shares` (from
+   `form_routes._pre_form_status`, before forms only) splits what is still missing BY CAUSE - each missing key detail,
+   each Exposure / Property / Umbrella item, the Loss History and Narrative gaps, and the cap the cards hold -
+   largest remainder: facts -> `screen_shares`, the cap and the cross-form deduction -> `screen_card_points` (by rule
+   code), what no box on the page answers -> `screen_unanswerable` (named in Recommendations with its points).
+   Frontend `utils/screenPoints.js` gives each fact's share to the item that offers its fix, by the Recommendations
+   list's own rule (`fixKeys` / `allCovered`): a table card (the COPE hard stop, the driver schedule) carries the rows
+   it hides; a cap share for a code the page does not draw goes to the cards it does draw. The cards print it beside
+   "Open to fix", the key details beside their label. A share from a gap worth under a point prints "up to +1" (the
+   14 Oct floor rule). First cut keyed cards by code + boxes and missed schedule cards: `8a61a2a6` printed 47 of 60.
+   **Measured, 6 packages (cards + key details + rows + unanswerable vs 100 - score):** `18f6914f` 11 / 11,
+   `8a61a2a6` 60 / 60, `312589ef` 61 / 61, `805049a7` 62 / 62, `c7c4cdb5` 86 / 86, `9acec031` 60 / 60 - and the
+   solver's answers land every one on 100. Display only, no score moves.
+Tests: `tests/test_points_add_up_15oct.py` (+1, `test_cards_details_and_rows_add_up_to_what_is_missing`). Related files
+230 passed; frontend build clean.
+
+**Then (owner: "can we add points in front of [Fix in Data Consistency] as well"):** every warning that costs points
+already has a fix button - checked over every rule, not a sample: "Open to fix", "Fix in Data Consistency", or "Add
+ACORD 25 / 28 / 125 / 186" (those four are deferred before forms); the only rule without one is the Tier 1 backstop for
+an unrecognised label (unreachable). The gap was the points: only "Open to fix" printed them, and a document conflict's
+share was spread onto unrelated cards. Now `complete_screen_shares` keys a conflict's share by the fact its Data
+Consistency row confirms (`screen_dc_points`, via `stops_now.conflict_stop_facts` - the same doors as `stops_now`;
+`doc_consistency_stops(with_conflicts=True)`), and `utils/screenPoints.js` prints it on the card whose "Fix in Data
+Consistency" button leads there, else on the "Values to confirm" row (both layouts). `issueFactKey` moved to
+`utils/dcFacts.js` (one copy). The Recommendations "Not answerable on this page" line no longer hides behind "Nothing to
+add". Build test `test_every_rule_that_costs_points_has_a_fix_button`.
+**The first full suite after items 1-4 found 10 failures - all fixed:** the phone / address / NAICS box rules had replaced
+the facts' shared `validate`, and three doors key on it by identity (the extraction merge's shape partition - `contact_phone`
+left it, so a name could win the phone fact - the type sweep and the stamper's shape guard). The shared `validate` is back;
+the stricter rule is `answer_validate`, read only where a person's answer is judged (`fact_registry.answer_check`:
+`answer_semantics`, `audit_routes` resolve-issue, the score probe). Extraction is unchanged. The crime / cyber decision
+cards got their "add the declarations page" note back. Four tests pinned today's deliberate reversals (nested conflicts
+take an explanation, monopolistic WC asks the state-fund question, a low-OCR card opens its box) - the TESTS were updated.
+b601fad1 re-checked: shown 19 = 100 - 81 (8 of them named "Not answerable" - its real claims).
+**Owner's live look (Choice Electric at 37, 6 values to confirm): no points beside the Data Consistency rows.** Cause: a
+stop's share was `raw - now` - what clearing it adds FIRST - and at 37 the conflicts hold a 60 cap the score has not
+reached, so they were worth 0. Now the stops' share is the average of clearing them first (`raw - now`) and last
+(everything above the cap) - Shapley over the two groups - and the answers share the rest, so a conflict row shows what
+it holds back ("up to +N pts") and the total is still exactly 100 - score. Every real gap shows at least 1 point while
+the total allows (the 14 Oct floor rule - a sub-point row is "up to +1", never blank). Replay with a name conflict made
+in memory: the "Applicant / Named Insured" row "up to +3 pts", total 60 = 100 - 40. 7 packages: all exact.
+Live session `7ed880d6` (read-only): the server sent every conflict's share, but a conflict that also had a Hard Stops
+card printed it on the card only, so 2 of the 6 rows stayed blank. Now every open row prints its own share and the
+card's "Fix in Data Consistency" button shows the SAME number (`mirror`, counted once). On `7ed880d6`: Applicant +2,
+Building Value +2, Entity Type / BPP Value / Total Policy Premium / Construction Type +1 each, total 63 = 100 - 37.
+Full suite before this frontend-only change: **14,693 passed / 1 failed (the documented `test_arq_acord125_missing_only`)
+/ 19 skipped**.
+
 ### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
 
 Wrong values found in our own runs, NOT on Brent's 27 or Michelle's 22. Owner: "keep these and we will fix later on".

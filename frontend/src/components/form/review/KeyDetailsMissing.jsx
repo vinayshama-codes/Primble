@@ -1,4 +1,5 @@
 import { splitMissingDetails } from "../../../utils/keyDetailCards";
+import { screenPointsText } from "../../../utils/screenPoints";
 
 // "Key details missing" on the pre-form Review screen, as ACTIONS (Orbin 22 Sep
 // item 9; owner, 30 Sep 2026: "do the action, not just mention it on the
@@ -41,7 +42,7 @@ function Elsewhere({ elsewhere, more, onShowSection }) {
   );
 }
 
-export default function KeyDetailsMissing({ keyDetails, onFix, onShowSection, className = "tier2-missing" }) {
+export default function KeyDetailsMissing({ keyDetails, onFix, onShowSection, className = "tier2-missing", points = null }) {
   const { labels, listed, items, elsewhere } = splitMissingDetails(keyDetails);
   if (!labels.length) return null;
   if (!listed.length) {
@@ -73,6 +74,12 @@ export default function KeyDetailsMissing({ keyDetails, onFix, onShowSection, cl
               {it.label}
             </button>
           ) : <span>{it.label}</span>}
+          {/* Its share of what answering everything adds (15 Oct 2026). */}
+          {points && screenPointsText(points.get(it.label)) ? (
+            <span style={{ fontWeight: 700, color: "#be185d", marginLeft: 4 }}>
+              ({screenPointsText(points.get(it.label))})
+            </span>
+          ) : null}
         </span>
       ))}
       {answerable ? <span style={{ fontWeight: 400 }}> - click one to enter it now.</span> : (tail ? "." : null)}
