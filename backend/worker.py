@@ -51,6 +51,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+for _noisy in ("httpx", "httpcore"):          # request URLs carry the Vision API key
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("worker")
 
 _POLL_INTERVAL        = int(os.getenv("WORKER_POLL_INTERVAL", "5"))

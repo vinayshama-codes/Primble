@@ -70,6 +70,11 @@ _json_handler.setFormatter(JsonFormatter())
 logging.root.setLevel(logging.INFO)
 logging.root.handlers = [_json_handler]
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
+# The HTTP client logs every request URL at INFO, and Google Vision's carries
+# the API key ("?key=AIza..."): the key reached the logs and a committed log
+# file (25 Oct 2026). Request lines are not ours to log.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
