@@ -11735,7 +11735,8 @@ async def generate_sqs_narrative(
     sqs_result: dict,
     delta_this_session: int,
     resolved_recs: List[str],
-    ignored_recs: List[str]
+    ignored_recs: List[str],
+    advisories: Optional[List[str]] = None,
 ) -> str:
     """
     Generate narrative prose explaining SQS score.
@@ -11769,8 +11770,9 @@ async def generate_sqs_narrative(
 Score: {score}/100 ({tier}) | Change this session: {'+' if delta_this_session >= 0 else ''}{delta_this_session} pts
 Top risk drivers: {', '.join(str(r) for r in risk_drivers[:3]) if risk_drivers else 'none'}
 Resolved: {', '.join(resolved_recs) if resolved_recs else 'none'} | Ignored: {', '.join(ignored_recs) if ignored_recs else 'none'}
+Underwriting advisories (no score effect, the underwriter will see them): {'; '.join(advisories[:3]) if advisories else 'none'}
 
-One paragraph only. State the main gap and the single most impactful next action. Do NOT repeat the numeric score, the tier name, or any point totals in your answer - the interface displays those separately, and a restated number that drifts from the displayed one reads as a contradiction."""
+One paragraph only. If any underwriting advisory is listed, name the most important one; never say there are no risk drivers, no issues or nothing outstanding while an advisory is listed. State the main gap and the single most impactful next action. Do NOT repeat the numeric score, the tier name, or any point totals in your answer - the interface displays those separately, and a restated number that drifts from the displayed one reads as a contradiction."""
 
         raw = await groq_chat(
             LLM_MODEL,

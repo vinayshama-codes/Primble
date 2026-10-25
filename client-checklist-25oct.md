@@ -538,3 +538,12 @@ generation. Server restarted on all fixes.
 waits Q4), 23 Oct Q1, Q4 (Brent), Q5 (reply owed), round-trip (reply owed), form base (Brent), API keys (security review).
 Nothing deployed at the time; owner pushed commit 845e250 on 25 Oct night (GitHub secret alert - see 25sepChanges Z43).
 - LIVE 654f34c4 (primble.ai, 25 Oct night, owner-driven): pre-form flow A/B passed (42 -> 100, mismatch both ways, loss runs 4 -> 5 of 5, Harborline). Bug found: the handwritten note's Review data showed Business Start Date 2024 = the PURCHASE year ('purchased the company in January of 2024'); the start feeds business age -> loss years required. Fixed locally (extraction_service.drop_purchase_year_as_start, test in test_z43_live_ff2.py, 3,402 related tests green) - NOT deployed. Note: local scripts cannot read/write live packages (Render's FIELD_ENCRYPTION_KEY differs) - live checks are owner-driven + read-only per-document data. Edge files EDGE1-5 created in ~/Downloads for C1-C6.
+
+## FINAL - live package 654f34c4 on primble.ai (deployed 25 Oct night), forms generated
+26 / 26 form checks PASS on the live forms (all earlier fixes incl. owner-not-additional-interest, 130 participating,
+141 insurer, 125 grid / page one, 101 list with EPL Missing / Requires Confirmation). Package 100 before and after forms.
+Brent's 49 items from 17 Oct onwards: 27 verified LIVE on primble.ai; 8 verified on localhost only (17 Oct #7, Att. A,
+Att. C; 19 Oct R2c, R3d; 20 Oct #4; 23 Oct Q3, Q6 - not exercised on the live package); 2 built but not exercisable with
+this package (23 Oct #4, #5); 12 not done / partial (17 Oct #10, B2, 16-PDF request; 19 Oct R2b, R3c declined; 20 Oct #5;
+23 Oct Q1, Q4, Q5, round-trip, form base, API keys). Several passed only after fixes made during 25 Oct testing (see Z43).
+- Download screen (live 654f34c4): summary said 'no material risk drivers' beside the high-loss-frequency advisory -> FIXED locally (C111: advisories passed to the summary prompt). 'Specify GL form type' card is CORRECT (no document states occurrence / claims-made) - no change. Suggested Brent proposal for the download screen (17 Oct #10 / Q1): show quote-blocking items first, fold optional Y/N questions per form, hide additional-interest blanks without an interest, count values-to-confirm and signatures. Both fixes need a push + deploy.

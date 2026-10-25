@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from datetime import datetime, timezone
 from typing import Any, List, Optional
@@ -2619,10 +2620,25 @@ async def sqs_narrative(
     resolved_recs = [f"{resolved_count} recommendation(s) resolved"] if resolved_count else []
     ignored_recs  = [f"{dismissed_count} recommendation(s) dismissed"] if dismissed_count else []
 
+    # The open underwriting ADVISORIES (no score effect) - at 100 the score has
+    # no drivers left, and the prose said "no material risk drivers" beside the
+    # download screen's own "high loss frequency - 12 claims" (live 654f34c4,
+    # 25 Oct).
+    advisories: list = []
+    try:
+        from services.audit_service import current_unresolved_recommendations
+        for r in await current_unresolved_recommendations(session_id, session):
+            msg = str((r or {}).get("message") or (r or {}).get("text") or "")
+            if re.search(r"underwriting advisory|loss frequency", msg, re.I) and msg not in advisories:
+                advisories.append(msg)
+    except Exception as _ax:                                   # noqa: BLE001
+        logger.warning(f"sqs narrative: advisories not read: {_ax}")
+
     narrative = await generate_sqs_narrative(
         sqs_result=sqs_result,
         delta_this_session=delta,
         resolved_recs=resolved_recs,
         ignored_recs=ignored_recs,
+        advisories=advisories,
     )
     return JSONResponse({"success": True, "narrative": narrative})

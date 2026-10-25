@@ -294,3 +294,15 @@ def test_a_purchase_year_is_not_the_business_start():
     founded = {"text": "Founded in 2011. The owner purchased new trucks in 2019.",
                "facts": {"business_start_date": {"value": "2011", "source": "ai"}}}
     assert not drop_purchase_year_as_start(founded)
+
+
+def test_the_summary_prompt_carries_the_advisories(monkeypatch):
+    import asyncio, config.settings as cs
+    from services.sqs_service import generate_sqs_narrative
+    seen = {}
+    async def fake(model, messages, max_tokens=None):
+        seen["p"] = messages[0]["content"]; return "ok"
+    monkeypatch.setattr(cs, "groq_chat", fake)
+    asyncio.run(generate_sqs_narrative({"package_sqs_score": 100, "tier": "Ready"}, 0, [], [],
+                                       advisories=["Underwriting advisory (no score effect): high loss frequency - 12 claims"]))
+    assert "high loss frequency" in seen["p"] and "never say there are no risk drivers" in seen["p"]

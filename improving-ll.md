@@ -4643,3 +4643,10 @@ to `qn_carrier_narrative` through the producer answer door, printed first in ACO
 kept out of the gap-fill facts block (`_GAP_FILL_FACTS_EXCLUDE_PREFIX`), so a package that answers the questionnaire
 sends exactly the prompt it sent before. Making the producer's narrative answers gap-fill hints is a separate decision.
 **Off:** `CARRIER_NARRATIVE=0` (the test suite sets it; the tests stub the call). Tests: `tests/test_build26_questionnaire.py`.
+
+### C111 (25 Oct 2026) - SQS download summary carries the open underwriting advisories
+`sqs_service.generate_sqs_narrative` gains `advisories` (the open "Underwriting advisory" rows the download review
+lists, read by `audit_routes.sqs_narrative` through `audit_service.current_unresolved_recommendations`). The prompt adds
+one context line and one instruction: name the most important advisory; never say there are no risk drivers / issues
+while one is listed. Live 654f34c4: at 100 the prompt said "Top risk drivers: none" and the prose read "no material
+risk drivers identified" beside "high loss frequency - 12 claims". Cost: same single call, ~40 more input tokens.
