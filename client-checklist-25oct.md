@@ -556,3 +556,9 @@ this package (23 Oct #4, #5); 12 not done / partial (17 Oct #10, B2, 16-PDF requ
   so forms generated before the fix stop blocking without a re-stamp. 17 tests that pinned the old rule updated (test was wrong). Needs push + deploy; old forms keep their labels until regenerated
   or re-stamped. Rest of that screen checked: correct per the documents (no premises address / roof material in any dec,
   EPL + auto premiums redacted); the 84-row list is the 17 Oct #10 / Q1 proposal waiting on Brent.
+- Fresh localhost package f3e4c225 (26 Oct): held at 85 by a FALSE Data Consistency card "Total Policy Premium: documents
+  disagree ($4,162, $10,692, $26,449, $17,082, $29,278)" - five policies' own premiums. The Cyber dec has no line record, so
+  `_scope_by_policy_record` gave up ("an unplaceable source decides nothing"). FIXED: a dec_page / policy / binder with no
+  line record is its own policy (`underwriting_consistency._OWN_POLICY_DOC_TYPES`); two values from one document still
+  conflict. Replay on f3e4c225: fix on = no conflict (85 -> 100 after a re-read), fix off = the card returns. 70 Data
+  Consistency test files green (6,484 passed). Extraction-dependent: any fresh upload (live too) could hit it. Needs deploy.

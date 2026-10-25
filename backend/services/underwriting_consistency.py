@@ -2610,8 +2610,16 @@ def _document_records(merged_facts: Optional[dict], line: Optional[str] = None) 
     return out
 
 
+# A document that is ONE policy's own paperwork. One that maps to no line
+# record is still its own policy (25 Oct 2026, live run f3e4c225: the Cyber dec
+# has no line record, so its $4,162 made five policies' premiums one
+# "documents disagree" card and held the package at 85).
+_OWN_POLICY_DOC_TYPES = frozenset({"dec_page", "policy", "binder"})
+
+
 def _scope_by_policy_record(fact_key: str, values: List[dict],
-                            merged_facts: Optional[dict]) -> bool:
+                            merged_facts: Optional[dict],
+                            docs: Optional[list] = None) -> bool:
     """True when every candidate of a POLICY-level fact comes from a different
     policy's own documents - each value kept under its own policy, no conflict.
 
@@ -2642,11 +2650,17 @@ def _scope_by_policy_record(fact_key: str, values: List[dict],
             return False
         recs_by_id = {r.get("id"): r for r in _line_records(merged_facts)}
         owned: List[set] = []
+        own_policy_docs = {str(d.get("filename") or "") for d in (docs or [])
+                           if isinstance(d, dict) and not d.get("excluded")
+                           and str(d.get("doc_type") or "").lower() in _OWN_POLICY_DOC_TYPES}
         for g in values:
             got: set = set()
             for src in g.get("sources") or []:
                 name = str((src or {}).get("filename") or "")
                 recs = by_doc.get(name)
+                if not recs and name and name in own_policy_docs and not any(
+                        name in (r.get("sources") or []) for r in _line_records(merged_facts)):
+                    recs = {f"doc:{name}"}        # its own policy, no record of ours
                 if not recs:
                     return False                  # an unplaceable source decides nothing
                 got |= recs
@@ -2659,7 +2673,8 @@ def _scope_by_policy_record(fact_key: str, values: List[dict],
                     return False                  # one policy, two values: a real conflict
         for g, recs in zip(values, owned):
             g["scope"] = sorted({recs_by_id[r].get("line") for r in recs
-                                 if r in recs_by_id and recs_by_id[r].get("line")})
+                                 if r in recs_by_id and recs_by_id[r].get("line")}
+                                | {r for r in recs if r.startswith("doc:")})
             g["scope_labels"] = sorted({str(recs_by_id[r].get("line_printed") or "")
                                         for r in recs if r in recs_by_id} - {""})
         logger.info("underwriting: %s - %d value(s) each from a different policy's "
@@ -3557,7 +3572,7 @@ def assess_underwriting_consistency(
         # every one became a "values differ" card. See
         # `_scope_by_policy_record`; positive evidence only.
         if not scoped and conflict_reason is None:
-            scoped = _scope_by_policy_record(fact_key, values, merged_facts)
+            scoped = _scope_by_policy_record(fact_key, values, merged_facts, docs)
         if not scoped and conflict_reason is None:
             scoped, conflict_reason = _scope_values(fact_key, values, eq_context)
 

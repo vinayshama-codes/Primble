@@ -573,3 +573,37 @@ def test_the_replay_recovers_the_gl_aggregate(merged):
     ("Employee Benefit Plan", None)])
 def test_employee_benefit_liability(text, family):
     assert canon_line(text) == family
+
+
+# 25 Oct 2026, live run f3e4c225: the Cyber dec had NO line record, so its
+# premium made five policies' premiums one "documents disagree" card (held 85).
+_MF_NO_CYBER_RECORD = {"_line_records": [
+    {"id": "umbrella#u", "line": "umbrella", "carrier_name": "A", "sources": ["umb.pdf"], "granted": True},
+    {"id": "workers_comp#w", "line": "workers_comp", "carrier_name": "B", "sources": ["wc.pdf"], "granted": True}]}
+_PREMIUMS = [{"display": "$4,162", "normalized": "4162", "sources": [{"filename": "cyber.pdf"}]},
+             {"display": "$17,082", "normalized": "17082", "sources": [{"filename": "umb.pdf"}]},
+             {"display": "$29,278", "normalized": "29278", "sources": [{"filename": "wc.pdf"}]}]
+
+
+def test_a_dec_with_no_line_record_is_its_own_policy():
+    docs = [{"filename": n, "doc_type": "dec_page"} for n in ("cyber.pdf", "umb.pdf", "wc.pdf")]
+    values = [dict(v) for v in _PREMIUMS]
+    assert uc._scope_by_policy_record("total_policy_premium", values, _MF_NO_CYBER_RECORD, docs)
+    assert values[0]["scope"] == ["doc:cyber.pdf"]
+
+
+def test_an_unplaced_document_that_is_not_a_policy_still_decides_nothing():
+    docs = [{"filename": "cyber.pdf", "doc_type": "certificate"},
+            {"filename": "umb.pdf", "doc_type": "dec_page"}, {"filename": "wc.pdf", "doc_type": "dec_page"}]
+    assert not uc._scope_by_policy_record("total_policy_premium", [dict(v) for v in _PREMIUMS],
+                                          _MF_NO_CYBER_RECORD, docs)
+    # and without the documents the old rule stands
+    assert not uc._scope_by_policy_record("total_policy_premium", [dict(v) for v in _PREMIUMS],
+                                          _MF_NO_CYBER_RECORD)
+
+
+def test_two_values_from_one_unplaced_dec_still_conflict():
+    docs = [{"filename": "cyber.pdf", "doc_type": "dec_page"}]
+    values = [{"display": "$4,162", "sources": [{"filename": "cyber.pdf"}]},
+              {"display": "$5,000", "sources": [{"filename": "cyber.pdf"}]}]
+    assert not uc._scope_by_policy_record("total_policy_premium", values, _MF_NO_CYBER_RECORD, docs)
