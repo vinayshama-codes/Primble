@@ -21,8 +21,11 @@ Design notes
   "different insureds" - that is the exact false-positive problem Workstream 2
   is separately solving. The LOW-confidence *pause* is driven only by strong
   identity signals (distinct normalized applicant-name clusters, or distinct
-  FEINs). Softer divergences (entity type, address, operations, policy number)
-  downgrade confidence to MEDIUM ("review recommended") but do NOT block.
+  FEINs) - and, since 21 Oct 2026, only when VERIFIED documents give them
+  (`document_tags.is_verified_source`); one only unverified documents give is
+  a MEDIUM note naming them. Softer divergences (entity type, address,
+  operations, policy number) downgrade confidence to MEDIUM ("review
+  recommended") but do NOT block.
 
 Verdict statuses
 ----------------
@@ -211,8 +214,8 @@ def _carrier_line_claims(doc: dict, raw_carrier: Any) -> List[tuple]:
     (an excess policy above an umbrella is its own slot - `lob_canon.
     umbrella_layer`). A row naming no carrier takes the document's; a row the
     document denies claims nothing. A document with no placeable row gives one
-    claim with slot None (it cannot be placed, so it is compared with every
-    line - the legacy behaviour)."""
+    claim with slot None (it cannot be placed, so it never counts as a clash -
+    two carriers clash only on ONE line, 24 Oct 2026)."""
     facts = doc.get("facts") or {}
     claims: List[tuple] = []
     try:
@@ -239,20 +242,38 @@ def _doc_identity(doc: dict, package_names: Optional[List[str]] = None) -> dict:
     facts = doc.get("facts") or {}
 
     raw_name = None
+    name_fact = None
     try:
         from services.normalization import is_not_a_party_name as _not_a_name
     except Exception:                                         # noqa: BLE001
         _not_a_name = lambda _v: False                        # noqa: E731
     for k in _IDENTITY_NAME_KEYS:
         raw_name = _fv(facts, k)
-        # A heading or a role names nobody, so it is no insured to compare
-        # ("S.B. MO." raised "Possible multiple submissions", 8 Oct 2026). Read
-        # here as well as dropped at extraction: a document stored before that
-        # fix still carries it, and adding a document re-runs this check.
+        # A heading, a role or a person in a role names no insured, so it is no
+        # insured to compare ("S.B. MO." raised "Possible multiple
+        # submissions", 8 Oct 2026; "Berger Owner of Choice Electric", 21 Oct).
+        # Read here as well as dropped at extraction: a document stored before
+        # that fix still carries it, and adding a document re-runs this check.
         if isinstance(raw_name, str) and _not_a_name(raw_name):
             raw_name = None
         if raw_name:
+            name_fact = k
             break
+    # VERIFIED SOURCES ONLY (21 Oct 2026, Brent 20 Oct: hard stop only on
+    # VERIFIED information). Whether THIS document's insured name / FEIN is a
+    # verified reading - the ONE definition, `document_tags.is_verified_source`
+    # - so the "different insured" verdict below pauses a package only on
+    # verified documents.
+    try:
+        from services.document_tags import (
+            describe_unverified as _describe_unverified, is_verified_source as _verified_source,
+        )
+    except Exception:                                         # noqa: BLE001
+        _verified_source = lambda _d, _k=None: True           # noqa: E731
+        _describe_unverified = lambda _d, _k=None: ""         # noqa: E731
+    fein_norm = _normalize_fein(_fv(facts, "fein"))
+    name_verified = bool(raw_name) and _verified_source(doc, name_fact)
+    fein_verified = bool(fein_norm) and _verified_source(doc, "fein")
 
     raw_policy = None
     for k in _POLICY_NUMBER_KEYS:
@@ -288,7 +309,13 @@ def _doc_identity(doc: dict, package_names: Optional[List[str]] = None) -> dict:
         "raw_name":       str(raw_name) if raw_name else "",
         "name_key":       _normalize_name(raw_name),
         "dba":            _normalize_name(_fv(facts, "dba_name")),
-        "fein":           _normalize_fein(_fv(facts, "fein")),
+        "fein":           fein_norm,
+        # Whether each identity anchor is a VERIFIED reading (21 Oct 2026), and
+        # how an unverified one is described ("x.jpeg (Underwriting Narrative)").
+        "name_verified":  name_verified,
+        "fein_verified":  fein_verified,
+        "name_unverified": "" if name_verified or not raw_name else _describe_unverified(doc, name_fact),
+        "fein_unverified": "" if fein_verified or not fein_norm else _describe_unverified(doc, "fein"),
         # Soft-divergence identity fields use the SHARED normalization layer so
         # formatting/synonym/alias-only differences (ST vs Street, LLC vs Limited
         # Liability Company, EMC vs Employers Mutual Casualty) do NOT produce a
@@ -364,6 +391,58 @@ def _cluster_by_insured(doc_sigs: List[dict]) -> List[dict]:
     return clusters
 
 
+def _cluster_is_verified(cluster: dict) -> bool:
+    """An insured group anchored by a VERIFIED name or FEIN reading (21 Oct
+    2026). A signature without the marks (an older caller) counts as verified."""
+    return any((m.get("name_key") and m.get("name_verified", True))
+               or (m.get("fein") and m.get("fein_verified", True))
+               for m in cluster.get("members") or [])
+
+
+def _unverified_identity_notes(insured_clusters: List[dict], verified_clusters: List[dict],
+                               all_feins: set, verified_feins: set) -> List[str]:
+    """The review notes for an identity divergence no two verified readings
+    make: which insured or FEIN only unverified documents give, and which
+    documents those are ("x.jpeg (Underwriting Narrative)"). Never a FEIN's
+    digits."""
+    notes: List[str] = []
+
+    def _descs(members, key):
+        return list(dict.fromkeys(m.get(key) for m in members if m.get(key)))
+
+    def _label(c):
+        return c["label"] if any(m.get("raw_name") for m in c["members"]) else "an unnamed insured"
+
+    if len(insured_clusters) >= 2:
+        verified_ids = {id(c) for c in verified_clusters}
+        others = [c for c in insured_clusters if id(c) not in verified_ids]
+        if verified_clusters:
+            for c in others:
+                ds = _descs(c["members"], "name_unverified") or _descs(c["members"], "fein_unverified")
+                lead = "Only an unverified source names" if len(ds) <= 1 else "Only unverified sources name"
+                notes.append(f"{lead} a different insured: {_label(c)} - {'; '.join(ds)}. "
+                             "Confirm whether it belongs to this submission.")
+        elif others:
+            parts = []
+            for c in others:
+                ds = _descs(c["members"], "name_unverified") or _descs(c["members"], "fein_unverified")
+                parts.append(f"{_label(c)} - {'; '.join(ds)}")
+            notes.append("Unverified sources name more than one insured: " + "; ".join(parts)
+                         + ". Confirm which insured this submission is for.")
+    unverified_feins = [f for f in sorted(all_feins) if f not in verified_feins]
+    if len(all_feins) >= 2 and unverified_feins:
+        members = [m for c in insured_clusters for m in c["members"]
+                   if m.get("fein") in unverified_feins and not m.get("fein_verified", True)]
+        ds = _descs(members, "fein_unverified")
+        if verified_feins:
+            lead = "Only an unverified source gives" if len(ds) <= 1 else "Only unverified sources give"
+            notes.append(f"{lead} a different FEIN - {'; '.join(ds)}. Confirm the insured's FEIN.")
+        else:
+            notes.append(f"Unverified sources give more than one FEIN - {'; '.join(ds)}. "
+                         "Confirm the insured's FEIN.")
+    return notes
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def assess_submission_integrity(docs: List[dict]) -> dict:
@@ -436,7 +515,24 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
 
     # ── STRONG identity divergence → LOW (pause) ─────────────────────────────
     multi_insured = len(insured_clusters) >= 2 or len(all_feins) >= 2
-    if multi_insured:
+    # VERIFIED SOURCES ONLY (21 Oct 2026, Brent 20 Oct: "only trigger a hard
+    # stop when Primble has enough VERIFIED information to know the condition is
+    # true; otherwise flag it for confirmation instead of assuming"). The pause
+    # needs the divergence among VERIFIED readings (`_doc_identity`, through
+    # `document_tags.is_verified_source`): two insured groups each anchored by a
+    # verified name or FEIN, or two verified FEINs. One only unverified
+    # documents make - a narrative, a supporting or unsure-type document, a poor
+    # OCR reading - is a review note (MEDIUM) naming them. The groups are kept
+    # either way, so the Documents list still tags whose document it is.
+    verified_clusters = [c for c in insured_clusters if _cluster_is_verified(c)]
+    verified_feins = {m["fein"] for c in insured_clusters for m in c["members"]
+                      if m["fein"] and m.get("fein_verified", True)}
+    signals["verified_insured_clusters"] = len(verified_clusters)
+    signals["distinct_verified_feins"] = len(verified_feins)
+    unverified_notes = (_unverified_identity_notes(insured_clusters, verified_clusters,
+                                                   all_feins, verified_feins)
+                        if multi_insured else [])
+    if multi_insured and (len(verified_clusters) >= 2 or len(verified_feins) >= 2):
         if len(insured_clusters) >= 2:
             reasons.append(
                 "Documents reference multiple distinct applicants/insureds: "
@@ -466,11 +562,13 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
         )
         return _verdict(
             status=STATUS_LOW, confidence=0.4, clusters=insured_clusters or clusters,
-            doc_sigs=doc_sigs, reasons=reasons, signals=signals, assessed_at=now,
+            doc_sigs=doc_sigs, reasons=reasons + unverified_notes, signals=signals,
+            assessed_at=now,
         )
 
     # ── SOFTER divergence (names align) → MEDIUM (review recommended) ────────
-    soft_reasons = _soft_divergence_reasons(doc_sigs, docs)
+    # An identity divergence only unverified documents make leads the notes.
+    soft_reasons = unverified_notes + _soft_divergence_reasons(doc_sigs, docs)
     if soft_reasons:
         return _verdict(
             status=STATUS_MEDIUM, confidence=0.7, clusters=insured_clusters or clusters,
@@ -561,8 +659,9 @@ def _soft_divergence_reasons(doc_sigs: List[dict],
             # an ordinary multi-carrier package, and the Data Consistency card
             # already calls the carrier field "scoped". The signal is two
             # carriers claiming the SAME line slot (family + umbrella layer).
-            # A document whose carrier cannot be placed on a line is compared
-            # with every line, exactly as before.
+            # A carrier that cannot be placed on a line is NEVER a clash (24 Oct
+            # 2026: Choice Electric's EPL dec, read with no coverage line, was
+            # compared with every line and raised a false advisory).
             def _same_family(a: Any, b: Any) -> bool:
                 if _door_family is None:
                     return normalize_carrier(a) == normalize_carrier(b)
@@ -577,7 +676,15 @@ def _soft_divergence_reasons(doc_sigs: List[dict],
                     (da, sa, ca), (db, sb, cb) = claims[x], claims[y]
                     if da == db:
                         continue          # one document's own rows
-                    if sa is not None and sb is not None and sa != sb:
+                    if sa is None or sb is None:
+                        # Unplaced carrier: no line, no clash (24 Oct 2026) -
+                        # unless both documents print the SAME policy number:
+                        # one contract, so two carriers on it is a real clash.
+                        pa = doc_sigs[da].get("policy_number") or ""
+                        pb = doc_sigs[db].get("policy_number") or ""
+                        if not (pa and pa == pb):
+                            continue
+                    if sa != sb:
                         continue          # different lines: different policies
                     if not _same_family(ca, cb):
                         return True
@@ -635,6 +742,12 @@ def _verdict(
             "doc_type":   s["doc_type"],
             "applicant":  s["raw_name"] or "(no applicant name detected)",
             "fein":       s["fein"][-4:] if s["fein"] else None,  # last 4 only - PII
+            # A verified source of the insured's identity (21 Oct 2026) - its
+            # name or FEIN, read by `document_tags.package_applicant`, where
+            # verified documents decide whose package it is. A document naming
+            # nobody has nothing to doubt.
+            "identity_verified": (bool(s.get("name_verified", True) or s.get("fein_verified", True))
+                                  if (s.get("raw_name") or s.get("fein")) else True),
         }
         for s in doc_sigs
     ]

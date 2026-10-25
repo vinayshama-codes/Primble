@@ -347,6 +347,8 @@ _MONEY_RE = re.compile(
     r"(?![\w])(?!\.\d)", re.I)
 # "303-996-7800 x212" / "ext. 212" - an extension is not part of the number.
 _PHONE_EXT_RE = re.compile(r"\b(?:x|ext\.?|extension)\s*\d+\s*$", re.I)
+# A value that says it is MONEY: a currency sign or word (Z33-PERCENT).
+_CURRENCY_MARK_RE = re.compile(r"[$€£]|\b(?:usd|dollars?)\b", re.I)
 # The words too: "$3 million" was read as three dollars - a narrative's
 # "The umbrella limit is $1 million" could never agree with "$1,000,000".
 _MULT = {"K": 1_000, "M": 1_000_000, "MM": 1_000_000, "B": 1_000_000_000,
@@ -564,15 +566,29 @@ def _is_policy_number_field(fact_key: Any) -> bool:
 
 
 def _same_policy_contract(a: Any, b: Any) -> bool:
-    """Two printings of ONE policy contract, decided WITHOUT package context."""
+    """Two printings of ONE policy contract, decided WITHOUT package context:
+    printed two ways (`_same_policy_contract_as_printed`) or printed without
+    its alphabetic prefix (`_number_without_its_prefix`)."""
+    return (_same_policy_contract_as_printed(a, b)
+            or _number_without_its_prefix(a, b) is not None)
+
+
+def _policy_alnum(v: Any) -> Tuple[str, str]:
+    """(the printing without a leading label, its lower-case alphanumerics)."""
     try:
-        try:
-            from services.normalization import strip_leading_label as _sll
-        except Exception:                                    # pragma: no cover
-            def _sll(v):
-                return str(v or "").strip()
-        a, b = _sll(a), _sll(b)
-        x, y = _alnum(a), _alnum(b)
+        from services.normalization import strip_leading_label as _sll
+    except Exception:                                        # pragma: no cover
+        def _sll(v):
+            return str(v or "").strip()
+    raw = _sll(v)
+    return raw, _alnum(raw)
+
+
+def _same_policy_contract_as_printed(a: Any, b: Any) -> bool:
+    """One contract printed two ways: identical alphanumerics, or one printing
+    plus a SEPARATED two-digit term marker (see the note above)."""
+    try:
+        (a, x), (b, y) = _policy_alnum(a), _policy_alnum(b)
         if not x or not y:
             return False
         if x == y:
@@ -586,6 +602,46 @@ def _same_policy_contract(a: Any, b: Any) -> bool:
         return bool(_POLICY_TERM_TAIL_RE.search(raw_hi.strip()))
     except Exception:                                        # noqa: BLE001
         return False
+
+
+# ── ONE POLICY NUMBER PRINTED WITHOUT ITS CARRIER PREFIX (22 Oct 2026) ──────
+# Orbin "Not done" (24 Sep): the GL policy reached extraction as `7263-26` on
+# one document and `BBC7263-26` on another, and the picker asked the producer
+# to choose between "two policies on the same coverage line" - one policy and
+# itself. A carrier's leading letters are a PREFIX on the number; a document
+# that leaves them off (or an OCR that loses them) still prints the number.
+#
+# EXACT, NEVER A SUFFIX OR SUBSTRING MATCH. One side opens on a digit; the
+# other is 1-4 letters followed by EXACTLY that side's characters. So
+# `263-26` is not `BBC7263-26`, `7263-26` is not `BBC7263-27`, and a core
+# needs five characters and four digits (`26` proves nothing). TWO PREFIXES
+# NEVER MEET HERE: `ABC7263-26` against `BBC7263-26` has no bare side - two
+# policies, the shape of carriers that number every line off one account core
+# (D-1's lesson). A bare number such a package prints matches BOTH of them, so
+# the closures that group printings (`fact_comparison.policy_contract_groups`)
+# and the picker's merge (`equivalent_index`'s exactly-one rule) never let it
+# join two different prefixes.
+_POLICY_PREFIXED_RE = re.compile(r"([a-z]{1,4})(\d[a-z0-9]*)")
+_POLICY_CORE_MIN_DIGITS = 4
+
+
+def _number_without_its_prefix(a: Any, b: Any) -> Optional[str]:
+    """The alphabetic prefix when one printing is the other's number without
+    it ("7263-26" / "BBC7263-26" -> "bbc"), else None. Never raises."""
+    try:
+        (_ra, x), (_rb, y) = _policy_alnum(a), _policy_alnum(b)
+        if not x or not y or x == y:
+            return None
+        for bare, full in ((x, y), (y, x)):
+            if not bare[:1].isdigit():
+                continue
+            m = _POLICY_PREFIXED_RE.fullmatch(full)
+            if (m and m.group(2) == bare and len(bare) >= _POLICY_CONTRACT_MIN
+                    and sum(ch.isdigit() for ch in bare) >= _POLICY_CORE_MIN_DIGITS):
+                return m.group(1)
+        return None
+    except Exception:                                        # noqa: BLE001
+        return None
 
 
 # THE AUTO LIABILITY STRUCTURE IS A READING, NOT A PHRASE (8 Oct 2026,
@@ -692,6 +748,37 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
             pass
 
     if kind == KIND_MONEY:
+        # A PERCENTAGE IS NEVER A DOLLAR AMOUNT (22 Oct 2026, Z33-PERCENT). A
+        # wind / earthquake deductible prints either; "2%" and "$2" carry the
+        # same digit and are different deductibles, and two percentages differ
+        # when their figures do. A bare figure ("2") makes no claim either way.
+        #
+        # The dollar side must state NO percentage of its own (review, same
+        # day): "$25,000 minimum or 2%, whichever is greater" and "Location 1:
+        # 2% subject to $25,000 minimum" print the same percentage as "2%
+        # subject to $25,000 minimum" - only not as their first figure - so
+        # they go on to the composite rule below, which compares the amounts
+        # each side states ("$25,000 minimum / 5%" stays DIFFERENT there).
+        try:
+            from services.normalization import mentions_a_percentage, stated_percentage
+            pa, pb = stated_percentage(sa), stated_percentage(sb)
+        except Exception:                                    # pragma: no cover
+            pa = pb = None
+        if (pa is None) != (pb is None):
+            _dollar_side = sb if pa is not None else sa
+            if (_CURRENCY_MARK_RE.search(_dollar_side)
+                    and not mentions_a_percentage(_dollar_side)):
+                return DIFFERENT
+        if pa is not None and pb is not None and pa["number"] != pb["number"]:
+            return DIFFERENT
+        # The same percentage, and neither side names a dollar amount: one
+        # value. `money_amounts` reads "1-1/2%" as 1 and 2 and "½%" as nothing,
+        # so it must not get the last word on what the reader read as 1.5%
+        # (review C of Z33-PERCENT, 22 Oct 2026).
+        if (pa is not None and pb is not None
+                and not _CURRENCY_MARK_RE.search(sa)
+                and not _CURRENCY_MARK_RE.search(sb)):
+            return SAME
         ma, mb = money_amounts(sa), money_amounts(sb)
         # A COMPOSITE that lists FEWER limits is not disagreeing - it is saying
         # less. Probe run B: the dec page printed "$1,000,000 / $2,000,000 /

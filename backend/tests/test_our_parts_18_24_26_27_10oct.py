@@ -68,31 +68,44 @@ def test_the_two_rows_are_named_by_what_they_charge():
     assert sq.EXPOSURE_BUCKET_LABELS["operations_description"] == "Class Codes & Operations"
     assert sq.EXPOSURE_BUCKET_LABELS["cross_document_consistency"] == "Cross-Form Checks"
     # the keys stay - stored payloads, the C3 trace and the tests key on them
+    # (19 Oct 2026, Brent: missing details are Completeness) plus its own cross-form bucket.
     assert set(sq.EXPOSURE_BUCKET_LABELS) == {
         "operations_description", "coverage_information", "payroll_employee_information",
         "revenue_sales_information", "cross_document_consistency", "auto_completeness",
-        "wc_supplemental"}
+        "wc_supplemental", "cross_form_details"}
+    assert sq.EXPOSURE_BUCKET_LABELS["cross_form_details"] == "Cross-Form Details"
 
 
-def _brents_exposure():
+def _brents_package():
     """The owner's run `2076fe35`: GL with no class codes, and the two cross-form hard
-    stops no document can clear - nothing else charged."""
+    stops no document can clear - nothing else charged. They reach the scorer as the
+    pipeline hands them over: warnings, one status since 14 Oct (`cross_form_severity`)."""
+    from services.stops_now import cross_form_severity
     facts = {"gl_limits": "$1,000,000 / $2,000,000"}
     flags = {"has_general_liability": True}
     hard = [{"type": "hard_stop", "code": "minimum_viable_cope_missing", "message": "COPE"},
             {"type": "hard_stop", "code": "bi_missing_period_of_restoration", "message": "PoR"}]
-    return sq._calculate_exposure_consistency(facts, flags, hard, [])
+    return facts, flags, cross_form_severity(hard)
 
 
 def test_brents_package_charges_class_codes_and_cross_form_checks_under_their_own_names():
-    score, subs = _brents_exposure()
-    assert score == 60
-    assert subs["operations_description"] == 80 and subs["cross_document_consistency"] == 80
+    facts, flags, warn = _brents_package()
+    # (19 Oct 2026, Brent: Exposure = conflicts only) neither charge is a conflict...
+    score, subs = sq._calculate_exposure_consistency(facts, flags, [], warn)
+    assert score == 100 and set(subs.values()) == {100}
     cats = sq._compute_category_breakdown({}, {}, exposure_subscores=subs)["exposure_consistency"]
     assert cats["operations_description"]["label"] == "Class Codes & Operations"
     assert cats["cross_document_consistency"]["label"] == "Cross-Form Checks"
     # the rows add up to the pillar: 100 minus every row's points
     assert 100 - sum(c["deducted"] for c in cats.values()) == score
+    # ...so both are Completeness's Coverage Details, each under its own name: the class
+    # codes' 20 and the two cross-form checks' 5 each.
+    items = sq.completeness_deduction_items(facts, flags, [], warn)
+    assert [(i["bucket"], i["points"], i["fact"]) for i in items] == [
+        ("operations_description", 20, "gl_class_codes_by_location"),
+        ("cross_form_details", 10, None)]
+    assert [sq.exposure_bucket_label(i["bucket"]) for i in items] == [
+        "Class Codes & Operations", "Cross-Form Details"]
 
 
 def test_the_unscored_fallback_reads_the_same_label_table():
@@ -281,14 +294,16 @@ def test_the_owners_run_counts_the_listed_fix_items_and_each_group(tmp_path):
     recs, attention = _owners_run()
     out = _node(tmp_path, {"A": _attention_module(tmp_path)}, f"""
 const c = A.downloadReviewCounts({json.dumps(recs)}, {json.dumps(attention)});
-const lines = ["verify", "heldBack", "applicant", "choices"].map(k => A.groupLineText(k, c[k]));
+const lines = ["verify", "applicant", "choices"].map(k => A.groupLineText(k, c[k]));
 console.log(JSON.stringify({{ c, lines, head: A.downloadReviewHeadline(c) }}));
 """)
+    # 23 Oct 2026 (Brent: "Users only need to see relevant information. The
+    # audit record is fine."): no "AI held back" group - the 93 stale rows of
+    # that status are not drawn or counted (the server no longer sends any).
     assert out["c"] == {"hard": 8, "warnings": 0, "recommendations": 8, "missing": 39, "verify": 26,
-                        "heldBack": 93, "applicant": 16, "choices": 0, "toFix": 55, "total": 190}
+                        "applicant": 16, "choices": 0, "toFix": 55, "total": 97}
     assert out["head"] == "55 items to fix - review before downloading"
-    assert out["lines"] == ["26 values to confirm", "93 values the AI held back",
-                            "16 boxes for the applicant to sign", ""]
+    assert out["lines"] == ["26 values to confirm", "16 boxes for the applicant to sign", ""]
 
 
 def test_the_headline_for_nothing_to_fix_one_item_and_all_clear(tmp_path):

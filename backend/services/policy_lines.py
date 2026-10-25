@@ -40,7 +40,9 @@ No store -> nothing runs, and every existing package is byte-identical.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
+import hashlib
 import logging
 import re
 import secrets
@@ -58,6 +60,16 @@ ROW_DOC_VALUES = "_document_values"   # the document's own values an edit replac
 
 ADDED_PREFIX = "added:"
 STORE_VERSION = 1
+# The policy the agent chose for ACORD 125's prior-carrier OTHER column (Brent,
+# 19 Oct 2026: "the primary excess / umbrella policy, unless the agent specifies
+# otherwise"): {"edit_key", "anchor", "at", "by"} - re-found like an edit.
+PRIOR_OTHER_KEY = "prior_other"
+# WHO supplied a field of an edit (22 Oct 2026): a value the CLIENT gave in the
+# questionnaire is recorded as theirs in `edits[key]["sources"]`
+# ({field: CLIENT_SOURCE}); a field with no entry is the producer's, which is
+# what every edit stored before this build means.
+CLIENT_SOURCE = "client_arq"
+PRODUCER_SOURCE = "producer"
 
 FIELDS: Tuple[str, ...] = ("carrier_name", "carrier_naic", "policy_number",
                            "effective_date", "expiration_date", "premium")
@@ -271,6 +283,18 @@ def read_store(facts: Any) -> dict:
                 "at": str(e.get("at") or ""),
                 "by": str(e.get("by") or ""),
             }
+            originals = e.get("originals")
+            if isinstance(originals, dict):
+                kept = {f: ("" if originals.get(f) is None else str(originals.get(f)))
+                        for f in FIELDS if f in originals}
+                if kept:
+                    out["edits"][key]["originals"] = kept
+            sources = e.get("sources")
+            if isinstance(sources, dict):
+                theirs = {f: CLIENT_SOURCE for f, s in sources.items()
+                          if f in clean and s == CLIENT_SOURCE}
+                if theirs:
+                    out["edits"][key]["sources"] = theirs
     added = held.get("added")
     if isinstance(added, list):
         seen = set()
@@ -292,6 +316,14 @@ def read_store(facts: Any) -> dict:
     if isinstance(flags_set, dict):
         out["flags_set"] = {str(k): v for k, v in flags_set.items()
                             if isinstance(k, str) and k.startswith("has_")}
+    choice = held.get(PRIOR_OTHER_KEY)
+    if isinstance(choice, dict) and str(choice.get("edit_key") or "").strip():
+        out[PRIOR_OTHER_KEY] = {
+            "edit_key": str(choice.get("edit_key")).strip(),
+            "anchor": dict(choice.get("anchor") or {}) if isinstance(choice.get("anchor"), dict) else {},
+            "at": str(choice.get("at") or ""),
+            "by": str(choice.get("by") or ""),
+        }
     return out
 
 
@@ -309,15 +341,56 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fields_back_to_documents(facts: dict, store: dict, key: str, changed: Dict[str, str]) -> set:
+    """The fields of ``changed`` whose new value is what the record shows with
+    no person's edit at all - the documents' own value. Never raises."""
+    try:
+        if key not in (store.get("edits") or {}):
+            return set()
+        # The documents' value as it stood when the field was FIRST edited
+        # (recorded with the edit): before forms the re-merge writes an edit
+        # into the facts themselves, so removing it from the store no longer
+        # shows the documents' value (live e66d68d7, 25 Oct).
+        originals = ((store["edits"].get(key) or {}).get("originals") or {})
+        if originals:
+            return {f for f, v in changed.items()
+                    if f in originals and _clean_text(originals[f]) == v and v != ""}
+        bare = copy.deepcopy(store)
+        bare["edits"].pop(key, None)
+        f2 = dict(facts or {})
+        f2[STORE_KEY] = bare
+        doc_row = find_row(f2, key) or {}
+        return {f for f, v in changed.items() if _clean_text(doc_row.get(f)) == v and v != ""}
+    except Exception:                                          # noqa: BLE001
+        return set()
+
+
 def store_with_edit(store: dict, edit_key: str, fields: Dict[str, str],
-                    anchor: Optional[dict] = None, user: Any = None) -> dict:
+                    anchor: Optional[dict] = None, user: Any = None,
+                    source: Optional[str] = None) -> dict:
     """The store with ``fields`` merged into the edit of ``edit_key``. The
     anchor of the FIRST edit of a record is kept: it describes the record as
-    the documents print it, which is what can re-find it later."""
+    the documents print it, which is what can re-find it later.
+
+    ``source`` - CLIENT_SOURCE when the values are a client's questionnaire
+    answers; anything else is the producer's, and a producer's later edit of a
+    field makes that field theirs again."""
     out = copy.deepcopy(store)
     cur = out["edits"].get(edit_key) or {"fields": {}, "anchor": dict(anchor or {})}
     cur["fields"] = {**(cur.get("fields") or {}), **{f: ("" if v is None else str(v))
                                                     for f, v in fields.items() if f in FIELDS}}
+    sources = dict(cur.get("sources") or {})
+    for f in fields:
+        if f not in FIELDS:
+            continue
+        if source == CLIENT_SOURCE:
+            sources[f] = CLIENT_SOURCE
+        else:
+            sources.pop(f, None)
+    if sources:
+        cur["sources"] = sources
+    else:
+        cur.pop("sources", None)
     if not cur.get("anchor"):
         cur["anchor"] = dict(anchor or {})
     cur["at"] = _now()
@@ -1124,9 +1197,14 @@ def _carrier_group_key(name: Any) -> str:
         return re.sub(r"[^a-z0-9&]", "", text.lower())
 
 
-def table_rows(facts: Any) -> List[dict]:
+def table_rows(facts: Any, docs: Any = None) -> List[dict]:
     """One row per policy for "Policies in this submission": the document
-    records first (in record order), then the lines the producer added."""
+    records first (in record order), then the lines the producer added.
+
+    ``docs`` (the package's documents): each row then also names the PAGE of
+    each source document that prints it, and each limit the page that prints
+    it (`_with_pages` - Brent, 19 Oct 2026: "keep the source and page
+    reference for every extracted coverage and limit")."""
     try:
         from services.extraction_service import _build_line_records, policy_line_records
     except Exception:                                         # noqa: BLE001
@@ -1140,6 +1218,17 @@ def table_rows(facts: Any) -> List[dict]:
             held = []
     recs = policy_line_records(held if isinstance(held, list) else [])
     limits = record_limits(facts, recs)
+    clients = client_fields_by_key(facts)
+    # Where each policy prints in ACORD 125's PRIOR CARRIER INFORMATION (Brent,
+    # 19 Oct 2026) - a grid column, or ACORD 101 when the grid has no box for
+    # it - and whether its premium is missing there. {} unless the policies are
+    # the expiring term the proposal renews.
+    try:
+        from services.pdf_service import prior_grid_placements
+        placements = prior_grid_placements(facts) if isinstance(facts, dict) else {}
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: prior-carrier placement skipped - %s", exc)
+        placements = {}
     out: List[dict] = []
     for rec in recs:
         added = rec.get("producer_added")
@@ -1158,7 +1247,15 @@ def table_rows(facts: Any) -> List[dict]:
             "premium":         _money_display(rec.get("premium")),
             "sources":         [s for s in dict.fromkeys(rec.get("sources") or []) if s],
             "producer_added":  bool(added),
-            "edited_fields":   sorted(f for f in (rec.get("producer_fields") or []) if f in FIELDS)
+            # A person's values on a document's policy: the producer's own
+            # corrections, and the ones a client gave in the questionnaire
+            # (22 Oct 2026 - kept apart, so a client's answer never reads as
+            # "Corrected by you").
+            "edited_fields":   sorted(f for f in (rec.get("producer_fields") or [])
+                                      if f in FIELDS and f not in clients.get(edit_key, ()))
+                               if not added else [],
+            "client_fields":   sorted(f for f in (rec.get("producer_fields") or [])
+                                      if f in FIELDS and f in clients.get(edit_key, ()))
                                if not added else [],
             # Brent #10: the policy's OWN limit (display only - `record_limits`)
             # and the key "Group by carrier" groups the rows by.
@@ -1166,12 +1263,66 @@ def table_rows(facts: Any) -> List[dict]:
             "carrier_key":     _carrier_group_key(rec.get("carrier_name")),
         }
         row["limit"] = "; ".join(f"{p['amount']} {p['label']}" for p in row["limit_parts"])
+        placed = placements.get(str(rec.get("id"))) or {}
+        row["prior_grid"] = placed.get("where")
+        row["premium_missing"] = bool(placed) and not placed.get("premium")
+        row["prior_other_line"] = bool(placed.get("other_line"))
+        row["prior_other_candidate"] = bool(placed.get("other_candidate"))
         if added and rec.get("line") == UMBRELLA_FAMILY:
             # An added umbrella / excess layer carries its own limits and SIR.
             for f in UMBRELLA_LIMIT_FIELDS:
                 row[f] = _money_display(rec.get(f))
+        if docs:
+            _with_pages(row, rec, docs)
         out.append(row)
     return out
+
+
+def _with_pages(row: dict, rec: dict, docs: Any) -> None:
+    """Add ``source_refs`` ([{"file", "page"}] - the page of each source
+    document printing this policy: its line name beside its premium, else
+    its number, else the name alone) and a ``page`` on each limit part (the
+    first source page printing the amount beside the line's name). A value
+    no page prints gets no page - never a guess (`fact_lineage.locate_page`)."""
+    try:
+        from services.fact_lineage import locate_page
+    except Exception:                                         # noqa: BLE001
+        return
+    by_name: Dict[str, dict] = {}
+    for d in docs if isinstance(docs, list) else []:
+        if isinstance(d, dict) and not d.get("excluded"):
+            by_name.setdefault(str(d.get("filename") or d.get("doc_id") or "").strip(), d)
+    name = _clean_text(rec.get("line_printed"))
+    premium = rec.get("premium")
+    value = (f"{float(premium):,.2f}" if isinstance(premium, (int, float))
+             and not isinstance(premium, bool) and premium > 0 else
+             _clean_text(rec.get("policy_number")) or name)
+    near = [name] if value != name else []
+    texts: List[Tuple[str, str]] = []
+    refs: List[dict] = []
+    for src in row.get("sources") or []:
+        doc = by_name.get(str(src).strip())
+        if not doc:
+            continue
+        text = str(doc.get("text") or "")
+        texts.append((str(src), text))
+        refs.append({"file": str(src), "page": locate_page(text, value, near) if value else None})
+    if refs:
+        row["source_refs"] = refs
+    # A limit is cited where it is printed beside its line's own name - the
+    # policy's own documents first, then the others (the GL limits a package
+    # dec does not print come from the umbrella's schedule of underlying).
+    own = {src for src, _t in texts}
+    texts += [(n, str(d.get("text") or "")) for n, d in by_name.items() if n and n not in own]
+    names = [n for n in dict.fromkeys([name, _family_label(rec)]) if n]
+    for part in row.get("limit_parts") or []:
+        if not isinstance(part, dict) or not part.get("amount"):
+            continue
+        for src, text in texts:
+            page = locate_page(text, part["amount"], names)
+            if page is not None:
+                part["page"], part["file"] = page, src
+                break
 
 
 def unmatched_edits(facts: Any) -> List[dict]:
@@ -1223,6 +1374,28 @@ def record_for_key(facts: Any, edit_key: str) -> Optional[dict]:
 def anchor_for(facts: Any, edit_key: str) -> dict:
     rec = record_for_key(facts, edit_key)
     return _anchor_of(rec) if rec else {}
+
+
+def prior_other_record(facts: Any) -> Optional[dict]:
+    """The policy record the agent chose for ACORD 125's prior-carrier OTHER
+    column, re-found by its edit key or, after a re-run renamed it, by its
+    anchor; None when no choice is stored or the policy is gone (the default
+    rule then decides - `pdf_service._prior_other_line_key`)."""
+    held = (facts or {}).get(STORE_KEY) if isinstance(facts, dict) else None
+    choice = held.get(PRIOR_OTHER_KEY) if isinstance(held, dict) else None
+    if not isinstance(choice, dict):
+        return None
+    key = _clean_text(choice.get("edit_key"))
+    rec = record_for_key(facts, key) if key else None
+    if rec is None and isinstance(choice.get("anchor"), dict):
+        try:
+            from services.extraction_service import policy_line_records
+            recs = policy_line_records(facts.get("_line_records")
+                                       if isinstance(facts.get("_line_records"), list) else [])
+        except Exception:                                     # noqa: BLE001
+            recs = []
+        rec = _find_by_anchor(choice["anchor"], recs)
+    return rec
 
 
 def producer_premium_amounts(facts: Any) -> set:
@@ -1308,14 +1481,25 @@ def _value_keys(value: Any) -> set:
     return keys - {""}
 
 
+def client_fields_by_key(facts: Any) -> Dict[str, set]:
+    """{edit key: the fields of that policy a CLIENT supplied} (22 Oct 2026)."""
+    return {k: set(e.get("sources") or {}) for k, e in read_store(facts)["edits"].items()
+            if e.get("sources")}
+
+
 def producer_values(facts: Any) -> set:
-    """Comparable keys of every value a person supplied in this table."""
+    """Comparable keys of every value the PRODUCER supplied in this table (a
+    value a client gave in the questionnaire is the client's, not theirs)."""
     out = set()
     rows = _fv(facts, "coverage_lines")
+    clients = client_fields_by_key(facts)
     for r in rows if isinstance(rows, list) else []:
         if not isinstance(r, dict):
             continue
+        theirs = clients.get(str(r.get(ROW_KEY) or ""), set())
         for f in (r.get(ROW_FIELDS) or []):
+            if f in theirs:
+                continue
             col = COLUMN.get(f)
             if col and r.get(col):
                 out |= _value_keys(r.get(col))
@@ -1408,11 +1592,17 @@ def restamp_nonfillable_boxes(generated: dict, before: dict, after: dict,
 
 
 def label_producer_boxes(generated: dict, states_before: Dict[str, dict],
-                         facts_after: dict) -> List[str]:
+                         facts_after: dict, *, label: str = PRODUCER_SOURCE,
+                         values: Optional[set] = None) -> List[str]:
     """A box this change MOVED that now prints a value the producer typed in
     the table is the producer's ("producer" label - green, full fill weight);
-    every other moved box keeps the engine's label. Returns forms relabelled."""
-    mine = producer_values(facts_after)
+    every other moved box keeps the engine's label. Returns forms relabelled.
+
+    ``label`` / ``values`` (22 Oct 2026): a client's questionnaire answer
+    labels the boxes printing ITS values (``values``, `_value_keys` of each)
+    "client_arq" and lists them as client-filled, as every other client
+    answer does."""
+    mine = set(values) if values is not None else producer_values(facts_after)
     if not mine:
         return []
     touched: List[str] = []
@@ -1430,14 +1620,17 @@ def label_producer_boxes(generated: dict, states_before: Dict[str, dict],
             if conf.get(box) in ("producer", "client_arq"):
                 continue
             if _value_keys(val) & mine:
-                conf[box] = "producer"
+                conf[box] = label
                 relabelled.add(box)
                 changed = True
         if changed:
             form["confidence"] = conf
-            # A producer's value replaced whatever the client had in the box.
-            form["client_filled_fields"] = [b for b in (form.get("client_filled_fields") or [])
-                                            if b not in relabelled]
+            kept = [b for b in (form.get("client_filled_fields") or []) if b not in relabelled]
+            if label == CLIENT_SOURCE:
+                # The client's own answer is on these boxes now.
+                kept += sorted(relabelled)
+            # (A producer's value replaced whatever the client had in the box.)
+            form["client_filled_fields"] = kept
             touched.append(fid)
     return touched
 
@@ -1462,10 +1655,11 @@ def _entries_and_text(session: dict) -> Tuple[Optional[list], str]:
 
 def plan_change(session: dict, action: str, *, edit_key: str = "", line_key: str = "",
                 fields: Optional[dict] = None, line_id: str = "",
-                user: Any = None) -> Tuple[dict, List[dict]]:
+                user: Any = None, source: Optional[str] = None) -> Tuple[dict, List[dict]]:
     """The store after one producer action, and the audit rows describing it.
     Raises PolicyLineError on a refused change, KeyError on an unknown row.
-    Pure: nothing is written."""
+    Pure: nothing is written. ``source`` - CLIENT_SOURCE for a questionnaire
+    answer about a document's policy (`apply_policy_answers`)."""
     facts = session.get("facts") or {}
     store = read_store(facts)
     entries, text = _entries_and_text(session)
@@ -1494,10 +1688,34 @@ def plan_change(session: dict, action: str, *, edit_key: str = "", line_key: str
             raise KeyError(key)
         clean = validate_fields(fields, current=row, entries=entries, text=text,
                                 document_record=True)
-        changed = {f: v for f, v in clean.items() if _clean_text(row.get(f)) != v}
+        # A value typed back to what the DOCUMENTS say is no edit (live
+        # bcfd175b, 25 Oct: a premium changed and typed back to its own $4,162
+        # became a person-typed premium and printed on ACORD 125 page one).
+        _edited = set(((store.get("edits") or {}).get(key) or {}).get("fields") or {})
+        reverted = _fields_back_to_documents(facts, store, key,
+                                             {f: v for f, v in clean.items() if f in _edited})
+        changed = {f: v for f, v in clean.items()
+                   if _clean_text(row.get(f)) != v or f in reverted}
         if not changed:
             return store, []
-        new_store = store_with_edit(store, key, changed, anchor_for(facts, key), user)
+        _prior = ((store.get("edits") or {}).get(key) or {})
+        _orig = dict(_prior.get("originals") or {})
+        for f in changed:
+            if f not in (_prior.get("fields") or {}) and f not in _orig:
+                _orig[f] = _clean_text(row.get(f))   # the documents' value, before this edit
+        new_store = store_with_edit(store, key, {f: v for f, v in changed.items() if f not in reverted},
+                                    anchor_for(facts, key), user, source=source) \
+            if len(reverted) < len(changed) else copy.deepcopy(store)
+        if key in new_store["edits"]:
+            new_store["edits"][key]["originals"] = {f: o for f, o in _orig.items()
+                                                    if f in (new_store["edits"][key].get("fields") or {})}
+        if reverted:
+            _e = new_store["edits"].get(key) or {}
+            for f in reverted:
+                (_e.get("fields") or {}).pop(f, None)
+                (_e.get("sources") or {}).pop(f, None)
+            if _e and not (_e.get("fields") or {}):
+                new_store["edits"].pop(key, None)
         for f, v in changed.items():
             audit.append({"field": f"policy::{key}::{f}", "previous": _clean_text(row.get(f)),
                           "new": v})
@@ -1530,6 +1748,36 @@ def plan_change(session: dict, action: str, *, edit_key: str = "", line_key: str
                                   f"{entry.get('carrier_name') or ''}",
                       "new": "removed"})
         return new_store, audit
+    if action == "prior_other":
+        # The agent's pick for ACORD 125's prior-carrier OTHER column (19 Oct
+        # 2026); an empty key goes back to the rule (umbrella first).
+        key = str(edit_key or "").strip()
+        current = store.get(PRIOR_OTHER_KEY) or {}
+        rows_now = {r.get("edit_key"): r for r in table_rows(facts)}
+        if key:
+            row = rows_now.get(key)
+            if row is None:
+                raise KeyError(key)
+            if not (row.get("prior_other_candidate") or row.get("prior_other_line")):
+                raise PolicyLineError(message="ACORD 125's prior-carrier Other column cannot "
+                                              "hold this policy - its line has a column of its own.")
+        if key == str(current.get("edit_key") or "") or (not key and not current):
+            return store, []
+
+        def _named(k: str) -> str:
+            r = rows_now.get(k) if k else None
+            return f"{r.get('line_label')} - {r.get('carrier_name')}" if r else (k or "")
+
+        new_store = copy.deepcopy(store)
+        if key:
+            new_store[PRIOR_OTHER_KEY] = {"edit_key": key, "anchor": anchor_for(facts, key),
+                                          "at": _now(), "by": str(user or "")}
+        else:
+            new_store.pop(PRIOR_OTHER_KEY, None)
+        audit.append({"field": "policy::prior_other",
+                      "previous": _named(str(current.get("edit_key") or "")) or "the default policy",
+                      "new": _named(key) or "the default policy (umbrella first)"})
+        return new_store, audit
     raise PolicyLineError(message="Unknown action.")
 
 
@@ -1548,13 +1796,18 @@ def stale_keys(stored: Any, now: Any) -> List[str]:
 
 
 async def apply_post_generation(session: dict, session_id: str, new_store: dict,
-                                *, upd=None) -> dict:
+                                *, upd=None, provenance: str = PRODUCER_SOURCE,
+                                own_values: Optional[set] = None) -> dict:
     """The change AFTER forms exist: the stored facts are rebuilt in place (the
     documents' rows, the Data Consistency confirmations, then the producer's
     lines), the Data Consistency assessment is redone, and every generated box
     the change moves is re-stamped - person-typed boxes kept. The caller
     re-scores (`recalculate_session_scores`). Returns the pieces the route
-    answers with."""
+    answers with.
+
+    ``provenance`` / ``own_values`` - who supplied THIS change's values and
+    their comparable keys (`label_producer_boxes`): the questionnaire door
+    passes the client's (`apply_policy_answers`); the table, the producer's."""
     from services.extraction_pipeline import UNCONFIRMED_COVERAGE_LINES_KEY
     from services.underwriting_consistency import (
         apply_confirmations, assess_underwriting_consistency,
@@ -1618,7 +1871,7 @@ async def apply_post_generation(session: dict, session_id: str, new_store: dict,
                                          own_value=None, provenance="producer", scope=None) or [])
     raw_text = "\n".join(str(d.get("text") or "") for d in docs)
     stamped |= set(restamp_nonfillable_boxes(generated, view_before, view_after, raw_text) or [])
-    label_producer_boxes(generated, states_before, facts)
+    label_producer_boxes(generated, states_before, facts, label=provenance, values=own_values)
     for fid in stamped:
         form = generated.get(fid)
         if isinstance(form, dict):
@@ -1630,3 +1883,696 @@ async def apply_post_generation(session: dict, session_id: str, new_store: dict,
     await upd(session_id, updates, delete_facts=sorted(set(delete)) or None)
     return {"forms_updated": sorted(stamped), "underwriting_consistency": underwriting,
             "report": report, "facts": facts, "flags": flags}
+
+
+# One change at a time per package in this process: two quick saves (the table
+# and a questionnaire answer) would otherwise each read the store before the
+# other wrote it. The table's routes and the questionnaire door share it.
+_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def session_lock(session_id: str) -> asyncio.Lock:
+    lock = _LOCKS.get(session_id)
+    if lock is None:
+        lock = _LOCKS[session_id] = asyncio.Lock()
+    return lock
+
+
+# ── Questionnaire answers by policy (22 Oct 2026) ─────────────────────────────
+# Open since 17 Sep: "the questionnaire's policy number / carrier answers still
+# land on no per-line box". A package holds one RECORD per policy (this table);
+# every SECTION form's header (126 GL, 127 auto, 130 WC, 131 each umbrella
+# layer, 140 property ...) prints ITS policy's record
+# (`pdf_service._resolve_section_policy_identity`), and the 125 prior-carrier
+# grid and question 4 read the records. A questionnaire answer to
+# `policy_number` / `carrier_name` / `carrier_naic` wrote only the package-level
+# fact - which no section header reads once the package has records - and the
+# client's raw answer went into the header box of EVERY form carrying it, so one
+# policy's number could print on another line's header. One door now:
+#   * QUESTIONS: a section form's blank header box is asked PER POLICY - one
+#     question per record of that form's line lacking the value
+#     (`questions_by_policy`). A package with ONE policy keeps its one package
+#     question: there is no other policy the answer could be.
+#   * ANSWERS: a per-policy answer - and a package answer on a one-policy
+#     package - writes its record through THIS table's door (`plan_change` ->
+#     `apply_post_generation`: every form re-stamped, person-typed boxes kept).
+#   * A value that DISAGREES with what the package already states for that
+#     policy (a document, or a person) never replaces it: a CLIENT's answer is
+#     held for the producer (`client_answer_review`, "Needs your decision"); a
+#     PRODUCER's answer is their decision, exactly as in the table.
+#   * The package-level fact keeps its meaning: a package answer still writes
+#     it; a per-policy answer never does (SYS-06, as every edit here).
+ANSWER_FACTS: Tuple[str, ...] = ("policy_number", "carrier_name", "carrier_naic")
+# The answer key: "insurer_policy::<fact>::<line[~excess]>::<digest>". The
+# "insurer" word is deliberate - `question_classifier` routes a question by its
+# FIELD NAME, and "insurer" is the agency word the header boxes' own names
+# (`Insurer_FullName_A`) are routed by, so a policy's question reaches the same
+# audience its box did. The record's edit key is DIGESTED, never embedded: a
+# carrier's name inside a field name ("...@FAXON...") could match a routing
+# word. The digest names the record; the line is only there to read.
+ANSWER_PREFIX = "insurer_policy::"
+_ANSWER_KEY_RE = re.compile(
+    "^" + re.escape(ANSWER_PREFIX) + "(" + "|".join(ANSWER_FACTS) + r")::"
+    r"([a-z_]+(?:~excess)?)::([0-9a-f]{10})$")
+# The header box each fact prints in on a section form - pinned by test against
+# `pdf_service._SECTION_IDENTITY_RE` and the rule table.
+HEADER_BOXES: Dict[str, str] = {
+    "policy_number": "Policy_PolicyNumberIdentifier_A",
+    "carrier_name":  "Insurer_FullName_A",
+    "carrier_naic":  "Insurer_NAICCode_A",
+}
+WRITE, SAME, HOLD, SKIP, REFUSE = "write", "same", "hold", "skip", "refuse"
+_ANSWER_LABEL: Dict[str, str] = {"policy_number": "Policy number",
+                                 "carrier_name": "Insurance company",
+                                 "carrier_naic": "NAIC code"}
+_ANSWER_QUESTION: Dict[str, Tuple[str, str]] = {
+    "policy_number": ("Policy number for {name}",
+                      "Enter just the policy number this policy's declarations page prints, "
+                      "e.g. 'GL-123456'."),
+    "carrier_name":  ("Insurance company for {name}",
+                      "Enter the insurance company's full name as the policy prints it."),
+    "carrier_naic":  ("NAIC code for {name}",
+                      "The insurance company's 5-digit NAIC code, printed on the declarations "
+                      "page, e.g. '25186'."),
+}
+_HELD_MISMATCH = ("The client's answer does not match what the package already states for "
+                  "this policy.")
+_HELD_GONE = ("The policy this answer was asked about is no longer in the package as it was "
+              "when the questionnaire was sent.")
+_SECTION_FAMILIES: Dict[str, frozenset] = {}
+
+
+def _digest(edit_key: Any) -> str:
+    return hashlib.sha256(str(edit_key or "").encode("utf-8")).hexdigest()[:10]
+
+
+def _scope(row: dict) -> str:
+    line = re.sub(r"[^a-z_]", "", str((row or {}).get("line") or "").lower()) or "line"
+    if line == UMBRELLA_FAMILY and (row or {}).get("layer") == "excess":
+        return f"{line}~excess"
+    return line
+
+
+def answer_key(fact: str, row: dict) -> str:
+    """The questionnaire field name of ``fact`` for one policy (a table row)."""
+    return f"{ANSWER_PREFIX}{fact}::{_scope(row)}::{_digest(row.get('edit_key'))}"
+
+
+def parse_answer_key(key: Any) -> Optional[Tuple[str, str, str]]:
+    """(fact, line scope, record digest) of a policy answer key, else None."""
+    m = _ANSWER_KEY_RE.match(str(key or "").strip())
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def is_answer_key(key: Any) -> bool:
+    return parse_answer_key(key) is not None
+
+
+def answer_fact(key: Any) -> Optional[str]:
+    """The fact a policy answer key asks for ("policy_number" ...), else None."""
+    parsed = parse_answer_key(key)
+    return parsed[0] if parsed else None
+
+
+def section_families(form_id: Any) -> frozenset:
+    """The line families a SECTION form's header describes (`pdf_service.
+    _SECTION_FORM_LINE_PHRASES`, read by the header resolver itself); empty for
+    a package-level form (125, 101, 25) - its header is the package's."""
+    try:
+        from services.form_instances import base_form_id
+        base = base_form_id(str(form_id or ""))
+    except Exception:                                         # noqa: BLE001
+        base = str(form_id or "")
+    held = _SECTION_FAMILIES.get(base)
+    if held is None:
+        try:
+            from services.pdf_service import _SECTION_FORM_LINE_PHRASES
+            from services.lob_canon import canon_line
+            phrases = _SECTION_FORM_LINE_PHRASES.get(base) or ()
+            held = frozenset(f for f in (canon_line(p) for p in phrases) if f)
+        except Exception:                                     # noqa: BLE001
+            return frozenset()
+        _SECTION_FAMILIES[base] = held
+    return held
+
+
+def is_section_form(form_id: Any) -> bool:
+    return bool(section_families(form_id))
+
+
+def section_form_ids(generated: Any) -> set:
+    """The generated forms (instance ids) whose header is ONE policy's."""
+    return {str(fid) for fid in (generated or {}) if is_section_form(fid)}
+
+
+def question_rows(facts: Any) -> List[dict]:
+    """The policies the package holds, as "Policies in this submission" shows
+    them; [] for a package with none (every rule here then stands down)."""
+    try:
+        return [r for r in table_rows(facts) if isinstance(r, dict) and r.get("edit_key")]
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: policy rows unavailable - %s", exc)
+        return []
+
+
+def form_policy_rows(facts: Any, form_id: Any, rows: List[dict]) -> List[dict]:
+    """The policies a section form's header describes: its line's rows - for
+    ACORD 131, the rows of the LAYER that copy is stamped for (the plain 131 is
+    the lowest layer of a tower, `umbrella_layers`)."""
+    families = section_families(form_id)
+    if not families:
+        return []
+    mine = [r for r in rows if r.get("line") in families]
+    if UMBRELLA_FAMILY not in families:
+        return mine
+    try:
+        from services import umbrella_layers as ul
+        from services.form_instances import instance_key
+        slots, assign = ul._assign(facts)
+        key = str(instance_key(form_id) or "")
+    except Exception:                                         # noqa: BLE001
+        return mine
+    if len(slots) < 2 and not key:
+        return mine                     # one layer (or rivals on it): the plain 131's
+    idx = assign.get(key)
+    if idx is None or idx >= len(slots):
+        return [r for r in mine if r.get("line") != UMBRELLA_FAMILY]
+    ids = {str(r.get("id")) for r in (slots[idx].get("records") or []) if isinstance(r, dict)}
+    return [r for r in mine if r.get("line") != UMBRELLA_FAMILY or str(r.get("id")) in ids]
+
+
+def _row_name(row: dict, fact: str) -> str:
+    """How a question names one policy: its line and company - or, asking FOR
+    the company, its line and number."""
+    line = _clean_text(row.get("line_label")) or _family_label(row)
+    if fact == "carrier_name":
+        number = _clean_text(row.get("policy_number"))
+        return f"{line} (policy {number})" if number else line
+    carrier = _clean_text(row.get("carrier_name"))
+    return f"{line} ({carrier})" if carrier else line
+
+
+def _forms_label(form_ids: Iterable[Any]) -> str:
+    return ", ".join(sorted({str(f).replace("ACORD_", "").replace("ACORD ", "")
+                             for f in form_ids if f}))
+
+
+def _blank_header_facts(form_id: str, form: dict) -> List[str]:
+    """The identity facts a section form's header asks for: its box blank and
+    asked by the form scan's own rule (`arq_service._scan_asks_box`)."""
+    from services.arq_service import _scan_asks_box
+    conf = form.get("confidence") or {}
+    state = form.get("field_state") or form.get("mapped") or {}
+    typed = set(form.get("client_filled_fields") or [])
+    return [fact for fact, box in HEADER_BOXES.items()
+            if box in conf and box not in typed
+            and _scan_asks_box(form_id, conf.get(box), state.get(box))]
+
+
+def identity_gaps(facts: Any, generated: Any, rows: List[dict]) -> Dict[Tuple[str, str], dict]:
+    """{(fact, edit key): {"row", "forms": base form ids}} - every policy whose
+    own section header asks for ``fact`` and that does not state it."""
+    out: Dict[Tuple[str, str], dict] = {}
+    try:
+        from services.form_instances import base_form_id
+    except Exception:                                         # noqa: BLE001
+        base_form_id = str                                    # type: ignore
+    for fid, form in (generated or {}).items():
+        if not isinstance(form, dict) or not is_section_form(fid):
+            continue
+        asked = _blank_header_facts(str(fid), form)
+        if not asked:
+            continue
+        mine = form_policy_rows(facts, fid, rows)
+        for fact in asked:
+            for r in mine:
+                if _clean_text(r.get(fact)):
+                    continue
+                slot = out.setdefault((fact, r["edit_key"]), {"row": r, "forms": set()})
+                slot["forms"].add(base_form_id(str(fid)))
+    return out
+
+
+def company_rows(rows: List[dict], row: dict) -> List[dict]:
+    """``row`` and every other policy of the SAME company, in table order - [row]
+    when it names no company. "Same company" is the key the NAIC question was
+    asked under (`_carrier_group_key`, `_naic_by_company`), never the looser
+    comparison door: "Travelers Indemnity Company" and "... Company of America"
+    agree as printings yet are two companies with two NAICs (review, 22 Oct)."""
+    company = _carrier_group_key((row or {}).get("carrier_name"))
+    if not company:
+        return [row]
+    return [r for r in rows if r is row or (r.get("edit_key") != row.get("edit_key")
+                                            and _carrier_group_key(r.get("carrier_name")) == company)]
+
+
+def _naic_by_company(gaps: Dict[Tuple[str, str], dict],
+                     rows: List[dict]) -> Dict[Tuple[str, str], dict]:
+    """A NAIC is the COMPANY's identifier - the header resolver pairs a company
+    with the NAIC printed for it on any of its lines (`pdf_service.
+    _section_carrier_pair`) - so it is asked ONCE per company: the NAIC gaps of
+    one company fold into the first of them (its forms joined, its other
+    policies named). A policy naming no company keeps its own question."""
+    out: Dict[Tuple[str, str], dict] = {}
+    held: Dict[str, Tuple[str, str]] = {}
+    order = {r["edit_key"]: i for i, r in enumerate(rows)}
+    for k in sorted(gaps, key=lambda k: order.get(k[1], len(order))):
+        slot = gaps[k]
+        if k[0] != "carrier_naic":
+            out[k] = slot
+            continue
+        company = _carrier_group_key(slot["row"].get("carrier_name"))
+        first = held.get(company) if company else None
+        if first is None:
+            out[k] = {"row": slot["row"], "forms": set(slot["forms"]), "also": []}
+            if company:
+                held[company] = k
+            continue
+        out[first]["forms"] |= set(slot["forms"])
+        out[first]["also"].append(slot["row"])
+    return out
+
+
+def _policy_questions(gaps: Dict[Tuple[str, str], dict], rows: List[dict],
+                      generated: Any) -> List[dict]:
+    """One question per (fact, policy) gap - one per COMPANY for a NAIC - named
+    so no two read the same."""
+    gaps = _naic_by_company(gaps, rows)
+    order = {r["edit_key"]: i for i, r in enumerate(rows)}
+    items = sorted(gaps.items(), key=lambda kv: (order.get(kv[0][1], len(order)),
+                                                 ANSWER_FACTS.index(kv[0][0])))
+    names: Dict[Tuple[str, str], str] = {}
+    for k, v in items:
+        if k[0] == "carrier_naic" and v.get("also"):
+            carrier = _clean_text(v["row"].get("carrier_name"))
+            lines = [_clean_text(r.get("line_label")) or _family_label(r)
+                     for r in [v["row"]] + list(v["also"])]
+            names[k] = f"{carrier} ({', '.join(dict.fromkeys(lines))})"
+        else:
+            names[k] = _row_name(v["row"], k[0])
+    for fact in ANSWER_FACTS:
+        same: Dict[str, List[Tuple[str, str]]] = {}
+        for k in names:
+            if k[0] == fact:
+                same.setdefault(names[k], []).append(k)
+        for name, keys in same.items():
+            if len(keys) < 2:
+                continue
+            for k in keys:                       # the term tells two policies apart
+                r = gaps[k]["row"]
+                term = " to ".join(t for t in (_clean_text(r.get("effective_date")),
+                                               _clean_text(r.get("expiration_date"))) if t)
+                names[k] = f"{name}, {term}" if term else name
+            again: Dict[str, List[Tuple[str, str]]] = {}
+            for k in keys:
+                again.setdefault(names[k], []).append(k)
+            for n2, ks in again.items():
+                if len(ks) > 1:
+                    for i, k in enumerate(ks, 1):
+                        names[k] = f"{n2}, policy {i}"
+    try:
+        from services.form_instances import base_form_id
+        present = {base_form_id(str(f)) for f in (generated or {})}
+    except Exception:                                         # noqa: BLE001
+        present = {str(f) for f in (generated or {})}
+    out: List[dict] = []
+    for (fact, _key), slot in items:
+        row = slot["row"]
+        forms = set(slot["forms"])
+        where = str(row.get("prior_grid") or "")
+        if fact in ("policy_number", "carrier_name") and where:
+            # ACORD 125's prior-carrier grid prints the expiring policies (or
+            # ACORD 101, past the grid) - the answer reaches them too.
+            target = "ACORD_101" if where == "ACORD_101" else "ACORD_125"
+            if target in present:
+                forms.add(target)
+        text, hint = _ANSWER_QUESTION[fact]
+        out.append({
+            "field_name":         answer_key(fact, row),
+            "question":           text.format(name=names[(fact, _key)]),
+            "hint":               hint,
+            "forms":              _forms_label(forms),
+            "form_ids":           sorted(forms),
+            "field_type":         "text",
+            "current_value":      "",
+            "_group_label":       None,
+            "_is_curated_client": False,
+            "_canonical_key":     None,
+        })
+    return out
+
+
+def questions_by_policy(questions: List[dict], facts: Any, generated: Any) -> List[dict]:
+    """The questionnaire with its policy-number / insurer / NAIC questions asked
+    of the policy each box belongs to. See the block comment above.
+
+    * No policy records: returned unchanged.
+    * A package question for one of the three facts keeps only the forms its
+      answer can reach: the package-level forms (125, 101, 25), plus - with ONE
+      policy - that policy's own section forms where it lacks the value. A
+      question left with no form is dropped (its boxes are asked per policy, or
+      are blank by the header resolver's own rule: no policy of that line).
+    * Two or more policies: one question per policy lacking the value on its
+      own section form (`identity_gaps`).
+    Never raises (the questions come back as they were)."""
+    try:
+        rows = question_rows(facts)
+        if not rows:
+            return questions
+        gaps = identity_gaps(facts, generated, rows)
+        one = rows[0] if len(rows) == 1 else None
+        kept: List[dict] = []
+        dropped: List[str] = []
+        for q in questions or []:
+            canon = q.get("_canonical_key") if isinstance(q, dict) else None
+            if canon not in ANSWER_FACTS or is_answer_key(q.get("field_name")):
+                kept.append(q)
+                continue
+            forms = [str(f) for f in (q.get("form_ids") or []) if f]
+            if not any(is_section_form(f) for f in forms):
+                kept.append(q)                    # asked on no section form: untouched
+                continue
+            reach = set((gaps.get((canon, one["edit_key"])) or {}).get("forms") or ()) if one else set()
+            still = [f for f in forms if not is_section_form(f) or f in reach]
+            if not still:
+                dropped.append(str(q.get("field_name") or canon))
+                continue
+            if still != forms:
+                q = dict(q, form_ids=still, forms=_forms_label(still))
+            kept.append(q)
+        added = _policy_questions(gaps, rows, generated) if one is None else []
+        if dropped or added:
+            logger.info("policy_lines: identity questions asked by policy - %d package "
+                        "question(s) dropped (%s), %d per-policy question(s) added",
+                        len(dropped), ", ".join(dropped[:6]), len(added))
+        return kept + added
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: questions by policy skipped - %s", exc, exc_info=True)
+        return questions
+
+
+# ── Judging and applying an answer ───────────────────────────────────────────
+
+def answer_context(session: Any) -> Optional[dict]:
+    """What judging an answer needs - the package's policies, its verified
+    declarations entries and its documents' text - or None when the package
+    has no generated forms or no policy records (nothing here applies)."""
+    if not isinstance(session, dict) or not session.get("generated_forms"):
+        return None
+    facts = session.get("facts") if isinstance(session.get("facts"), dict) else {}
+    rows = question_rows(facts)
+    if not rows:
+        return None
+    try:
+        entries, text = _entries_and_text(session)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: declarations entries unavailable - %s", exc)
+        entries, text = None, ""
+    return {"facts": facts, "rows": rows, "entries": entries, "text": text}
+
+
+def answer_row(ctx: Optional[dict], key: Any) -> Optional[dict]:
+    """The policy (table row) an answer key names - by its record digest, and
+    only while that record is still the one the key was made for. Never a
+    guess: a record that changed or left gives None."""
+    parsed = parse_answer_key(key)
+    if not parsed or not ctx:
+        return None
+    _fact, scope, digest = parsed
+    hits = [r for r in ctx.get("rows") or []
+            if _digest(r.get("edit_key")) == digest and _scope(r) == scope]
+    return hits[0] if len(hits) == 1 else None
+
+
+def package_target(ctx: Optional[dict], fact: str, form_ids: Iterable[Any] = ()) -> Optional[str]:
+    """The ONE policy a PACKAGE-level answer about ``fact`` belongs to, as an
+    answer key: the package's only policy; else the one policy the question's
+    own section forms describe (a questionnaire sent before this build asked
+    the 126's blank header as a package question). None when several could be
+    meant - the answer then stays the package's."""
+    if not ctx or fact not in ANSWER_FACTS:
+        return None
+    rows = ctx.get("rows") or []
+    if len(rows) == 1:
+        return answer_key(fact, rows[0])
+    found: Dict[str, dict] = {}
+    for f in form_ids or ():
+        if is_section_form(f):
+            for r in form_policy_rows(ctx.get("facts") or {}, f, rows):
+                found[r["edit_key"]] = r
+    return answer_key(fact, next(iter(found.values()))) if len(found) == 1 else None
+
+
+def _answer_text(fact: str, value: Any) -> str:
+    s = _clean_text(value)
+    if fact == "carrier_naic":
+        m = re.fullmatch(r"(?i)(?:naic\b\.?\s*(?:code|number|no\.?|#)?\s*[:#\-]?\s*)?(\d{5})", s)
+        if m:
+            return m.group(1)
+    return s
+
+
+def _same_value(fact: str, a: Any, b: Any) -> bool:
+    if fact == "policy_number":
+        return _same_contract(a, b)
+    if fact == "carrier_name":
+        return _same_company(a, b)
+    da, db = re.sub(r"\D", "", str(a or "")), re.sub(r"\D", "", str(b or ""))
+    return bool(da) and da == db
+
+
+def _documents_say_otherwise(ctx: dict, row: dict, fact: str, value: str) -> Tuple[str, str]:
+    """For a policy that does NOT state ``fact``: (what the documents print
+    instead, why it matters) - ("", "") when nothing - for another policy's
+    number, a prior term's number, or another NAIC for this policy's own
+    company. A number two policies share can be one package policy's, so it is
+    the producer's to confirm, never ours to assume either way."""
+    facts = ctx.get("facts") or {}
+    if fact == "policy_number":
+        for other in ctx.get("rows") or []:
+            if other is row or other.get("edit_key") == row.get("edit_key"):
+                continue
+            if _same_contract(other.get("policy_number"), value):
+                name = _row_name(other, fact)
+                return (f"{_clean_text(other.get('policy_number'))} ({name})",
+                        f"The documents print this number for {name} - check it is this "
+                        "policy's too (one package policy can cover several lines).")
+        try:
+            from services.extraction_service import _norm_policy_number, prior_term_policy_numbers
+            if _norm_policy_number(value) in prior_term_policy_numbers(facts):
+                return (f"{value} (a prior term)",
+                        "The documents print this number for an earlier policy term.")
+        except Exception:                                     # noqa: BLE001
+            pass
+        return "", ""
+    if fact == "carrier_naic" and _carrier_group_key(row.get("carrier_name")):
+        rows = _fv(facts, "coverage_lines")
+        carrier = _clean_text(row.get("carrier_name"))
+        company = _carrier_group_key(carrier)
+        # The NAICs printed for THIS company - the key its question was asked
+        # under (`company_rows`), never a sister company that reads alike.
+        found = {re.sub(r"\D", "", str(r.get("naic") or ""))
+                 for r in (rows if isinstance(rows, list) else [])
+                 if isinstance(r, dict) and not r.get(ROW_ADDED)
+                 and _carrier_group_key(r.get("carrier")) == company}
+        found = {n for n in found if len(n) == 5}
+        printed = next(iter(found)) if len(found) == 1 else ""
+        if printed and not _same_value(fact, printed, value):
+            return (f"{printed} ({carrier})",
+                    f"The documents print NAIC {printed} for {carrier}.")
+    return "", ""
+
+
+def judge(ctx: Optional[dict], key: Any, value: Any, *, person: str) -> dict:
+    """`_judge`, never raising: an unexpected failure HOLDS a client's answer
+    (it is never lost) and refuses a producer's."""
+    try:
+        return _judge(ctx, key, value, person=person)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: answer %s not judged - %s", key, exc, exc_info=True)
+        return {"action": HOLD if person == CLIENT_SOURCE else REFUSE,
+                "fact": answer_fact(key) or "", "edit_key": "", "value": _clean_text(value),
+                "label": _ANSWER_LABEL.get(answer_fact(key) or "", ""),
+                "reason": "This answer could not be checked against the package.",
+                "source_value": ""}
+
+
+def _judge(ctx: Optional[dict], key: Any, value: Any, *, person: str) -> dict:
+    """What one answer about one policy does: {"action": write | same | hold |
+    skip | refuse, "fact", "edit_key", "value" (clean), "label", "reason",
+    "source_value"}.
+
+    * not a value ("None", "N/A", "don't know"): skip - an answer never clears a
+      policy's value, and a policy lacking it simply stays so;
+    * a value the table's own validator refuses (a form number, "NAIC 12"):
+      a client's is held with the reason, a producer's refused;
+    * the policy states the same value: same (nothing to write);
+    * the policy states ANOTHER value (a document's or a person's), or the
+      documents print the answer as another policy's: a client's is HELD, a
+      producer's written (their decision);
+    * otherwise: write."""
+    parsed = parse_answer_key(key)
+    fact = parsed[0] if parsed else ""
+    verdict = {"action": SKIP, "fact": fact, "edit_key": "", "value": "",
+               "label": _ANSWER_LABEL.get(fact, ""), "reason": "", "source_value": ""}
+    if not parsed:
+        return verdict
+    on_hold = HOLD if person == CLIENT_SOURCE else REFUSE
+    row = answer_row(ctx, key)
+    if row is None:
+        verdict.update(action=on_hold, value=_clean_text(value), reason=_HELD_GONE)
+        return verdict
+    verdict["edit_key"] = row["edit_key"]
+    carrier = _clean_text(row.get("carrier_name"))
+    # A NAIC is its company's (asked once per company, `_naic_by_company`).
+    verdict["label"] = (f"{_ANSWER_LABEL[fact]} - {carrier}" if fact == "carrier_naic" and carrier
+                        else f"{_ANSWER_LABEL[fact]} - {_row_name(row, fact)}")
+    text = _answer_text(fact, value)
+    if not text:
+        return verdict
+    try:
+        from services.answer_semantics import VALUE, interpret_answer
+        if interpret_answer(fact, text).intent != VALUE:
+            verdict["reason"] = "not a value"
+            return verdict
+    except Exception:                                         # noqa: BLE001
+        pass
+    try:
+        clean = validate_fields({fact: text}, current=row, entries=ctx.get("entries"),
+                                text=ctx.get("text"),
+                                document_record=not row.get("producer_added"))
+    except PolicyLineError as exc:
+        verdict.update(action=on_hold, value=text,
+                       reason=exc.errors.get(fact) or exc.message)
+        return verdict
+    new = _clean_text(clean.get(fact))
+    if not new:
+        return verdict
+    verdict["value"] = new
+    current = _clean_text(row.get(fact))
+    if current:
+        if _same_value(fact, current, new):
+            verdict["action"] = SAME
+            return verdict
+        verdict["source_value"] = current
+        if person == CLIENT_SOURCE:
+            verdict.update(action=HOLD, reason=_HELD_MISMATCH)
+            return verdict
+        verdict["action"] = WRITE
+        return verdict
+    clash, why = _documents_say_otherwise(ctx, row, fact, new)
+    if clash and person == CLIENT_SOURCE:
+        verdict.update(action=HOLD, source_value=clash, reason=why)
+        return verdict
+    verdict["action"] = WRITE
+    return verdict
+
+
+def hold_entry(verdict: dict, value: Any, field_name: str, arq_id: Any = None) -> dict:
+    """A held answer, in the shape `client_answer_review` lists ("Needs your
+    decision"): the client's words, what the package states, and which policy."""
+    return {"client_value": _clean_text(value)[:500],
+            "source_value": verdict.get("source_value") or "(not stated)",
+            "field_name": field_name,
+            "arq_id": arq_id,
+            "held_at": _now(),
+            "label": verdict.get("label") or "",
+            "reason": verdict.get("reason") or ""}
+
+
+async def apply_policy_answers(session_id: str, answers: Iterable[Tuple[Any, Any]], *,
+                               person: str = PRODUCER_SOURCE, arq_id: Any = None,
+                               upd=None) -> dict:
+    """THE DOOR for questionnaire answers about one policy: each (answer key,
+    value) is judged against the package as it is now (`judge`), the ones to
+    write go through `plan_change` (the table's own validation and store, the
+    source recorded) and ONE `apply_post_generation` re-stamps every generated
+    form - section headers, the 125 prior-carrier grid and question 4 - with
+    the boxes labelled for whoever supplied the value. A client's held answers
+    join the session's held list. Returns {"written", "unchanged", "held",
+    "refused", "skipped", "forms_updated", "changes"}; never writes before
+    forms exist."""
+    report: dict = {"written": [], "unchanged": [], "held": {}, "refused": {}, "skipped": [],
+                    "forms_updated": [], "changes": []}
+    items = [(str(k), v) for k, v in (answers or []) if is_answer_key(k)]
+    if not items:
+        return report
+    from repositories.session_repository import get_processing_session
+    if upd is None:
+        from repositories.session_repository import upd_processing_session as upd
+    async with session_lock(session_id):
+        session = await get_processing_session(session_id)
+        ctx = answer_context(session)
+        work = dict(session) if isinstance(session, dict) else {}
+        work["facts"] = copy.deepcopy(work.get("facts") or {})
+        store = read_store(work["facts"])
+        own: set = set()
+        for key, value in items:
+            if ctx is None:
+                verdict = {"action": HOLD if person == CLIENT_SOURCE else REFUSE,
+                           "label": _ANSWER_LABEL.get(answer_fact(key) or "", ""),
+                           "reason": _HELD_GONE, "source_value": ""}
+            else:
+                verdict = judge(ctx, key, value, person=person)
+            act = verdict["action"]
+            if act == WRITE:
+                # A NAIC is its company's: every policy of that company still
+                # lacking one takes it (`_naic_by_company` asked it once).
+                targets = [verdict["edit_key"]]
+                mine = answer_row(ctx, key) if ctx is not None else None
+                if verdict["fact"] == "carrier_naic" and mine is not None:
+                    targets += [r["edit_key"] for r in company_rows(ctx["rows"], mine)
+                                if r is not mine and not _clean_text(r.get("carrier_naic"))]
+                audit: List[dict] = []
+                why = ""
+                for edit_key in targets:
+                    try:
+                        store, rows_ = plan_change(work, "edit", edit_key=edit_key,
+                                                   fields={verdict["fact"]: verdict["value"]},
+                                                   user=person, source=person)
+                    except (PolicyLineError, KeyError) as exc:
+                        if edit_key == verdict["edit_key"]:
+                            why = exc.message if isinstance(exc, PolicyLineError) else _HELD_GONE
+                            break
+                        continue                  # a sibling that cannot take it keeps its own
+                    work["facts"][STORE_KEY] = store
+                    audit += rows_
+                if why:
+                    if person == CLIENT_SOURCE:
+                        report["held"][key] = hold_entry({**verdict, "reason": why}, value, key, arq_id)
+                    else:
+                        report["refused"][key] = why
+                    continue
+                if not audit:
+                    report["unchanged"].append(key)
+                    continue
+                report["written"].append(key)
+                own |= _value_keys(verdict["value"])
+                for row in audit:
+                    report["changes"].append({"field": key, "fact_key": str(row.get("field") or ""),
+                                              "previous": row.get("previous") or None,
+                                              "new": str(row.get("new") or "")})
+            elif act == SAME:
+                report["unchanged"].append(key)
+            elif act == HOLD:
+                report["held"][key] = hold_entry(verdict, value, key, arq_id)
+            elif act == REFUSE:
+                report["refused"][key] = verdict.get("reason") or _HELD_GONE
+            else:
+                report["skipped"].append(key)
+        if report["written"]:
+            out = await apply_post_generation(
+                session, session_id, store, upd=upd, provenance=person,
+                own_values=own if person == CLIENT_SOURCE else None)
+            report["forms_updated"] = sorted(out.get("forms_updated") or [])
+        if report["held"]:
+            held = dict((session or {}).get("client_answer_conflicts") or {})
+            held.update(report["held"])
+            await upd(session_id, {"client_answer_conflicts": held,
+                                   "facts": {"_client_answer_conflicts": held}})
+        logger.info("policy_lines: questionnaire answers by policy (%s) - written %s, "
+                    "unchanged %d, held %s, refused %s, skipped %d, forms %s", person,
+                    report["written"][:6], len(report["unchanged"]), sorted(report["held"])[:6],
+                    sorted(report["refused"])[:6], len(report["skipped"]),
+                    report["forms_updated"][:8])
+    return report

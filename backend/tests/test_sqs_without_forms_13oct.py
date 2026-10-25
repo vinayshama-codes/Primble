@@ -66,12 +66,16 @@ def _structural_rows(pkg):
 
 
 def test_form_fill_false_ignores_the_form_results_fill():
+    # 23 Oct 2026 (Brent, Z34-1 #1): no fill slice is the DEFAULT on every path;
+    # the old slice survives only as the explicit `form_fill=True` reversal. The
+    # TEST relied on the old default and was updated to name it; the code is right.
     facts, flags = _complete_facts(), {}
     results = [{"form_id": "ACORD_125", "confidence_fill_rate": 40}]
     common = dict(facts=facts, flags=flags, form_results=results, cross_issues=[],
                   hard_stops=[], soft_stops=[], session_data={}, _probe=True)
-    with_fill = S.calculate_package_sqs(**common)
+    with_fill = S.calculate_package_sqs(**common, form_fill=True)
     without = S.calculate_package_sqs(**common, form_fill=False)
+    assert S.calculate_package_sqs(**common)["package_sqs_score"] == without["package_sqs_score"]
     assert len((with_fill["score_trace"] or {})["structural"]) == 3          # tier1, tier2, fill
     rows = without["score_trace"]["structural"]
     assert len(rows) == 2 and all("fill" not in str(r).lower() for r in rows), rows
@@ -95,16 +99,21 @@ def test_pre_form_score_is_the_no_forms_recipe(monkeypatch):
 
 
 def test_a_post_form_score_carries_the_score_without_forms():
+    # 23 Oct 2026 (Brent, Z34-1 #1): one number before and after forms, so a
+    # post-form score carries no second number by default (the TEST pinned the old
+    # "Without forms X · With forms Y" pair and was updated). The comparison is kept
+    # only on the explicit `form_fill=True` reversal path.
     facts = _complete_facts()
     session = {"facts": facts, "flags": {}, "recommendations": [{"form_id": "ACORD_125"}], "docs": []}
-    pkg = S.calculate_package_sqs(facts=facts, flags={}, form_results=[{"form_id": "ACORD_125", "confidence_fill_rate": 80}],
-                                  cross_issues=[], hard_stops=[], soft_stops=[], session_data=session)
+    kw = dict(facts=facts, flags={}, form_results=[{"form_id": "ACORD_125", "confidence_fill_rate": 80}],
+              cross_issues=[], hard_stops=[], soft_stops=[], session_data=session)
+    assert S.calculate_package_sqs(**kw)["without_forms"] is None
+    pkg = S.calculate_package_sqs(**kw, form_fill=True)
     wf = pkg["without_forms"]
     assert isinstance(wf, dict) and wf["score"] is not None
     assert wf["score"] >= pkg["package_sqs_score"]       # the 80% fill costs only with forms
     # Probes never pay for it (they only need the number).
-    probe = S.calculate_package_sqs(facts=facts, flags={}, form_results=[{"form_id": "ACORD_125", "confidence_fill_rate": 80}],
-                                    cross_issues=[], hard_stops=[], soft_stops=[], session_data=session, _probe=True)
+    probe = S.calculate_package_sqs(**kw, _probe=True, form_fill=True)
     assert probe["without_forms"] is None
 
 
@@ -141,16 +150,17 @@ def test_deferring_takes_a_form_choice_out_of_both_stop_lists():
     assert _ACORD25["type"] == "soft_warning"           # a copy - the caller's issue is untouched
 
 
-def test_stops_now_defers_only_before_forms(monkeypatch):
+def test_stops_now_defers_form_choices_before_and_after_forms(monkeypatch):
+    """25 Oct 2026 (Brent 23 Oct: the package score is independent of the forms):
+    a form choice is never a stop - before forms AND after (generating without
+    ACORD 186 dropped a finished package 100 -> 85). A real warning still is."""
     import services.stops_now as SN
     monkeypatch.setattr(SN, "cross_form_run", lambda *_a, **_k: [dict(_ACORD25), dict(_TYPED)])
     session = {"facts": {}, "flags": {}, "docs": [], "recommendations": [{"form_id": "ACORD_125"}]}
-    pre = SN.stops_now(session, ["ACORD_125"], pre_form=True)
-    post = SN.stops_now(session, ["ACORD_125"], pre_form=False)
-    assert not _listed(_ACORD25["message"], pre["soft"]) and _listed(_TYPED["message"], pre["soft"])
-    assert any(i.get("form_choice") for i in pre["cross_issues"])
-    assert _listed(_ACORD25["message"], post["soft"])   # after forms: the add-form window answers it
-    assert not any(i.get("form_choice") for i in post["cross_issues"])
+    for pre_form in (True, False):
+        st = SN.stops_now(session, ["ACORD_125"], pre_form=pre_form)
+        assert not _listed(_ACORD25["message"], st["soft"]) and _listed(_TYPED["message"], st["soft"])
+        assert any(i.get("form_choice") for i in st["cross_issues"])
 
 
 def test_the_review_lists_a_form_choice_apart_from_the_warnings():
@@ -200,8 +210,25 @@ def test_exposure_items_are_the_score(flags, n_hard, n_warn):
 def test_every_exposure_item_with_a_box_routes_to_an_answer():
     flags = {"has_general_liability": True, "has_workers_comp": True, "wc_multi_state": True,
              "has_auto_coverage": True, "is_contractor": True}
-    items = S.exposure_deduction_items({}, flags, [], [])
+    # (19 Oct 2026, Brent: missing details are Completeness) the boxes moved with them;
+    # only the cross-form details are answered by their own cards.
+    detail = [{"type": "soft_warning", "message": "a cross-form check asking for a detail"}]
+    items = S.completeness_deduction_items({}, flags, [], detail)
     assert items, "the fixture must raise deductions"
+    assert any(not it["fact"] for it in items), "and reach the box-less branch"
+    for it in items:
+        if it["fact"]:
+            mode = answer_mode(it["fact"]).get("mode")
+            assert mode in ("field", "schedule", "narrative"), (it, mode)
+        else:
+            assert it["bucket"] == "cross_form_details", it
+    # (19 Oct 2026, Brent: Exposure = conflicts only) a disagreeing figure has its box;
+    # a coverage decision and the cross-form conflicts have none.
+    facts = {"num_employees": _env("12"), "auto_vin_schedule": _env([{"year": "2020"}]),
+             "total_revenue": _env("$10,000,000"), "total_payroll": _env("$25,000")}
+    conflict = [{"type": "soft_warning", "code": "location_address_mismatch", "message": "c"}]
+    items = S.exposure_deduction_items(facts, {"is_contractor": True}, [], conflict)
+    assert {it["bucket"] for it in items} == set(S._EXPOSURE_BUCKETS) - {"operations_description"}
     for it in items:
         if it["fact"]:
             mode = answer_mode(it["fact"]).get("mode")
@@ -261,11 +288,14 @@ def test_the_package_lists_the_owners_last_three_questions():
                                   hard_stops=[], soft_stops=[], session_data={"docs": []}, form_fill=False)
     fields = {r.get("field") for r in pkg["top_recommendations"]}
     assert {"auto_radius_of_operation", "distance_to_hydrant", "fire_department_type"} <= fields
+    # (19 Oct 2026, Brent: missing details are Completeness) the radius is Structural's now.
+    assert pkg["pillars"]["structural_completeness"] < 100
     # Answering the three closes the score.
     answered = dict(facts, auto_radius_of_operation=_env("Local (up to 50 miles)"),
                     distance_to_hydrant=_env("500"), fire_department_type=_env("Professional"))
     pkg2 = S.calculate_package_sqs(facts=answered, flags=flags, form_results=[], cross_issues=[],
                                    hard_stops=[], soft_stops=[], session_data={"docs": []}, form_fill=False)
+    assert pkg2["pillars"]["structural_completeness"] == 100, pkg2["top_recommendations"]
     assert pkg2["pillars"]["exposure_consistency"] == 100, pkg2["top_recommendations"]
     assert pkg2["pillars"]["property_integrity"] == 100
 
@@ -410,17 +440,18 @@ console.log(JSON.stringify({
 
 
 def test_the_screen_explains_the_move_at_generation(tmp_path):
+    # 23 Oct 2026 (Brent, Z34-1 #1): the number no longer moves at generation, so
+    # there is no move to explain - "Without forms X · With forms Y" is gone and the
+    # forms' to-dos are the Forms ready meter (tests/test_build25_score.py). The
+    # TEST pinned the removed line and was updated.
     out = _node(tmp_path, "scoreWithForms.js", """
 console.log(JSON.stringify({
-  down: M.formsEffect({package_sqs_score: 97, without_forms: {score: 100}}),
-  up: M.formsEffect({package_sqs_score: 90, without_forms: {score: 88}}),
-  same: M.formsEffect({package_sqs_score: 100, without_forms: {score: 100}}),
-  pre: M.formsEffect({package_sqs_score: 94}),
+  gone: typeof M.formsEffect,
+  meter: M.formsReady({forms: [{form_id: "ACORD_125", rows: [{status: "verify"}]}]}).overall.text,
 }));""")
-    assert out["down"]["text"] == "Without forms 100 · With forms 97"
-    assert "Please verify" in out["down"]["detail"] and "—" not in out["down"]["detail"]
-    assert out["up"]["detail"] and out["same"]["detail"] == ""
-    assert out["pre"] is None
+    assert out["gone"] == "undefined"
+    assert out["meter"] == "Forms ready: 1 value to confirm · 0 boxes to fill"
+    assert "—" not in out["meter"]
 
 
 def test_form_choices_are_not_listed_before_forms(tmp_path):

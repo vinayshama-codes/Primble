@@ -161,6 +161,25 @@ def live_card_points(form_results) -> dict:
     return points
 
 
+def live_card_types(form_results) -> dict:
+    """{rec_id: type} - the type each live card shows now ("hard_stop",
+    "soft_warning", ...; the first copy speaks for all, as `live_card_points`).
+    19 Oct 2026: four per-form cards became warnings (Brent's short hard-stop
+    list), and a row stored before then kept "hard_stop" - the cover listed it
+    under "CRITICAL - Hard Stops" while the panel showed a warning."""
+    types: dict = {}
+    for sqs in form_results or []:
+        if not isinstance(sqs, dict):
+            continue
+        for rec in sqs.get("recommendations") or []:
+            if not isinstance(rec, dict) or not rec.get("rec_id"):
+                continue
+            kind = rec.get("type")
+            if rec["rec_id"] not in types and isinstance(kind, str) and kind.strip():
+                types[rec["rec_id"]] = kind
+    return types
+
+
 def live_card_messages(form_results) -> dict:
     """{rec_id: message} - the words each live card shows now (the first copy
     speaks for all, as `live_card_points`). A card whose words are its id (a
@@ -179,7 +198,8 @@ def live_card_messages(form_results) -> dict:
 
 
 def plan_card_sync(rows, live: set, live_points: Optional[dict] = None,
-                   live_messages: Optional[dict] = None) -> dict:
+                   live_messages: Optional[dict] = None,
+                   live_types: Optional[dict] = None) -> dict:
     """What must change so the stored cards match the live ones. Pure.
 
     `rows`: the session's stored rows ({rec_id, action, producer_answer,
@@ -198,11 +218,14 @@ def plan_card_sync(rows, live: set, live_points: Optional[dict] = None,
                 2026: the building card kept "street address, occupancy,
                 construction type, and building or BPP value" after it learned
                 to name only what is missing).
+      retype  - live and open, stored as another type than the card shows now
+                (`live_types`) - the same reason, for the type (19 Oct 2026: the
+                cover's "CRITICAL - Hard Stops" and the download review read it).
     A dismissed or answered row is the producer's own act and is never touched
     - a dismissal's credit is the number it was dismissed at. New cards are
     recorded by `log_recommendations_presented`, whose insert already skips a
     stored row."""
-    reopen, resolve, repoint, reword = [], [], [], []
+    reopen, resolve, repoint, reword, retype = [], [], [], [], []
     for row in rows or []:
         rid = str((row or {}).get("rec_id") or "")
         if not rid or rid.startswith(_NOT_A_CARD_PREFIXES):
@@ -220,17 +243,22 @@ def plan_card_sync(rows, live: set, live_points: Optional[dict] = None,
             if (open_now and not answered and live_messages and rid in live_messages
                     and "message" in row and row.get("message") != live_messages[rid]):
                 reword.append(rid)
+            if (open_now and not answered and live_types and rid in live_types
+                    and "recommendation_type" in row
+                    and row.get("recommendation_type") != live_types[rid]):
+                retype.append(rid)
         elif action in (None, "downloaded_anyway"):
             resolve.append(rid)
     return {"reopen": sorted(reopen), "resolve": sorted(resolve),
-            "repoint": sorted(repoint), "reword": sorted(reword)}
+            "repoint": sorted(repoint), "reword": sorted(reword),
+            "retype": sorted(retype)}
 
 
 async def _stored_card_rows(session_id: str) -> List[dict]:
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT rec_id, action, producer_answer, score_impact, message "
-            "FROM sqs_recommendation_audit WHERE session_id=$1",
+            "SELECT rec_id, action, producer_answer, score_impact, message, "
+            "recommendation_type FROM sqs_recommendation_audit WHERE session_id=$1",
             session_id,
         )
     return [dict(r) for r in rows]
@@ -266,6 +294,23 @@ async def _reword_open_cards(session_id: str, messages: dict) -> None:
                            OR action='resolved')
                       AND (producer_answer IS NULL OR producer_answer = '')""",
                 session_id, rid, str(msg),
+            )
+
+
+async def _retype_open_cards(session_id: str, types: dict) -> None:
+    """Give open, unanswered cards the type they show now - the WHERE clause
+    repeats the plan's test, like `_reword_open_cards`."""
+    if not types:
+        return
+    async with get_pool().acquire() as conn:
+        for rid, kind in sorted(types.items()):
+            await conn.execute(
+                """UPDATE sqs_recommendation_audit SET recommendation_type=$3
+                    WHERE session_id=$1 AND rec_id=$2
+                      AND (action IS NULL OR action='downloaded_anyway'
+                           OR action='resolved')
+                      AND (producer_answer IS NULL OR producer_answer = '')""",
+                session_id, rid, str(kind),
             )
 
 
@@ -324,12 +369,14 @@ async def sync_recommendation_cards(
                 out["presented"] += len(new)
         points = live_card_points(results)
         messages = live_card_messages(results)
-        plan = plan_card_sync(rows, live_card_ids(results), points, messages)
+        types = live_card_types(results)
+        plan = plan_card_sync(rows, live_card_ids(results), points, messages, types)
         await _reopen_system_closed_cards(session_id, plan["reopen"])
         out["reopened"] = len(plan["reopen"])
         await _repoint_open_cards(session_id, {rid: points[rid] for rid in plan["repoint"]})
         out["repointed"] = len(plan["repoint"])
         await _reword_open_cards(session_id, {rid: messages[rid] for rid in plan["reword"]})
+        await _retype_open_cards(session_id, {rid: types[rid] for rid in plan["retype"]})
         for rid in plan["resolve"]:
             if await mark_recommendation_resolved(
                 session_id=session_id, rec_id=rid,
@@ -446,9 +493,11 @@ async def run_and_log_field_qa(
         attention = None
         try:
             from services.needs_attention import needs_attention_for_session
+            # `audit=True`: the AI's refused values stay in this record (they
+            # left every user list - Brent, 23 Oct 2026).
             attention = await asyncio.to_thread(
                 needs_attention_for_session, generated_forms, merged_facts or {},
-                flags=flags or {}, docs=docs,
+                flags=flags or {}, docs=docs, audit=True,
             )
         except Exception as _na_ex:                       # noqa: BLE001
             logger.warning(f"needs_attention skipped for session {session_id}: {_na_ex}")
@@ -1445,6 +1494,11 @@ def _snapshot_signature(package_sqs: Optional[dict]) -> dict:
     reason = p.get("cap_reason")
     if isinstance(reason, str):
         reason = reason.split(" Fix:")[0].strip()
+    # The five 5.12 fields only (20 Oct 2026: the readiness keys of 19 Oct are
+    # gone again). Under the caps a hard stop opening or clearing moves the
+    # ceiling or its reason, so readiness says nothing these do not - and the
+    # extra keys made every signature stored before 19 Oct "changed" on its
+    # first recalculation, writing one empty E&O snapshot per old session.
     return {
         "raw_sqs":        p.get("raw_sqs_score"),
         "displayed_sqs":  p.get("package_sqs_score"),
@@ -1806,6 +1860,17 @@ async def get_audit_trail_export(session_id: str) -> dict:
             # class the client reported.
             if isinstance(raw, bool):
                 continue
+            # A two-way boolean's False that no person gave is every
+            # document's silence (B8; Brent 17 Oct item 3). The record listed
+            # it as a captured "No", value state explicit_no, citing each
+            # silent document as its source. Same door as the popup; a
+            # person's "No" is an answer and stays.
+            try:
+                from services.extraction_service import is_silent_boolean
+                if is_silent_boolean(key, raw):
+                    continue
+            except Exception:                                  # noqa: BLE001
+                pass
             row = _flatten_fact(key, raw, facts)
             if row:
                 if doc_index:
@@ -1869,8 +1934,9 @@ async def get_audit_trail_export(session_id: str) -> dict:
 # The review page a status is filed under (`severity`): the page whose Resolved
 # list shows it once it stops being listed. "recommendation" (13 Oct 2026) is a
 # fixed "Raise your score" / "Your forms will need" row, keyed "rec:..." by the
-# screen (frontend utils/recommendations.js).
-ISSUE_STATUS_PAGES = ("hard", "warning", "recommendation")
+# screen (frontend utils/recommendations.js). "overview" (23 Oct 2026) is a key
+# detail fixed on the Overview page, keyed "kd:..." (utils/resolvedIssues.js).
+ISSUE_STATUS_PAGES = ("hard", "warning", "recommendation", "overview")
 
 # ASYNC-SAFE
 async def set_issue_status(
@@ -1888,7 +1954,7 @@ async def set_issue_status(
 ) -> bool:
     now = datetime.now(timezone.utc).isoformat()
     # Only the review pages that keep a Resolved list - Hard Stops, Warnings and
-    # Recommendations (owner, 13 Oct 2026); anything else is not recorded (never
+    # Recommendations (owner, 13 Oct 2026) and Overview (23 Oct); anything else is not recorded (never
     # guessed).
     severity = severity if severity in ISSUE_STATUS_PAGES else None
     try:
@@ -2154,6 +2220,7 @@ async def current_unresolved_recommendations(session_id: str,
             flags=(session or {}).get("flags") or {},
             package_sqs=(session or {}).get("package_sqs") or None,
             docs=(session or {}).get("docs"),
+            audit=True,     # the E&O record keeps the refused values; the cover drops them
         )
         return with_live_attention_rows(rows, attention)
     except Exception as ex:                                  # noqa: BLE001

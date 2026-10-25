@@ -14,7 +14,8 @@
 4. A stated radius CLASS ("LOCAL") or a distance with its unit is a stated
    radius of operation (Auto Completeness -5 no longer charged).
 5. ONE GL-class-code reader (both homes, minus another line's codes) for the
-   legacy stop and the Exposure "Operations" -20.
+   legacy stop and the Exposure "Operations" -20 (Completeness's since 19 Oct
+   2026 - a missing code is missing information, not an exposure conflict).
 6. Owner's live bug (session ac300073): a 127-only package capped at 60 by
    "Business Income limit is specified but Period of Restoration is missing".
 """
@@ -164,7 +165,8 @@ def test_generation_scores_without_the_stale_stop():
         facts=session["facts"], flags=session["flags"], form_results=[],
         cross_issues=stops["cross_issues"], hard_stops=stops["hard"],
         soft_stops=stops["soft"], session_data=session, _probe=True)
-    assert "Minimum Viable COPE" not in str(pkg.get("cap_reason") or "")
+    # (19 Oct 2026: a hard stop also blocks Submission Ready; the 60 / 85 caps are back since 20 Oct) the stale stop must not block it.
+    assert not any("Minimum Viable COPE" in m for m in pkg["ready_blockers"])
 
 
 def test_the_pre_form_door_ignores_the_stored_lists():
@@ -173,7 +175,8 @@ def test_the_pre_form_door_ignores_the_stored_lists():
                "hard_stops": [MV_COPE_LEGACY], "soft_stops": [],
                "recommendations": [{"form_id": "ACORD_140"}]}
     pkg = score_package_pre_generation(session)
-    assert "Minimum Viable COPE" not in str(pkg.get("cap_reason") or "")
+    # (19 Oct 2026: a hard stop also blocks Submission Ready; the 60 / 85 caps are back since 20 Oct) the stale stop must not block it.
+    assert not any("Minimum Viable COPE" in m for m in pkg["ready_blockers"])
 
 
 def test_facts_as_stored_is_the_additive_write():
@@ -205,13 +208,18 @@ def test_underwriting_conflicts_keep_the_pipeline_rule():
          "values": [{"display": "$1"}, {"display": "$2"}]},
         {"fact_key": "umbrella_limit", "label": "Umbrella / Excess Limit", "review_required": True,
          "values": [{"display": "$4,000,000"}, {"display": "$5,000,000"}]},
+        {"fact_key": "fein", "label": "FEIN", "review_required": True,
+         "values": [{"display": "12-3456789"}, {"display": "98-7654321"}]},
     ]}
     with_prop = {k: b for k, _m, b in sn.underwriting_conflict_stops(
         uw, {"has_property_coverage": True})}
     without = {k: b for k, _m, b in sn.underwriting_conflict_stops(uw, {})}
-    assert without["property_building_value"] is False      # irrelevant -> a warning
-    assert with_prop["property_building_value"] is True     # relevant -> blocks (C75)
+    # (19 Oct 2026, Brent: only documents naming different companies block) a
+    # building value is a warning whether or not property is carried; a FEIN blocks.
+    assert without["property_building_value"] is False
+    assert with_prop["property_building_value"] is False
     assert with_prop["umbrella_limit"] is False
+    assert with_prop["fein"] is True and without["fein"] is True
     msgs = [m for _k, m, _b in sn.underwriting_conflict_stops(uw, {})]
     assert msgs[1] == ("Umbrella / Excess Limit: documents disagree ($4,000,000, $5,000,000). "
                        "Fix: Confirm the correct value to apply it across forms.")
@@ -410,8 +418,10 @@ def test_update_pdf_propagates_and_rederives():
     body = ast.get_source_segment(src, fn) or ""
     assert "propagate_fact_edits(" in body
     assert "_rederive_answer_dependent_facts(" in body
-    # the dependent facts are re-derived BEFORE the stops are rebuilt
-    assert body.index("_rederive_answer_dependent_facts(") < body.index("evaluate_stops(updated_facts")
+    # the dependent facts are re-derived BEFORE the stops are rebuilt (since
+    # 22 Oct 2026 by the stops door, on the facts the save will store)
+    assert body.index("_rederive_answer_dependent_facts(") < body.index(
+        'stops_now({**session, "facts": updated_facts')
 
 
 # ── 4. A stated radius ───────────────────────────────────────────────────────
@@ -469,8 +479,10 @@ def test_another_lines_codes_are_not_gl_codes():
     assert gl_class_codes(facts) == ["91580"]
 
 
-def test_the_stop_and_the_exposure_bucket_give_one_answer():
-    from services.sqs_service import _calculate_exposure_consistency, evaluate_stops
+def test_the_stop_and_the_completeness_item_give_one_answer():
+    from services.sqs_service import (
+        _calculate_exposure_consistency, completeness_deduction_items, evaluate_stops,
+    )
     flags = {"has_general_liability": True}
     for facts, present in (
         ({"gl_class_code_schedule": [{"class_code": "91580"}]}, True),
@@ -479,8 +491,11 @@ def test_the_stop_and_the_exposure_bucket_give_one_answer():
         _score, sub = _calculate_exposure_consistency(facts, flags, [], [])
         _hard, soft = evaluate_stops(facts, flags)
         warned = any("no class codes found" in m for m in soft)
-        charged = sub["operations_description"] <= 80
+        # (19 Oct 2026, Brent: missing information is Completeness's) the -20 moved there.
+        charged = any(i["fact"] == "gl_class_codes_by_location" and i["points"] == 20
+                      for i in completeness_deduction_items(facts, flags, [], []))
         assert warned is (not present) and charged is (not present), facts
+        assert sub["operations_description"] == 100, facts     # never an exposure conflict
 
 
 # ── 6. Business Income / Period of Restoration on a package without ACORD 140 ─
@@ -504,7 +519,8 @@ def test_bi_without_restoration_does_not_block_a_127_only_package():
         facts=session["facts"], flags=session["flags"], form_results=[],
         cross_issues=stops["cross_issues"], hard_stops=stops["hard"],
         soft_stops=stops["soft"], session_data=session, _probe=True)
-    assert "Period of Restoration" not in str(pkg.get("cap_reason") or "")
+    # (19 Oct 2026: a hard stop also blocks Submission Ready; the 60 / 85 caps are back since 20 Oct) nothing about BI may block it here.
+    assert not any("Period of Restoration" in m for m in pkg["ready_blockers"])
 
 
 def test_bi_without_restoration_still_flags_the_140():

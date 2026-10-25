@@ -496,6 +496,8 @@ def test_package_top_recommendations_do_not_ask_for_workers_comp():
 # GL+Property roofing contractor with no WC facts, a wrongly-true flag cost the
 # package 3 SQS points and the Exposure pillar 14. Fixing the flag once at the
 # seam is one rule in one place instead of five gated consumers.
+# (19 Oct 2026, Brent: missing details are Completeness) the same flag now costs
+# the package 2 points and Structural 15 - the WC asks moved there.
 
 CERT_FACTS = {
     "account_description": "ABC Roofing LLC, roofing contractor since 2009.",
@@ -512,20 +514,25 @@ def test_a_blank_certificate_row_demotes_the_mention_flag():
     assert flags["has_workers_comp"] is False
 
 
-def test_the_demotion_restores_the_exposure_pillar():
+def test_the_demotion_restores_the_completeness_pillar():
     def _pillars(flags):
         pkg = S.calculate_package_sqs(
             facts=CERT_FACTS, flags=flags, form_results=[], cross_issues=[],
             hard_stops=[], soft_stops=[],
             session_data={"docs": [], "facts": CERT_FACTS})
-        return pkg["package_sqs_score"], pkg["pillars"]["exposure_consistency"]
+        return (pkg["package_sqs_score"], pkg["pillars"]["structural_completeness"],
+                pkg["pillars"]["exposure_consistency"])
 
     wrong = _pillars({"has_workers_comp": True})
     fixed_flags = {"has_workers_comp": True}
     LP.reconcile_line_flags(fixed_flags, CERT_FACTS)
     fixed = _pillars(fixed_flags)
     assert fixed[0] > wrong[0], (wrong, fixed)
+    # (19 Oct 2026, Brent: missing details are Completeness) the wrong flag's WC payroll and
+    # class-code asks are Structural's, so that is the pillar the demotion restores...
     assert fixed[1] > wrong[1], (wrong, fixed)
+    # ...and Exposure now states the one real conflict the flag hid: 12 employees, no WC.
+    assert (wrong[2], fixed[2]) == (100, 92), (wrong, fixed)
 
 
 def test_a_genuine_wc_package_keeps_its_flag():

@@ -121,6 +121,25 @@ def _schedule_keys() -> frozenset:
     return _CACHE["sched"]
 
 
+def _answered_by_tables() -> Dict[str, str]:
+    """{fact: the capture table that answers it} - every table's own
+    `answers` declaration (schedule_capture.ScheduleDef). The GL classification
+    window answers `gl_class_codes_by_location` (21 Oct 2026, Brent 17 Oct item
+    6: one window, both GL pop-ups): a card asking that fact opens the table,
+    never a free-text box beside it."""
+    if "answers" not in _CACHE:
+        out: Dict[str, str] = {}
+        try:
+            from services import schedule_capture
+            for key, defn in (getattr(schedule_capture, "SCHEDULE_DEFS", {}) or {}).items():
+                for fact in (defn.get("answers") or ()) if isinstance(defn, dict) else ():
+                    out.setdefault(str(fact), str(key))
+        except Exception:                                      # pragma: no cover
+            out = {}
+        _CACHE["answers"] = out
+    return _CACHE["answers"]
+
+
 def _narrative_keys() -> frozenset:
     """Facts whose value is PROSE (narrative_facts.NARRATIVE_FACT_KEYS)."""
     if "narr" not in _CACHE:
@@ -242,6 +261,13 @@ def answer_mode(field: Optional[str], facts: Optional[dict] = None) -> Dict[str,
     if canon in _schedule_keys():
         return {"mode": MODE_SCHEDULE, "fact": canon, "schedule_key": canon}
 
+    # A fact a capture table ANSWERS (its `answers` declaration): the table is
+    # the one place to give it (the GL window, 21 Oct 2026). The typed write
+    # door is untouched (`can_write_scalar`) - only what a card offers moves.
+    _table = _answered_by_tables().get(canon)
+    if _table and _table in _schedule_keys():
+        return {"mode": MODE_SCHEDULE, "fact": _table, "schedule_key": _table}
+
     if canon in _narrative_keys():
         return {"mode": MODE_NARRATIVE, "fact": canon}
 
@@ -272,6 +298,37 @@ def can_write_scalar(field: Optional[str], facts: Optional[dict]) -> bool:
     if accepts_typed_input(canon):
         return True
     return not holds_rows((facts or {}).get(canon))
+
+
+def per_building_redirect(field: Optional[str], facts: Optional[dict]) -> Optional[Dict[str, Any]]:
+    """The PRODUCER write door's half of one store (21 Oct 2026, review M2).
+
+    A typed per-building COPE fact (year built, construction, building / BPP
+    value...) on a package with 2+ buildings is refused: one typed value would
+    earn every building's points and print on building 1 only. The reply opens
+    the location table instead - `{"answer_mode": "schedule", "schedule_key",
+    "resolution", "message"}`, the shape the editor's "the server says it is a
+    table" path already reads. None = write as usual (any other fact, one
+    building). Read by the producer routes only (`audit_routes.
+    answer_recommendation`, `resolve_issue` field mode); the client
+    questionnaire's own apply is not changed here."""
+    try:
+        canon = _canonical(str(field or "").strip()) if field else None
+        from services.premises_cope import building_row_count, per_building_fix
+        per = per_building_fix(canon or field, facts)
+        if not per:
+            return None
+        n = building_row_count(facts)
+        return {
+            "answer_mode": MODE_SCHEDULE,
+            "schedule_key": per["schedule_key"],
+            "resolution": per,
+            "message": (f"This package has {n} buildings - enter this for each "
+                        "building in the location table."),
+        }
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("answer_routing: per-building redirect skipped for %r (%s)", field, ex)
+        return None
 
 
 def refusal_note(field: Optional[str], facts: Optional[dict] = None) -> str:
@@ -309,7 +366,38 @@ def stamp_recommendation(rec: Any, facts: Optional[dict] = None) -> Any:
         rec["answer_note"] = routed["note"]
     if rec.get("informational") and routed["mode"] == MODE_NONE:
         rec["answer_note"] = NOTE_INFORMATIONAL
+    _stamp_per_building(rec, routed, facts)
     return rec
+
+
+def _stamp_per_building(rec: dict, routed: Dict[str, Any], facts: Optional[dict]) -> None:
+    """ONE STORE FOR BUILDING DETAILS (21 Oct 2026, Brent 17 Oct item 8).
+
+    A typed per-building COPE fact on a package with 2+ location rows is asked
+    per building in the location table (`premises_cope.per_building_fix` - the
+    one door the COPE cards and the Recommendations rows read): the card opens
+    that table with its column (`resolution`) instead of a box whose one value
+    would stand for every building. A route this stamped earlier that the
+    package no longer needs (it lost a building) is taken back, so a re-stamp
+    is always the facts' own answer. `answer_mode()` itself is unchanged: it
+    answers for the FACT, this for the card on THIS package."""
+    try:
+        own = rec.get("resolution")
+        ours = isinstance(own, dict) and own.get("per_building") is True
+        per = None
+        if routed.get("mode") == MODE_FIELD:
+            from services.premises_cope import per_building_fix
+            per = per_building_fix(routed.get("fact") or rec.get("field"), facts)
+        if per:
+            rec["answer_mode"] = MODE_SCHEDULE
+            rec["schedule_key"] = per["schedule_key"]
+            rec["resolution"] = per
+        elif ours:
+            rec.pop("resolution", None)
+            if not routed.get("schedule_key") and rec.get("schedule_key") == own.get("schedule_key"):
+                rec.pop("schedule_key", None)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("answer_routing: per-building stamp skipped for %r (%s)", rec.get("rec_id"), ex)
 
 
 def stamp_recommendations(recs: Optional[List[Any]],

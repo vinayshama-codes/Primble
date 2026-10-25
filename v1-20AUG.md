@@ -12179,3 +12179,226 @@ Full record, root causes, replays and D6 tables: `25sepChanges.md` "Step 2". In 
   business revenue (never $0), landlord asked when Tenant (not printed yet).
 Verification: FR125 312 of 312 with stamps byte-identical; Orbin replay moves only the 2 dates and 5 premiums; D6 panel
 0 of 12 moved; suite 10,544 / 1 (known) / 19 after the review fixes. Nothing committed.
+
+## 19 Oct 2026 - Brent's answers: expiring premiums, WC / EL vs EBL, required values (decisions, nothing built)
+Full analysis, the measured "today vs his rule" table, the plan and the new questions: `25sepChanges.md` part **Z27**.
+- **D58 (Brent)** - ACORD 125 Prior Carrier "Other" column = the primary umbrella / excess unless the agent picks another;
+  every other expiring policy on ACORD 101 (carrier, policy number, dates, limits, premium); a missing premium is blank +
+  "Missing / Requires Confirmation", never $0 or estimated; page 1's six Other rows are lines APPLIED FOR, never overflow.
+- **D59 (Brent)** - WC + Employers Liability = ACORD 130; Employee Benefits Liability = the liability form (ACORD 126 when
+  written with GL), never the 130, never inferred; EL and EBL never interchangeable; keep source + page for every
+  extracted coverage and limit.
+- **D60 (Brent)** - no numeric 60 cap: a hard stop blocks "Submission Ready" (status) until resolved; true hard stops
+  only for information essential to the coverage applied for; missing information is penalised once (Completeness);
+  Exposure Consistency deducts only for conflicts between documented exposures. Our calls (Z27, pending the owner's OK): the 85 cap goes too; a short hard-stop list;
+  Exposure's missing items move to Completeness with the same points (both pillars 25%) - Brent sees the D6 table.
+
+## 19 Oct 2026 - BUILT: Brent's answers + the owner-approved calls (offline, uncommitted)
+What changed and the D6 table: `25sepChanges.md` part **Z28** (A expiring policies, B WC / EBL / pages, C the SQS rule).
+- **D61 (owner)** - **REVERSED 20 Oct by D72 (the caps are back).** No numeric ceiling anywhere: the 85 goes with the 60,
+  on the package and on every form. The number is the weighted pillar sum; a credit moves tier and routing with the
+  number. D6: 927 packages, 521 up, 0 down (final code).
+- **D62 (owner)** - The hard-stop list is five kinds:
+  - documents naming different companies (name / FEIN; integrity is its own block);
+  - no proposed term (missing, invalid or person-typed and ended);
+  - property without Minimum Viable COPE;
+  - a monopolistic state with a private carrier;
+  - an umbrella with no underlying limits.
+
+  Everything else that was hard is a warning: policy-date differences, building value, split auto limits, the
+  monopolistic breakdown, and four per-form cards. The building-value generation 409 is removed, and the gate stays the
+  one door (an empty key set).
+- **D63 (ours)** - Exposure Consistency = conflicts between documented EXPOSURES only:
+  - class codes vs operations;
+  - payroll vs revenue;
+  - employees with no WC;
+  - vehicles with no auto;
+  - the cross-form checks that compare exposures, and the building value.
+
+  Identity disagreements (name, FEIN, DBA, addresses, entity type, dates, lines, carriers) are not exposures and cost no
+  Exposure points; name / FEIN block Submission Ready. (Under the caps, D72, an open name / FEIN conflict holds the
+  score at 60 and the other identity disagreements at 85 until confirmed in Data Consistency.) Reversible in one line (`_cross_is_conflict`) if Brent reads it otherwise.
+- **D64 (ours)** - The missing coverage details are Completeness, at the same points: the Structural part "Coverage
+  Details" (GL / WC / auto details, Auto Completeness, WC Supplemental). A non-conflict cross-form check costs 5 only when
+  no pillar already charges a fact it asks for, so the same missing information is never charged twice. D6: 0 of 20
+  uncapped packages moved. The floor (Structural at 0, on 145 of 927 packages; 18 at HEAD) drops part of the charge
+  on 113 of them: mean 4.4 package points, max 25 (corrected 20 Oct from the pre-review run's 118 / 3.6). The un-doubled checks add 1.25 points each.
+- **D65 (ours)** - One conflict, one blocker. The document check and the picker state the same name / FEIN conflict
+  twice, so the blocker count keeps the picker's row (the one the screen draws), coded so it opens Data Consistency.
+- **D66 (ours)** - The EBL premium is not placed on ACORD 126 (no labelled box; its total would not reconcile). It is
+  listed on ACORD 101 with its policy, and the 126 EBL limit is blank + "Missing / Requires Confirmation" when not
+  printed.
+- **D67 (ours)** - WC endorsements are data (`_wc_endorsements`, the WC policy's own schedule pages). ACORD 130's one
+  box points to ACORD 101, which lists the schedule. Rating-worksheet factors are not extracted.
+- **D69 (ours, from the 19 Oct review)** - "Never twice" holds across pillars, not only between Exposure and
+  Completeness. A missing detail another pillar already charges for its own reason costs nothing more in
+  Completeness: on an umbrella package that is the underlying GL each-occurrence and auto liability limits, which the
+  Umbrella pillar charges at 20. A check whose fix is a table counts that table. Scores move UP on those packages
+  (D6 in Z28 D) - tell Brent with the rest.
+- **D70 (ours)** - **VOID 20 Oct (D72: the caps are back, the bridge is removed).** A score stored before 19 Oct keeps
+  its own ceiling until it is re-scored. A credit patched onto
+  an old payload does not lift it off its old cap, so the number, tier and readiness stay one rule. The next
+  recalculation moves it to the new one.
+- **D71 (owner, 20 Oct)** - A missing proposed effective date STAYS a hard stop (the one hard stop added on 19 Oct;
+  it was a warning). A submission cannot be quoted without a term, which is Brent's "essential" test. On the 927
+  stored packages it shows on 67 packages that had no hard stop before; all of them were already held back by the old
+  85 warning cap. Brent is asked to confirm it in the hard-stop e-mail of 20 Oct.
+- **D72 (owner, 20 Oct) - REVERSES D61, voids D70.** The caps come back exactly as before: an open hard stop holds the
+  score at 60 and an open warning at 85, on the package and on every form, and credits clamp to the cap
+  (`25sepChanges.md` Z28 E). D62's short hard-stop list stands, so a former hard stop that is now a warning holds 85,
+  and a missing proposed effective date holds 60 (D71). D70's bridge (an old payload keeps its stored ceiling) is
+  removed - it existed only for the move to no cap. Readiness (D60's status) stays beside the number and always agrees
+  with it under the caps. This goes against Brent's written "Do not automatically cap the SQS at 60" (D60); the 20 Oct
+  update tells him the caps are still there and lists what left the hard-stop list. D6: 927 packages, 444 up / 17 down (the effective-date hard stop, at most
+  -13), mean 56.7 -> 58.2; 403 held at 60 (348 at HEAD), 504 at 85 (559).
+  The review of the restoration (20 Oct, part Z28 E) fixed four places where a cap still did not hold:
+  - the scorer's own reclassified items hold their 85 on every path - a building-value conflict held no cap at all
+    after forms;
+  - a credit never passes the payload's own ceiling - a form's gate was released by the first credit, open since
+    31 Aug;
+  - the missing effective date's card is typed hard stop;
+  - the E&O signature is 5.12's five fields again.
+- **D73 (Brent, 20 Oct reply) - three hard-stop rules made explicit, NOT BUILT** (analysis: `25sepChanges.md` Z29).
+  - **Effective date:** a hard stop only when Primble cannot find or confirm a valid proposed effective date. Never just
+    because an uploaded prior / current policy expired.
+  - **Umbrella / excess:** a hard stop when it is selected and the APPLICABLE underlying liability limits cannot be
+    identified. Both GL and Auto are not required.
+  - **Monopolistic WC:** a hard stop only when private-carrier WC is requested with no state-fund acknowledgment.
+  - **All three:** a hard stop only on VERIFIED information; otherwise flag it for confirmation.
+  - **"Forms Ready stays separate from SQS."**
+
+  Today the effective-date and monopolistic rules match; the monopolistic rule's three phantom inputs (no writer) need
+  cleaning up. Gaps:
+  - backwards dates hard-stop even when only read from a document;
+  - the umbrella check ignores Employers Liability and the umbrella's own schedule;
+  - partial underlying limits are undecided;
+  - the identity hard stop fired on a misread narrative (17 Oct item 4).
+
+  Rechecked 21 Oct: most were answered by his own words; only B2 (the claims file's two copies) and B3
+  (questionnaire priority) are open - Z29-4. B1 (umbrella partial) is answered by his rule text: every applicable
+  underlying limit must be found; one missing = hard stop when that line is known to sit under the umbrella.
+- **D68 (ours)** - ACORD 125 placement rules:
+  - Other column: the agent's pick, else umbrella, then excess (lowest layer), then the largest premium, with WC last;
+  - page 1 over six lines: the rest go on ACORD 101;
+  - an EBL part written with GL by the same company takes no page-1 row;
+  - two unnumbered policies the table lists apart in one grid box: the box is blank and both are listed on ACORD 101.
+
+## D74 - 21 Oct 2026: build of the items needing neither Brent nor the open discussion (25sepChanges.md part Z30)
+
+Owner: "begin the implementation ... do not break anything".
+
+**Built (offline, uncommitted)** - from Brent's 17 Oct test items 1, 2, 3, 4, 5, 8 and 9, item 10's two ACORD 131
+warnings, and his 20 Oct rules:
+- backwards / expired terms judged by who supplied the date;
+- the umbrella "applicable underlying" rule;
+- monopolistic: only the private-carrier option is a hard stop.
+
+**How it was built:** seven agents, each item followed by an adversarial review whose findings were fixed. Each item
+ran only its own new tests; the full suite ran once at the end (owner, 15:18).
+
+**Decisions taken for Brent:** the full list is in Z30-D. Headlines:
+- a "verified source" (document type, type confidence, not supporting-only, OCR) decides whether a name / FEIN
+  difference is a hard stop;
+- loss runs and mod worksheets count as verified;
+- "known to sit under the umbrella" = the umbrella's own schedule lists the line (a line the package merely carries is
+  a warning);
+- a backwards term is hard only when a person supplied BOTH dates; the expired-term stop only when a person supplied
+  the expiration; a backwards save is refused;
+- on 2+ buildings, building details are asked per building everywhere on the producer's screens;
+- Excel formats accepted / refused;
+- years of experience is never turned into a licensed year.
+
+**D6:** on the offline 11-package panel, 0 of 12 rows moved for every item. The identity item measured 14 of 927
+stored packages up and 0 down; its agent did this before the owner's no-sweep rule reached it.
+
+**Open, owner's call:**
+- the silent agreed-value False switches off the coinsurance warning;
+- the client questionnaire still asks building details as one answer;
+- an expired proposed term is not refused at save.
+
+## D75 - 21 Oct 2026 night: second build run (25sepChanges.md part Z31)
+
+**Built (offline, uncommitted):**
+- item 6, the GL classification window;
+- attachment C, the claims checks;
+- every Excel number format in both readers, from one shared vector file;
+- the unused ZIP reader removed;
+- one "typed by a person" door;
+- P15-1, 2, 3, 4 and 7.
+
+**How:** each item was implemented, adversarially reviewed and fixed. The full suite ran once at the end.
+
+**Decisions for Brent:** in Z31-D.
+
+**D6:** 0 of 12 panel rows moved, for every lane.
+
+## D76 - 21 Oct 2026 night: waiting on Brent's answers
+
+What is sent, what waits and what is ours for later: 25sepChanges.md Z31-S. Nothing is built from the open discussion until he answers.
+
+## D77 - 21 Oct 2026 night: the overall backlog for the next session
+
+In 25sepChanges.md Z31-N: commit, then ours (C), then a live run to size the wrong-value class (B).
+
+## D78 - 22 Oct 2026: the no-input backlog (25sepChanges.md part Z32)
+
+**Built (offline, uncommitted):**
+- STOPS: one stops door after forms, the cover's hard stops, the ended-term refusal, the GL misfile;
+- FACTS: extracted non-answers, placeholder names, prefix-less policy numbers;
+- SMALL: "Needs Verification" review, total rows, PII logging, the purge comment;
+- POLICY: questionnaire answers per policy.
+
+**How:** one combined review found two real defects (order-dependent contract folding; NAIC spread across two
+companies with near-identical names). Both are fixed. The full suite ran once at the end.
+
+**Decisions for Brent:** in Z32-D.
+
+## D79 - 22 Oct 2026: the four held items and what testing found (25sepChanges.md part Z33)
+
+**Built (offline, uncommitted):** per-building client questions; the ended-term refusal in the client questionnaire and the PDF editor; the 126 printing a typed GL code the WC table repeats; the lite paths' cross list from `stops_now`. Then, on the owner's ask, a client answer that fails its fact's check is held for the producer, and certificate dates stay on the certificate.
+
+**Found while testing, fixed (pre-existing):** checkbox ticks writing "Yes" into value facts (the GL aggregate limit); the editor's second named insured overwriting the applicant name; ACORD 131 underlying and certificate dates writing the proposed term; a 126 claims-made "Yes" stored as the GL form type; validators refusing their own listed values ("Masonry", "Replacement Cost", "8B", ".87").
+
+**How:** two lanes, then one fix agent; two reviews (one HIGH: every typed "Other" answer was held - fixed); the full suite ran green.
+
+**Tell Brent:** in Z33-FOLLOWUPS (the monopolistic "Other:" reading among them).
+
+## D80 - 23 Oct 2026: Brent's answers of 23 Oct (25sepChanges.md part Z34) - nothing built yet
+
+**Decided by Brent (to build when the owner says):**
+- The package score is independent of the forms; the Form Fill Rate moves to a separate "Forms ready" meter ("Yes,
+  this is acceptable"; "okay for now. Subject to change"). Reverses the after-forms fill slice kept since 13 Oct (Z6).
+- Attested No Known Losses: keep the logic, present it as "Unable to Verify / Confirmation Required". Loss runs are
+  judged against the years the business has existed; a business older than the runs provided keeps the gap as
+  incomplete.
+- The excess 131 lists the applicable underlying lines (GL, Auto, Employers Liability, other), never all three by
+  default. Extends his 7 Oct rule (excess maps to the umbrella below). A follow-form excess with a known attachment
+  point loses nothing for a missing SIR; neither known = flag for review.
+- A redacted premium gives a partial 125 total.
+- The state of operations: insured evidence only (garaging, premises, WC class rows, the insured's address), per
+  coverage, else unverified and asked. Approves part P (8 Oct).
+- Refused AI values: audit record only; possibly withheld altogether later.
+- The narrative questionnaire is its own page, mostly filled from the documents, showing only what is relevant.
+- The umbrella carried-but-unlisted line is a warning (already built in Z30).
+
+**Still open:** Q1 (after-forms items - he asked us to clarify); Q4 (per-form scores - TBD).
+
+**Asked of us:** thoughts on a simulated SQS from e-labels; a timeline for the core forms and then the 800+; two
+vendor API keys (address validation, narrative enrichment). His next test (24 Oct) re-uploads the downloaded forms and
+expects the same 97.
+
+## D81 - 23 Oct 2026: Brent's 23 Oct answers built, items 1-6 (25sepChanges.md part Z35)
+
+**Built (offline, uncommitted):** one package number before and after forms + a "Forms ready" meter; Loss History
+"Unable to Verify / Confirmation Required" + loss runs judged by business age; the excess 131 lists the applicable
+underlying lines, SIR or attachment point; a partial 125 total; the state per coverage from insured evidence (the
+recommender's logic untouched, its input only); "AI held back" removed from user screens (refused values to the audit
+record only).
+
+**How:** three lanes, one combined review (3 findings, all fixed), the full suite once: 19,630 / 1 / 18.
+
+**Open:** form-choice stops after forms (the number can still differ - owner's call); tower GL / Auto / EL boxes now
+in the shared gap fill (live run); the narrative questionnaire page is next (last page before form selection).
+
+**Tell Brent:** in Z35-D.
+

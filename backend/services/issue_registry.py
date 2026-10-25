@@ -106,6 +106,7 @@ CLUSTER_MAP: Dict[str, str] = {
     # Contractor / subcontracting
     "contractor_missing_acord186": "Contractor exposure (ACORD 186)",
     "acord127_missing_state_137": "Auto state section (ACORD 137)",
+    "auto_state_unverified": "Auto state section (ACORD 137)",
     "acord186_high_sub_high_wc_payroll": "Contractor exposure (ACORD 186)",
     "high_subcontracting_no_wc_payroll": "Subcontracting vs. WC payroll",
     # Umbrella
@@ -150,6 +151,8 @@ CLUSTER_MAP: Dict[str, str] = {
     "legal_name_equals_dba": "Identity data quality",
     # Narrative
     "acord101_required": "Narrative requirement (ACORD 101)",
+    # Expiring policies ACORD 125 has no box for (Brent, 19 Oct 2026)
+    "acord101_for_expiring_policies": "Prior carrier information (ACORD 101)",
     # Coverage terminology / data consistency (2026-09-03). Both were falling
     # into DEFAULT_CLUSTER, which put an advice-only terminology note and a
     # pillar-capping loss conflict in ONE cluster headed "Other validations" -
@@ -181,6 +184,7 @@ TIER_MAP: Dict[str, str] = {
     "wc_subcontracting_payroll_conflict": "recommended",
     "contractor_missing_acord186": "recommended",
     "acord127_missing_state_137": "recommended",
+    "auto_state_unverified": "recommended",
     "acord186_high_sub_high_wc_payroll": "recommended",
     "umbrella_gl_attachment_failure": "recommended",
     "umbrella_gl_limits_not_found": "recommended",
@@ -206,6 +210,7 @@ TIER_MAP: Dict[str, str] = {
     "certificate_requested_but_acord25_missing": "recommended",
     "property_evidence_requested_but_acord28_missing": "recommended",
     "acord101_required": "recommended",
+    "acord101_for_expiring_policies": "recommended",
 
     "builders_risk_property_duplication": "binder_followup",
     "inland_marine_property_overlap": "binder_followup",
@@ -339,6 +344,11 @@ def _r_schedule(schedule_key: str) -> dict:
     return {"mode": "schedule", "schedule_key": schedule_key}
 
 
+# The GL classification window's item on the review (21 Oct 2026, Brent 17 Oct
+# item 6) - his own title for the one window both GL warnings open.
+GL_WINDOW_CLUSTER = "General Liability Classification & Exposure Details"
+
+
 def field_resolution(*facts: str) -> dict:
     """A field-mode fix for `facts`, shaped exactly as every card's (answer
     choices attached by `_copy_resolution`). The pre-form dry run
@@ -446,15 +456,20 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # ACORD 127 itself prints "USE ACORD 137 FOR YOUR STATE TO PROVIDE
     # COVERAGES / LIMITS INFORMATION" - the form is the fix.
     "acord127_missing_state_137": _R_NONE,
+    # The state question (Brent, 23 Oct 2026): a person's answer is the one
+    # value of `state_of_operations` the state readers count.
+    "auto_state_unverified": _r_field("state_of_operations"),
     "acord186_high_sub_high_wc_payroll": _r_field("percent_subcontracted", "wc_payroll"),
     "high_subcontracting_no_wc_payroll": _r_field("wc_payroll"),
     # ── Umbrella ──
     # The rule clears as soon as ANY underlying limit is on record, and all three
     # are writable canonical facts - so this is typed, not "add a form". It was
     # _R_NONE until 2026-08-08, which meant a HARD STOP capping the package at 60
-    # rendered a dead button. Its legacy twin is typed the same way.
+    # rendered a dead button. Its legacy twin is typed the same way. An
+    # employers liability limit clears it too (21 Oct 2026, Brent's rule 2).
     "umbrella_no_underlying_coverage": _r_field(
-        "gl_each_occurrence", "gl_limits", "auto_liability_limit"),
+        "gl_each_occurrence", "gl_limits", "auto_liability_limit",
+        "employers_liability_limits"),
     "umbrella_sir_below_gl_deductible": _r_field("umbrella_sir", "gl_deductible"),
     "umbrella_gl_period_misaligned": _r_field("umbrella_effective_date", "effective_date"),
     "umbrella_gl_expiration_misaligned": _r_field("umbrella_expiration_date", "expiration_date"),
@@ -536,6 +551,12 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "legal_name_equals_dba": _r_field("dba_name"),
     # ── Narrative requirement ──
     "acord101_required": _R_NARRATIVE,
+    # `none` MODE + add_forms (19 Oct 2026): the only fix is the form - ACORD 101
+    # prints the expiring policies ACORD 125 has no box for. The note shows only
+    # where the card has no Add button.
+    "acord101_for_expiring_policies": _r_review(
+        "Add ACORD 101 to the package: it lists the expiring policies and the "
+        "endorsements the other forms have no room for."),
     # ── A coverage part to place on a line (client 1.7 / SYS-05) ──
     # 14 Oct 2026 (owner: "give user to enter the correct option"). The fact
     # this note said did not exist now does: `lob_canon.PART_LINES_FACT`, one
@@ -1010,10 +1031,11 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_valuation_method_missing", _r_field("valuation_method")),
     # The property-integrity gate's LAST-RESORT sentence, for a future branch
     # that raises the gate without naming its own cause. Unreachable from
-    # today's code - every branch calls `_prop_hard_because` /
-    # `_prop_soft_because`, pinned by
+    # today's code - every branch calls `_prop_soft_because` (the gate is a
+    # warning, 85, since 19 Oct 2026: its one hard cause, Period of Restoration,
+    # left Brent's hard-stop list), pinned by
     # `test_legacy_rules.test_the_property_gate_always_names_its_cause` - but a
-    # 60-cap must never be able to print without a fix, so it carries the four
+    # cap must never be able to print without a fix, so it carries the four
     # facts the four property gates are actually about.
     ("Property details are incomplete", "Property COPE completeness", "required",
      "legacy_property_integrity_gate", _r_field(
@@ -1023,7 +1045,8 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_valuation_basis_conflict", _r_field("valuation_method")),
     ("Business Income coverage detected", "Business Income coverage", "recommended",
      "legacy_bi_no_limit", _r_field("business_income_limit", "period_of_restoration")),
-    # The PROPERTY-INTEGRITY GATE's own sentence (sqs_service `_prop_hard_because`).
+    # The PROPERTY-INTEGRITY GATE's own sentence (sqs_service `_prop_soft_because`
+    # - a warning, 85, since 19 Oct 2026; it was the gate's one hard cause).
     # It must sit above the generic "Business income limit" FORMAT row at the
     # bottom of this table: first match wins on substring, and that row would
     # otherwise claim it and offer only `business_income_limit` - the one fact
@@ -1044,10 +1067,17 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # `evaluate_stops`' append sites, and these are passed to `_resolve_cap`
     # instead), which is exactly why they went unnoticed. That blind spot is now
     # closed by `test_legacy_rules._harvest_cap_gate_reasons`.
+    # 21 Oct 2026 (Brent's rule 2, `sqs_service.umbrella_underlying`): an
+    # employers liability limit identifies the underlying too, so both "no
+    # underlying" windows offer its box - an umbrella over EL only clears with
+    # the one value it can have. The sentences keep their wording (and their
+    # issue ids): they fire only when EL and the umbrella's schedule are
+    # missing as well, so they stay true.
     ("Umbrella present with no underlying GL or Auto limits",
      "Umbrella underlying coverage", "required",
      "legacy_umbrella_gate_no_underlying", _r_field(
-         "gl_each_occurrence", "gl_limits", "auto_liability_limit")),
+         "gl_each_occurrence", "gl_limits", "auto_liability_limit",
+         "employers_liability_limits")),
     ("Umbrella coverage is present but its supporting detail is incomplete",
      "Umbrella underlying coverage", "required",
      "legacy_umbrella_gate_detail_incomplete", _r_field(
@@ -1056,7 +1086,29 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
          "schedule_of_underlying_insurance", "umbrella_follow_form")),
     ("Umbrella detected but no underlying", "Umbrella underlying coverage", "required",
      "legacy_umbrella_no_underlying", _r_field(
-         "gl_each_occurrence", "gl_limits", "auto_liability_limit")),
+         "gl_each_occurrence", "gl_limits", "auto_liability_limit",
+         "employers_liability_limits")),
+    # A line the umbrella's OWN schedule of underlying insurance lists with no
+    # limit found anywhere (21 Oct 2026): a hard stop ("..., but no underlying
+    # <line> limit was found") or, when the schedule also prints amounts it does
+    # not tie to one line, a warning ("... - confirm the underlying <line>
+    # limit"). Both carry the line, so each line's row opens that line's box;
+    # the generic row (last) holds the f-string's opening words, which is what
+    # the legacy-message harvest reads.
+    ("schedule of underlying insurance lists general liability",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_scheduled_gl_limit_missing", _r_field("gl_each_occurrence", "gl_limits")),
+    ("schedule of underlying insurance lists auto liability",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_scheduled_auto_limit_missing", _r_field("auto_liability_limit")),
+    ("schedule of underlying insurance lists employers liability",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_scheduled_el_limit_missing", _r_field("employers_liability_limits")),
+    ("Umbrella's own schedule of underlying insurance lists",
+     "Umbrella underlying coverage", "required",
+     "legacy_umbrella_scheduled_limit_missing", _r_field(
+         "gl_each_occurrence", "gl_limits", "auto_liability_limit",
+         "employers_liability_limits")),
     ("Umbrella SIR", "Umbrella underlying coverage", "required",
      "legacy_umbrella_sir_below_gl_deductible", _r_field("umbrella_sir", "gl_deductible")),
     ("Umbrella attaches over WC but Employers Liability", "Umbrella Employers Liability", "binder_followup",
@@ -1081,6 +1133,16 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_umbrella_underlying_below_minimum", _r_field("auto_liability_limit")),
     ("Umbrella limit", "Umbrella attachment limits", "recommended",
      "legacy_umbrella_limit", _r_field("umbrella_limit")),
+    # ── Loss History: the narrative vs the claims answer (24 Oct 2026) ──────
+    # Both sentences (`sqs_service.evaluate_stops`). The window asks the claims
+    # question with its two answers; the note says how the other half is fixed:
+    # the questionnaire page's L.6 box shows the whole remarks and an edit there
+    # REPLACES them (`questionnaire_routes._answer_remarks`).
+    ("Loss History: your narrative says there were", "Loss history conflict", "required",
+     "legacy_loss_narrative_mismatch", {**_r_field("loss_history_no_prior_losses_indicator"), "note": (
+         "If this answer is right, correct the narrative instead: on the Narrative "
+         "questionnaire page, edit \"Additional remarks and explanations for the "
+         "underwriter\" and change what its Loss History Discussion says about claims.")}),
     # ── GL / claims-made ─────────────────────────────────────────────────────
     ("GL policy is claims-made - retro date is required", "Claims-made continuity", "recommended",
      "legacy_gl_claims_made_retro_date", _r_field("retro_date")),
@@ -1112,10 +1174,22 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # subcontracted %); offering it as a single text box is the scalar-over-a-
     # table shape BUG-05 exists to prevent. The rule reads BOTH facts, so
     # filling either one clears it - and this is the one a producer can state.
-    ("GL coverage detected but no class codes found", "GL class code alignment", "recommended",
-     "legacy_gl_no_class_codes", _r_field("gl_class_codes_by_location")),
-    ("GL coverage detected but no revenue or payroll found", "GL exposure basis", "recommended",
-     "legacy_gl_no_exposure_basis", _r_field("total_revenue", "total_payroll")),
+    #
+    # ONE WINDOW FOR BOTH (21 Oct 2026, Brent 17 Oct item 6: "combine the two
+    # existing GL pop-ups into one titled General Liability Classification &
+    # Exposure Details"). `gl_class_code_schedule` now HAS a live capture table
+    # (`schedule_capture.SCHEDULE_DEFS`), so the paragraph above no longer
+    # applies: both rules open it - a row's code answers the first
+    # (`sqs_service.gl_class_codes_present`), a row's basis and exposure the
+    # second (`sqs_service._dec_entries_state_payroll`) - and the revenue /
+    # payroll boxes are gone from this window (the package's revenue stays a
+    # key detail of its own; nothing here derives it from GL rows). Both sit in
+    # ONE cluster under Brent's title, and the review folds them into one item
+    # (`_fold_one_item_tables`, the table's `review_item`).
+    ("GL coverage detected but no class codes found", GL_WINDOW_CLUSTER, "recommended",
+     "legacy_gl_no_class_codes", _r_schedule("gl_class_code_schedule")),
+    ("GL coverage detected but no revenue or payroll found", GL_WINDOW_CLUSTER, "recommended",
+     "legacy_gl_no_exposure_basis", _r_schedule("gl_class_code_schedule")),
     ("GL each occurrence limit", "GL exposure basis", "recommended",
      "legacy_gl_each_occurrence", _r_field("gl_each_occurrence")),
     ("GL aggregate limit", "GL exposure basis", "recommended",
@@ -1192,6 +1266,17 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     ("Policy term expires within", "Date format & range", "recommended",
      "legacy_policy_term_expiring",
      _r_field("effective_date", "expiration_date", "umbrella_expiration_date")),
+    # A term that runs backwards (21 Oct 2026). MUST precede "Effective date":
+    # first match wins. The hard sentence (a person typed one of the dates) and
+    # the warning (both read from documents, `validators.
+    # BACKWARDS_TERM_TO_CONFIRM`) share these opening words, so one code covers
+    # both - like the expired-term row above. Until 21 Oct the hard sentence
+    # fell through to the FORMAT row below, whose window asked only for the
+    # effective date; fixing that date alone could leave a wrong expiration
+    # with no box to correct it. The proposed-term window shows both dates.
+    ("Effective date is on or after expiration date", "Date format & range", "required",
+     "legacy_policy_term_backwards",
+     _r_field("effective_date", "expiration_date", "umbrella_expiration_date")),
     ("Effective date", "Date format & range", "recommended",
      "legacy_effective_date_format", _r_field("effective_date")),
     ("Expiration date", "Date format & range", "recommended",
@@ -1241,6 +1326,16 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
 _LEGACY_CODE_RESOLUTIONS: Dict[str, dict] = {
     _code: _res for _phrase, _cluster, _tier, _code, _res in _LEGACY_MESSAGE_RULES
 }
+# code -> cluster and code -> its row's place in the table, derived the same way
+# (21 Oct 2026, the GL window: a stored card takes today's cluster, and two
+# folded rules are drawn under the one listed first - `_fold_one_item_tables`).
+_LEGACY_CODE_CLUSTERS: Dict[str, str] = {
+    _code: _cluster for _phrase, _cluster, _tier, _code, _res in _LEGACY_MESSAGE_RULES
+}
+_LEGACY_CODE_ORDER: Dict[str, int] = {
+    _code: _n for _n, (_phrase, _cluster, _tier, _code, _res)
+    in reversed(list(enumerate(_LEGACY_MESSAGE_RULES)))
+}
 
 
 # ── Cross-engine twin registry (client review #4) ────────────────────────────
@@ -1263,6 +1358,10 @@ _LEGACY_CODE_RESOLUTIONS: Dict[str, dict] = {
 # hard_stops list that caps SQS is never altered by this.
 _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
     "minimum_viable_cope_missing":               "Minimum Viable COPE incomplete",
+    # Live bcfd175b, 25 Oct: one FEIN conflict drawn twice as hard stops - the
+    # Data Consistency card ("FEIN: documents disagree (...)", the one with the
+    # picker) and the legacy sentence. The card is kept.
+    "underwriting_reconciliation_fein":          "FEIN differs across uploaded documents",
     # `peril_deductible_referenced_but_undefined` REMOVED 2026-09-23. Its
     # cross-form rule was retired as a false positive by construction (it
     # demanded all three peril deductibles from a flag that means "at least
@@ -1514,7 +1613,142 @@ def _cluster_rank_key(cluster: dict) -> tuple:
     return (-len(cluster["forms"]), -cluster["count"], cluster["cluster"])
 
 
+# ── ONE TABLE, ONE REVIEW ITEM (21 Oct 2026, Brent 17 Oct item 6) ────────────
+# Brent: "Display only one GL correction item in the review workflow, with all
+# missing GL details grouped inside it." The two GL warnings (no class codes /
+# no revenue or payroll) are two rules of the scorer - two stop sentences, two
+# caps' worth of inputs, untouched here - and ONE fix: the GL classification
+# window. A capture table that declares `review_item` (schedule_capture) shows
+# every open item whose fix opens that WHOLE table as ONE row: the first rule
+# in the table's order leads (its code, severity, cluster), the row keeps one
+# id whichever of them fire (`review_item_id` - a dismissal or a Resolved status
+# stays with the item while its parts come and go), names what is missing in
+# the table's own sentence when two or more fire, and lists its parts under
+# `folded`. Display only: the stop lists, the caps and every score read the
+# rules, never this row; the screen's points follow it (`fold_card_codes`).
+
+def _review_item_tables() -> Dict[str, str]:
+    """{schedule key: the sentence its folded item shows} - every capture
+    table that declares `review_item`."""
+    try:
+        from services.schedule_capture import SCHEDULE_DEFS
+    except Exception:                                          # noqa: BLE001
+        return {}
+    return {str(k): str(d.get("review_item") or "")
+            for k, d in SCHEDULE_DEFS.items() if isinstance(d, dict) and d.get("review_item")}
+
+
+def review_item_table(resolution: Any) -> Optional[str]:
+    """The table whose open items show as ONE review item, when `resolution`
+    opens that WHOLE table - no named columns, no boxes above it, no
+    per-building scope (those windows ask something narrower) - else None."""
+    if not isinstance(resolution, dict) or resolution.get("mode") != "schedule":
+        return None
+    if resolution.get("columns") or resolution.get("facts") or resolution.get("per_building"):
+        return None
+    key = str(resolution.get("schedule_key") or "").strip()
+    return key if key and key in _review_item_tables() else None
+
+
+def review_item_id(table: str) -> str:
+    """The one id a table's review item keeps, whichever of its rules fire."""
+    return issue_id_for(f"review item: {table}", [])
+
+
+def review_item_id_of(issue: Any) -> Optional[str]:
+    """The review item id a stored issue is drawn under (its fix TODAY opens a
+    review-item table - `current_issue_resolution`), else None. A status the
+    screen saves on the folded item (Dismiss, Resolved, an undo receipt) is
+    keyed by that id, never by the rule's own message hash - so "is this item
+    still live?" must ask this too (`audit_routes._issue_still_live`; review
+    of 21 Oct 2026: "Open again" on a dismissed GL item said "already fixed"
+    while the warning still fired)."""
+    table = review_item_table(current_issue_resolution(issue))
+    return review_item_id(table) if table else None
+
+
+def _rule_rank(code: Any) -> int:
+    return _LEGACY_CODE_ORDER.get(str(code or ""), len(_LEGACY_CODE_ORDER))
+
+
+def current_issue_resolution(issue: Any) -> Optional[dict]:
+    """The fix an issue's card opens NOW. A legacy rule whose fix TODAY opens a
+    review-item table takes today's fix over an older stored copy (a session
+    stored before 21 Oct 2026 carries the GL cards' typed boxes); every other
+    issue keeps its own (copied), else its code's."""
+    if not isinstance(issue, dict):
+        return None
+    code = str(issue.get("code") or "")
+    stored = issue.get("resolution") if isinstance(issue.get("resolution"), dict) else None
+    if code.startswith("legacy_"):
+        now = resolution_for(code)
+        if review_item_table(now):
+            return now
+    return _copy_resolution(stored) if stored else resolution_for(code)
+
+
+def fold_card_codes(codes: Any) -> Dict[str, str]:
+    """{rule code: the code its card is drawn under} for the codes that fold
+    (`_fold_one_item_tables`: two or more firing whose fix opens one review-item
+    table -> the first in the table's order). Codes that do not fold are not
+    listed. The screen's points read it (`sqs_service.complete_screen_shares`),
+    so a folded rule's share lands on the one card the page draws."""
+    by_table: Dict[str, List[str]] = {}
+    for code in dict.fromkeys(str(c) for c in (codes or []) if c):
+        table = review_item_table(resolution_for(code))
+        if table:
+            by_table.setdefault(table, []).append(code)
+    out: Dict[str, str] = {}
+    for members in by_table.values():
+        if len(members) < 2:
+            continue
+        head = min(members, key=_rule_rank)
+        for code in members:
+            out[code] = head
+    return out
+
+
+def _fold_one_item_tables(items: List[dict]) -> List[dict]:
+    """One section's rows with each review-item table's rows folded into ONE
+    (see the note above). Rows of any other kind are returned as they are, in
+    their order; the folded row takes the place of its first member."""
+    tables = _review_item_tables()
+    if not tables:
+        return items
+    groups: Dict[str, List[dict]] = {}
+    slots: List[Any] = []
+    for it in items:
+        table = review_item_table(it.get("resolution")) if isinstance(it, dict) else None
+        if not table:
+            slots.append(it)
+            continue
+        if table not in groups:
+            groups[table] = []
+            slots.append(("fold", table))
+        groups[table].append(it)
+    if not groups:
+        return items
+    out: List[dict] = []
+    for slot in slots:
+        if not (isinstance(slot, tuple) and slot[:1] == ("fold",)):
+            out.append(slot)
+            continue
+        table = slot[1]
+        members = sorted(groups[table], key=lambda m: _rule_rank(m.get("code")))
+        head = dict(members[0])
+        head["issue_id"] = review_item_id(table)
+        head["forms"] = sorted({f for m in members for f in (m.get("forms") or []) if f})
+        if len(members) > 1 and tables.get(table):
+            head["message"] = tables[table]
+        head["folded"] = [{"issue_id": m.get("issue_id"), "message": m.get("message"),
+                           "code": m.get("code")} for m in members]
+        head["score_neutral"] = all(m.get("score_neutral") for m in members)
+        out.append(head)
+    return out
+
+
 def _make_clusters(items: List[dict]) -> List[dict]:
+    items = _fold_one_item_tables(items)
     by_cluster: Dict[str, List[dict]] = {}
     order: List[str] = []
     for it in items:
@@ -1846,12 +2080,13 @@ def build_grouped_view(
     #
     # AND A BLOCKER CAN NEVER BE HIDDEN: a hard-stop twin is suppressed only
     # when the surviving picker issue is ALSO a hard stop. Today the two sets
-    # agree exactly (underwriting_consistency.HARD_STOP_RECONCILABLE_KEYS is
-    # {applicant_name, fein, effective_date, expiration_date}, which is precisely
-    # the four fields check_doc_consistency hard-stops on), and both engines
-    # downgrade the two date rules on a multi-contract package. This guard means
-    # that if they ever drift, the failure is a duplicate row - not a 60 cap with
-    # nothing on screen explaining it.
+    # agree exactly (19 Oct 2026: the picker blocks on underwriting_consistency.
+    # READY_BLOCKING_RECONCILABLE_KEYS = {applicant_name, fein}, precisely the
+    # two fields check_doc_consistency hard-stops on; both policy dates are
+    # warnings in both engines). This guard means that if they ever drift, the
+    # failure is a duplicate row - not a blocker with nothing on screen
+    # explaining it. The package's blocker count folds the same twins
+    # (`sqs_service.one_blocker_per_conflict`).
     _picker_severity: Dict[str, str] = {}
     for _i in list(structured_issues or []) + list(cross_issues or []):
         _fk = picker_fact_key(_i.get("code"))
@@ -1934,12 +2169,13 @@ def build_grouped_view(
     # WARNINGS ONLY, and the call is made on the severity THIS view resolved
     # (promotion + the classify_stops downgrade), never on the severity the
     # emitter claimed:
-    #   * a hard stop keeps its red row - the four HARD_STOP_RECONCILABLE_KEYS
-    #     (applicant name, FEIN, both policy dates) block submission, and a
-    #     blocker is never hidden behind a section the producer may have
-    #     collapsed;
+    #   * a hard stop keeps its red row - READY_BLOCKING_RECONCILABLE_KEYS
+    #     (applicant name, FEIN) block Submission Ready, and a blocker is never
+    #     hidden behind a section the producer may have collapsed;
     #   * a `promote_codes` row keeps its card - it is what is holding a score
-    #     at 60, and that card carries the only control that clears it.
+    #     at 60, and that card carries the only control that clears it (no
+    #     scorer names one since the building value became a warning, 19 Oct
+    #     2026; the path stays for old payloads).
     #
     # Display only. The caller's hard_stops / soft_stops are the SQS capping
     # inputs and are not mutated, so no cap, no dismiss credit and no issue_id
@@ -1988,6 +2224,14 @@ def build_grouped_view(
         else:
             cluster, default_tier = _lookup(code)
         tier = "required" if severity == "hard_stop" else default_tier
+        _res = issue.get("resolution") or resolution_for(code) or _fallback_resolution(code, message)
+        # A stored legacy card whose fix TODAY opens a review-item table (the
+        # GL window, 21 Oct 2026) takes today's fix and cluster - a session
+        # stored before still carries the old typed boxes, and its two GL cards
+        # must open, and fold into, the one window (`current_issue_resolution`).
+        if code.startswith("legacy_") and review_item_table(resolution_for(code)):
+            _res = resolution_for(code)
+            cluster = _LEGACY_CODE_CLUSTERS.get(code, cluster)
 
         _forms = issue.get("forms") or []
         enriched.append({
@@ -2000,9 +2244,7 @@ def build_grouped_view(
             "severity": severity,
             "cluster": cluster,
             "tier": tier,
-            "resolution": _with_current_needs(
-                issue.get("resolution") or resolution_for(code)
-                or _fallback_resolution(code, message), code),
+            "resolution": _with_current_needs(_res, code),
             # Re-derived from the CODE, never carried from the incoming dict.
             # Issues reach this view from several sources (persisted sessions,
             # the legacy string arrays, the cross-form mirror) and only some of
@@ -2072,11 +2314,14 @@ def build_grouped_view(
                 "resolution": _legacy_message_resolution(_msg),
             })
 
-    # ── A COPE CARD ON A 2+ BUILDING PACKAGE OPENS THE LOCATION TABLE ───────
+    # ── A COPE CARD ON A 2+ BUILDING PACKAGE ASKS PER BUILDING ──────────────
     # Choice Electric #18 (7 Oct 2026): "this should have turned up TWO building
-    # property values". Decided per package from the facts this view is drawn
-    # for; a card that reached the safety net above is routed by the legacy
-    # code its own sentence classifies to. Display only - no stop, cap or id moves.
+    # property values". Since 21 Oct (Brent 17 Oct item 8) it asks only what is
+    # missing: the location table for the per-building items, just the boxes for
+    # package-level ones (`premises_cope.route_cope_resolution`). Decided per
+    # package from the facts this view is drawn for; a card that reached the
+    # safety net above is routed by the legacy code its own sentence classifies
+    # to. Display only - no stop, cap or id moves.
     if isinstance(facts, dict) and facts:
         try:
             from services.premises_cope import route_cope_resolution
@@ -2328,9 +2573,10 @@ def grouped_with_package_caps(
 
     OWNER RULE, 2026-08-31: the card must match the cap. `calculate_package_sqs`
     can hold a score at 60 through a stop that never becomes a structured issue -
-    the `property_building_value` conflict it MANUFACTURES internally is the live
-    case, and a `hard_cross` entry is the other. Both survive only as
-    `cap_reason`, a sentence the pre-form Review screen never prints.
+    a `hard_cross` entry on a route that does not inject cross issues (until
+    19 Oct 2026 also the `property_building_value` conflict it manufactured;
+    that is a warning holding 85 since). It survives only as `cap_reason`, a
+    sentence the pre-form Review screen never prints.
 
     Two shapes, both from the scorer:
       * `cap_hard_stop_codes` names a card that ALREADY EXISTS for the same
@@ -2627,6 +2873,30 @@ def doc_conflict_code(issue: Any) -> Optional[str]:
     return "doc_conflict_warn_unknown"
 
 
+LOSS_CONFLICT_CODE = "loss_history_attestation_conflict"
+
+
+def retire_stopped_loss_conflict(
+    persisted: Optional[List[dict]], facts: Any, flags: Any, docs: Any,
+) -> List[dict]:
+    """Drop the persisted No Known Losses / loss-run conflict once the live check
+    (`sqs_service._loss_history_conflict`, the same call the upload made) no
+    longer raises it (23 Oct 2026: answering "we have had claims" left it on
+    screen). A check that cannot run keeps everything."""
+    try:
+        from services.loss_history_state import package_has_loss_runs
+        from services.sqs_service import _loss_history_conflict
+        active = [d for d in (docs or []) if isinstance(d, dict) and not d.get("excluded")]
+        live = bool(_loss_history_conflict(
+            facts or {}, flags or {}, package_has_loss_runs(active, facts or {})))
+    except Exception:                                     # noqa: BLE001
+        return list(persisted or [])
+    if live:
+        return list(persisted or [])
+    return [i for i in (persisted or [])
+            if not (isinstance(i, dict) and i.get("code") == LOSS_CONFLICT_CODE)]
+
+
 def retire_stopped_doc_conflict_issues(
     persisted: Optional[List[dict]], docs: Any, confirmed_keys: Any = (),
     explained: Any = (),
@@ -2659,9 +2929,27 @@ def retire_stopped_doc_conflict_issues(
     for i in persisted or []:
         code = str(i.get("code") or "") if isinstance(i, dict) else ""
         if code.startswith("doc_conflict_") and code not in live:
+            # The SAME finding at the other severity is still raised (19 Oct
+            # 2026: the policy-date rules became warnings): the card stays,
+            # under the code and severity the fresh run gives it. Dropped, its
+            # sentence came back through the safety net with no fix at all -
+            # no explanation box, no "Fix in Data Consistency".
+            twin = _doc_conflict_severity_twin(code)
+            if twin and twin in live:
+                out.append({**i, **make_issue(
+                    twin, "hard_stop" if twin.startswith("doc_conflict_hard_") else "soft_warning",
+                    str(i.get("message") or ""), forms=i.get("forms") or [])})
             continue
         out.append(i)
     return out
+
+
+def _doc_conflict_severity_twin(code: str) -> Optional[str]:
+    """`doc_conflict_hard_X` <-> `doc_conflict_warn_X` (`doc_conflict_code`'s two shapes)."""
+    for a, b in (("doc_conflict_hard_", "doc_conflict_warn_"), ("doc_conflict_warn_", "doc_conflict_hard_")):
+        if code.startswith(a):
+            return b + code[len(a):]
+    return None
 
 
 def retire_settled_source_conflicts(persisted: Optional[List[dict]], facts: Any) -> List[dict]:

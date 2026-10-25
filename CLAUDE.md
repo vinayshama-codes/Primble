@@ -541,7 +541,7 @@ stop" reversal (`25sepChanges.md` part O).**
   the "Your forms will need" group only** is recommended - a different question from "what is wrong now", so the
   dedupe rule survives and no score surface moves. Option (c) would reverse C75 and is Brent's call with a D6 table.
 
-**HELD FOR BRENT, nothing built (8 Oct, `25sepChanges.md` part P): `state_of_operations` is read off CARRIER
+**HELD FOR BRENT, nothing built (8 Oct, `25sepChanges.md` part P) - ANSWERED 23 Oct (Z34-1 #6: approved, per coverage; not built): `state_of_operations` is read off CARRIER
 letterheads.** The owner held the Business Auto Policy back from a Choice Electric re-run and noticed ACORD 137_CO
 was no longer offered. Cause: per-document `state_of_operations` came back **MI** (Amerisure's Farmington Hills
 head office), **PA** (Chubb claims, Scranton), **AZ** (the "OFFICE: PHOENIX AZ" line that also became
@@ -802,6 +802,152 @@ home (a full schedule scores 60); the score's "no class codes" warning fires on 
 **Does answering everything on the pre-form screen reach 100? (part Z26, 15 Oct) - measured, offline:** a read-only solver (`scratchpad/solve100/solve.py`, the 13 Oct corpus, owner: "just a few" - 14 packages) answers every hard stop, warning, key detail, row and Data Consistency pick through the real routes like a producer: 13 of 14 reach exactly 100, 0 rounds where score + shown points passed 100; the shown numbers cover only PART of what is left (key details and warning caps carry none). Fixed: the Umbrella pillar lists one row per deduction with its box (`umbrella_deduction_items` - the pillar is their sum - / `umbrella_gap_items`); `check_doc_consistency` reads the SETTLED entity type (`submission_integrity._document_entity_type`, `package_identity_names` - a stale raw "Corporation" held 85 with nothing to confirm); the recalc retires stored `doc_conflict_*` copies the documents no longer raise (`issue_registry.retire_stopped_doc_conflict_issues` / `doc_conflict_code`); limits are probed at the scorer's thresholds (`_THRESHOLD_PROBE_FACTS`). Tests: `tests/test_reach_100_before_forms_15oct.py` (35). Suite 14,652 / 1 / 19.
 **Every warning a correct answer can clear (part Z26, 15 Oct afternoon):** prior acts (`prior_acts_confirmation`), monopolistic WC (`wc_state_fund_acknowledged` - "No, private carrier" stays a true hard stop), crime / cyber (`*_coverage_decision`) are typed questions with choice lists; a low-OCR card opens its own field (`issue_registry._ocr_resolution`); a narrative-only card is answered by its explanation (`_explained_issue_codes`, `explains_away`, filtered in `run_cross_form_validation`); a document disagreement a person typed is settled (`person_settled_keys` - the identity / date hard stops stay with the picker; source conflicts via `person_settled_fact`). Tests: `tests/test_warnings_a_correct_answer_clears_15oct.py`.
 **The pre-form numbers add up to exactly 100 - score (part Z26 "The four left over", 15 Oct):** "None" / "N/A" is an answer (`_answered` in Exposure / Property / Umbrella items); the NAICS / phone / mailing boxes accept only what the later check accepts (`fact_registry.VALID_NAICS_SECTORS`, `validators.phone_main_digits`); a gap under half a point is listed "up to +1"; `sqs_service.complete_screen_shares` splits what is missing by cause (`screen_shares` / `screen_card_points` by rule code / `screen_unanswerable`) and `utils/screenPoints.js` puts each share on the item that offers its fix (the Recommendations list's `fixKeys` rule - a table card carries the rows it hides). 6 packages: shown = 100 - score on every one. Display only. A document conflict's share prints on its card's "Fix in Data Consistency" button or its "Values to confirm" row (`screen_dc_points`, `stops_now.conflict_stop_facts`, `utils/dcFacts.js`). **A person's answer is judged by `fact_registry.answer_check` (`answer_validate`, else `validate`) - never swap a fact's `validate`: the extraction merge, the type sweep and the stamper key on it by identity.**
+**BRENT'S ANSWERS, 19 Oct (part Z27) - ANALYSIS ONLY, nothing built; read Z27 before touching the 125 prior grid / Other rows, ACORD 101, the 130 / 126 EBL boxes, caps, tiers or Exposure.** (1) Prior Carrier "Other" column = the primary umbrella / excess unless the agent picks another; every other expiring policy on ACORD 101 (carrier, number, dates, limits, premium); a missing premium is blank + "Missing / Requires Confirmation", never $0 / estimated; page 1's SIX Other rows (not two - our 14 Oct question was wrong) are lines APPLIED FOR. (2) WC + Employers Liability = ACORD 130; Employee Benefits Liability = ACORD 126 when written with GL, never the 130, never inferred; extract WC classes / payroll / rates / mod / endorsements; keep source + PAGE for every coverage and limit (stored texts carry "[Document page N]"). (3) **No numeric 60 cap: a hard stop blocks "Submission Ready" (status), few hard stops; never penalise missing information twice - Completeness deducts for it, Exposure Consistency only for real conflicts.** Today on `ecab28dd`: the grid's Other column is blank, the five other policies print nowhere, EBL takes a page-1 row, the 126 EBL section is empty, hard stops cap at 60 and stop-list warnings at 85, Exposure mixes missing items with conflicts. D6 when built: capped packages rise, Exposure rises, Structural falls - measure first.
+**BUILT 19 Oct (part Z28, offline, uncommitted; decisions D61-D72 in `v1-20AUG.md`); THE CAPS CAME BACK 20 Oct (owner,
+D72, part Z28 E).** An open hard stop holds the score at 60 and an open warning at 85, on the package and on every form,
+exactly as before 19 Oct (`HARD_STOP_CAP` / `SOFT_STOP_CAP`, `_resolve_cap`, the per-form gates, `audit_routes._cap_from`).
+What 19 Oct changed and still stands is WHICH items are hard stops (the list below). Brent wrote "Do not automatically
+cap the SQS at 60"; the owner kept the caps, and the 20 Oct update tells him so and lists what left the hard-stop list.
+
+Per-form gates under that list:
+- Minimum Viable COPE missing on 140 / 141 / 133 = 60 (`cope_hard`).
+- An umbrella with no underlying limit stated = 60.
+- An underlying limit stated in words only, with the umbrella pillar at 0, = 85.
+- The property gate is soft only (`_prop_soft_because`); Period of Restoration is a warning.
+
+Readiness rides beside the number: `tier_for_score(score, open_hard_stops)` / `routing_for_score` and every payload's
+`ready_blockers` / `ready_blocker_items` / `open_hard_stops` / `submission_ready` (`readiness_fields`). Under the caps it
+always agrees with the number. There is one blocker per conflicted fact (`one_blocker_per_conflict`, coded via
+`stops_now.conflict_stop_issues`).
+
+Hard stops are only five kinds:
+- documents naming different companies (`READY_BLOCKING_RECONCILABLE_KEYS` = name / FEIN);
+- no proposed term;
+- property without Minimum Viable COPE;
+- a monopolistic state with a private carrier;
+- an umbrella with no underlying limits.
+
+Dates / building value / split limits are warnings (85), and the building-value 409 is gone. Exposure = conflicts between
+documented exposures (`exposure_deduction_items`). The missing coverage details are the Structural part "Coverage
+Details" at the same points (`completeness_deduction_items`).
+
+Other doors:
+- 125 prior grid Other column = one line (`PriorGrid`, `_prior_other_line_key`, agent pick via `POST
+  /api/policy-lines/{id}/prior-other`); the rest go on ACORD 101 (`_acord101_blocks`, `_resolve_acord101_box`);
+- page-1 Other rows = lines applied for (`lob_canon.WRITTEN_WITH` drops an EBL part written with GL), and rows past six
+  go on the 101;
+- "Missing / Requires Confirmation" rows (`needs_attention._missing_confirmation_boxes`);
+- WC endorsements (`services/wc_endorsements.py`, 130 pointer box + 101 schedule);
+- source + page (`fact_lineage.locate_page`, `policy_lines.table_rows(facts, docs)`).
+
+D6 with the caps back (20 Oct, HEAD vs today): 927 stored packages, 444 up / 17 down / 466 unchanged, mean 56.7 -> 58.2.
+403 are held at 60 (348 at HEAD) and 504 at 85 (559). 67 moved 85 -> 60 on the missing proposed effective date (17 lose
+up to 13 points), and 12 moved 60 -> 85. (The no-cap build of 19 Oct measured 521 up / 0 down, mean 58.8.) The Structural
+floor (pillar at 0, on 145 packages) drops part of the charge on 113 of them (mean 4.4 package points, max 25).
+
+Same-day fixes:
+- a stored `doc_conflict_hard_*` card is re-coded, not dropped, when the fresh check raises the `_warn_` twin
+  (`retire_stopped_doc_conflict_issues`);
+- a blocking picker sentence is always hard (`_ALWAYS_HARD_PATTERNS` ": documents disagree (");
+- readiness follows a credited number: SQL flag, dashboard derivation, `formatters.submissionReady`.
+
+The 19-20 Oct adversarial review (Z28 D) - every fix pinned:
+- no missing fact is charged in two pillars (D69);
+- a table fix counts its table;
+- the recommender is unchanged (`escalates_acord101`);
+- ~~an old payload keeps its ceiling until re-scored (D70)~~ - void since the caps came back (D72);
+- stored cards retype;
+- the cover cache and the E&O snapshot see readiness;
+- the Other column never takes a GL / Auto / Property line, and is decided by the agent's pick;
+- one policy is listed once (same number + premium);
+- two records are never one policy;
+- the re-stamp doors pass the package (`_package_form_ids` from the generated forms);
+- `_producer_policy_lines` is out of the gap-fill prompt (C108).
+
+Tests: `tests/test_brent_19oct_{expiring_policies,wc_ebl_sources,sqs_rule}.py`; 33 old-rule test files rewritten
+(none removed).
+The 20 Oct review of the restoration (part Z28 E) fixed four places where a cap still did not hold:
+- the scorer's own reclassified items hold their 85 on every path (`calculate_package_sqs._held_soft`: the building
+  value and `escalates_acord101` items). After forms a building-value conflict had held NO cap;
+- a credit never passes the payload's own `cap_applied` (`apply_credits_to_score`, the dismiss-credit SQL). This closes
+  the 31 Aug "a gate-produced 60 is released the first time any credit lands";
+- the missing effective date's card is typed `hard_stop`;
+- the E&O signature is 5.12's five fields again.
+
+Named, not fixed (pre-existing at HEAD): after forms the recalculation and the field edit skip the Data Consistency /
+source / OCR stops (7 stored packages, 11 at HEAD); the cover's CRITICAL list misses name / FEIN / monopolistic.
+Tests: `tests/test_caps_restored_20oct.py`.
+**BRENT'S 20 OCT REPLY + THE CHOICE ELECTRIC TEST OF 17 OCT (part Z29, D73) - ANALYSIS ONLY, nothing built.** Read Z29 before touching the effective-date / umbrella / monopolistic hard stops, uploads (Excel), the schedule import, the GL cards, the narrative window or the download review. The 17 Oct test ran on the 15 Oct deploy (`6bff54a`), so none of the 19-20 Oct work was live. Rechecked: only B2-B3 are open for Brent (Z29-4); the rest is answered by his own words. Owner: nothing starts until his call; deploy once everything is fixed.
+**BUILT 21 Oct (part Z30, offline, uncommitted; D74 in `v1-20AUG.md`) - what Brent's 17 Oct test and 20 Oct reply
+raised that needs neither Brent nor the open discussion.** Read Z30 (each item's entry) and Z30-D (the decisions to
+tell Brent) before touching:
+- uploads (Excel/CSV as documents);
+- `scheduleImport.js`;
+- the Review data popup;
+- the monopolistic / backwards-date / expired-term stops;
+- identity stops (`document_tags.is_verified_source` is the ONE "verified source" door; `normalization.is_person_in_a_role`);
+- the umbrella underlying door (`sqs_service.umbrella_underlying`, per-line limit keys from `policy_lines.limit_facts()`);
+- COPE routing (`premises_cope.per_building_fix` / `is_building_row`);
+- needs_attention empty rows;
+- `arq_service._canonical_keys_for` (now includes `fact_to_form_fields`' reverse links);
+- the stamp-mismatch wording.
+
+Each item was reviewed by a separate agent and the findings fixed. Left out, under discussion with Brent (Z29-7): the
+narrative questionnaire, SQS separation / Forms Ready, the download screen, AI held back. Second run: item 6 (the GL
+window) and attachment C (claims checks).
+**BUILT 21 Oct night (part Z31, offline, uncommitted; D75) - the ten items needing no input from anyone.**
+Each was reviewed and its findings fixed. Read Z31 / Z31-D before touching:
+- the GL classification window (`schedule_capture.SCHEDULE_DEFS['gl_class_code_schedule']`, both legacy GL cards fold
+  into one review item);
+- claims checks on loss rows (pillar deductions + cards, never stops);
+- the ONE Excel number-format renderer, written twice with shared vectors: `backend/utils/excel_number_format.py` +
+  `frontend/src/utils/excelNumberFormat.js` + `tests/fixtures/excel_number_format_vectors.json`. Change both or neither;
+- the one "typed / confirmed by a person" door in `fact_state`;
+- P15-1/2/3/4/7 guards: the pairing readers read the template layout order, never the JSONB-sorted stored schema;
+- `ocr_service.extract_zip` is gone; the one ZIP door is `upload_intake`.
+**BUILT 22 Oct (part Z32, offline, uncommitted; D78) - the backlog items needing no input. Four lanes, one
+combined review, fixes in.** Doors to know:
+- Every package scorer takes its stops from `stops_now`, AST-pinned; picker / source / OCR stops hold after forms.
+- The dismiss-credit ceiling is the form's own `cap_applied`.
+- The cover's CRITICAL list = `ready_blocker_items`.
+- `validators.term_save_refusal` (renamed; also refuses a save of an ENDED term).
+- `answer_semantics.extracted_non_answer`: extracted N/A / TBD are gaps, not data (merge, vote, Data Consistency).
+- `normalization.is_party_placeholder`: FIO / Sample / Void are never parties.
+- A prefix-less policy number is the same contract (`fact_equivalence`). All contract grouping goes through
+  `fact_comparison.policy_contract_groups`; each kept row prints its own number.
+- `addDocuments.documentNeedsTypeReview`: "Needs Verification" counts, plus a Confirm type button; a same-type
+  confirm never re-reads.
+- `scheduleImport.isSummaryRow`: total rows are skipped.
+- DIAG_RESPONSE is DEBUG, with no values.
+- `policy_lines.questions_by_policy` / `apply_policy_answers`: questionnaire policy number / insurer / NAIC reach
+  their own policy record; NAIC is spread by `_carrier_group_key`; a disagreeing answer is held.
+**BUILT 22 Oct (part Z33, offline, uncommitted; D79) - the four Z32-N items plus what testing found.** Doors to know:
+- Per-building client questions: `premises_cope.building_field` ("year_built@loc2") / `write_building_answer`, `arq_service._split_building_questions` / `_restamp_building_row`; each "@locN" question carries the row it named and the apply skips it if the row moved (`premises_interest.row_is_still`). 0-1 buildings unchanged.
+- `pdf_service.proposed_term_fact(form_id, box)`: the ONE "does this box write the proposed term" rule (never an underlying / other-policy box, never ACORD 25 / 28); the editor refusal, the editor write-back, the client refusal and the client apply (`arq_service.client_answer_fact`) use it.
+- The editor write-back walk checks `scalar_rules_reach` like the client door: a row B+ box never writes a package fact (`NamedInsured_FullName_B` had overwritten `applicant_name`).
+- `pdf_service.box_fact_value`: a checkbox on a non-yes/no fact never writes its raw state (the aggregate-applies ticks had written "Yes" into `gl_aggregate`); only claims-made / Occurrence / CSL write their meaning; limit-scope (AppliesTo) boxes write nothing; `box_withdraws_fact` is the editor untick.
+- A client answer that fails its fact's check is HELD (`kind: "format"`, "Needs your decision"), never written, never a 422; `fact_registry.answer_refusal` is the one person-answer check (producer path, client apply, "Use the client's value"). A leading "Other:" is stripped before the check and at the write (`arq_service._without_other_prefix`; premises interest and the marketing reason keep it).
+- `pdf_service._valuation_code`: the 140 / 160 ValuationCode box prints R / A / V / M or blank, never words.
+- Percentage deductibles (Z33-PERCENT): `fact_registry.takes_amount_or_percent` is the class; `normalization.stated_percentage` the reader (twin `answerFormats.percentStatement`, shared vectors); a percentage prints in the 160 percent box or as "2%", never "$2 %"; `normalize_general` keeps decimal points ("$2.5M" vs "$25M" now differ). Reviewed adversarially, 16 + 6 findings fixed.
+**BRENT'S 23 OCT REPLY (part Z34, D80) - ANALYSIS ONLY, nothing built; read Z34 before touching the package score after forms, Loss History, the excess 131, the 125 total, the state of operations, "AI held back" or the narrative questionnaire.** 13 answered (6 earlier + the owner's 7), 2 open (Q1 "Could you please clarify?" - re-ask the after-forms items one by one; Q4 Forms Ready per-form scores "TBD"). Approved, to build (* = changes built work):
+- the package score is independent of the forms; the fill rate gets its own "Forms ready" meter* ("Yes, this is acceptable"; Q2 "okay for now. Subject to change");
+- an attested No Known Losses reads "Unable to Verify / Confirmation Required"*; loss runs are measured against the years the business has existed, never penalised for years before it existed* (today `_LOSS_YEARS_FULL = 5` whatever the age);
+- the excess 131 lists the applicable GL / Auto / EL / other underlying lines* (since 7 Oct it lists only the layer below); SIR OR attachment point, a review flag only when neither is known*;
+- a redacted premium gives a partial 125 total* (today blank);
+- the state of operations comes only from insured evidence, per coverage, else unverified + ask* (part P approved; it changes what the recommender is fed - owner to confirm);
+- refused AI values go to the audit record only*; real gaps in "AI held back" stay visible;
+- the narrative questionnaire is its own page that fills itself from the documents and shows only what is relevant.
+Already built, no change: the umbrella carried-but-unlisted warning (Z30, "Agree"). Owe him a reply: his e-label "simulated SQS" idea (`form_dry_run` already stamps without the LLM - propose it for the Forms ready meter), a timeline for the 800+ form base, the two vendor API keys (address check, narrative enrichment - security review first). **His round-trip test (re-upload the downloaded forms, expect 97 again) runs on primble.ai = the 15 Oct deploy `6bff54a`; owner, 23 Oct: no deploy until everything is built and tested on localhost.**
+**BUILT 23 Oct (part Z35, offline, uncommitted; D81) - Brent's 23 Oct answers, items 1-6.** Doors to know:
+- `calculate_package_sqs` defaults to `form_fill=False` (one package number before and after forms; `form_fill=True` kept only as a way back, AST-pinned unused); the "Forms ready: N values to confirm · M boxes to fill" line replaces "Without forms / With forms"; the Recommendations fill-rate row is gone. OPEN: form-choice / form-scoped cross-form stops still apply after forms (`stops_now(pre_form=False)`), so an 85 can still differ - owner's call.
+- Loss History: attested No Known Losses reads "Unable to Verify / Confirmation Required"; `loss_history_state.loss_years_required` = min(5, business age) years of runs for full credit.
+- Excess 131: `umbrella_layers.applicable_underlying_lines` / `UNDERLYING_LINE_BLOCKS` (shared with the plain 131 in gap fill); `sqs_service.umbrella_retention_state` (SIR OR attachment; neither = an unscored review card); `umbrella_sir_not_needed` judges the lowest layer on a tower. Tower GL / Auto / EL boxes now go through the shared gap fill - needs a live run.
+- 125 total: `_printed_sum` leaves out a redacted premium; `needs_attention.partial_total_boxes` adds the "total is partial" to-do.
+- State: `form_service.coverage_states(facts, coverage)` (auto = garaging, property = premises, WC = class rows, GL = locations; then a person's answer; then the insured's address; else unverified + the `auto_state_unverified` card). The model's `state_of_operations` and the is_california / is_colorado flags never count alone (`extraction_service._drop_non_insured_states`). Recommender logic untouched; 2 of 13 fixtures change (Choice Electric with the auto policy held back now asks instead of 137_CO).
+- "AI held back" is gone from every user screen: refused AI values go to the audit record only; refused questions and table-backed details are Missing rows.
+Suite after the build: 19,630 passed / 1 failed (the known one) / 18 skipped; the 3 review fixes re-ran their 20 covering files green.
+**BUILT 23 Oct (part Z36, offline, uncommitted):** the narrative questionnaire page - `services/questionnaire.py` (138 questions, Brent's A-L; 61 existing facts, 65 new `qn_*`), `routes/questionnaire_routes.py`, `QuestionnairePage.jsx` as the last review page before form selection; answers through resolve-issue; Unknown / Pending / N/A never scored; carrier narrative (one LLM call, C110, `CARRIER_NARRATIVE=0` off) prints first on ACORD 101 once approved; pre-form answers refresh the recommended forms (`recalculate_session_scores(before=)`); the 131 OTHER rows A / B fixed. Reviewed; fixes re-run green. Full suite before the review fixes 19,688 / 1 / 18. Owner's ASK-LATER calls are in Z36.
+**STATE 21 Oct night (Z31-S):** Z30 + Z31 are built, reviewed and green, uncommitted. The narrative questionnaire, item 10's after-forms changes, "lines applied for" and the shorter Please verify list wait on Brent's answers to the owner's 7 questions. Ours for later and the tell-Brent list are in Z31-S.
 **PARKED by the owner, 15 Oct - ours, fix later, no Brent answer needed:** 7 AI wrong values in `25sepChanges.md` "P15" (130 rating dates on a renewal = expiring term; 126 products row = business description; 127 garaging with no vehicles; "Item 3A State: CO" as a value; X1 137 hired PD "primary" tick; 126 per-project aggregate from the umbrella; X3 131 "Any auto" tick blanked by the pairing guard). X1 and the per-project tick need a live run.
 **Exclude takes back the AI reading (part Z23, 15 Oct, live `0353c36b`):** Z18 fix A and B4 verified live (the filled Harborline 125 read as an ACORD 125 application; 0 boxes written, 45 suggestions for two other insureds). Excluding a document now also hides its "New document says" rows (`session_documents.suggestions_from_active_documents`, read-time), blanks the boxes its after-forms AI reading wrote while unchanged (`document_fill_receipts`, value HASHED, `take_back_document_fills` in `remerge_package`) and drops its held-back rows; the 409 names only the other insured (`other_insured_named`). Limit: generation-time AI values are not traced to a document. Review fix (same night): each reading row names the documents whose OWN text prints its value (`plan_form_fill(document_texts=)` - one upload of several files), a later reading repeating a box's value joins its receipt (`join_confirming_documents`), and a still-included document's different value is offered on the emptied box (`offers_on_emptied_boxes`). Live 15 Oct (fe11b8c): CE 25 closed. Same night: the door also retracts facts the MERGE derived from the old document set only (`merge_only_keys` - a renewal mark outlived its excluded application), a kept form offer needs a current recommendation (`form_offers`), and the umbrella renewal warning needs the package to still say renewal (`extraction_service.renewal_is_stated`, shared with the merge) and clears on a typed umbrella term (`_term_not_ended`). And a SAVE that moves the package's stops - or finds the stored issue list holding a warning the stops no longer raise (`form_routes.issue_list_outdated`) - runs the one full recalculation and returns every form's score (`forms_sqs`, merged on screen by `utils/formScores.withFormScores`); before, the other forms and the review page kept a cleared warning. Verified live 15 Oct 05:19 IST (`988fc83`). **CORRECTED the same morning by an item-by-item audit (`25sepChanges.md` "AUDIT 15 Oct"): CE 25 is NOT closed - the exclude left Harborline's 125 question 4 (Y + 4 policy numbers + 3 lines); CE 27 partial; Orbin 0 of 22 seen on the Orbin package on Render with current code (last Orbin run 1 Oct); the board's "37 of 49 closed" overclaims.**
 **99 after forms with nothing listed (part Z17, 14 Oct):** the last point is the Form Fill Rate (unconfirmed AI values on the forms); the scorer's row had no fix window, so the Recommendations section dropped it. Now listed after forms (`recommendations.fillRateItem`, only while Please verify rows exist); "Open to fix" opens the form with the most of them (`openScoreFix` mode `forms`). Frontend only, no score moves. The Overview then says so in a neutral note when the review page is finished and only the forms are left (`recommendations.scoreLeftOnForms`; "To reach 100" only when the score without forms is 100).
@@ -1825,7 +1971,7 @@ lists (each ending in "Other"), so a closed question is never a free-text box.
 Deliberately NO LLM - owner's call on latency and determinism, not cost.
 Full detail in `v1-20AUG.md` entries C2-G / C2-H / C2-I.
 
-**GAP 1 - extraction is NOT covered.** These modules sit on the human answer
+**GAP 1 - CLOSED 22 Oct 2026 (part Z32): `answer_semantics.extracted_non_answer` makes an extracted N/A / TBD / unknown a gap in the merge, the vote and Data Consistency. The history below is kept.** These modules sit on the human answer
 path only. `merge_facts` writes `facts[key]` directly, so an LLM-extracted
 literal `"N/A"` / `"unknown"` still counts as data. Closing it means a
 post-merge normalisation pass (deterministic, cheap) or a prompt change (an
@@ -3331,9 +3477,14 @@ Both exist in the repo but neither runs automatically at startup (confirmed: onl
 `init_db()` is called from `main.py`) — they are legacy/inactive paths. Adding a
 column there will not reach a real deployment.
 
+## CLIENT CHECKLIST (25 Oct 2026)
+
+**`client-checklist-25oct.md` at the repo root** is the one list of every client item (122) with its status and the
+live test plan for Brent's 17-23 Oct items. Update it when an item is verified live or built.
+
 ## SUITE BASELINE - corrected 2026-09-25
 
-`py -m pytest -q -p no:randomly` from `backend/` -> **14,693 passed, 1 failed, 19 skipped** (~16 min; 15 Oct 2026 evening, after part Z26 - the pre-form numbers add up, the conflict rows carry points; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
+`py -m pytest -q -p no:randomly` from `backend/` -> **20,415 passed, 1 failed, 19 skipped** (25 Oct 2026 night, after the live run e66d68d7 and its fixes - tests/test_z43_live_ff2.py; before that 20,407 / 1 / 19 after the live run bcfd175b and its fixes; before that 20,403 / 1 / 19 after the live runs ff2ba3e5 / 85e51d02 and their fixes - tests/test_z43_live_ff2.py; see client-checklist-25oct.md). Before that: 20,385 / 1 / 19 (25 Oct 2026 night, after Z41-Z42: the owner's package f575160b checked form by form - 3 fix lanes + 3 reviews (28 more bugs fixed), form choices no longer hold the PACKAGE score after forms, 141 gross receipts prints the revenue). Before that: 20,268 / 1 / 19 (after Z40: excess layer named from an "Umbrella / Excess" row of another carrier, review-plan table saves, claims row `listed_at_zero`, the loss window anchored on the latest ended documented term, snake_case spreadsheet loss runs; the sharded run read 20,267 / 2 - `test_build21oct_f-excel-csv-documents` pinned Brent's claims workbook as Unable to Classify, the TEST was outdated by the owner's Z37/Z40 ask, updated, file green). Before that: 20,262 / 1 / 19 (25 Oct 2026, after Z39: items-only follow-up preview, officer titles in every common layout, coinsurance not asked on an affirmed agreed value, the builders-risk stop names no form, `typed_parts` on the remarks so only a person's words count, the three Z38 leftovers). Before that: 20,185 / 1 / 19 (25 Oct 2026, after Z38: rare address / LOB cases, officer titles read deterministically, "Included" beside an amount not a conflict, the review plan fills only empty boxes (COPE numbers), loss runs count only years inside the window, card-written boxes tracked (`answer_written_fields`), preview caches + prefetch; the sharded run read 20,184 / 2 - `test_partial_items_30sep` pinned the old `label_producer_edits` call text, the TEST was outdated, updated, file green). Before that: 20,102 / 1 / 19 (24 Oct 2026 night, after Z37: three lanes + one review - 141 = Crime / 160 = Business Owners in the recommender and per-form scoring, 133 scored as WC, agreed value, umbrella follow-form by layer, ACORD LOB codes, per-vehicle USE, spreadsheet loss-run auto-classify, office addresses / insurance summaries refused, policies table client marks; the narrative-vs-claims warning before it). Before that: 19,894 / 1 / 19 (24 Oct 2026 evening, after the Loss History audit + inline follow-ups preview; the sharded run read 19,892 / 3 - two tests pinned the pre-form payload and caught an always-present `loss_coverage: None`, the CODE was wrong, now left out when empty, files re-run green). Before that: 19,847 / 1 / 19 (24 Oct 2026, after the page-wide review plan: `services/review_plan.py` weighs every page item in rail order, each number = what it moves done top to bottom; whole-page acceptance = `scratchpad/live26/solve.py` J1-J4 on package 5472449a, all PASS). Before that: 19,745 passed, 3 failed, 19 skipped (23 Oct 2026, after Z36's live-test fixes: loss dead ends, option B, Overview Resolved, the stale loss warning; 2 failures were the person-door guard catching a fake fact source in the option-B code, fixed and re-run green, 1,030 passed). Before that: 19,704 / 1 / 18. Before that: 19,630 / 1 / 18 (after Z35). Before that: 19,499 / 1 / 18 (22 Oct, after Z33). Before that: 19,400 / 1 / 18. Before that: 18,791 passed, 1 failed, 18 skipped (after part Z33). Before that: 18,668 passed, 1 failed (22 Oct 2026, after part Z32: the sharded run read 18,663 / 6, and the five new failures were fixed and their files re-run green, 2,026 passed). Before that: 17,684 passed, 1 failed (21 Oct 2026 night, after part Z31; earlier: 15,919 passed, 1 failed, 18 skipped, 21 Oct evening, after part Z30; run as 4 parallel chunks via `scratchpad/build21/run_suite_sharded.sh`, about 12 min; the 7 failures it showed were tests pinning the old rules, fixed and re-run). Before that: **14,833 passed, 2 failed, 18 skipped** (~17 min; 20 Oct 2026, after part Z28 E - the caps restored and their review; the second failure was a test pinning the defect the review fixed, corrected and its file re-run green, so the next full run should read 14,834 / 1 / 18). Before that: 14,814 / 1 / 18 (20 Oct, after part Z28 A-D, the no-cap build). Before that: **14,694 passed, 1 failed, 19 skipped** (~18 min; 15 Oct 2026 evening, after part Z26 - the pre-form numbers add up, the conflict rows carry points, policy-date differences are explained; run it WITHOUT `EVIDENCE_JUDGE=0` - the judge tests need the default) (~10 min; 5 Oct 2026 evening, after the CH125 fixes). **Never edit a source file while it runs** - tests that `inspect.getsource` then read shifted lines and fail spuriously. **Run it FROM `backend/`:** started from the repo root, three tests that open schemas by a relative path fail.
 
 The ONE failure is `test_arq_acord125_missing_only`. On a venv with the `httpx`/`openai`
 conflict it is `ImportError: cannot import name 'URL' from 'httpx'`; on the owner's Mac

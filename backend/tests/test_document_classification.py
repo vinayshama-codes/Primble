@@ -198,7 +198,9 @@ def test_attested_no_losses_credited():
     60). What must never happen is the attestation reading as no information."""
     score, recs = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
     assert score is None
-    assert any("not applicable" in r.lower() for r in recs)
+    # Brent, 23 Oct 2026: worded "Unable to Verify / Confirmation Required" (the TEST
+    # pinned the old "Not Applicable" wording and was updated).
+    assert any("unable to verify / confirmation required" in r.lower() for r in recs)
     assert sq.calculate_p4_loss_history({}, {})[0] == 25
 
 

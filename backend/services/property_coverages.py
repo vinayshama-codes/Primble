@@ -101,6 +101,11 @@ def _money(value: str) -> str:
 
 _TIME_DED_RE = re.compile(r"^(\d+)\s*(HOURS?|HRS?\.?|DAYS?)$", re.I)
 _PCT_RE = re.compile(r"^(\d+(?:\.\d+)?)\s?%$")
+# The ACORD 140 / 160 DEDUCTIBLE TYPE code of a percentage deductible (the
+# tooltip's "percent, dollars and number of days"). Also read by the stamper for
+# a percentage that reaches a premises row by another door
+# (`pdf_service._type_percentage_deductibles`).
+PERCENT_DEDUCTIBLE_TYPE = "Percent"
 
 
 def _deductible(raw: str) -> Tuple[str, str]:
@@ -114,7 +119,7 @@ def _deductible(raw: str) -> Tuple[str, str]:
         return f"{t.group(1)} {unit}", unit
     p = _PCT_RE.match(s)
     if p:
-        return f"{p.group(1)}%", "Percent"
+        return f"{p.group(1)}%", PERCENT_DEDUCTIBLE_TYPE
     if dollars(s):
         return _money(s), "Dollars"
     return "", ""

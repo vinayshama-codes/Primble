@@ -18,13 +18,24 @@
 
 export const isHandledStatus = (status) => status === "resolved" || status === "dismissed";
 
-// The sentences the package HARD STOPS block prints - the rule that block has
-// always used: the scorer's own `cap_hard_stops` when it has any, else the one
-// `cap_reason`, and nothing at all unless the package is capped at 60.
+// The sentences the package HARD STOPS block prints: every open hard stop
+// holding the package at 60, one per conflict (`ready_blockers`, 19 Oct 2026).
+// A score saved before then: the rule that block has always used - the
+// scorer's own `cap_hard_stops` when it has any, else the one `cap_reason`, and
+// nothing at all unless the package is capped at 60.
 export function packageCapReasons(pkg) {
-  if (!pkg || pkg.cap_applied !== 60) return [];
+  if (!pkg) return [];
+  if (Array.isArray(pkg.ready_blockers)) return pkg.ready_blockers;
+  if (pkg.cap_applied !== 60) return [];
   if (Array.isArray(pkg.cap_hard_stops) && pkg.cap_hard_stops.length) return pkg.cap_hard_stops;
   return pkg.cap_reason ? [pkg.cap_reason] : [];
+}
+
+// The clickable rows for those sentences (rule code + resolution).
+export function packageCapItems(pkg) {
+  if (!pkg) return [];
+  if (Array.isArray(pkg.ready_blocker_items)) return pkg.ready_blocker_items;
+  return Array.isArray(pkg.cap_hard_stop_items) ? pkg.cap_hard_stop_items : [];
 }
 
 // Split cap-stop sentences into { open, handled }. Each row is

@@ -153,6 +153,122 @@ def validate_date_range(eff: str, exp: str) -> Tuple[bool, str]:
     return True, ""
 
 
+# The same backwards term when no PERSON supplied either date (21 Oct 2026). It
+# shares its opening words with the hard message above, so ONE rule row
+# (`issue_registry`, "legacy_policy_term_backwards") codes both and opens the
+# proposed-term window - the way "Policy term already expired" codes its hard
+# and its read-from-a-document sentence. Static, so its issue id is stable.
+#
+# THE FIX LINE SAYS "CORRECT", NOT "CONFIRM" (21 Oct 2026 review, M2). A
+# backwards pair cannot be confirmed - confirming it is what used to turn this
+# warning into the hard stop. The save door refuses a backwards pair a person
+# supplies (`term_save_refusal`), so the only way out is a correction.
+BACKWARDS_TERM_TO_CONFIRM = (
+    "Effective date is on or after expiration date in the dates read from your "
+    "documents. Fix: Correct the proposed effective or expiration date."
+)
+
+# What the save door says when a person's save would leave the proposed term
+# running backwards (21 Oct 2026 review, M2). Plain words, no em-dash.
+TERM_BACKWARDS_REFUSAL = "The expiration date must be after the effective date."
+
+# ...and when it would leave the proposed term already ENDED - its expiration
+# before today (22 Oct 2026, Z31-N group C). Same door, same reason: a
+# "Confirm these values" save of a document's expired term made that
+# expiration a person's, and the expired-term warning a hard stop (Z30 open
+# end). A term already under way (a past effective date, a future expiration)
+# is in force and is not refused. Plain words, no em-dash.
+TERM_ENDED_REFUSAL = "The proposed policy term has already ended. Enter the upcoming term's dates."
+
+_TERM_DATE_KEYS = ("effective_date", "expiration_date")
+
+
+def _iso_date(text: str):
+    """The calendar date a date string reads as, or None (the one date reader,
+    `normalization.normalize_date`)."""
+    from services.normalization import normalize_date
+    iso = normalize_date(str(text or "").strip()) if str(text or "").strip() else None
+    if not iso:
+        return None
+    try:
+        return datetime.strptime(iso, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def term_save_refusal(stored_facts: dict, supplied: dict, today=None) -> str:
+    """The refusal sentence when a person's save would leave the proposed term
+    unusable: running backwards (`TERM_BACKWARDS_REFUSAL`), or already ended -
+    its expiration before today (`TERM_ENDED_REFUSAL`); "" otherwise.
+
+    `supplied` is every proposed-term date a PERSON gives in this save (the
+    fix window sends its boxes one request at a time, so it names the whole
+    save). The term judged is the one the save LEAVES: the supplied dates over
+    the ones on file, then the save's own re-derivation (`extraction_service.
+    follow_proposed_expiration` - a typed effective date takes a derived or
+    blank expiration with it, exactly as `apply_producer_answer_to_session`
+    does), so a save the follow corrects is never refused for the stale
+    expiration it replaces. Empty when the save supplies neither date, when a
+    supplied date is unreadable or the side to compare is missing (the format
+    and missing-date rules' job), or when the term runs forwards and has not
+    ended. An expiration of today has not ended. `today` is for tests.
+
+    Why it exists: with the hard stops needing a PERSON's dates, a "Confirm
+    these values" save of a backwards or an expired pair read off a document -
+    the warning's own window - would otherwise make that pair a person's and
+    the warning a hard stop."""
+    given = {k: str(v).strip() for k, v in (supplied or {}).items()
+             if k in _TERM_DATE_KEYS and v is not None and str(v).strip()}
+    if not given or any(_iso_date(v) is None for v in given.values()):
+        return ""
+    left = dict(stored_facts or {})
+    for key, text in given.items():
+        left[key] = {"value": text, "source": "producer", "confidence": "filled"}
+    try:
+        from services.extraction_service import follow_proposed_expiration
+        follow_proposed_expiration(left)
+    except Exception:                                        # noqa: BLE001
+        pass                     # judged on the dates as supplied over the stored ones
+    eff = str(_fv(left, "effective_date") or "").strip()
+    exp = str(_fv(left, "expiration_date") or "").strip()
+    if eff and exp:
+        ok, _msg = validate_date_range(eff, exp)
+        if not ok:
+            return TERM_BACKWARDS_REFUSAL
+    end = _iso_date(exp) if exp else None
+    if end is None:
+        return ""
+    if today is None:
+        today = datetime.now().date()
+    return TERM_ENDED_REFUSAL if end < today else ""
+
+
+def _term_typed_by_a_person(facts: dict) -> bool:
+    """Did a person supply BOTH proposed-term dates?
+
+    BOTH, NOT ONE (21 Oct 2026 review, M2). "One typed date is enough" let the
+    warning's own instruction make it hard: documents read 07/15/2026 ->
+    07/15/2025 (an OCR slip), the producer retyped only the effective date, and
+    the stop went hard on the document's unverified expiration. The condition
+    is about the PAIR, so a person must have supplied both sides of it.
+
+    The per-date door is `sqs_service._date_is_person_supplied`, which asks
+    the one "typed by a person" door, `fact_state.typed_by_person` (21 Oct
+    2026, review L1) - the expired-term rule asks it about the expiration date
+    it judges, so both date rules read provenance the same way: a date typed
+    by a producer or answered by the client is a person's; a date read off a
+    document (whatever its confidence), picked between documents or typed into
+    Data Consistency, confirmed by the client in confirm-or-correct, or
+    calculated by Primble is not. Lazy import: sqs_service imports this
+    module. If the door cannot be reached the stop keeps its old severity
+    (hard)."""
+    try:
+        from services.sqs_service import _term_dates_both_person_supplied
+    except Exception:                                        # noqa: BLE001
+        return True
+    return bool(_term_dates_both_person_supplied(facts))
+
+
 def validate_percent(value: str, label: str = "Percentage") -> Tuple[bool, str]:
     """Percentage must be 0–100."""
     if not value:
@@ -188,8 +304,11 @@ def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
     Run all deterministic field-level validations against extracted facts.
 
     Returns (hard_stops, soft_stops):
-      hard_stops — conditions that cap SQS at 60 and block submission
-      soft_stops — conditions that cap SQS at 85 but allow submission
+      hard_stops — conditions that cap SQS at 60 and block "Submission Ready"
+                   (only the invalid policy period here - Brent's short
+                   hard-stop list, 19 Oct 2026 - and since 21 Oct only when
+                   a person supplied one of its dates)
+      soft_stops — conditions that cap SQS at 85
 
     This function is the ONLY place format/range validations run.
     sqs_service.evaluate_stops() calls this and extends the results with
@@ -230,11 +349,22 @@ def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
         if not ok:
             soft.append(msg)
 
-    # ── Date range: effective must be before expiration (hard — invalid period) ─
+    # ── Date range: effective must be before expiration ──────────────────────
+    # HARD ONLY WHEN VERIFIED (21 Oct 2026, Brent's 20 Oct reply: "only trigger
+    # a hard stop when Primble has enough VERIFIED information to know the
+    # condition is true; otherwise flag it for confirmation"). A term a person
+    # typed that runs backwards is a verified invalid period - hard, same
+    # sentence and issue id as before. The same pair read off a document is an
+    # OCR or reading slip until someone looks: a warning to correct the dates.
+    # A person must have supplied BOTH dates (review, M2): one retyped date
+    # beside a document's slip is still the document's slip.
     if eff and exp:
         ok, msg = validate_date_range(eff, exp)
         if not ok:
-            hard.append(msg)
+            if _term_typed_by_a_person(facts):
+                hard.append(msg)
+            else:
+                soft.append(BACKWARDS_TERM_TO_CONFIRM)
 
     # ── Percentage validations ────────────────────────────────────────────────
     for field, label in [

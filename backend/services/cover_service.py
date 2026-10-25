@@ -139,7 +139,8 @@ def _routing_key(words_: Any) -> str:
     return re.sub(r"[\s-]+", " ", str(words_ or "").strip().lower())
 
 
-def _checked_sqs_reasoning(text, ranked, score, is_package: bool, package_routing=None) -> str:
+def _checked_sqs_reasoning(text, ranked, score, is_package: bool, package_routing=None,
+                           package_open: int = 0) -> str:
     """The model's paragraph, or the deterministic one when it contradicts the
     scores it was handed.
 
@@ -155,7 +156,7 @@ def _checked_sqs_reasoning(text, ranked, score, is_package: bool, package_routin
     if is_package and re.search(r"\baverage\b", t, re.I):
         return _deterministic_sqs_reasoning(ranked, score, is_package)
     if is_package:
-        own_tier = grade_and_tier(score)[1]
+        own_tier = grade_and_tier(score, package_open)[1]
         own_routing = _routing_key(routing_label(package_routing)) if package_routing else None
         for sentence in re.split(r"(?<=[.!?])\s+", t):
             if _COVER_FORM_RE.search(sentence.replace("_", " ")):
@@ -239,12 +240,14 @@ def routing_label(code) -> str:
     return text[:1].upper() + text[1:]
 
 
-def grade_and_tier(score) -> tuple:
+def grade_and_tier(score, open_hard_stops=0) -> tuple:
     """(grade, tier) for a score - the one ladder, so a cover can never print a
-    grade the app does not show for the same number."""
+    grade the app does not show for the same number. ``open_hard_stops`` - the
+    score's own count: an open hard stop holds the tier below Submission Ready
+    (Brent, 19 Oct 2026)."""
     try:
         from services.sqs_service import tier_for_score
-        grade, tier, _color = tier_for_score(int(score or 0))
+        grade, tier, _color = tier_for_score(int(score or 0), int(open_hard_stops or 0))
         return grade, tier
     except Exception:                                         # noqa: BLE001
         return _COVER_UNKNOWN, _COVER_UNKNOWN
@@ -367,7 +370,7 @@ def _score_name(fid: Any) -> str:
 
 def _score_entry(name: str, sqs: Optional[dict]) -> dict:
     score = (sqs or {}).get("sqs_score", 0) or 0
-    grade, tier = grade_and_tier(score)
+    grade, tier = grade_and_tier(score, (sqs or {}).get("open_hard_stops"))
     return {"form": name, "score": score, "grade": grade, "tier": tier,
             "routing": routing_label((sqs or {}).get("routing_decision"))}
 
@@ -413,6 +416,7 @@ async def generate_ai_cover_narrative(
     user: dict = None,
     package_score: int = None,
     package_routing: Optional[str] = None,
+    package_open_hard_stops: int = 0,
 ) -> dict:
     """Cover-page narrative.
 
@@ -455,7 +459,7 @@ async def generate_ai_cover_narrative(
     # the ACORD 126's "Needs Work / priority review" under a Major Gaps /
     # Standard review row. `_checked_sqs_reasoning` holds it to them.
     if _is_package:
-        _pg, _pt = grade_and_tier(avg_sqs)
+        _pg, _pt = grade_and_tier(avg_sqs, package_open_hard_stops)
         _pkg_rank_line = (f"\nPackage grade / tier / routing: {_pg} / {_pt} / "
                           f"{routing_label(package_routing)}")
         _pkg_rank_rule = ("A tier or routing you give the submission must be the package's own, "
@@ -504,7 +508,8 @@ Return ONLY the JSON object."""
                        hard_stops=list(dict.fromkeys(_stops("hard_stops"))),
                        soft_stops=list(dict.fromkeys(_stops("soft_stops"))))
     _block["package_sqs"] = ({"score": avg_sqs, "grade": grade_and_tier(avg_sqs)[0],
-                              "tier": grade_and_tier(avg_sqs)[1]} if _is_package else None)
+                              "tier": grade_and_tier(avg_sqs, package_open_hard_stops)[1]}
+                             if _is_package else None)
     _cached_cover = await _cache_get(_cover_cache_key)
     if _cached_cover:
         return {**_cached_cover, "ai_block": _block}
@@ -519,7 +524,7 @@ Return ONLY the JSON object."""
                 "narrative":     result.get("narrative", ""),
                 "sqs_reasoning": _checked_sqs_reasoning(
                     result.get("sqs_reasoning", ""), _ranked, avg_sqs, _is_package,
-                    package_routing),
+                    package_routing, package_open_hard_stops),
             }
             await _cache_set(_cover_cache_key, result)
             return {**result, "ai_block": _block}
@@ -554,7 +559,7 @@ async def generate_lite_cover_narrative(
     # The ladder's grade and the routing in words (1 Oct 2026) - the brief used
     # to pass the FIRST FORM's grade and the raw code "priority_review", and the
     # summary repeated both.
-    grade, tier = grade_and_tier(score)
+    grade, tier = grade_and_tier(score, sqs.get("open_hard_stops"))
     routing = routing_label(sqs.get("routing_decision"))
     _revenue = _money(_fv(facts, "total_revenue")) if _fv(facts, "total_revenue") else "Not provided"
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
@@ -791,7 +796,7 @@ def build_cover_page_pdf(
                 score   = sqs.get("sqs_score", 0) if sqs else 0
                 sc      = sqs_color(score)
                 routing = routing_label(sqs.get("routing_decision") if sqs else None)
-                grade, tier = grade_and_tier(score)
+                grade, tier = grade_and_tier(score, (sqs or {}).get("open_hard_stops"))
                 # Instance-aware: "ACORD 131 (Excess)"; every plain id as before.
                 _row_name = (_cover_form_label(fid) if "__" in str(fid)
                              else str(fid).replace("_", " "))
@@ -811,7 +816,7 @@ def build_cover_page_pdf(
         _pkg_score = (package_sqs or {}).get("package_sqs_score")
         if _pkg_score is not None and package_label not in (sqs_results or {}):
             sc = sqs_color(_pkg_score)
-            grade, tier = grade_and_tier(_pkg_score)
+            grade, tier = grade_and_tier(_pkg_score, (package_sqs or {}).get("open_hard_stops"))
             sqs_rows.append([
                 Paragraph(f"<b>{package_label}</b>", S("Cell", fontSize=8,  fontName="Helvetica-Bold")),
                 Paragraph(f"<b>{_pkg_score}/100</b>", S("Cell", fontSize=9,  fontName="Helvetica-Bold", textColor=sc)),

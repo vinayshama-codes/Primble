@@ -197,6 +197,17 @@ export default function AddDocumentsPanel({
           onClick={() => send(false)}>
           {busy ? "Adding..." : files.length > 1 ? `Add ${files.length} documents` : "Add document"}
         </button>
+        {/* Cancel what was picked before adding it (owner, 25 Oct 2026). Not
+            while a read runs - the server is already merging the files. */}
+        {files.length > 0 && !busy && (
+          <button type="button" style={btn(false, false)} data-testid="add-documents-cancel"
+            onClick={() => {
+              setFiles([]); setDocType(""); setAsSupporting(false); setError(""); setIntegrity(null);
+              if (inputRef.current) inputRef.current.value = "";
+            }}>
+            Cancel
+          </button>
+        )}
       </div>
       {busy && (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PINK, fontWeight: 600 }} role="status">

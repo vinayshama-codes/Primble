@@ -229,6 +229,9 @@ def test_the_package_score_comes_from_the_panels_door():
     assert dr._package_score_now({"generated_forms": {"A": {}}}, "sid", "uid") == {}
     # a cached paragraph never quotes an older package score
     assert dr._cover_cache_key({}, ["ACORD_125"], {}, {}, 77) != dr._cover_cache_key({}, ["ACORD_125"], {}, {}, 78)
+    # ...nor an older readiness: same number, a hard stop confirmed away
+    assert dr._cover_cache_key({}, ["ACORD_125"], {}, {}, 92, open_hard_stops=1) != \
+        dr._cover_cache_key({}, ["ACORD_125"], {}, {}, 92, open_hard_stops=0)
 
 
 def test_every_download_route_prints_and_records_the_panels_score():
@@ -239,6 +242,9 @@ def test_every_download_route_prints_and_records_the_panels_score():
     allf = inspect.getsource(dr.download_all)
     assert "package_score=_pkg_score" in allf and "package_sqs=_pkg_now" in allf
     assert "_avg_score = (_pkg_score if _pkg_score is not None" in allf
-    assert "_cover_cache_key(facts, list(generated.keys()), sqs_results, flags, _pkg_score)" in allf
+    # ...and its readiness (19 Oct 2026: a confirmed hard stop can move the tier
+    # and routing the paragraph states without moving the number).
+    assert ("_cover_cache_key(facts, list(generated.keys()), sqs_results, flags, _pkg_score,\n"
+            "                           open_hard_stops=_pkg_now.get(\"open_hard_stops\"))") in allf
     lite = inspect.getsource(dr.lite_cover_sheet)
     assert '_row_label = "Total Package Score"' in lite and "sqs_results = {_row_label: sqs}" in lite

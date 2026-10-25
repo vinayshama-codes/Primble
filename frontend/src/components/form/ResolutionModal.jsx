@@ -26,10 +26,11 @@ import { API_BASE } from '../../config/constants';
 import ScheduleTable from '../arq/ScheduleTable';
 import { formLabel as instanceFormLabel } from '../../utils/formInstances';
 import { positiveScoreWording } from '../../utils/positiveWording';
-import { applyLabel, fieldsToApply } from '../../utils/fixWindow';
+import { applyLabel, fieldsToApply, sameSave, tableIsSaved, windowColumns } from '../../utils/fixWindow';
 import { missingRequiredSummary } from '../../utils/scheduleImport';
 import { stillMissing as windowStillMissing, unmetNeeds, rowNeedsSummary, unfinishedStarters, textForCoverage, gapCovered } from '../../utils/fixProgress';
 import { composePartLines, partPicks, partsLeft } from '../../utils/partLines';
+import { createPreviewer, fetchFollowUps, followUpIssue, followUpIssueId, followUpSaves, prefetchAnswerLists, previewableAnswers, splitFollowUps, warmFollowUps } from '../../utils/followUpPreview';
 
 const PINK = '#E61B84';
 
@@ -44,7 +45,7 @@ function humanizeFact(key) {
     .join(' ');
 }
 
-export default function ResolutionModal({ issue, sessionId, onApplied, onSetStatus, onClose }) {
+export default function ResolutionModal({ issue, sessionId, onApplied, onSetStatus, onClose, onOpenFollowUp, onAddDocuments, onFollowUpSaved }) {
   const resolution = issue?.resolution || {};
   const mode = resolution.mode || 'none';
   // A schedule fix may ALSO need a few whole-submission values (Choice
@@ -139,6 +140,55 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // (the validation cleared, which requires it) and absent from the list.
   const addedRef = useRef(null);
 
+  // Follow-up questions (owner, 24 Oct 2026): what the answer chosen here will
+  // ask next, shown below it as soon as it is chosen - the server reads the
+  // page with the answer written on a copy (backend services/answer_preview).
+  // Field windows only; a newer answer's reply always wins (followUpPreview).
+  const [followUps, setFollowUps] = useState([]);
+  const [fuValues, setFuValues] = useState({});
+  const [fuOther, setFuOther] = useState(() => new Set());
+  const previewer = useRef(null);
+  if (!previewer.current && mode === 'field' && sessionId) {
+    previewer.current = createPreviewer(
+      (answers, opts) => fetchFollowUps(API_BASE, sessionId, answers, fieldFacts, opts),
+      (list) => setFollowUps(Array.isArray(list) ? list : []),
+    );
+  }
+  useEffect(() => () => previewer.current?.cancel(), []);
+  // Z38 lane F (speed): on opening, the server reads the page as it stands,
+  // then the follow-ups of each choice of a short one-question list are read
+  // ahead - picking one shows its follow-ups at once.
+  useEffect(() => {
+    if (!previewer.current || !sessionId) return;
+    let live = true;
+    (async () => {
+      await warmFollowUps(API_BASE, sessionId);
+      if (live) previewer.current?.prefetch(prefetchAnswerLists(fieldFacts, resolution.controls));
+    })();
+    return () => { live = false; };
+    // Once per window: the window's question and session do not change while it is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Ask with the answers the producer gave in this window (pre-filled values on
+  // file are not new answers). Called on a choice, on every change of a typed
+  // box and when it is left - a typed value counts only once it reads as a
+  // whole answer (Z39 lane G: never a half-typed date), and the previewer's
+  // 350 ms debounce asks once per pause.
+  const askPreview = (nextValues, left = false) => {
+    if (!previewer.current) return;
+    const mine = fieldFacts.filter((f) => touched.current.has(f));
+    const ctl = resolution.controls || {};
+    const typed = (f) => !Array.isArray((ctl[f] || {}).options) || otherFacts.has(f) || nextValues[f] === 'Other';
+    previewer.current.request(previewableAnswers(nextValues, mine, ctl, typed, left));
+  };
+  const onTyped = (fact, text) => {
+    touched.current.add(fact);
+    setValues((v) => ({ ...v, [fact]: text }));
+    askPreview({ ...values, [fact]: text });
+    if (err) setErr('');
+  };
+  const fuSplit = splitFollowUps(followUps);
+
   // Carry the add forward onto whatever response finally reaches the panel.
   // Never overwrites a fresher field: the later response's `cross_issues`,
   // scores and stop lists win, because they are the ones computed last.
@@ -211,7 +261,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         if (!match) {
           setErr('This schedule is not available for the current forms.');
         } else {
-          setSchedule(match);
+          // Ask only what is missing (21 Oct 2026, Brent's item 8): a window the
+          // server scoped shows each building's identity and the cells it asks
+          // for, not the whole location table. The rows keep every cell.
+          setSchedule({ ...match, columns: windowColumns(match.columns, resolution) });
           setRows(Array.isArray(match.rows) ? match.rows : []);
         }
       } catch {
@@ -221,7 +274,9 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       }
     })();
     return () => { alive = false; };
-  }, [mode, sessionId, resolution.schedule_key]);
+    // The window's scope (`resolution.show_columns`) is the card it opened for -
+    // read once with the table, never a reason to fetch it again.
+  }, [mode, sessionId, resolution.schedule_key]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Only the window scrolls (owner, 13 Oct 2026: scrolling a long window also
   // scrolled the faded page behind it - twice: locking the body alone let a wheel
@@ -315,7 +370,9 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     return data || {};
   };
 
-  const applyField = async () => {
+  // `after` (optional): run once the save has landed and the window closed - a
+  // follow-up's "Open to fix" / "Add documents" saves the answer above first.
+  const applyField = async (after) => {
     // Send the fields the producer typed into. `values` also carries whatever
     // the async pre-fill loaded from the current session facts (so a reopened
     // validation shows what's already on file). Beside a typed box those stay
@@ -340,20 +397,42 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       // authoritative for the panel refresh. Filling BOTH sides of a trade-off
       // in one go therefore reports no note: the second write clears what the
       // first one raised, and only the last response is read.
+      // The whole save rides each request, so the server judges the term pair
+      // as one save (fixWindow.sameSave).
+      const saveValues = sameSave(filled);
       for (const [field, value] of filled) {
-        last = await post({ mode: 'field', field, value });
+        last = await post({ mode: 'field', field, value, same_save: saveValues });
         if (!last?.success) {
           setErr(last?.validation_error || last?.message || 'Could not apply that value.');
           setBusy(false);
           return;
         }
       }
+      // Then the follow-ups typed below it, each under its own row's id so its
+      // Resolved / Open again work like the row's own window. Blank ones are
+      // not saved - the row appears on the page afterwards, as before.
+      const parentNote = last?.note ? last : null;
+      for (const { fu, field, value } of followUpSaves(fuSplit.field, fuValues)) {
+        const fuIssue = followUpIssue(fu);
+        const r = await post({ mode: 'field', field, value, issue_id: followUpIssueId(fu),
+                               code: fu.source === 'card' ? (fu.code ?? null) : null });
+        if (!r?.success) {
+          applied.current = last;
+          setErr(`Your answer above is saved. ${fu.label}: ${r?.validation_error || r?.message || 'could not be saved'}`);
+          setBusy(false);
+          return;
+        }
+        last = r;
+        try { onFollowUpSaved?.(r, fuIssue); } catch { /* tracking only */ }
+      }
+      if (parentNote && !last?.note) last = { ...last, note: parentNote.note, note_settle_here: parentNote.note_settle_here };
       // Applied, but it raised something else. Hold the modal open on the note
       // so the producer can settle it here instead of discovering it later on
       // the panel and starting the loop again. The value stands either way -
       // `applied` carries it to whichever exit they take.
       if (last?.note) {
         applied.current = last;
+        setFuValues({}); setFollowUps([]);       // saved with it; never sent twice
         setNote(String(last.note));
         setNoteSettleHere(!!last.note_settle_here);
         touched.current.clear();
@@ -375,6 +454,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     // the producer as a failed apply - that invites them to retype a value that
     // is already on file. Every early return above has already exited.
     onApplied?.(withAdded(last), issue);
+    if (typeof after === 'function') after();
   };
 
   const applyNarrative = async () => {
@@ -417,8 +497,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       }
       // The table is saved when it was edited, or when it is the only thing
       // being saved (an unchanged table still lets every row's stated value
-      // answer the card - premises_cope.derive_package_cope).
-      const savedTable = !(typedOne && !rowsTouched.current);
+      // answer the card - premises_cope.derive_package_cope), or when it shows
+      // cells every building already states that only its save carries to the
+      // submission (`confirm_columns`, 21 Oct 2026).
+      const savedTable = tableIsSaved({ typedOne: !!typedOne, rowsTouched: rowsTouched.current, resolution });
       data = savedTable
         ? await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows })
         : typedOne;
@@ -498,7 +580,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         // The table's required cells, and each building row's COPE column
         // groups the card declares (`resolution.row_needs`).
         table: [missingRequiredSummary(rows, schedule.columns || []),
-                rowNeedsSummary(rows, resolution.row_needs, schedule.columns || [])]
+                rowNeedsSummary(rows, resolution.row_needs, schedule.columns || [], resolution.building_columns)]
           .filter(Boolean).join('; '),
       })
     : (mode === 'field' && !prefillLoading && Array.isArray(resolution.needs)
@@ -653,10 +735,12 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                               onChange={(e) => {
                                 const chosen = e.target.value;
                                 touched.current.add(fact);
+                                const composed = composePartLines(ctl, { ...partPicks(ctl, values[fact]), [p.key]: chosen });
                                 setValues((v) => ({
                                   ...v,
                                   [fact]: composePartLines(ctl, { ...partPicks(ctl, v[fact]), [p.key]: chosen }),
                                 }));
+                                askPreview({ ...values, [fact]: composed });
                                 if (err) setErr('');
                               }}
                               onFocus={() => { if (note) setNote(''); }}
@@ -705,7 +789,9 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                           // Entering Other clears the box rather than submitting
                           // the literal word "Other", which the backend refuses
                           // (answer_semantics: it is an affordance, not a value).
+                          const nextValues = { ...values, [fact]: chosen === 'Other' ? '' : chosen };
                           setValues((v) => ({ ...v, [fact]: chosen === 'Other' ? '' : chosen }));
+                          askPreview(nextValues);
                           if (err) setErr('');
                         }}
                         onFocus={() => { if (note) setNote(''); }}
@@ -721,7 +807,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                           disabled={busy}
                           autoFocus
                           value={picked}
-                          onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                          onChange={(e) => onTyped(fact, e.target.value)}
+                          onBlur={() => askPreview(values, true)}
                           onKeyDown={(e) => { if (e.key === 'Enter' && mode === 'field') applyField(); }}
                         />
                       )}
@@ -733,14 +820,87 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                     placeholder="Type the correct value..."
                     disabled={busy}
                     autoFocus={fieldFacts[0] === fact}
-                    onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                    onChange={(e) => onTyped(fact, e.target.value)}
                     onFocus={() => { if (note) setNote(''); }}
+                    onBlur={() => askPreview(values, true)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && mode === 'field') applyField(); }}
                   />
                   )}
                 </label>
                 );
               })}
+            </div>
+          )}
+
+          {mode === 'field' && !prefillLoading && followUps.length > 0 && (
+            <div data-testid="follow-ups" style={{ marginTop: 14, background: '#fdf2f8', border: '1px solid #f9a8d4', borderRadius: 10, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#be185d', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Then:</div>
+              {fuSplit.warning.map((fu) => (
+                <div key={fu.id} data-testid="follow-up-warning" style={{ fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '7px 10px', lineHeight: 1.45 }}>
+                  This answer raises a warning: {fu.label}
+                </div>
+              ))}
+              {fuSplit.field.map((fu) => (
+                <div key={fu.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>{fu.label}</span>
+                  {((fu.resolution && fu.resolution.facts) || []).map((fact) => {
+                    const ctl = ((fu.resolution && fu.resolution.controls) || {})[fact] || {};
+                    const opts = Array.isArray(ctl.options) ? ctl.options : null;
+                    const v = fuValues[fact] || '';
+                    const other = !!opts && fuOther.has(fact);
+                    const setFu = (val) => setFuValues((cur) => ({ ...cur, [fact]: val }));
+                    return (
+                      <div key={fact}>
+                        {fu.resolution.facts.length > 1 && (
+                          <span style={{ display: 'block', fontSize: 11.5, color: '#475569', marginBottom: 4 }}>{humanizeFact(fact)}</span>
+                        )}
+                        {opts ? (
+                          <>
+                            <select style={inputStyle} value={other ? 'Other' : v} disabled={busy}
+                              onChange={(e) => {
+                                const chosen = e.target.value;
+                                setFuOther((prev) => { const n = new Set(prev); if (chosen === 'Other') n.add(fact); else n.delete(fact); return n; });
+                                setFu(chosen === 'Other' ? '' : chosen);
+                                if (err) setErr('');
+                              }}>
+                              <option value="">Select an answer (optional)...</option>
+                              {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                            {other && (
+                              <input style={{ ...inputStyle, marginTop: 6 }} placeholder="Type the value..." disabled={busy}
+                                value={v} onChange={(e) => setFu(e.target.value)} />
+                            )}
+                          </>
+                        ) : (
+                          <input style={inputStyle} placeholder="Type the value (optional)..." disabled={busy}
+                            value={v} onChange={(e) => { setFu(e.target.value); if (err) setErr(''); }} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              {fuSplit.open.map((fu) => (
+                <div key={fu.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 12, color: '#334155', lineHeight: 1.45 }}>{fu.label}</span>
+                  {typeof onOpenFollowUp === 'function' && (
+                    <button type="button" style={{ ...ghostBtn, padding: '6px 11px', fontSize: 12, whiteSpace: 'nowrap' }} disabled={busy}
+                      onClick={() => applyField(() => onOpenFollowUp(followUpIssue(fu)))}>Open to fix</button>
+                  )}
+                </div>
+              ))}
+              {fuSplit.document.map((fu) => (
+                <div key={fu.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 12, color: '#334155', lineHeight: 1.45 }}>{fu.label}</span>
+                  {typeof onAddDocuments === 'function' && (
+                    <button type="button" style={{ ...ghostBtn, padding: '6px 11px', fontSize: 12, whiteSpace: 'nowrap' }} disabled={busy}
+                      onClick={() => applyField(() => onAddDocuments())}>Add documents</button>
+                  )}
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+                These appear because of the answer above. What you fill in here is saved with it; anything left blank stays on the page to answer later.
+              </div>
             </div>
           )}
 
@@ -811,6 +971,17 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
           {mode === 'schedule' && (
             <div>
+              {/* A table with its own heading (21 Oct 2026, Brent's item 6: "one
+                  pop-up titled General Liability Classification & Exposure
+                  Details") - the server's `title` and `intro` for that table. */}
+              {schedule && !loading && schedule.title && (
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 6 }} data-testid="schedule-title">
+                  {schedule.title}
+                </div>
+              )}
+              {schedule && !loading && schedule.intro && (
+                <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5, marginBottom: 10 }}>{schedule.intro}</div>
+              )}
               {/* What this fix needs from the table (the COPE card on a package
                   with two or more buildings, 7 Oct 2026): one row per building. */}
               {(resolution.note || (Array.isArray(resolution.columns) && resolution.columns.length > 0)) && !loading && (
@@ -839,6 +1010,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                   vinDecode={!!schedule.vin_decode}
                   rowCapacity={schedule.row_capacity || 0}
                   compact
+                  fixedRows={resolution.per_building === true}
+                  followUp={schedule.follow_up === true}
                 />
               ) : (
                 <div style={{ padding: '16px 0', color: '#b91c1c', fontSize: 13 }}>{err || 'Schedule unavailable.'}</div>

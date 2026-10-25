@@ -1,0 +1,3645 @@
+{
+ "note": "Excel number formats: code, stored value, date system, expected text. Expectations are typed by hand from Excel's documented display behaviour and the build's rules (a full date is MM/DD/YYYY; a malformed code or an unshowable value is General). type n = a numeric cell's stored <v> text, s = a text cell, d = an ISO date cell (t=\"d\"). Replayed through backend/utils/excel_number_format.py and frontend/src/utils/excelNumberFormat.js by backend/tests/test_build22_excel-formats.py.",
+ "vectors": [
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "-1",
+   "date1904": false,
+   "expect": "-1"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "0.5"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "-0.5",
+   "date1904": false,
+   "expect": "-0.5"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1.25"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "100",
+   "date1904": false,
+   "expect": "100"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1234.5678",
+   "date1904": false,
+   "expect": "1234.5678"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "123456789",
+   "date1904": false,
+   "expect": "123456789"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "9999999999",
+   "date1904": false,
+   "expect": "9999999999"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "12345678901",
+   "date1904": false,
+   "expect": "12345678901"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "99999999999",
+   "date1904": false,
+   "expect": "99999999999"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "123456789012",
+   "date1904": false,
+   "expect": "1.23457E+11"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "-123456789012",
+   "date1904": false,
+   "expect": "-1.23457E+11"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1234567890123",
+   "date1904": false,
+   "expect": "1.23457E+12"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "100000000000",
+   "date1904": false,
+   "expect": "1E+11"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1E+15",
+   "date1904": false,
+   "expect": "1E+15"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1.5E+20",
+   "date1904": false,
+   "expect": "1.5E+20"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1E-20",
+   "date1904": false,
+   "expect": "1E-20"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0.0001",
+   "date1904": false,
+   "expect": "0.0001"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0.001",
+   "date1904": false,
+   "expect": "0.001"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0.1",
+   "date1904": false,
+   "expect": "0.1"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "2.5",
+   "date1904": false,
+   "expect": "2.5"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0.30000000000000004",
+   "date1904": false,
+   "expect": "0.3"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1.0000000000000002",
+   "date1904": false,
+   "expect": "1"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "45729",
+   "date1904": false,
+   "expect": "45729"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "12000",
+   "date1904": false,
+   "expect": "12000"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0012",
+   "date1904": false,
+   "expect": "12"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "+5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "-0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1e3",
+   "date1904": false,
+   "expect": "1000"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": ".5",
+   "date1904": false,
+   "expect": "0.5"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "  42 ",
+   "date1904": false,
+   "expect": "42"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "1,000",
+   "date1904": false,
+   "expect": "1,000"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "N/A",
+   "date1904": false,
+   "expect": "N/A"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "0x10",
+   "date1904": false,
+   "expect": "0x10"
+  },
+  {
+   "group": "general",
+   "code": "General",
+   "type": "n",
+   "value": "Infinity",
+   "date1904": false,
+   "expect": "Infinity"
+  },
+  {
+   "group": "general",
+   "code": "general",
+   "type": "n",
+   "value": "12.5",
+   "date1904": false,
+   "expect": "12.5"
+  },
+  {
+   "group": "general",
+   "code": "",
+   "type": "n",
+   "value": "12.5",
+   "date1904": false,
+   "expect": "12.5"
+  },
+  {
+   "group": "general",
+   "code": "",
+   "type": "n",
+   "value": "123456789012",
+   "date1904": false,
+   "expect": "1.23457E+11"
+  },
+  {
+   "group": "general",
+   "code": "@",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "12345"
+  },
+  {
+   "group": "general",
+   "code": "@",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "2.5",
+   "date1904": false,
+   "expect": "3"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-3"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "0.4",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "-0.4",
+   "date1904": false,
+   "expect": "-0"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1235"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "12345678901234567",
+   "date1904": false,
+   "expect": "12345678901234600"
+  },
+  {
+   "group": "number",
+   "code": "0",
+   "type": "n",
+   "value": "1E+20",
+   "date1904": false,
+   "expect": "100000000000000000000"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0.00"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "1.005",
+   "date1904": false,
+   "expect": "1.01"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "2.675",
+   "date1904": false,
+   "expect": "2.68"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "-1.5",
+   "date1904": false,
+   "expect": "-1.50"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "0.13"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.50"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "-0.001",
+   "date1904": false,
+   "expect": "-0.00"
+  },
+  {
+   "group": "number",
+   "code": "0.00",
+   "type": "n",
+   "value": "0.30000000000000004",
+   "date1904": false,
+   "expect": "0.30"
+  },
+  {
+   "group": "number",
+   "code": "0.000",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1.000"
+  },
+  {
+   "group": "number",
+   "code": "0.000",
+   "type": "n",
+   "value": "1.2345",
+   "date1904": false,
+   "expect": "1.235"
+  },
+  {
+   "group": "number",
+   "code": "000",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "005"
+  },
+  {
+   "group": "number",
+   "code": "000",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1234"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "999",
+   "date1904": false,
+   "expect": "999"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "1000",
+   "date1904": false,
+   "expect": "1,000"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "1200000",
+   "date1904": false,
+   "expect": "1,200,000"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "-1234567",
+   "date1904": false,
+   "expect": "-1,234,567"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,235"
+  },
+  {
+   "group": "number",
+   "code": "#,##0",
+   "type": "n",
+   "value": "0.4",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "0.50"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00",
+   "type": "n",
+   "value": "-1234.567",
+   "date1904": false,
+   "expect": "-1,234.57"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00",
+   "type": "n",
+   "value": "1000000",
+   "date1904": false,
+   "expect": "1,000,000.00"
+  },
+  {
+   "group": "number",
+   "code": "#,###",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "number",
+   "code": "#,###",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "number",
+   "code": "#.##",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "."
+  },
+  {
+   "group": "number",
+   "code": "#.##",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1.5"
+  },
+  {
+   "group": "number",
+   "code": "#.##",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": ".25"
+  },
+  {
+   "group": "number",
+   "code": "#.##",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1."
+  },
+  {
+   "group": "number",
+   "code": "0.0#",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1.5"
+  },
+  {
+   "group": "number",
+   "code": "0.0#",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1.25"
+  },
+  {
+   "group": "number",
+   "code": "0.0#",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1.0"
+  },
+  {
+   "group": "number",
+   "code": "0.0?",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1.5 "
+  },
+  {
+   "group": "number",
+   "code": "0.0?",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1.25"
+  },
+  {
+   "group": "number",
+   "code": "0.##",
+   "type": "n",
+   "value": "2",
+   "date1904": false,
+   "expect": "2."
+  },
+  {
+   "group": "number",
+   "code": "0.##",
+   "type": "n",
+   "value": "2.5",
+   "date1904": false,
+   "expect": "2.5"
+  },
+  {
+   "group": "number",
+   "code": "#,##0;(#,##0)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "number",
+   "code": "#,##0;(#,##0)",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": "(1,234)"
+  },
+  {
+   "group": "number",
+   "code": "#,##0;(#,##0)",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00;[Red](#,##0.00)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "(1,234.50)"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00;[Red](#,##0.00)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50"
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00_);(#,##0.00)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50 "
+  },
+  {
+   "group": "number",
+   "code": "#,##0.00_);(#,##0.00)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "(1,234.50)"
+  },
+  {
+   "group": "number",
+   "code": "+0;-0;0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "+5"
+  },
+  {
+   "group": "number",
+   "code": "+0;-0;0",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "-5"
+  },
+  {
+   "group": "number",
+   "code": "+0;-0;0",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "number",
+   "code": "\"Yes\";\"No\";\"Zero\"",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "Yes"
+  },
+  {
+   "group": "number",
+   "code": "\"Yes\";\"No\";\"Zero\"",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "No"
+  },
+  {
+   "group": "number",
+   "code": "\"Yes\";\"No\";\"Zero\"",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "Zero"
+  },
+  {
+   "group": "number",
+   "code": ";;;",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "number",
+   "code": ";;;",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "number",
+   "code": ";;;",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "number",
+   "code": "0;-0;;@",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "number",
+   "code": "0;-0;;@",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "0;-0;;@",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "-5"
+  },
+  {
+   "group": "number",
+   "code": "0.00;(0.00);\"-\"",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "-"
+  },
+  {
+   "group": "number",
+   "code": "0.00;(0.00);\"-\"",
+   "type": "n",
+   "value": "-1.5",
+   "date1904": false,
+   "expect": "(1.50)"
+  },
+  {
+   "group": "number",
+   "code": "0.00;(0.00);\"-\"",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1.50"
+  },
+  {
+   "group": "number",
+   "code": "0;0",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "0;0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "[Red]0.00",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5.00"
+  },
+  {
+   "group": "number",
+   "code": "[Blue]#,##0",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "number",
+   "code": "[Color10]0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "[Green]0;[Red]-0",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "-5"
+  },
+  {
+   "group": "number",
+   "code": "[Green]0;[Red]-0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "number",
+   "code": "\"Total \"General",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "Total 5"
+  },
+  {
+   "group": "number",
+   "code": "\"Total \"General",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "Total 1234.5"
+  },
+  {
+   "group": "number",
+   "code": "General\" units\"",
+   "type": "n",
+   "value": "12",
+   "date1904": false,
+   "expect": "12 units"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "$1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0.00",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "-$1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0.00",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "$0.00"
+  },
+  {
+   "group": "literal",
+   "code": "\"$\"#,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "$1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "\"$\"#,##0",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "-$5"
+  },
+  {
+   "group": "literal",
+   "code": "\"$\"#,##0",
+   "type": "n",
+   "value": "1000000",
+   "date1904": false,
+   "expect": "$1,000,000"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0.00_);($#,##0.00)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "$1,234.50 "
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0.00_);($#,##0.00)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "($1,234.50)"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0;[Red]($#,##0)",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "($5)"
+  },
+  {
+   "group": "literal",
+   "code": "$#,##0;[Red]($#,##0)",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "$5"
+  },
+  {
+   "group": "literal",
+   "code": "\"$\"#,##0.00_);\\(\"$\"#,##0.00\\)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "$1,234.50 "
+  },
+  {
+   "group": "literal",
+   "code": "\"$\"#,##0.00_);\\(\"$\"#,##0.00\\)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "($1,234.50)"
+  },
+  {
+   "group": "literal",
+   "code": "[$$-409]#,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "$1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "[$$-409]#,##0.00;[Red]-[$$-409]#,##0.00",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "-$1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "[$€-2] #,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "€ 1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0.00 [$EUR]",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50 EUR"
+  },
+  {
+   "group": "literal",
+   "code": "[$USD] #,##0",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "USD 1,234"
+  },
+  {
+   "group": "literal",
+   "code": "[$CHF-100C] #,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "CHF 1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "[$-409]#,##0",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "literal",
+   "code": "£#,##0.00",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "£1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0.00 €",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50 €"
+  },
+  {
+   "group": "literal",
+   "code": "0.00 \"USD\"",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5.00 USD"
+  },
+  {
+   "group": "literal",
+   "code": "0 \"units\"",
+   "type": "n",
+   "value": "12",
+   "date1904": false,
+   "expect": "12 units"
+  },
+  {
+   "group": "literal",
+   "code": "0 \"days\"",
+   "type": "n",
+   "value": "12",
+   "date1904": false,
+   "expect": "12 days"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0\" sq ft\"",
+   "type": "n",
+   "value": "8500",
+   "date1904": false,
+   "expect": "8,500 sq ft"
+  },
+  {
+   "group": "literal",
+   "code": "0\\d",
+   "type": "n",
+   "value": "12",
+   "date1904": false,
+   "expect": "12d"
+  },
+  {
+   "group": "literal",
+   "code": "0\"%\"",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5%"
+  },
+  {
+   "group": "literal",
+   "code": "0\\%",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5%"
+  },
+  {
+   "group": "literal",
+   "code": "\"Class \"0000",
+   "type": "n",
+   "value": "5403",
+   "date1904": false,
+   "expect": "Class 5403"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0_)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234 "
+  },
+  {
+   "group": "literal",
+   "code": "_(#,##0_)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": " 1,234 "
+  },
+  {
+   "group": "literal",
+   "code": "* #,##0",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0*-",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234"
+  },
+  {
+   "group": "literal",
+   "code": "0 - 0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "0 - 5"
+  },
+  {
+   "group": "literal",
+   "code": "(0)",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "(5)"
+  },
+  {
+   "group": "literal",
+   "code": "0:0",
+   "type": "n",
+   "value": "12",
+   "date1904": false,
+   "expect": "1:2"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0 ;(#,##0)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": "1,234 "
+  },
+  {
+   "group": "literal",
+   "code": "#,##0 ;(#,##0)",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": "(1,234)"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0 ;[Red](#,##0)",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": "(1,234)"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0.00;(#,##0.00)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": "(1,234.50)"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0.00;(#,##0.00)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1,234.50"
+  },
+  {
+   "group": "literal",
+   "code": "#,##0.00;[Red](#,##0.00)",
+   "type": "n",
+   "value": "-0.5",
+   "date1904": false,
+   "expect": "(0.50)"
+  },
+  {
+   "group": "literal",
+   "code": "$-+/():!^&'~{}<>= 0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "$-+/():!^&'~{}<>= 5"
+  },
+  {
+   "group": "literal",
+   "code": "/0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "/5"
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": " 1,234 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": " (1,234)"
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": " - "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": " $1,234 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": " $(1,234)"
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": " $- "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)",
+   "type": "n",
+   "value": "1000000",
+   "date1904": false,
+   "expect": " $1,000,000 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": " 1,234.50 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": " (1,234.50)"
+  },
+  {
+   "group": "accounting",
+   "code": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": " -   "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": " $1,234.50 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": " $(1,234.50)"
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": " $-   "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "12000",
+   "date1904": false,
+   "expect": " $12,000.00 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": " $0.50 "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "s",
+   "value": "Name",
+   "date1904": false,
+   "expect": " Name "
+  },
+  {
+   "group": "accounting",
+   "code": "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+   "type": "s",
+   "value": "",
+   "date1904": false,
+   "expect": "  "
+  },
+  {
+   "group": "accounting",
+   "code": "_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * \"-\"??_ ;_ @_ ",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": " 1,234.50 "
+  },
+  {
+   "group": "accounting",
+   "code": "_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * \"-\"??_ ;_ @_ ",
+   "type": "n",
+   "value": "-1234.5",
+   "date1904": false,
+   "expect": " -1,234.50 "
+  },
+  {
+   "group": "accounting",
+   "code": "_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * \"-\"??_ ;_ @_ ",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": " -   "
+  },
+  {
+   "group": "accounting",
+   "code": "_ * #,##0_ ;_ * \\-#,##0_ ;_ * \"-\"_ ;_ @_ ",
+   "type": "n",
+   "value": "1234",
+   "date1904": false,
+   "expect": " 1,234 "
+  },
+  {
+   "group": "accounting",
+   "code": "_ * #,##0_ ;_ * \\-#,##0_ ;_ * \"-\"_ ;_ @_ ",
+   "type": "n",
+   "value": "-1234",
+   "date1904": false,
+   "expect": " -1,234 "
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "100%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "13%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "50%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "-0.5",
+   "date1904": false,
+   "expect": "-50%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "150%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "-0.001",
+   "date1904": false,
+   "expect": "-0%"
+  },
+  {
+   "group": "percent",
+   "code": "0%",
+   "type": "n",
+   "value": "0.07",
+   "date1904": false,
+   "expect": "7%"
+  },
+  {
+   "group": "percent",
+   "code": "0.0%",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "12.5%"
+  },
+  {
+   "group": "percent",
+   "code": "0.0%",
+   "type": "n",
+   "value": "0.0001",
+   "date1904": false,
+   "expect": "0.0%"
+  },
+  {
+   "group": "percent",
+   "code": "0.0%",
+   "type": "n",
+   "value": "0.07",
+   "date1904": false,
+   "expect": "7.0%"
+  },
+  {
+   "group": "percent",
+   "code": "0.0%",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "100.0%"
+  },
+  {
+   "group": "percent",
+   "code": "0.00%",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "12.50%"
+  },
+  {
+   "group": "percent",
+   "code": "0.00%",
+   "type": "n",
+   "value": "0.07",
+   "date1904": false,
+   "expect": "7.00%"
+  },
+  {
+   "group": "percent",
+   "code": "0.00%",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "100.00%"
+  },
+  {
+   "group": "percent",
+   "code": "0.00%",
+   "type": "n",
+   "value": "-0.0525",
+   "date1904": false,
+   "expect": "-5.25%"
+  },
+  {
+   "group": "percent",
+   "code": "#,##0%",
+   "type": "n",
+   "value": "123.45",
+   "date1904": false,
+   "expect": "12,345%"
+  },
+  {
+   "group": "percent",
+   "code": "[Red]0.0%",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "12.5%"
+  },
+  {
+   "group": "scaling",
+   "code": "#,##0,",
+   "type": "n",
+   "value": "1234567",
+   "date1904": false,
+   "expect": "1,235"
+  },
+  {
+   "group": "scaling",
+   "code": "#,##0,",
+   "type": "n",
+   "value": "999",
+   "date1904": false,
+   "expect": "1"
+  },
+  {
+   "group": "scaling",
+   "code": "#,##0,",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "scaling",
+   "code": "0.0,,",
+   "type": "n",
+   "value": "12345678",
+   "date1904": false,
+   "expect": "12.3"
+  },
+  {
+   "group": "scaling",
+   "code": "0.0,,\"M\"",
+   "type": "n",
+   "value": "2500000",
+   "date1904": false,
+   "expect": "2.5M"
+  },
+  {
+   "group": "scaling",
+   "code": "#,##0,\"K\"",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "12K"
+  },
+  {
+   "group": "scaling",
+   "code": "$#,##0,\"K\"",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "$12K"
+  },
+  {
+   "group": "scaling",
+   "code": "#,###.0,",
+   "type": "n",
+   "value": "12200000",
+   "date1904": false,
+   "expect": "12,200.0"
+  },
+  {
+   "group": "scaling",
+   "code": "0,",
+   "type": "n",
+   "value": "1500",
+   "date1904": false,
+   "expect": "2"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "8540",
+   "date1904": false,
+   "expect": "08540"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "12345"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "123456",
+   "date1904": false,
+   "expect": "123456"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "00000"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "12.5",
+   "date1904": false,
+   "expect": "00013"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "-5",
+   "date1904": false,
+   "expect": "-00005"
+  },
+  {
+   "group": "ids",
+   "code": "00000",
+   "type": "n",
+   "value": "2134.4",
+   "date1904": false,
+   "expect": "02134"
+  },
+  {
+   "group": "ids",
+   "code": "00000-0000",
+   "type": "n",
+   "value": "12345678",
+   "date1904": false,
+   "expect": "01234-5678"
+  },
+  {
+   "group": "ids",
+   "code": "00000-0000",
+   "type": "n",
+   "value": "123456789",
+   "date1904": false,
+   "expect": "12345-6789"
+  },
+  {
+   "group": "ids",
+   "code": "00000-0000",
+   "type": "n",
+   "value": "854012345",
+   "date1904": false,
+   "expect": "85401-2345"
+  },
+  {
+   "group": "ids",
+   "code": "00000\\-0000",
+   "type": "n",
+   "value": "85401234",
+   "date1904": false,
+   "expect": "08540-1234"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "8540",
+   "date1904": false,
+   "expect": "08540"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "85401234",
+   "date1904": false,
+   "expect": "08540-1234"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "123456789",
+   "date1904": false,
+   "expect": "12345-6789"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "99999",
+   "date1904": false,
+   "expect": "99999"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "100000",
+   "date1904": false,
+   "expect": "00010-0000"
+  },
+  {
+   "group": "ids",
+   "code": "[<=99999]00000;00000-0000",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "00000"
+  },
+  {
+   "group": "ids",
+   "code": "000-00-0000",
+   "type": "n",
+   "value": "123456789",
+   "date1904": false,
+   "expect": "123-45-6789"
+  },
+  {
+   "group": "ids",
+   "code": "000-00-0000",
+   "type": "n",
+   "value": "12345678",
+   "date1904": false,
+   "expect": "012-34-5678"
+  },
+  {
+   "group": "ids",
+   "code": "000-00-0000",
+   "type": "n",
+   "value": "1234567890",
+   "date1904": false,
+   "expect": "1234-56-7890"
+  },
+  {
+   "group": "ids",
+   "code": "00-0000000",
+   "type": "n",
+   "value": "841234567",
+   "date1904": false,
+   "expect": "84-1234567"
+  },
+  {
+   "group": "ids",
+   "code": "00-0000000",
+   "type": "n",
+   "value": "12345678",
+   "date1904": false,
+   "expect": "01-2345678"
+  },
+  {
+   "group": "ids",
+   "code": "[<=9999999]###-####;(###) ###-####",
+   "type": "n",
+   "value": "5551234",
+   "date1904": false,
+   "expect": "555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "[<=9999999]###-####;(###) ###-####",
+   "type": "n",
+   "value": "3035551234",
+   "date1904": false,
+   "expect": "(303) 555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "[<=9999999]###-####;(###) ###-####",
+   "type": "n",
+   "value": "8005550199",
+   "date1904": false,
+   "expect": "(800) 555-0199"
+  },
+  {
+   "group": "ids",
+   "code": "(000) 000-0000",
+   "type": "n",
+   "value": "3035551234",
+   "date1904": false,
+   "expect": "(303) 555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "(000) 000-0000",
+   "type": "n",
+   "value": "5551234",
+   "date1904": false,
+   "expect": "(000) 555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "(###) ###-####",
+   "type": "n",
+   "value": "3035551234",
+   "date1904": false,
+   "expect": "(303) 555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "(###) ###-####",
+   "type": "n",
+   "value": "5551234",
+   "date1904": false,
+   "expect": "() 555-1234"
+  },
+  {
+   "group": "ids",
+   "code": "0000",
+   "type": "n",
+   "value": "42",
+   "date1904": false,
+   "expect": "0042"
+  },
+  {
+   "group": "ids",
+   "code": "0",
+   "type": "n",
+   "value": "1999",
+   "date1904": false,
+   "expect": "1999"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "123456",
+   "date1904": false,
+   "expect": "1.23E+05"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "0.000123",
+   "date1904": false,
+   "expect": "1.23E-04"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1.00E+00"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0.00E+00"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "-12345",
+   "date1904": false,
+   "expect": "-1.23E+04"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "9.999",
+   "date1904": false,
+   "expect": "1.00E+01"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "1E+100",
+   "date1904": false,
+   "expect": "1.00E+100"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E+00",
+   "type": "n",
+   "value": "12345678901",
+   "date1904": false,
+   "expect": "1.23E+10"
+  },
+  {
+   "group": "scientific",
+   "code": "0.0E+0",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "1.2E+4"
+  },
+  {
+   "group": "scientific",
+   "code": "0E+00",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "1E+04"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E-00",
+   "type": "n",
+   "value": "123456",
+   "date1904": false,
+   "expect": "1.23E05"
+  },
+  {
+   "group": "scientific",
+   "code": "0.00E-00",
+   "type": "n",
+   "value": "0.000123",
+   "date1904": false,
+   "expect": "1.23E-04"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "12345",
+   "date1904": false,
+   "expect": "12.3E+3"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "123456",
+   "date1904": false,
+   "expect": "123.5E+3"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "1234567",
+   "date1904": false,
+   "expect": "1.2E+6"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "0.012345",
+   "date1904": false,
+   "expect": "12.3E-3"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "1.0E+0"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "1000",
+   "date1904": false,
+   "expect": "1.0E+3"
+  },
+  {
+   "group": "scientific",
+   "code": "##0.0E+0",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0.0E+0"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1 1/4"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": " 1/2"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "2.75",
+   "date1904": false,
+   "expect": "2 3/4"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1 1/2"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "-1.25",
+   "date1904": false,
+   "expect": "-1 1/4"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "3.141592653589793",
+   "date1904": false,
+   "expect": "3 1/7"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "0.3333333333333333",
+   "date1904": false,
+   "expect": " 1/3"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/?",
+   "type": "n",
+   "value": "5.2",
+   "date1904": false,
+   "expect": "5 1/5"
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/??",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1  1/4 "
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/??",
+   "type": "n",
+   "value": "0.125",
+   "date1904": false,
+   "expect": "  1/8 "
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/??",
+   "type": "n",
+   "value": "3.375",
+   "date1904": false,
+   "expect": "3  3/8 "
+  },
+  {
+   "group": "fraction",
+   "code": "# ???/???",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "1   1/4  "
+  },
+  {
+   "group": "fraction",
+   "code": "# ???/???",
+   "type": "n",
+   "value": "3.141592653589793",
+   "date1904": false,
+   "expect": "3  16/113"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/8",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1 4/8"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/8",
+   "type": "n",
+   "value": "1.3",
+   "date1904": false,
+   "expect": "1 2/8"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/8",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": " 2/8"
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/16",
+   "type": "n",
+   "value": "2.5",
+   "date1904": false,
+   "expect": "2  8/16"
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/16",
+   "type": "n",
+   "value": "0.3125",
+   "date1904": false,
+   "expect": "  5/16"
+  },
+  {
+   "group": "fraction",
+   "code": "# ??/100",
+   "type": "n",
+   "value": "1.37",
+   "date1904": false,
+   "expect": "1 37/100"
+  },
+  {
+   "group": "fraction",
+   "code": "##/100",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "125/100"
+  },
+  {
+   "group": "fraction",
+   "code": "##/100",
+   "type": "n",
+   "value": "0.37",
+   "date1904": false,
+   "expect": "37/100"
+  },
+  {
+   "group": "fraction",
+   "code": "?/?",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "1/2"
+  },
+  {
+   "group": "fraction",
+   "code": "?/?",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "5/4"
+  },
+  {
+   "group": "fraction",
+   "code": "??/??",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": " 5/4 "
+  },
+  {
+   "group": "fraction",
+   "code": "???/???",
+   "type": "n",
+   "value": "1.25",
+   "date1904": false,
+   "expect": "  5/4  "
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/2",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "1 1/2"
+  },
+  {
+   "group": "fraction",
+   "code": "# ?/4",
+   "type": "n",
+   "value": "1.75",
+   "date1904": false,
+   "expect": "1 3/4"
+  },
+  {
+   "group": "fraction",
+   "code": "0 ?/?",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "0 1/2"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "mm/dd/yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "dd/mm/yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "d-mmm-yy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "yyyy-mm-dd",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "mmmm d, yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "dddd, mmmm dd, yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "[$-409]mmmm d, yyyy;@",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "d/m/yy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "mmm d, yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "d mmmm yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "yyyy\"年\"m\"月\"d\"日\"",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "[$-F800]dddd, mmmm dd, yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "dd.mm.yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "yyyymmdd",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/e",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "dd/mm/bbbb",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "\"Due \"mm/dd/yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "36526",
+   "date1904": false,
+   "expect": "01/01/2000"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "01/01/1900"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "59",
+   "date1904": false,
+   "expect": "02/28/1900"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "61",
+   "date1904": false,
+   "expect": "03/01/1900"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "2958465",
+   "date1904": false,
+   "expect": "12/31/9999"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "60",
+   "date1904": false,
+   "expect": "60"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "-1",
+   "date1904": false,
+   "expect": "-1"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "2958466",
+   "date1904": false,
+   "expect": "2958466"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "45730.75",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "44999.9999999999",
+   "date1904": false,
+   "expect": "03/15/2023"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "30058",
+   "date1904": false,
+   "expect": "04/17/1982"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "0",
+   "date1904": true,
+   "expect": "01/01/1904"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "1",
+   "date1904": true,
+   "expect": "01/02/1904"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "59",
+   "date1904": true,
+   "expect": "02/29/1904"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "28596",
+   "date1904": true,
+   "expect": "04/17/1982"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "2957003",
+   "date1904": true,
+   "expect": "12/31/9999"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "2957004",
+   "date1904": true,
+   "expect": "2957004"
+  },
+  {
+   "group": "full date",
+   "code": "m/d/yyyy",
+   "type": "n",
+   "value": "-1",
+   "date1904": true,
+   "expect": "-1"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "2025"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy",
+   "type": "n",
+   "value": "43831",
+   "date1904": false,
+   "expect": "2020"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy",
+   "type": "n",
+   "value": "60",
+   "date1904": false,
+   "expect": "60"
+  },
+  {
+   "group": "partial date",
+   "code": "yy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "25"
+  },
+  {
+   "group": "partial date",
+   "code": "yy",
+   "type": "n",
+   "value": "36526",
+   "date1904": false,
+   "expect": "00"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "March"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmm",
+   "type": "n",
+   "value": "43831",
+   "date1904": false,
+   "expect": "January"
+  },
+  {
+   "group": "partial date",
+   "code": "mmm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Mar"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmmm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "M"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmmm",
+   "type": "n",
+   "value": "43831",
+   "date1904": false,
+   "expect": "J"
+  },
+  {
+   "group": "partial date",
+   "code": "mm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03"
+  },
+  {
+   "group": "partial date",
+   "code": "m",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "3"
+  },
+  {
+   "group": "partial date",
+   "code": "mmm-yy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Mar-25"
+  },
+  {
+   "group": "partial date",
+   "code": "mmm-yy",
+   "type": "n",
+   "value": "43891",
+   "date1904": false,
+   "expect": "Mar-20"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmm yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "March 2025"
+  },
+  {
+   "group": "partial date",
+   "code": "mm/yyyy",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/2025"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy-mm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "2025-03"
+  },
+  {
+   "group": "partial date",
+   "code": "d-mmm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "14-Mar"
+  },
+  {
+   "group": "partial date",
+   "code": "mmm d",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Mar 14"
+  },
+  {
+   "group": "partial date",
+   "code": "dd",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "14"
+  },
+  {
+   "group": "partial date",
+   "code": "d",
+   "type": "n",
+   "value": "45658",
+   "date1904": false,
+   "expect": "1"
+  },
+  {
+   "group": "partial date",
+   "code": "ddd",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Fri"
+  },
+  {
+   "group": "partial date",
+   "code": "dddd",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Friday"
+  },
+  {
+   "group": "partial date",
+   "code": "dddd",
+   "type": "n",
+   "value": "36526",
+   "date1904": false,
+   "expect": "Saturday"
+  },
+  {
+   "group": "partial date",
+   "code": "dddd",
+   "type": "n",
+   "value": "1",
+   "date1904": false,
+   "expect": "Sunday"
+  },
+  {
+   "group": "partial date",
+   "code": "dddd",
+   "type": "n",
+   "value": "60",
+   "date1904": false,
+   "expect": "60"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmm e",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "March 2025"
+  },
+  {
+   "group": "partial date",
+   "code": "mmm bbbb",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Mar 2568"
+  },
+  {
+   "group": "partial date",
+   "code": "\"Week of \"mmm d",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "Week of Mar 14"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy",
+   "type": "n",
+   "value": "0",
+   "date1904": true,
+   "expect": "1904"
+  },
+  {
+   "group": "partial date",
+   "code": "yyyy",
+   "type": "n",
+   "value": "28596",
+   "date1904": true,
+   "expect": "1982"
+  },
+  {
+   "group": "partial date",
+   "code": "mmmm",
+   "type": "n",
+   "value": "0",
+   "date1904": true,
+   "expect": "January"
+  },
+  {
+   "group": "partial date",
+   "code": "dddd",
+   "type": "n",
+   "value": "0",
+   "date1904": true,
+   "expect": "Friday"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": false,
+   "expect": "13:30"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": "6:00"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "45730.5625",
+   "date1904": false,
+   "expect": "13:30"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "0:00"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "1.5",
+   "date1904": false,
+   "expect": "12:00"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "-0.5",
+   "date1904": false,
+   "expect": "-0.5"
+  },
+  {
+   "group": "time",
+   "code": "hh:mm",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": "06:00"
+  },
+  {
+   "group": "time",
+   "code": "h:mm:ss",
+   "type": "n",
+   "value": "0.5626736111111111",
+   "date1904": false,
+   "expect": "13:30:15"
+  },
+  {
+   "group": "time",
+   "code": "h:mm:ss",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": false,
+   "expect": "13:30:00"
+  },
+  {
+   "group": "time",
+   "code": "hh:mm:ss",
+   "type": "n",
+   "value": "0.37855324074074076",
+   "date1904": false,
+   "expect": "09:05:07"
+  },
+  {
+   "group": "time",
+   "code": "h:mm AM/PM",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": false,
+   "expect": "1:30 PM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm AM/PM",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": "6:00 AM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm AM/PM",
+   "type": "n",
+   "value": "0",
+   "date1904": false,
+   "expect": "12:00 AM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm AM/PM",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "12:00 PM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm:ss AM/PM",
+   "type": "n",
+   "value": "0.5626736111111111",
+   "date1904": false,
+   "expect": "1:30:15 PM"
+  },
+  {
+   "group": "time",
+   "code": "hh:mm AM/PM",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": "06:00 AM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm A/P",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": false,
+   "expect": "1:30 P"
+  },
+  {
+   "group": "time",
+   "code": "h:mm a/p",
+   "type": "n",
+   "value": "0.25",
+   "date1904": false,
+   "expect": "6:00 a"
+  },
+  {
+   "group": "time",
+   "code": "mm:ss",
+   "type": "n",
+   "value": "0.5626736111111111",
+   "date1904": false,
+   "expect": "30:15"
+  },
+  {
+   "group": "time",
+   "code": "mm:ss.0",
+   "type": "n",
+   "value": "0.562675925925926",
+   "date1904": false,
+   "expect": "30:15.2"
+  },
+  {
+   "group": "time",
+   "code": "h:mm:ss.00",
+   "type": "n",
+   "value": "0.562675925925926",
+   "date1904": false,
+   "expect": "13:30:15.20"
+  },
+  {
+   "group": "time",
+   "code": "ss.000",
+   "type": "n",
+   "value": "0.562675925925926",
+   "date1904": false,
+   "expect": "15.200"
+  },
+  {
+   "group": "time",
+   "code": "[h]:mm:ss",
+   "type": "n",
+   "value": "1.5625",
+   "date1904": false,
+   "expect": "37:30:00"
+  },
+  {
+   "group": "time",
+   "code": "[h]:mm:ss",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "12:00:00"
+  },
+  {
+   "group": "time",
+   "code": "[h]:mm:ss",
+   "type": "n",
+   "value": "2.25",
+   "date1904": false,
+   "expect": "54:00:00"
+  },
+  {
+   "group": "time",
+   "code": "[h]:mm",
+   "type": "n",
+   "value": "1.5625",
+   "date1904": false,
+   "expect": "37:30"
+  },
+  {
+   "group": "time",
+   "code": "[mm]:ss",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": false,
+   "expect": "810:00"
+  },
+  {
+   "group": "time",
+   "code": "[ss]",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "43200"
+  },
+  {
+   "group": "time",
+   "code": "[s]",
+   "type": "n",
+   "value": "0.5",
+   "date1904": false,
+   "expect": "43200"
+  },
+  {
+   "group": "time",
+   "code": "[h]",
+   "type": "n",
+   "value": "2.5",
+   "date1904": false,
+   "expect": "60"
+  },
+  {
+   "group": "time",
+   "code": "[$-F400]h:mm:ss\\ AM/PM",
+   "type": "n",
+   "value": "0.5626736111111111",
+   "date1904": false,
+   "expect": "1:30:15 PM"
+  },
+  {
+   "group": "time",
+   "code": "h:mm",
+   "type": "n",
+   "value": "0.5625",
+   "date1904": true,
+   "expect": "13:30"
+  },
+  {
+   "group": "date time",
+   "code": "m/d/yyyy h:mm",
+   "type": "n",
+   "value": "45730.5625",
+   "date1904": false,
+   "expect": "03/14/2025 13:30"
+  },
+  {
+   "group": "date time",
+   "code": "m/d/yyyy h:mm",
+   "type": "n",
+   "value": "45730.25",
+   "date1904": false,
+   "expect": "03/14/2025 6:00"
+  },
+  {
+   "group": "date time",
+   "code": "m/d/yyyy h:mm",
+   "type": "n",
+   "value": "45730",
+   "date1904": false,
+   "expect": "03/14/2025 0:00"
+  },
+  {
+   "group": "date time",
+   "code": "mm/dd/yyyy hh:mm:ss",
+   "type": "n",
+   "value": "45730.56267361111",
+   "date1904": false,
+   "expect": "03/14/2025 13:30:15"
+  },
+  {
+   "group": "date time",
+   "code": "m/d/yy h:mm AM/PM",
+   "type": "n",
+   "value": "45730.5625",
+   "date1904": false,
+   "expect": "03/14/2025 1:30 PM"
+  },
+  {
+   "group": "date time",
+   "code": "yyyy-mm-dd hh:mm",
+   "type": "n",
+   "value": "45730.25",
+   "date1904": false,
+   "expect": "03/14/2025 06:00"
+  },
+  {
+   "group": "date time",
+   "code": "dddd, mmmm d, yyyy h:mm AM/PM",
+   "type": "n",
+   "value": "45730.75",
+   "date1904": false,
+   "expect": "03/14/2025 6:00 PM"
+  },
+  {
+   "group": "date time",
+   "code": "m/d/yyyy h:mm",
+   "type": "n",
+   "value": "28596.5625",
+   "date1904": true,
+   "expect": "04/17/1982 13:30"
+  },
+  {
+   "group": "text",
+   "code": "@",
+   "type": "s",
+   "value": "Bob",
+   "date1904": false,
+   "expect": "Bob"
+  },
+  {
+   "group": "text",
+   "code": "@",
+   "type": "s",
+   "value": "",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "text",
+   "code": "\"Name: \"@",
+   "type": "s",
+   "value": "Bob",
+   "date1904": false,
+   "expect": "Name: Bob"
+  },
+  {
+   "group": "text",
+   "code": "@\" kg\"",
+   "type": "s",
+   "value": "5",
+   "date1904": false,
+   "expect": "5 kg"
+  },
+  {
+   "group": "text",
+   "code": "0;0;0;\"T:\"@",
+   "type": "s",
+   "value": "x",
+   "date1904": false,
+   "expect": "T:x"
+  },
+  {
+   "group": "text",
+   "code": "0;-0;0;\"fixed\"",
+   "type": "s",
+   "value": "anything",
+   "date1904": false,
+   "expect": "fixed"
+  },
+  {
+   "group": "text",
+   "code": "0.00",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "text",
+   "code": "mm/dd/yyyy",
+   "type": "s",
+   "value": "04/01/2020",
+   "date1904": false,
+   "expect": "04/01/2020"
+  },
+  {
+   "group": "text",
+   "code": ";;;",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": ""
+  },
+  {
+   "group": "text",
+   "code": "_(@_)",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": " abc "
+  },
+  {
+   "group": "text",
+   "code": "General",
+   "type": "s",
+   "value": "x",
+   "date1904": false,
+   "expect": "x"
+  },
+  {
+   "group": "text",
+   "code": "0;-0;0;[Red]@",
+   "type": "s",
+   "value": "x",
+   "date1904": false,
+   "expect": "x"
+  },
+  {
+   "group": "iso",
+   "code": "General",
+   "type": "d",
+   "value": "2025-03-14T00:00:00",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "iso",
+   "code": "General",
+   "type": "d",
+   "value": "2025-03-14",
+   "date1904": false,
+   "expect": "03/14/2025"
+  },
+  {
+   "group": "iso",
+   "code": "General",
+   "type": "d",
+   "value": "not a date",
+   "date1904": false,
+   "expect": "not a date"
+  },
+  {
+   "group": "iso",
+   "code": "yyyy",
+   "type": "d",
+   "value": "2025-03-14",
+   "date1904": false,
+   "expect": "2025"
+  },
+  {
+   "group": "iso",
+   "code": "h:mm",
+   "type": "d",
+   "value": "2025-03-14T13:30:00",
+   "date1904": false,
+   "expect": "13:30"
+  },
+  {
+   "group": "iso",
+   "code": "mmm-yy",
+   "type": "d",
+   "value": "2025-03-14",
+   "date1904": false,
+   "expect": "Mar-25"
+  },
+  {
+   "group": "iso",
+   "code": "m/d/yyyy h:mm",
+   "type": "d",
+   "value": "2025-03-14T13:30:00",
+   "date1904": false,
+   "expect": "03/14/2025 13:30"
+  },
+  {
+   "group": "iso",
+   "code": "yyyy",
+   "type": "d",
+   "value": "1904-01-01",
+   "date1904": true,
+   "expect": "1904"
+  },
+  {
+   "group": "malformed",
+   "code": "0;0;0;0;0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "0;0;0;0;0",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "0;0;0;0;0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "0;0;0;0;0",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "\"abc",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "\"abc",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "\"abc",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "\"abc",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "[Red 0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "[Red 0",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "[Red 0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "[Red 0",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "0.0 m",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "0.0 m",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "0.0 m",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "0.0 m",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "yyyy 0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "yyyy 0",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "yyyy 0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "yyyy 0",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "General;General;General;General;General",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "General;General;General;General;General",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "General;General;General;General;General",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "General;General;General;General;General",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  },
+  {
+   "group": "malformed",
+   "code": "mm/dd/yyyy@0",
+   "type": "n",
+   "value": "5",
+   "date1904": false,
+   "expect": "5"
+  },
+  {
+   "group": "malformed",
+   "code": "mm/dd/yyyy@0",
+   "type": "n",
+   "value": "-2.5",
+   "date1904": false,
+   "expect": "-2.5"
+  },
+  {
+   "group": "malformed",
+   "code": "mm/dd/yyyy@0",
+   "type": "n",
+   "value": "1234.5",
+   "date1904": false,
+   "expect": "1234.5"
+  },
+  {
+   "group": "malformed",
+   "code": "mm/dd/yyyy@0",
+   "type": "s",
+   "value": "abc",
+   "date1904": false,
+   "expect": "abc"
+  }
+ ]
+}

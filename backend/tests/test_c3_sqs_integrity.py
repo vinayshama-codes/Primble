@@ -275,6 +275,8 @@ def test_a_suggested_value_never_equals_a_verified_one():
 
 
 # ── 3.9 - ceilings, unchanged and re-pinned to the client's own examples ────
+# (20 Oct 2026, owner) the 60 / 85 ceilings are back after the 19 Oct "no cap"
+# build; the client's four examples are what every scorer displays again.
 
 @pytest.mark.parametrize("raw,cap,expected", [
     (88, 60, 60),    # "Raw 88 + hard stop -> displays 60"
@@ -287,10 +289,12 @@ def test_the_clients_four_ceiling_examples(raw, cap, expected):
 
 
 def test_ceilings_do_not_stack():
-    """*"One hard stop and ten hard stops still produce a ceiling of 60."*"""
+    """*"One hard stop and ten hard stops still produce a ceiling of 60."*
+    And (19 Oct 2026) both block Submission Ready the same way."""
     one, _ = sq._resolve_cap(["a"], [])
     ten, _ = sq._resolve_cap([f"stop {i}" for i in range(10)], ["w"] * 5)
     assert one == ten == 60
+    assert sq.tier_for_score(95, 1) == sq.tier_for_score(95, 10) == ("A", "Almost There", "yellow")
 
 
 # ── 3.11 - credits ──────────────────────────────────────────────────────────
@@ -527,9 +531,22 @@ def test_the_trace_reconciles_to_the_headline():
 def test_the_structural_rows_reconstruct_their_own_pillar():
     res = _pkg()
     parts = res["score_trace"]["structural"]
-    assert {p["key"] for p in parts} == {"tier1", "tier2", "fill"}
+    # (19 Oct 2026, Brent: missing details are Completeness) a GL package with no class
+    # codes and no limits carries a Coverage Details row, and still adds up.
+    # (23 Oct 2026, Brent Z34-1 #1) the package score is independent of the forms: the
+    # form results above no longer add a Form Fill Rate row - the TEST pinned the old
+    # with-forms Structural and was updated; the code is the new rule.
+    assert [p["key"] for p in parts] == ["tier1", "tier2", "coverage_details"]
+    assert parts[-1]["deducted"] == 28
+    assert parts[-1]["missing"] == ["GL class codes", "GL each occurrence limit"]
     rebuilt = int(sum(p["contribution"] for p in parts))
     assert rebuilt == res["pillars"]["structural_completeness"]
+    # With nothing missing there is no Coverage Details row, and the two still add up.
+    full = _pkg(facts=dict(_TRACE_FACTS, gl_limits="1000000",
+                           gl_class_codes_by_location=[{"code": "91580"}]))
+    parts = full["score_trace"]["structural"]
+    assert [p["key"] for p in parts] == ["tier1", "tier2"]
+    assert int(sum(p["contribution"] for p in parts)) == full["pillars"]["structural_completeness"]
 
 
 def test_the_trace_reports_effective_weights_when_a_pillar_is_na():
@@ -550,6 +567,12 @@ def test_the_trace_states_the_ceiling_and_its_reason():
     assert "FEIN" in (arith["ceiling_reason"] or "")
     assert arith["displayed"] <= 60
     assert arith["raw"] == res["raw_sqs_score"], "the raw score is preserved"
+    assert arith["displayed"] == res["package_sqs_score"]
+    # The stop costs no points of its own - the ceiling holds the display only -
+    # and (19 Oct 2026) it is what blocks Submission Ready.
+    assert arith["raw"] == _pkg()["raw_sqs_score"]
+    assert res["ready_blockers"] == ["FEIN differs across uploaded documents"]
+    assert res["submission_ready"] is False
 
 
 def test_every_form_score_carries_a_trace_too():
@@ -625,27 +648,35 @@ def test_no_fact_is_deducted_in_two_pillars():
     def exposure(facts, flags):
         return sq._calculate_exposure_consistency(facts, flags, [], [])[0]
 
+    # (19 Oct 2026, Brent: never penalise missing information twice) the missing
+    # coverage details now sit in Structural beside Tier 2, so both are guarded.
+    def details(facts, flags):
+        return sum(i["points"] for i in sq.completeness_deduction_items(facts, flags, [], []))
+
     gl = {"has_general_liability": True}
     codes = {"gl_class_codes_by_location": [{"code": "91580"}],
              "gl_limits": "1000000"}
 
-    # operations_description: Tier 2 only. Its absence must not touch Exposure.
-    assert exposure(dict(codes), gl) == exposure(
-        dict(codes, operations_description="Roofing contractor"), gl), (
-        "operations_description is a Tier 2 field - Exposure must not charge "
-        "for it a second time"
-    )
+    for charged in (exposure, details):
+        # operations_description: Tier 2 only. Its absence must not touch Exposure.
+        assert charged(dict(codes), gl) == charged(
+            dict(codes, operations_description="Roofing contractor"), gl), (
+            "operations_description is a Tier 2 field - "
+            f"{charged.__name__} must not charge for it a second time"
+        )
 
-    # total_revenue: Tier 2 only.
-    assert exposure(dict(codes), gl) == exposure(
-        dict(codes, total_revenue="2000000"), gl), (
-        "total_revenue is a Tier 2 field - Exposure must not charge for it too"
-    )
+        # total_revenue: Tier 2 only.
+        assert charged(dict(codes), gl) == charged(
+            dict(codes, total_revenue="2000000"), gl), (
+            f"total_revenue is a Tier 2 field - {charged.__name__} must not charge for it too"
+        )
 
-    # ...while the checks that measure something DIFFERENT are still alive.
-    assert exposure({"gl_limits": "1000000"}, gl) < 100, "missing class codes"
-    assert exposure({"wc_class_codes": ["5183"]},
-                    {"has_workers_comp": True}) < 100, "WC with no payroll"
+    # ...while the checks that measure something DIFFERENT are still alive - as
+    # Coverage Details, since a missing detail is not a conflict (19 Oct 2026, Brent).
+    assert details({"gl_limits": "1000000"}, gl) > 0, "missing class codes"
+    assert details({"wc_class_codes": ["5183"]},
+                   {"has_workers_comp": True}) > 0, "WC with no payroll"
+    assert exposure({"gl_limits": "1000000"}, gl) == 100, "and Exposure no longer charges it"
 
-    # total_payroll: Exposure only (3.14), never Structural.
+    # total_payroll: the Coverage Details row only (3.14), never Tier 2.
     assert "total_payroll" not in sq.TIER2_FIELDS

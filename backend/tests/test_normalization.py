@@ -197,9 +197,12 @@ def test_check_doc_consistency_no_false_name_hard_stop():
 
 
 def test_check_doc_consistency_real_conflict_still_hard_stops():
+    # Two VERIFIED documents. Until 21 Oct 2026 the second was a narrative,
+    # which Brent's 20 Oct "verified only" rule makes a warning to confirm
+    # (tests/test_build21oct_b-identity-verified-only.py).
     docs = [
         _doc({"applicant_name": "Orbin Contracting LLC"}),
-        _doc({"applicant_name": "Wake County Government"}, doc_type="narrative"),
+        _doc({"applicant_name": "Wake County Government"}, doc_type="application"),
     ]
     issues = check_doc_consistency(docs)
     assert any("name_conflict" in i and "hard_stop" in i for i in issues), issues

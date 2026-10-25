@@ -949,9 +949,13 @@ def names_a_party(value: Any, third_party: bool = False,
         return False
     if third_party:
         try:
-            from services.normalization import is_party_role_label
+            from services.normalization import is_party_role_label, is_party_placeholder
             if is_party_role_label(head):
                 return False               # "Landlord", "Owner" - a role, not a party
+            # "FIO", "TBA", "Sample" - a placeholder in the party's place, which
+            # the initialism rule below would otherwise pass (22 Oct 2026).
+            if is_party_placeholder(head):
+                return False
         except Exception:                                     # noqa: BLE001
             pass
     if third_party and not _PARTY_LEGAL_SUFFIX_RX.search(head) \

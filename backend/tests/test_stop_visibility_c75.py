@@ -52,6 +52,9 @@ STOPS_DOOR = open(os.path.join(os.path.dirname(__file__), "..", "services",
 _EXPIRED = ("Policy term already expired (07/15/26) - the application proposes "
             "a period that ended. Fix: Update the proposed effective and "
             "expiration dates to the term being applied for.")
+# A property stop - the kind the proceed decision exists to demote on a package
+# that carries no property line.
+_COPE = "Property Minimum Viable COPE incomplete - missing: occupancy type"
 
 
 # ── 1. Severity on screen matches severity in the score ─────────────────────
@@ -59,14 +62,19 @@ _EXPIRED = ("Policy term already expired (07/15/26) - the application proposes "
 def test_the_demoted_stop_is_still_a_hard_stop_on_screen():
     """THE LIVE CASE. On a non-property submission this stop is demoted, and
     the screen used to show it as a warning while the score capped at 60."""
+    # (19 Oct 2026, Brent: no quote without a term) the live stop is never demoted now.
     _can, remaining, downgraded = classify_stops([_EXPIRED],
                                                  {"has_property_coverage": False})
+    assert remaining == [_EXPIRED] and downgraded == []
+    assert build_grouped_view([], [_EXPIRED], [])["counts"] == {"hard_stops": 1, "warnings": 0}
+    # The C75 rule itself, on a stop the proceed decision still demotes.
+    _can, remaining, downgraded = classify_stops([_COPE], {"has_property_coverage": False})
     assert remaining == [] and len(downgraded) == 1, "precondition: it demotes"
     # What the screen used to be given:
     old = build_grouped_view([], remaining, downgraded)["counts"]
     assert old == {"hard_stops": 0, "warnings": 1}
-    # What it is given now - the same arrays the scorer reads:
-    new = build_grouped_view([], [_EXPIRED], [])["counts"]
+    # What it is given now - the same arrays the blocker list reads:
+    new = build_grouped_view([], [_COPE], [])["counts"]
     assert new == {"hard_stops": 1, "warnings": 0}
 
 
@@ -120,7 +128,9 @@ def test_the_issue_is_demoted_not_discarded():
 def test_a_generation_blocking_conflict_is_raised_as_a_hard_stop():
     """The client's own directive for building value is 'require review BEFORE
     FORMS ARE GENERATED' - blocking - and the scorer has always capped at 60
-    for it. The display said 'warning'. Owner's rule: blocking = hard stop."""
+    for it. The display said 'warning'. Owner's rule: blocking = hard stop.
+    (19 Oct 2026, Brent: the blocking conflicts are the applicant's name and
+    FEIN - a building value is a warning now; the routing below is unchanged.)"""
     assert '"hard_stop" if _blocking else "soft_warning"' in PIPELINE
     assert "hard_stops = list(hard_stops) + [_uw_msg]" in PIPELINE
 
@@ -128,8 +138,9 @@ def test_a_generation_blocking_conflict_is_raised_as_a_hard_stop():
 def test_the_blocking_keys_come_from_the_declared_sets_not_a_local_list():
     """ANTI-ROT: a second copy of 'which fields block' is how these two layers
     drifted apart in the first place."""
-    assert "HARD_STOP_RECONCILABLE_KEYS" in STOPS_DOOR
-    assert "GENERATION_BLOCKING_RECONCILABLE_KEYS" in STOPS_DOOR
+    # (19 Oct 2026, Brent: only documents naming different companies block) ONE declared set now.
+    assert "blocking_keys = set(READY_BLOCKING_RECONCILABLE_KEYS)" in STOPS_DOOR
+    assert '{"applicant_name", "fein"}' not in STOPS_DOOR, "a local copy of the blocking keys"
     assert "underwriting_conflict_stops(" in PIPELINE
 
 
@@ -137,16 +148,23 @@ def test_the_declared_sets_still_contain_what_this_relies_on():
     """If someone empties these, the hard-stop routing silently stops."""
     from services.underwriting_consistency import (
         HARD_STOP_RECONCILABLE_KEYS, GENERATION_BLOCKING_RECONCILABLE_KEYS,
+        READY_BLOCKING_RECONCILABLE_KEYS,
     )
-    assert "property_building_value" in GENERATION_BLOCKING_RECONCILABLE_KEYS
-    assert {"applicant_name", "fein"} <= set(HARD_STOP_RECONCILABLE_KEYS)
+    # (19 Oct 2026, Brent: a hard stop only where the documents name different companies)
+    assert READY_BLOCKING_RECONCILABLE_KEYS == {"applicant_name", "fein"}
+    # ...and nothing refuses generation any more: a building value is fixable later.
+    assert GENERATION_BLOCKING_RECONCILABLE_KEYS == frozenset()
+    # The picker still never pre-selects a value for the two that block.
+    assert set(READY_BLOCKING_RECONCILABLE_KEYS) <= set(HARD_STOP_RECONCILABLE_KEYS)
 
 
 def test_an_irrelevant_conflict_is_not_a_blocker():
     """Owner: 'it should only be shown if declaration page has some relevant
     data'. With no property coverage there is no ACORD 140 to generate and no
     box for the number, so a building-value disagreement cannot block - it
-    stays a visible warning rather than capping the score."""
+    stays a visible warning rather than capping the score. (19 Oct 2026,
+    Brent: a building value never blocks now; the relevance gate stays for any
+    property value that is ever made blocking.)"""
     assert '"property_building_value": "has_property_coverage"' in STOPS_DOOR
     assert "key in blocking_keys and relevant" in STOPS_DOOR
 
@@ -202,6 +220,10 @@ def test_every_suppression_entry_names_a_code_that_can_actually_be_emitted():
     cfv = open(os.path.join(os.path.dirname(__file__), "..", "services",
                             "cross_form_validator.py"), encoding="utf-8").read()
     emitted = set(_re.findall(r'"([a-z0-9_]+)"', cfv))
+    # The Data Consistency picker's cards: `underwriting_reconciliation_<fact>`
+    # (extraction_pipeline) for every reconcilable field (25 Oct: the FEIN pair).
+    from services.underwriting_consistency import RECONCILABLE_FIELDS
+    emitted |= {f"underwriting_reconciliation_{k}" for k in RECONCILABLE_FIELDS}
     missing = [c for c in _LEGACY_SUPERSEDED_BY_CODE if c not in emitted]
     assert not missing, f"suppression keyed on codes nothing emits: {missing}"
 

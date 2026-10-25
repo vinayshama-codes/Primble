@@ -126,20 +126,24 @@ class TestListable:
 
 class TestPageOneOtherRows:
     def test_the_epl_policy_takes_the_next_other_row_with_no_premium(self):
+        """19 Oct 2026 (Brent): page 1's OTHER rows are lines APPLIED FOR. The
+        package's Employee Benefit Liability is a coverage part written with its
+        GL policy (same company) - ACORD 126's, never a row here; the EPL row
+        prints its LINE ("Coverage Part" dropped); a priced row comes first."""
         rows = ps._other_lob_rows(_ce())
         assert [r["name"] for r in rows] == [
-            "Employee Benefit Liability", "Excess (Following Form) Liability",
-            "Employment Practices Liability Coverage Part"]
-        assert rows[2]["premium"] is None
+            "Excess (Following Form) Liability", "Employment Practices Liability"]
+        assert rows[1]["premium"] is None
         with ps._schema_context(_schema125()):
-            assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_C", _ce()) == "Yes"
+            assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_B", _ce()) == "Yes"
             assert ps._resolve_other_lob_row(
-                "Policy_LineOfBusiness_OtherLineOfBusinessDescription_C", _ce()) == \
-                "Employment Practices Liability Coverage Part"
+                "Policy_LineOfBusiness_OtherLineOfBusinessDescription_B", _ce()) == \
+                "Employment Practices Liability"
             # the premium box stays blank - never "$0", never "redacted"
-            assert ps._resolve_other_lob_premium("Policy_SectionAttached_OtherPremiumAmount_C", _ce()) is None
-            # the rows listed before keep their row and their premium
-            assert ps._resolve_other_lob_premium("Policy_SectionAttached_OtherPremiumAmount_A", _ce()) == "$ 425.00"
+            assert ps._resolve_other_lob_premium("Policy_SectionAttached_OtherPremiumAmount_B", _ce()) is None
+            assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_C", _ce()) is None
+            # the priced row keeps its premium
+            assert ps._resolve_other_lob_premium("Policy_SectionAttached_OtherPremiumAmount_A", _ce()) == "$ 10,692"
 
     def test_a_standard_family_or_a_coverage_part_never_becomes_a_row(self):
         names = [r["name"] for r in ps._other_lob_rows(_ce())]
@@ -154,7 +158,7 @@ class TestPageOneOtherRows:
         recs = [r for r in recs if not (r["line"] == "workers_comp" and r.get("premium"))]
         names = [r["name"] for r in ps._other_lob_rows(_ce(_line_records=recs))]
         assert not any("Workers" in n for n in names)
-        assert "Employment Practices Liability Coverage Part" in names
+        assert "Employment Practices Liability" in names
 
     def test_a_record_riding_a_standard_lines_number_adds_nothing(self):
         lines = copy.deepcopy(_CE_LINES)
@@ -164,21 +168,25 @@ class TestPageOneOtherRows:
         recs = [dict(r, own_declarations=False, policy_number="CPP-7781203") if r["line"] == "epli" else r
                 for r in _CE_RECORDS]
         names = [r["name"] for r in ps._other_lob_rows(_ce(coverage_lines=lines, _line_records=recs))]
-        assert "Employment Practices Liability Coverage Part" not in names
+        assert not any(n.startswith("Employment Practices") for n in names)
 
     def test_a_record_without_its_own_declarations_adds_nothing(self):
         recs = [dict(r, own_declarations=False) if r["line"] == "epli" else r for r in _CE_RECORDS]
         names = [r["name"] for r in ps._other_lob_rows(_ce(_line_records=recs))]
-        assert "Employment Practices Liability Coverage Part" not in names
+        assert not any(n.startswith("Employment Practices") for n in names)
 
-    def test_more_policies_than_rows_adds_none_of_them(self, monkeypatch):
-        """Which line takes a scarce OTHER row is the open slot question: when
-        the unpriced policies do not ALL fit, today's rows stand alone."""
+    def test_more_lines_than_rows_print_the_largest_and_list_the_rest(self, monkeypatch):
+        """Brent, 19 Oct 2026, settled the slot question: the largest premium
+        first, a row with no premium last; the rows past the form's own are
+        listed on ACORD 101 (`other_lob_overflow`), never dropped."""
         monkeypatch.setattr(ps, "_other_lob_premium_boxes",
-                            lambda schema: {"Policy_SectionAttached_OtherPremiumAmount_A": "A",
-                                            "Policy_SectionAttached_OtherPremiumAmount_B": "B"})
+                            lambda schema: {"Policy_SectionAttached_OtherPremiumAmount_A": "A"})
         names = [r["name"] for r in ps._other_lob_rows(_ce())]
-        assert names == ["Employee Benefit Liability", "Excess (Following Form) Liability"]
+        assert names == ["Excess (Following Form) Liability", "Employment Practices Liability"]
+        assert [r["name"] for r in ps.other_lob_overflow(_ce())] == ["Employment Practices Liability"]
+        block = ps._other_lines_continuation(_ce())
+        assert block.startswith("OTHER LINES OF BUSINESS (continued from ACORD 125 page 1):")
+        assert "Employment Practices Liability" in block
 
     def test_a_priced_row_of_the_same_line_is_that_policy(self):
         lines = copy.deepcopy(_CE_LINES)
@@ -192,27 +200,31 @@ class TestPageOneOtherRows:
     def test_no_records_no_change(self):
         f = _ce()
         f.pop("_line_records")
-        assert [r["name"] for r in ps._other_lob_rows(f)] == [
-            "Employee Benefit Liability", "Excess (Following Form) Liability"]
+        assert [r["name"] for r in ps._other_lob_rows(f)] == ["Excess (Following Form) Liability"]
 
-    def test_the_policy_premium_total_never_omits_a_listed_policy(self):
-        """A total that leaves out a listed policy's unknown premium is a wrong
-        figure - the sum is partial, so the box stays blank."""
+    def test_the_policy_premium_total_is_the_visible_premiums(self):
+        """A listed policy's redacted premium leaves the total PARTIAL, and
+        partial is acceptable (Brent, 23 Oct 2026, Z34-1 #5 - reverses this
+        test's 14 Oct blank): the visible premiums' sum, with a needs-attention
+        note (tests/test_build25_forms.py)."""
         without = _ce()
         without.pop("_line_records")
         printed = ps._printed_lob_premiums(without)
         assert ps._printed_sum(without, printed)
-        assert ps._printed_sum(_ce(), ps._printed_lob_premiums(_ce())) is None
+        partial = ps._printed_lob_premiums(_ce())
+        assert ps._printed_sum(_ce(), partial) == sum(partial)
 
     def test_a_stated_one_policy_total_never_stands_in(self):
-        """The excess dec's own $10,692 total beside five carriers' rows was
-        replaced by the rows' sum; with a listed policy's premium unknown the
-        sum is partial too, so the box is blank - not the one policy's total."""
+        """The excess dec's own $10,692 total beside five carriers' rows is
+        replaced by the rows' sum - with a listed policy's premium redacted that
+        sum is partial, and printed (Brent, 23 Oct 2026); never the one
+        policy's total."""
         without = _ce(total_policy_premium="$10,692")
         without.pop("_line_records")
         assert str(ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A", without)).startswith("$")
+        partial = sum(ps._printed_lob_premiums(_ce()))
         assert ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A",
-                                           _ce(total_policy_premium="$10,692")) is None
+                                           _ce(total_policy_premium="$10,692")) == f"${partial:,}"
 
 
 def _schema125():
@@ -250,14 +262,20 @@ class TestPriorCarrierGrid:
         assert ps._resolve_prior_coverage_cell("PriorCoverage_OtherLine_TotalPremiumAmount_A", f) is None
         assert ps._resolve_prior_coverage_cell("PriorCoverage_OtherLine_EffectiveDate_A", f) == "01/01/2025"
 
-    def test_a_shared_other_column_is_exactly_as_before(self):
-        """Choice Electric: OTHER already holds crime, cyber, EBL, inland marine,
-        umbrella, excess and WC - several policies, one box, blank. The EPL
-        policy joining them changes nothing (the slot question)."""
+    def test_the_other_column_holds_the_umbrella_and_acord_101_lists_the_rest(self):
+        """Brent, 19 Oct 2026: the OTHER column holds "the primary excess /
+        umbrella policy" and every other policy is listed on ACORD 101 - never
+        omitted. Until then crime, cyber, EBL, inland marine, umbrella, excess,
+        WC and EPL all contested one box and the whole column printed blank."""
         f = _routed(_line_records=copy.deepcopy(_CE_RECORDS), coverage_lines=copy.deepcopy(_CE_LINES))
         grid, _years = ps._prior_coverage_grid(f)
-        assert ("OtherLine", 0) not in grid
+        assert grid[("OtherLine", 0)]["_family"] == "umbrella"
+        assert grid[("OtherLine", 0)]["_layer"] == "umbrella"
+        assert grid.other_line == "Umbrella"
         assert grid[("GeneralLiability", 0)]["premium"] == "$ 16,818.00"
+        listed = {e["_family"] for e in grid.set_aside}
+        assert {"workers_comp", "cyber", "epli"} <= listed and "umbrella" in listed  # the excess layer
+        assert "general_liab" not in listed and "property" not in listed
 
     def test_a_box_a_listed_policy_holds_is_never_taken(self):
         f = _routed(_line_records=[
@@ -279,10 +297,14 @@ class TestPriorCarrierGrid:
         assert grid[("Automobile", 0)]["policy_no"] == "BA-00123"
 
     def test_two_unnumbered_policies_of_one_carrier_are_two(self):
+        """Two lines, one OTHER column (19 Oct 2026): one line takes it - with
+        no premium on either, the first - and the other is listed on ACORD
+        101. One carrier's EPL and D&O are still two policies."""
         f = _routed(_line_records=[_rec("epli", FED, printed="Employment Practices Liability"),
                                    _rec("directors_officers", FED, printed="Directors and Officers Liability")])
         grid, _ = ps._prior_coverage_grid(f)
-        assert ("OtherLine", 0) not in grid           # one box cannot name both
+        assert grid[("OtherLine", 0)]["_family"] == "epli"
+        assert [e["_family"] for e in grid.set_aside] == ["directors_officers"]
 
     def test_a_year_is_added_only_while_the_grid_has_room(self):
         hist = [{"line": "General Liability", "carrier": "Old Co", "policy_no": f"GL-{y}",

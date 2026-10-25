@@ -49,6 +49,7 @@ door (the rule ``fact_comparison`` owns is "are these the same fact?").
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -91,6 +92,34 @@ LOSS_RUN_STATUS_OPTIONS = (
     "Loss runs are available and will be uploaded",
     "No loss runs are available",
 )
+
+# The producer's answer to "do these loss runs belong to this insured?" (23 Oct
+# 2026, package fc04c74f). A run whose insured NAME matches but carries no FEIN
+# or policy number scored `possible` and its only row asked for the PACKAGE
+# FEIN - already filled, so the row measured 0 and nothing could lift Loss
+# History. The producer is the one who knows: a "Yes" here makes a name-matched
+# run a person-confirmed STRONG match in the one match door
+# (`loss_run_identity.match_loss_run_identity`); a "No" leaves it unmatched.
+LOSS_RUN_OWNERSHIP_FIELD = "loss_run_ownership_confirmed"
+LOSS_RUN_OWNERSHIP_OPTIONS = (
+    "Yes - these loss runs belong to this insured",
+    "No - they are another insured's loss runs",
+)
+
+
+def loss_run_ownership_answer(facts: Any) -> Optional[bool]:
+    """The producer's ownership answer: True / False, or None when unanswered.
+    Same no-inversion reading as `new_venture_answer` (a bare Yes / No keeps
+    its meaning; anything else is no answer)."""
+    v = _fv(facts, LOSS_RUN_OWNERSHIP_FIELD)
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s.startswith("yes") or s in ("y", "true", "confirmed"):
+        return True
+    if s.startswith("no") or s in ("n", "false"):
+        return False
+    return None
 
 
 # ── Small local coercers (type coercion only - see module docstring) ─────────
@@ -361,6 +390,30 @@ _CLAIM_ROW_MONEY_COLUMNS = ("paid", "reserved_amount", "incurred", "amount")
 _CLAIM_ROW_DETAIL_COLUMNS = ("date", "description", "line_of_business")
 
 
+# "Total" / "Summary" open a total line only as a LABEL - "Total loss of
+# vehicle" and "Summary judgment defense" are claims (Z42 review A).
+_TOTAL_LINE_RE = re.compile(
+    r"^\s*(?:all\s+(?:lines?|coverages?|policies)\b|(?:grand\s+|sub\s*)?totals?\b"
+    r"(?!\s+(?:loss\b|theft\b|destruction\b|collapse\b|burn))|summary\s*(?:$|[:|(\-]|"
+    r"(?:for|of\s+(?:all|claims|losses))\b))", re.I)
+
+
+def _row_is_a_period_total(row: dict) -> bool:
+    """A loss-run SUMMARY line, not a claim (live f575160b, 25 Oct 2026): "2025-2026 |
+    All lines | 12 | 151700 | ... | 322650" - a policy year's claim COUNT and totals,
+    extracted as one "claim" of $322,650 beside the 12 real claims. A row naming
+    all lines / a total, with no claim number and no loss date, is a total."""
+    if any(not _is_blank_fact(row.get(c)) for c in ("claim_number", "claim_date", "date", "loss_date")):
+        return False
+    for col in ("line_of_business", "description", "line"):
+        val = str(row.get(col) or "")
+        if not val.strip():
+            continue
+        if _TOTAL_LINE_RE.search(val) or re.search(r"\|\s*all\s+lines?\s*\|", val, re.I):
+            return True
+    return False
+
+
 def _row_states_a_claim(row: Any) -> bool:
     """Does this `loss_history` row assert an actual CLAIM?
 
@@ -392,6 +445,8 @@ def _row_states_a_claim(row: Any) -> bool:
     description says.
     """
     if not isinstance(row, dict):
+        return False
+    if _row_is_a_period_total(row):
         return False
     money = 0.0
     for column in _CLAIM_ROW_MONEY_COLUMNS:
@@ -599,8 +654,13 @@ def asserted_claims(facts: Any) -> tuple:
             if not _row_states_a_claim(row):
                 continue
             row_count += 1
-            for column in _CLAIM_ROW_MONEY_COLUMNS:
-                row_incurred += _to_float(row.get(column)) or 0.0
+            # One figure per claim (25 Oct 2026): its incurred, else its amount,
+            # else paid + reserve. Adding all four counted one claim's money two
+            # or three times ($625,050 for Brent's $322,650 file).
+            inc = _to_float(row.get("incurred")) or _to_float(row.get("amount"))
+            if not inc:
+                inc = (_to_float(row.get("paid")) or 0.0) + (_to_float(row.get("reserved_amount")) or 0.0)
+            row_incurred += inc or 0.0
         claims = max(claims, row_count)
         incurred = max(incurred, row_incurred)
 
@@ -973,18 +1033,116 @@ BAND_ESTABLISHED = "established"     # >= 5 years
 BAND_UNKNOWN = "unknown"        # no usable years figure - never assume one
 
 
+def years_in_business_value(facts: dict) -> Optional[float]:
+    """The applicant's years in business as a number, or None when no usable
+    figure is on file (blank, unreadable, negative). The one reader the band
+    and the loss-run years requirement share."""
+    raw = _fv(facts or {}, "years_in_business")
+    try:
+        years = float(str(raw).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    if years != years or years < 0:                  # NaN or negative
+        return None
+    return years
+
+
+# LOSS-RUN YEARS ARE JUDGED AGAINST THE YEARS THE BUSINESS HAS EXISTED (Brent,
+# 23 Oct 2026, Z34-1 #2): "if a business has only existed 1-5 years, evaluate
+# the loss history against the years the business has actually existed. Do not
+# penalize it for years before it existed. If the business has existed longer
+# than the loss history provided, treat the missing period as incomplete."
+LOSS_YEARS_WINDOW = 5     # the most years of runs ever asked for (client 2.3)
+
+
+def loss_years_required(facts: dict) -> Optional[int]:
+    """How many years of loss runs give full credit: min(5, the business's age
+    rounded up), at least 1 - or None when the age is unknown (the caller keeps
+    the 5-year rule; an unknown age never lowers the bar)."""
+    age = years_in_business_value(facts)
+    if age is None:
+        return None
+    return max(1, math.ceil(min(float(LOSS_YEARS_WINDOW), age)))
+
+
+# ── Only the years inside the window count (owner, 24 Oct 2026, Z38 lane E) ──
+# A loss run wholly before the last min(5, business age) years (2019-2021 alone,
+# reviewed in 2026) says nothing about the risk being written and gave full
+# Loss History years. The window ends at the earlier of today and the proposed
+# effective date (a stale effective more than a year back is ignored), and opens
+# `required` years before it, less a 90-day grace - carriers treat a run valued
+# within 90 days as current, so a fresh 5-year run is never cut to 4 by its own
+# valuation lag. A run partly inside counts only its inside part.
+LOSS_WINDOW_GRACE_DAYS = 90
+
+
+def loss_window_start(facts: Any, today: Optional[date] = None) -> date:
+    """The first day a loss run's years count from. Never raises."""
+    from datetime import timedelta
+    anchor = today or date.today()
+    try:
+        from services.normalization import normalize_date
+        iso = normalize_date(_fv(facts or {}, "effective_date"))
+        if iso:
+            y, m, d = (int(p) for p in str(iso).split("-")[:3])
+            eff = date(y, m, d)
+            if eff < anchor and (anchor - eff).days <= 366:
+                anchor = eff
+    except Exception:                                          # noqa: BLE001
+        pass
+    # The latest term the documents show, when it has ENDED (live c5dc03ec,
+    # 25 Oct 2026): the decs' 2025-26 term ended 01/01/2026 and the proposed
+    # term rolled to 2027, so runs reaching 01/01/2026 are as current as the
+    # submission's own paperwork - counting back from today cut them to 4 of 5.
+    # Never while a term is IN FORCE today (effective past, expiration future):
+    # then today stands, and last year's end must not pull the window back.
+    try:
+        from services.normalization import normalize_date
+
+        def _d(key):
+            iso = normalize_date(_fv(facts or {}, key))
+            if not iso:
+                return None
+            y, m, d = (int(p) for p in str(iso).split("-")[:3])
+            return date(y, m, d)
+        _today = today or date.today()
+        eff, exp = _d("effective_date"), _d("expiration_date")
+        in_force = bool(eff and exp and eff <= _today < exp)
+        if not in_force:
+            ended = [e for e in (_d("prior_expiration_date"), exp)
+                     if e and e <= anchor and (anchor - e).days <= 731]
+            if ended:
+                anchor = max(ended)
+    except Exception:                                          # noqa: BLE001
+        pass
+    required = loss_years_required(facts or {}) or LOSS_YEARS_WINDOW
+    try:
+        start = anchor.replace(year=anchor.year - required)
+    except ValueError:                                         # 29 Feb
+        start = anchor.replace(year=anchor.year - required, day=28)
+    return start - timedelta(days=LOSS_WINDOW_GRACE_DAYS)
+
+
+def years_inside_window(start: date, end: date, facts: Any,
+                        today: Optional[date] = None) -> Optional[int]:
+    """Years of the run start..end that fall inside the window, or None when the
+    run lies wholly inside it (the caller keeps its own count, unchanged)."""
+    ws = loss_window_start(facts, today)
+    if start >= ws:
+        return None
+    if end <= ws:
+        return 0
+    return max(0, min(round((end - ws).days / 365.25), 10))
+
+
 def years_in_business_band(facts: dict) -> str:
     """The applicant's operating-history band, or BAND_UNKNOWN.
 
     Unknown is a real answer, not a default to the strictest band: a missing
     years figure must never manufacture a penalty (the blank-over-wrong rule).
     """
-    raw = _fv(facts or {}, "years_in_business")
-    try:
-        years = float(str(raw).strip().replace(",", ""))
-    except (TypeError, ValueError):
-        return BAND_UNKNOWN
-    if years < 0:
+    years = years_in_business_value(facts)
+    if years is None:
         return BAND_UNKNOWN
     if years <= 1:
         return BAND_YOUNG
@@ -1040,6 +1198,92 @@ def loss_runs_pending_stated(facts: dict, flags: dict) -> bool:
     return parse_loss_run_status(_fv(facts, LOSS_RUN_STATUS_FIELD)) == "pending"
 
 
+def stored_pending_counts(facts: dict, flags: dict, has_loss_run_doc: bool,
+                          years: int = 0) -> bool:
+    """Does a stored "requested / pending" loss-run status still COUNT? ONE door
+    for the scorer, the pillar's state label and the questionnaire state (23 Oct
+    2026, package fc04c74f).
+
+    With no loss-run document on file: whenever it is stated (unchanged).
+    With one on file the runs are here, so a PERSON's earlier "requested and
+    pending" answer is out of date and is ignored. The document's OWN statement
+    still counts in the one case it always did - a file classified as a loss run
+    that only SAYS the runs are pending (a cover letter): no claim years, no
+    claim, no claim row."""
+    facts, flags = facts or {}, flags or {}
+    if not has_loss_run_doc:
+        return loss_runs_pending_stated(facts, flags)
+    if parse_loss_run_status(_fv(facts, LOSS_RUN_STATUS_FIELD)) != "pending":
+        return False
+    try:
+        from services.fact_state import typed_by_person
+        if typed_by_person(facts.get(LOSS_RUN_STATUS_FIELD)):
+            return False
+    except Exception:                                     # noqa: BLE001
+        pass
+    if years:
+        return False
+    claims, incurred = asserted_claims(facts)
+    return not claims and not incurred
+
+
+_YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d\d)\b")
+_SHORT_YEAR_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-](\d{2})\b")
+
+
+def loss_run_years_suggestion(facts: Any) -> Optional[List[int]]:
+    """The distinct years the loss runs' own claim rows fall in, oldest first -
+    a SUGGESTION for "how many years do the runs cover", never a stored value.
+    None when no row states a year."""
+    rows = _fv(facts, "loss_history")
+    if not isinstance(rows, list):
+        return None
+    years = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for col in ("date", "claim_date", "policy_year", "policy_period", "policy_effective_date"):
+            text = str(row.get(col) or "")
+            m = _YEAR_RE.search(text)
+            if m:
+                years.add(int(m.group(1)))
+                break
+            m = _SHORT_YEAR_DATE_RE.search(text)        # 03/15/25
+            if m:
+                years.add(2000 + int(m.group(1)))
+                break
+    return sorted(years) or None
+
+
+def markable_loss_run_documents(docs: Any) -> List[int]:
+    """The positions in `docs` of the uploaded documents NOT typed as loss runs
+    whose classifier scored `loss_run` best (`classification.scores`) - the
+    runs are on file, only the type is wrong (5472449a, 23 Oct 2026). Upload
+    order. Reads the classification only; never changes it."""
+    out: List[int] = []
+    for n, d in enumerate(docs or []):
+        if not isinstance(d, dict) or d.get("excluded") \
+                or str(d.get("doc_type") or "").strip() == _LOSS_RUN_DOC_TYPE:
+            continue
+        scores = (d.get("classification") or {}).get("scores") if isinstance(d.get("classification"), dict) else None
+        if not isinstance(scores, dict) or not scores:
+            continue
+        try:
+            best = max(scores.items(), key=lambda kv: float(kv[1] or 0))
+        except (TypeError, ValueError):
+            continue
+        if best[0] == _LOSS_RUN_DOC_TYPE and float(best[1] or 0) > 0:
+            out.append(n)
+    return out
+
+
+def unmarked_loss_run_documents(docs: Any) -> List[str]:
+    """The filenames of `markable_loss_run_documents`, upload order."""
+    docs = list(docs or [])
+    return [str(docs[n].get("filename") or "the uploaded document")
+            for n in markable_loss_run_documents(docs)]
+
+
 def no_runs_available_stated(facts: dict) -> bool:
     return parse_loss_run_status(_fv(facts or {}, LOSS_RUN_STATUS_FIELD)) == "no_runs_available"
 
@@ -1072,6 +1316,412 @@ def had_claims_answer(facts: dict) -> bool:
     return "have had" in s or "had claims" in s or "had losses" in s
 
 
+def claims_question_answers() -> tuple:
+    """(no claims, had claims): the claims question's two answers as they are
+    stored, from their one owner (`arq_service._NO_LOSS_OPTIONS`)."""
+    try:
+        from services.arq_service import _NO_LOSS_OPTIONS
+        return tuple(_NO_LOSS_OPTIONS)
+    except Exception:                                          # noqa: BLE001
+        return ("No - no claims or losses in the past 5 years",
+                "Yes - we have had claims or losses")
+
+
+def with_claims_answer(facts: Any, flags: Any, answer: str) -> tuple:
+    """(facts, flags) as a producer's answer to the claims question leaves them:
+    the answer on `loss_history_no_prior_losses_indicator` and the
+    `no_prior_losses` flag both of its writers mirror (`arq_service`). Copies;
+    the inputs are never changed."""
+    f = dict(facts or {})
+    f["loss_history_no_prior_losses_indicator"] = {
+        "value": answer, "source": "producer", "confidence": "producer"}
+    fl = dict(flags or {})
+    fl["no_prior_losses"] = bool(attested_true(answer))
+    return f, fl
+
+
+def claims_confirmed_by_person(facts: Any, has_loss_run_doc: bool = False) -> bool:
+    """A person answered "we have had claims" and the package holds corroborated
+    claims (23 Oct 2026, the Loss History plan): every no-loss statement beside
+    them - an attestation, a narrative's sentence - is out of date, so none is
+    credited and none raises a conflict. Without corroborated claims the answer
+    changes nothing here (a narrative's statement keeps its credit)."""
+    if not had_claims_answer(facts):
+        return False
+    claims, incurred = asserted_claims(facts)
+    return bool(claims or incurred) and claims_are_corroborated(facts, has_loss_run_doc)
+
+
+# ── The narrative's claims stance vs the claims answer (24 Oct 2026) ─────────
+# Package 73284179: a producer's narrative reading "Loss history shows 12 claims
+# in the past five years, 4 still open, $322,650 incurred" beside the answer
+# "No claims" scored 100, Submission Ready, no card - and the reverse pair left
+# ACORD 101 printing "no claims" under a "we have had claims" answer. Nothing
+# compared the two things the same PERSON said. The reader below gives the
+# narrative's stance; `claims_answer_stance` gives the answer's; the warning
+# (`sqs_service.evaluate_stops`, `legacy_loss_narrative_mismatch`) fires only
+# when both are known and disagree.
+#
+# ONLY TEXT A PERSON TYPED is read (`fact_state.typed_by_person`): a narrative
+# a document supplied, or the model wrote, is not something the producer said,
+# and a carrier's boilerplate inside it is no statement about this insured.
+# The vocabulary is the module's own and `normalization`'s: the no-loss phrase
+# scan (`no_loss_statements`, account scope only), `_ZERO_COUNT_RE`,
+# `_NOTHING_ANSWERS`, `_HAD_LOSSES_RE`, the threshold and exception guards.
+# Ambiguity is None, never a guess: a text stating both, a no-loss statement
+# scoped to one line / one term / fewer than five years, or nothing at all.
+
+NARRATIVE_REMARKS_FACTS = ("additional_remarks_text", "acord101_remarks")
+_CLAIMS_WINDOW_YEARS = 5                       # "Any claims in the last 5 years?"
+
+_LOSS_WORD_RE = re.compile(r"\b(?:claims?|loss(?:es)?|incidents?)\b", re.I)
+_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+                "twelve": 12, "a single": 1, "several": 2, "multiple": 2}
+_CLAIM_COUNT_RE = re.compile(
+    r"\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"a single|several|multiple)\s+(?:(?:open|closed|prior|reported|paid|total|known|"
+    r"pending|separate|small|minor|large|auto|gl|liability|property|workers'?|"
+    r"compensation|general|still|insurance)\s+){0,2}(?:claims?|loss(?:es)?)\b"
+    r"(?![\s-]*(?:payees?|control|runs?|ratios?|experience|history|record|prevention|"
+    r"free|adjusters?|of use)\b)", re.I)
+# "We have had excellent loss experience" is no loss: the had-phrase must reach
+# the loss word itself, and a loss word naming a record / a role is not one.
+_HAD_A_LOSS_RE = re.compile(
+    r"\b(?:have had|has had|we had|there (?:have been|has been|were|was)|filed)\s+"
+    r"(?:a|an|one|some|several|multiple|\d+)?\s*(?:[a-z$,\d']+\s+){0,4}?"
+    r"(?:claims?|loss(?:es)?|incidents?)\b"
+    r"(?![\s-]*(?:payees?|control|runs?|ratios?|experience|history|record|prevention|"
+    r"free|adjusters?|of use)\b)|\bopen claim", re.I)
+# Coverage wording, not a loss: "claims-made" / "claims made" policies.
+_CLAIMS_MADE_RE = re.compile(r"\bclaims?[\s-]+made\b", re.I)
+# A premium / fee paid is not a loss paid.
+_NOT_A_LOSS_AMOUNT_RE = re.compile(r"\b(?:premiums?|deposits?|fees?|tax(?:es)?|dues)\b", re.I)
+_LABEL_COUNT_RE = re.compile(
+    r"\b(?:claims?|loss(?:es)?|loss count|number of claims)\s*[:=\-]\s*"
+    r"(\d{1,4}|none(?:\s+(?:known|reported))?|nil|zero|nothing)\b", re.I)
+_INCURRED_RE = re.compile(
+    r"(?:\b(?:incurred|paid|reserved?|reserves)\b[^.;\n$]{0,20}[$£€]\s?(\d[\d,]*(?:\.\d+)?)"
+    r"|[$£€]\s?(\d[\d,]*(?:\.\d+)?)\s*(?:k\b|m\b)?\s*(?:in\s+|of\s+)?"
+    r"(?:total\s+)?(?:incurred|paid|reserved?))", re.I)
+_NEGATED_HAD_RE = re.compile(
+    r"\b(?:has|have|had|did|does)\s*(?:not|n't|never)\s+(?:had\s+|filed\s+|reported\s+|have\s+)?"
+    r"(?:any\s+|a\s+)?(?:prior\s+|known\s+)?(?:claims?|loss(?:es)?)\b"
+    r"|\bnever\s+(?:had|filed|reported)\s+(?:any\s+|a\s+)?(?:prior\s+)?(?:claims?|loss(?:es)?)\b"
+    r"|\bwithout\s+(?:any\s+|a\s+single\s+)?(?:claims?|loss(?:es)?)\b", re.I)
+_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_ANY_PERIOD_RE = re.compile(
+    r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:full\s+)?years?\b", re.I)
+_LONG_PERIOD_RE = re.compile(
+    r"\b(?:past|last|prior|previous)\s+(\d{1,2}|six|seven|eight|nine|ten|twenty)\s+years?\b", re.I)
+_TERM_TAIL_RE = re.compile(
+    r"^[\s,]*(?:in|during|for|since|on)\s+(?:the\s+)?(?:(?:(?:19|20)\d{2}|current|expiring|"
+    r"this)\s*(?:policy|term|year)?|(?:last|prior|previous)\s+(?:policy|term|year)\b)", re.I)
+_OTHER_ENTITY_RE = re.compile(
+    r"\b((?:[A-Z][\w&'.-]*\s+){0,4}[A-Z][\w&'.-]*\s+"
+    r"(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Company|Co\.|Ltd\.?|LLP|LP))(?=\W|$)")
+_CLAUSE_SPLIT_RE = re.compile(r"(?<!\d)[.;!?\n\r]+(?!\d)")
+
+
+def _loss_narrative_question_facts() -> tuple:
+    """The narrative questionnaire's free-text facts that ask about losses
+    (`services/questionnaire.QUESTIONS`: a `qn_*` long text whose question or
+    group names losses, loss control aside) - derived, never listed."""
+    try:
+        from services.questionnaire import QUESTIONS
+    except Exception:                                          # noqa: BLE001
+        return ()
+    out = []
+    for q in QUESTIONS.values():
+        fact = getattr(q, "fact", None) or ""
+        if not fact.startswith("qn_") or getattr(q, "answer_type", "") != "long_text":
+            continue
+        words = f"{getattr(q, 'text', '')} {getattr(q, 'group', '') or ''}".lower()
+        # LOSSES, not "claims": the EPLI / professional questions ask about
+        # employment or professional claims, not this account's loss history.
+        if re.search(r"\bloss(?:es)?\b", words) and "loss-control" not in words \
+                and "loss control" not in words:
+            out.append(fact)
+    return tuple(out)
+
+
+# The words of a remarks envelope a PERSON typed (Z39 lane H, 25 Oct 2026):
+# `arq_service.append_producer_narrative` saves the WHOLE remarks under
+# "producer" when it appends, so the document's text it was appended to is
+# stored as typed. The envelope keeps the person's own parts under this key
+# (appended on each save; "Open again" puts the earlier envelope back through
+# the fix's receipt; the questionnaire's L.6 replace sets the whole text).
+TYPED_PARTS_KEY = "typed_parts"
+
+
+def person_typed_parts(raw: Any) -> Optional[List[str]]:
+    """The parts of a stored text a person typed, or None when the envelope
+    does not record them (legacy rows, document text - the caller keeps its
+    own reading). A recorded part no longer in the text is dropped (the text
+    was edited since)."""
+    if not isinstance(raw, dict) or TYPED_PARTS_KEY not in raw:
+        return None
+    parts = raw.get(TYPED_PARTS_KEY)
+    if not isinstance(parts, list):
+        return None
+    whole = str(raw.get("value") or "")
+    out: List[str] = []
+    for p in parts:
+        t = str(p or "").strip()
+        if t and t in whole and t not in out:
+            out.append(t)
+    return out
+
+
+def _wholly_typed(raw: Any) -> bool:
+    """Every word of the stored text is one a person typed (no recorded
+    parts = the legacy reading: the whole text)."""
+    parts = person_typed_parts(raw)
+    if parts is None:
+        return True
+    whole = re.sub(r"\s+", " ", str(raw.get("value") or "")).strip()
+    return bool(whole) and re.sub(r"\s+", " ", " ".join(parts)).strip() == whole
+
+
+def person_narrative_texts(facts: Any) -> List[str]:
+    """The narrative text a PERSON typed: the producer's remarks
+    (`arq_service.append_producer_narrative`) and the narrative questionnaire's
+    loss answers - each only when `fact_state.typed_by_person` says so. Of the
+    remarks only the parts the person typed when the envelope records them
+    (`person_typed_parts`) - a document's sentence they were appended to is
+    not the person's statement."""
+    if not isinstance(facts, dict):
+        return []
+    try:
+        from services.fact_state import typed_by_person
+    except Exception:                                          # noqa: BLE001
+        return []
+    out: List[str] = []
+    for key in NARRATIVE_REMARKS_FACTS + _loss_narrative_question_facts():
+        raw = facts.get(key)
+        if not typed_by_person(raw):
+            continue
+        parts = person_typed_parts(raw)
+        texts = parts if parts is not None else [str(_fv(facts, key) or "").strip()]
+        for text in texts:
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _count_value(token: str) -> Optional[int]:
+    t = str(token or "").strip().lower()
+    if t.isdigit():
+        return int(t)
+    if t in _COUNT_WORDS:
+        return _COUNT_WORDS[t]
+    if t in ("none", "nil", "zero", "nothing") or t.startswith("none "):
+        return 0
+    return None
+
+
+def _clause_is_outside_window(clause: str, today: date) -> bool:
+    """A clause whose losses sit wholly before the five-year window (every year
+    it names older), or over a period longer than it ("12 claims in the past
+    ten years"), cannot answer "Any claims in the last 5 years?"."""
+    years = [int(y) for y in _YEAR_RE.findall(clause)]
+    if years and max(years) < today.year - _CLAIMS_WINDOW_YEARS:
+        return True
+    m = _LONG_PERIOD_RE.search(clause)
+    if m:
+        raw = m.group(1).lower()
+        n = int(raw) if raw.isdigit() else {"six": 6, "seven": 7, "eight": 8, "nine": 9,
+                                            "ten": 10, "twenty": 20}.get(raw, 0)
+        if n > _CLAIMS_WINDOW_YEARS:
+            return True
+    return False
+
+
+def _names_another_company(clause: str, applicant: Any) -> bool:
+    """The clause names a company that is not the applicant (a prior owner, a
+    subcontractor, another insured) - its losses are not this insured's."""
+    names = [m.group(1).strip() for m in _OTHER_ENTITY_RE.finditer(clause)]
+    if not names:
+        return False
+    try:
+        from services.normalization import same_entity_name
+    except Exception:                                          # noqa: BLE001
+        return False
+    return not any(applicant and same_entity_name(n, applicant) for n in names)
+
+
+def _clause_stance(clause: str, today: date) -> Optional[str]:
+    """"claims" / "no_claims" / None for ONE clause."""
+    clause = _CLAIMS_MADE_RE.sub(" ", clause)
+    low = clause.lower()
+    if not _LOSS_WORD_RE.search(low):
+        return None
+    try:
+        from services.normalization import (
+            _NO_LOSS_PHRASES, _tail_introduces_an_exception, _tail_is_a_threshold,
+            no_loss_statements,
+        )
+    except Exception:                                          # noqa: BLE001
+        return None
+    # A no-loss phrase that carves an exception out of itself ("no claims except
+    # one in 2022", "clean loss history apart from a fire") states a loss.
+    for phrase in _NO_LOSS_PHRASES:
+        idx = low.find(phrase)
+        if idx < 0:
+            continue
+        after = low[idx + len(phrase):]
+        if _tail_introduces_an_exception(after):
+            return None if _clause_is_outside_window(clause, today) else "claims"
+        if _tail_is_a_threshold(after[:24].lstrip()):
+            return None                    # losses may exist, none counted
+    for st in no_loss_statements(clause):
+        after = low[st.get("at", 0) + len(st.get("phrase") or ""):]
+        if st.get("scope") != "account" or _TERM_TAIL_RE.match(after):
+            continue                       # one line / one term: not the account
+        years = st.get("years")
+        if years is None:                  # "no claims for 3 years"
+            ym = _ANY_PERIOD_RE.search(after[:40])
+            if ym:
+                raw = ym.group(1).lower()
+                years = int(raw) if raw.isdigit() else _COUNT_WORDS.get(raw)
+        if years is not None and years < _CLAIMS_WINDOW_YEARS:
+            continue                       # covers less than the question asks
+        return "no_claims"
+    if _NEGATED_HAD_RE.search(low) or _ZERO_COUNT_RE.search(low):
+        return "no_claims"
+    m = _LABEL_COUNT_RE.search(low)
+    if m:
+        n = _count_value(m.group(1))
+        if n == 0:
+            return "no_claims"
+        if n:
+            return None if _clause_is_outside_window(clause, today) else "claims"
+    stated = False
+    for m in _CLAIM_COUNT_RE.finditer(low):
+        n = _count_value(m.group(1))
+        if n and n > 0:
+            stated = True
+    for m in _INCURRED_RE.finditer(low):
+        if _NOT_A_LOSS_AMOUNT_RE.search(low[max(0, m.start() - 20):m.end() + 20]):
+            continue                       # "paid $12,000 in premium"
+        amt = _to_float((m.group(1) or m.group(2) or "").replace(",", ""))
+        if amt and amt > 0:
+            stated = True
+    if not stated and _HAD_A_LOSS_RE.search(low) and not re.search(r"\b(?:no|not|never|n't)\b", low):
+        stated = True
+    if stated:
+        return None if _clause_is_outside_window(clause, today) else "claims"
+    return None
+
+
+def _rule_stances(texts: List[str], applicant: Any, today: date) -> set:
+    found = set()
+    for text in texts:
+        for clause in _CLAUSE_SPLIT_RE.split(text):
+            clause = clause.strip()
+            if not clause or _names_another_company(clause, applicant):
+                continue
+            st = _clause_stance(clause, today)
+            if st:
+                found.add(st)
+    return found
+
+
+def text_claims_stance(text: Any, today: Optional[date] = None) -> Optional[str]:
+    """The rules' stance of one piece of text (no provenance, no reader) - for
+    a caller writing narrative words that must not contradict an answer."""
+    found = _rule_stances([str(text or "")], None, today or date.today())
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def narrative_claims_stance(facts: Any, today: Optional[date] = None) -> Optional[str]:
+    """What the narrative a PERSON typed says about claims in the last five
+    years: "claims", "no_claims", or None (says nothing, says both, or only a
+    scoped no-loss statement). Clause by clause; a clause naming another
+    company is not about this insured."""
+    today = today or date.today()
+    applicant = _fv(facts, "applicant_name") if isinstance(facts, dict) else None
+    found = _rule_stances(person_narrative_texts(facts), applicant, today)
+    # The narrative reader's stance (paraphrases: "our loss experience has
+    # been spotless") - only when the rules found nothing; where both read a
+    # stance and they differ, no stance (never a warning invented by a model).
+    ai = _ai_remarks_stance(facts)
+    if not found:
+        return ai
+    if len(found) == 1:
+        rule = next(iter(found))
+        return rule if ai in (None, rule) else None
+    return None
+
+
+def _ai_remarks_stance(facts: Any) -> Optional[str]:
+    """The stored narrative reading's loss stance (`narrative_reader.
+    loss_stance`, quote gated), for the remarks a PERSON typed, read for
+    exactly the text they hold now - else None."""
+    if not isinstance(facts, dict):
+        return None
+    try:
+        from services.extraction_service import _narrative_remarks_text
+        from services.fact_state import typed_by_person
+        from services.narrative_reader import loss_stance
+    except Exception:                                          # noqa: BLE001
+        return None
+    # The key `_narrative_remarks_text` reads FIRST (acord101_remarks before
+    # additional_remarks_text) - else a typed key vouches for a document's text.
+    owner = next((k for k in ("acord101_remarks", "additional_remarks_text")
+                  if str(_fv(facts, k) or "").strip()), None)
+    if owner is None or not typed_by_person(facts.get(owner)):
+        return None
+    # The reading is of the WHOLE remarks; when part of them is a document's
+    # text (Z39 lane H) it is not the person's stance - the rules read the
+    # person's own parts.
+    if not _wholly_typed(facts.get(owner)):
+        return None
+    return loss_stance(facts, _narrative_remarks_text(facts))
+
+
+def claims_answer_stance(facts: Any) -> Optional[str]:
+    """What a PERSON answered to "Any claims in the last 5 years?" - the
+    answer on `loss_history_no_prior_losses_indicator` only (never a flag, a
+    document's checkbox or the narrative): "no_claims" / "claims" / None."""
+    if not isinstance(facts, dict):
+        return None
+    raw = facts.get("loss_history_no_prior_losses_indicator")
+    try:
+        from services.fact_state import confirmed_by_person
+        if not confirmed_by_person(raw):
+            return None
+    except Exception:                                          # noqa: BLE001
+        return None
+    if attested_true(_fv(facts, "loss_history_no_prior_losses_indicator")):
+        return "no_claims"
+    if had_claims_answer(facts):
+        return "claims"
+    return None
+
+
+def narrative_answer_mismatch(facts: Any, today: Optional[date] = None) -> Optional[str]:
+    """The narrative's stance when it disagrees with the claims answer, else
+    None. One rule for the warning, its probe and the review page."""
+    answer = claims_answer_stance(facts)
+    if answer is None:
+        return None
+    narrative = narrative_claims_stance(facts, today)
+    if narrative is None or narrative == answer:
+        return None
+    return narrative
+
+
+def claims_answer_for_narrative(facts: Any, today: Optional[date] = None) -> Optional[str]:
+    """The claims question's stored answer that agrees with the person's
+    narrative, or None when the narrative takes no stance."""
+    stance = narrative_claims_stance(facts, today)
+    if stance is None:
+        return None
+    no_claims, had_claims = claims_question_answers()
+    return had_claims if stance == "claims" else no_claims
+
+
 def prior_claims_exist(facts: dict, flags: dict) -> bool:
     facts = facts or {}
     return (
@@ -1102,12 +1752,8 @@ def resolve_loss_history_state(facts: dict, flags: dict,
         # A doc classified loss_run that only SAYS runs are pending (no years,
         # no claims) is a cover letter - honour the pending state (mirrors the
         # scorer's shortcut).
-        if (
-            parse_loss_run_status(_fv(facts, LOSS_RUN_STATUS_FIELD)) == "pending"
-            and (_to_int(_fv(facts, "loss_history_years")) or 0) == 0
-            and (_to_int(_fv(facts, "num_claims")) or 0) == 0
-            and (_to_float(_fv(facts, "total_incurred")) or 0.0) == 0.0
-        ):
+        if stored_pending_counts(facts, flags, True,
+                                 _to_int(_fv(facts, "loss_history_years")) or 0):
             return STATE_LOSS_RUNS_PENDING
         return STATE_LOSS_RUNS_UPLOADED
     if user_attested_no_losses(facts, flags):
@@ -1158,3 +1804,164 @@ def suppressed_question_fields(facts: dict, flags: dict,
     if state == STATE_LOSS_RUNS_UPLOADED:
         return _UPLOADED_SUPPRESSED
     return frozenset()
+
+
+# ── Several loss-run documents cover the years TOGETHER (owner, 24 Oct 2026) ──
+# The merge kept ONE document's experience period, so a second run for the
+# earlier years (2021-2024 beside 2025-26) never added a year: the page asked
+# for "the earlier years", the producer uploaded them, and the score stayed put.
+# The package's period is now the contiguous coverage the included loss runs
+# give together - the stretch that ends latest, joined across gaps of up to 45
+# days - never a span with a hole in it. A person's typed period is kept.
+_PERIOD_JOIN_GAP_DAYS = 45
+
+
+def loss_period_date(v: Any, end: bool = False):
+    """A loss-run period date as a `date`, or None. A bare year ("2021" ..
+    "2025", read off "Years of loss history 5 (2021-2025)" - live 85e51d02,
+    25 Oct) is that whole year: from 1 January, through 31 December. It used to
+    read as no period at all, so the run counted no years."""
+    from datetime import date as _date, datetime as _dt
+    from services.normalization import normalize_date
+    v = v.get("value") if isinstance(v, dict) else v
+    m = re.fullmatch(r"\s*((?:19|20)\d{2})\s*", str(v if v is not None else ""))
+    if m:
+        y = int(m.group(1))
+        return _date(y, 12, 31) if end else _date(y, 1, 1)
+    s = normalize_date(v) if v not in (None, "") else None
+    try:
+        return _dt.strptime(s, "%Y-%m-%d").date() if s else None
+    except (TypeError, ValueError):
+        return None
+
+
+def combine_loss_run_periods(facts: dict, docs) -> bool:
+    """Widen facts["loss_run_period_start"/"_end"] to the included loss runs'
+    joined coverage. True when it changed them. Never raises."""
+    try:
+        from datetime import datetime, timedelta
+        from services.normalization import normalize_date
+
+        _iso = loss_period_date
+
+        def _person(v):
+            return isinstance(v, dict) and str(v.get("source") or "") in ("producer", "client_arq", "client")
+
+        if not isinstance(facts, dict) or _person(facts.get("loss_run_period_start")) \
+                or _person(facts.get("loss_run_period_end")):
+            return False
+        spans = []
+        for d in docs or []:
+            if not isinstance(d, dict) or d.get("excluded") or d.get("doc_type") != "loss_run":
+                continue
+            f = d.get("facts") or {}
+            a = _iso(f.get("loss_run_period_start"))
+            b = _iso(f.get("loss_run_period_end"), end=True) or _iso(f.get("loss_run_valuation_date"))
+            if a and b and b >= a:
+                spans.append((a, b))
+        if len(spans) < 2:
+            return False
+        spans.sort()
+        joined = [list(spans[0])]
+        for a, b in spans[1:]:
+            if a <= joined[-1][1] + timedelta(days=_PERIOD_JOIN_GAP_DAYS):
+                joined[-1][1] = max(joined[-1][1], b)
+            else:
+                joined.append([a, b])
+        start, end = max(joined, key=lambda s: s[1])
+        cur_a, cur_b = _iso(facts.get("loss_run_period_start")), _iso(facts.get("loss_run_period_end"), end=True)
+        if cur_a == start and cur_b == end:
+            return False
+        if cur_a and cur_b and cur_a <= start and cur_b >= end:
+            return False
+        for key, day in (("loss_run_period_start", start), ("loss_run_period_end", end)):
+            facts[key] = {"value": day.strftime("%m/%d/%Y"), "source": "derived",
+                          "confidence": "deterministic", "value_state": "present"}
+        return True
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+# ── Loss-run coverage, shown on the review page (owner, 24 Oct 2026) ─────────
+# Loss History scores by the TOTAL YEARS the included loss runs cover, so
+# including or excluding one file moves the score by different amounts. This
+# reader names those years. Display only: `covered` is the scorer's own count
+# (`sqs_service._resolve_loss_history_years` on the facts as
+# `combine_loss_run_periods` leaves them), never a second count.
+def _years_label(years: List[int]) -> str:
+    if not years:
+        return ""
+    return str(years[0]) if len(years) == 1 else f"{years[0]}-{years[-1]}"
+
+
+def loss_run_coverage(docs: Any, facts: Any) -> Optional[dict]:
+    """{"required", "years", "covered", "end_year", "label", "documents"} for the
+    package's loss-run documents, or None when it has none. Never raises."""
+    try:
+        import copy
+        from datetime import datetime
+        from services.normalization import normalize_date
+
+        _iso = loss_period_date
+
+        def _n_years(a, b) -> int:
+            return max(1, min(round((b - a).days / 365.25), 10))
+
+        runs = [d for d in (docs or []) if isinstance(d, dict)
+                and str(d.get("doc_type") or "").strip() == _LOSS_RUN_DOC_TYPE]
+        if not runs:
+            return None
+        facts = facts if isinstance(facts, dict) else {}
+        documents = []
+        for d in runs:
+            f = d.get("facts") or {}
+            a = _iso(f.get("loss_run_period_start"))
+            b = _iso(f.get("loss_run_period_end"), end=True) or _iso(f.get("loss_run_valuation_date"))
+            yrs: List[int] = []
+            label = ""
+            if a and b and b >= a:
+                n = _n_years(a, b)
+                yrs = [a.year + i for i in range(n)]
+                label = f"{_years_label(yrs)} - {n} year{'s' if n != 1 else ''}"
+            outside = bool(a and b and b >= a and years_inside_window(a, b, facts) == 0)
+            if outside:
+                label = (label + " - " if label else "") + "outside the years that count"
+            documents.append({"doc_id": str(d.get("doc_id") or ""),
+                              "filename": str(d.get("filename") or ""),
+                              "years": yrs, "years_label": label,
+                              "outside_window": outside,
+                              "excluded": bool(d.get("excluded"))})
+        # The scorer's count, on the facts as the merge leaves them.
+        from services.sqs_service import _resolve_loss_history_years
+        f2 = copy.deepcopy(facts)
+        combine_loss_run_periods(f2, runs)
+        covered = int(_resolve_loss_history_years(f2) or 0)
+        start = _iso(f2.get("loss_run_period_start"))
+        end = _iso(f2.get("loss_run_period_end"), end=True) or _iso(f2.get("loss_run_valuation_date"))
+        if covered and start and end and end >= start:
+            # Only the years inside the window are named (Z38 lane E).
+            # The LATEST covered years, ending with the last policy year the
+            # runs reach, named by its start year (a run ending 01/01/2026 or
+            # 07/15/2026 reaches the 2025 year) - counting up from the window's
+            # start named 2021-2023 for a 2021-2024 run (Z40).
+            # The policy year the period's LAST year starts in: 01/01/2026 and
+            # 07/15/2026 reach 2025; a bare-year end, 12/31/2025, reaches 2025
+            # too (it read 2024 - live 85e51d02, 25 Oct).
+            from datetime import timedelta as _td
+            last = max((end - _td(days=364)).year, start.year)
+            years = list(range(last - covered + 1, last + 1))
+        elif covered:
+            last = max((y for doc in documents if not doc["excluded"] for y in doc["years"]),
+                       default=datetime.now().year)
+            years = list(range(last - covered + 1, last + 1))
+        else:
+            years = []
+        required = loss_years_required(facts) or LOSS_YEARS_WINDOW
+        end_year = years[-1] if years else datetime.now().year
+        label = f"{min(covered, required) if covered > required else covered} of {required} year{'s' if required != 1 else ''}"
+        if years:
+            label += f" ({_years_label(years)})"
+        return {"required": int(required), "years": years, "covered": covered,
+                "end_year": end_year, "label": label, "documents": documents}
+    except Exception:                                          # noqa: BLE001
+        return None

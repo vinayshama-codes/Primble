@@ -570,6 +570,8 @@ def test_both_serializers_carry_confirm_mode():
     confirm question through `confirm_known`, or the client sees a blank box."""
     import inspect
     from routes import arq_routes
-    for fn in (arq_routes.send_arq, arq_routes.client_view):
+    # The send serializer moved into `send_questions_to_client` (23 Oct 2026 -
+    # one mailer for /api/arq/send and the narrative questionnaire page).
+    for fn in (arq_routes.send_questions_to_client, arq_routes.client_view):
         body = inspect.getsource(fn)
         assert "confirm_known." in body and '"confirm"' in body, fn.__name__

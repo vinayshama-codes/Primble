@@ -6,8 +6,8 @@ The owner added: keep form selection one click away on every other page. So,
 before forms, the rail footer's main button reads "Continue to <next page>" and
 opens it, with "Skip to form selection" beside it - sized and coloured like the
 form-selection screen's "Back to review" (owner, 9 Oct: the same row, the same
-solid pink); the last page (Recommendations) has the one button "Continue to
-form selection". Once forms exist or are being generated nothing changes: one
+solid pink); the last page has the one button "Continue to form selection" -
+Recommendations until 23 Oct 2026, the Questionnaire page since (owner). Once forms exist or are being generated nothing changes: one
 button, "Continue where you left off", on every page.
 """
 from __future__ import annotations
@@ -27,7 +27,8 @@ _CSS = _FRONT / "components" / "form" / "review" / "ReviewRailLayout.css"
 _MODAL = _FRONT / "components" / "form" / "AcordModal.jsx"
 _APP_CSS = _FRONT / "App.css"
 
-_PAGES = ["overview", "documents", "integrity", "consistency", "hardstops", "warnings", "recommendations"]
+_PAGES = ["overview", "documents", "integrity", "consistency", "hardstops", "warnings", "recommendations",
+          "questionnaire"]
 
 
 def _rail_sections():
@@ -54,7 +55,7 @@ def _node(tmp_path, body):
 
 
 # ── The sequence ─────────────────────────────────────────────────────────────
-def test_the_rail_walks_seven_pages_in_this_order():
+def test_the_rail_walks_its_pages_in_this_order():
     assert [s["id"] for s in _rail_sections()] == _PAGES
 
 
@@ -75,6 +76,7 @@ console.log(JSON.stringify({{
         {"id": "hardstops", "label": "Continue to Hard Stops"},
         {"id": "warnings", "label": "Continue to Warnings"},
         {"id": "recommendations", "label": "Continue to Recommendations"},
+        {"id": "questionnaire", "label": "Continue to Questionnaire"},
         None,                                   # the last page: the one continue button
     ]
     # A run that did not finish is generated again from form selection.
@@ -91,7 +93,7 @@ console.log(JSON.stringify({{
   label: P.continueLabel(st),
 }}));
 """)
-    assert out["steps"] == [None] * 7
+    assert out["steps"] == [None] * len(_PAGES)
     assert out["label"] == "Continue where you left off"
 
 

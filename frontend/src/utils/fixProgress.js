@@ -77,17 +77,24 @@ export function fixLeftOpen(issue, before, after, idOf) {
 // the server's declaration for the location table (premises_cope `row_needs`)
 // - every non-blank row needs ONE value per group ("Building value or BPP
 // value on rows 1 and 2"). Blank rows are not buildings.
-export function rowNeedsSummary(rows, rowNeeds, columns) {
+// `buildingColumns` (21 Oct 2026, review M1): the server's own "is this row a
+// building?" (premises_cope `building_columns` - a value in one of the table's
+// columns, never a bare id or LOC #), so Save progress counts exactly the rows
+// the submission's value is derived from. Without it, any stated cell counts.
+export function rowNeedsSummary(rows, rowNeeds, columns, buildingColumns) {
   const list = Array.isArray(rows) ? rows : [];
   const cols = Array.isArray(columns) ? columns : [];
   const labelOf = (k) => ((cols.find((c) => c && c.key === k) || {}).label) || k;
+  const building = Array.isArray(buildingColumns) && buildingColumns.length ? buildingColumns : null;
   const parts = [];
   for (const group of (Array.isArray(rowNeeds) ? rowNeeds : [])) {
     const keys = (Array.isArray(group) ? group : [group]).filter(Boolean);
     if (!keys.length) continue;
     const missing = [];
     list.forEach((row, idx) => {
-      const filled = Object.entries(row || {}).some(([k, v]) => !k.startsWith("_") && TEXT(v));
+      const filled = building
+        ? building.some((k) => TEXT((row || {})[k]))
+        : Object.entries(row || {}).some(([k, v]) => !k.startsWith("_") && TEXT(v));
       if (filled && !keys.some((k) => TEXT(row[k]))) missing.push(idx + 1);
     });
     if (!missing.length) continue;

@@ -10,6 +10,11 @@ Covers the defects found while writing the client scoring specification:
      stopped counting rather than because anything was fixed.
   5. "Submission blocked" copy on messages that block nothing.
 
+19 Oct 2026 (Brent) shortened the hard-stop list; 20 Oct 2026 (owner) the 60 / 85
+caps are back after the 19 Oct "no cap" build. The identity name / FEIN conflicts
+still come back on every rescore - they hold the 60 and also block "Submission
+Ready" (`ready_blockers`); the policy-date differences are warnings, so they hold 85.
+
 Every test drives the real production functions - no local reimplementation of
 the logic under test (see the C23 lesson in CLAUDE.md: a copy of production
 logic in a test only proves the copy is self-consistent).
@@ -30,6 +35,8 @@ from services.sqs_service import (
     check_doc_consistency,
     doc_consistency_stops,
     final_score_with_credits,
+    readiness_fields,
+    routing_for_score,
     split_doc_consistency_issues,
     tier_for_score,
 )
@@ -156,18 +163,30 @@ def test_formatting_differences_alone_are_not_a_conflict():
 # the cross-document detector, the cap silently disappears again and no
 # behavioural test would necessarily catch it on a fixture with no conflict.
 
+# 22 Oct 2026 (build 23, Z28 E "named, not fixed"): both rescore paths take
+# EVERY list from the stops door, which re-runs this detector (and the picker,
+# source and OCR ones they never ran) - the TESTS below pinned the old inline
+# copy, so they now pin the door. The structural twin for every package scorer
+# is tests/test_build23_stops-after-forms.py.
+
+def _door_runs_the_detector():
+    from services import stops_now as _sn
+    return "doc_consistency_stops(" in inspect.getsource(_sn.stops_now)
+
+
 def test_arq_rescore_path_reruns_the_cross_document_detector():
     from services.arq_service import recalculate_session_scores
     src = inspect.getsource(recalculate_session_scores)
-    assert "doc_consistency_stops" in src, (
+    assert "stops_now(" in src and _door_runs_the_detector(), (
         "recalculate_session_scores rebuilds hard_stops from scratch; without "
         "doc_consistency_stops the identity conflicts stop capping the score."
     )
 
 
 def test_producer_edit_path_reruns_the_cross_document_detector():
-    src = (_BACKEND / "routes" / "form_routes.py").read_text(encoding="utf-8")
-    assert "doc_consistency_stops(session)" in src, (
+    from routes import form_routes as _fr
+    src = inspect.getsource(_fr.update_pdf)
+    assert "stops_now({**session" in src and _door_runs_the_detector(), (
         "The update-pdf rescore rebuilds hard_stops from scratch; without "
         "doc_consistency_stops the identity conflicts stop capping the score."
     )
@@ -178,11 +197,10 @@ def test_every_rebuild_of_the_stop_list_is_accounted_for():
 
     Guards against a third rescore path being added later with the same hole.
     Any new site must either call doc_consistency_stops or be added here
-    deliberately, with a reason.
+    deliberately, with a reason. (22 Oct 2026: the recalculation and the field
+    edit no longer rebuild their own - they read the stops door.)
     """
     known = {
-        ("services/arq_service.py", "recalculate_session_scores"),
-        ("routes/form_routes.py", "update_pdf"),
         # Extraction owns the ORIGINAL run of all three detectors.
         ("services/extraction_pipeline.py", "_finalize_pipeline"),
     }
@@ -213,7 +231,8 @@ def test_every_rebuild_of_the_stop_list_is_accounted_for():
 # ── 4. Copy: nothing is blocked, so nothing may claim to be ──────────────────
 
 def test_no_user_facing_message_claims_the_submission_is_blocked():
-    """Hard stops cap the score at 60. They do not gate generation or download."""
+    """Hard stops cap the score at 60 and block the Submission Ready status
+    (19 Oct 2026). They do not gate generation or download."""
     docs = _conflicting_session()["docs"]
     docs[0]["facts"]["effective_date"] = "01/01/2025"
     for msg in check_doc_consistency(docs):
@@ -247,6 +266,11 @@ def test_the_owners_worked_example_65_capped_to_60_then_plus_10_is_75():
     assert final_score_with_credits(raw, 10, HARD_STOP_CAP) == 60
     # Stops cleared: the full earned value is released.
     assert final_score_with_credits(raw, 10, None) == 75
+    # The cap an open hard stop resolves to is that same 60 (restored 20 Oct 2026).
+    cap, _reason = _resolve_cap(["a hard stop"], [])
+    assert cap == HARD_STOP_CAP
+    assert final_score_with_credits(raw, 0, cap) == 60
+    assert final_score_with_credits(raw, 10, cap) == 60
 
 
 def test_a_cap_is_a_ceiling_and_never_a_floor():
@@ -254,6 +278,11 @@ def test_a_cap_is_a_ceiling_and_never_a_floor():
     assert final_score_with_credits(42, 0, HARD_STOP_CAP) == 42
     assert final_score_with_credits(78, 0, SOFT_STOP_CAP) == 78
     assert final_score_with_credits(94, 0, SOFT_STOP_CAP) == 85
+    # The caps the stops resolve to clamp only a score above them (20 Oct 2026).
+    for hard, soft, held in ((["h"], [], 60), ([], ["w"], 85)):
+        cap, _reason = _resolve_cap(hard, soft)
+        assert final_score_with_credits(94, 0, cap) == held
+        assert final_score_with_credits(42, 0, cap) == 42
 
 
 def test_credits_can_never_push_a_score_over_100():
@@ -272,12 +301,37 @@ def test_hard_beats_soft_and_stops_never_stack():
     assert reason_one == "one hard stop"             # the reason is recorded
     assert _resolve_cap([], ["only a warning"])[0] == SOFT_STOP_CAP
     assert _resolve_cap([], [])[0] is None
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the blocker is recorded, and never stacks.
+    one = readiness_fields(95, ["one hard stop"])
+    many = readiness_fields(95, ["h1", "h2", "h3"])
+    assert one["ready_blockers"] == ["one hard stop"]     # the reason is recorded
+    assert one["submission_ready"] is many["submission_ready"] is False
+    assert tier_for_score(95, 1) == tier_for_score(95, 3)  # one or three, the same status
+    assert routing_for_score(95, 1) == routing_for_score(95, 3) == "priority_review"
 
 
 def test_cross_form_issues_cap_the_package_too():
     cap, reason = _resolve_cap([], [], hard_cross=["cross-form conflict"])
     assert cap == HARD_STOP_CAP
     assert reason == "cross-form conflict"
+    facts = {"applicant_name": "ORBIN CONTRACTING LLC", "effective_date": "07/15/2025"}
+    pkg = calculate_package_sqs(
+        facts=facts, flags={}, form_results=[], hard_stops=[], soft_stops=[],
+        cross_issues=[{"type": "hard_stop", "code": "x", "message": "cross-form conflict"}],
+        session_data={},
+    )
+    # The package holds the same 60 and names it (no hard_stops card carries it)...
+    assert pkg["cap_applied"] == HARD_STOP_CAP and pkg["cap_reason"] == "cross-form conflict"
+    assert pkg["cap_hard_stops"] == ["cross-form conflict"]
+    assert pkg["package_sqs_score"] == min(pkg["raw_sqs_score"], HARD_STOP_CAP)
+    # ...and (19 Oct 2026) it blocks Submission Ready, named by its own message; a warning never does.
+    assert pkg["ready_blockers"] == ["cross-form conflict"]
+    warned = calculate_package_sqs(
+        facts=facts, flags={}, form_results=[], hard_stops=[], soft_stops=[],
+        cross_issues=[{"type": "soft_warning", "code": "y", "message": "cross-form warning"}],
+        session_data={},
+    )
+    assert warned["ready_blockers"] == []
 
 
 def test_scorers_report_the_uncapped_score_and_the_reason():
@@ -300,6 +354,9 @@ def test_scorers_report_the_uncapped_score_and_the_reason():
         assert result[key] <= HARD_STOP_CAP
         # The real number is retained rather than overwritten.
         assert result["raw_sqs_score"] >= result[key]
+        # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the reason is the blocker too.
+        assert result["ready_blockers"] == [stop]
+        assert result["open_hard_stops"] == 1 and result["submission_ready"] is False
 
 
 # ── 6. Form and package remain SEPARATE calculations ─────────────────────────
@@ -402,17 +459,34 @@ def test_no_inline_tier_ladder_survives_anywhere():
 
 
 def test_backend_and_frontend_agree_on_the_readiness_boundary():
-    """The frontend readiness surfaces must use the same 90 boundary."""
+    """The frontend readiness surfaces must use the same rule as the backend."""
     fe = _BACKEND.parent / "frontend" / "src" / "components" / "form" / "AcordModal.jsx"
     if not fe.exists():
         return
     src = fe.read_text(encoding="utf-8")
-    assert 'avg >= 90 ? { label: "Quote Ready"' in src, (
-        "session-list readiness no longer uses >= 90; backend tier_for_score does"
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - both surfaces read the server's flag first.
+    assert 'const ready = typeof s?.submission_ready === "boolean" ? s.submission_ready : avg >= 90;' in src, (
+        "session-list readiness no longer reads submission_ready (old payloads: >= 90)"
     )
-    assert '(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission"' in src, (
-        "submission banner no longer uses >= 90; backend tier_for_score does"
+    assert '{submissionReady(packageSqs) ? "Ready to Send Submission"' in src, (
+        "submission banner no longer uses submissionReady; backend submission_ready does"
     )
+    import json
+    import shutil
+    import subprocess
+    if shutil.which("node") is None:
+        return
+    util = _BACKEND.parent / "frontend" / "src" / "utils" / "formatters.js"
+    run = subprocess.run(["node", "--input-type=module", "-e", (
+        f"import {{ submissionReady }} from {json.dumps(util.as_uri())};"
+        "console.log(JSON.stringify([null, {package_sqs_score: 95, submission_ready: false},"
+        "{package_sqs_score: 95, submission_ready: true}, {package_sqs_score: 90},"
+        "{package_sqs_score: 89}, {sqs_score: 91}].map(submissionReady)));")],
+        capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    # the server's flag wins; an old payload falls back to the same 90 tier_for_score uses
+    assert json.loads(run.stdout) == [False, False, True, True, False, True]
+    assert tier_for_score(90)[1] == "Submission Ready" and tier_for_score(89)[1] != "Submission Ready"
 
 
 # ── 8. One score everywhere (defect 3) ───────────────────────────────────────
@@ -473,10 +547,17 @@ def test_the_legacy_package_scorer_is_unreachable_from_production():
 
 def test_both_package_scorers_share_one_cap_rule_and_one_tier_ladder():
     import inspect
+    import re
     import services.sqs_service as S
+    # The one cap door (restored 20 Oct 2026): hard wins, and no scorer may grow a ceiling of its own.
+    assert S._resolve_cap(["h"], ["s"], hard_cross=["c"]) == (S.HARD_STOP_CAP, "h")
     for fn in (S.calculate_package_sqs, S.calculate_package_sqs_spec_compliant, S.calculate_sqs):
         src = inspect.getsource(fn)
         assert "_resolve_cap" in src, f"{fn.__name__} has its own cap copy"
-        assert "min(raw, 60)" not in src and "min(raw_score, 60)" not in src, (
+        code = "\n".join(line.split("#")[0] for line in src.splitlines())
+        assert not re.search(r"min\([^)]*\b(60|85)\b", code), (
             f"{fn.__name__} still carries an inline cap"
         )
+        # One readiness ladder and one routing rule, both reading the open hard stops.
+        assert "tier_for_score(" in code, f"{fn.__name__} has its own tier ladder"
+        assert "routing_for_score(" in code, f"{fn.__name__} has its own routing rule"

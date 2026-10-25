@@ -266,7 +266,9 @@ def test_a_refused_answer_is_not_also_unanswered():
     q, fr = _q_form()
     fr["guard_blanks"] = [{"field": q, "removed_value": "N", "kind": "unanswered"}]
     rows = [r for r in na.needs_attention(fr, {}, "ACORD_125") if r["field"] == q]
-    assert len(rows) <= 1 and all(r["status"] == na.STATUS_HELD_BACK for r in rows)
+    # 23 Oct 2026 (Brent): listed once, as the unanswered question it is
+    # (Missing) - never "AI held back".
+    assert len(rows) <= 1 and all(r["status"] == na.STATUS_MISSING for r in rows)
 
 
 def test_field_qa_never_calls_a_refused_box_unanswered_and_uses_form_words():

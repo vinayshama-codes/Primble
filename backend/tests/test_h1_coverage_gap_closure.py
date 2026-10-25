@@ -195,15 +195,20 @@ def test_the_two_warnings_carry_a_schedule_resolution():
 
 
 def test_the_warnings_cap_at_85_but_never_charge_the_cross_bucket():
-    """'+ Warning' means the 85 ceiling. Emitted through the legacy engine on
-    purpose: a cross-form soft warning also lands in the Exposure
-    cross-document bucket, which would charge the same gap twice."""
+    """'+ Warning' means the 85 ceiling (back on 20 Oct 2026). Emitted through
+    the legacy engine on purpose: a cross-form soft warning also lands in a
+    cross-form bucket, which would charge the same gap twice."""
     _hard, soft = sq.evaluate_stops({}, AUTO)
+    assert any(s.startswith("Vehicle schedule not provided") for s in soft)
     cap, reason = sq._resolve_cap([], soft)
-    assert cap == 85
+    assert cap == 85 and reason == soft[0]
     _score, subs = sq._calculate_exposure_consistency({}, AUTO, [], [])
     assert subs["cross_document_consistency"] == 100
-    assert subs["auto_completeness"] == 75
+    # (19 Oct 2026, Brent: missing details are Completeness) the -25 is a Coverage
+    # Details item now, and Completeness's own cross-form bucket stays untouched too.
+    items = sq.completeness_deduction_items({}, AUTO, [], [])
+    assert sum(i["points"] for i in items if i["bucket"] == "auto_completeness") == 25
+    assert not [i for i in items if i["bucket"] == "cross_form_details"]
 
 
 # ── 3. Supplemental WC ───────────────────────────────────────────────────────
@@ -294,21 +299,57 @@ def test_wc_supplemental_points_and_cap():
 
 
 def test_a_gl_only_package_is_untouched_by_both_buckets():
-    _score, subs = sq._calculate_exposure_consistency(
-        {"gl_limits": "$1,000,000", "gl_class_codes_by_location": [{"code": "91580"}]}, GL, [], [])
-    assert subs["auto_completeness"] == 100 and subs["wc_supplemental"] == 100
+    facts = {"gl_limits": "$1,000,000", "gl_class_codes_by_location": [{"code": "91580"}]}
+    # (19 Oct 2026, Brent: missing details are Completeness) both buckets live there now.
+    items = sq.completeness_deduction_items(facts, GL, [], [])
+    assert not [i for i in items if i["bucket"] in ("auto_completeness", "wc_supplemental")]
+    _score, subs = sq._calculate_exposure_consistency(facts, GL, [], [])
+    assert "auto_completeness" not in subs and "wc_supplemental" not in subs
 
 
 # ── 4. Pillar, trace, breakdown, no double count ─────────────────────────────
+# (19 Oct 2026, Brent: missing details are Completeness) both buckets left Exposure
+# for Structural's "Coverage Details" row, same points, never past 0. `_CORE`
+# completes Tier 1 / Tier 2 so the blend is 100 and a deduction shows in full; it
+# has four employees because more than five with no WC carried is an Exposure
+# conflict this section is not about.
+_CORE = {
+    "applicant_name": "Acme LLC", "mailing_address": "1 Main St, Denver CO 80202",
+    "effective_date": "01/01/2027", "expiration_date": "01/01/2028",
+    "lines_of_business": ["Business Auto"], "entity_type": "LLC", "contact_name": "Jo",
+    "producer_name": "Broker Inc", "fein": "12-3456789", "num_employees": "4",
+    "years_in_business": "12", "operations_description": "Plumbing contractor - residential service",
+    "total_revenue": "2000000", "naics_code": "238220",
+}
+
+
+def _bucket_points(facts, flags):
+    """What each Completeness coverage-detail bucket deducts, keyed by bucket."""
+    out = {}
+    for it in sq.completeness_deduction_items(facts, flags, [], []):
+        out[it["bucket"]] = out.get(it["bucket"], 0) + it["points"]
+    return out
+
+
+def _package(facts, flags):
+    return sq.calculate_package_sqs(facts, flags, form_results=[], cross_issues=[],
+                                    hard_stops=[], soft_stops=[], session_data={})
+
 
 def test_the_buckets_reach_the_pillar_and_reconstruct_it():
     flags = {"has_auto_coverage": True, "has_workers_comp": True}
     facts = {"total_payroll": "$500,000",
              "wc_class_codes": [{"code": "5183", "payroll": "$500,000"}]}
-    score, subs = sq._calculate_exposure_consistency(facts, flags, [], [])
-    assert subs["auto_completeness"] == 75
-    assert subs["wc_supplemental"] == 100, "class-schedule payroll is annual; mod/officers unknown"
-    assert score == 100 - sum(100 - v for v in subs.values())
+    buckets = _bucket_points(facts, flags)
+    assert buckets["auto_completeness"] == 25
+    assert "wc_supplemental" not in buckets, "class-schedule payroll is annual; mod/officers unknown"
+    assert sq._calculate_exposure_consistency(facts, flags, [], [])[0] == 100, "nothing conflicts"
+    # (19 Oct 2026, Brent: Completeness owns them) the row reconstructs Structural.
+    pkg = _package(dict(_CORE, **facts), flags)
+    parts = pkg["score_trace"]["structural"]
+    cov = next(p for p in parts if p["key"] == "coverage_details")
+    assert cov["deducted"] == sum(buckets.values()) == 40
+    assert int(sum(p["contribution"] for p in parts)) == pkg["pillars"]["structural_completeness"] == 60
 
 
 def test_the_breakdown_renders_every_bucket_the_scorer_emitted():
@@ -319,39 +360,51 @@ def test_the_breakdown_renders_every_bucket_the_scorer_emitted():
     _score, subs = sq._calculate_exposure_consistency({}, flags, [], [])
     bd = sq._compute_category_breakdown({}, flags, exposure_subscores=subs)
     rows = bd["exposure_consistency"]
-    assert set(rows) == set(subs)
-    assert rows["auto_completeness"]["label"] == "Auto Completeness"
-    assert rows["auto_completeness"]["deducted"] == 25
-    assert rows["wc_supplemental"]["label"] == "WC Supplemental"
+    assert set(rows) == set(subs) == set(sq._EXPOSURE_BUCKETS)
+    # (19 Oct 2026, Brent: Completeness owns them) the auto rows are Structural's
+    # Coverage Details row, printed with its points like any deduction row.
+    cov = _package(dict(_CORE), flags)["category_breakdown"]["structural_completeness"][
+        "coverage_details"]
+    assert cov["label"] == "Coverage Details" and cov["deducted"] == 40
+    assert {"Vehicle schedule", "Driver schedule"} <= set(cov["missing"])
 
 
 def test_the_trace_lists_both_buckets():
-    flags = {"has_auto_coverage": True}
-    pkg = sq.calculate_package_sqs({}, flags, form_results=[], cross_issues=[],
-                                   hard_stops=[], soft_stops=[], session_data={})
-    buckets = {r["bucket"]: r for r in pkg["score_trace"]["exposure"]}
-    assert buckets["auto_completeness"]["deducted"] == 25
-    assert "wc_supplemental" in buckets
-    assert pkg["score_trace"]["reconciles"] is True
+    flags = {"has_auto_coverage": True, "has_workers_comp": True}
+    facts = dict(_CORE, total_payroll="$500,000")
+    buckets = _bucket_points(facts, flags)
+    assert buckets["auto_completeness"] == 25 and buckets["wc_supplemental"] == 3
+    trace = _package(facts, flags)["score_trace"]
+    # (19 Oct 2026, Brent: Exposure = conflicts only) neither is an Exposure row...
+    assert {r["bucket"] for r in trace["exposure"]} == set(sq._EXPOSURE_BUCKETS)
+    # ...both are on the Coverage Details row, and the trace still reconciles.
+    cov = next(p for p in trace["structural"] if p["key"] == "coverage_details")
+    assert cov["deducted"] == sum(buckets.values()) == 53
+    assert {"Vehicle schedule", "Driver schedule", "Payroll period / basis unresolved"} <= set(
+        cov["missing"])
+    assert trace["reconciles"] is True
 
 
 def test_no_tier2_fact_moves_either_bucket():
-    """The client's own 'counted twice' test, extended to the new buckets."""
+    """The client's own 'counted twice' test, extended to the new buckets.
+    (19 Oct 2026, Brent: they now sit in Structural beside Tier 2 - a Tier 2 fact
+    moving them would charge one gap twice inside one pillar.)"""
     flags = {"has_auto_coverage": True, "has_workers_comp": True}
-    base = sq._calculate_exposure_consistency({"total_payroll": "$1"}, flags, [], [])[1]
+    base = _bucket_points({"total_payroll": "$1"}, flags)
+    assert base["auto_completeness"] == 25 and base["wc_supplemental"] == 3
     for tier2 in ("operations_description", "total_revenue", "num_employees",
                   "years_in_business", "naics_code", "fein"):
-        subs = sq._calculate_exposure_consistency(
-            {"total_payroll": "$1", tier2: "42"}, flags, [], [])[1]
-        assert subs["auto_completeness"] == base["auto_completeness"], tier2
-        assert subs["wc_supplemental"] == base["wc_supplemental"], tier2
+        buckets = _bucket_points({"total_payroll": "$1", tier2: "42"}, flags)
+        assert buckets.get("auto_completeness") == base["auto_completeness"], tier2
+        assert buckets.get("wc_supplemental") == base["wc_supplemental"], tier2
 
 
 def test_existing_auto_deductions_remain_separately_applicable():
     """6.3: 'Existing Auto deductions remain separately applicable'."""
-    _score, subs = sq._calculate_exposure_consistency({}, AUTO, [], [])
-    assert subs["coverage_information"] == 85, "-10 limit and -5 symbols, untouched"
-    assert subs["auto_completeness"] == 75
+    # (19 Oct 2026, Brent: missing details are Completeness) both kinds, side by side there.
+    buckets = _bucket_points({}, AUTO)
+    assert buckets["coverage_information"] == 15, "-10 limit and -5 symbols, untouched"
+    assert buckets["auto_completeness"] == 25
 
 
 # ── 5. Questionnaire ─────────────────────────────────────────────────────────
@@ -565,13 +618,15 @@ def test_split_limits_are_read_from_the_facts_the_extractor_writes():
     from services.cross_form_validator import _check_auto_symbol_to_exposure_alignment
     facts = {"auto_liability_structure": "split", "auto_bi_per_person": "$100,000",
              "auto_bi_per_accident": "$300,000", "auto_pd_per_accident": "$50,000"}
-    hard, _soft = sq.evaluate_stops(facts, AUTO)
-    assert not any("Split liability limits incomplete" in h for h in hard)
+    hard, soft = sq.evaluate_stops(facts, AUTO)
+    assert not any("Split liability limits incomplete" in m for m in hard + soft)
     codes = [i["code"] for i in _check_auto_symbol_to_exposure_alignment(facts, AUTO, {"ACORD_127"})]
     assert "auto_split_limits_incomplete" not in codes
     facts.pop("auto_pd_per_accident")
-    hard, _soft = sq.evaluate_stops(facts, AUTO)
-    assert any("Split liability limits incomplete" in h for h in hard), "a real gap still stops"
+    hard, soft = sq.evaluate_stops(facts, AUTO)
+    # (19 Oct 2026, Brent: hard stops only for what is essential) a real gap now warns.
+    assert any("Split liability limits incomplete" in s for s in soft), "a real gap still warns"
+    assert not any("Split liability limits incomplete" in h for h in hard)
     from services.issue_registry import resolution_for
     assert resolution_for("auto_split_limits_incomplete")["mode"] == "field"
 
@@ -925,8 +980,12 @@ def test_split_limits_state_the_auto_liability_limit():
     # structure and three parts does not (skeptic G1, 5 Oct 2026: a split part
     # copied into the limit field outvoted the structure, the flag and the parts).
     assert not ce.auto_split_limits_stated(dict(split, auto_liability_limit="$1,000,000 CSL"))
-    subs = sq._calculate_exposure_consistency(split, AUTO, [], [])[1]
-    assert subs["coverage_information"] == 100
+    # (19 Oct 2026, Brent: missing details are Completeness) the -10 would be charged there.
+    assert "auto_liability_limit" not in {
+        i["fact"] for i in sq.completeness_deduction_items(split, AUTO, [], [])}
+    assert "auto_liability_limit" in {
+        i["fact"] for i in sq.completeness_deduction_items(
+            {"auto_covered_symbols": _sym(1)}, AUTO, [], [])}, "no limit at all still costs it"
     # The umbrella: split limits are an underlying auto; no CSL comparison is attempted.
     umb = dict(split, umbrella_limit="$5,000,000", gl_each_occurrence="$1,000,000",
                gl_aggregate="$2,000,000", umbrella_follow_form="follows form",
@@ -977,12 +1036,13 @@ def test_producer_typed_split_limits_actually_reach_the_form():
 def test_a_csl_policy_with_one_stray_split_part_is_not_called_split():
     """`any(parts)` was dead code (three phantom keys). Making the keys real
     turned a single stray figure on a CSL policy into a 60 cap."""
-    hard, _ = sq.evaluate_stops(
+    hard, soft = sq.evaluate_stops(
         {"auto_liability_limit": "$1,000,000", "auto_pd_per_accident": "$100,000"}, AUTO)
-    assert not any("Split liability limits incomplete" in h for h in hard)
-    hard2, _ = sq.evaluate_stops({"auto_bi_per_person": "$250,000"}, AUTO)
-    assert any("Split liability limits incomplete" in h for h in hard2), (
-        "a genuinely partial split must still stop")
+    assert not any("Split liability limits incomplete" in m for m in hard + soft)
+    # (19 Oct 2026, Brent: hard stops only for what is essential) a partial split warns.
+    _hard2, soft2 = sq.evaluate_stops({"auto_bi_per_person": "$250,000"}, AUTO)
+    assert any("Split liability limits incomplete" in s for s in soft2), (
+        "a genuinely partial split must still warn")
 
 
 def test_a_split_underlying_auto_is_surfaced_not_silently_forgiven():
@@ -1095,7 +1155,7 @@ def test_schedule_backed_facts_are_asked_once_as_a_table():
     assert dedup(lone) == 0 and len(lone) == 1
 
 
-def test_resolving_the_split_hard_stop_actually_fills_the_boxes():
+def test_resolving_the_split_warning_actually_fills_the_boxes():
     """THE WHOLE ROUND TRIP, and the half that was missing.
 
     The stop is now resolvable by typing the three limits. Adversarial review
@@ -1104,15 +1164,15 @@ def test_resolving_the_split_hard_stop_actually_fills_the_boxes():
     `_ACORD_FIELD_RULES`, so `_restamp_canonical_into_forms` looked for boxes
     keyed on `auto_bi_per_person`, found none, and the producer cleared a 60
     cap over a form that stayed blank forever. Each box now maps to its own
-    fact.
+    fact. (19 Oct 2026, Brent: the stop is a warning now; the round trip is the same.)
     """
     import json
     from services.arq_service import _restamp_canonical_into_forms, _canonical_key
     from services.answer_semantics import build_fact_envelope, interpret_answer
 
     facts = {"auto_bi_per_person": "$250,000"}          # extractor found one part
-    hard, _ = sq.evaluate_stops(facts, AUTO)
-    assert any("Split liability limits incomplete" in h for h in hard)
+    _hard, soft = sq.evaluate_stops(facts, AUTO)
+    assert any("Split liability limits incomplete" in s for s in soft)
 
     with open("forms_schemas/ACORD_137_CA_schema.json", encoding="utf-8") as fh:
         schema = json.load(fh)
@@ -1128,8 +1188,9 @@ def test_resolving_the_split_hard_stop_actually_fills_the_boxes():
                                            "producer", "filled")
         _restamp_canonical_into_forms(generated, canon, facts)
 
-    hard2, _ = sq.evaluate_stops(facts, AUTO)
-    assert not any("Split liability limits incomplete" in h for h in hard2), "stop must clear"
+    hard2, soft2 = sq.evaluate_stops(facts, AUTO)
+    assert not any("Split liability limits incomplete" in m for m in hard2 + soft2), (
+        "the warning must clear")
     state = generated["ACORD_137_CA"]["field_state"]
     assert any("BodilyInjury_PerPerson" in k for k in state), "and the boxes must FILL"
     assert any("BodilyInjury_PerAccident" in k for k in state)

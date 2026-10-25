@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
@@ -57,24 +57,20 @@ _FORM_EVIDENCE_FACTS: Dict[str, dict] = {
     # ── Property - building value, else business personal property value ─────
     "ACORD_140": {"combine": False, "facts": [("property_building_value", "Building value"),
                                               ("property_bpp_value", "Business property value")]},
-    # ── ACORD 141 - recommended on PROPERTY evidence ("Detailed property values
-    #    or multiple locations detected"), so its evidence is the property
-    #    values. It printed the inland marine value - another line's (7 Oct
-    #    2026, round 4). The card's own "Property Schedule" label is a known
-    #    open item (the template is the Crime Section). ─────────────────────────
-    "ACORD_141": {"combine": False, "facts": [("property_building_value", "Building value"),
-                                              ("property_bpp_value", "Business property value")]},
+    # ── ACORD 141 - the Crime Section (template title; Z37 24 Oct 2026 - it was
+    #    offered as a "Property Schedule" on property evidence) ────────────────
+    "ACORD_141": {"combine": False, "facts": [("crime_limit", "Crime limit"),
+                                              ("crime_deductible", "Crime deductible")]},
     # ── Additional Remarks - loss count when losses drove the narrative ──────
     "ACORD_101": {"combine": False, "facts": [("num_claims", "Prior claims")]},
     # ── Workers Comp Assigned Risk - the template's own title (see the ACORD
     #    133 block in match_forms_deterministic). Same payroll evidence as 130 ─
     "ACORD_133": {"combine": False, "facts": [("total_payroll", "Total payroll"),
                                               ("wc_payroll", "WC payroll")]},
-    # ── ACORD 160 - recommended for the INLAND MARINE line (`for_line`), so its
-    #    evidence is inland marine. It printed "Cyber limit: $1,000,000" -
-    #    another line's value (Choice Electric, 7 Oct 2026 round 4). ──────────
-    "ACORD_160": {"combine": False, "facts": [("inland_marine_total_value", "Inland marine value"),
-                                              ("inland_marine_transit_limit", "Transit limit")]},
+    # ── ACORD 160 - the Business Owners Section (template title; Z37 24 Oct
+    #    2026 - it was offered as an "Inland Marine Application") ──────────────
+    "ACORD_160": {"combine": False, "facts": [("bop_property_limit", "BOP property limit"),
+                                              ("bop_liability_limit", "BOP liability limit")]},
     # ── Contractors Supplemental - subcontracting exposure ───────────────────
     "ACORD_186": {"combine": False, "facts": [("percent_subcontracted", "% subcontracted")]},
     # ── Evidence of Property - the property value being evidenced ────────────
@@ -114,9 +110,9 @@ _FORM_EVIDENCE_LINES: Dict[str, FrozenSet[str]] = {
     "ACORD_133":    frozenset({"workers_comp"}),
     "ACORD_131":    frozenset({"umbrella"}),
     "ACORD_140":    frozenset({"property"}),
-    "ACORD_141":    frozenset({"property"}),
+    "ACORD_141":    frozenset({"crime"}),
     "ACORD_28":     frozenset({"property"}),
-    "ACORD_160":    frozenset({"inland_marine"}),
+    "ACORD_160":    frozenset({"property", "general_liab"}),
     "ACORD_137_CA": frozenset({"auto"}),
     "ACORD_137_CO": frozenset({"auto"}),
     "ACORD_138_CA": frozenset({"auto"}),
@@ -457,52 +453,215 @@ def _extract_state_code(value) -> Optional[str]:
     return None
 
 
-def _infer_primary_state(facts: dict) -> Optional[str]:
-    """
-    Infer the primary state from applicant facts.
-    Returns a 2-letter state code (CA, CO, etc.) or None.
+# ── WHERE THE INSURED IS, PER COVERAGE (Brent, 23 Oct 2026 - Z34-1 #6, part P) ─
+# "Do not use the carrier's letterhead, headquarters, or address to determine the
+# insured's state. Use insured/exposure-specific information: (Auto: garaging/
+# location) (Property: premises/location) (WC: WC state/class information)
+# (General applicant: insured's address). If we cannot verify the correct state
+# from insured-specific information, leave it unverified and ask for
+# confirmation rather than guessing. Also, do not force one universal 'State of
+# Operations' across every coverage."
+#
+# The model's `state_of_operations` was read FIRST ("most reliable") and it was
+# read off carrier letterheads - MI (Amerisure's head office), PA (Chubb claims),
+# AZ (a Phoenix office), IN (Federal) on a Colorado contractor, and 137_CO left
+# the 6-document Choice Electric run. It now never counts on its own: only a
+# PERSON's answer to the state question (`STATE_QUESTION_FACT`) is evidence.
+# Each coverage reads its own evidence, then that answer, then the insured's own
+# address, then nothing - unverified, and the producer is asked (the
+# `auto_state_unverified` card). The recommender's LOGIC is untouched; these
+# sets are what it is fed.
+STATE_QUESTION_FACT = "state_of_operations"
+COVERAGE_AUTO = "auto"
+COVERAGE_PROPERTY = "property"
+COVERAGE_WC = "wc"
+COVERAGE_GL = "gl"
 
-    Priority:
-    0. LLM-extracted state_of_operations field (most reliable)
-    1. Extract from mailing_address or physical_address using US address patterns
-    2. Check first location in locations list
-    3. Check wc_payroll_by_state (first/dominant state)
-    """
-    state_val = facts.get("state_of_operations")
-    if state_val:
-        if isinstance(state_val, dict):
-            state_val = (
-                state_val.get("primary") or
-                state_val.get("state") or
-                state_val.get("value") or
-                next(iter(state_val.values()), None)
-            )
-        if state_val and isinstance(state_val, str):
-            code = state_val.upper().strip()[:2]
-            if code in US_STATES:
-                return code
+# Whose evidence a form's state boxes read. A form not listed (125, 131, 101...)
+# reads every insured-specific state together.
+_FORM_COVERAGE = {
+    "ACORD_127": COVERAGE_AUTO, "ACORD_137_CA": COVERAGE_AUTO, "ACORD_137_CO": COVERAGE_AUTO,
+    "ACORD_138_CA": COVERAGE_AUTO, "ACORD_138_CO": COVERAGE_AUTO,
+    "ACORD_140": COVERAGE_PROPERTY, "ACORD_28": COVERAGE_PROPERTY,
+    "ACORD_130": COVERAGE_WC, "ACORD_133": COVERAGE_WC,
+    "ACORD_126": COVERAGE_GL, "ACORD_186": COVERAGE_GL,
+}
 
+_STATE_LIST_SPLIT_RE = re.compile(r"\s*(?:[,;/&+]|\band\b)\s*", re.IGNORECASE)
+_STATE_CELL_KEYS = ("state", "state_code", "st", "address_state", "garaging_state")
+_ADDRESS_CELL_RE = re.compile(r"address|city|zip|postal|garag", re.IGNORECASE)
+
+
+def form_coverage(form_id: Any) -> Optional[str]:
+    """The coverage whose evidence a form's state boxes read, or None."""
+    return _FORM_COVERAGE.get(_fi.base_form_id(str(form_id or "")))
+
+
+def _state_token(part: Any) -> Optional[str]:
+    t = re.sub(r"\s+", " ", re.sub(r"[^A-Z ]", "", str(part or "").upper())).strip()
+    return t if t in US_STATES else _STATE_NAME_TO_CODE.get(t)
+
+
+def state_codes_of(value: Any) -> set:
+    """Every US state a STATE value names: a code or a name, a list of them
+    ("CO, CA", "Colorado and Wyoming"), or a list / dict of such values. A text
+    that is not a list of states is read as an address (`_extract_state_code`)."""
+    if isinstance(value, dict) and "value" in value and ("source" in value or "confidence" in value):
+        value = value.get("value")
+    if value is None or isinstance(value, bool):
+        return set()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return set().union(*(state_codes_of(v) for v in value)) if value else set()
+    if isinstance(value, dict):
+        return set().union(*(state_codes_of(v) for v in value.values())) if value else set()
+    text = str(value).strip()
+    if not text:
+        return set()
+    parts = [p for p in _STATE_LIST_SPLIT_RE.split(text) if p.strip()]
+    codes = [_state_token(p) for p in parts]
+    if parts and all(codes):
+        return set(codes)
+    code = _extract_state_code(text)
+    return {code} if code else set()
+
+
+def _place_states(item: Any) -> set:
+    """The state of ONE place: an address, or a row's own state cell (else its
+    address cells read together). Never a whole row's words - "123 California
+    St" is a street, not a state."""
+    if isinstance(item, dict):
+        for key in _STATE_CELL_KEYS:
+            if item.get(key):
+                got = state_codes_of(item.get(key))
+                if got:
+                    return got
+        text = " ".join(str(v) for k, v in item.items() if v and _ADDRESS_CELL_RE.search(str(k)))
+        item = text
+    code = _extract_state_code(item) if item else None
+    return {code} if code else set()
+
+
+def _each(value: Any) -> list:
+    if isinstance(value, list):
+        return value
+    return [value] if value else []
+
+
+def _auto_states(facts: dict) -> set:
+    """Where the VEHICLES are garaged (the 24 Sep 2026 rule, now the only one):
+    a CO insured with a truck garaged in Los Angeles needs the 137 CA."""
+    out: set = set()
+    for item in _each(_fv(facts, "auto_garaging_addresses")):
+        out |= _place_states(item)
+    for row in _each(_fv(facts, "auto_vin_schedule")):
+        if isinstance(row, dict):
+            for key, cell in row.items():
+                if cell and re.search(r"garag", str(key), re.IGNORECASE):
+                    out |= _place_states(cell)
+    return out
+
+
+def _premises_states(facts: dict) -> set:
+    out: set = set()
+    for key in ("locations", "property_locations"):
+        for item in _each(_fv(facts, key)):
+            out |= _place_states(item)
+    out |= _place_states(_fv(facts, "builders_risk_project_address"))
+    return out
+
+
+def _wc_states(facts: dict) -> set:
+    out: set = set()
+    by_state = _fv(facts, "wc_payroll_by_state")
+    if isinstance(by_state, dict):
+        for key in by_state:
+            out |= state_codes_of(key)
+    for fact in ("wc_class_codes", "wc_officers"):
+        for row in _each(_fv(facts, fact)):
+            if isinstance(row, dict):
+                out |= (state_codes_of(row.get("state")) if row.get("state")
+                        else _place_states(row.get("location")))
+    return out
+
+
+def _gl_states(facts: dict) -> set:
+    """A GL schedule's own location cells, then the premises GL insures."""
+    out: set = set()
+    for fact in ("gl_class_codes_by_location", "gl_class_code_schedule"):
+        val = _fv(facts, fact)
+        for row in (list(val) if isinstance(val, dict) else _each(val)):
+            out |= _place_states(row.get("location") if isinstance(row, dict) else row)
+    return out | _premises_states(facts)
+
+
+_LINE_STATES = {COVERAGE_AUTO: _auto_states, COVERAGE_PROPERTY: _premises_states,
+                COVERAGE_WC: _wc_states, COVERAGE_GL: _gl_states}
+
+
+def _person_states(facts: dict) -> set:
+    """A PERSON's answer to the state question (typed or confirmed)."""
+    try:
+        from services.fact_state import confirmed_by_person
+        if not confirmed_by_person((facts or {}).get(STATE_QUESTION_FACT)):
+            return set()
+    except Exception:                                      # noqa: BLE001
+        return set()
+    return state_codes_of(_fv(facts, STATE_QUESTION_FACT))
+
+
+def _model_states(facts: dict) -> set:
+    """The model's own `state_of_operations` reading - never evidence by itself."""
+    if _person_states(facts):
+        return set()
+    return state_codes_of(_fv(facts, STATE_QUESTION_FACT))
+
+
+def _insured_address_states(facts: dict) -> set:
+    out: set = set()
     for key in ("mailing_address", "physical_address"):
-        state = _extract_state_code(_fv(facts, key))
-        if state:
-            return state
+        out |= _place_states(_fv(facts, key))
+    return out
 
-    # Try first location
-    locs = _fv(facts, "locations")
-    if locs and isinstance(locs, list) and locs:
-        state = _extract_state_code(locs[0])
-        if state:
-            return state
 
-    # Try WC payroll by state
-    wc_by_state = _fv(facts, "wc_payroll_by_state")
-    if wc_by_state and isinstance(wc_by_state, dict):
-        for state in wc_by_state.keys():
-            code = _extract_state_code(state)
-            if code:
-                return code
+def coverage_states(facts: dict, coverage: Optional[str] = None) -> set:
+    """The states insured-specific evidence places THIS coverage in: its own
+    evidence (auto garaging, premises, WC state / class rows, a GL schedule's
+    locations), else a person's answer to the state question, else the insured's
+    own places (its mailing / physical address and its premises - "Auto:
+    garaging / location"; a location in a state still surfaces that state's
+    form, Beta Report 7.2 item 4), else none (unverified - ask, never guess).
+    `coverage` None:
+    every insured-specific state together (a person's answer and the address
+    included). The model's `state_of_operations` is never one of them - when
+    insured evidence backs it, it is already in the set."""
+    facts = facts if isinstance(facts, dict) else {}
+    reader = _LINE_STATES.get(coverage)
+    if reader is None:
+        out = _person_states(facts) | _insured_address_states(facts)
+        for read in _LINE_STATES.values():
+            out |= read(facts)
+        return out
+    return (reader(facts) or _person_states(facts)
+            or (_insured_address_states(facts) | _premises_states(facts)))
 
-    return None
+
+def state_unverified(facts: dict, coverage: Optional[str] = None) -> bool:
+    """True when no insured-specific evidence places this coverage in any state."""
+    return not coverage_states(facts, coverage)
+
+
+def _infer_primary_state(facts: dict, coverage: Optional[str] = None) -> Optional[str]:
+    """ONE state for the coverage, or None (unverified). Several states: a
+    person's answer, then the model's reading (backed - it is among them), then
+    the insured's address picks; else the first by code."""
+    states = coverage_states(facts, coverage)
+    if len(states) <= 1:
+        return next(iter(states), None)
+    for pick in (_person_states(facts), _model_states(facts), _insured_address_states(facts)):
+        both = sorted(states & pick)
+        if both:
+            return both[0]
+    return sorted(states)[0]
 
 
 def _infer_primary_state_from_flags(flags: dict) -> Optional[str]:
@@ -513,81 +672,24 @@ def _infer_primary_state_from_flags(flags: dict) -> Optional[str]:
     return None
 
 
-def _collect_states(facts: dict) -> set:
-    """
-    Return the SET of US state codes the insured appears to touch, drawn from
-    every available signal: operations state, mailing/physical address, EVERY
-    location (not just the first), and WC-payroll-by-state keys.
-
-    Unlike ``_infer_primary_state`` (single dominant state), this surfaces
-    secondary states too, so a state-specific form (ACORD 137/138 CA/CO) can be
-    recommended when a *location* or *operations* in that state exist - directly
-    implementing Beta Report §7.2 item 4 ("a location in that state exists" /
-    "operations in that state exist"). Only evidence-backed states are returned,
-    so this never re-inflates the list with states the insured doesn't touch.
-    """
-    states: set = set()
-
-    def _add_code(value) -> None:
-        code = _extract_state_code(value)
-        if code:
-            states.add(code)
-
-    # Operations state - may be a plain string, a dict, or a list.
-    sv = facts.get("state_of_operations")
-    if isinstance(sv, dict):
-        for v in sv.values():
-            _add_code(v)
-    elif isinstance(sv, (list, tuple)):
-        for v in sv:
-            _add_code(v)
-    else:
-        _add_code(sv)
-
-    for key in ("mailing_address", "physical_address"):
-        _add_code(_fv(facts, key))
-
-    locs = _fv(facts, "locations")
-    if isinstance(locs, list):
-        for loc in locs:
-            if isinstance(loc, dict):
-                # Prefer an explicit state field; fall back to all values joined.
-                explicit = loc.get("state") or loc.get("state_code") or loc.get("st")
-                _add_code(explicit or " ".join(str(v) for v in loc.values()))
-            else:
-                _add_code(loc)
-
-    wc_by_state = _fv(facts, "wc_payroll_by_state")
-    if isinstance(wc_by_state, dict):
-        for k in wc_by_state.keys():
-            _add_code(k)
-
-    # Where the VEHICLES are garaged (24 Sep 2026). ACORD 137 is the state
-    # section for the AUTOS, so a CO insured with a truck garaged in Los
-    # Angeles needs the 137 CA - and a TX insured whose autos sit in Denver
-    # needs the 137 CO - even when no mailing address names that state.
-    garaging = _fv(facts, "auto_garaging_addresses")
-    for g in garaging if isinstance(garaging, list) else ([garaging] if garaging else []):
-        if isinstance(g, dict):
-            _add_code(g.get("state") or " ".join(str(v) for v in g.values()))
-        else:
-            _add_code(g)
-
-    return states
+def _collect_states(facts: dict, coverage: Optional[str] = None) -> set:
+    """The SET of states insured-specific evidence places the risk in - for one
+    coverage (`coverage_states`' chain), or every state together (None): a
+    secondary location / operations state still surfaces (Beta Report 7.2 item
+    4). Never the model's `state_of_operations` on its own (23 Oct 2026)."""
+    return coverage_states(facts, coverage)
 
 
 def _supported_state_forms(facts: dict, flags: dict) -> List[str]:
     """
-    Supported state-specific form states (subset of {CA, CO}) the insured
-    touches - from extracted data OR the is_california/is_colorado flags.
-    Sorted for deterministic recommendation ordering.
+    The supported states (subset of {CA, CO}) of the AUTOS - ACORD 137 / 138
+    are the autos' state sections: garaging, then a person's answer, then the
+    insured's own address (Brent, 23 Oct 2026). Unknown = none offered, and the
+    `auto_state_unverified` card asks. The model's `is_california` /
+    `is_colorado` flags were read here too; a model reading of a state is never
+    evidence by itself, so they are not. Sorted for deterministic ordering.
     """
-    codes = _collect_states(facts)
-    if flags.get("is_california"):
-        codes.add("CA")
-    if flags.get("is_colorado"):
-        codes.add("CO")
-    return sorted(codes & _SUPPORTED_137_138_STATES)
+    return sorted(coverage_states(facts, COVERAGE_AUTO) & _SUPPORTED_137_138_STATES)
 
 
 # ── Account profile: business class / account type / coverage goals ───────────
@@ -704,9 +806,9 @@ _FORM_COVERAGE_GOAL = {
     "ACORD_130":    "Workers' Compensation",
     "ACORD_131":    "Umbrella / Excess",
     "ACORD_140":    "Commercial Property",
-    "ACORD_141":    "Commercial Property",
+    "ACORD_141":    "Crime",
     "ACORD_133":    "Workers' Compensation",
-    "ACORD_160":    "Inland Marine",
+    "ACORD_160":    "Commercial Property",
     "ACORD_137_CA": "Commercial Auto", "ACORD_137_CO": "Commercial Auto",
     "ACORD_138_CA": "Commercial Auto", "ACORD_138_CO": "Commercial Auto",
     "ACORD_28":     "Commercial Property",
@@ -715,7 +817,7 @@ _FORM_COVERAGE_GOAL = {
 # Business class → supplemental forms that stay relevant for that class even when
 # they are not tied to an explicit confirmed coverage goal.
 _CLASS_RELEVANT_FORMS = {
-    "contractor": {"ACORD_186", "ACORD_133", "ACORD_160"},
+    "contractor": {"ACORD_186", "ACORD_133"},
 }
 
 # Always relevant regardless of profile: master application + the narrative form.
@@ -1131,6 +1233,79 @@ def _dec_line_present(text: str, phrases) -> bool:
                 return True
             start = i + 1
     return False
+
+
+# ── ACORD 141 (Crime) / ACORD 160 (Business Owners) triggers - Z37 ───────────
+# One reading each, shared by the recommender and its tests.
+_CRIME_LINE_PHRASES = ("commercial crime", "crime coverage", "employee dishonesty",
+                       "employee theft", "fidelity bond", "crime policy")
+_CRIME_YES_ANSWERS = ("requested", "already carried", "carried", "yes")
+_CRIME_NO_ANSWERS = ("declined", "not applicable", "n/a", "no", "none")
+_BOP_NAME_RE = re.compile(r"\bbusiness\s*owners?'?s?\b|\bbop\b", re.IGNORECASE)
+# "business owners" alone is also the people who own the business ("Officers /
+# Business Owners: John Smith ... Payroll $52,000" on a WC application), so the
+# two-word spellings count only when they name the policy or its coverage.
+_BOP_LINE_PHRASES = ("businessowners", "businessowner's") + tuple(
+    f"{owner} {noun}"
+    for owner in ("business owners", "business owner's", "business owners'")
+    for noun in ("policy", "coverage", "liability", "property", "special", "package", "form"))
+
+
+def crime_line_present(facts: dict, flags: dict, text: str = "") -> bool:
+    """Is crime exposure in this submission? A person's crime decision decides
+    first (Requested / Already carried = yes; Declined / Not applicable = no);
+    then the line canon (a crime row or `has_crime`); then a stated crime limit;
+    then a crime line ITEM on a declarations page. Property never counts."""
+    facts = facts or {}
+    flags = flags or {}
+    decision = str(_fv(facts, "crime_coverage_decision") or "").strip().lower()
+    if decision:
+        if any(decision.startswith(a) for a in _CRIME_NO_ANSWERS):
+            return False
+        if any(decision.startswith(a) for a in _CRIME_YES_ANSWERS):
+            return True
+    not_requested = facts.get("_lines_not_requested")
+    if isinstance(not_requested, (list, tuple, set)) and "crime" in not_requested:
+        return False                                  # "NOT REQUESTED: crime"
+    try:
+        from services.lob_canon import line_is_carried
+        carried = line_is_carried("crime", facts, flags)
+    except Exception:                                    # noqa: BLE001
+        carried = None
+    if carried is True:
+        return True
+    if carried is False:
+        return False
+    if re.search(r"[1-9]", str(_fv(facts, "crime_limit") or "")):
+        return True                                   # a stated amount, never "None" / "N/A"
+    return _dec_line_present((text or "").lower(), _CRIME_LINE_PHRASES)
+
+
+def bop_line_present(facts: dict, text: str = "") -> bool:
+    """Is a Business Owners (BOP) policy in this submission? A coverage-line
+    row naming it (and not denying it), a line of business naming it, a stated
+    BOP value, or a BOP line ITEM on a declarations page. Inland marine never
+    counts."""
+    facts = facts or {}
+    try:
+        from services.lob_canon import denies_coverage
+    except Exception:                                    # noqa: BLE001
+        denies_coverage = lambda _e: False               # noqa: E731
+    rows = facts.get("coverage_lines")
+    if isinstance(rows, dict) and "value" in rows:
+        rows = rows.get("value")
+    for e in rows if isinstance(rows, list) else []:
+        if isinstance(e, dict) and _BOP_NAME_RE.search(str(e.get("line") or "")) \
+                and not denies_coverage(e):
+            return True
+    lobs = facts.get("lines_of_business")
+    if isinstance(lobs, dict) and "value" in lobs:
+        lobs = lobs.get("value")
+    if isinstance(lobs, list) and any(_BOP_NAME_RE.search(str(x or "")) for x in lobs):
+        return True
+    if any(_fv(facts, k) for k in ("bop_property_limit", "bop_liability_limit")):
+        return True
+    return _dec_line_present((text or "").lower(), _BOP_LINE_PHRASES)
 
 
 def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
@@ -1757,7 +1932,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     # already a real underwriting concern, so it escalates on its own; a lone SOFT
     # warning (formatting / extraction variance) still needs a second issue before
     # it escalates, so one minor mismatch does not force 101 into every packet.
-    _cross_hard = [i for i in _cross_issues if isinstance(i, dict) and i.get("type") == "hard_stop"]
+    # `escalates_acord101`: an issue that was a hard stop before Brent's 19 Oct
+    # 2026 short list - the recommendation stays exactly what it was.
+    _cross_hard = [i for i in _cross_issues if isinstance(i, dict)
+                   and (i.get("type") == "hard_stop" or i.get("escalates_acord101"))]
     if _cross_hard or len(_cross_issues) >= 2:
         # A genuine hard conflict, or multiple independent issues → escalate.
         _101_recommended_reasons.append(
@@ -1876,45 +2054,26 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              reason_label="Assigned Risk / Workers Compensation Insurance Plan submission detected",
              for_line="workers_comp")
 
-    _160_kw = {
-        "inland marine", "contractor's equipment", "contractors equipment",
-        "motor truck cargo", "equipment schedule", "installation floater",
-        "scheduled equipment", "tool floater", "installation risk",
-        "equipment breakdown",
-        # Decision_Tree.txt ACORD 160 cue (L440): bare "floater" (always means an
-        # inland-marine scheduled-property floater - unambiguous, safe to add).
-        "floater",
-    }
-    _has_im = flags.get("has_inland_marine")
-    _im_kw_in_text = any(kw in text for kw in _160_kw)
-    _im_facts = any([
-        _fv(facts, "inland_marine_total_value"),
-        _fv(facts, "inland_marine_transit_limit"),
-        bool(_fv(facts, "inland_marine_items")),
-    ])
-    # Flag-alone is not sufficient - require keyword or extracted inland marine
-    # data as corroboration (prevents firing when the flag was set on a brief
-    # incidental mention in ops description without actual IM coverage).
-    if _im_kw_in_text or (_has_im is True and _im_facts) or (_has_im is None and _im_kw_in_text):
+    # ACORD 160 is the BUSINESS OWNERS section (its template's own title). It
+    # was offered as an "Inland Marine Application" on floater / equipment
+    # keywords (Z37, 24 Oct 2026). There is no inland marine section form in
+    # this product, so inland marine exposure offers no form; a BOP line does.
+    if not _already_matched("ACORD_160") and bop_line_present(facts, search):
         _add("ACORD_160",
-             "ACORD 160 - Inland Marine Application",
+             "ACORD 160 - Business Owners Section",
              trigger_weight=0.85,
-             trigger_reason="inland marine flag or equipment / cargo keywords detected",
-             template_pending=True,
-             tier=TIER_OPTIONAL,
-             reason_label="Possible Inland Marine / equipment exposure",
-             for_line="inland_marine")
+             trigger_reason="business owners (BOP) line detected",
+             tier=TIER_RECOMMENDED,
+             reason_label="Business Owners (BOP) policy detected")
 
-    # TODO: Add a dedicated crime/fidelity ACORD form (e.g. ACORD 140 or a crime-specific form)
-    # once the correct form template is added to forms_database. ACORD 137 is a commercial
-    # AUTO form and must NOT be used for crime/fidelity coverage detection.
+    # Crime / fidelity is ACORD 141 (below). ACORD 137 is a commercial AUTO form
+    # and must NOT be used for crime/fidelity coverage detection.
 
     # ACORD 138 (national) - Cyber / Network Security: intentionally out of
     # scope for now. The state-variant ACORD 138 CA/CO forms in the form DB
     # cover Garage and Dealers (not Cyber), so cyber signals must NOT trigger
-    # them - that produced wrong-form recommendations. Crime (ACORD 137) is
-    # likewise out of scope. Both remain pending until proper national
-    # templates are added.
+    # them - that produced wrong-form recommendations. Cyber remains pending
+    # until a proper national template is added.
 
     # ACORD 186 - flag-matched above; keyword fallback for any submission with
     # contractor-type operations. Per Decision_Tree.txt L461:
@@ -1941,25 +2100,17 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
                                + (" and Workers Compensation"
                                   if flags.get("has_workers_comp") else "")))
 
-    # ACORD 141 - property + valuation/coinsurance detail or multiple locations
-    _141_kw = {
-        "agreed value", "coinsurance", "replacement cost value", "rcv", "acv",
-        "actual cash value", "scheduled property", "property schedule",
-        "period of restoration", "business income limit", "wind/hail deductible",
-        "flood deductible", "earthquake deductible",
-    }
-    # Property present via the confirmed flag OR a recovered dec-page property line
-    # (mirrors the ACORD 140 recall fix) AND (multiple locations OR valuation detail).
-    if (not _already_matched("ACORD_141")
-            and (flags.get("has_property_coverage") or _prop_line)
-            and (flags.get("has_multiple_locations") or any(kw in text for kw in _141_kw))):
+    # ACORD 141 is the CRIME section (its template's own title). It was offered
+    # as a "Property Schedule" on property valuation keywords (Z37, 24 Oct
+    # 2026). Now: crime exposure only - never property alone.
+    if not _already_matched("ACORD_141") and crime_line_present(facts, flags, search):
         _add("ACORD_141",
-             "ACORD 141 - Property Schedule",
-             trigger_weight=0.90,
-             trigger_reason="property coverage with multiple locations or detailed valuation/coinsurance data detected",
-             template_pending=True,
+             "ACORD 141 - Crime Section",
+             trigger_weight=0.85,
+             trigger_reason="crime coverage carried, requested or stated on a declarations line",
              tier=TIER_RECOMMENDED,
-             reason_label="Detailed property values or multiple locations detected")
+             reason_label="Crime coverage detected",
+             for_line="crime")
 
     # ACORD 25 keyword path - only if not already flag-matched above.
     # "certificate holder" REMOVED: it is a standard printed field on dec pages,
@@ -2094,8 +2245,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     # (`services.declined_lines`). The in-force WC page and the floater kept
     # ACORD 130 / 160 on the list for lines nobody is applying for. Withdrawn
     # by the recommendation's own trigger line (`for_line`), never by form
-    # number - ACORD 160 is offered here for Inland Marine, and a future BOP
-    # trigger for it must not be withdrawn by an IM decline. The decision is
+    # number - an IM decline must never withdraw ACORD 160 (Business Owners). The decision is
     # `line_presence.declined_by_submission`, the door the coverage flags use,
     # so a person's answer on the line brings both back together. An uploaded
     # copy of the form itself stays; the producer can still add any form.
@@ -2505,7 +2655,7 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     _has_narr    = "narrative" in _present
     from services.loss_history_state import package_has_loss_runs
     _has_loss    = package_has_loss_runs(_docs, session.get("facts") or {})
-    _loss_match  = _check_loss_run_insured_match(_docs, _fv(session["facts"], "applicant_name"))
+    _loss_match  = _check_loss_run_insured_match(_docs, _fv(session["facts"], "applicant_name"), session.get("facts") or {})
     _narr_text   = _extract_narrative_doc_text(_docs)
     # THE STOPS AS THEY STAND (6 Oct 2026, Choice Electric #18): rebuilt from
     # the stored facts by the one door - never the stored `hard_stops` /

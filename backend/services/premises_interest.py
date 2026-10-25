@@ -429,6 +429,42 @@ def premises_rows(facts: Any) -> List[dict]:
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
+# ── The row a per-location question named (22 Oct 2026) ──────────────────────
+# A per-location answer finds its row by POSITION ("@loc2"). A table edit, a
+# document added after forms or a consolidation can re-order the list between
+# sending and applying, so the question carries the row it named and the apply
+# writes only while the row at that position is still that one.
+ROW_ADDRESS_KEY = "row_address"
+ROW_BUILDING_KEY = "row_building"
+
+
+def sent_row(row: Any) -> Dict[str, str]:
+    """The row identity a per-location question carries: its address and BLDG #."""
+    if not isinstance(row, dict):
+        return {}
+    return {ROW_ADDRESS_KEY: premises_address(row),
+            ROW_BUILDING_KEY: str(row.get("building_number") or "").strip()}
+
+
+def row_is_still(facts: Any, position: int, question: Any) -> bool:
+    """Is the row now at `position` (1-based, in the stored list) the one the
+    question named when it was sent? True for a question that stored no row
+    (sent before 22 Oct 2026). Its BLDG # counts only when the question named
+    one - a number assigned after sending is not another building."""
+    q = question if isinstance(question, dict) else {}
+    if ROW_ADDRESS_KEY not in q:
+        return True
+    rows = _fact_value(facts, "property_locations")
+    idx = int(position) - 1
+    if not isinstance(rows, list) or not (0 <= idx < len(rows)) or not isinstance(rows[idx], dict):
+        return False
+    now = sent_row(rows[idx])
+    if _norm(now[ROW_ADDRESS_KEY]) != _norm(q.get(ROW_ADDRESS_KEY)):
+        return False
+    sent_bldg = _norm(q.get(ROW_BUILDING_KEY))
+    return not sent_bldg or _premises_number(sent_bldg) == _premises_number(_norm(now[ROW_BUILDING_KEY]))
+
+
 def tenant_option_labels() -> List[str]:
     """The interest options that mean "the business rents" - what a landlord
     follow-up is shown on."""

@@ -5,12 +5,16 @@ import { API_BASE } from "../config/constants";
 // services/needs_attention.py). Components live in
 // components/form/NeedsAttentionPanel.jsx.
 
-export const ATTENTION_STATUS_ORDER = ["missing", "ai_held_back", "verify"];
+// No "AI held back" group (Brent, 23 Oct 2026: "Users only need to see relevant
+// information. The audit record is fine."): the AI's refused values live in
+// the audit record only; a refused box the producer must act on comes as
+// Missing (an unanswered Yes/No question, or a detail with a fact / table
+// behind it). A stale row of any other status is never drawn.
+export const ATTENTION_STATUS_ORDER = ["missing", "verify"];
 
 // Colours follow the viewer's own legend: Required = yellow, Verify = orange.
 export const ATTENTION_TAG_STYLE = {
   missing:      { label: "Missing",       bg: "rgb(254,243,199)", fg: "#92400e", hint: "Required on this form and still empty." },
-  ai_held_back: { label: "AI held back",  bg: "#e0e7ff",          fg: "#3730a3", hint: "A value was found but did not fit, so it was left blank." },
   verify:       { label: "Please verify", bg: "rgb(254,215,170)", fg: "#9a3412", hint: "Filled by the AI or calculated by us. Confirm it or correct it." },
   // The applicant's own steps (sign, date, initial) - not the producer's to fill
   // in (1 Oct 2026). A group of their own wherever the list is drawn.
@@ -24,8 +28,8 @@ export const APPLICANT_GROUP_LABEL = "To be signed by the applicant";
 export const isApplicantStep = (row) => row?.status === "missing" && !!row?.applicant_step;
 
 // The groups a list is drawn in: Missing (the producer's), then the applicant's
-// steps, AI held back, Please verify. Pure, so the side panel, the review and
-// its counts read one split.
+// steps, Please verify. Pure, so the side panel, the review and its counts read
+// one split.
 export function attentionGroups(rows) {
   const list = Array.isArray(rows) ? rows : [];
   const groups = [];
@@ -46,7 +50,7 @@ export function attentionGroups(rows) {
 //      server decides the rows: `needs_attention.download_review_rows`).
 //   2. It lists ONE BY ONE only the items to fix - hard stops (the download
 //      gate's boxes included), warnings, recommendation cards and Missing
-//      boxes. "Please verify", "AI held back", the applicant's signing steps
+//      boxes. "Please verify", the applicant's signing steps
 //      and new-document choices are each ONE line with its count and a Show
 //      link that opens the group in place. Nothing is hidden; it is not a
 //      flood. The headline counts the listed fix-items only; each group line
@@ -59,11 +63,10 @@ const isWarningRec = (r) => !isHardRec(r) && r?.recommendation_type === "soft_wa
 // ONE PROBLEM, ONE LINE. A box the download gate holds is a side-panel row
 // (`blocks_download`) AND a hard stop: listed once, under Hard Stops - its row
 // is left out only when a hard stop names that very box, so nothing is lost if
-// the hard stops did not load. A Missing or AI-held-back box whose fact a
-// listed card or issue fixes (`fix_facts`, from the server) is that line's.
+// the hard stops did not load. A Missing box whose fact a listed card or issue
+// fixes (`fix_facts`, from the server) is that line's.
 const boxKey = (formId, field) => `${formId || ""}\u0000${field || ""}`;
-const absorbable = (r) => !r?.blocks_download
-  && ((r?.status === "missing" && !isApplicantStep(r)) || r?.status === "ai_held_back");
+const absorbable = (r) => !r?.blocks_download && r?.status === "missing" && !isApplicantStep(r);
 
 export function withoutListedBoxes(openRecs, attention) {
   const recs = Array.isArray(openRecs) ? openRecs : [];
@@ -87,7 +90,7 @@ export function withoutListedBoxes(openRecs, attention) {
 }
 
 // The review's parts, each list exactly as drawn. `missing` / `verify` /
-// `heldBack` / `applicant` are per form ([{ form_id, form_label, rows }]).
+// `applicant` are per form ([{ form_id, form_label, rows }]).
 export function downloadReviewParts(openRecs, attention) {
   const recs = Array.isArray(openRecs) ? openRecs : [];
   const listed = withoutListedBoxes(recs, attention);
@@ -105,7 +108,6 @@ export function downloadReviewParts(openRecs, attention) {
     recommendations: recs.filter((r) => !isHardRec(r) && !isWarningRec(r)),
     missing: byForm("missing"),
     verify: byForm("verify"),
-    heldBack: byForm("ai_held_back"),
     applicant: byForm("applicant"),
     choices: Array.isArray(attention?.document_suggestions) ? attention.document_suggestions : [],
   };
@@ -121,14 +123,13 @@ export function downloadReviewCounts(openRecs, attention) {
     recommendations: p.recommendations.length,
     missing: rowCount(p.missing),
     verify: rowCount(p.verify),
-    heldBack: rowCount(p.heldBack),
     applicant: rowCount(p.applicant),
     choices: p.choices.length,
   };
   // Exactly what is listed one by one ...
   counts.toFix = counts.hard + counts.warnings + counts.recommendations + counts.missing;
   // ... and everything on the screen, the groups by their own counts.
-  counts.total = counts.toFix + counts.verify + counts.heldBack + counts.applicant + counts.choices;
+  counts.total = counts.toFix + counts.verify + counts.applicant + counts.choices;
   return counts;
 }
 
@@ -137,7 +138,6 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 // The groups shown as ONE line each, in this order, with their words.
 export const DOWNLOAD_GROUPS = [
   { key: "verify", one: "value to confirm", many: "values to confirm" },
-  { key: "heldBack", one: "value the AI held back", many: "values the AI held back" },
   { key: "applicant", one: "box for the applicant to sign", many: "boxes for the applicant to sign" },
   { key: "choices", one: "new-document choice", many: "new-document choices" },
 ];

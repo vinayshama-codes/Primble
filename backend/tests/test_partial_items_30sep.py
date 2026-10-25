@@ -433,6 +433,7 @@ def test_a_typed_value_is_the_producers_and_leaves_the_clients_list():
 
 def test_update_pdf_uses_the_rule_and_saves_the_clients_list():
     src = inspect.getsource(fr.update_pdf)
-    assert "label_producer_edits(confidence, _client_filled, req.field_updates)" in src
+    # Z38: the call also passes the boxes an answer wrote (`_answer_written`).
+    assert "label_producer_edits(confidence, _client_filled, req.field_updates" in src
     assert '"client_filled_fields": sorted(_client_filled)' in src
     assert "so pink highlights persist" not in src

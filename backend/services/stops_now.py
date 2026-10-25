@@ -119,22 +119,38 @@ def field_level_stops(facts: dict, flags: dict, docs: List[dict]) -> Tuple[List[
 
 
 def underwriting_conflict_stops(underwriting: Optional[dict],
-                                flags: Optional[dict]) -> List[Tuple[str, str, bool]]:
+                                flags: Optional[dict],
+                                docs: Optional[List[dict]] = None) -> List[Tuple[str, str, bool]]:
     """[(fact_key, message, blocking)] for every OPEN Data Consistency conflict.
 
     BLOCKING MEANS HARD STOP, AND RELEVANCE IS A PRECONDITION (C75): a key in
-    the two declared blocking sets blocks, unless the coverage it belongs to
-    is absent or the reconciler downgraded it as contract-scoped."""
+    the declared blocking set (`READY_BLOCKING_RECONCILABLE_KEYS`, 19 Oct 2026)
+    blocks, unless the coverage it belongs to is absent or the reconciler
+    downgraded it as contract-scoped.
+
+    VERIFIED SOURCES ONLY (21 Oct 2026, Brent 20 Oct): with the package's
+    `docs`, a name / FEIN conflict blocks only when at least two of its rival
+    values are each stated by a verified source (`document_tags.
+    conflict_sources_verified`, over the ONE definition `is_verified_source`);
+    otherwise it is a warning whose sentence ends by naming the unverified
+    document(s). Every production caller passes its documents; without them
+    the stored answer stands, exactly as before."""
     uw = underwriting or {}
     if not uw.get("review_required"):
         return []
     try:
-        from services.underwriting_consistency import (
-            HARD_STOP_RECONCILABLE_KEYS, GENERATION_BLOCKING_RECONCILABLE_KEYS,
-        )
-        blocking_keys = set(HARD_STOP_RECONCILABLE_KEYS) | set(GENERATION_BLOCKING_RECONCILABLE_KEYS)
+        # Only documents naming different companies block (Brent, 19 Oct 2026):
+        # the applicant's name and FEIN. Dates and building value are warnings.
+        from services.underwriting_consistency import READY_BLOCKING_RECONCILABLE_KEYS
+        blocking_keys = set(READY_BLOCKING_RECONCILABLE_KEYS)
     except Exception:                                         # noqa: BLE001
         blocking_keys = set()
+    try:
+        from services.document_tags import (
+            conflict_sources_verified as _sources_verified, unverified_note as _unverified_note,
+        )
+    except Exception:                                         # noqa: BLE001
+        _sources_verified = None
     out: List[Tuple[str, str, bool]] = []
     for f in uw.get("fields") or []:
         if not isinstance(f, dict) or not f.get("review_required"):
@@ -151,7 +167,17 @@ def underwriting_conflict_stops(underwriting: Optional[dict],
         if downgraded:
             msg += (" This package evidences more than one policy, "
                     "and each policy carries its own term.")
-        out.append((key, msg, key in blocking_keys and relevant and not downgraded))
+        blocking = key in blocking_keys and relevant and not downgraded
+        if blocking and docs is not None and _sources_verified is not None:
+            try:
+                _verified, _descs = _sources_verified(f.get("values") or [], docs, key)
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning("stops_now: source verification skipped for %s (%s)", key, exc)
+                _verified, _descs = True, []
+            if not _verified:
+                blocking = False
+                msg += _unverified_note(_descs)
+        out.append((key, msg, blocking))
     return out
 
 
@@ -164,12 +190,19 @@ def source_conflict_stops(docs: List[dict],
     try:
         from services.extraction_service import detect_source_conflicts
         from services.underwriting_consistency import RECONCILABLE_FIELD_KEYS
-        return list(detect_source_conflicts(
+        found = list(detect_source_conflicts(
             docs,
             skip_fields=set(RECONCILABLE_FIELD_KEYS) | set(_CONSISTENCY_OWNED)
             | set((underwriting or {}).get("assessed_keys") or []),
             return_fields=True,
         ) or [])
+        # The producer's contact details are the submitting agency's (the login
+        # account): two documents printing different producer offices - often
+        # a carrier's head office - is never a conflict to settle here (owner,
+        # 24 Oct 2026, package 6a535b39). The producer NAME stays with the
+        # picker's own rule.
+        return [f for f in found if not (str(f[0]).startswith("producer_")
+                                         and f[0] != "producer_name")]
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("stops_now: source conflicts skipped (%s)", exc)
         return []
@@ -248,27 +281,64 @@ def cross_form_severity(issues: Optional[Iterable[Any]]) -> List[Any]:
             else i for i in (issues or [])]
 
 
-def conflict_stop_facts(session: Optional[dict]) -> Dict[str, str]:
-    """{stop message: fact} for every stop a Data Consistency row settles - the
-    documents' identity disagreements and the picker's own open conflicts (15 Oct
-    2026: the review screen prints their points on that row, or on the card whose
-    "Fix in Data Consistency" button leads there). Same doors as `stops_now`, so
-    the messages match its lists. Never raises."""
+def conflict_stop_issues(session: Optional[dict]) -> List[Dict[str, Any]]:
+    """Every stop a Data Consistency row settles, as the card the review screen
+    draws for it: [{message, code, fact, picker}] - the documents' identity
+    disagreements (`doc_conflict_(hard|warn)_<code>`, `issue_registry.
+    doc_conflict_code`'s derivation) and the picker's own open conflicts
+    (`underwriting_reconciliation_<fact>`). Same doors as `stops_now`, so the
+    messages match its lists. Never raises."""
     session = session or {}
-    out: Dict[str, str] = {}
+    out: List[Dict[str, Any]] = []
     try:
         from services.sqs_service import doc_consistency_stops
         from services.issue_registry import _DOC_CONFLICT_CODE_TO_FACT
         for c in doc_consistency_stops(session, with_conflicts=True)[2] or []:
             code = str((c or {}).get("code") or "")
             if code and (c or {}).get("message"):
-                out[str(c["message"])] = _DOC_CONFLICT_CODE_TO_FACT.get(code, code)
+                out.append({"message": str(c["message"]),
+                            "code": f"doc_conflict_{'hard' if c.get('hard_stop') else 'warn'}_{code}",
+                            "fact": _DOC_CONFLICT_CODE_TO_FACT.get(code, code), "picker": False})
     except Exception as exc:                                  # noqa: BLE001
-        logger.warning("conflict_stop_facts: document conflicts skipped (%s)", exc)
+        logger.warning("conflict_stop_issues: document conflicts skipped (%s)", exc)
     flags = session.get("flags") if isinstance(session.get("flags"), dict) else {}
-    for key, msg, _blocking in underwriting_conflict_stops(session.get("underwriting_consistency") or {}, flags):
-        out[str(msg)] = str(key)
+    for key, msg, _blocking in underwriting_conflict_stops(session.get("underwriting_consistency") or {}, flags,
+                                                           active_documents(session)):
+        out.append({"message": str(msg), "code": f"underwriting_reconciliation_{key}",
+                    "fact": str(key), "picker": True})
     return out
+
+
+def conflict_stop_facts(session: Optional[dict]) -> Dict[str, str]:
+    """{stop message: fact} for every stop a Data Consistency row settles - the
+    documents' identity disagreements and the picker's own open conflicts (15 Oct
+    2026: the review screen prints their points on that row, or on the card whose
+    "Fix in Data Consistency" button leads there). Never raises."""
+    return {i["message"]: i["fact"] for i in conflict_stop_issues(session)}
+
+
+# ONE READING, ONE STOPS RUN (Z38 lane F, 24 Oct 2026). Reading the review page
+# once runs this door twice on the SAME row (the package scorer and the cards,
+# `sqs_service.review_page_grouped_view`) - 0.5-0.7 s each on a real package.
+# Inside `stops_memo()` (the answer preview's page reading) a second call with
+# the same session / facts / flags OBJECTS and the same scope returns a copy of
+# the first result. Outside it nothing changes: no memo, every call recomputes.
+import contextlib as _contextlib
+import contextvars as _contextvars
+import copy as _copy
+
+_STOPS_MEMO: "_contextvars.ContextVar[Optional[dict]]" = _contextvars.ContextVar(
+    "stops_now_memo", default=None)
+
+
+@_contextlib.contextmanager
+def stops_memo():
+    """Memoise `stops_now` for the duration of the block (one page reading)."""
+    token = _STOPS_MEMO.set({})
+    try:
+        yield
+    finally:
+        _STOPS_MEMO.reset(token)
 
 
 def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None, *,
@@ -298,6 +368,19 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
     session = session or {}
     facts = session.get("facts") if facts is None else facts
     flags = session.get("flags") if flags is None else flags
+    # Inside `stops_memo()` only: the same row, facts and flags OBJECTS and the
+    # same scope as an earlier call in this reading -> a copy of its result.
+    memo, memo_key = _STOPS_MEMO.get(), None
+    if memo is not None:
+        form_ids = None if form_ids is None else list(form_ids)   # never consume an iterator twice
+        _scope = (tuple(str(x) for x in form_ids if x) if form_ids is not None
+                  else tuple(recommended_form_ids(session)) if pre_form else None)
+        if _scope is not None:
+            memo_key = (id(session), id(facts), id(flags), _scope, bool(pre_form))
+            hit = memo.get(memo_key)
+            if hit is not None and hit[0] is session and hit[1] is facts and hit[2] is flags:
+                return _copy.deepcopy(hit[3])
+            memo_objs = (session, facts, flags)
     facts = facts if isinstance(facts, dict) else {}
     flags = flags if isinstance(flags, dict) else {}
     docs = active_documents(session)
@@ -322,7 +405,7 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
     form_hard, form_soft = list(hard), list(soft)
 
     underwriting = session.get("underwriting_consistency") or {}
-    for _key, msg, blocking in underwriting_conflict_stops(underwriting, flags):
+    for _key, msg, blocking in underwriting_conflict_stops(underwriting, flags, docs):
         (hard if blocking else soft).append(msg)
     try:
         from services.issue_registry import explained_issue_codes, person_settled_fact
@@ -343,11 +426,13 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
         try:
             from services.cross_form_validator import defer_form_choices, split_cross_form_issues
             cross = cross_form_run(facts, flags, form_ids)
-            if pre_form:
-                # A check whose only fix is choosing a form is a form choice
-                # before forms exist, not a stop (13 Oct 2026, the SQS without
-                # forms) - outside both lists, marked `form_choice`.
-                cross = defer_form_choices(cross)
+            # A check whose only fix is choosing a form is a form choice, not a
+            # stop (13 Oct 2026, the SQS without forms) - outside both lists,
+            # marked `form_choice`. AFTER forms too (25 Oct 2026, Brent 23 Oct
+            # "the package score is independent of the forms"): generating
+            # without ACORD 186 dropped a finished package 100 -> 85. It stays
+            # offered as a form to add.
+            cross = defer_form_choices(cross)
             cf_hard, cf_soft, _adv = split_cross_form_issues(cross)
             # ONE STATUS FROM START TO FINISH (14 Oct 2026): C75's demotion,
             # before forms and after, in the pipeline's own order - the
@@ -360,7 +445,7 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
         except Exception as exc:                              # noqa: BLE001
             logger.warning("stops_now: cross-form validation skipped (%s)", exc)
 
-    return {
+    out = {
         "hard": hard, "soft": soft,
         "form_hard": form_hard, "form_soft": form_soft,
         "evaluate_hard": list(ev_hard), "evaluate_soft": list(ev_soft),
@@ -368,3 +453,6 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
         "form_ids": form_ids,
         "pre_form": bool(pre_form),
     }
+    if memo_key is not None:
+        memo[memo_key] = (*memo_objs, _copy.deepcopy(out))
+    return out

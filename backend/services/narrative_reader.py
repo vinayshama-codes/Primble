@@ -32,6 +32,11 @@ from typing import Any, Dict, Optional, Set, Tuple
 logger = logging.getLogger(__name__)
 
 READING_KEY = "_narrative_reading"      # bookkeeping fact (facts merge per key)
+# 2 (24 Oct 2026): the reading also carries the narrative's LOSS STANCE
+# (`loss:claims` / `loss:no_claims`, with its quote). A reading stored before
+# carries none, and only a version-2 reading is asked for one (`loss_stance`).
+READER_VERSION = 2
+LOSS_STANCES = ("claims", "no_claims")
 _MIN_QUOTE_CHARS = 8
 _MAX_TEXT_CHARS = 12000
 
@@ -90,8 +95,13 @@ _SYSTEM = (
     "does, copy the exact words from the narrative that show it - word for word, a short "
     "phrase or sentence, never paraphrased. When it does not clearly cover the item, answer "
     "false with an empty quote. Never guess and never quote words that are not in the "
-    "narrative. Use each item id exactly as given, prefix included. Reply with JSON only: {\"items\": {\"<id>\": {\"covered\": true|false, "
-    "\"quote\": \"...\"}}}"
+    "narrative. Use each item id exactly as given, prefix included. ALSO say what the narrative "
+    "states about the insured's OWN claims or losses in the last five years: \"claims\" (it says "
+    "there were some), \"no_claims\" (it says there were none), \"mixed\" (it says both, or only "
+    "for some lines, years or another company), or \"not_stated\" - with the exact words it relies "
+    "on, copied word for word (empty when not_stated). Reply with JSON only: {\"items\": {\"<id>\": "
+    "{\"covered\": true|false, \"quote\": \"...\"}}, \"loss\": {\"stance\": "
+    "\"claims|no_claims|mixed|not_stated\", \"quote\": \"...\"}}"
 )
 
 _COMPONENT_HINTS = {
@@ -124,6 +134,13 @@ def gate_reply(reply: Any, text: str) -> Dict[str, str]:
     items = _items()
     body = _norm(text)
     out: Dict[str, str] = {}
+    # The loss stance (24 Oct 2026): "claims" / "no_claims" with a quote that is
+    # in the text, never "mixed" or "not_stated" - same gate as an item.
+    loss = reply.get("loss") if isinstance(reply, dict) else None
+    if isinstance(loss, dict) and loss.get("stance") in LOSS_STANCES:
+        lq = _norm(loss.get("quote"))
+        if len(lq) >= _MIN_QUOTE_CHARS and lq in body:
+            out[f"loss:{loss['stance']}"] = str(loss.get("quote"))[:300]
     data = reply.get("items") if isinstance(reply, dict) else None
     if not isinstance(data, dict):
         return out
@@ -164,6 +181,17 @@ async def read_narrative(text: str) -> Optional[Dict[str, str]]:
         logger.info("narrative_reader: no reading (%s) - keywords only", exc)
         return None
     return gate_reply(reply, text)
+
+
+def loss_stance(facts: Any, text: Any) -> Optional[str]:
+    """"claims" / "no_claims" the stored reading of exactly `text` gives (a
+    version-2 reading, one gated stance), else None."""
+    reading = (facts or {}).get(READING_KEY) if isinstance(facts, dict) else None
+    if not isinstance(reading, dict) or reading.get("text_hash") != text_hash(text) \
+            or int(reading.get("version") or 1) < READER_VERSION:
+        return None
+    found = [k.split(":", 1)[1] for k in (reading.get("items") or {}) if k.startswith("loss:")]
+    return found[0] if len(found) == 1 and found[0] in LOSS_STANCES else None
 
 
 def credited(facts: Any, text: Any) -> Tuple[Set[str], Set[str]]:

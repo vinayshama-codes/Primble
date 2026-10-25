@@ -143,8 +143,11 @@ def test_186_recommended_for_contractor():
     assert _tier(recs, "ACORD_186") == TIER_RECOMMENDED
 
 
-def test_141_recommended_property_schedule():
+def test_141_is_the_crime_section_never_property_alone():
+    # Z37 (24 Oct 2026): ACORD 141 is the Crime Section (template title).
     recs = _recs(flags={"has_property_coverage": True, "has_multiple_locations": True})
+    assert "ACORD_141" not in _ids(recs)
+    recs = _recs(flags={"has_crime": True})
     assert _tier(recs, "ACORD_141") == TIER_RECOMMENDED
 
 
@@ -210,9 +213,12 @@ def test_133_not_recommended_from_flag_alone_without_facts():
 
 # ── Situational forms → Optional ──────────────────────────────────────────────
 
-def test_160_optional_inland_marine():
+def test_160_is_the_business_owners_section_never_inland_marine():
+    # Z37 (24 Oct 2026): ACORD 160 is the Business Owners Section.
     recs = _recs(text="inland marine contractor's equipment floater")
-    assert _tier(recs, "ACORD_160") == TIER_OPTIONAL
+    assert "ACORD_160" not in _ids(recs)
+    recs = _recs(text="businessowners policy premium $2,400")
+    assert _tier(recs, "ACORD_160") == TIER_RECOMMENDED
 
 
 def test_101_recommended_when_loss_history_incomplete():
@@ -456,9 +462,9 @@ def test_130_payroll_word_alone_does_not_trigger_wc():
     assert "ACORD_130" not in _ids(recs)
 
 
-def test_160_floater_keyword_triggers():
+def test_160_floater_keyword_no_longer_triggers():
     recs = _recs(text="policy includes a floater for scheduled items")
-    assert "ACORD_160" in _ids(recs)
+    assert "ACORD_160" not in _ids(recs)
 
 
 def test_186_contracting_in_name_triggers_186():

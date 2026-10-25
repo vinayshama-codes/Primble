@@ -455,50 +455,106 @@ def test_form_selection_view_returns_the_whole_banner_payload():
 def test_cap_hard_stops_ship_an_actionable_row():
     """`cap_hard_stops` made the cap LEGIBLE in 2026-08-31; it stayed a dead end
     until 2026-09-08. Every sentence must arrive with the rule code and
-    resolution the panel needs to draw "Open to fix"."""
-    from services.sqs_service import calculate_sqs
+    resolution the panel needs to draw "Open to fix".
 
-    scenarios = [
-        # Property gate: BI limit with no period of restoration.
-        ("ACORD_140",
-         {"applicant_name": "X", "business_income_limit": "$450,000",
-          "property_building_value": "$3,750,000", "occupancy_type": "Office",
-          "construction_type": "Joisted Masonry", "locations": ["1 A St"]},
-         {"has_property_coverage": True}),
-        # Property gate: minimum viable COPE.
-        ("ACORD_140", {"applicant_name": "X"}, {"has_property_coverage": True}),
-        # Umbrella gate: no underlying at all.
-        ("ACORD_131", {"applicant_name": "X", "umbrella_limit": "$5,000,000"},
-         {"has_umbrella": True}),
-        # Property gate on the OTHER form that carries it, so the guard is not
-        # resting on a single form id.
-        ("ACORD_141", {"applicant_name": "X"}, {"has_property_coverage": True}),
-        # COPE gate on ACORD 133, the third form the property gate covers.
-        ("ACORD_133", {"applicant_name": "X"}, {"has_property_coverage": True}),
-        # REMOVED 2026-09-23 - "umbrella underlying present, supporting detail
-        # incomplete" no longer caps at 60, deliberately. The umbrella pillar
-        # reaches 0 by ACCUMULATION on packages whose underlying limits are all
-        # stated, and the client ruling (recorded three times in sqs_service) is
-        # that this must be a warning plus a score reduction, never a block. Its
-        # replacement above keeps the count of exercised cap sentences at four;
-        # the un-capping itself is pinned by
-        # tests/test_cap_60_is_visible.py::test_a_healthy_umbrella_tower_is_never_capped_at_60.
-    ]
-    seen = 0
-    for fid, facts, flags in scenarios:
-        res = calculate_sqs(facts, flags, {}, {}, [fid], [], [], 0, form_id=fid)
-        stops = res.get("cap_hard_stops") or []
-        items = res.get("cap_hard_stop_items") or []
+    20 Oct 2026 (owner: the caps are back): the gates are back too, so they are
+    driven ALONE again, each holding its own cap - since 19 Oct the property gate
+    (a missing period of restoration) holds 85 and rides `cap_soft_stops`. The
+    19 Oct guard stays beside it: every hard stop on Brent's SHORT list, passed
+    as the form's own stop, holds the 60 itself and arrives in
+    `ready_blocker_items` with an actionable row."""
+    from datetime import datetime, timedelta
+
+    from services.sqs_service import (
+        calculate_sqs, evaluate_stops, HARD_STOP_CAP, SOFT_STOP_CAP,
+    )
+
+    def _actionable(fid, stops, items):
         assert len(items) == len(stops), f"{fid}: items/stops mismatch"
         for msg in stops:
-            seen += 1
             row = next((i for i in items if i.get("message") == msg), None)
             assert row, f"{fid}: no row for {msg!r}"
             assert row.get("code"), f"{fid}: {msg!r} classified to no rule"
             mode = (row.get("resolution") or {}).get("mode")
             assert mode in ("field", "schedule", "narrative"), \
                 f"{fid}: {msg!r} has no actionable fix (mode={mode})"
-    assert seen >= 4, f"only {seen} cap sentences exercised - guard is thin"
+
+    gates = [
+        # Property gate: BI limit with no period of restoration - a warning
+        # since 19 Oct 2026, so it holds 85.
+        ("ACORD_140",
+         {"applicant_name": "X", "business_income_limit": "$450,000",
+          "property_building_value": "$3,750,000", "occupancy_type": "Office",
+          "construction_type": "Joisted Masonry", "locations": ["1 A St"]},
+         {"has_property_coverage": True}, SOFT_STOP_CAP),
+        # COPE gate: minimum viable COPE, on ACORD 140 only (Z37, 24 Oct 2026:
+        # 141 is the Crime section and 133 the WC Assigned Risk section).
+        ("ACORD_140", {"applicant_name": "X"}, {"has_property_coverage": True}, HARD_STOP_CAP),
+        # Umbrella gate: no underlying at all.
+        ("ACORD_131", {"applicant_name": "X", "umbrella_limit": "$5,000,000"},
+         {"has_umbrella": True}, HARD_STOP_CAP),
+        # REMOVED 2026-09-23 - "umbrella underlying present, supporting detail
+        # incomplete" no longer caps at 60, deliberately. The umbrella pillar
+        # reaches 0 by ACCUMULATION on packages whose underlying limits are all
+        # stated, and the client ruling (recorded three times in sqs_service) is
+        # that this must be a warning plus a score reduction, never a block. The
+        # un-capping itself is pinned by
+        # tests/test_cap_60_is_visible.py::test_a_healthy_umbrella_tower_is_never_capped_at_60.
+    ]
+    seen = 0
+    for fid, facts, flags, cap in gates:
+        res = calculate_sqs(facts, flags, {}, {}, [fid], [], [], 0, form_id=fid)
+        assert res.get("cap_applied") == cap, f"{fid}: held at {res.get('cap_applied')}, not {cap}"
+        channel = "cap_hard_stops" if cap == HARD_STOP_CAP else "cap_soft_stops"
+        stops = res.get(channel) or []
+        assert stops == [res.get("cap_reason")], f"{fid}: the gate does not name itself"
+        _actionable(fid, stops, res.get(channel[:-1] + "_items") or [])
+        seen += len(stops)
+    # 3 since Z37 (24 Oct 2026): the COPE gate covers ACORD 140 only.
+    assert seen >= 3, f"only {seen} cap sentences exercised - guard is thin"
+
+    def _typed(v):
+        return {"value": v, "source": "producer", "confidence": "filled"}
+
+    _exp = datetime.now() - timedelta(days=90)
+    _eff = _exp - timedelta(days=365)
+    term = "07/15/2026"
+    scenarios = [
+        # Property without Minimum Viable COPE, on each form the COPE gate covers.
+        ("ACORD_140", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
+        ("ACORD_141", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
+        ("ACORD_133", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
+        # An umbrella with no underlying at all.
+        ("ACORD_131", {"applicant_name": "X", "umbrella_limit": "$5,000,000", "effective_date": term},
+         {"has_umbrella": True}),
+        # A private carrier in a monopolistic state.
+        ("ACORD_130", {"applicant_name": "X", "effective_date": term, "wc_payroll": "500000",
+                       "wc_state_fund_acknowledged": "No - private carrier"},
+         {"has_workers_comp": True, "wc_has_monopolistic_state": True}),
+        # No proposed term, an invalid one, and a person-typed term that ended.
+        # The invalid term is TYPED (21 Oct 2026, Brent: hard only when
+        # verified); this used bare document dates, now a warning at 85.
+        ("ACORD_125", {"applicant_name": "X"}, {}),
+        ("ACORD_125", {"applicant_name": "X",
+                       "effective_date": _typed((datetime.now() + timedelta(days=600)).strftime("%m/%d/%Y")),
+                       "expiration_date": _typed((datetime.now() + timedelta(days=300)).strftime("%m/%d/%Y"))},
+         {}),
+        ("ACORD_125", {"applicant_name": "X", "effective_date": _typed(_eff.strftime("%m/%d/%Y")),
+                       "expiration_date": _typed(_exp.strftime("%m/%d/%Y"))}, {}),
+    ]
+    blockers = set()
+    for fid, facts, flags in scenarios:
+        hard, soft = evaluate_stops(facts, flags)
+        res = calculate_sqs(facts, flags, {}, {}, [fid], hard, soft, 0, form_id=fid)
+        # The form's own hard stop holds the 60, so no gate adds a second blocker...
+        assert res.get("cap_applied") == HARD_STOP_CAP and res.get("cap_reason") in hard
+        assert res.get("cap_hard_stops") == [] and res.get("cap_hard_stop_items") == []
+        # ...and (19 Oct 2026, kept) every blocker of Submission Ready is clickable.
+        stops = res.get("ready_blockers") or []
+        assert stops, f"{fid}: scenario no longer raises a hard stop"
+        _actionable(fid, stops, res.get("ready_blocker_items") or [])
+        blockers.update(msg.split(" (")[0].split(" - ")[0] for msg in stops)
+    assert len(blockers) >= 6, f"only {sorted(blockers)} blocker sentences exercised - guard is thin"
 
 
 # ── 9. A cap sentence from EITHER engine is clickable ───────────────────────
@@ -535,7 +591,11 @@ def test_cap_rows_inherit_a_coded_cross_form_identity():
 def test_package_cap_block_ships_clickable_rows():
     """The package block falls back to `cap_reason` when `cap_hard_stops` is
     empty - the COMMON case, since a cap whose reason is already a hard stop
-    deliberately produces no extra entry. That fallback must still be clickable."""
+    deliberately produces no extra entry. That fallback must still be clickable.
+
+    The fixture hands the scorer a coded hard stop directly; the live paths make
+    every cross-form hard stop a warning (`stops_now.cross_form_severity`), so
+    this pins the mechanism, not which checks are hard."""
     from services.sqs_service import calculate_package_sqs
 
     msg = ("Business Income limit is specified but Period of Restoration is "
@@ -555,6 +615,13 @@ def test_package_cap_block_ships_clickable_rows():
     assert items, "the package cap has no clickable row"
     assert items[0]["code"] == "bi_missing_period_of_restoration"
     assert (items[0]["resolution"] or {}).get("mode") == "field"
+    # (19 Oct 2026, kept) the same blocker is listed once in `ready_blockers`,
+    # clickable, with its form.
+    assert pkg["ready_blockers"] == [msg]
+    rows = pkg.get("ready_blocker_items") or []
+    assert len(rows) == 1 and rows[0]["code"] == "bi_missing_period_of_restoration"
+    assert (rows[0]["resolution"] or {}).get("mode") == "field"
+    assert rows[0]["forms"] == ["ACORD_140"]
 
 
 # ── 10. The umbrella pillar reaches 0 two ways - never claim only one ───────

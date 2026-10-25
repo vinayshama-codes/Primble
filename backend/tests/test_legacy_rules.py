@@ -125,7 +125,12 @@ def _harvest_field_validation_messages() -> list[str]:
         "business_income_limit": "abc",
     }
     hard, soft = run_field_validations(bad_facts)
-    return list(hard) + list(soft)
+    # 21 Oct 2026: a backwards term read off a document is a WARNING with its
+    # own sentence - unparseable dates above never reach the range check, so it
+    # is driven separately (the hard twin is driven in _hard_stop_fixtures).
+    _h2, soft2 = run_field_validations(
+        {"effective_date": "07/15/2027", "expiration_date": "07/15/2026"})
+    return list(hard) + list(soft) + list(_h2) + list(soft2)
 
 
 def _harvest_standalone_validator_messages() -> list[str]:
@@ -153,7 +158,7 @@ def _harvest_standalone_validator_messages() -> list[str]:
     return out
 
 
-def _harvest_cap_gate_reasons() -> list[str]:
+def _harvest_cap_gate_reasons(cap: str | None = None) -> list[str]:
     """The sentences the CAP GATES print, which no other harvester can see.
 
     THIS IS THE BLIND SPOT THAT SHIPPED FOUR UNFIXABLE BLOCKERS.
@@ -171,19 +176,24 @@ def _harvest_cap_gate_reasons() -> list[str]:
 
     Harvested from the AST for the same reason the static harvester is: the
     gates are mutually exclusive, so no single facts/flags dict trips them all.
+
+    `cap="hard"` / `cap="soft"` keeps only the sentences that feed the 60 / the
+    85 (20 Oct 2026: the caps are back; since 19 Oct the property gate and the
+    umbrella "supporting detail" sentence are soft - only COPE and "no
+    underlying" are hard gates, pinned by `test_every_cap_gate_reason_offers_a_real_fix`).
     """
     import services.sqs_service as sqs
 
     src = textwrap.dedent(inspect.getsource(sqs.calculate_sqs))
     tree = ast.parse(src)
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
 
-    def _collect(node) -> None:
+    def _collect(node, kind: str) -> None:
         for n in ast.walk(node):
             text = _literal_prefix(n) if isinstance(
                 n, (ast.Constant, ast.JoinedStr, ast.BinOp)) else None
             if text and len(text.strip()) > 10:
-                out.append(text)
+                out.append((kind, text))
 
     for node in ast.walk(tree):
         # `_gate_hard_reason = (...)` - the COPE / umbrella / property ladder.
@@ -191,19 +201,109 @@ def _harvest_cap_gate_reasons() -> list[str]:
             for t in node.targets:
                 if isinstance(t, ast.Name) and t.id in (
                         "_gate_hard_reason", "_gate_soft_reason"):
-                    _collect(node.value)
+                    _collect(node.value, "hard" if t.id == "_gate_hard_reason" else "soft")
         # `extra_hard_reason=` / `extra_soft_reason=` passed to _resolve_cap.
         if isinstance(node, ast.Call):
             for kw in node.keywords:
                 if kw.arg in ("extra_hard_reason", "extra_soft_reason"):
-                    _collect(kw.value)
+                    _collect(kw.value, "hard" if kw.arg == "extra_hard_reason" else "soft")
             # `_prop_hard_because("...")` / `_prop_soft_because("...")`
             if (isinstance(node.func, ast.Name)
                     and node.func.id in ("_prop_hard_because", "_prop_soft_because")
                     and node.args):
-                _collect(node.args[0])
+                _collect(node.args[0],
+                         "hard" if node.func.id == "_prop_hard_because" else "soft")
 
-    return sorted(set(out))
+    return sorted({text for kind, text in out if cap in (None, kind)})
+
+
+# ── The short hard-stop list (19 Oct 2026, Brent) ────────────────────────────
+# A hard stop holds the score at 60 (back on 20 Oct 2026) and BLOCKS "Submission
+# Ready" (19 Oct), and Brent keeps the list short - only what is essential to the
+# submission. One fixture per HARD rule the field-level engine can raise (its
+# branches are mutually exclusive, so each needs its own facts), each tripping
+# exactly its own rule. Driven, not harvested: a literal opening such as "ACORD
+# 125 minimum field missing: " is the Tier 1 BACKSTOP row on its own - only the
+# full sentence names its field.
+
+def _producer(value):
+    return {"value": value, "confidence": "filled", "source": "producer"}
+
+
+def _hard_stop_fixtures() -> dict:
+    """{rule: (facts, flags, the sentence's opening words)}. Dates are relative
+    to today, so the ended term stays ended and the proposed term stays ahead."""
+    from datetime import datetime, timedelta
+
+    def _d(days):
+        return (datetime.now() + timedelta(days=days)).strftime("%m/%d/%Y")
+
+    term = {"effective_date": _d(30), "expiration_date": _d(395)}
+    return {
+        "no proposed term": (
+            {}, {}, "ACORD 125 minimum field missing: Proposed effective date"),
+        # A person typed the term (21 Oct 2026, Brent: hard only when
+        # verified). Bare document dates that run backwards are a warning now;
+        # this fixture used them and pinned the old any-source rule.
+        "a period that runs backwards": (
+            {"effective_date": _producer(_d(395)), "expiration_date": _producer(_d(30))}, {},
+            "Effective date is on or after expiration date - policy period is invalid"),
+        "an ended term a person typed": (
+            {"effective_date": _producer(_d(-455)), "expiration_date": _producer(_d(-90))},
+            {}, "Policy term already expired"),
+        "property without Minimum Viable COPE": (
+            dict(term), {"has_property_coverage": True},
+            "Property Minimum Viable COPE incomplete - missing:"),
+        # The person's placement answer - the rule's one real input. This used
+        # `wc_carrier_type="private"`, a key nothing writes (removed from the
+        # rule 21 Oct 2026); the fixture drove the stop through a phantom.
+        "a private carrier in a monopolistic WC state": (
+            dict(term, wc_state_fund_acknowledged=_producer(
+                "No - private-carrier coverage is being requested for those states")),
+            {"has_workers_comp": True, "wc_has_monopolistic_state": True},
+            "Monopolistic WC state (ND/OH/WA/WY) requires the state fund"),
+        "an umbrella with no underlying limits": (
+            dict(term), {"has_umbrella": True},
+            "Umbrella detected but no underlying GL or Auto limits found"),
+        # The same kind, line by line (21 Oct 2026, Brent's rule 2 -
+        # b-umbrella-underlying): a line the umbrella's OWN schedule of
+        # underlying insurance lists, with no limit found anywhere.
+        "a line the umbrella's own schedule lists with no limit": (
+            dict(term, gl_each_occurrence="$1,000,000",
+                 underlying_policies=[{"line": "General Liability", "limit": "$1,000,000"},
+                                      {"line": "Automobile Liability", "limit": ""}]),
+            {"has_umbrella": True},
+            "Umbrella's own schedule of underlying insurance lists "),
+    }
+
+
+def _driven_hard_stops() -> list[str]:
+    """The hard sentences the fixtures above make the engine emit, as stored."""
+    from services.sqs_service import evaluate_stops
+
+    out: list[str] = []
+    for facts, flags, _opening in _hard_stop_fixtures().values():
+        hard, _soft = evaluate_stops(facts, flags)
+        out.extend(m for m in hard if m not in out)
+    return out
+
+
+def _hard_append_sites() -> list[tuple[str, int, str | None]]:
+    """Every `hard.append(...)` in the two functions that raise field-level hard
+    stops: (function, line, literal opening - None for a computed sentence)."""
+    import services.sqs_service as sqs
+    from utils import validators
+
+    sites = []
+    for fn in (sqs.evaluate_stops, validators.run_field_validations):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "append"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "hard" and node.args):
+                sites.append((fn.__name__, node.lineno, _literal_prefix(node.args[0])))
+    return sites
 
 
 def _all_emittable_messages() -> list[str]:
@@ -212,6 +312,8 @@ def _all_emittable_messages() -> list[str]:
         + _harvest_field_validation_messages()
         + _harvest_standalone_validator_messages()
         + _harvest_cap_gate_reasons()
+        # 19 Oct 2026: the full hard sentences too - they block Submission Ready.
+        + _driven_hard_stops()
     )
 
 
@@ -226,6 +328,8 @@ def test_harvesting_actually_found_messages():
     assert len(_harvest_field_validation_messages()) >= 10
     assert len(_harvest_standalone_validator_messages()) >= 2
     assert len(_harvest_cap_gate_reasons()) >= 6
+    # (19 Oct 2026, kept) ...and every hard stop on Brent's short list is found.
+    assert len(_driven_hard_stops()) == len(_hard_stop_fixtures()) >= 6
 
 
 @pytest.mark.parametrize("message", _all_emittable_messages())
@@ -241,8 +345,7 @@ def test_every_emittable_message_matches_a_rule_row(message):
 
 
 def test_the_property_gate_always_names_its_cause():
-    """`_prop_hard` / `_prop_soft` may only be raised through the helpers that
-    also record WHY.
+    """`_prop_soft` may only be raised through the helper that also records WHY.
 
     The gate used to surface as the literal "Property integrity gate" /
     "Property integrity warning" - our internal rule names, printed to a broker
@@ -250,24 +353,27 @@ def test_the_property_gate_always_names_its_cause():
     sentence, phrased so `classify_legacy` matches it and the row gets a real
     Open-to-fix.
 
-    A future branch doing `_prop_hard = True` inline would quietly reopen that
+    A future branch doing `_prop_soft = True` inline would quietly reopen that
     hole: the flag would be set, no reason recorded, and the generic fallback
     printed instead of the specific cause. This makes that a build failure.
+
+    19 Oct 2026 (Brent's short hard-stop list, kept under the restored caps):
+    the property gate is a WARNING only - a missing Period of Restoration holds
+    85, not 60 - so `_prop_hard` / `_prop_hard_because` are gone, and a hard
+    property gate coming back fails here too.
     """
     import services.sqs_service as sqs
 
     src = textwrap.dedent(inspect.getsource(sqs.calculate_sqs))
     tree = ast.parse(src)
-    # The two helpers are the ONE place allowed to set the flag - they are also
-    # the place that records the reason, which is the whole point.
-    helpers = {"_prop_hard_because", "_prop_soft_because"}
-    # Everything the two helpers own - they ARE allowed to set the flag, and
-    # they are the place that records the reason alongside it.
+    # The helper is the ONE place allowed to set the flag - it is also the
+    # place that records the reason, which is the whole point.
+    helpers = {"_prop_soft_because"}
     allowed = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in helpers:
             allowed.update(id(n) for n in ast.walk(node))
-    assert allowed, "the _prop_*_because helpers are gone - this guard is vacuous"
+    assert allowed, "the _prop_soft_because helper is gone - this guard is vacuous"
 
     inline = []
     for node in ast.walk(tree):
@@ -280,14 +386,28 @@ def test_the_property_gate_always_names_its_cause():
                 inline.append((t.id, node.lineno))
     assert not inline, (
         "property gate raised without naming its cause - use "
-        f"_prop_hard_because()/_prop_soft_because(): {inline}"
+        f"_prop_soft_because(): {inline}"
     )
+
+    hard_gate = sorted(
+        {n.id for n in ast.walk(tree)
+         if isinstance(n, ast.Name) and n.id.startswith("_prop_hard")}
+        | {n.name for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+           and n.name.startswith("_prop_hard")})
+    assert not hard_gate, f"the property gate holds 60 again: {hard_gate}"
 
 
 def test_every_cap_gate_reason_offers_a_real_fix():
     """A sentence that CAPS the score at 60 or 85 must carry a fix, not just a
     code. The four umbrella/property gate sentences printed under "Other
-    validations" with nothing to click from 2026-08-31 to 2026-09-08."""
+    validations" with nothing to click from 2026-08-31 to 2026-09-08.
+
+    19 Oct 2026 (Brent's short list, kept under the restored caps): only two
+    gates hold 60 - Minimum Viable COPE and an umbrella with no underlying limit
+    at all. The property gate, Period of Restoration included, and the umbrella
+    "supporting detail" sentence (a limit stated only in words) hold 85.
+    """
     reasons = _harvest_cap_gate_reasons()
     assert reasons, "cap-gate harvest is empty - this guard would pass vacuously"
     dead = []
@@ -298,12 +418,56 @@ def test_every_cap_gate_reason_offers_a_real_fix():
             dead.append((message[:60], code, res.get("mode")))
     assert not dead, f"cap-gate sentences with no actionable fix: {dead}"
 
+    assert _harvest_cap_gate_reasons("hard") == [
+        "Minimum Viable COPE incomplete",
+        "Umbrella present with no underlying GL or Auto limits",
+    ]
+    soft = _harvest_cap_gate_reasons("soft")
+    assert "Business income limit present but period of restoration not specified" in soft
+    assert any(m.startswith("Umbrella coverage is present but its supporting detail is "
+                            "incomplete") for m in soft), soft
+
+
+def test_every_hard_stop_offers_a_real_fix():
+    """Every hard stop holds the score at 60 and (19 Oct 2026, kept) blocks
+    "Submission Ready", so every one is a red row the producer must clear - and
+    every one must open a real fix. Brent keeps the list short: every
+    `hard.append` site must have its fixture above, so a new hard stop cannot
+    ship without someone deciding it is essential.
+    """
+    from services.sqs_service import evaluate_stops
+
+    sites = _hard_append_sites()
+    fixtures = _hard_stop_fixtures()
+    assert len(sites) == len(fixtures), (
+        f"{len(sites)} hard.append sites but {len(fixtures)} fixtures - a hard stop "
+        "was added or removed. Brent keeps the list short (19 Oct 2026): once it "
+        f"is agreed, give it a fixture in _hard_stop_fixtures. Sites: {sites}"
+    )
+    driven = {}
+    for rule, (facts, flags, opening) in fixtures.items():
+        hard, _soft = evaluate_stops(facts, flags)
+        assert len(hard) == 1 and hard[0].startswith(opening), (rule, hard)
+        driven[rule] = hard[0]
+    unseen = [s for s in sites if s[2] and not any(m.startswith(s[2]) for m in driven.values())]
+    assert not unseen, f"hard.append sites no fixture trips: {unseen}"
+    dead = []
+    for rule, message in driven.items():
+        code, _cluster, _tier = classify_legacy(message, "hard_stop")
+        res = resolution_for(code) or {}
+        if res.get("mode") not in ("field", "schedule", "narrative"):
+            dead.append((rule, code, res.get("mode")))
+    assert not dead, f"hard stops with no actionable fix: {dead}"
+
 
 def test_no_cap_gate_reason_is_an_internal_rule_name():
     """"Property integrity gate" is what we call the rule. It is not something a
-    broker can act on, and it was printed to one."""
+    broker can act on, and it was printed to one.
+
+    The red blocker rows print the hard stops too (19 Oct 2026, kept), so the
+    same rule reads them."""
     banned = ("integrity gate", "integrity warning", "_prop_", "gate)")
-    bad = [m for m in _harvest_cap_gate_reasons()
+    bad = [m for m in _harvest_cap_gate_reasons() + _driven_hard_stops()
            if any(b in m.lower() for b in banned)]
     assert not bad, f"internal rule names printed to producers: {bad}"
 
@@ -502,7 +666,10 @@ def test_hard_stop_umbrella_no_underlying_is_typeable_on_both_engines():
     legacy = resolution_for("legacy_umbrella_no_underlying")
     for res in (coded, legacy):
         assert res["mode"] == "field"
-        assert set(res["facts"]) == {"gl_each_occurrence", "gl_limits", "auto_liability_limit"}
+        # + employers liability (21 Oct 2026, Brent's rule 2: an EL limit is an
+        # applicable underlying limit, so it clears the stop too).
+        assert set(res["facts"]) == {"gl_each_occurrence", "gl_limits", "auto_liability_limit",
+                                     "employers_liability_limits"}
 
 
 # ── 6. The fallback gate: other sources keep their own routing ───────────────
@@ -557,7 +724,7 @@ def test_uncovered_safety_net_still_gets_a_fix_from_its_message():
 # a Dismiss whose credit `final_score_with_credits` clamps straight back under
 # the same ceiling. Reported live as "we cannot get the Orbin package over 85".
 #
-# The house pattern is already established for cap gates - `_prop_hard_because`
+# The house pattern is already established for cap gates - `_prop_soft_because`
 # ("a cap gate must name its own cause"). This is the same rule for the other
 # end: a resolution that offers NO fix must say why, and when the reason is
 # "that is not a fact a human can write", the one door has to agree.
@@ -572,6 +739,9 @@ _NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
     "certificate_requested_but_acord25_missing": (),
     "property_evidence_requested_but_acord28_missing": (),
     "acord125_missing": (),
+    # 19 Oct 2026: the expiring policies / endorsements ACORD 125 and 130 have
+    # no room for print on ACORD 101 - the card's Add button is the fix.
+    "acord101_for_expiring_policies": (),
     # Fixed by placing the coverage, not by typing a value.
     "crime_silent_exposure": (),
     "cyber_silent_exposure": (),
@@ -651,28 +821,38 @@ def test_a_no_fix_rule_about_nothing_is_confirmed_by_the_one_door():
 
 def test_gl_class_codes_can_actually_be_answered():
     """The live regression, pinned at the shape the customer hit: a GL package
-    with no class codes must offer a fix that WRITES the fact the rule reads."""
-    from services.answer_routing import answer_mode
+    with no class codes must offer a fix that WRITES the fact the rule reads.
+
+    21 Oct 2026 (Brent 17 Oct item 6): the fix is the GL classification window -
+    the capture table on `gl_class_code_schedule`, which the rule reads - not a
+    free-text box on `gl_class_codes_by_location`. The one door agrees (a card
+    on the old fact opens the table too), and the typed write door still takes
+    the old fact (the ARQ text question, an older tab)."""
+    from services import schedule_capture
+    from services.answer_routing import answer_mode, can_write_scalar
     from services.arq_service import _canonical_key
     from services.issue_registry import _legacy_message_resolution
     from services.sqs_service import evaluate_stops
 
     msg = "GL coverage detected but no class codes found"
     res = _legacy_message_resolution(msg)
-    assert res["mode"] == "field", "the GL class-code warning has no typed fix again"
-    fact = res["facts"][0]
-    assert answer_mode(fact, {})["mode"] == "field", "the one door refuses this fact"
-    assert _canonical_key(fact), "the producer-answer path cannot write this fact"
+    assert res["mode"] == "schedule", "the GL class-code warning has no table to fill again"
+    table = res["schedule_key"]
+    assert schedule_capture.get_def(table) is not None, "the window names no live table"
+    assert answer_mode("gl_class_codes_by_location", {})["schedule_key"] == table
+    assert _canonical_key("gl_class_codes_by_location") and \
+        can_write_scalar("gl_class_codes_by_location", {}), "the typed door was closed"
 
     facts = {"gl_limits": {"value": "$1,000,000"}}
     flags = {"has_general_liability": True}
     _, soft = evaluate_stops(facts, flags)
     assert msg in soft, "the warning no longer fires - rewrite this test, not the rule"
 
-    facts[fact] = {"value": "91580 Carpentry - residential",
-                   "confidence": "filled", "source": "producer"}
+    rows, _ = schedule_capture.validate_rows(table, [{"location": "Location 1", "class_code": "91580",
+                                                      "classification": "Carpentry - residential"}])
+    facts[table] = schedule_capture.rows_for_facts(table, rows)
     _, soft_after = evaluate_stops(facts, flags)
     assert msg not in soft_after, (
-        "answering the fact the card offers does NOT clear the warning - the "
+        "answering the table the card opens does NOT clear the warning - the "
         "85 ceiling would stand after a correct answer"
     )

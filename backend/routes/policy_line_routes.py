@@ -40,16 +40,16 @@ class PolicyLineAddFormRequest(BaseModel):
     form_id: str
 
 
+class PolicyLinePriorOtherRequest(BaseModel):
+    edit_key: str = ""
+
+
 # One change at a time per package in this process: two quick saves would
-# otherwise each read the store before the other wrote it.
-_LOCKS: Dict[str, asyncio.Lock] = {}
-
-
+# otherwise each read the store before the other wrote it. The lock lives with
+# the store (`policy_lines.session_lock`) because the questionnaire's answers
+# about a policy write the same store (22 Oct 2026).
 def _lock_for(session_id: str) -> asyncio.Lock:
-    lock = _LOCKS.get(session_id)
-    if lock is None:
-        lock = _LOCKS[session_id] = asyncio.Lock()
-    return lock
+    return pl.session_lock(session_id)
 
 
 def _owner(session: dict, current_user: dict) -> None:
@@ -106,7 +106,7 @@ async def _pre_form_response(session_id: str, result: dict, current_user: dict) 
     # the key details and the "Before you generate" dry run (DRYRUN, 7 Oct).
     _status = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
-        result.get("mflags") or {}, integrity, current_user)
+        result.get("mflags") or {}, integrity, current_user, remember_score=True)
     _pkg, _key = _status
     _grouped = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [], _soft, _pkg,
@@ -153,7 +153,7 @@ async def _post_form_response(session_id: str, forms_updated: list) -> dict:
         score = (fdata.get("sqs") or {}).get("sqs_score") if isinstance(fdata, dict) else None
         if score is None:
             continue
-        g, t, c = _grade_from_score(int(score))
+        g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
         updated_forms[fid] = {"new_sqs_score": int(score), "new_grade": g, "new_tier": t,
                               "new_tier_color": c, "new_sqs": fdata.get("sqs")}
     cross_issues = sess.get("cross_issues_last") or []
@@ -173,7 +173,10 @@ async def _post_form_response(session_id: str, forms_updated: list) -> dict:
         "new_package_sqs_score": package_sqs.get("package_sqs_score"),
         "new_package_tier": package_sqs.get("tier"),
         "cross_issues": cross_issues,
-        "grouped_cross_issues": _grouped_cross_issues_for_panel(cross_issues),
+        # The session facts: a COPE card's fix follows the package (2+ buildings:
+        # per building, only what is missing - premises_cope, 21 Oct 2026).
+        "grouped_cross_issues": _grouped_cross_issues_for_panel(
+            cross_issues, facts=sess.get("facts") or {}),
         "hard_stops": view["hard_stops"],
         "soft_stops": view["soft_stops"],
         "grouped_issues": view["grouped_issues"],
@@ -203,7 +206,7 @@ async def _change(session_id: str, current_user: dict, action: str, **kw) -> JSO
             # Nothing changed: answer with the screen as it stands.
             uw = session.get("underwriting_consistency") or {}
             return JSONResponse({"success": True, "changed": False, "after_forms": after_forms,
-                                 "policy_lines": pl.table_rows(session.get("facts") or {}),
+                                 "policy_lines": pl.table_rows(session.get("facts") or {}, pl._active_docs(session)),
                                  "unmatched_policy_edits": uw.get("unmatched_policy_edits") or [],
                                  "add_form_offers": pl.form_offers(session) if after_forms else []})
         try:
@@ -262,7 +265,7 @@ async def policy_lines_for(session_id: str, current_user: dict = Depends(get_cur
     after_forms = bool(session.get("generated_forms"))
     uw = session.get("underwriting_consistency") or {}
     return JSONResponse({
-        "policy_lines": pl.table_rows(session.get("facts") or {}),
+        "policy_lines": pl.table_rows(session.get("facts") or {}, pl._active_docs(session)),
         "unmatched_policy_edits": uw.get("unmatched_policy_edits") or [],
         "add_form_offers": pl.form_offers(session) if after_forms else [],
         "after_forms": after_forms,
@@ -292,6 +295,16 @@ async def policy_line_remove(session_id: str, line_id: str,
     """Remove a policy the producer added. A document's policy cannot be
     removed here (correct it instead)."""
     return await _change(session_id, current_user, "remove", line_id=line_id)
+
+
+@router.post("/api/policy-lines/{session_id}/prior-other")
+async def policy_line_prior_other(session_id: str, req: PolicyLinePriorOtherRequest,
+                                  current_user: dict = Depends(get_current_user)):
+    """Choose the policy ACORD 125's prior-carrier OTHER column holds (Brent,
+    19 Oct 2026: the primary umbrella / excess "unless the agent specifies
+    otherwise"); an empty key goes back to that rule. The rest are listed on
+    ACORD 101."""
+    return await _change(session_id, current_user, "prior_other", edit_key=req.edit_key)
 
 
 @router.post("/api/policy-lines/{session_id}/add-form")

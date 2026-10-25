@@ -315,12 +315,18 @@ def test_the_excess_131_stamps_travelers_over_the_umbrella(stamped):
     assert m["UnderlyingPolicy_OtherPolicy_PolicyEffectiveDate_A"] == "01/01/2025"
     assert m["UnderlyingPolicy_OtherPolicy_PolicyExpirationDate_A"] == "01/01/2026"
     assert m["UnderlyingPolicy_OtherPolicy_CombinedSingleLimitAmount_A"].replace("$", "") == "5,000,000"
+    # Brent, 23 Oct 2026 (Z34-1 #3, reverses this test's 7 Oct blanks): "list
+    # the applicable underlying coverages" - the GL / Auto / EL lines the
+    # umbrella sits over print as the plain 131 prints them
+    # (tests/test_build25_forms.py); the expiring policy and OTHER row B do not.
+    base = stamped["ACORD_131"]["mapped"]
     for box in ("UnderlyingPolicy_GeneralLiability_InsurerFullName_A",
                 "GeneralLiability_EachOccurrence_LimitAmount_A",
                 "Vehicle_CombinedSingleLimit_EachAccidentAmount_A",
                 "UnderlyingPolicy_EmployersLiability_InsurerFullName_A",
-                "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A",
-                "UnderlyingPolicy_OtherPolicy_InsurerFullName_B",
+                "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A"):
+        assert m.get(box) and m[box] == base[box], box
+    for box in ("UnderlyingPolicy_OtherPolicy_InsurerFullName_B",
                 "PriorCoverage_PolicyNumberIdentifier_A"):
         assert not m.get(box), box
     # the insured is the same insured on both
@@ -512,8 +518,14 @@ def test_the_scorer_rules_by_the_form_and_scores_the_copys_view(merged):
     exc = calculate_sqs(facts=mf, selected_form_ids=["ACORD_131", EXCESS], form_id=EXCESS, **kw)
     base = calculate_sqs(facts=mf, selected_form_ids=["ACORD_131", EXCESS], form_id="ACORD_131", **kw)
     assert exc["form_id"] == EXCESS and base["form_id"] == "ACORD_131"
-    # the 131 rule set (umbrella SIR / attachment) read on each copy's own view
-    assert exc["breakdown"]["structural_completeness"] < base["breakdown"]["structural_completeness"]
+    # the 131 rule set (umbrella SIR / attachment) read on each copy's own view.
+    # Brent, 23 Oct 2026 (Z34-1 #3, reverses this test's 7 Oct "<"): the excess
+    # states no SIR, but its attachment is the umbrella below - no deduction.
+    from services.sqs_service import UMB_RETENTION_ESTABLISHED, umbrella_retention_state
+    view = fi.facts_for_form(mf, EXCESS)
+    assert "umbrella_sir" not in view
+    assert umbrella_retention_state(view, flags) == UMB_RETENTION_ESTABLISHED
+    assert exc["breakdown"]["structural_completeness"] == base["breakdown"]["structural_completeness"]
 
 
 def test_form_keyed_rules_see_the_form_once(merged):
@@ -548,9 +560,15 @@ def test_every_131_field_has_a_declared_layer_rule():
     unruled = [f for f in schema if ul.field_rule(f) is None]
     assert unruled == []
     for f in ("Insurer_FullName_A", "ExcessUmbrella_Umbrella_EachOccurrenceAmount_A",
-              "UnderlyingPolicy_OtherPolicy_InsurerFullName_A", "GeneralLiability_EachOccurrence_LimitAmount_A",
+              "UnderlyingPolicy_OtherPolicy_InsurerFullName_A", "PriorCoverage_PolicyNumberIdentifier_A",
               "CommercialUmbrellaLineOfBusiness_Question_ACBYesIndicator_A", "Policy_PolicyType_ExcessIndicator_A"):
         assert ul.is_private_field(f) and fi.is_private_field(EXCESS, f)
+    # Brent, 23 Oct 2026 (Z34-1 #3): the GL / Auto / EL underlying blocks are the
+    # same policies under every layer - one shared answer (tests/test_build25_forms.py).
+    for f in ("GeneralLiability_EachOccurrence_LimitAmount_A", "GeneralLiability_OccurrenceIndicator_A",
+              "UnderlyingPolicy_Automobile_InsurerFullName_A",
+              "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A"):
+        assert not ul.is_private_field(f) and not fi.is_private_field(EXCESS, f)
     for f in ("NamedInsured_FullName_A", "BusinessInformation_OperationsDescription_A",
               "CommercialUmbrellaLineOfBusiness_Question_AADCode_A", "LossHistory_ClaimDate_A",
               "ExcessUmbrella_PollutionLiability_InsuredEnvironmentalProtectionAgencyIdentifier_A"):

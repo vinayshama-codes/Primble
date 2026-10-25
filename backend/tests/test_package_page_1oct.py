@@ -641,8 +641,9 @@ def test_both_layouts_lock_the_document_and_value_actions():
     rail, modal = _src(RAIL), _src(MODAL)
     # Documents: locked only while a run is live (Choice Electric #25, 7 Oct
     # 2026 - after forms a change re-stamps them through the documents door).
-    assert rail.count("disabled={anyReclassBusy || !!docLockText}") == 3
-    assert modal.count("disabled={anyReclassBusy || reclassLocked}") == 3
+    # 4 controls each since 22 Oct 2026: type, Confirm type, Exclude, Supporting only.
+    assert rail.count("disabled={anyReclassBusy || !!docLockText}") == 4
+    assert modal.count("disabled={anyReclassBusy || reclassLocked}") == 4
     assert "const reclassLocked = !!documentsLockedReason(pkgGen.state);" in modal
     head = modal[modal.index("const handleReclassify = async"):]
     head = head[:head.index("try {")]

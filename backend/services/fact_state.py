@@ -67,6 +67,12 @@ _HUMAN_SOURCES = {
     "producer": "producer",            # recommendation-card answer
     "client_arq": "client",            # client questionnaire
 }
+# The same people, split by WHAT they did (the door below, `typed_by_person`
+# / `confirmed_by_person`). Together they are exactly `_HUMAN_SOURCES`' keys,
+# which cross_form_validator and coverage_evidence read (pinned by
+# tests/test_build22_person-door.py).
+PERSON_ENTRY_SOURCES = frozenset({"producer", "client_arq"})   # a person typed it
+PERSON_CHOICE_SOURCES = frozenset({"user_confirmed"})          # a person picked it
 _VERIFIED_SOURCES = frozenset({"dec_entry", "policy_doc_text"})
 _VERIFIED_CONFIDENCES = frozenset({"deterministic", "filled"})
 _DERIVED_SOURCES = frozenset({"derived"})
@@ -117,6 +123,77 @@ def derive_evidence_state(raw: Any) -> Tuple[str, Optional[str]]:
             or confidence in _VERIFIED_CONFIDENCES:
         return SOURCE_VERIFIED, None
     return SUGGESTED, None
+
+
+# ── DID A PERSON SUPPLY THIS VALUE? ONE DOOR, TWO QUESTIONS (21 Oct 2026) ───
+# Review finding L1 (25sepChanges.md Z30, Z31-P): two doors answered "did a
+# person supply this?" differently. The term rules (`sqs_service.
+# _date_is_person_supplied`) read `source in {producer, client_arq, user,
+# human}` OR `confidence in {filled, deterministic}`; the display door
+# (`extraction_service.is_silent_boolean`) read `derive_evidence_state`. So a
+# Data Consistency pick and a client's confirm-or-correct were a person for
+# one and not the other, and a document's `filled` value was a person for the
+# term rules. Two named questions now, read off the envelope's own `source`:
+#
+#   typed_by_person      a person ENTERED the value
+#   confirmed_by_person  typed, or a person PICKED / CONFIRMED it
+#
+# The rules that judge what a person PROPOSED (the hard term stops) ask the
+# first; the rules that respect a person's answer (never silence, never
+# re-asked, never re-derived, never held against the documents) ask the second.
+# A rule that needs a third thing - the VALUE put there by a person's action,
+# typed or picked but not a confirmation of a document's value - is not either
+# of these and keeps its own test until it is decided (Z31-P open ends).
+
+def _source_of(env: dict) -> str:
+    return str(env.get("source") or "").strip().lower()
+
+
+def typed_by_person(raw: Any) -> bool:
+    """Did a PERSON ENTER this value? (the one door, question 1 of 2)
+
+    True when the envelope's ``source`` is a person's entry
+    (``PERSON_ENTRY_SOURCES``): a producer typed it - any fix window, a
+    recommendation card, a form edit, a table save (``producer``) - or the
+    client answered it in the questionnaire, a correction in confirm-or-correct
+    included (``client_arq``).
+
+    Not typed, though a person may stand behind it (``confirmed_by_person``):
+      * a Data Consistency confirmation (``source: user_confirmed``). The
+        picker stores a value PICKED between the documents and a value TYPED
+        into it the same way - its route sends only the value and
+        `underwriting_consistency.apply_confirmations` writes one envelope for
+        either - so the two cannot be told apart and both are a choice. This
+        keeps the 21 Oct ruling that a date picked in Data Consistency is not
+        "typed";
+      * the client's "this is correct" in confirm-or-correct (the document's
+        source stays; ``evidence_state: user_confirmed`` is added);
+      * the login account's producer details (``source: account``).
+
+    Never typed: a document's value, our own derivation, anything that is not
+    an envelope (a bare value carries no provenance; every writer of a
+    person's source writes a ``value``), and anything whose only person-like
+    signal is a CONFIDENCE - ``filled`` and ``deterministic`` are written by
+    document readers (dec_entry, document_text, policy_doc_text) and by our
+    derivations as often as by people, so a confidence is never provenance.
+    """
+    _value, env = _unwrap(raw)
+    return bool(env) and _source_of(env) in PERSON_ENTRY_SOURCES
+
+
+def confirmed_by_person(raw: Any) -> bool:
+    """Did a person ENTER or VOUCH FOR this value? (question 2 of 2)
+
+    ``typed_by_person``, or a person picked / confirmed it: a Data
+    Consistency choice (picked, or typed into the picker - stored alike), the
+    client's confirm-or-correct, the login account's own producer details -
+    every envelope `derive_evidence_state` calls ``user_confirmed``. On every
+    envelope the code writes this is exactly ``derive_evidence_state(raw)[0]
+    == USER_CONFIRMED``; the ``typed_by_person`` half only makes "typed means
+    confirmed" structural (a person's source beside a stale evidence label,
+    which no writer produces, still counts).
+    """
+    return typed_by_person(raw) or derive_evidence_state(raw)[0] == USER_CONFIRMED
 
 
 # ── THE TWO STATES THAT USED TO HAVE NO WRITER (client 1.3) ─────────────────
@@ -534,7 +611,7 @@ def human_provenance_facts(facts: Optional[dict],
             if not (include_absence
                     and str(raw.get("value_state") or "") in (EXPLICIT_NO, NOT_APPLICABLE)):
                 continue
-        if derive_evidence_state(raw)[0] == USER_CONFIRMED:
+        if confirmed_by_person(raw):         # the one door (21 Oct 2026, L1)
             out[key] = dict(raw)
     return out
 

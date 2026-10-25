@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from config.database import get_pool
 from config.settings import ACORD_LICENSE_VERSION, FREE_PACKAGE_LIMIT
@@ -181,7 +182,7 @@ async def _acquire_download_lock(user_id: str, session_id: str, form_ids_hash: s
 
 
 def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict,
-                     package_score=None) -> str:
+                     package_score=None, open_hard_stops=None) -> str:
     applicant = facts.get("applicant_name")
     if isinstance(applicant, dict):
         applicant = applicant.get("value", "")
@@ -194,6 +195,9 @@ def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict
         # The package score is part of what the paragraph says (1 Oct 2026): a
         # cached paragraph must never quote an older package score.
         + f"|pkg={package_score}"
+        # ...nor an older readiness (19 Oct 2026): the tier the paragraph states
+        # reads the open hard stops too (`cover_service.grade_and_tier`).
+        + (f"|open={open_hard_stops}" if open_hard_stops is not None else "")
         + str(sorted((k, str(v)) for k, v in flags.items()))
     )
     return hashlib.md5(raw.encode()).hexdigest()
@@ -255,7 +259,8 @@ def _live_card_points(generated_forms: dict) -> dict:
     return out
 
 
-def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None) -> tuple:
+def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None,
+                     package_sqs: Optional[dict] = None) -> tuple:
     """Split open (unresolved) recommendations into hard-stop and soft-warning strings
     for the cover page's Red Flags & Warnings section.
 
@@ -263,8 +268,12 @@ def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None
     producer to-do row and a zero-point card (`unscored_ids`) stay in the
     producer's review and the E&O record, never here. `live_points`
     (`_live_card_points`) gives each card the number and hedge the panel shows;
-    a card no form shows any more keeps its stored number, hedged."""
-    hard, soft = [], []
+    a card no form shows any more keeps its stored number, hedged.
+
+    `package_sqs`: the score the cover prints. Its open hard stops are the
+    CRITICAL list (`_critical_lines`), so the list names every hard stop the
+    score holds - not only the cards typed hard stop (22 Oct 2026)."""
+    hard_rows, soft = [], []
     try:
         from services.needs_attention import is_producer_todo_row
     except Exception:                                      # noqa: BLE001
@@ -284,11 +293,58 @@ def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None
         if live_points and r.get("rec_id") in live_points:
             imp, exact = live_points[r["rec_id"]]
         if r.get("recommendation_type") == "hard_stop":
-            hard.append(f"{msg} (-{imp} pts)" if imp else msg)
+            hard_rows.append((r, msg, imp))
         else:
             soft.append((f"{msg} (+{imp} pts)" if exact else f"{msg} (up to +{imp} pts)")
                         if imp else msg)
-    return hard, soft
+    return _critical_lines(hard_rows, package_sqs), soft
+
+
+def _hard_line(msg: str, imp) -> str:
+    return f"{msg} (-{imp} pts)" if imp else msg
+
+
+def _critical_lines(hard_rows: list, package_sqs: Optional[dict]) -> list:
+    """The cover's "CRITICAL - Hard Stops" (22 Oct 2026): every open hard stop
+    the package score holds, read off the score's own door - its readiness
+    fields (`sqs_service.readiness_fields`: `ready_blocker_items`, one per
+    conflict, each with its fix) - then each card typed hard stop whose fix no
+    listed stop's fix covers. The cards alone missed every hard stop that is
+    not a card: documents naming different companies (name / FEIN) and the
+    monopolistic state with a private carrier.
+
+    One problem, one line (`needs_attention.download_review_rows`' rule): a
+    card whose fix a stop's fix covers is that stop's line, and the line keeps
+    the card's points. A score stored before 19 Oct carries no readiness
+    fields: the cards, exactly as before."""
+    pkg = package_sqs if isinstance(package_sqs, dict) else {}
+    items = pkg.get("ready_blocker_items")
+    if not isinstance(items, list):
+        blockers = pkg.get("ready_blockers")
+        items = ([{"message": m} for m in blockers if m]
+                 if isinstance(blockers, list) else None)
+    if items is None:
+        return [_hard_line(msg, imp) for _r, msg, imp in hard_rows]
+    try:
+        from services.needs_attention import card_fix_keys, issue_fix_keys
+    except Exception:                                      # noqa: BLE001
+        card_fix_keys = issue_fix_keys = lambda _x: set()  # noqa: E731
+    lines: list = []
+    for it in items:
+        msg = str((it or {}).get("message") or "").strip() if isinstance(it, dict) else ""
+        if msg and msg not in [ln["message"] for ln in lines]:
+            lines.append({"message": msg, "points": None, "keys": issue_fix_keys(it)})
+    cards: list = []
+    for r, msg, imp in hard_rows:
+        keys = card_fix_keys(r)
+        owner = next((ln for ln in lines if (keys & ln["keys"]) or ln["message"] == msg), None)
+        if owner is None:
+            cards.append(_hard_line(msg, imp))
+            continue
+        if isinstance(imp, (int, float)) and not isinstance(imp, bool) \
+                and imp > (owner["points"] or 0):
+            owner["points"] = imp
+    return [_hard_line(ln["message"], ln["points"]) for ln in lines] + cards
 
 
 # ASYNC-SAFE
@@ -370,7 +426,8 @@ async def download_pdf(
     # here we want the override to still show up in the audit trail.
     unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
 
-    _ck = _cover_cache_key(facts, [form_id], sqs_results, flags, _pkg_score)
+    _ck = _cover_cache_key(facts, [form_id], sqs_results, flags, _pkg_score,
+                           open_hard_stops=_pkg_now.get("open_hard_stops"))
     _loop = asyncio.get_event_loop()
 
     if include_cover:
@@ -387,7 +444,8 @@ async def download_pdf(
                 _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
                 generate_ai_cover_narrative(facts, flags, sqs_results, [form_id], org_name, fresh,
                                             package_score=_pkg_score,
-                                            package_routing=_pkg_now.get("routing_decision")),
+                                            package_routing=_pkg_now.get("routing_decision"),
+                                            package_open_hard_stops=_pkg_now.get("open_hard_stops") or 0),
             )
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
@@ -397,7 +455,7 @@ async def download_pdf(
         file_manifest, package_checksum = _compute_manifest({f"{file_stem(form_id)}_{_file_suffix}.pdf": pdf_bytes})
         hard_stops, soft_stops = _split_open_recs(
             unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
-            _live_card_points(proc_session.get("generated_forms")))
+            _live_card_points(proc_session.get("generated_forms")), package_sqs=_pkg_now)
         cover_pdf = await _loop.run_in_executor(
             None, lambda: build_cover_page_pdf(
                 facts, flags, sqs_results, [form_id], org_name,
@@ -587,17 +645,18 @@ async def download_all(
     # "Download Anyway" without a fix) + per-file integrity manifest, for the cover
     # and the download audit record.
     unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
+    # The package score exactly as the SQS panel shows it (1 Oct 2026) - read
+    # first: its open hard stops are the cover's CRITICAL list (22 Oct 2026).
+    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
+    _pkg_score = _pkg_now.get("package_sqs_score")
     hard_stops, soft_stops = _split_open_recs(
         unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
-        _live_card_points(proc_session.get("generated_forms")))
+        _live_card_points(proc_session.get("generated_forms")), package_sqs=_pkg_now)
     file_manifest, package_checksum = _compute_manifest(
         {f"{file_stem(fid)}_{_file_suffix}.pdf": pb for fid, pb in acord_pdfs.items()}
     )
-
-    # The package score exactly as the SQS panel shows it (1 Oct 2026).
-    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
-    _pkg_score = _pkg_now.get("package_sqs_score")
-    _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags, _pkg_score)
+    _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags, _pkg_score,
+                           open_hard_stops=_pkg_now.get("open_hard_stops"))
     ai_content = _COVER_CACHE.get(_ck)
     if ai_content is None:
         # Pass the submission's OWN score so the cover page states the same
@@ -607,6 +666,7 @@ async def download_all(
             facts=facts, flags=flags, sqs_results=sqs_results,
             form_ids=list(generated.keys()), org_name=org_name, user=fresh,
             package_score=_pkg_score, package_routing=_pkg_now.get("routing_decision"),
+            package_open_hard_stops=_pkg_now.get("open_hard_stops") or 0,
         )
         _COVER_CACHE[_ck] = ai_content
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
@@ -829,6 +889,10 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
             "raw_sqs_score": _pkg.get("raw_sqs_score"),
             "cap_applied":   _pkg.get("cap_applied"),
             "cap_reason":    _pkg.get("cap_reason"),
+            # The package's open hard stops (19 Oct 2026): they hold its tier
+            # below Submission Ready - never the first form's count.
+            "open_hard_stops": _pkg.get("open_hard_stops") or 0,
+            "ready_blockers":  _pkg.get("ready_blockers") or [],
             "breakdown":     _pkg.get("pillars", _first.get("breakdown", {})),
             "tier":          _pkg.get("tier", _first.get("tier")),
             "routing_decision": _pkg.get("routing_decision", _first.get("routing_decision")),

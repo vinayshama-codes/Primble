@@ -68,6 +68,11 @@ STATUS_TAG: Dict[str, str] = {
     STATUS_HELD_BACK: "AI held back",
     STATUS_VERIFY: "Please verify",
 }
+# Since 23 Oct 2026 (Brent, Z34-2 Q3) no user list carries STATUS_HELD_BACK: a
+# refused AI value is the audit record's (`refused=` / `audit=True`). A refused
+# box with a fact / table behind it is a Missing detail (this marker).
+REFUSED_DETAIL = "REFUSED_DETAIL"
+REFUSED_DETAIL_REASON = "A detail this form asks for that your documents do not confirm."
 
 # The labels the viewer paints yellow ("Required"). `missing_required_gate`
 # (ACORD 140 COPE) is NOT listed here (review, 30 Sep): its own hard-block row
@@ -828,6 +833,108 @@ def _row_is_unused(field: str, mapped: dict) -> bool:
     return True
 
 
+# ── A row the form does not use is not a gap (21 Oct 2026) ───────────────────
+# Brent's 17 Oct test, item 9: ACORD 130 with ONE officer listed "Full name of
+# the partner or executive officer ..." for rows 1, 2 and 3 as "Missing - a
+# high-impact box the AI left blank" - the empty boxes of rows the package has
+# no officer for, still carrying the AI's low_confidence label. The phantom
+# vehicle rows were the same class (C46) at fill time; this is the display
+# side, for every repeating section of every form.
+#
+# THE RULE: an entirely empty row AFTER the last row of its section holding any
+# value is not a gap - not Missing, not high-impact. The section's FIRST row
+# stays (a section with nothing in it still asks for one entry: "no officer
+# recorded" is one row, and the 130's officer card folds onto it); an empty box
+# INSIDE a used row stays; an empty row between two used rows stays.
+#
+# A SECTION is read off the form, never a name list: a box printed on two or
+# more rows with ONE tooltip is a column; columns starting on the same page
+# with the same rows are one table. Measured on all 17 schemas: the 130's
+# officers (rows A-D) and its rating classes (A-N) are two sections even under
+# one name root - so 3 rating rows do not keep three officer rows open - while
+# the 131's company rows join its CommercialStructure (name, address) and
+# BusinessInformation (payroll, receipts) roots. Merging two tables that share
+# a page and rows keeps MORE rows listed, never fewer; a box ACORD numbers per
+# row with different tooltips ("As used here, this is Insurer B") is no column
+# and is never judged. No template or no schema = nothing judged. Display only.
+_UNTICKED_TOKENS = frozenset({"", "off", "/off", "no", "n", "false", "0", "none", "null"})
+
+
+@lru_cache(maxsize=64)
+def _repeating_sections(form_id: str) -> Tuple[Dict[str, Tuple[Tuple[int, str], int]],
+                                               Dict[Tuple[int, str], Tuple[Tuple[str, ...], ...]],
+                                               frozenset]:
+    """({field: (section key, row index)}, {section key: cells per row},
+    checkbox fields) for one BASE form, read off its schema and template."""
+    schema = _schema_from_disk(form_id)
+    positions = widget_positions(form_id)
+    if not schema or not positions:
+        return {}, {}, frozenset()
+    by_base: Dict[str, Dict[str, str]] = {}
+    for f in schema:
+        m = _ROW_RE.match(f)
+        if m:
+            by_base.setdefault(m.group("base"), {})[m.group("row")] = f
+    columns: Dict[Tuple[int, str], List[Dict[str, str]]] = {}
+    for base, rows in by_base.items():
+        if len(rows) < 2:
+            continue
+        if len({_tooltip(schema, f).strip() for f in rows.values()}) != 1:
+            continue                     # one box per letter, not a column
+        letters = "".join(sorted(rows))
+        first = rows[letters[0]]
+        tip = _tooltip(schema, first)
+        if _signature_kind(first, tip) or _is_applicant_step(first, tip) \
+                or _is_producer_signature(first, tip, _field_type(schema, first)):
+            continue                     # a signing step, never a list row
+        pages = {(positions.get(f) or (None,))[0] for f in rows.values()}
+        if len(pages) != 1 or None in pages:
+            continue                     # a printed column lives on one page
+        columns.setdefault((int(next(iter(pages))), letters), []).append(rows)
+    where: Dict[str, Tuple[Tuple[int, str], int]] = {}
+    cells: Dict[Tuple[int, str], Tuple[Tuple[str, ...], ...]] = {}
+    for key, cols in columns.items():
+        letters = key[1]
+        cells[key] = tuple(tuple(c[l] for c in cols) for l in letters)
+        for i, letter in enumerate(letters):
+            for c in cols:
+                where[c[letter]] = (key, i)
+    buttons = frozenset(f for f in where if _field_type(schema, f) == "/Btn")
+    return where, cells, buttons
+
+
+def unused_trailing_row(field: str, mapped: Optional[dict], form_id: str) -> bool:
+    """True when `field` sits in an entirely empty row AFTER the last row of
+    its section that holds any value (see the note above) - not its section's
+    first row. False whenever the form cannot be read. A ticked box is a value;
+    an unticked one ("Off", "No") is not; any typed text is (even "0")."""
+    try:
+        from services.form_instances import base_form_id
+        where, cells, buttons = _repeating_sections(base_form_id(form_id))
+    except Exception:                                      # noqa: BLE001
+        return False
+    hit = where.get(field)
+    if not hit or hit[1] == 0:
+        return False
+    key, idx = hit
+    mapped = mapped or {}
+
+    def _holds(box: str) -> bool:
+        v = mapped.get(box)
+        if v is None or v is False:
+            return False
+        s = str(v).strip()
+        if box in buttons:
+            return s.lower() not in _UNTICKED_TOKENS
+        return s not in ("", "null", "None")
+
+    last = -1
+    for i, row in enumerate(cells.get(key) or ()):
+        if any(_holds(b) for b in row):
+            last = i
+    return idx > last
+
+
 def _unanswered_high_impact_question_test(form_id: str, schema: dict, mapped: dict,
                                           labels: dict, facts: Optional[dict],
                                           flags: Optional[dict]):
@@ -849,7 +956,7 @@ def _unanswered_high_impact_question_test(form_id: str, schema: dict, mapped: di
                 return False
             if not is_high_impact_field(field, _tooltip(schema, field) or None):
                 return False
-            if _spare_row_of_an_answered_group(field, mapped):
+            if _spare_row_of_an_answered_group(field, mapped) or unused_trailing_row(field, mapped, form_id):
                 return False
             with _schema_context(schema):
                 return not bool(_owned_blank_claim(field, owned_facts))
@@ -887,7 +994,7 @@ def _unanswered_high_impact_box_test(form_id: str, schema: dict, mapped: dict,
             tip = _tooltip(schema, field) or None
             if not is_high_impact_field(field, tip) or _is_explanation_box(field, tip):
                 return False
-            if _spare_row_of_an_answered_group(field, mapped):
+            if _spare_row_of_an_answered_group(field, mapped) or unused_trailing_row(field, mapped, form_id):
                 return False
             with _schema_context(schema):
                 return not bool(_owned_blank_claim(field, owned_facts))
@@ -906,13 +1013,40 @@ FINDING_VALUE_MISMATCH = "value_mismatch"
 FINDING_NOT_THE_INSURED = "not_the_insured"
 
 
+def _retention_settled(field: str, facts: Optional[dict], form_id: str) -> bool:
+    """The 131's retention box is no to-do when the layer's SIR OR its
+    attachment point is known (Brent, 23 Oct 2026, Z34-1 #3 - "do not flag a
+    follow-form excess whose attachment is established"). Live 85e51d02,
+    25 Oct: the excess 131 listed "retention amount" as Missing after the AI's
+    borrowed EPL $10,000 was refused, beside the umbrella it sits on."""
+    if not re.match(r"^ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_[A-N]$", field or ""):
+        return False
+    try:
+        from services.form_instances import facts_for_form
+        from services.sqs_service import (UMB_RETENTION_ESTABLISHED, UMB_RETENTION_STATED,
+                                          umbrella_retention_state)
+        return umbrella_retention_state(facts_for_form(facts or {}, form_id)) in (
+            UMB_RETENTION_STATED, UMB_RETENTION_ESTABLISHED)
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_id: str,
                     *, flags: Optional[dict] = None,
                     package_sqs: Optional[dict] = None,
                     doc_haystack: Optional[str] = None,
                     hard_blocks: Optional[List[dict]] = None,
-                    findings: Optional[dict] = None) -> List[dict]:
+                    findings: Optional[dict] = None,
+                    refused: Optional[List[dict]] = None) -> List[dict]:
     """Rows for ONE generated form, in the order the form prints its boxes.
+
+    `refused` (23 Oct 2026, Brent: "Users only need to see relevant
+    information. The audit record is fine."): a list the AI's REFUSED values
+    are appended to, for the audit record only (`attention_recommendation_rows`
+    with `needs_attention_for_session(audit=True)`). No user list carries them:
+    a refused box is listed only as Missing - an underwriting question the
+    documents do not answer, a detail with a fact / table behind it, or a box
+    the form requires.
 
     Each row: form_id, form_label, field, page (1-based, None if the template
     has no widget for it), label, status, tag, required, reason, what_to_do,
@@ -1006,6 +1140,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
 
     rows: List[dict] = []
     seen_questions: set = set()
+    seen_refused: set = set()
     # Print order, so the FIRST box of a Yes/No pair is the one kept and jumped to.
     for field in sorted(universe, key=_print_order):
         value = mapped.get(field)
@@ -1043,13 +1178,43 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                 if held and _row_is_unused(field, mapped):
                     held = False
                 if held:
-                    status = STATUS_HELD_BACK
-                    reason, quotable = held_back(schema, field, removed, facts, kind,
-                                                 gb.get("in_documents"),
-                                                 reason=gb.get("reason"))
-                    # A value the reason does not repeat is not shipped either.
-                    found = str(removed or "") if quotable else None
-            if status is None and required:
+                    # The REFUSED value is the audit record's, never a user
+                    # list's (Brent, 23 Oct 2026 - Z34-2 Q3). The box stays
+                    # visible only as what it is to the producer: a Yes/No
+                    # question the documents do not answer, or a detail with
+                    # a fact / table behind it (driver dates, % subcontracted)
+                    # - Missing, opening the box. Neither: not listed, unless
+                    # the form requires the box (Missing below).
+                    if refused is not None:
+                        _why, _quotable = held_back(schema, field, removed, facts, kind,
+                                                    gb.get("in_documents"),
+                                                    reason=gb.get("reason"))
+                        _m = _ROW_RE.match(field)
+                        _qkey = (box_label(schema, field).lower(), _m.group("row") if _m else "")
+                        if not (is_question_box(schema, field) and _qkey in seen_refused):
+                            seen_refused.add(_qkey)
+                            _pos = positions.get(field)
+                            refused.append({
+                                "form_id": form_id, "form_label": form_label(form_id),
+                                "field": field, "page": _pos[0] if _pos else None,
+                                "label": _trim(box_label(schema, field) + _row_suffix(schema, field),
+                                               _LABEL_MAX + 10),
+                                "status": STATUS_HELD_BACK, "tag": STATUS_TAG[STATUS_HELD_BACK],
+                                "required": bool(required), "reason": _why,
+                                "found_value": (_snippet(removed, 160) if _quotable else None),
+                            })
+                    if is_question_box(schema, field):
+                        status = STATUS_MISSING
+                        reason = "UNANSWERED"
+                    elif _retention_settled(field, facts, form_id):
+                        pass                       # SIR OR attachment (Brent, 23 Oct)
+                    elif box_fold_keys(field):
+                        status = STATUS_MISSING
+                        reason = REFUSED_DETAIL
+            # A box of a row the form does not use is not Missing (Brent's
+            # 17 Oct item 9, `unused_trailing_row`) - the high-impact tests
+            # below read the same rule.
+            if status is None and required and not unused_trailing_row(field, mapped, _base):
                 status = STATUS_MISSING
             if status is None and gb is None and _unanswered_question(field):
                 status = STATUS_MISSING
@@ -1080,6 +1245,11 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
         elif unanswered_box:
             what = HIGH_IMPACT_BLANK_WHAT
             reason = HIGH_IMPACT_BLANK_REASON
+        elif status == STATUS_MISSING and reason == REFUSED_DETAIL:
+            what = ("Tick it on the form if it applies." if is_box
+                    else "Enter it on the form if it applies.")
+            reason = ("Required on this form and still empty." if required
+                      else REFUSED_DETAIL_REASON)
         elif status == STATUS_MISSING:
             if applicant_step and applicant_state == "stale" and _signature_kind(field, tip) in ("signature", "date"):
                 what = APPLICANT_SIGNATURE_STALE
@@ -1205,6 +1375,41 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                 "_sort": _print_order(anchor),
             })
 
+    # A PREMIUM NO DOCUMENT STATES (Brent, 19 Oct 2026): "the policy is still
+    # listed with what is verified, the premium blank and flagged 'Missing /
+    # Requires Confirmation' - never $0, never an estimate". ACORD 125's prior-
+    # carrier rows, the expiring policies ACORD 101 lists, and the Employee
+    # Benefits limit ACORD 126 cannot print. Producer to-dos; no score moves.
+    # ...and a POLICY PREMIUM total that leaves out redacted premiums (Brent,
+    # 23 Oct 2026: "partial is acceptable") says so - `partial_total_boxes`.
+    for field, label, why in (_missing_confirmation_boxes(_base, schema, mapped, facts)
+                              + partial_total_boxes(_base, schema, mapped)):
+        if field in listed or field in client_filled:
+            continue
+        listed.add(field)
+        pos = positions.get(field)
+        rows.append({
+            "form_id": form_id,
+            "form_label": form_label(form_id),
+            "field": field,
+            "page": pos[0] if pos else None,
+            "label": label,
+            "status": STATUS_MISSING,
+            "tag": STATUS_TAG[STATUS_MISSING],
+            "required": False,
+            "reason": why,
+            "what_to_do": "Confirm it with the carrier or the insured and enter it on the form.",
+            "value": None,
+            "found_value": None,
+            "score_effect": 0,
+            "score_effect_exact": True,
+            "score_text": score_text(0, True),
+            "fact_key": None,
+            "answer_mode": "none",
+            "producer_todo": True,
+            "_sort": _print_order(field),
+        })
+
     if (findings or {}).get("values"):
         rows = _with_value_findings(rows, findings["values"], schema=schema, form_id=form_id,
                                     positions=positions, print_order=_print_order,
@@ -1232,6 +1437,85 @@ def _is_ticked(value: Any) -> bool:
     if value is True:
         return True
     return str(value or "").strip().lower() in ("yes", "y", "true", "1", "x", "on", "/1", "/yes")
+
+
+MISSING_CONFIRMATION = "Missing / Requires Confirmation"
+_PRIOR_PREMIUM_BOX_RE = re.compile(
+    r"^PriorCoverage_(GeneralLiability|Automobile|Property|OtherLine)_TotalPremiumAmount_([A-C])$")
+_PRIOR_COLUMN_LABEL = {"GeneralLiability": "General Liability", "Automobile": "Automobile",
+                       "Property": "Property"}
+_EBL_LIMIT_BOX = "GeneralLiability_EmployeeBenefits_LimitAmount_A"
+_ACORD101_REMARKS_BOX = "AdditionalRemark_RemarkText_A"
+
+
+def _missing_confirmation_boxes(base: str, schema: dict, mapped: dict,
+                                facts: Optional[dict]) -> List[Tuple[str, str, str]]:
+    """(box, label, reason) for each value Brent's 19 Oct 2026 rule marks
+    "Missing / Requires Confirmation" on this form, as it prints now:
+      * ACORD 125: a prior-carrier row that names its carrier and prints no
+        premium;
+      * ACORD 101: the expiring policies its prior-carrier list prints with no
+        premium (one row - the list is one box);
+      * ACORD 126: the Employee Benefits limit, when the documents show EBL
+        written with the GL policy and print no limit for it."""
+    out: List[Tuple[str, str, str]] = []
+    mapped = mapped or {}
+    schema = schema or {}
+
+    def _shown(box: str) -> str:
+        return str(mapped.get(box) or "").strip()
+
+    try:
+        if base == "ACORD_125":
+            for field in schema:
+                m = _PRIOR_PREMIUM_BOX_RE.match(field)
+                if not m or _shown(field):
+                    continue
+                col, row = m.groups()
+                carrier = _shown(f"PriorCoverage_{col}_InsurerFullName_{row}")
+                if not carrier:
+                    continue
+                name = _PRIOR_COLUMN_LABEL.get(col) or _shown(
+                    "PriorCoverage_OtherLine_LineOfBusinessCode_A") or "Other line"
+                year = _shown(f"PriorCoverage_PolicyYear_{row}")
+                out.append((field, f"Prior carrier premium - {name}" + (f" {year}" if year else ""),
+                            f"The documents do not state {carrier}'s premium for this policy - "
+                            f"{MISSING_CONFIRMATION}."))
+        elif base == "ACORD_101":
+            from services.pdf_service import PRIOR_CARRIER_CONTINUED_HEADING, prior_grid_set_aside_rows
+            if _ACORD101_REMARKS_BOX in schema \
+                    and PRIOR_CARRIER_CONTINUED_HEADING in _shown(_ACORD101_REMARKS_BOX):
+                unpriced = [r for r in prior_grid_set_aside_rows(facts or {}) if not r.get("premium")]
+                if unpriced:
+                    names = "; ".join(f"{r['line']} ({r['carrier']})" if r.get("carrier") else r["line"]
+                                      for r in unpriced)
+                    out.append((_ACORD101_REMARKS_BOX, "Expiring policy premiums",
+                                f"The documents do not state the premium of {names} - "
+                                f"{MISSING_CONFIRMATION}."))
+        elif base == "ACORD_126":
+            if _EBL_LIMIT_BOX in schema and not _shown(_EBL_LIMIT_BOX) and _ebl_written_with_gl(facts):
+                out.append((_EBL_LIMIT_BOX, "Employee Benefits limit",
+                            "The documents show Employee Benefits Liability written with the GL "
+                            f"policy but print no limit for it - {MISSING_CONFIRMATION}."))
+    except Exception as exc:                               # noqa: BLE001
+        logger.warning("needs_attention: missing-confirmation rows skipped on %s - %s", base, exc)
+    return out
+
+
+def _ebl_written_with_gl(facts: Optional[dict]) -> bool:
+    """The documents show an Employee Benefits Liability coverage written with
+    the GL policy (`lob_canon.written_with_line`) - granted rows only."""
+    try:
+        from services.extraction_service import _fv, _line_entry_grants_coverage as _grants
+        from services.lob_canon import EMPLOYEE_BENEFITS, GENERAL_LIAB, canon_line, written_with_line
+    except Exception:                                      # noqa: BLE001
+        return False
+    rows = _fv(facts or {}, "coverage_lines")
+    granted = [r for r in (rows if isinstance(rows, list) else [])
+               if isinstance(r, dict) and _grants(r)]
+    return any(canon_line(str(r.get("line") or "")) == EMPLOYEE_BENEFITS
+               and written_with_line(EMPLOYEE_BENEFITS, r.get("carrier"), granted) == GENERAL_LIAB
+               for r in granted)
 
 
 def _page_one_premiums_withheld(facts: Optional[dict]) -> bool:
@@ -1264,6 +1548,49 @@ def _blank_premium_boxes(schema: dict, mapped: dict) -> List[Tuple[str, str]]:
         out.append((_TOTAL_PREMIUM_BOX,
                     "Lines of business are ticked, but the total premium is blank."))
     return out
+
+
+def partial_total_boxes(base: str, schema: Optional[dict],
+                        mapped: Optional[dict]) -> List[Tuple[str, str, str]]:
+    """(box, label, reason) for ACORD 125's POLICY PREMIUM when it prints a
+    PARTIAL total - Brent, 23 Oct 2026 (Z34-1 #5): "Redaction is a byproduct of
+    testing ... In these cases, partial is acceptable." The total
+    (`pdf_service._printed_sum`) adds the premiums the grid shows and leaves out
+    the lines listed with no premium.
+
+    Read off the form as it prints: the total equals the sum of the premiums the
+    grid shows, and N listed lines show no premium - a ticked line's own box, or
+    an OTHER row that names a line. Nothing when the box is blank, nothing is
+    left out, or the box holds another figure (the documents' own total). A
+    producer to-do; no score moves."""
+    if base != "ACORD_125" or not isinstance(schema, dict) or _TOTAL_PREMIUM_BOX not in schema:
+        return []
+    mapped = mapped or {}
+    try:
+        from services.pdf_service import (
+            _currency_to_int, _lob_premium_index, _other_lob_premium_boxes, lob_premium_box_pairs)
+        pairs = lob_premium_box_pairs(schema)
+        others = _other_lob_premium_boxes(schema)
+        premium_boxes = ({b for b in _lob_premium_index() if b in schema}
+                         | set(pairs.values()) | set(others))
+        total = _currency_to_int(mapped.get(_TOTAL_PREMIUM_BOX))
+        if total <= 0:
+            return []
+        shown = sum(_currency_to_int(mapped.get(b)) for b in premium_boxes)
+        left_out = sum(1 for tick, prem in pairs.items()
+                       if _is_ticked(mapped.get(tick)) and _currency_to_int(mapped.get(prem)) <= 0)
+        left_out += sum(1 for prem, row in others.items()
+                        if _has_value(mapped.get(f"Policy_LineOfBusiness_OtherLineOfBusinessDescription_{row}"))
+                        and _currency_to_int(mapped.get(prem)) <= 0)
+    except Exception as exc:                               # noqa: BLE001
+        logger.warning("needs_attention: partial-total note skipped - %s", exc)
+        return []
+    if not left_out or shown != total:
+        return []
+    policies = "policy" if left_out == 1 else "policies"
+    return [(_TOTAL_PREMIUM_BOX, "Policy premium total is partial",
+             f"The total adds the premiums this form shows. It leaves out {left_out} listed "
+             f"{policies} whose premium the documents do not show (redacted).")]
 
 
 def _landlords_for_acord45(facts: Optional[dict]) -> List[str]:
@@ -1571,10 +1898,14 @@ def needs_attention_for_session(generated_forms: Optional[dict], facts: Optional
                                 hard_blocks: bool = False,
                                 findings: bool = False,
                                 mismatch_rows: Optional[Iterable[dict]] = None,
-                                confirmations: Optional[dict] = None) -> dict:
+                                confirmations: Optional[dict] = None,
+                                audit: bool = False) -> dict:
     """{"forms": [{form_id, form_label, rows, counts}], "counts": {...}} for
     every generated form (or `form_ids`), in the order the session holds them.
     Every count is summed from the rows - never computed beside them.
+    `audit`: the audit record's call (the E&O rows) - each form also carries
+    `refused`, the AI's refused values, which no user list shows (Brent, 23 Oct
+    2026); never in `rows` or `counts`.
     `docs`: the session's documents (or their text), read once for every form.
     `hard_blocks`: also list the download gate's boxes (`hard_block_findings`) -
     the side panel and the download review ask for them (the needs-attention
@@ -1603,19 +1934,23 @@ def needs_attention_for_session(generated_forms: Optional[dict], facts: Optional
             found = (review_findings_for_form(fid, fr, facts, mismatch_rows=mismatch_rows,
                                               confirmations=confirmations)
                      if findings else None)
+            refused: Optional[List[dict]] = [] if audit else None
             rows = needs_attention(fr, facts, fid, flags=flags, package_sqs=package_sqs,
                                    doc_haystack=haystack, hard_blocks=blocking.get(fid),
-                                   findings=found)
+                                   findings=found, refused=refused)
         except Exception as exc:                           # noqa: BLE001
             logger.warning("needs_attention: %s skipped - %s", fid, exc)
-            rows, ok = [], False
+            rows, ok, refused = [], False, ([] if audit else None)
         counts = count_rows(rows)
         for s in STATUS_ORDER:
             total[s] += counts[s]
         # `ok` False = this form could not be read; callers keep their own
         # findings for it rather than reporting "nothing needs attention".
-        out_forms.append({"form_id": fid, "form_label": form_label(fid),
-                          "rows": rows, "counts": counts, "ok": ok})
+        entry = {"form_id": fid, "form_label": form_label(fid),
+                 "rows": rows, "counts": counts, "ok": ok}
+        if refused is not None:
+            entry["refused"] = refused
+        out_forms.append(entry)
     total["total"] = sum(total[s] for s in STATUS_ORDER)
     return {"forms": out_forms, "counts": total}
 
@@ -1670,7 +2005,9 @@ def attention_recommendation_rows(attention: Optional[dict], shown: int = 6) -> 
     out: List[dict] = []
     for form in (attention or {}).get("forms") or []:
         fid = form.get("form_id") or ""
-        rows = form.get("rows") or []
+        # The AI's refused values ride the record only (`refused`, an
+        # `audit=True` read - Brent, 23 Oct 2026); no user list has them.
+        rows = list(form.get("rows") or []) + list(form.get("refused") or [])
         for status in STATUS_ORDER:
             mine_all = [r for r in rows if r.get("status") == status]
             applicant = [r for r in mine_all if r.get("applicant_step")]
@@ -1783,6 +2120,10 @@ def issue_fix_keys(item: Optional[dict]) -> set:
     res = item.get("resolution") if isinstance(item.get("resolution"), dict) else {}
     keys = set(_flat_names(res.get("facts"))) | set(_flat_names(res.get("needs")))
     keys |= set(_flat_names(res.get("schedule_key")))
+    # A per-building table's cells answer the submission facts it names
+    # (premises_cope `derives`, 21 Oct 2026): a card asking one of them is the
+    # same line, as the frontend folds it (`recommendations.fixKeys`).
+    keys |= set(_flat_names(res.get("derives")))
     keys |= set(_flat_names(item.get("source_fact")))
     return {k for k in keys if k}
 
@@ -1803,6 +2144,12 @@ def card_fix_keys(row: Optional[dict]) -> set:
             keys.add(str(sk))
     except Exception:                                      # pragma: no cover
         pass
+    # A card routed to the location table on a 2+ building package carries
+    # that route (`answer_routing._stamp_per_building`, 21 Oct 2026): its
+    # table and the facts its cells answer are what it asks.
+    res = (row or {}).get("resolution")
+    if isinstance(res, dict) and res.get("per_building") is True:
+        keys |= set(_flat_names(res.get("schedule_key"))) | set(_flat_names(res.get("derives")))
     return keys
 
 
@@ -1886,6 +2233,9 @@ def download_review_rows(stored_rows: Iterable[dict], generated_forms: Optional[
     out: List[dict] = []
     for r in rows:
         rid = str(r.get("rec_id") or "")
+        if ((rid.startswith(ATTENTION_REC_PREFIX) and rid.endswith("_" + STATUS_HELD_BACK))
+                or "guard_removed_value" in rid):
+            continue        # the AI's refused values: the audit record's only (23 Oct 2026)
         if is_hard_block_row(rid):
             if live_hard_blocks is None:
                 out.append(r)

@@ -46,9 +46,13 @@ def _by_field(rows):
 
 def test_a_held_back_box_the_producer_filled_leaves_the_list():
     fr, facts, flags = _live_125()
-    rows = na.needs_attention(fr, facts, "ACORD_125", flags=flags)
-    held = [r for r in rows if r["status"] == na.STATUS_HELD_BACK and not r.get("box_count")]
-    assert held, "the live run has held-back boxes"
+    # Since 23 Oct 2026 (Brent) a refused box is listed as Missing - the
+    # refused value is the audit record's (`refused=`).
+    refused: list = []
+    rows = na.needs_attention(fr, facts, "ACORD_125", flags=flags, refused=refused)
+    listed = {r["field"] for r in rows if r["status"] == na.STATUS_MISSING and not r.get("box_count")}
+    held = [r for r in refused if r["field"] in listed]
+    assert held, "the live run has refused boxes still listed"
     box = held[0]["field"]
     state = dict(fr.get("field_state") or fr.get("mapped") or {})
     fr["field_state"] = state

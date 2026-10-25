@@ -467,10 +467,14 @@ def test_a_carrier_office_state_is_not_the_state_of_operations():
     assert docs[2]["facts"]["state_of_operations"] == "CO"
 
 
-def test_no_insured_evidence_judges_nothing():
+def test_no_insured_evidence_leaves_the_state_unverified():
+    # Was `test_no_insured_evidence_judges_nothing` (AZ kept). Brent, 23 Oct
+    # 2026: "If we cannot verify the correct state from insured-specific
+    # information, leave it unverified and ask" - the 805049a7 run settled on a
+    # claims office's PA exactly here. The TEST pinned the hole.
     docs = [_doc({"state_of_operations": "AZ"})]
     es._drop_non_insured_states(docs)
-    assert docs[0]["facts"]["state_of_operations"] == "AZ"
+    assert "state_of_operations" not in docs[0]["facts"]
 
 
 def test_the_replay_corrects_every_misread(merged):

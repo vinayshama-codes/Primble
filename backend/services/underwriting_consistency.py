@@ -578,9 +578,10 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     # Add a one-line entry: {"label": ..., "kind": "currency"|"integer", "forms": [...]}.
 }
 
-# Fields whose conflict is a HARD STOP until the user resolves it (kept blocking
-# in check_doc_consistency while unconfirmed; the picker is the resolution path).
-# Informational only here — the gating still lives in sqs_service.check_doc_consistency.
+# Fields the picker never preselects (their conflict is confirmed by a person).
+# Until 19 Oct 2026 this was also the hard-stop set; since then only
+# `READY_BLOCKING_RECONCILABLE_KEYS` (name / FEIN) is hard (60) and the policy
+# dates are warnings (85). The gating lives in sqs_service.check_doc_consistency.
 HARD_STOP_RECONCILABLE_KEYS = frozenset({
     "applicant_name", "fein", "effective_date", "expiration_date",
 })
@@ -605,9 +606,21 @@ CONTRACT_SCOPED_HARD_STOP_KEYS = frozenset({
 # Duplication ... generate a warning and require review before forms are
 # generated."). This is a generation-time gate only — scoring, recommendations,
 # and the questionnaire still run; the confirmation picker is the resolution path.
-GENERATION_BLOCKING_RECONCILABLE_KEYS = frozenset({
-    "property_building_value",
-})
+#
+# EMPTY SINCE 19 OCT 2026 (Brent: a hard stop only for what is essential - "they
+# interrupt workflows"; the owner-approved list in 25sepChanges.md Z27 keeps a
+# differing building value a WARNING, "fixable later without stopping the
+# work"). The value is confirmed in Data Consistency before or after forms
+# (`confirm-value-in-editor` re-stamps every form that prints it); generation is
+# no longer refused. Kept as the one declaration the gates read.
+GENERATION_BLOCKING_RECONCILABLE_KEYS: frozenset = frozenset()
+
+# The Data Consistency conflicts that are HARD STOPS (19 Oct 2026, Brent's short
+# list) - they hold the score at 60 and block "Submission Ready": documents
+# naming different companies - the applicant's name or FEIN. A policy date or a
+# building value that differs is a warning (85). `HARD_STOP_RECONCILABLE_KEYS`
+# above keeps its other job (a field the picker never preselects).
+READY_BLOCKING_RECONCILABLE_KEYS = frozenset({"applicant_name", "fein"})
 
 # Fields whose unresolved conflict WITHHOLDS the stamped value (the box ships
 # blank until the picker confirms) without blocking generation. Client
@@ -894,7 +907,13 @@ def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optiona
                 return entity_compact_key(value) or None
         except Exception:                                     # noqa: BLE001
             pass
-        norm = normalize_value(fact_key or "", value)
+        # The door's own first-pass key (`fact_comparison.comparison_key`): a
+        # percentage never groups with a dollar amount of the same digits.
+        try:
+            from services.fact_comparison import comparison_key
+            norm = comparison_key(fact_key or "", value)
+        except Exception:                                     # noqa: BLE001
+            norm = normalize_value(fact_key or "", value)
         return norm or None
     if kind == "currency":
         norm = _normalize_currency(value)
@@ -1633,6 +1652,75 @@ def _drop_values_of_another_kind(fact_key: str, values: List[dict]) -> List[dict
                     "Yes/No answer folded (%s)", fact_key, len(values) - len(merged),
                     "; ".join(str(g.get("display"))[:30] for g in values))
     return merged
+
+
+# ── A reference word beside an amount is not a rival amount (Z38) ─────────
+# Owner, 24 Oct: Extra Expense "Included" on one document and "$1,000,000" on
+# another is not a conflict - "Included" says the coverage sits inside another
+# limit, it states no different amount. On a MONEY fact a candidate whose
+# every printing is a reference word (Included / Incl. / See schedule / As
+# scheduled / Statutory) stands down when another candidate states an amount;
+# the amount stands. Two different amounts still conflict; two different
+# words ("Included" vs "Excluded") still conflict - "Excluded" is a statement
+# of NO coverage, never a reference.
+_REFERENCE_WORD_RE = re.compile(
+    r"^\W*(?:incl(?:uded|\.)?|inc\.|statutory|stat\.?|"
+    r"(?:see|per|refer\s+to|as\s+(?:per|shown\s+(?:in|on)|stated\s+(?:in|on)))\s+"
+    r"(?:the\s+)?(?:attached\s+)?(?:schedule[ds]?|declarations?|dec(?:s|\s+page)?|endorsement|"
+    r"attached|policy|form)|as\s+scheduled)\b", re.I)
+
+
+def is_reference_amount_word(value: Any) -> bool:
+    """True when `value` points at an amount stated elsewhere instead of
+    stating one ("Included", "Included in BPP limit", "See schedule",
+    "Statutory"). "Excluded", "None", "N/A" are not references."""
+    text = str(value or "").strip()
+    if not text or re.match(r"^\W*(?:not|ex|no\b|n/?a\b)", text, re.I):
+        return False
+    # "Included $250,000" / "See schedule - 250,000" STATE an amount: a rival
+    # amount beside it is a real conflict, never a reference standing down.
+    if re.search(r"\$\s*\d|\d{1,3}(?:,\d{3})+|\d{4,}", text):
+        return False
+    return bool(_REFERENCE_WORD_RE.search(text))
+
+
+def _drop_reference_words_beside_amounts(fact_key: str, values: List[dict]) -> List[dict]:
+    """See the block comment above. Operates on candidate groups."""
+    if len(values) < 2:
+        return values
+    try:
+        from services.fact_equivalence import value_kind, KIND_MONEY
+        if value_kind(fact_key) != KIND_MONEY:
+            return values
+    except Exception:                                         # noqa: BLE001
+        return values
+
+    def _printings(g) -> List[str]:
+        out = [g.get("display")] + [src.get("raw") for src in (g.get("sources") or [])
+                                    if isinstance(src, dict)]
+        return [str(x) for x in out if str(x or "").strip()]
+
+    refs = [g for g in values if _printings(g)
+            and all(is_reference_amount_word(p) for p in _printings(g))]
+    amounts = [g for g in values if g not in refs
+               and any(_normalize_currency(p) for p in _printings(g))]
+    # Every candidate only POINTS elsewhere ("Included" vs "See schedule" vs
+    # "Statutory", no amount anywhere): they do not disagree about an amount,
+    # so they are one candidate carrying every source (owner, 25 Oct 2026).
+    # "Excluded" / "None" are not reference words, so they keep conflicting.
+    if refs and len(refs) == len(values):
+        first = dict(refs[0])
+        first["sources"] = [src for g in refs for src in (g.get("sources") or [])]
+        logger.info("underwriting: %s - %d reference words, no amount, are one candidate (%s)",
+                    fact_key, len(refs), "; ".join(str(g.get("display"))[:30] for g in refs))
+        return [first]
+    if not refs or not amounts:
+        return values
+    keep = [g for g in values if g not in refs]
+    logger.info("underwriting: %s - %d reference word(s) beside a stated amount stand "
+                "down (%s)", fact_key, len(refs),
+                "; ".join(str(g.get("display"))[:30] for g in refs))
+    return keep
 
 
 def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
@@ -2598,9 +2686,19 @@ def _display_money(fact_key: str, kind: str, values: List[dict]) -> None:
         if not money:
             return
         from services.display_canonicalizer import canonicalize_currency
+        # Z37 lane B: a fact that takes a dollar amount OR a percentage (the
+        # wind / earthquake deductible) shows a figure written without "$" as
+        # written - a bare "2" is not "$2" (the picker listed "$2" twice).
+        try:
+            from services.fact_registry import takes_amount_or_percent
+            either = bool(takes_amount_or_percent(fact_key))
+        except Exception:                                     # noqa: BLE001
+            either = False
         for g in values:
             shown = g.get("display")
             if shown is None:
+                continue
+            if either and "$" not in str(shown):
                 continue
             canon = canonicalize_currency(shown)
             if canon and canon != shown:
@@ -2720,6 +2818,20 @@ def unevidenced_boolean_negative(fact_key: str, value: Any) -> bool:
         return False
 
 
+# A LOSS RUN'S OWN FIGURES are not one fact of the insured (24 Oct 2026, the
+# 5472449a replay): each loss run states the claims, totals, period and
+# valuation of ITS policies and years, so two of them - a carrier's runs beside
+# a claims sheet, a GL run beside an Auto run - differ by nature. Comparing
+# them raised "Num Claims: documents disagree (10, 5)" (and paid, incurred) and
+# held a finished package at 85 the moment complete runs arrived. A claim that
+# contradicts itself or the package is `claim_checks`' (the one claims reader).
+LOSS_RUN_OWN_FACTS = frozenset({
+    "num_claims", "total_paid", "total_incurred", "open_claims_count",
+    "loss_history_years", "loss_run_period_start", "loss_run_period_end",
+    "loss_run_valuation_date", "loss_run_age_days", "loss_run_status",
+})
+
+
 def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
     """Fact keys eligible for generic cross-document reconciliation.
 
@@ -2740,6 +2852,15 @@ def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
             continue
         for k, v in facts.items():
             if not k or k.startswith("_") or k in exclude or k in keys:
+                continue
+            # The producer block is the submitting agency's (the login account);
+            # a document's producer values are the expiring agency's or a
+            # carrier's own office - two carriers' head offices were offered as
+            # rival "Producer Address" values and held the score at 85 with no
+            # right answer (owner, 24 Oct 2026, package 6a535b39).
+            # The producer NAME keeps its card (two real agencies still conflict,
+            # 14 Sep party-role rule); its address / phone / e-mail never do.
+            if k != "producer_name" and (_is_producer_identity_field(k) or str(k).startswith("producer_")):
                 continue
             val = v["value"] if isinstance(v, dict) and "value" in v else v
             if val is None or isinstance(val, (list, dict, bool)):
@@ -2865,6 +2986,35 @@ def _out_of_scope_contract_rows(merged_facts: Optional[dict], docs: Optional[lis
         except Exception:                                     # noqa: BLE001
             return False
     return _out
+
+
+def _annotate_source_pages(groups: Dict[str, dict], docs: List[dict]) -> None:
+    """Give each DOCUMENT source in ``groups`` the page that prints its raw
+    value (`fact_lineage.locate_page`), in place. Never raises."""
+    try:
+        from services.fact_lineage import locate_page
+    except Exception:                                          # noqa: BLE001
+        return
+    by_id: Dict[str, dict] = {}
+    for idx, d in enumerate(docs or []):
+        if isinstance(d, dict):
+            by_id.setdefault(str(d.get("doc_id") or idx), d)
+    for g in (groups or {}).values():
+        for src in g.get("sources") or []:
+            if not isinstance(src, dict) or "page" in src:
+                continue
+            if src.get("source_method") not in ("llm", "coverage_line", "text_scan"):
+                continue
+            doc = by_id.get(str(src.get("doc_id")))
+            if not doc:
+                continue
+            try:
+                page = locate_page(doc.get("text"), src.get("raw"),
+                                   [src["line"]] if src.get("line") else ())
+            except Exception:                                  # noqa: BLE001
+                page = None
+            if page is not None:
+                src["page"] = page
 
 
 def assess_underwriting_consistency(
@@ -3004,6 +3154,25 @@ def assess_underwriting_consistency(
     except Exception:                                         # noqa: BLE001
         _fact_line = None
     _out_of_scope_row = _out_of_scope_contract_rows(merged_facts, docs)
+    # A heading, a role or a PERSON IN A ROLE names no insured (21 Oct 2026,
+    # Brent 17 Oct item 4: "Berger Owner of Choice Electric") - the insured-name
+    # door. Dropped from each document at extraction; read here too, for a
+    # document stored before the rule (the editor's confirm re-assesses the
+    # stored documents without a re-merge).
+    try:
+        from services.normalization import (
+            INSURED_NAME_KEYS as _INSURED_KEYS, is_not_a_party_name as _not_insured,
+        )
+    except Exception:                                         # noqa: BLE001
+        _INSURED_KEYS, _not_insured = (), (lambda _v: False)  # noqa: E731
+    # A NON-ANSWER IS NOT A RIVAL (GAP 1, 22 Oct 2026): a document's "TBD",
+    # "N/A." or "--" - a scalar or a row cell - is never a candidate. Dropped
+    # from each document at the merge; read here too, for a document stored
+    # before the rule and for row cells, which the merge keeps. The one door.
+    try:
+        from services.answer_semantics import extracted_non_answer as _non_answer
+    except Exception:                                         # noqa: BLE001
+        _non_answer = lambda _k, _v: None                     # noqa: E731
     for fact_key, cfg in effective_fields.items():
         if _fact_line is not None:
             try:
@@ -3020,6 +3189,10 @@ def assess_underwriting_consistency(
         is_auto = bool(cfg.get("_auto"))
         assessed_keys.add(fact_key)
         if _producer_separated and _is_producer_identity_field(fact_key):
+            continue
+        if is_auto and fact_key in LOSS_RUN_OWN_FACTS:
+            # Each loss run's own figures, never one fact of the insured - see
+            # LOSS_RUN_OWN_FACTS. Assessed, so the crude detector skips it too.
             continue
 
         # Group raw values by their normalized form, recording every source doc.
@@ -3076,6 +3249,12 @@ def assess_underwriting_consistency(
                     fact_key, raw, _fv(d.get("facts") or {}, "dec_page_entries"),
                     d.get("text")):
                 raw = None
+            # Nor is a value that names no insured an insured-name candidate.
+            if fact_key in _INSURED_KEYS and isinstance(raw, str) and _not_insured(raw):
+                raw = None
+            # Nor is a non-answer a candidate at all.
+            if raw is not None and _non_answer(fact_key, (d.get("facts") or {}).get(fact_key)):
+                raw = None
             llm_norm = None
             if raw is not None:
                 llm_norm = _normalize(raw, kind, fact_key)
@@ -3120,6 +3299,8 @@ def assess_underwriting_consistency(
                             fact_key, _lv, _fv(d.get("facts") or {}, "dec_page_entries"),
                             d.get("text")):
                         continue
+                    if _lv and _non_answer(fact_key, _lv):
+                        continue                     # a row's "TBD" is no rival
                     _ln_norm = _normalize(_lv, kind, fact_key) if _lv else None
                     if not _ln_norm:
                         continue
@@ -3163,6 +3344,12 @@ def assess_underwriting_consistency(
                         g["sources"].append(src)
                     if _value_completeness(fact_key, kind, scanned_raw) > _value_completeness(fact_key, kind, g["display"]):
                         g["display"] = scanned_raw
+
+        # THE PAGE (Brent, 19 Oct 2026: "keep the source and page reference"):
+        # each document source names the page of its own text that prints the
+        # value - a per-line printing beside its line's name. No page is
+        # claimed for a value no page prints (`fact_lineage.locate_page`).
+        _annotate_source_pages(groups, docs)
 
         _cc = client_candidates.get(fact_key)
         if _cc:
@@ -3292,6 +3479,9 @@ def assess_underwriting_consistency(
         # Nor is a value of another KIND - an amount in a Yes/No fact, or a
         # sentence that is the document's own way of saying the same Yes.
         values = _drop_values_of_another_kind(fact_key, values)
+        # Nor is a reference word beside a stated amount ("Included" next to
+        # "$1,000,000" on a money fact - Z38).
+        values = _drop_reference_words_beside_amounts(fact_key, values)
         # Nor is a form reference no verified contract names, offered as a
         # policy number (see `_FORM_REFERENCE_RE` - both conditions).
         values = _drop_unknown_form_references(fact_key, values, merged_facts, docs)
@@ -3600,7 +3790,7 @@ def assess_underwriting_consistency(
     # Display only; nothing above reads it.
     try:
         from services.policy_lines import table_rows, unmatched_edits
-        _policy_lines = table_rows(merged_facts or {})
+        _policy_lines = table_rows(merged_facts or {}, docs)
         _unmatched_policy_edits = unmatched_edits(merged_facts or {})
     except Exception as _ple:                                 # noqa: BLE001
         logger.warning("underwriting: policy table skipped - %s", _ple)
@@ -4257,25 +4447,78 @@ def stamp_mismatch_issues(stamp_check: Optional[dict]) -> List[dict]:
     Returns ``[]`` when there are no mismatches, so the normal case adds nothing.
     One issue per field, listing the forms involved. Display only — callers must
     NOT feed these into SQS scoring.
+
+    THE WORDS SAY WHAT DISAGREES WITH WHAT (21 Oct 2026, Brent's 17 Oct test
+    item 10). Every mismatch is a form printing something other than the
+    SUBMISSION's figure; the old sentence ("... appears inconsistently across
+    generated forms (ACORD 131, ACORD 131 (Excess))") read as the forms
+    disagreeing with each other, when the two 131s printed the same
+    $3,000,000 against the submission's $6,000,000. Now: "Gross Sales / Annual
+    Revenue: ACORD 131 and ACORD 131 (Excess) print $3,000,000, but the
+    submission says $6,000,000. Confirm the figure so every form prints the
+    same." Forms printing different figures are named figure by figure. The
+    issue id hashes the message, so a dismissal stored against the old words
+    does not carry over to the new ones.
     """
     if not stamp_check or stamp_check.get("ok", True):
         return []
-    by_fact: Dict[tuple, set] = {}
+    by_fact: Dict[tuple, List[dict]] = {}
     for m in stamp_check.get("mismatches") or []:
-        by_fact.setdefault((m.get("fact_key"), m.get("label")), set()).add(m.get("form_id"))
-    issues: List[dict] = []
-    for (fact_key, label), forms in by_fact.items():
-        flist = sorted(f for f in forms if f)
+        if isinstance(m, dict):
+            by_fact.setdefault((m.get("fact_key"), m.get("label")), []).append(m)
+    from services.form_instances import instance_label, is_instance
+
+    def _form_words(fid: str) -> str:
         # A form's second copy reads "ACORD 131 (Excess)" (7 Oct 2026).
-        from services.form_instances import instance_label, is_instance
-        pretty = ", ".join(instance_label(f) if is_instance(f) else f.replace("ACORD_", "ACORD ")
-                           for f in flist)
+        return instance_label(fid) if is_instance(fid) else str(fid).replace("ACORD_", "ACORD ")
+
+    def _and(words: List[str]) -> str:
+        return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+    issues: List[dict] = []
+    for (fact_key, label), rows in by_fact.items():
+        flist = sorted({str(m.get("form_id")) for m in rows if m.get("form_id")})
+        kind = (RECONCILABLE_FIELDS.get(fact_key) or {}).get("kind")
+
+        def _figure(value: Any) -> str:
+            norm = (_normalize_currency(value) if kind == "currency"
+                    else _normalize_integer(value) if kind == "integer" else None)
+            if norm and kind == "currency":
+                try:
+                    from services.display_canonicalizer import canonicalize_currency
+                    return canonicalize_currency(norm) or str(value).strip()
+                except Exception:                         # noqa: BLE001
+                    return str(value).strip()
+            if norm and kind == "integer":
+                return f"{int(norm):,}"
+            return str(value if value is not None else "").strip()
+
+        # {figure: [forms]} in form order, for what the forms print and for
+        # what the submission says (one figure, unless a copy reads its own).
+        printed: Dict[str, List[str]] = {}
+        expected: Dict[str, List[str]] = {}
+        for m in sorted(rows, key=lambda r: str(r.get("form_id") or "")):
+            fid = str(m.get("form_id") or "")
+            for table, raw in ((printed, m.get("stamped")), (expected, m.get("expected"))):
+                fig = _figure(raw)
+                if fig and fid and fid not in table.setdefault(fig, []):
+                    table[fig].append(fid)
+        if not printed or not expected:
+            continue
+        prints = _and([_and([_form_words(f) for f in fids])
+                       + (" prints " if len(fids) == 1 else " print ") + fig
+                       for fig, fids in printed.items()])
+        if len(expected) == 1:
+            says = next(iter(expected))
+        else:
+            says = _and([f"{fig} for {_and([_form_words(f) for f in fids])}"
+                         for fig, fids in expected.items()])
         issues.append({
             "type":    "soft_warning",
             "code":    "underwriting_stamp_mismatch",
             "message": (
-                f"{label or fact_key} appears inconsistently across generated forms "
-                f"({pretty}). Re-confirm the value so it applies uniformly."
+                f"{label or fact_key}: {prints}, but the submission says {says}. "
+                "Confirm the figure so every form prints the same."
             ),
             "forms":   flist,
         })

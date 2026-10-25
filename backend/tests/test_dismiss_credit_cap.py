@@ -4,7 +4,14 @@ Locks the client-confirmed rule: a recommendation/ARQ credit raises each score b
 its impact from that score's OWN base, capped at the active-stop ceiling ONLY when
 the score would individually exceed it. Scores below the cap keep their own values
 and never collapse onto a shared 60 (hard stop) or 85 (warning).
+
+20 Oct 2026 (owner): the 60 / 85 ceilings are back after the 19 Oct "no cap"
+build - `_cap_from` is 60 / 85 / 100 again and `_credited_score` takes a REQUIRED
+cap. What 19 Oct changed and still stands is which items are hard stops, and an
+open hard stop also blocks "Submission Ready" (`ready_blockers`).
 """
+import pytest
+
 import services.sqs_service as sq
 from routes.audit_routes import _cap_from, _credited_score
 
@@ -15,6 +22,10 @@ def test_cap_from_matches_scorer_gates():
     assert _cap_from(2, 3) == 60      # hard takes precedence over soft
     assert _cap_from(0, 1) == 85
     assert _cap_from(0, 0) == 100
+    # ...the same gates the scorer's `_resolve_cap` applies (caps restored 20 Oct 2026).
+    assert sq._resolve_cap(["h"], ["s"]) == (sq.HARD_STOP_CAP, "h") == (60, "h")
+    assert sq._resolve_cap([], ["s"]) == (sq.SOFT_STOP_CAP, "s") == (85, "s")
+    assert sq._resolve_cap([], []) == (None, None)
 
 
 def test_credit_is_a_ceiling_not_a_floor():
@@ -57,6 +68,10 @@ def test_credit_never_exceeds_100():
     assert cap == 100
     assert _credited_score(98, 8, cap) == 100
     assert _credited_score(40, 8, cap) == 48
+    # The cap is REQUIRED again (20 Oct 2026): a caller cannot drop the ceiling
+    # by leaving it out - the 19 Oct "no cap" default is gone.
+    with pytest.raises(TypeError):
+        _credited_score(98, 8)
 
 
 def test_subsequent_credits_accumulate_until_cap():
@@ -153,14 +168,18 @@ _RICH_FACTS = {
 _RICH_FLAGS = {"has_general_liability": True}
 
 
-def _rich_score(hard, soft):
+def _rich(hard, soft):
     return sq.calculate_sqs(
         facts=_RICH_FACTS, flags=_RICH_FLAGS,
         mapped_data={k: _RICH_FACTS[k] for k in _RICH_FACTS},
         form_schema={k: {} for k in _RICH_FACTS}, selected_form_ids=["ACORD_125"],
         hard_stops=hard, soft_stops=soft, tier2_score=100, form_id="ACORD_125",
         has_narrative_doc=True, has_loss_run_doc=True, loss_run_match=True,
-    )["sqs_score"]
+    )
+
+
+def _rich_score(hard, soft):
+    return _rich(hard, soft)["sqs_score"]
 
 
 def test_initial_scoring_caps_only_when_stops_present():
@@ -174,3 +193,12 @@ def test_initial_scoring_caps_only_when_stops_present():
     assert _rich_score([], ["a warning"]) == 85
     # Hard stop present + raw > 85 -> clamped to 60.
     assert _rich_score(["a hard stop"], []) == 60
+    # The routing follows the capped number, and the open hard stop is also named
+    # as what blocks Submission Ready (19 Oct 2026; caps restored 20 Oct 2026).
+    clean, warned, blocked = _rich([], []), _rich([], ["a warning"]), _rich(["a hard stop"], [])
+    assert clean["routing_decision"] == "auto_quote"
+    assert warned["routing_decision"] == "priority_review"     # 85 is not above 85
+    assert blocked["routing_decision"] == "standard_review"    # held at 60
+    assert warned["raw_sqs_score"] == blocked["raw_sqs_score"] == raw
+    assert blocked["open_hard_stops"] == 1 and blocked["ready_blockers"] == ["a hard stop"]
+    assert clean["open_hard_stops"] == warned["open_hard_stops"] == 0

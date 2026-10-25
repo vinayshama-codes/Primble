@@ -459,16 +459,20 @@ def test_two_buildings_route_the_carrier_grade_card_to_the_table():
     assert res["facts"] == ["valuation_method"] and res["controls"]["valuation_method"]
 
 
-def test_occupancy_only_opens_the_table_too_and_values_route_together():
+def test_occupancy_only_is_just_its_box_and_values_route_together():
     # REVERSED 7 Oct 2026 round 4 (owner, Brent #18): this test pinned "an
     # occupancy-only card stays a field card" - the TEST was wrong under the new
     # decision. That card showed building 1's construction and values as THE
     # package's on a two-building package; every COPE card now opens the table.
+    # REVERSED AGAIN 21 Oct 2026 (Brent 17 Oct item 8, b-cope-one-store: "ask
+    # only what is missing") for the occupancy-only card: a field window with
+    # JUST the occupancy box - no table, and still no per-building box, so the
+    # round-4 defect cannot come back. The second half below is unchanged.
     facts = {"property_locations": _rows(2), "construction_type": "Frame",
              "property_building_value": "$1"}
-    res, _ = _cope_view(facts, "minimum_viable_cope_missing")
-    assert res["mode"] == "schedule" and res["facts"] == ["occupancy_type"]
-    assert res["columns"] == ["construction_type", "building_value", "bpp_value"]
+    res, cluster = _cope_view(facts, "minimum_viable_cope_missing")
+    assert res["mode"] == "field" and res["facts"] == ["occupancy_type"]
+    assert "columns" not in res and cluster == res
     facts = {"property_locations": _rows(2)}
     res, _ = _cope_view(facts, "minimum_viable_cope_missing")
     assert res["mode"] == "schedule"

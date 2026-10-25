@@ -434,11 +434,14 @@ def test_two_carriers_on_one_line_still_signal():
         assess_submission_integrity(docs)["reasons"]
 
 
-def test_an_unplaceable_carrier_is_compared_as_before():
+def test_an_unplaceable_carrier_is_never_a_clash():
+    # REVERSED 24 Oct 2026 (Choice Electric's EPL dec read with no line): a
+    # carrier with no line is never compared with every line - the advisory is
+    # two carriers on ONE line only (test_build26_integrity_carriers.py).
     docs = [_carrier_doc("a.pdf", "Commercial General Liability", "ALPHA INSURANCE COMPANY"),
             _doc("b.pdf", {"applicant_name": "ACME ELECTRIC LLC",
                            "carrier_name": "OMEGA CASUALTY COMPANY"})]
-    assert "Multiple carriers referenced across documents" in \
+    assert "Multiple carriers referenced across documents" not in \
         assess_submission_integrity(docs)["reasons"]
 
 

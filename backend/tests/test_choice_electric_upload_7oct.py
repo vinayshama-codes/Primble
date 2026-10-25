@@ -944,7 +944,8 @@ def test_both_layouts_offer_add_documents_and_unlock_documents_after_forms():
     modal = (FRONTEND / "components" / "form" / "AcordModal.jsx").read_text(encoding="utf-8")
     assert 'typeof renderAddDocuments === "function" && renderAddDocuments()' in rail
     assert "const docLockText = documentsLockedReason(genState);" in rail
-    assert rail.count("disabled={anyReclassBusy || !!docLockText}") == 3
+    # 4 since 22 Oct 2026: type, Confirm type, Exclude, Supporting only.
+    assert rail.count("disabled={anyReclassBusy || !!docLockText}") == 4
     assert "renderAddDocuments={renderAddDocumentsPanel}" in modal
     assert "{renderAddDocumentsPanel()}" in modal
     assert "const reclassLocked = !!documentsLockedReason(pkgGen.state);" in modal

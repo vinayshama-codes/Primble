@@ -48,6 +48,7 @@ NO LLM ANYWHERE IN THIS FILE, by the same ruling that governs
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -669,12 +670,14 @@ def _structure_reading(raw: Any) -> Optional[str]:
 
 
 def _human_set(facts: Optional[dict], key: str) -> bool:
+    """A person typed, picked or confirmed this value - the one door,
+    `fact_state.confirmed_by_person` (21 Oct 2026, review L1)."""
     raw = (facts or {}).get(key)
     if not isinstance(raw, dict):
         return False
     try:
-        from services.fact_state import USER_CONFIRMED, derive_evidence_state
-        return derive_evidence_state(raw)[0] == USER_CONFIRMED
+        from services.fact_state import confirmed_by_person
+        return confirmed_by_person(raw)
     except Exception:                                         # noqa: BLE001
         return False
 
@@ -954,6 +957,269 @@ def umbrella_schedule_present(facts: Optional[dict]) -> bool:
         if not value_states_absence(val):
             return True
     return False
+
+
+# ── The umbrella's OWN schedule of underlying insurance, LINE BY LINE ─────────
+# 21 Oct 2026, Brent's 20 Oct rule 2: a hard stop when an umbrella / excess is
+# present and Primble "cannot identify the applicable underlying liability
+# limits needed to support it ... look at the account's actual underlying
+# coverage". `umbrella_schedule_present` above answers "is a schedule there";
+# this reads what it SAYS, one line of business at a time, for the one verdict
+# door `sqs_service.umbrella_underlying`.
+#
+# Only a STRUCTURED row (`underlying_policies`, one row per policy) LISTS a
+# line - the evidence that the umbrella itself sits over it, which is what
+# makes that line's missing limit a hard stop. The free-text schedule
+# (`schedule_of_underlying_insurance`) is never enough for that: the pipeline
+# writes a synthetic "referenced in submitted documents" sentence into it, and
+# prose names lines it does not list ("see the attached GL and Auto policies").
+# The text is read only where it can REMOVE a stop - an amount it prints is an
+# identified underlying limit (never one line's: "GL and Auto $1M" names two),
+# and a segment naming a line as excluded / not scheduled takes that line out.
+LIMIT_AMOUNT = "amount"      # a money amount ("$1,000,000", "1M", "5,000 EACH OCCURRENCE")
+LIMIT_WORDS = "words"        # a limit in words ("Included", "Statutory", "See schedule")
+LIMIT_EXCLUDED = "excluded"  # the line is excluded / not scheduled / not covered
+LIMIT_ABSENT = "absent"      # nothing ("", "N/A", "none", "to follow", "not provided")
+
+_LIMIT_EXCLUDED_RE = re.compile(
+    r"\bexclu(?:ded|des|sion)\b|\bnot\s+(?:scheduled|covered|included)\b|\bno\s+coverage\b",
+    re.I)
+# A schedule ROW whose limit reads N/A says the line does not apply to it.
+_ROW_NOT_APPLICABLE_RE = re.compile(
+    r"^\s*(?:n\.?\s*/\s*a\.?|na|not\s+applicable)\s*[.;,]?\s*$", re.I)
+# Families a schedule of underlying LIABILITY insurance does not list: the
+# umbrella itself (its own limits read as rows - the Choice Electric umbrella
+# dec's "Umbrella Liability / 5,000 EACH OCCURRENCE") and first-party lines.
+_NOT_UNDERLYING_FAMILIES = frozenset({"umbrella", "property", "inland_marine", "crime"})
+_SCHEDULE_TEXT_KEYS = ("schedule_of_underlying_insurance", "underlying_schedule",
+                       "underlying_insurance_schedule")
+_SCHEDULE_SEGMENT_RE = re.compile(r"[;|\n]|,\s")
+
+
+def _limit_text(value: Any) -> str:
+    """One printing as text: the envelope unwrapped, a list / dict cell joined."""
+    v, _ = _unwrap(value)
+    if v is None or isinstance(v, bool):
+        return ""
+    if isinstance(v, dict):
+        v = " ".join(str(x) for x in v.values() if x is not None and not isinstance(x, bool))
+    elif isinstance(v, (list, tuple)):
+        v = " ".join(str(x) for x in v if x is not None and not isinstance(x, (bool, dict, list)))
+    return str(v).strip()
+
+
+# Memoised by TEXT (immutable, so a stale answer is impossible): one package is
+# scored many times per request - every pillar, card and gain probe asks.
+@functools.lru_cache(maxsize=8192)
+def _text_state(text: str) -> str:
+    if not text or text.lower() in _EMPTY_STRINGS:
+        return LIMIT_ABSENT
+    # A whole bare 5+ digit number is an amount, as `_labelled_amounts` reads it
+    # (14 Oct 2026: a person's typed limit is stored "1000000").
+    if _SCHEDULE_DATA_RE.search(text) or _WHOLE_BARE_AMOUNT_RE.fullmatch(text):
+        return LIMIT_AMOUNT
+    # Absence BEFORE exclusion: "schedule of underlying GL policy not included"
+    # says a DOCUMENT is missing, not that the umbrella leaves GL out.
+    if _ABSENCE_ABOUT_DOC_RE.search(text) or _ABSENCE_WHOLE_RE.match(text):
+        return LIMIT_ABSENT
+    if _LIMIT_EXCLUDED_RE.search(text):
+        return LIMIT_EXCLUDED
+    return LIMIT_WORDS
+
+
+@functools.lru_cache(maxsize=8192)
+def _text_positive(text: str) -> bool:
+    try:
+        return any(amount > 0 for amount, _label, _cents in _labelled_amounts(text))
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+@functools.lru_cache(maxsize=8192)
+def _text_family(text: str) -> Optional[str]:
+    try:
+        from services.lob_canon import canon_line
+        return canon_line(text)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def limit_printing_state(value: Any) -> str:
+    """How ONE limit printing reads: LIMIT_AMOUNT, LIMIT_WORDS, LIMIT_EXCLUDED
+    or LIMIT_ABSENT. An amount wins ("$1,000,000 - pollution excluded" is a
+    limit). Silent on purpose - unlike `value_states_absence` it records
+    nothing: the scorer calls it on every score, probes included."""
+    return _text_state(_limit_text(value))
+
+
+def limit_is_positive_amount(value: Any) -> bool:
+    """The printing states a money amount above zero ("$0" is stated, not a
+    limit to measure - the 20 Oct "$0" convention)."""
+    return _text_positive(_limit_text(value))
+
+
+def _schedule_row_reading(row: dict) -> Tuple[str, bool]:
+    """(state, positive amount) of one schedule row: its `limit` cell, else an
+    amount or an exclusion printed in its line cell ("General Liability
+    $1,000,000", "Employers Liability - Not Scheduled")."""
+    limit = _limit_text(row.get("limit"))
+    if _ROW_NOT_APPLICABLE_RE.match(limit):
+        return LIMIT_EXCLUDED, False
+    state, source = _text_state(limit), limit
+    if state == LIMIT_ABSENT:
+        line = _limit_text(row.get("line"))
+        line_state = _text_state(line)
+        if line_state in (LIMIT_AMOUNT, LIMIT_EXCLUDED):
+            state, source = line_state, line
+    return state, (state == LIMIT_AMOUNT and _text_positive(source))
+
+
+# A row or segment about a FIRST-party part of a line (auto physical damage, a
+# deductible) is not an underlying liability limit.
+_PHYSICAL_DAMAGE_RE = re.compile(
+    r"\bphysical\s+damage\b|\bcomprehensive\b|\bcollision\b|\bcomp\s*/\s*coll\b|\bdeductibles?\b",
+    re.I)
+_LIABILITY_WORDS_RE = re.compile(
+    r"\bliab|\boccurrence\b|\bcsl\b|combined\s+single|each\s+accident|\bbodily\b", re.I)
+# The labels an umbrella prints beside its OWN limits.
+_LIMIT_TYPE_LABEL_RE = re.compile(
+    r"\b(?:each|per)\s+occurrence\b|\boccurrence\b|\baggregate\b|\bagg\b|\bsir\b"
+    r"|self[\s-]*insured\s+retention|\bretention\b", re.I)
+
+
+def _not_a_liability_row(row: dict) -> bool:
+    line = _limit_text(row.get("line"))
+    if _PHYSICAL_DAMAGE_RE.search(line):
+        return True
+    limit = _limit_text(row.get("limit"))
+    return bool(_PHYSICAL_DAMAGE_RE.search(limit) and not _LIABILITY_WORDS_RE.search(limit))
+
+
+def _row_names_a_policy(row: dict) -> bool:
+    return any(_limit_text(row.get(k)).lower() not in _EMPTY_STRINGS
+               for k in ("carrier", "policy_no", "policy_number"))
+
+
+def _umbrella_own_amounts(facts: dict) -> frozenset:
+    out = set()
+    for key in ("umbrella_limit", "umbrella_sir", "umbrella_attachment_point"):
+        try:
+            out.update(a for a, _l, _c in _labelled_amounts(_limit_text(facts.get(key))) if a > 0)
+        except Exception:                                     # noqa: BLE001
+            pass
+    return frozenset(out)
+
+
+def _only_umbrella_amounts(text: str, umb_amounts: frozenset) -> bool:
+    """Every amount `text` prints is one of the umbrella's own figures."""
+    try:
+        amounts = [a for a, _l, _c in _labelled_amounts(text) if a > 0]
+    except Exception:                                         # noqa: BLE001
+        return False
+    return bool(amounts) and bool(umb_amounts) and all(a in umb_amounts for a in amounts)
+
+
+def umbrella_schedule_lines(facts: Optional[dict]) -> dict:
+    """What the umbrella's OWN schedule of underlying insurance says, line by
+    line (see the note above):
+
+      {"lines": {family: {"listed", "excluded", "stated", "numeric"}},
+       "stated":   an underlying limit printed anywhere in the schedule,
+       "numeric":  ... as an amount above zero,
+       "unplaced": an amount the schedule prints for no one line it names}
+
+    `listed`   - a row lists the family and does not exclude it;
+    `excluded` - a ROW says the family is excluded / not scheduled / N/A, and
+                 no row states a limit for it (text never excludes a line);
+    `stated`   - a row for the family prints a limit (an amount, or words -
+                 never for employers liability, a money limit);
+    `numeric`  - ... an amount above zero.
+    The umbrella's own rows, first-party lines and rows naming no line with no
+    amount are not underlying evidence. Never raises."""
+    empty = {"lines": {}, "stated": False, "numeric": False, "unplaced": False}
+    if not isinstance(facts, dict):
+        return empty
+    acc: Dict[str, dict] = {}
+    stated = numeric = unplaced = False
+    umb_amounts = _umbrella_own_amounts(facts)
+
+    def _entry(fam: str) -> dict:
+        return acc.setdefault(fam, {"rows": 0, "excluded": False, "stated": False,
+                                    "numeric": False})
+
+    for row in _rows(facts, "underlying_policies"):
+        if not isinstance(row, dict):
+            continue
+        line_text = _limit_text(row.get("line"))
+        fam = _text_family(line_text)
+        if fam in _NOT_UNDERLYING_FAMILIES or _not_a_liability_row(row):
+            continue
+        state, positive = _schedule_row_reading(row)
+        if fam is None:
+            # A policy listed under a name no family places ("Commercial
+            # Package Policy", a blank line cell): its amount is an underlying
+            # limit, but not one line's - only when the row names a POLICY (a
+            # carrier or a number) and the amount is not the umbrella's own
+            # (its "Each Occurrence $5,000,000" read as a nameless row).
+            if state == LIMIT_AMOUNT and _row_names_a_policy(row) and \
+                    not _only_umbrella_amounts(_limit_text(row.get("limit")) or line_text,
+                                               umb_amounts):
+                stated = unplaced = True
+                numeric = numeric or positive
+            continue
+        e = _entry(fam)
+        if state == LIMIT_EXCLUDED:
+            e["excluded"] = True
+            continue
+        e["rows"] += 1
+        # Employers liability is a money limit: "Statutory" is the WC part's.
+        if state == LIMIT_AMOUNT or (state == LIMIT_WORDS and fam != "workers_comp"):
+            e["stated"] = stated = True
+        if positive:
+            e["numeric"] = numeric = True
+
+    for key in _SCHEDULE_TEXT_KEYS:
+        val = _fv(facts, key)
+        if val is None:
+            continue
+        if isinstance(val, dict):
+            pieces = [str(x) for x in val.values() if isinstance(x, (str, int, float))]
+        elif isinstance(val, list):
+            pieces = [str(x) for x in val if isinstance(x, (str, int, float))]
+        else:
+            pieces = [str(val)]
+        for piece in pieces:
+            for seg in _SCHEDULE_SEGMENT_RE.split(piece):
+                seg = seg.strip()
+                if not seg:
+                    continue
+                fam = _text_family(seg)
+                if fam in _NOT_UNDERLYING_FAMILIES:
+                    continue
+                # Text never EXCLUDES a line (only a structured row does, the
+                # rule that lists one): "hired autos excluded" or "Products-
+                # Completed Operations excluded" names a coverage PART.
+                if _text_state(seg) != LIMIT_AMOUNT or (
+                        _PHYSICAL_DAMAGE_RE.search(seg) and not _LIABILITY_WORDS_RE.search(seg)):
+                    continue
+                # A nameless segment counts only when it is not the umbrella's
+                # own limit ("Each Occurrence $5,000,000", "Aggregate", "SIR").
+                if fam is None and (_LIMIT_TYPE_LABEL_RE.search(seg)
+                                    or _only_umbrella_amounts(seg, umb_amounts)):
+                    continue
+                stated = unplaced = True
+                numeric = numeric or _text_positive(seg)
+
+    lines: Dict[str, dict] = {}
+    for fam, e in acc.items():
+        excluded = bool(e["excluded"]) and not e["stated"]
+        lines[fam] = {
+            "listed": e["rows"] > 0 and not excluded,
+            "excluded": excluded,
+            "stated": bool(e["stated"]),
+            "numeric": bool(e["numeric"]),
+        }
+    return {"lines": lines, "stated": stated, "numeric": numeric, "unplaced": unplaced}
 
 
 def _flags_of(facts: Optional[dict], flags: Optional[dict]) -> Optional[dict]:
@@ -2001,11 +2267,15 @@ def payroll_period_corroborated(period, entries=None, text=""):
 def _payroll_source_is_annual(facts: Optional[dict]) -> bool:
     """The payroll figure came from a source whose own wording is annual:
     a human answer to the questionnaire (both payroll questions ask for the
-    ANNUAL figure by name), or a rating-basis schedule row (a class-code
-    schedule states annual remuneration by definition)."""
+    ANNUAL figure by name - a figure a person TYPED, `fact_state.
+    typed_by_person`; one picked between documents is the documents'), or a
+    rating-basis schedule row (a class-code schedule states annual
+    remuneration by definition)."""
+    from services.fact_state import typed_by_person
     for key in ("wc_payroll", "total_payroll"):
-        _, env = _unwrap((facts or {}).get(key))
-        if str(env.get("source") or "").lower() in ("producer", "client_arq", "client"):
+        held = (facts or {}).get(key)
+        _, env = _unwrap(held)
+        if typed_by_person(held):
             return True
         if str(env.get("period_basis") or "").lower() == "annual":
             return True
@@ -2152,6 +2422,51 @@ def wc_supplemental_unknowns(facts: Optional[dict], flags: Optional[dict]) -> Li
     return out
 
 
+# ── Agreed value: only an AFFIRMATIVE statement counts (Z37 lane B, 24 Oct) ──
+#
+# `agreed_value_endorsement` is a bare boolean in the extraction schema, so a
+# document that never mentions it stores False - and "False" / "No" / "N" are
+# truthy strings. The coinsurance rule (cross_form_validator and the sqs
+# property gate) tested `not _fv(...)`, so a stated or silent NO switched the
+# "coinsurance missing" warning OFF. ONE reader: agreed value is in place only
+# when something says YES.
+
+_AGREED_LEAD_RE = re.compile(r"^\s*(yes|y|no|n)\b", re.I)
+_AGREED_NEG_RE = re.compile(
+    r"\b(no|not|none|without|n/a|excluded?|declined|rejected|removed|deleted)\b", re.I)
+# What agreed value DOES to coinsurance is not a negation of agreed value:
+# "Agreed value (no coinsurance)", "agreed value; coinsurance does not apply".
+_COINSURANCE_CLAUSE_RE = re.compile(
+    r"\b(?:no|without)\s+coinsurance\b|\bcoinsurance\b[^.;,()]*", re.I)
+
+
+def agreed_value_affirmed(facts: Optional[dict]) -> bool:
+    """True only when `agreed_value_endorsement` affirmatively says it applies.
+
+    False / "No" / "N" / "No - coinsurance applies" / blank -> False. "Yes",
+    "Yes - agreed value endorsement applies", True -> True. A free-text answer
+    naming agreed value with no negation ("Other: agreed value per schedule")
+    -> True. Anything unreadable -> False (the warning asks, which is safe).
+    """
+    value = _fv(facts, "agreed_value_endorsement")
+    if value is None:
+        return False
+    try:
+        from services.normalization import yes_no_token
+        tok = yes_no_token(value)
+    except Exception:                                         # noqa: BLE001
+        tok = None
+    if tok:
+        return tok == "Y"
+    text = str(value).strip()
+    text = re.sub(r"^\s*other\s*[:\-]\s*", "", text, flags=re.I)
+    rest = _COINSURANCE_CLAUSE_RE.sub(" ", text)
+    lead = _AGREED_LEAD_RE.match(rest)
+    if lead:
+        return lead.group(1).lower() in ("yes", "y")
+    return "agreed" in rest.lower() and not _AGREED_NEG_RE.search(rest)
+
+
 # ── 4. Is a coverage flag still supported once a field is edited? ─────────────
 
 # Facts that evidence a line but are package-level in the registry (they also
@@ -2271,6 +2586,8 @@ __all__ = [
     "AUTO_COMPLETENESS_RULES", "AUTO_COMPLETENESS_CAP",
     "auto_liability_stated", "auto_split_limits_stated",
     "value_states_absence", "umbrella_schedule_present",
+    "LIMIT_AMOUNT", "LIMIT_WORDS", "LIMIT_EXCLUDED", "LIMIT_ABSENT",
+    "limit_printing_state", "limit_is_positive_amount", "umbrella_schedule_lines",
     "text_references_schedule_as_present", "unreadable_absence_values",
     "WC_SUPPLEMENTAL_CAP", "WC_XMOD_POINTS", "WC_OFFICER_POINTS",
     "WC_PAYROLL_PERIOD_POINTS",

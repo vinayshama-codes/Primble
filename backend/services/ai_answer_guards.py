@@ -84,6 +84,7 @@ REASON_BUREAU_NOT_STATED = "AI_BUREAU_ID_NOT_STATED"
 # a person's answer to another question, the box's own tooltip example,
 # another section's text. See the "Fix C" block above `_judge`.
 REASON_ANOTHER_QUESTION = "AI_ANSWER_TO_ANOTHER_QUESTION"
+REASON_OWN_PARTY_AS_INTEREST = "AI_INSUREDS_OWN_PARTY_AS_INTEREST"
 REASON_TOOLTIP_EXAMPLE = "AI_TOOLTIP_EXAMPLE"
 REASON_QUALIFIER_NOT_STATED = "AI_QUALIFIER_NOT_STATED"
 REASON_INITIAL_FROM_NAME = "AI_INITIAL_FROM_THE_NAME"
@@ -97,6 +98,23 @@ REASON_COVERAGE_ROW = "AI_COVERAGE_ROW_AS_EXPLANATION"
 # row whose naming box is empty); the sentence lives here with the others.
 REASON_OTHER_ROW_UNNAMED = "AI_OTHER_ROW_UNNAMED"
 
+# P15 (21 Oct 2026, 25sepChanges.md Z31-W). The first two are this module's
+# rules; the last two are recorded by `pdf_service` (the ACORD 126 products row,
+# the ACORD 127 garaging column) and their sentences live here with the others.
+REASON_RATING_DATE_OTHER_TERM = "AI_RATING_DATE_NOT_THE_PROPOSED_TERM"
+REASON_ITEM_LABEL = "AI_DOCUMENT_ITEM_LABEL"
+REASON_PRODUCT_IS_OPERATIONS = "AI_PRODUCT_IS_THE_BUSINESS_DESCRIPTION"
+REASON_GARAGING_WITHOUT_A_VEHICLE = "AI_GARAGING_WITHOUT_A_VEHICLE"
+# Z41 (25 Oct 2026, live run f575160b) - see the Z41 section below `_judge`.
+REASON_BOX_LABEL = "AI_BOX_LABEL_AS_VALUE"
+REASON_SCHEDULE_PERSON = "AI_PERSON_FROM_ANOTHER_SCHEDULE"
+REASON_STATE_NOT_THIS_FORMS = "AI_STATE_NOT_THIS_FORMS"
+REASON_LICENCE_STATE_AS_ADDRESS = "AI_LICENCE_STATE_AS_ADDRESS"
+REASON_OTHER_LINES_FORM = "AI_ANOTHER_LINES_FORM"
+REASON_AMOUNT_NOT_FOR_THIS_COVERAGE = "AI_AMOUNT_NOT_STATED_FOR_THIS_COVERAGE"
+REASON_ISSUE_DATE = "AI_ISSUE_DATE"
+REASON_PERSON_ANSWER_ELSEWHERE = "AI_PERSON_ANSWER_FOR_ANOTHER_QUESTION"
+
 REASON_CODES = frozenset({
     REASON_CROSS_REFERENCE, REASON_PARTY_NAME, REASON_ECHO, REASON_ONE_WORD_OPERATIONS,
     REASON_CLASSIFICATION, REASON_FORM_TITLE, REASON_OPTION_LIST, REASON_ROW_NAME_REFUSED,
@@ -107,11 +125,31 @@ REASON_CODES = frozenset({
     REASON_INITIAL_FROM_NAME, REASON_ADDRESS_NOT_THIS_PERSONS, REASON_FACTOR_AS_IDENTIFIER,
     REASON_ROW_REFERENCE, REASON_BLANK_FORM_LABEL, REASON_SYMBOL_NOT_STATED,
     REASON_OTHER_ROW_UNNAMED, REASON_COVERAGE_ROW,
+    REASON_RATING_DATE_OTHER_TERM, REASON_ITEM_LABEL, REASON_PRODUCT_IS_OPERATIONS,
+    REASON_GARAGING_WITHOUT_A_VEHICLE,
+    REASON_BOX_LABEL, REASON_SCHEDULE_PERSON, REASON_STATE_NOT_THIS_FORMS,
+    REASON_LICENCE_STATE_AS_ADDRESS, REASON_OTHER_LINES_FORM,
+    REASON_AMOUNT_NOT_FOR_THIS_COVERAGE, REASON_ISSUE_DATE, REASON_PERSON_ANSWER_ELSEWHERE,
+    REASON_OWN_PARTY_AS_INTEREST,
 })
 
 # What the producer reads in the needs-attention list. Plain words, no
 # em-dashes, never the refused value (it belongs to nothing on this form).
 _HELD_BACK: Dict[str, str] = {
+    REASON_BOX_LABEL: "The AI copied the box's own label into it, so it was left blank.",
+    REASON_SCHEDULE_PERSON: ("The AI listed a person your documents name only on another "
+                             "schedule (for example the drivers), so it was left blank."),
+    REASON_STATE_NOT_THIS_FORMS: ("The AI put another state on this state's form, so it was "
+                                  "left blank."),
+    REASON_LICENCE_STATE_AS_ADDRESS: ("The AI used a driver's licence state as a mailing "
+                                      "address state, so it was left blank."),
+    REASON_OTHER_LINES_FORM: ("The AI listed another policy's form or endorsement here, so it "
+                              "was left blank."),
+    REASON_AMOUNT_NOT_FOR_THIS_COVERAGE: ("Your documents do not print this amount for this "
+                                          "coverage, so the AI's value was left blank."),
+    REASON_ISSUE_DATE: ("The AI used a document's issue date here, so it was left blank."),
+    REASON_PERSON_ANSWER_ELSEWHERE: ("The AI used an answer given for another question, so it "
+                                     "was left blank."),
     REASON_CROSS_REFERENCE: ("The AI put a pointer to another part of your documents here "
                              "(such as \"see schedule\"), not a value, so it was left blank."),
     REASON_PARTY_NAME: ("The AI put a company or person's name here, which does not describe "
@@ -146,6 +184,9 @@ _HELD_BACK: Dict[str, str] = {
                      "state, so it was left blank."),
     REASON_BUREAU_NOT_STATED: ("Your documents do not print this credit or rating bureau's number "
                                "or name, so the AI's answer was left blank."),
+    REASON_OWN_PARTY_AS_INTEREST: ("The AI put the insured's own owner, contact or name here. An "
+                                   "additional interest is a third party (a lender, loss payee or "
+                                   "additional insured), so it was left blank."),
     REASON_ANOTHER_QUESTION: ("The AI copied an answer you gave to a different question here. "
                               "Nothing says it answers this one, so it was left blank."),
     REASON_TOOLTIP_EXAMPLE: ("The AI used the form's own example answer for this box, which your "
@@ -169,6 +210,14 @@ _HELD_BACK: Dict[str, str] = {
                                "for, so it was left blank."),
     REASON_COVERAGE_ROW: ("The AI copied a row of a policy's coverage table here, which explains "
                           "nothing about this question, so it was left blank."),
+    REASON_RATING_DATE_OTHER_TERM: ("The AI put a date from another policy term here. A rating date "
+                                    "belongs to the policy being applied for, so it was left blank."),
+    REASON_ITEM_LABEL: ("The AI copied a numbered item from your documents here (such as \"Item 3A\"), "
+                        "and what it holds does not answer this box, so it was left blank."),
+    REASON_PRODUCT_IS_OPERATIONS: ("The AI put the description of the business here. This row asks for "
+                                   "a product or service the business sells, so it was left blank."),
+    REASON_GARAGING_WITHOUT_A_VEHICLE: ("No vehicle is listed on this row, so the AI's garaging address "
+                                        "for it was left blank."),
 }
 
 
@@ -179,8 +228,11 @@ def held_back_sentence(reason: Any) -> Optional[str]:
     return _HELD_BACK.get(code)
 
 
-# Forms the owner froze on 14 Sep 2026 - no new guard acts on them.
-_FROZEN_FORMS = frozenset({"ACORD_141", "ACORD_160"})
+# Forms the owner froze on 14 Sep 2026 - no new guard acts on them. ACORD 141
+# left the list on 25 Oct 2026 (Z41): its label is the template's own and the
+# owner's run f575160b showed its AI values unguarded (cyber limits as crime
+# limits, the drivers as employees, the carrier's office as the auditor).
+_FROZEN_FORMS = frozenset({"ACORD_160"})
 
 
 def _base_form(form_id: Any) -> str:
@@ -828,6 +880,26 @@ def option_list_dumps(mapped: dict, schema: dict, ai_fields: Set[str]) -> Set[st
 # for the refusal itself: every printing of the year is part of a full date or
 # a copyright / edition line, or the year is not printed at all. A date that
 # sits beside a building word ("roof replaced 06/15/2018") is still evidence.
+_IMPROVEMENT_YEAR_RE = re.compile(r"^BuildingImprovement_(?P<k>\w+?)Year_(?P<r>[A-N])$")
+
+
+def improvement_year_is_another_year(field: str, value: Any, mapped: Any) -> bool:
+    """An AI improvement year (wiring / plumbing / heating / other) that is
+    just the same building's ROOF year or YEAR BUILT already on the form (live
+    85e51d02, 25 Oct: "other improvement year" 2018 = the typed roof year).
+    A roof year is never judged against itself."""
+    m = _IMPROVEMENT_YEAR_RE.match(field or "")
+    if not m or m.group("k") == "Roofing" or not isinstance(mapped, dict):
+        return False
+    v = str(value or "").strip()
+    if not re.fullmatch(r"(?:19|20)\d{2}", v):
+        return False
+    r = m.group("r")
+    others = {str(mapped.get(f"BuildingImprovement_RoofingYear_{r}") or "").strip(),
+              str(mapped.get(f"CommercialStructure_BuiltYear_{r}") or "").strip()}
+    return v in others
+
+
 _BUILDING_YEAR_BOX_RE = re.compile(
     r"^(?:CommercialStructure|BuildingImprovement|Construction)_\w*Year_[A-N]\d?$")
 _DATE_BEFORE_YEAR_RE = re.compile(
@@ -973,6 +1045,53 @@ def _attribute_box_unstated(field: str, value: Any, raw_text: str, tooltip: str,
 # NCCI code. The merge already refuses a number printed under another code's
 # label as a NAIC (extraction_service._OTHER_CODE_LABEL_RE); this is the same
 # reading for the insured's own identifier boxes.
+_PARTY_ADDRESS_BOX_RE = re.compile(
+    r"^(?:NamedInsured|Producer)_MailingAddress_(?:LineOne|LineTwo|CityName|StateOrProvinceCode|"
+    r"PostalCode)_[A-N]$")
+
+
+_STREET_SUFFIXES = {"rd": "road", "st": "street", "ave": "avenue", "av": "avenue", "dr": "drive",
+                    "blvd": "boulevard", "ln": "lane", "hwy": "highway", "pkwy": "parkway",
+                    "ct": "court", "pl": "place", "cir": "circle", "ste": "suite"}
+
+
+def _street_spellings(value: Any) -> List[str]:
+    v = str(value or "")
+    out = [v]
+    longer = re.sub(r"\b([A-Za-z]{2,4})\b\.?",
+                    lambda m: _STREET_SUFFIXES.get(m.group(1).lower(), m.group(0)), v)
+    shorter_map = {b: a for a, b in _STREET_SUFFIXES.items() if a not in ("av",)}
+    shorter = re.sub(r"\b([A-Za-z]{4,9})\b",
+                     lambda m: shorter_map.get(m.group(1).lower(), m.group(0)), v)
+    for x in (longer, shorter):
+        if x != v and x not in out:
+            out.append(x)
+    return out
+
+
+def _office_address(value: Any, raw_text: str, own_names: Any = (), party_names: Any = ()) -> bool:
+    try:
+        from services.insured_scope import address_is_a_party_office
+        # The model abbreviates a printed street ("26777 HALSTED ROAD" ->
+        # "26777 Halsted Rd"): each spelling is tried, the first one printed
+        # anywhere decides.
+        for v in _street_spellings(value):
+            if address_is_a_party_office(v, [raw_text], own_names=own_names,
+                                         party_names=party_names):
+                return True
+        return False
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+def _insured_own_names(facts: Any) -> list:
+    try:
+        from services.insured_scope import _own_names
+        return _own_names(facts)
+    except Exception:                                      # noqa: BLE001
+        return []
+
+
 _INSURED_ID_BOX_RE = re.compile(r"NCCIRiskIdentifier|RiskIdentifier|TaxIdentifier|FEIN", re.I)
 _CARRIER_CODE_LABEL_RE = re.compile(
     r"\bncci\s+(?:carrier\s+)?code\b|\bnaic\b|\ba\.?\s?m\.?\s?best\b|"
@@ -1084,6 +1203,38 @@ def _rating_row_named(text: str, schema: dict, prefix: str) -> bool:
     return False
 
 
+# ══ Z37 (24 Oct 2026): the worksheet's OTHER row named only by a label ═══════
+# ACORD 130's premium block "Other" rows ("optional factors, charges or
+# credits") came back holding "Workers Compensation", "Employers Liability",
+# "Premium" - the section's own headings, naming no factor, charge or credit -
+# with the line's premium beside them. A name made only of line names and the
+# premium block's own words names nothing; the row's amount / factor go with it.
+_PREMIUM_BLOCK_LABEL_WORDS = frozenset({
+    "workers", "worker", "compensation", "comp", "wc", "employers", "employer", "liability", "liab",
+    "el", "part", "one", "two", "three", "premium", "premiums", "total", "subtotal", "estimated",
+    "annual", "other", "others", "coverage", "coverages", "policy", "state", "states", "rating",
+    "rate", "rates", "factor", "factors", "charge", "charges", "credit", "credits", "optional",
+    "required", "applicable", "modified", "modification", "amount", "description", "insurance",
+    "general", "auto", "automobile", "umbrella", "property", "line", "lines", "section",
+    "information", "and", "or", "of", "the", "for", "a", "an", "&",
+})
+
+
+def other_factor_row_is_a_label(field: str, schema: dict, mapped: dict) -> bool:
+    """Is this box part of a worksheet OTHER row whose name is only a label
+    (a line name or the premium block's own words)? Read off the row's naming
+    box, so its amount and factor follow it."""
+    m = _OTHER_FACTOR_DESC_RE.match(field or "") or _OTHER_FACTOR_ROW_RE.match(field or "")
+    if not m:
+        return False
+    desc = f"{m.group('p')}Other_CoverageDescription_{m.group('r')}"
+    if desc not in (schema or {}):
+        return False
+    text = re.sub(r"\$?\d[\d,.]*%?", " ", str((mapped or {}).get(desc) or "").lower())
+    words = re.findall(r"[a-z]+", text)
+    return bool(words) and all(w in _PREMIUM_BLOCK_LABEL_WORDS for w in words)
+
+
 # ══ An explanation that is only a coverage schedule row (W10, 14 Oct 2026) ═══
 # ACORD 131's "has any product, work, accident or location been excluded,
 # uninsured or self-insured from any previous coverage?" came back Yes, explained
@@ -1120,6 +1271,19 @@ def is_coverage_schedule_row(value: Any) -> bool:
             return (bool(rest) and all(w in _LIMIT_BASIS_WORDS or w in _LINE_TAIL_WORDS for w in rest)
                     and any(w in _LIMIT_BASIS_WORDS for w in rest))
     return False
+
+
+_TABLE_CELL_DATA_RE = re.compile(r"^\s*(?:\$?[\d,.]+%?|\d{1,2}/\d{1,2}/\d{2,4}|[A-Z]{2})\s*$")
+
+
+def is_data_table_row(value: Any) -> bool:
+    """A spreadsheet / schedule row ("Name | 05/04/1997 | CO | 02/03/2025 | 7"):
+    three or more " | " cells, two or more of them bare data (a number, an
+    amount, a date or a two-letter code). Prose that quotes one cell is not."""
+    cells = [c.strip() for c in str(value or "").split("|")]
+    if len(cells) < 3:
+        return False
+    return sum(1 for c in cells if c and _TABLE_CELL_DATA_RE.match(c)) >= 2
 
 
 # ══ A street line holds a street (8 Oct 2026) ════════════════════════════════
@@ -1234,6 +1398,363 @@ def policy_date_as_business_start(value: Any, raw_text: str) -> bool:
         return False
     return all(_POLICY_DATE_LABEL_RE.search(raw_text[max(0, h.start() - 40):h.end() + 40])
                for h in hits)
+
+
+# ══ P15-1 (21 Oct 2026): a rating date belongs to the policy applied for ═════
+# ACORD 130's RATING EFFECTIVE DATE ("the earliest date that a specific
+# modification is applied to a policy") and NORMAL ANNIVERSARY RATING DATE ("the
+# rates used are normally in effect on the effective date of the policy")
+# describe the policy this application is FOR. No rule fills them - gap fill
+# does - and on Choice Electric's renewal for 01/01/2026-27 (runs ba7c709d,
+# b117f010) and Brent's 17 Oct run (proposed 01/01/2027) both printed 01/01/2025:
+# the expiring WC term's start, the only rating date its dec prints.
+#
+# Structural, by the box's own name and declared type: a DATE box whose name
+# says it holds a rating date - across the 17 schemas exactly those two ACORD
+# 130 boxes (pinned by the build-22 test). An AI date there is refused when it
+# falls outside the proposed term the same form prints (before its effective
+# date, or on / after its expiration). With no proposed date printed, the
+# proposed effective date fact decides; with none at all, the term the merge
+# moved to prior_* does (a date before it ended belongs to it); with no term
+# known, nothing is judged. A date inside the proposed term stands, and no date
+# is ever written. ACCEPTED: NCCI's rule for a cancelled or short-term policy
+# (enter the ORIGINAL effective date, which falls before the proposed one) is
+# refused when the AI writes it; a person's date is never judged.
+_RATING_DATE_BOX_RE = re.compile(r"(?:Rating\w*Date|Anniversary\w*Date)_[A-N]$")
+_PROPOSED_TERM_BOXES = ("Policy_EffectiveDate_A", "Policy_ExpirationDate_A")
+_DATE_IN_TEXT_RE = re.compile(
+    r"\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\b|"
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b",
+    re.I)
+
+
+def is_rating_date_box(field: str, schema: Any) -> bool:
+    """A box that asks for a RATING date of the policy applied for."""
+    return bool(_RATING_DATE_BOX_RE.search(field or "")) and \
+        _tooltip(schema, field).strip().lower().startswith("enter date")
+
+
+def _iso_date(value: Any) -> Optional[str]:
+    try:
+        from services.normalization import normalize_date
+        return normalize_date(str(value or "").strip()) or None
+    except Exception:                                      # noqa: BLE001
+        return None
+
+
+def _dates_in(value: Any) -> List[str]:
+    """Every date `value` holds, ISO: the whole value, else each date in it
+    ("01/01/2025 TO 01/01/2026" holds two)."""
+    whole = _iso_date(value)
+    if whole:
+        return [whole]
+    return [d for d in (_iso_date(m.group(0)) for m in _DATE_IN_TEXT_RE.finditer(str(value or ""))) if d]
+
+
+def _proposed_term(mapped: Any, facts: Any) -> Tuple[Optional[str], Optional[str]]:
+    """(effective, expiration) of the proposed term, ISO: the form's own header
+    first, then the facts. A backwards pair bounds nothing after its start."""
+    m = mapped if isinstance(mapped, dict) else {}
+    eff, exp = _iso_date(m.get(_PROPOSED_TERM_BOXES[0])), _iso_date(m.get(_PROPOSED_TERM_BOXES[1]))
+    if not eff:
+        eff, exp = _iso_date(_fv(facts, "effective_date")), _iso_date(_fv(facts, "expiration_date"))
+    elif not exp:
+        exp = _iso_date(_fv(facts, "expiration_date"))
+    if eff and exp and exp <= eff:
+        exp = None
+    return eff, exp
+
+
+def rating_date_outside_the_term(field: str, value: Any, schema: Any, mapped: Any,
+                                 facts: Any) -> bool:
+    """True when `value`, in a rating-date box, holds a date of another term."""
+    if not is_rating_date_box(field, schema):
+        return False
+    dates = _dates_in(value)
+    if not dates:
+        return False                       # no date read: another rule's, or nobody's
+    eff, exp = _proposed_term(mapped, facts)
+    if eff:
+        return any(d < eff or (exp is not None and d >= exp) for d in dates)
+    ended = _iso_date(_fv(facts, "prior_expiration_date"))
+    return bool(ended) and any(d < ended for d in dates)
+
+
+# ══ P15-4 (21 Oct 2026): a document's item label is not part of the value ════
+# Run b117f010's ACORD 130 printed "Item 3A State: CO" - the WC information
+# page's ITEM reference ("Item 3. A. Worker's Compensation Insurance: ... the
+# states listed here: CO") and a field label, kept with the value. A value that
+# OPENS with a document item / section / part reference ("Item 3A", "Item 3.A.",
+# "Item 4:", "Section 2 -", "Part One:", "Section II") followed by a field label
+# and a colon is the model copying a labelled line out of a document.
+#
+# Strip or refuse, decided by the box: what follows the label prints when the
+# label names what the box asks (a word of the box's own tooltip definition or
+# of its name's last segment) and the value fits the box's declared type
+# (`pdf_service._rejects_declared_type`) and says something
+# (`answer_semantics.is_placeholder_text`); otherwise the box is left blank.
+#
+# Narrow on purpose: the reference word stands alone ("Part-time", "Partners",
+# "Itemized", "Items" are words, not references); its designator is short - one
+# or two digits with an optional letter, a roman numeral, a number word or one
+# letter ("Section 179", "Part 135" are statute and regulation numbers) - and is
+# set off from the label; and BOTH the label and its colon must follow
+# ("Section 8 housing", "Item 1 of 3", "Item 3A: CO" are untouched). AI text
+# boxes only; Yes/No boxes and checkboxes are the evidence gate's; ACORD 141 /
+# 160 are frozen.
+_ITEM_NUMBER_WORDS = r"(?:one|two|three|four|five|six|seven|eight|nine|ten)"
+_DOC_ITEM_LABEL_RE = re.compile(
+    r"^\s*(?P<ref>item|section|part)(?![a-z])\s*(?:no\.?\s*|#\s*)?"
+    r"(?P<des>\d{1,2}(?!\d)(?:\s*\.?\s*\(?[a-z]\)?(?![a-z]))?"
+    r"|[ivx]{1,4}(?![a-z])|" + _ITEM_NUMBER_WORDS + r"(?![a-z])|[a-z](?![a-z]))"
+    r"(?:\s*[.):\-–—]+\s*|\s+)"
+    r"(?P<label>[a-z][a-z'’&/\- ]{0,48}?)\s*:\s*(?P<value>.*?)\s*$",
+    re.I | re.S)
+_LABEL_FILLER = frozenset({
+    "the", "of", "and", "or", "a", "an", "for", "to", "in", "on", "by", "per", "with", "at",
+    "from", "is", "are", "as", "its", "this", "that", "any", "all", "each", "if", "be"})
+# A label may OPEN with these and still be a label ("Each Accident", "Per
+# Claim" - the limit labels of every dec); any other filler word first is prose
+# ("Item 7 of the Declarations to include: ...").
+_LABEL_QUANTIFIERS = frozenset({"each", "per"})
+_CAMEL_WORD_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+")
+
+
+def _label_stem(w: str) -> str:
+    """One spelling per word, the same for a label and a box: plurals, -ed and
+    -ing off, then a final e ("Named" = "Name", "Rating" = "Rate", "States" =
+    "State" = "Stated"). Consistency, not linguistics - both sides go through it."""
+    if len(w) > 4 and w.endswith("ies"):
+        w = w[:-3] + "y"
+    elif len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        w = w[:-1]
+    if len(w) > 4 and w.endswith("ed"):
+        w = w[:-2]
+    elif len(w) > 5 and w.endswith("ing"):
+        w = w[:-3]
+    if len(w) > 3 and w.endswith("e"):
+        w = w[:-1]
+    return w
+
+
+def _word_stems(text: Any) -> Set[str]:
+    out: Set[str] = set()
+    t = str(text or "").lower().replace("’", "'").replace("'s", "")
+    for w in re.findall(r"[a-z]+", t):
+        if len(w) < 2 or w in _LABEL_FILLER:
+            continue
+        out.add(_label_stem(w))
+    return out
+
+
+# The words of a data element's name that say only its TYPE ("FullName",
+# "LimitAmount", "StateOrProvinceCode", "EffectiveDate") - what is left names it.
+# "limit" is ACORD's own type declaration ("Enter limit:"), like "amount".
+_DATA_TYPE_WORDS = frozenset({
+    "code", "amount", "identifier", "indicator", "description", "text", "number", "count",
+    "name", "full", "date", "type", "value", "total", "limit"})
+_DATA_TYPE_STEMS = frozenset(_label_stem(w) for w in _DATA_TYPE_WORDS)
+
+
+def _label_names_the_box(label: str, field: str, schema: Any) -> bool:
+    """The label names what the box asks, three ways at once:
+      * every word of it is a word of the box - its data element, its tooltip
+        definition or, for an explanation, the question it explains;
+      * one of them is the data element's own;
+      * on a data box, it names the element: every word one of the element's
+        alternatives keeps beyond its type ("StateOrProvinceCode" = state |
+        province; "CityName" = city; "FullName" = anything that names it).
+    Measured over the 17 schemas with labelled probes: with one shared word
+    alone, "Item 1 Name of Insured: ..." stripped into the producer's, the
+    insurer's and the CITY box, and "Item 2 Policy Period: <date>" into the
+    audit FREQUENCY and EXPIRATION boxes; all of the label must fit.
+    The data element is the name's last segment and, when the name has three
+    or more, the one before it ("GeneralLiability_EachOccurrence_LimitAmount"
+    is an each occurrence limit); a two-segment name's first segment is its
+    OWNER ("Policy_", "NamedInsured_"), never the element."""
+    words = _word_stems(label)
+    if not words:
+        return False
+    segments = _element_segments(field)
+    own: Set[str] = set()
+    for seg in segments:
+        own |= _word_stems(" ".join(_CAMEL_WORD_RE.findall(seg)))
+    box = own | _word_stems(_definition(_tooltip(schema, field))) | \
+        _word_stems(" ".join(_question_words(schema, field)))
+    if not (words <= box and words & own):
+        return False
+    if _is_narrative_box(field):
+        return True                        # an explanation is named by its question
+    return any(_word_stems(" ".join(_CAMEL_WORD_RE.findall(alt))) - _DATA_TYPE_STEMS <= words
+               for seg in segments for alt in re.split(r"Or(?=[A-Z])", seg))
+
+
+def _element_segments(field: str) -> Tuple[str, ...]:
+    """The segments of a box's name that are its data element: the last one,
+    and the one before it when the name has three or more (row letter off)."""
+    m = _ROW_RE.match(field or "")
+    parts = (m.group("base") if m else (field or "")).split("_")
+    return tuple(parts[-2:]) if len(parts) >= 3 else (parts[-1],)
+
+
+# ── The label must pick out THIS box (review of P15-4, 21 Oct) ───────────────
+# A generic label ("State", "Limits", "Each Accident") names an element several
+# parties / sections of one form print: on ACORD 130 "Item 3A State: CO" names
+# the producer's, the insured's mailing, every location's, Part 1's, Part 3's
+# and the individuals' state. Stripped into the insured's mailing state it
+# prints a clean "CO" that passes the raw-text check - the label was the only
+# sign the value belonged to WC Item 3A. So the stripped value prints only when
+# the label, read against EVERY data box of the form, comes down to this box's
+# element (its rows are one element):
+#   1. the label names one element on the form; or
+#   2. the document reference itself is in the element's name ("Part One -
+#      State: CO" -> WorkersCompensation_PartOne_...; tooltips are not read,
+#      Part 3's says "states not listed in Part 1"); or
+#   3. the label spells the box's WHOLE name - every word of every segment
+#      beyond its type, and nothing the name does not say ("Name of Insured" ->
+#      NamedInsured_FullName, not the insured's inspection contact). The
+#      element alone is not enough: "Each Occurrence" spells the element of
+#      ACORD 131's underlying GL box (GeneralLiability_EachOccurrence_
+#      LimitAmount) and not the umbrella's (ExcessUmbrella_Umbrella_
+#      EachOccurrenceAmount) only by how ACORD named them - an umbrella's
+#      $5,000,000 would have stripped into the GL box (C23's shape).
+# Otherwise it is refused: blank over a value whose meaning nothing states.
+# An explanation box is not judged this way - its words carry their own
+# meaning and the evidence guards judge them.
+_NUMBER_WORD_DIGITS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+                       "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10"}
+_ROMAN_DIGITS = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7",
+                 "viii": "8", "ix": "9", "x": "10"}
+_REFERENCE_WORDS = ("item", "section", "part")
+
+
+def _reference_key(ref: Any, des: Any) -> str:
+    """"Part" + "One" / "1" / "I" -> "part1"; "Item" + "3.A." -> "item3a"."""
+    d = re.sub(r"[^a-z0-9]", "", str(des or "").lower())
+    return str(ref or "").lower() + _NUMBER_WORD_DIGITS.get(d, _ROMAN_DIGITS.get(d, d))
+
+
+def _box_reference_keys(field: str) -> Set[str]:
+    """The document references a box's NAME spells ("PartOne" -> part1)."""
+    m = _ROW_RE.match(field or "")
+    words = [w.lower() for w in _CAMEL_WORD_RE.findall(m.group("base") if m else (field or ""))]
+    return {_reference_key(a, b) for a, b in zip(words, words[1:])
+            if a in _REFERENCE_WORDS and (b in _NUMBER_WORD_DIGITS or b in _ROMAN_DIGITS)}
+
+
+def _spells_the_name(words: Set[str], field: str) -> bool:
+    """Every word of every segment of the box's name (beyond its type; one
+    alternative of a "StateOrProvince" segment) is in the label, and every
+    word of the label is in the name."""
+    m = _ROW_RE.match(field or "")
+    segments = (m.group("base") if m else (field or "")).split("_")
+    name_words: Set[str] = set()
+    for seg in segments:
+        name_words |= _word_stems(" ".join(_CAMEL_WORD_RE.findall(seg)))
+    if not words <= name_words:
+        return False
+    return all(any(_word_stems(" ".join(_CAMEL_WORD_RE.findall(alt))) - _DATA_TYPE_STEMS <= words
+                   for alt in re.split(r"Or(?=[A-Z])", seg))
+               for seg in segments)
+
+
+_LABEL_BOXES_CACHE: List[Tuple[Any, str, Dict[str, List[str]]]] = []
+
+
+def _boxes_the_label_names(label: str, schema: dict) -> Dict[str, List[str]]:
+    """{element (name minus row letter): its boxes} for every data box of the
+    form the label names. Cached per schema object and label."""
+    key = " ".join(sorted(_word_stems(label)))
+    for ref, k, out in _LABEL_BOXES_CACHE:
+        if ref is schema and k == key:
+            return out
+    out: Dict[str, List[str]] = {}
+    for f in schema:
+        if _is_narrative_box(f) or _skip_box(f, schema) or not _label_names_the_box(label, f, schema):
+            continue
+        m = _ROW_RE.match(f)
+        out.setdefault(m.group("base") if m else f, []).append(f)
+    _LABEL_BOXES_CACHE.append((schema, key, out))
+    del _LABEL_BOXES_CACHE[:-8]
+    return out
+
+
+def _label_picks_out_the_box(label: str, ref_key: str, field: str, schema: Any) -> bool:
+    """Rules 1-3 above, in order, each narrowing what the one before left."""
+    if _is_narrative_box(field) or not isinstance(schema, dict):
+        return True
+    m = _ROW_RE.match(field or "")
+    mine = m.group("base") if m else field
+    named = dict(_boxes_the_label_names(label, schema))
+    named.setdefault(mine, [field])
+    pool = set(named)
+    words = _word_stems(label)
+    for narrow in (lambda b: ref_key in _box_reference_keys(named[b][0]),
+                   lambda b: _spells_the_name(words, named[b][0])):
+        if len(pool) == 1:
+            break
+        hit = {b for b in pool if narrow(b)}
+        if hit:
+            pool = hit
+    return pool == {mine}
+
+
+def strip_document_item_label(field: str, value: Any,
+                              schema: Any) -> Optional[Tuple[Optional[str], Optional[str]]]:
+    """None when `value` carries no document item label; otherwise
+    (the value to print, None) or (None, "AI_DOCUMENT_ITEM_LABEL: detail")."""
+    m = _DOC_ITEM_LABEL_RE.match(str(value or ""))
+    if not m:
+        return None
+    label, rest = m.group("label").strip(), m.group("value").strip()
+    first = label.split()[0].lower()
+    if first in _LABEL_FILLER and first not in _LABEL_QUANTIFIERS:
+        return None                        # "Item 7 of the Declarations ...:" is prose
+
+    why = f"{REASON_ITEM_LABEL}: {str(value)[:40]!r} is a line copied with its document item label"
+    if not rest or not _label_names_the_box(label, field, schema):
+        return None, why
+    if not _label_picks_out_the_box(label, _reference_key(m.group("ref"), m.group("des")),
+                                    field, schema):
+        return None, f"{why}; {label!r} names more than one box on this form"
+    try:
+        from services.answer_semantics import is_placeholder_text
+        if is_placeholder_text(rest):
+            return None, why
+    except Exception:                                      # noqa: BLE001
+        pass
+    try:
+        meta = schema.get(field) if isinstance(schema, dict) else None
+        if _ps()._rejects_declared_type(field, meta, rest, schema):
+            return None, why
+    except Exception:                                      # noqa: BLE001
+        pass
+    return rest, None
+
+
+def document_item_label_values(mapped: dict, schema: dict, facts: Any,
+                               gpt_filled_set: Optional[set]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """{field: (value to print or None, refusal reason or None)} for every AI
+    text box whose value carries a document item label. Mutates nothing; never
+    raises. `pdf_service._enforce_post_fill_guards` applies it FIRST, so every
+    later guard judges the value, not the label."""
+    out: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    try:
+        if not gpt_filled_set or not isinstance(mapped, dict) or not isinstance(schema, dict):
+            return out
+        form_id = facts.get("_form_id") if isinstance(facts, dict) else ""
+        if _base_form(form_id) in _FROZEN_FORMS:
+            return out
+        for f in sorted(gpt_filled_set):
+            v = mapped.get(f)
+            if f not in schema or not isinstance(v, str) or not v.strip() or _skip_box(f, schema):
+                continue
+            res = strip_document_item_label(f, v, schema)
+            if res is not None:
+                out[f] = res
+    except Exception as exc:                               # noqa: BLE001
+        logger.warning("document item label check skipped: %s", exc)
+    return out
 
 
 # ══ Fix C (14 Oct 2026): an AI value whose ONLY evidence is the wrong source ══
@@ -1376,7 +1897,36 @@ def person_statements(facts: Any) -> str:
 _FREE_TEXT_TOOLTIP_RE = re.compile(r"^\s*enter\s+text\s*:", re.I)
 
 
-def unstated_tooltip_example(text: Any, tooltip: str, folded_raw: str) -> bool:
+# The words naming what a box is ABOUT (its party / subject), read off its name:
+# "NamedInsured_Contact_ContactDescription_A" -> {"contact"}. Z41 (25 Oct 2026,
+# run f575160b): ACORD 125's contact type printed "Claims" - the tooltip's own
+# example ("e.g. accounting, claims") - because "claims" is printed all over a
+# package; it counts as stated only on a line that also names the box's subject.
+_SUBJECT_STOP = frozenset({"named", "insured", "description", "type", "code", "other", "name",
+                           "indicator", "text", "full", "applicant", "information"})
+
+
+def _box_subject_words(field: str) -> Set[str]:
+    base = re.sub(r"_[A-N]$", "", str(field or ""))
+    words = set(re.findall(r"[a-z]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", base).lower()))
+    return {w for w in words if len(w) >= 4 and w not in _SUBJECT_STOP}
+
+
+def _example_stated_for_subject(text: Any, field: str, raw_text: str) -> bool:
+    subject = _box_subject_words(field)
+    word = _norm(text)
+    if not subject or not word or not raw_text:
+        return True                        # nothing to scope by: not judged here
+    rx = re.compile(rf"(?<![a-z]){re.escape(word)}", re.I)
+    for line in str(raw_text).splitlines():
+        low = line.lower()
+        if rx.search(low) and any(w in low for w in subject):
+            return True
+    return False
+
+
+def unstated_tooltip_example(text: Any, tooltip: str, folded_raw: str,
+                             field: str = "", raw_text: str = "") -> bool:
     if not folded_raw or not _FREE_TEXT_TOOLTIP_RE.match(tooltip or ""):
         return False                       # no documents to read: not judged
     examples = tooltip_options(tooltip, minimum=1)
@@ -1385,6 +1935,111 @@ def unstated_tooltip_example(text: Any, tooltip: str, folded_raw: str) -> bool:
     # A LINE OF BUSINESS is a reading of a closed vocabulary ("CGL" in a loss
     # run is "General Liability" on the form), judged by the line rules - never
     # the box's illustration.
+    try:
+        from services.lob_canon import canon_line
+        if canon_line(str(text or "")):
+            return False
+    except Exception:                                      # noqa: BLE001
+        return False
+    if not _printed(text, folded_raw):
+        return True
+    # Printed somewhere - stated for THIS box's subject only on a line naming it.
+    # Z42 review B: only a DESCRIPTION box whose example is one common word
+    # ("Claims" as a contact type); "Ford" for a vehicle's make or "Property" for
+    # a loss's line of business is printed as itself, on rows naming no subject.
+    if not re.search(r"Description_[A-N]$", field or "") or len(_norm(text).split()) != 1:
+        return False
+    return bool(field and raw_text) and not _example_stated_for_subject(text, field, raw_text)
+
+
+_OWN_PARTY_FACTS = ("contact_name", "applicant_name", "dba_name", "producer_name",
+                    "inspection_contact_name", "accounting_contact_name")
+
+
+_INTEREST_ROLE_RE = re.compile(
+    r"\b(?:other\s+owner|co-?owner|lien\s*holder|loss\s+payee|mortgagee|lessor|lender|"
+    r"additional\s+(?:insured|interest)|leased\s+from|registered\s+owner)\b", re.I)
+
+
+def _named_in_an_interest_role(value: Any, raw_text: str) -> bool:
+    """A document prints ``value`` on a line naming an interest role ("Other
+    owner: Dana Whitfield", "Loss payee - First Bank"): it may be one."""
+    v = re.sub(r"\s+", " ", str(value or "")).strip().lower()
+    if not v:
+        return False
+    for ln in str(raw_text or "").splitlines():
+        low = re.sub(r"\s+", " ", ln).lower()
+        if v in low and _INTEREST_ROLE_RE.search(low):
+            return True
+    return False
+
+
+_INTEREST_FACTS = ("loss_payee_name", "mortgagee_name", "lienholder_name", "landlord_name",
+                   "additional_interests", "additional_insureds")
+
+
+def _a_documents_interest_fact(value: Any, facts: Any) -> bool:
+    """A fact that names an interest party holds ``value`` - it may be one."""
+    v = _norm(value)
+    f = facts if isinstance(facts, dict) else {}
+    for k in _INTEREST_FACTS:
+        x = f.get(k)
+        x = x.get("value") if isinstance(x, dict) and "value" in x else x
+        items = x if isinstance(x, list) else [x]
+        for it in items:
+            n = (it.get("name") or it.get("full_name")) if isinstance(it, dict) else it
+            if isinstance(n, str) and _norm(n) == v:
+                return True
+    return False
+
+
+def _is_the_insureds_own_party(value: Any, facts: Any) -> bool:
+    """``value`` names the applicant, its DBA, its contact / owner, or the
+    producer - never an additional interest. Never raises."""
+    try:
+        from services.normalization import same_entity_name
+        v = _norm(value)
+        if not v or len(v) < 5:
+            return False                   # "Al": too short to be anybody's name for sure
+        f = facts if isinstance(facts, dict) else {}
+        names = []
+        for k in _OWN_PARTY_FACTS:
+            x = f.get(k)
+            x = x.get("value") if isinstance(x, dict) and "value" in x else x
+            if isinstance(x, str) and x.strip():
+                names.append(x)
+        contacts = f.get("applicant_contacts")
+        contacts = contacts.get("value") if isinstance(contacts, dict) and "value" in contacts else contacts
+        for c in contacts if isinstance(contacts, list) else []:
+            n = c.get("name") if isinstance(c, dict) else c
+            if isinstance(n, str) and n.strip():
+                names.append(n)
+        return any(_norm(n) == v or same_entity_name(n, str(value)) for n in names)
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+_FIELD_LABEL_WORDS = frozenset({
+    "full", "first", "last", "middle", "given", "sur", "surname", "name", "names", "date", "of",
+    "birth", "dob", "address", "street", "city", "state", "zip", "postal", "code", "phone", "fax",
+    "email", "e", "mail", "number", "no", "id", "type", "title", "description", "years", "year",
+    "experience", "hired", "licence", "license", "licensed", "in", "n", "a"})
+_TYPE_OF_TOOLTIP_RE = re.compile(r"^\s*enter\s+text\s*:\s*the\s+type\s+of\b", re.I)
+
+
+def unstated_type_word(text: Any, tooltip: str, folded_raw: str) -> bool:
+    """A short value (1-3 words) in an "Enter text: The type of ..." box that
+    no document prints: the model's guess at a category, not a reading. A line
+    of business is judged by the line rules, never here."""
+    if not folded_raw or not _TYPE_OF_TOOLTIP_RE.match(tooltip or ""):
+        return False
+    words = _norm(text).split()
+    if not words or len(words) > 3:
+        return False
+    # A field LABEL is no type (live bcfd175b, 25 Oct: the contact type read
+    # "Full Name" - the driver Excel's column heading).
+    if all(w in _FIELD_LABEL_WORDS for w in words):
+        return True
     try:
         from services.lob_canon import canon_line
         if canon_line(str(text or "")):
@@ -1412,6 +2067,14 @@ _QUALIFIED_BOXES: Tuple[Tuple[re.Pattern, re.Pattern, int], ...] = (
      re.compile(r"\bforeign\b|\bexport\w*|\binternational\b|\boverseas\b|"
                 r"\boutside\s+(?:of\s+)?(?:the\s+)?(?:u\.?\s?s\.?|united\s+states|country)", re.I), 200),
     (re.compile(r"Retrospective", re.I), re.compile(r"\bretro(?:spective)?\b", re.I), 160),
+    # An inflation guard percentage (live 85e51d02, 25 Oct: the 140 printed the
+    # 80% COINSURANCE there; the dec's "Inflation Guard (%)" line is empty).
+    (re.compile(r"InflationGuard", re.I), re.compile(r"\binflation\b", re.I), 60),
+    # A GL property damage / bodily injury deductible (live 85e51d02, 25 Oct:
+    # the 126 printed the PROPERTY coverage's $5,000 building deductible; no
+    # document says "property damage").
+    (re.compile(r"^GeneralLiability_(?:PropertyDamage|BodilyInjury)_Deductible", re.I),
+     re.compile(r"\bproperty\s+damage\b|\bbodily\s+injury\b|\bP\.?D\.?\s+deductible|\bB\.?I\.?\s+deductible", re.I), 160),
 )
 
 
@@ -1737,6 +2400,10 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
     if _SUMMARY_PHRASE_RE.search(text) and not (
             ctx.raw_text and re.sub(r"\s+", " ", text.lower()) in re.sub(r"\s+", " ", ctx.raw_text.lower())):
         return f"{REASON_SUMMARY}: {text[:40]!r} is a summary of the documents"
+    if _is_operations_box(field, tu) and ctx.raw_text:
+        from services.normalization import describes_insurance_not_business
+        if describes_insurance_not_business(text, ctx.raw_text):
+            return f"{REASON_SUMMARY}: {text[:40]!r} describes the insurance, not the business"
     if (ctx.raw_text and not _box_takes_a_title(field, tu)
             and printed_only_as_form_title(text, ctx.raw_text)):
         return f"{REASON_FORM_TITLE}: {text[:40]!r} is printed only as a form title"
@@ -1776,12 +2443,26 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
     # Fix C (7), (8), W10 - after the person check, so a person's own words
     # for this question stand: a row reference as a description, a form's own
     # unfilled label line as a value, a coverage table row as an explanation.
+    why = _z41_judge(field, text, tu, _said_for, ctx)
+    if why:
+        return why
     if narrative and is_row_reference(text):
         return f"{REASON_ROW_REFERENCE}: {text[:40]!r} names a row, it describes nothing"
     if ctx.raw_text and is_blank_form_label(text, ctx.raw_text):
         return f"{REASON_BLANK_FORM_LABEL}: {text[:40]!r} is a form's unfilled label"
     if "Explanation" in (field or "") and is_coverage_schedule_row(text):
         return f"{REASON_COVERAGE_ROW}: {text[:40]!r} is a coverage table row"
+    # The TYPE OF WORK subcontracted is work, not the insurance the subs must
+    # carry (live 85e51d02, 25 Oct: the 126 printed "subcontractors must carry
+    # their own insurance and name us as additional insured").
+    if re.search(r"TypeOfWorkSubcontracted", field or "") and re.search(
+            r"\b(?:insurance|insured|certificates?|coverage|limits?|policy|policies)\b", str(text or ""), re.I):
+        return f"{REASON_ANOTHER_QUESTION}: {text[:40]!r} is about the subcontractors' insurance, not their work"
+    # Any DATA row is no explanation either (live 85e51d02, 25 Oct: the 130's
+    # "employees under 16 or over 60?" answered Yes with a driver schedule row,
+    # "Hannah Price | 05/04/1997 | CO | 02/03/2025 | 7", as its explanation).
+    if "Explanation" in (field or "") and is_data_table_row(text):
+        return f"{REASON_COVERAGE_ROW}: {text[:40]!r} is a table row"
     # Fix C (1): ...and it is no evidence for ANOTHER question either - an
     # identity value a person typed for one question, in a box asking another,
     # with nothing else stating it (the typed contact as a vehicle's owner).
@@ -1789,13 +2470,31 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
                                                                 field, tu):
         return (f"{REASON_ANOTHER_QUESTION}: {text[:30]!r} is the answer a person gave for "
                 f"{sorted(_said_for)[0]}")
+    # An ADDITIONAL INTEREST is a third party - a lender, loss payee or
+    # additional insured - never the insured's own owner, contact or producer
+    # (live e66d68d7, 25 Oct: "Eric Berger", the owner the handwritten note
+    # names, printed as additional interest #2 on the 28, 126, 127 and 140).
+    if (re.match(r"^AdditionalInterest_FullName_[A-N]$", field or "") and ctx.raw_text
+            and _is_the_insureds_own_party(text, ctx.facts)
+            and not _named_in_an_interest_role(text, ctx.raw_text)
+            and not _a_documents_interest_fact(text, ctx.facts)):
+        return f"{REASON_OWN_PARTY_AS_INTEREST}: {text[:40]!r} is the insured's own party, not an additional interest"
     # Fix C (2): the box's own tooltip example, stated by nothing.
-    if not _said_for and ctx.raw_text and unstated_tooltip_example(text, tu, ctx.folded):
+    if not _said_for and ctx.raw_text and unstated_tooltip_example(text, tu, ctx.folded,
+                                                                      field, ctx.raw_text):
         return f"{REASON_TOOLTIP_EXAMPLE}: {text[:30]!r} is the box's own example"
+    # ...and a TYPE word nothing states (live 85e51d02, 25 Oct: ACORD 125's
+    # contact type printed "Inspection" beside the owner - no document says it).
+    if not _said_for and ctx.raw_text and unstated_type_word(text, tu, ctx.folded):
+        return f"{REASON_TOOLTIP_EXAMPLE}: {text[:30]!r} is a type no document states"
+    if ctx.mapped is not None and improvement_year_is_another_year(field, text, ctx.mapped):
+        return f"{REASON_YEAR_FROM_A_DATE}: {text[:6]!r} is this building's roof year / year built"
     if _BUILDING_YEAR_BOX_RE.match(field or "") and year_not_printed_as_a_building_year(text, ctx.raw_text):
         return f"{REASON_YEAR_FROM_A_DATE}: {text[:10]!r} is printed only inside dates"
     if _START_DATE_BOX_RE.search(field or "") and policy_date_as_business_start(text, ctx.raw_text):
         return f"{REASON_POLICY_DATE_AS_START}: {text[:12]!r} is a policy date"
+    if rating_date_outside_the_term(field, text, ctx.schema, ctx.mapped, ctx.facts):
+        return f"{REASON_RATING_DATE_OTHER_TERM}: {text[:24]!r} is outside the proposed term"
     if cope_answer_without_evidence(field, text, ctx.raw_text, tu):
         return f"{REASON_COPE_WITHOUT_EVIDENCE}: {text[:40]!r} is not stated for this building"
     # Fix C (3): a qualified box (subcontracted, foreign, retrospective) needs
@@ -1809,6 +2508,19 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
             return f"{REASON_INITIAL_FROM_NAME}: {text[:12]!r} is made from the row's own name"
         if address_not_this_persons(field, text, ctx.mapped, ctx.schema, ctx.raw_text, ctx.ai_fields):
             return f"{REASON_ADDRESS_NOT_THIS_PERSONS}: {text[:30]!r} is not printed for this person"
+    # Z37: an insurer's / office's address is not the insured's or the agency's
+    # (Travelers' "OFFICE: PHOENIX AZ" printed as the applicant's mailing state).
+    if (ctx.raw_text and (_PARTY_ADDRESS_BOX_RE.match(field or "")
+                          or _OTHER_PARTY_ADDRESS_BOX_RE.match(field or ""))
+            and not _row_party_is_an_outside_insurer(field, ctx.mapped, ctx.facts)
+            and _office_address(text, ctx.raw_text,
+                                own_names=(_insured_own_names(ctx.facts)
+                                           if (field or "").startswith("NamedInsured_")
+                                           or _OTHER_PARTY_ADDRESS_BOX_RE.match(field or "") else ()),
+                                party_names=(_package_carrier_names(ctx.facts)
+                                             if _OTHER_PARTY_ADDRESS_BOX_RE.match(field or "")
+                                             else ()))):
+        return f"{REASON_ADDRESS_NOT_THIS_PERSONS}: {text[:30]!r} is printed only as an office's address"
     if _INSURED_ID_BOX_RE.search(field or "") and carrier_code_as_insured_id(text, ctx.raw_text):
         return f"{REASON_CARRIER_CODE_AS_INSURED_ID}: {text[:14]!r} is printed as the carrier's code"
     # Fix C (6) and (9): a rating factor as an identifier; a covered auto
@@ -1817,12 +2529,17 @@ def _judge(field: str, value: Any, ctx: _Context) -> Optional[str]:
         return f"{REASON_FACTOR_AS_IDENTIFIER}: {text[:14]!r} is a rating factor"
     if symbol_not_stated(field, text, ctx.facts, ctx.raw_text):
         return f"{REASON_SYMBOL_NOT_STATED}: {text[:6]!r} is stated as no symbol"
+    if other_factor_row_is_a_label(field, ctx.schema, getattr(ctx, "mapped", None)):
+        return f"{REASON_ROW_NAME_REFUSED}: the OTHER row is named only by a section label"
     if other_row_names_a_coverage_with_its_own_boxes(field, ctx.schema, getattr(ctx, "mapped", None)):
         return f"{REASON_COVERAGE_HAS_ITS_OWN_ROW}: the OTHER row names a coverage this form prints itself"
     if _LINE_ONE_BOX_RE.search(field or "") and not_a_street_line(text):
         return f"{REASON_NOT_A_STREET_LINE}: {text[:30]!r} is not a street"
     if bureau_value_without_its_label(field, text, ctx.raw_text):
         return f"{REASON_BUREAU_NOT_STATED}: {text[:30]!r} is not printed as a bureau's"
+    # Z41: last, so every more specific reason names the box first.
+    if box_label_as_value(text, tu):
+        return f"{REASON_BOX_LABEL}: {text[:40]!r} is the box's own label"
     return None
 
 
@@ -1850,6 +2567,421 @@ def _other_row_companions(field: str, schema: dict) -> List[str]:
     pat = re.compile(r"^" + re.escape(m.group("prefix") + m.group("mid"))
                      + r"(?:Limit|Premium)?(?:Amount|Indicator)_" + m.group("row") + r"$")
     return [f for f in schema if pat.match(f)]
+
+
+# ══ Z41 (25 Oct 2026, live run f575160b) - AI values borrowed across roles ═══
+# ACORD 141 / 127 / 137_CO / 140 / 28 on the owner's Choice Electric package
+# printed: the box's own tooltip as its value; the carrier's head office as
+# the auditor's address; the twelve drivers as the crime form's employees; the
+# drivers' licence states as their mailing states and as the Colorado form's
+# hired / non-owned states; the producer's ROOF year as the WIRING year and the
+# typed period of restoration as an Actual Loss Sustained month count; an AUTO
+# endorsement (CA 71 65 09 11) on the property evidence; a $5,000 deductible
+# under named windstorm and ordinance or law (neither printed); the dec's ISSUE
+# date as a prior evidence date. One rule each, every form, AI values only - a
+# person's own answer for the box's question is returned before any of these.
+
+def _plain(text: Any) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())).strip()
+
+
+def box_label_as_value(text: Any, tooltip: Any) -> bool:
+    """The value is the box's own tooltip text (four words or more of it)."""
+    v = _plain(text)
+    if len(re.findall(r"[a-z]{3,}", v)) < 4:
+        return False
+    # Z42 review B: ACORD's own example answers are answers, not the label
+    # ("e.g., combined building and contents" on the 140 blanket type) - an
+    # unstated one is `unstated_tooltip_example`'s question.
+    try:
+        if any(v == _plain(o) or v in _plain(o) for o in tooltip_options(str(tooltip or ""), minimum=1)):
+            return False
+    except Exception:                                      # noqa: BLE001
+        pass
+    return v in _plain(tooltip)
+
+
+# Address boxes of a party other than the insured / producer (those keep the
+# older rule with their own names): an auditor, an interest, a premises owner.
+# An insurer's own address boxes are never judged.
+_OTHER_PARTY_ADDRESS_BOX_RE = re.compile(
+    r"^(?!NamedInsured_|Producer_|Insurer|Carrier|Company)[A-Za-z]+(?:_[A-Za-z]+)*?_"
+    r"(?:MailingAddress|PhysicalAddress)_(?:LineOne|LineTwo|CityName|PostalCode)_[A-N]$")
+_ADDRESS_PART_RE = re.compile(
+    r"^(?P<p>.+)_(?P<k>MailingAddress|PhysicalAddress)_(?:LineOne|LineTwo|CityName|"
+    r"StateOrProvinceCode|PostalCode|CountyName|CountryCode)_(?P<r>[A-N])$")
+
+
+def _row_party_is_an_outside_insurer(field: str, mapped: Any, facts: Any) -> bool:
+    """Z42 review B: the row's own party is an insurance company that writes
+    nothing in this package - a mortgagee / lender such as "Northwestern Mutual
+    Life Insurance Company" on an interest row. Its address printed under its
+    own (insurer-shaped) name is its address, not a carrier's office."""
+    m = _ADDRESS_PART_RE.match(field or "")
+    if not m or not isinstance(mapped, dict) or m.group("p").startswith(("NamedInsured", "Producer")):
+        return False
+    name = str(mapped.get(f"{m.group('p')}_FullName_{m.group('r')}") or "").strip()
+    if not name:
+        return False
+    try:
+        from services.fact_comparison import looks_like_an_insurer
+        from services.normalization import same_entity_name
+        if not looks_like_an_insurer(name):
+            return False
+        return not any(same_entity_name(name, c) for c in _package_carrier_names(facts))
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+def _package_carrier_names(facts: Any) -> List[str]:
+    """Every carrier the package names (its scalar and each coverage row)."""
+    names: List[str] = []
+    try:
+        v = _fv(facts, "carrier_name")
+        if isinstance(v, str) and v.strip():
+            names.append(v.strip())
+        rows = _fv(facts, "coverage_lines")
+        for r in rows if isinstance(rows, list) else []:
+            c = r.get("carrier") if isinstance(r, dict) else None
+            if isinstance(c, str) and c.strip() and c.strip() not in names:
+                names.append(c.strip())
+    except Exception:                                      # noqa: BLE001
+        pass
+    return names
+
+
+# A person list kept for ONE role, and the facts that name people in other roles.
+_SCHEDULE_PERSON_LISTS = ("auto_drivers",)
+_ROLE_PERSON_KEY_RE = re.compile(
+    r"officer|named_individual|contact|interest|owner|partner|member|employee|trustee|"
+    r"principal|auditor|manager|applicant|insured|dba|individual|proprietor|signer|signature", re.I)
+# Words of a name box that say only its type, never its role.
+_NAME_TYPE_WORDS = frozenset({"full", "name", "given", "surname", "other", "initial", "middle"})
+# A printed role of a person in the business ("OFFICERS: Daniel Mercer,
+# President") states the person beside any such box, whatever its own words.
+_PERSON_ROLE_WORDS = ("officer", "president", "owner", "partner", "member", "manager",
+                      "secretary", "treasurer", "director", "principal", "proprietor",
+                      "executive")
+_NAME_BOX_RE = re.compile(r"(?:FullName|GivenName|Surname)_[A-N]$")
+
+
+def _list_names(rows: Any) -> List[str]:
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict):
+            n = r.get("name") or " ".join(str(r.get(k) or "") for k in ("first_name", "last_name"))
+        else:
+            n = r
+        if isinstance(n, str) and len(n.split()) >= 2:
+            out.append(n.strip())
+    return out
+
+
+def person_from_another_schedule(field: str, text: str, facts: Any, raw_text: str) -> bool:
+    """A name box outside the drivers' rows holding a name only the driver
+    schedule gives, with no fact naming that person in another role and no
+    printed line naming them beside the box's own role word."""
+    if not _NAME_BOX_RE.search(field or "") or (field or "").startswith("Driver_"):
+        return False
+    who = _plain(text)
+    if len(who.split()) < 2:
+        return False
+    listed = {_plain(n) for k in _SCHEDULE_PERSON_LISTS for n in _list_names(_fv(facts, k))}
+    if who not in listed:
+        return False
+    for k, v in (facts or {}).items() if isinstance(facts, dict) else ():
+        if isinstance(k, str) and not k.startswith("_") and k not in _SCHEDULE_PERSON_LISTS \
+                and _ROLE_PERSON_KEY_RE.search(k) and who in _plain(json_safe(v)):
+            return False
+    # Every segment of the box's name but the name type: "NamedInsured_Contact_
+    # FullName" is a contact ("Contact: Erin Royal" states it), "WorkersCompensation_
+    # Individual_FullName" an individual (Z42 review B - the first segment alone
+    # read "named insured" / "workers compensation").
+    role = [w for seg in re.sub(r"_[A-N]$", "", field).split("_")
+            for w in re.findall(r"[a-z]{4,}", _field_words_lower(seg))
+            if w not in _NAME_TYPE_WORDS] + list(_PERSON_ROLE_WORDS)
+    for line in str(raw_text or "").splitlines():
+        pl = _plain(line)
+        if who in pl and any(_stem(w) in {_stem(x) for x in pl.split()} for w in role):
+            return False
+    return True
+
+
+def json_safe(v: Any) -> str:
+    try:
+        import json as _json
+        return _json.dumps(v, default=str)
+    except Exception:                                      # noqa: BLE001
+        return str(v)
+
+
+def _field_words_lower(segment: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(segment or "")).lower()
+
+
+_STATE_FORM_RE = re.compile(r"_([A-Z]{2})$")
+_STATE_BOX_RE = re.compile(r"StateOrProvinceCode_[A-N]$")
+_NOT_A_COVERAGE_STATE_RE = re.compile(r"MailingAddress|PhysicalAddress|Licensed|Garag|Address")
+
+
+def state_not_this_forms(field: str, text: str, form_id: str) -> bool:
+    """A state-specific form (ACORD 137_CO) is about that state: a coverage
+    row's state box holding another state is not this form's."""
+    m = _STATE_FORM_RE.search(_base_form(form_id))
+    if not m or not _STATE_BOX_RE.search(field or "") or _NOT_A_COVERAGE_STATE_RE.search(field):
+        return False
+    v = str(text or "").strip().upper()
+    return bool(re.fullmatch(r"[A-Z]{2}", v)) and v != m.group(1)
+
+
+def licence_state_as_mailing_state(field: str, text: str, mapped: Any) -> bool:
+    """A row's mailing state equal to its LICENCE state, with no street and no
+    city on the row - the licence state copied, not an address."""
+    m = re.match(r"^(?P<p>.+)_MailingAddress_StateOrProvinceCode_(?P<r>[A-N])$", field or "")
+    if not m or not isinstance(mapped, dict):
+        return False
+    p, r = m.group("p"), m.group("r")
+    lic = str(mapped.get(f"{p}_LicensedStateOrProvinceCode_{r}") or "").strip().upper()
+    if not lic or lic != str(text or "").strip().upper():
+        return False
+    return not any(str(mapped.get(f"{p}_MailingAddress_{k}_{r}") or "").strip()
+                   for k in ("LineOne", "CityName", "PostalCode"))
+
+
+# ISO / AAIS form-number prefixes and the line each belongs to (IL = common
+# policy conditions, every line's - never judged).
+_FORM_PREFIX_LINE = {
+    "CA": "auto", "CG": "general_liab", "CP": "property", "CU": "umbrella",
+    "WC": "workers_comp", "CM": "inland_marine", "IM": "inland_marine", "CR": "crime",
+    "EP": "epli",
+}
+
+
+def form_from_another_line(field: str, mapped: Any, form_id: str) -> bool:
+    """A FormEndorsement row naming another line's form (an AUTO "CA ..." on
+    the property evidence)."""
+    m = re.match(r"^FormEndorsement_\w+_([A-N])$", field or "")
+    if not m or not isinstance(mapped, dict):
+        return False
+    try:
+        from services.scoped_evidence import form_line
+        line = form_line(form_id)
+    except Exception:                                      # noqa: BLE001
+        return False
+    if not line:
+        return False
+    r = m.group(1)
+    code = str(mapped.get(f"FormEndorsement_CopyrightOwnerCode_{r}") or "").strip().upper()
+    number = str(mapped.get(f"FormEndorsement_FormIdentifier_{r}")
+                 or mapped.get(f"FormEndorsement_FormNumberIdentifier_{r}") or "").strip().upper()
+    prefix = code if re.fullmatch(r"[A-Z]{2}", code) else (
+        re.match(r"^([A-Z]{2})[\s-]?\d", number).group(1) if re.match(r"^([A-Z]{2})[\s-]?\d", number)
+        else "")
+    owner = _FORM_PREFIX_LINE.get(prefix)
+    return bool(owner) and owner not in _COMPATIBLE_FORM_LINES.get(line, {line})
+
+
+# A property evidence / section may print an inland marine form (contractors'
+# equipment, builders' risk - first-party property the lender is evidenced on).
+_COMPATIBLE_FORM_LINES = {"property": {"property", "inland_marine"},
+                          "inland_marine": {"inland_marine", "property"}}
+
+
+# A peril / coverage named in an amount box's own name, and the words a
+# document prints for it.
+_COVERAGE_AMOUNT_WORDS = (
+    ("namedwindstorm", ("windstorm", "namedstorm", "hurricane", "wind")),
+    ("windstorm", ("windstorm", "wind")),
+    ("windhail", ("wind", "hail")),
+    ("ordinanceorlaw", ("ordinance",)),
+    ("earthquake", ("earthquake", "earthmovement")),
+    ("flood", ("flood",)),
+    ("sinkhole", ("sinkhole",)),
+    ("terrorism", ("terror",)),
+    ("spoilage", ("spoilage",)),
+    ("equipmentbreakdown", ("breakdown", "boiler")),
+)
+_AMOUNT_BOX_RE = re.compile(r"(?:Amount|Limit|Deductible|Percent)\w*_[A-N]$")
+
+
+def percent_deductible_as_limit(field: str, text: str, raw_text: str) -> bool:
+    """A LIMIT box holding a bare percentage the documents print only as a
+    deductible ("WINDSTORM OR HAIL DEDUCTIBLE: 2%" -> the 28's wind / hail and
+    named windstorm LIMITS read "2%" - live 85e51d02, 25 Oct). A limit is an
+    amount; an inflation-guard / coinsurance percentage is printed with its own
+    words and is not a deductible line, so it stands."""
+    if not raw_text or not re.search(r"Limit\w*_[A-N]$", field or ""):
+        return False
+    m = re.fullmatch(r"\s*(\d{1,3}(?:\.\d+)?)\s*%\s*", str(text or ""))
+    if not m:
+        return False
+    rx = re.compile(rf"(?<![\d.]){re.escape(m.group(1))}\s*%")
+    lines = [ln for ln in str(raw_text).splitlines() if rx.search(ln)]
+    return bool(lines) and all("deductible" in ln.lower() for ln in lines)
+
+
+def amount_not_for_this_coverage(field: str, text: str, raw_text: str) -> bool:
+    """An amount in a box about one named peril / coverage that no document
+    prints on (or right under) a line naming that coverage."""
+    if not raw_text or not _AMOUNT_BOX_RE.search(field or ""):
+        return False
+    # A coverage SECTION's amounts are judged here too (live bcfd175b, 25 Oct:
+    # the 28's equipment breakdown deductible took the policy-wide "$500";
+    # the schedule prints $5,000 under it). Whether the section is carried at
+    # all stays scoped_evidence rule (b)'s question.
+    key = re.sub(r"[^a-z]", "", (field or "").lower())
+    words = next((w for k, w in _COVERAGE_AMOUNT_WORDS if k in key), None)
+    if not words:
+        return False
+    try:
+        from services.scoped_evidence import coverage_section
+        if coverage_section(field) and not any(
+                w in re.sub(r"[^a-z]", "", str(raw_text).lower()) for w in words):
+            return False                  # no document names it: rule (b)'s refusal
+    except Exception:                                      # noqa: BLE001
+        pass
+    digits = re.sub(r"\D", "", str(text or "").split(".")[0])
+    if not digits or not re.fullmatch(r"[\s$,.\d%]+", str(text or "")):
+        return False
+    # The label an amount belongs to: its own line when that line names a
+    # coverage or a deductible / limit ("THEFT CAUSE OF LOSS DEDUCTIBLE:
+    # $5,000"), else the nearest line above (up to three) naming a coverage or
+    # peril ("COVERAGE: BUILDING-EQUIPMENT BREAKDOWN" over "LIMIT DEDUCTIBLE" /
+    # "INCLUDED $5,000"); a column header of bare limit / deductible words is
+    # passed over.
+    lines = str(raw_text).splitlines()
+    rx = re.compile(rf"(?<!\d){digits}(?!\d)")
+    every = {w for _k, ws in _COVERAGE_AMOUNT_WORDS for w in ws} | {"theft", "coverage", "causeofloss"}
+    for i, line in enumerate(lines):
+        if not rx.search(line.replace(",", "")):
+            continue
+        own = re.sub(r"[^a-z]", "", line.lower())
+        if any(w in own for w in every) or re.search(r"deductible|limit", own) and len(own) > 15:
+            if any(w in own for w in words):
+                return False
+            continue
+        for j in range(i - 1, max(-1, i - 4), -1):
+            up = re.sub(r"[^a-z]", "", lines[j].lower())
+            if any(w in up for w in every):
+                if any(w in up for w in words):
+                    return False
+                break
+    return True
+
+
+def issue_date_as_value(field: str, text: str, tooltip: str, raw_text: str) -> bool:
+    """A date box (not an issue-date box) holding a date the documents print
+    only as an issue / countersign / transaction date."""
+    tl = str(tooltip or "").lower()
+    # A box that asks for a POLICY's / declarations' own issue date takes it;
+    # ACORD 28's "date the prior Evidence of Property was issued" does not.
+    if not raw_text or "issue" in (field or "").lower() or (
+            "issue" in tl and re.search(r"\b(?:polic(?:y|ies)|declarations?|binder|certificate)\b", tl)):
+        return False
+    if not re.search(r"Date_[A-N]$", field or ""):
+        return False
+    try:
+        from services.extraction_service import issue_only_dates
+        from services.normalization import normalize_date
+        iso = normalize_date(text)
+        return bool(iso) and iso in issue_only_dates(raw_text)
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+_BOX_ELEMENT_WORDS = frozenset({
+    "year", "count", "code", "amount", "number", "identifier", "indicator", "date", "month",
+    "months", "percent", "description", "name", "limit", "value", "other", "type", "each",
+    "total", "commercial", "property", "coverage", "information", "building", "improvement",
+    "policy", "class",
+})
+_FACT_SYNONYMS = {"revenue": ("sale", "receipt", "revenue"), "employee": ("employee", "staff")}
+
+
+def _box_words(field: str) -> List[str]:
+    segs = re.sub(r"_[A-N]$", "", field or "").split("_")
+    for seg in reversed(segs):
+        words = [w for w in re.findall(r"[a-z]+", _field_words_lower(seg))
+                 if len(w) >= 4 and w not in _BOX_ELEMENT_WORDS]
+        if words:
+            return words
+    return []
+
+
+def person_answer_for_another_question(field: str, text: str, said_for: Set[str],
+                                       tooltip: str, raw_text: str) -> bool:
+    """A short number (a year, a count, a code) equal to what a PERSON gave for
+    another question, in a box whose own words name none of those facts, and
+    printed in no document beside the box's own words."""
+    if not said_for or not re.fullmatch(r"[\d\s.,]+", str(text or "")):
+        return False
+    digits = re.sub(r"\D", "", str(text).split(".")[0])
+    if not digits or len(digits) > 4:
+        return False
+    box = {_stem(w) for w in re.findall(r"[a-z]+", _field_words_lower(field) + " "
+                                       + str(tooltip or "").lower()) if len(w) >= 3}
+    for k in said_for:
+        kw = [_stem(w) for w in re.findall(r"[a-z]+", str(k).lower())
+              if len(w) >= 3 and w not in _KEY_FILLER_WORDS]
+        syn = {s for w in kw for s in _FACT_SYNONYMS.get(w, (w,))}
+        if _fact_reads_as_this_box(k, field, tooltip) or (syn and syn & box and len(kw) == 1):
+            return False
+    words = [w[:4] for w in _box_words(field)]
+    rx = re.compile(rf"(?<!\d){digits}(?!\d)")
+    lines = str(raw_text or "").splitlines()
+    for i, line in enumerate(lines):
+        if rx.search(line.replace(",", "")):
+            if not words:
+                return False
+            # Z42 review B: words by their stem ("roofing" box, "Roof replaced
+            # 2018"); a column table prints the box's words in its header row,
+            # so up to three lines above count when they carry ALL of them.
+            if any(w in line.lower() for w in words):
+                return False
+            near = " ".join(lines[max(0, i - 3):i + 1]).lower()
+            if all(w in near for w in words):
+                return False
+    return True
+
+
+def _z41_judge(field: str, text: str, tu: str, said_for: Any, ctx: "_Context") -> Optional[str]:
+    if ctx.raw_text and person_from_another_schedule(field, text, ctx.facts, ctx.raw_text):
+        return f"{REASON_SCHEDULE_PERSON}: {text[:30]!r} is listed only on another schedule"
+    if state_not_this_forms(field, text, ctx.form_id):
+        return f"{REASON_STATE_NOT_THIS_FORMS}: {text[:4]!r} is not this form's state"
+    if ctx.mapped is not None:
+        if licence_state_as_mailing_state(field, text, ctx.mapped):
+            return f"{REASON_LICENCE_STATE_AS_ADDRESS}: {text[:4]!r} is the row's licence state"
+        if form_from_another_line(field, ctx.mapped, ctx.form_id):
+            return f"{REASON_OTHER_LINES_FORM}: the row names another line's form"
+    if percent_deductible_as_limit(field, text, ctx.raw_text):
+        return f"{REASON_AMOUNT_NOT_FOR_THIS_COVERAGE}: {text[:20]!r} is printed only as a deductible"
+    if amount_not_for_this_coverage(field, text, ctx.raw_text):
+        return f"{REASON_AMOUNT_NOT_FOR_THIS_COVERAGE}: {text[:14]!r} is not printed for this coverage"
+    if issue_date_as_value(field, text, tu, ctx.raw_text):
+        return f"{REASON_ISSUE_DATE}: {text[:12]!r} is printed only as an issue date"
+    if ctx.raw_text and person_answer_for_another_question(field, text, set(said_for or ()),
+                                                           tu, ctx.raw_text):
+        return (f"{REASON_PERSON_ANSWER_ELSEWHERE}: {text[:12]!r} was given for "
+                f"{sorted(said_for)[0]}")
+    return None
+
+
+def _office_address_companions(out: Dict[str, str], mapped: dict, ai: Set[str]) -> None:
+    """An address refused as an office's takes its row's other AI parts with
+    it (the state "MI" of the carrier's head office prints everywhere)."""
+    for f, why in list(out.items()):
+        if not why.startswith(REASON_ADDRESS_NOT_THIS_PERSONS) or "office" not in why:
+            continue
+        m = _ADDRESS_PART_RE.match(f)
+        if not m:
+            continue
+        head = f"{m.group('p')}_{m.group('k')}_"
+        for c in ai:
+            cm = _ADDRESS_PART_RE.match(c)
+            if c not in out and cm and c.startswith(head) and cm.group("r") == m.group("r") \
+                    and str(mapped.get(c) or "").strip():
+                out[c] = f"{REASON_ADDRESS_NOT_THIS_PERSONS}: part of an office's address ({f})"
 
 
 def refuse_non_answers(mapped: dict, schema: dict, facts: dict, raw_text: str,
@@ -1901,6 +3033,24 @@ def refuse_non_answers(mapped: dict, schema: dict, facts: dict, raw_text: str,
             why = _judge(f, mapped.get(f), ctx)
             if why and not _rule_said_yes(f):
                 out[f] = why
+        _office_address_companions(out, mapped, ai)
+        # A refused additional-interest NAME takes its row's other AI boxes
+        # (rank, interest type, address) with it - a row about nobody.
+        for f in sorted(out):
+            m_ = re.match(r"^AdditionalInterest_FullName_(?P<r>[A-N])$", f)
+            if m_:
+                for k in list(gpt_filled_set):
+                    if (k.startswith("AdditionalInterest_") and k.endswith("_" + m_.group("r"))
+                            and k not in out and str(mapped.get(k) or "").strip()):
+                        out[k] = f"{REASON_ROW_NAME_REFUSED}: its row's name {f} was refused"
+        # A refused deductible AMOUNT takes its own AI "deductible applies" tick
+        # with it (live 85e51d02: the 126's GL property damage tick stayed Yes).
+        for f in sorted(out):
+            m_ = re.match(r"^(?P<b>.+)_DeductibleAmount_(?P<r>[A-N])$", f)
+            if m_:
+                tick = f"{m_.group('b')}_DeductibleIndicator_{m_.group('r')}"
+                if tick in gpt_filled_set and tick not in out and str(mapped.get(tick) or "").strip():
+                    out[tick] = f"{REASON_ROW_NAME_REFUSED}: its amount {f} was refused"
         for f in sorted(out):
             for c in _other_row_companions(f, schema):
                 cv = str(mapped.get(c) or "").strip()

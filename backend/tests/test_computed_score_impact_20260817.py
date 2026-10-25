@@ -209,17 +209,34 @@ def test_simulations_are_capped():
 # ── The "up to" hedge ────────────────────────────────────────────────────────
 
 def test_a_capped_score_keeps_the_hedge():
-    """Points are earned but will not SHOW until the stop clears."""
-    result = calculate_sqs(
-        facts={}, flags={}, mapped_data={}, form_schema={},
-        selected_form_ids=["ACORD_125"],
-        hard_stops=["something is badly wrong"], soft_stops=[],
-        tier2_score=50, form_id="ACORD_125")
-    for r in result.get("recommendations") or []:
-        if r.get("score_impact", 0) > 0:
-            assert r.get("impact_is_exact") is False, (
-                "a capped score must not state an exact gain"
-            )
+    """Points are earned but will not SHOW until the stop clears (the cap is
+    back, 20 Oct 2026)."""
+    def _run(hard):
+        return calculate_sqs(
+            facts={}, flags={}, mapped_data={}, form_schema={},
+            selected_form_ids=["ACORD_125"],
+            hard_stops=hard, soft_stops=[],
+            tier2_score=50, form_id="ACORD_125")
+
+    result = _run(["something is badly wrong"])
+    assert result["cap_applied"] == 60
+    # (19 Oct 2026, kept) the same stop blocks Submission Ready.
+    assert result["ready_blockers"] == ["something is badly wrong"]
+    gains = [r for r in result.get("recommendations") or [] if r.get("score_impact", 0) > 0]
+    assert any(r.get("impact_measured") for r in gains), (
+        "the fixture must carry a measured card, or this is vacuous")
+    for r in gains:
+        assert r.get("impact_is_exact") is False, (
+            "a capped score must not state an exact gain"
+        )
+
+    # POSITIVE CONTROL - with nothing open the measured cards state exact numbers,
+    # so the hedge above is the cap doing it.
+    clear = _run([])
+    assert clear["cap_applied"] is None
+    measured = [r for r in clear.get("recommendations") or []
+                if r.get("impact_measured") and r.get("score_impact", 0) > 0]
+    assert measured and all(r.get("impact_is_exact") is True for r in measured)
 
 
 def test_headroom_helper():

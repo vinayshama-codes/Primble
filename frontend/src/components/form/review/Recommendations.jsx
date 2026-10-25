@@ -14,15 +14,17 @@
 // repeated. Presentation only: every fix goes through the page's handlers.
 // Used by the rail layout (its own section) and the classic layout.
 
-import { useState } from "react";
+import React, { useState } from "react";
 import useAttentionList from "./useAttentionList";
 import {
   buildRecommendations, pointsText, recommendationResolvedRows, liveRecommendationIds, clearedByText,
+  scoreSequence,
 } from "../../../utils/recommendations";
 import { itemsText } from "../../../utils/dryRun";
 import { formLabel } from "../../../utils/formInstances";
 import { positiveScoreWording } from "../../../utils/positiveWording";
 import { screenPoints } from "../../../utils/screenPoints";
+import { lossCoverageChips, showLossCoverage } from "../../../utils/lossCoverage";
 import "./Recommendations.css";
 
 const ROWS_SHOWN = 6;
@@ -40,21 +42,111 @@ function FoldHead({ open, onToggle, title, children }) {
   );
 }
 
-function ScoreGroup({ items, onOpenFix }) {
+// One list for everything that raises the score (owner, 23 Oct 2026): a row a
+// document lifts sits with the answer rows of its own pillar, with its points
+// and an "Add documents" button instead of "Open to fix" - never a second panel.
+// Loss History's rows come in its plan's order, answers and documents
+// interleaved (`scoreSequence`); a "Mark as Loss runs" step opens Documents too.
+// The years the included loss runs cover (24 Oct 2026), at the top of the
+// Loss History rows: one chip per required year, then "4 of 5 years".
+function LossCoverageStrip({ cov }) {
+  const chips = lossCoverageChips(cov);
+  if (!chips.length) return null;
+  return (
+    <div className="rec-losscov" data-testid="loss-coverage">
+      <span className="rec-losscov__lead">Loss runs on file:</span>
+      {chips.map((c) => (
+        <span key={c.year} className={`rec-losscov__chip${c.covered ? " rec-losscov__chip--on" : ""}`}>
+          {c.covered ? "\u2713 " : ""}{c.year}
+        </span>
+      ))}
+      <span className="rec-losscov__label">{String(cov.label || "").split(" (")[0]}</span>
+    </div>
+  );
+}
+
+const isLossHistory = (entry) => {
+  const t = entry.kind === "doc" ? (entry.doc.title || "") : (entry.item.title || "");
+  return /^\s*loss history/i.test(String(t));
+};
+
+function ScoreGroup({ items, onOpenFix, docRows = [], onAddDocuments, lossCoverage = null }) {
   const [open, setOpen] = useState(true);
+  // A short notice before the jump to Documents (owner, 23 Oct 2026), so the
+  // page change does not come as a surprise.
+  const [openingDocs, setOpeningDocs] = useState(false);
+  const goToDocuments = (mark) => {
+    if (openingDocs) return;
+    setOpeningDocs(mark ? "mark" : "add");
+    setTimeout(() => { setOpeningDocs(false); onAddDocuments(); }, 1000);
+  };
+  const total = items.length + docRows.length;
+  const docRow = (u) => {
+    const mark = u.step === "mark";
+    return (
+      <div key={`doc:${u.label}`} className="rec-row" data-rec-id={`doc:${u.label}`}>
+        <div className="rec-row__main">
+          <div className="rec-row__title">{u.title || "Needs documents"}</div>
+          <div className="rec-row__detail">{u.label}</div>
+          <div className="rec-row__also">{mark
+            ? "Set its document type to Loss runs in Documents to add these points."
+            : "Upload a document to add these points."}</div>
+        </div>
+        <span className="rec-pts">{`+${u.points} pts`}</span>
+        {typeof onAddDocuments === "function" && (
+          <button type="button" className="rec-link" onClick={() => goToDocuments(mark)} disabled={!!openingDocs}>
+            {mark ? "Mark as Loss runs" : "Add documents"}
+          </button>
+        )}
+      </div>
+    );
+  };
   return (
     <section className="rec-group" aria-label="Raise your score" data-rec-group="score">
+      {openingDocs && (
+        <div role="status" aria-live="polite" data-testid="opening-documents"
+          style={{ position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center",
+            justifyContent: "center", background: "rgba(15, 23, 42, 0.35)" }}>
+          <div style={{ background: "var(--surface, #fff)", color: "var(--text, #111827)", borderRadius: 12,
+            padding: "18px 22px", display: "flex", alignItems: "center", gap: 12,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)", fontSize: 14 }}>
+            <span className="rr-spinner" aria-hidden="true" />
+            {openingDocs === "mark"
+              ? "Opening the Documents section - set the file's type to Loss runs there."
+              : "Opening the Documents section - add your document there."}
+          </div>
+        </div>
+      )}
       <FoldHead open={open} onToggle={() => setOpen((o) => !o)} title="Raise your score">
-        {items.length > 0 && <span className="rec-count">{items.length}</span>}
+        {total > 0 && <span className="rec-count">{total}</span>}
       </FoldHead>
       {open && (
       <>
-      <div className="rec-group__sub">Optional. Each answer adds to your Submission Quality Score.</div>
-      {items.length === 0 ? (
+      <div className="rec-group__sub">Optional. Each one adds to your Submission Quality Score.</div>
+      {total === 0 ? (
         <div className="rec-empty">Nothing to add here. Anything else that moves the score is under Hard Stops or Warnings.</div>
       ) : (
         <div className="rec-list">
-          {items.map((it) => (
+          {lossCoverage && Number(lossCoverage.covered) > 0 && !scoreSequence(items, docRows).some(isLossHistory) && (
+            <LossCoverageStrip cov={lossCoverage} />
+          )}
+          {scoreSequence(items, docRows).map((entry, idx, all) => {
+            const strip = lossCoverage && isLossHistory(entry) && all.findIndex(isLossHistory) === idx
+              && showLossCoverage(lossCoverage, all.filter(isLossHistory))
+              ? <LossCoverageStrip key="loss-coverage" cov={lossCoverage} /> : null;
+            if (strip) return <React.Fragment key={`lc:${idx}`}>{strip}{renderEntry(entry)}</React.Fragment>;
+            return renderEntry(entry);
+          })}
+        </div>
+      )}
+      </>
+      )}
+    </section>
+  );
+  function renderEntry(entry) {
+            if (entry.kind === "doc") return docRow(entry.doc);
+            const it = entry.item;
+            return (
             <div key={it.id} className="rec-row" data-rec-id={it.id}>
               <div className="rec-row__main">
                 <div className="rec-row__title">{it.title}</div>
@@ -74,13 +166,8 @@ function ScoreGroup({ items, onOpenFix }) {
                 <button type="button" className="rec-link" onClick={() => onOpenFix(it)}>Open to fix</button>
               )}
             </div>
-          ))}
-        </div>
-      )}
-      </>
-      )}
-    </section>
-  );
+            );
+  }
 }
 function ReopenIcon() {
   return (
@@ -97,7 +184,7 @@ function ReopenIcon() {
 // fix answered says which (14 Oct 2026); its "Open again" takes THAT answer
 // back, which brings back every row it cleared. One a key detail cleared has
 // no fix on file to take back, so it offers none.
-function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
+export function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
   const [open, setOpen] = useState(false);
   if (!rows.length) return null;
   return (
@@ -127,7 +214,7 @@ function ResolvedGroup({ rows, onReopen, reopeningIds, reopenNotices }) {
                   )}
                   <div className="rec-resolved__actions">
                     <span className={`rec-resolved__label rec-resolved__label--${r.status}`}>
-                      {r.status === "added" ? "Added" : "Resolved"}
+                      {{ added: "Added", dismissed: "Dismissed" }[r.status] || "Resolved"}
                     </span>
                     {canReopen && (
                       <button type="button" className="issue-status-btn rec-resolved__open"
@@ -235,7 +322,7 @@ function AfterFormsGroup({ forms, ready, onOpenForm }) {
             )}
             {f.toCheck > 0 && (
               <div className="rec-form__check">
-                {itemsText(f.toCheck)} to check (AI held back or please verify) - see the form&apos;s side panel.
+                {itemsText(f.toCheck)} to confirm (Please verify) - see the form&apos;s side panel.
               </div>
             )}
           </div>
@@ -257,6 +344,8 @@ export default function Recommendations({
   issueStatuses = null, onReopenResolved, reopeningIds, reopenNotices,
   // What no box on the page can answer, with its points (screenPoints).
   screenUnanswerable = null,
+  // Opens the page's Add documents panel (a row only a document lifts).
+  onAddDocuments,
 }) {
   // The classic layout passes no list: this section reads it itself.
   const ownAttention = useAttentionList(sessionId, formsExist && attention === undefined && !model, refreshKey);
@@ -292,11 +381,17 @@ export default function Recommendations({
       )}
       {allGood && <div className="rec-empty--good">Nothing to add - your package is in good shape.</div>}
       <div className="rec" hidden={allGood}>
-      <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix} />
-      {unanswerable.length > 0 && (
+      {/* Points only a document lifts (23 Oct 2026) sit in the same list, beside
+          their pillar's answer rows, with Add documents. */}
+      <ScoreGroup items={rec.score} onOpenFix={onOpenScoreFix}
+        docRows={unanswerable.filter((u) => u.action === "add_documents")}
+        onAddDocuments={onAddDocuments}
+        lossCoverage={formsExist ? null : (packageSqs?.loss_coverage || null)} />
+      {unanswerable.some((u) => u.action !== "add_documents") && (
         <div className="rec-group__sub" data-rec-group="unanswerable" style={{ marginTop: 6 }}>
           Not answerable on this page:{" "}
-          {unanswerable.map((u) => `${u.label} (${u.points} pts)`).join("; ")}.
+          {unanswerable.filter((u) => u.action !== "add_documents")
+            .map((u) => `${u.label} (${u.points} pts)`).join("; ")}.
         </div>
       )}
       {formsExist && <OffersGroup offers={offers} onAddOffer={onAddOffer} />}

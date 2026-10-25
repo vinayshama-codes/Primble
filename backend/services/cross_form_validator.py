@@ -282,6 +282,42 @@ def _umbrella_in_scope(flags: dict) -> bool:
     return bool(flags.get("has_umbrella"))
 
 
+def _umbrella_door(facts: dict, flags: dict) -> Optional[dict]:
+    """`sqs_service.umbrella_underlying` (the one door for an umbrella's
+    applicable underlying limits, 21 Oct 2026 - Brent's rule 2), or None when
+    it cannot be read (every caller then keeps its warning as it was)."""
+    try:
+        from services.sqs_service import umbrella_underlying
+        return umbrella_underlying(facts, flags)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _umbrella_line_excluded(facts: dict, flags: dict, family: str) -> bool:
+    """The umbrella's own schedule leaves this line out (excluded / not
+    scheduled / N/A) - the umbrella does not sit over it."""
+    uu = _umbrella_door(facts, flags)
+    return bool(uu and ((uu.get("lines") or {}).get(family) or {}).get("excluded"))
+
+
+def _umbrella_line_settled(facts: dict, flags: dict, family: str) -> bool:
+    """True when the one door already answers this line's "limit not found"
+    warning: the umbrella's own schedule of underlying insurance leaves the line
+    out or states its amount, or the gap is that door's own stop (a line the
+    schedule lists with no limit found). Fails open - False keeps the warning."""
+    uu = _umbrella_door(facts, flags)
+    if not uu:
+        return False
+    line = (uu.get("lines") or {}).get(family) or {}
+    if line.get("excluded") or line.get("schedule_numeric"):
+        return True
+    # Employers liability stated in its own parts (`wc_el_*`) is provided.
+    if family == "workers_comp" and line.get("fact_numeric"):
+        return True
+    return (family in (uu.get("missing_scheduled") or ())
+            or family in (uu.get("scheduled_to_confirm") or ()))
+
+
 # ── Individual rule functions ─────────────────────────────────────────────────
 
 
@@ -432,10 +468,27 @@ def _check_acord127_state_section(
             or flags.get("has_auto_liability")):
         return []
     try:
-        from services.form_service import _supported_state_forms
+        from services.form_service import _supported_state_forms, state_unverified, COVERAGE_AUTO
         states = _supported_state_forms(facts, flags)
+        unverified = state_unverified(facts, COVERAGE_AUTO)
     except Exception:                                        # noqa: BLE001
         return []
+    # THE STATE QUESTION (Brent, 23 Oct 2026): no insured document places the
+    # autos (garaging) or the insured (its address), so the state is unverified
+    # and no state ACORD 137 is offered - ask, never guess. Silent once a 137
+    # is in the package (the producer chose the state).
+    if unverified and not any(str(f).startswith("ACORD_137_") for f in triggered_ids):
+        return [_issue(
+            "advisory",
+            "auto_state_unverified",
+            (
+                "No insured document says where the vehicles are garaged or where "
+                "the insured is located, so the state auto section (ACORD 137) is "
+                "not offered. Enter the state the vehicles are garaged in - a "
+                "carrier's office address is not the insured's state."
+            ),
+            ["ACORD_127"],
+        )]
     issues: List[dict] = []
     # One literal emit per state form, so `add_forms` is a declaration the
     # anti-rot harvester (tests/test_add_form_resolution.py) can read.
@@ -626,19 +679,23 @@ def _check_umbrella_attachment_stack(
     if not _umbrella_in_scope(flags):
         return issues
 
-    # 1. WC Employers Liability when umbrella attaches over WC
-    if "ACORD_130" in triggered_ids and flags.get("has_workers_comp"):
+    # 1. WC Employers Liability when umbrella attaches over WC - not where the
+    # umbrella's own schedule leaves EL out, prices it, or LISTS it with no limit
+    # (that is the door's own hard stop; 21 Oct 2026, `_umbrella_line_settled`).
+    if ("ACORD_130" in triggered_ids and flags.get("has_workers_comp")
+            and not _umbrella_line_excluded(facts, flags, "workers_comp")):
         el_limit = _fv(facts, "employers_liability_limits")
         if not el_limit:
-            issues.append(_issue(
-                "soft_warning",
-                "umbrella_missing_employers_liability",
-                (
-                    "Umbrella attaches over Workers Compensation but Employers "
-                    "Liability limits are not provided. Add EL limits on ACORD 130."
-                ),
-                ["ACORD_130", "ACORD_131"],
-            ))
+            if not _umbrella_line_settled(facts, flags, "workers_comp"):
+                issues.append(_issue(
+                    "soft_warning",
+                    "umbrella_missing_employers_liability",
+                    (
+                        "Umbrella attaches over Workers Compensation but Employers "
+                        "Liability limits are not provided. Add EL limits on ACORD 130."
+                    ),
+                    ["ACORD_130", "ACORD_131"],
+                ))
         else:
             el_val = _to_int(el_limit)
             # Client Q2: minimum preferred EL for umbrella attachment is $500K
@@ -757,50 +814,12 @@ def _check_builders_risk_vs_property_deduplication(
 def _check_inland_marine_deduplication(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
-    """
-    Items on ACORD 160 (Inland Marine) must not be double-counted in
-    ACORD 140 / 141 (Commercial Property).
-
-    Spec: "Ensure items on 160 are not double-counted on 140/141/133."
-    """
-    issues: List[dict] = []
-
-    if "ACORD_160" not in triggered_ids:
-        return issues
-    # 5 Oct 2026: double-counting needs inland marine IN the submission. The
-    # recommender suggests ACORD 160 from bare keywords ("installation
-    # floater"), including a floater the documents say is NOT requested
-    # (CH125), so the pair of forms alone is no evidence of an overlap.
-    # A flag that SAYS no (False / "no" - including a line the submission
-    # declines) silences it; a MISSING flag does not - a legacy session or an
-    # extraction that never set it still has its stated IM values (G2 audit).
-    _im_flag = flags.get("has_inland_marine")
-    if isinstance(_im_flag, dict) and "value" in _im_flag:
-        _im_flag = _im_flag.get("value")
-    if _im_flag is None:
-        if not (_fv(facts, "inland_marine_total_value") or _fv(facts, "inland_marine_items")):
-            return issues
-    elif not _is_trueish(_im_flag):
-        return issues
-
-    im_value   = _to_float(_fv(facts, "inland_marine_total_value"))
-    prop_value = _to_float(
-        _fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")
-    )
-
-    if im_value and prop_value and "ACORD_140" in triggered_ids:
-        issues.append(_issue(
-            "advisory",
-            "inland_marine_property_overlap",
-            (
-                "ACORD 160 (Inland Marine) and ACORD 140 (Commercial Property) "
-                "are both present. Verify that mobile/scheduled items on ACORD 160 "
-                "are not also included in ACORD 140 BPP values."
-            ),
-            ["ACORD_140", "ACORD_160"],
-        ))
-
-    return issues
+    """Stands down (Z37, 24 Oct 2026). It warned that items on "ACORD 160
+    (Inland Marine)" may be double-counted on ACORD 140 - but ACORD 160 is the
+    Business Owners section (its template's own title) and no form in this
+    product is the inland marine section, so a 140 + 160 pair says nothing
+    about inland marine items. Kept as a no-op so callers and pins hold."""
+    return []
 
 
 def _check_property_bi_period_of_restoration(
@@ -975,6 +994,18 @@ def _check_gl_missing_when_umbrella(
     if not _umbrella_in_scope(flags):
         return issues
 
+    # THE APPLICABLE UNDERLYING (21 Oct 2026, Brent's 20 Oct rule 2 - "look at
+    # the account's actual underlying coverage"): the one door's verdict. An
+    # employers liability limit, the umbrella's own schedule of underlying
+    # insurance or the layer below identify the underlying as well as a GL or
+    # auto limit, so an umbrella over EL only is not told it cannot attach.
+    try:
+        from services.sqs_service import umbrella_underlying as _umb_underlying
+        if _umb_underlying(facts, flags)["identified"]:
+            return issues
+    except Exception:                                          # noqa: BLE001
+        pass
+
     has_gl   = "ACORD_126" in triggered_ids or bool(_fv(facts, "gl_limits"))
     try:
         from services.coverage_evidence import auto_liability_stated as _auto_stated
@@ -982,8 +1013,11 @@ def _check_gl_missing_when_umbrella(
     except Exception:                                          # noqa: BLE001
         _auto_limit = bool(_fv(facts, "auto_liability_limit"))
     has_auto = "ACORD_127" in triggered_ids or _auto_limit
+    # A Workers Compensation / Employers Liability policy in the package is an
+    # underlying policy too - its missing limit is the legacy hard stop's.
+    has_el = "ACORD_130" in triggered_ids
 
-    if not has_gl and not has_auto:
+    if not has_gl and not has_auto and not has_el:
         issues.append(_issue(
             "hard_stop",
             "umbrella_no_underlying_coverage",
@@ -2034,7 +2068,10 @@ def _check_umbrella_gl_minimum_limits(
             ),
             ["ACORD_126", "ACORD_131"],
         ))
-    elif "ACORD_126" in triggered_ids and not gl_limit:
+    elif ("ACORD_126" in triggered_ids and not gl_limit
+          # 21 Oct 2026: not where the umbrella's own schedule leaves GL out or
+          # states its amount, nor when that gap is the door's own stop.
+          and not _umbrella_line_settled(facts, flags, "general_liab")):
         issues.append(_issue(
             "soft_warning",
             "umbrella_gl_limits_not_found",
@@ -2105,7 +2142,10 @@ def _check_umbrella_auto_minimum_limits(
             ),
             ["ACORD_127", "ACORD_131"],
         ))
-    elif "ACORD_127" in triggered_ids and not auto_limit:
+    elif ("ACORD_127" in triggered_ids and not auto_limit
+          # 21 Oct 2026: not where the umbrella's own schedule leaves auto out
+          # or states its amount, nor when that gap is the door's own stop.
+          and not _umbrella_line_settled(facts, flags, "auto")):
         issues.append(_issue(
             "soft_warning",
             "umbrella_auto_limits_not_found",
@@ -2241,6 +2281,62 @@ def _check_auto_optional_coverages(
 # generated packet, so this trigger is what actually gets it there when the
 # operations narrative alone is too long for its own form field.
 _OPS_OVERFLOW_CHAR_THRESHOLD = 300
+
+
+def _check_expiring_policies_need_acord101(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """ACORD 125 lists expiring policies its own boxes cannot hold - the prior-
+    carrier grid has one OTHER column, page 1 six OTHER rows - and ACORD 101 is
+    where they are listed (Brent, 19 Oct 2026: "every remaining policy ... on
+    ACORD 101 ... never omitted"); ACORD 130's one-line endorsements box points
+    to ACORD 101 for the WC policy's endorsement schedule. When the package
+    makes either form without ACORD 101, this offers the form. ADVISORY: it
+    costs no points; before forms it is a form choice like every other
+    (`defer_form_choices`)."""
+    present = set(triggered_ids or ())
+    if "ACORD_101" in present or not ({"ACORD_125", "ACORD_130"} & present):
+        return []
+    aside: List[dict] = []
+    overflow: List[dict] = []
+    endorsements: List[dict] = []
+    try:
+        if "ACORD_125" in present:
+            from services.pdf_service import other_lob_overflow, prior_grid_set_aside_rows
+            aside = prior_grid_set_aside_rows(facts)
+            overflow = other_lob_overflow(facts)
+        if "ACORD_130" in present:
+            from services.wc_endorsements import schedule
+            endorsements = schedule(facts)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.debug("expiring-policies rule skipped (%s)", exc)
+        return []
+    if not aside and not overflow and not endorsements:
+        return []
+    parts: List[str] = []
+    if aside:
+        names = ", ".join(str(r.get("line") or "Other line") for r in aside[:6])
+        more = f" and {len(aside) - 6} more" if len(aside) > 6 else ""
+        parts.append(f"ACORD 125's Prior Carrier Information has no column for "
+                     f"{len(aside)} expiring polic{'y' if len(aside) == 1 else 'ies'} "
+                     f"({names}{more})")
+    if overflow:
+        names = ", ".join(str(r.get("name") or "") for r in overflow[:6])
+        parts.append(f"page 1 has no row for {len(overflow)} more line"
+                     f"{'' if len(overflow) == 1 else 's'} of business ({names})")
+    if endorsements:
+        parts.append(f"ACORD 130 points to ACORD 101 for the workers compensation policy's "
+                     f"endorsement schedule ({len(endorsements)} forms)")
+    what = ("them with their carrier, policy number, term, limit and premium"
+            if aside or overflow else "it")
+    said = "; ".join(parts)
+    return [_issue(
+        "advisory",
+        "acord101_for_expiring_policies",
+        (said[:1].upper() + said[1:] + f". Add ACORD 101 (Additional Remarks Schedule) to list {what}."),
+        ["ACORD_101"],
+        add_forms=["ACORD_101"],
+    )]
 
 
 def _check_acord101_triggers(
@@ -2397,8 +2493,9 @@ def _deductible_basis_evident(value: str, *, peril: bool = False) -> bool:
     is that peril's percentage column."""
     if _DEDUCTIBLE_BASIS_SHOWN_RE.search(value) or _SPELLED_AMOUNT_RE.search(value):
         return True
+    from services.normalization import PERCENT_DEDUCTIBLE_CEILING
     amount = _to_float(value)
-    if amount is not None and amount >= 100:
+    if amount is not None and amount >= PERCENT_DEDUCTIBLE_CEILING:
         return True
     return bool(peril and re.fullmatch(r"\s*\d{1,2}(?:\.\d+)?(?:\s*-\s*\d/\d)?\s*", value or ""))
 
@@ -2419,7 +2516,9 @@ def _check_property_deductible_structure(
     if not flags.get("has_property_coverage"):
         return issues
 
-    if "ACORD_140" not in triggered_ids and "ACORD_141" not in triggered_ids:
+    # ACORD 140 and ACORD 160 (Business Owners) print the property premises
+    # grid; ACORD 141 is the Crime section, never a property form (Z37).
+    if "ACORD_140" not in triggered_ids and "ACORD_160" not in triggered_ids:
         return issues
 
     # Check for AOP deductible (minimum requirement)
@@ -2429,7 +2528,7 @@ def _check_property_deductible_structure(
             "soft_warning",
             "property_aop_deductible_missing",
             "Property coverage present but AOP (All Other Perils) deductible not specified",
-            ["ACORD_140", "ACORD_141"],
+            ["ACORD_140", "ACORD_160"],
         ))
 
     has_wind = _fv(facts, "property_deductible_wind")
@@ -2490,7 +2589,7 @@ def _check_property_deductible_structure(
                 "soft_warning",
                 "property_deductible_basis_missing",
                 "Property deductible defined but basis (flat dollar or percentage) not specified",
-                ["ACORD_140", "ACORD_141"],
+                ["ACORD_140", "ACORD_160"],
             ))
 
     return issues
@@ -2511,7 +2610,9 @@ def _check_property_coinsurance_enforcement(
     if not flags.get("has_property_coverage"):
         return issues
 
-    if "ACORD_140" not in triggered_ids and "ACORD_141" not in triggered_ids:
+    # ACORD 140 and ACORD 160 (Business Owners) print the property premises
+    # grid; ACORD 141 is the Crime section, never a property form (Z37).
+    if "ACORD_140" not in triggered_ids and "ACORD_160" not in triggered_ids:
         return issues
 
     # Check if insured values are present (hard requirement for coinsurance check)
@@ -2521,7 +2622,9 @@ def _check_property_coinsurance_enforcement(
 
     # Check coinsurance percentage
     coinsurance_pct = _fv(facts, "coinsurance_percentage")
-    agreed_value_end = _fv(facts, "agreed_value_endorsement")
+    # Z37 lane B: a stated / silent NO ("False") is not agreed value.
+    from services.coverage_evidence import agreed_value_affirmed
+    agreed_value_end = agreed_value_affirmed(facts)
 
     if not coinsurance_pct and not agreed_value_end:
         issues.append(_issue(
@@ -2529,7 +2632,7 @@ def _check_property_coinsurance_enforcement(
             "property_coinsurance_missing",
             "Property values present but coinsurance percentage or agreed value endorsement not specified. "
             "Define coinsurance % or confirm agreed value endorsement is in place.",
-            ["ACORD_140", "ACORD_141"],
+            ["ACORD_140", "ACORD_160"],
         ))
     elif coinsurance_pct:
         # Validate coinsurance percentage is reasonable (typically 80-100%)
@@ -2543,7 +2646,7 @@ def _check_property_coinsurance_enforcement(
                     "property_coinsurance_unreasonable",
                     f"Coinsurance percentage {coinspct_val}% appears outside normal range (80-100%). "
                     "Verify this is intentional.",
-                    ["ACORD_140", "ACORD_141"],
+                    ["ACORD_140", "ACORD_160"],
                 ))
         except Exception:
             pass
@@ -2731,7 +2834,13 @@ def _check_builders_risk_project_value(
                 "Provide the total construction cost or attach an ACORD 101 "
                 "narrative explaining the project scope."
             ),
-            ["ACORD_133"],
+            # No form of the 17 prints a builders-risk project value (Z39 lane
+            # H, 25 Oct 2026, checked in every schema): ACORD 133 is the
+            # Workers Compensation Assigned Risk section, ACORD 160 prints only
+            # the BOP builders-risk ENDORSEMENTS (theft of materials, collapse)
+            # and ACORD 125 only ticks "Installation / Builder's Risk section
+            # attached". The fact is the package's; the card names no form.
+            [],
             add_forms=["ACORD_101"],
         ))
 
@@ -2802,10 +2911,11 @@ def _check_carrier_grade_cope_quality(
     if "ACORD_140" not in triggered_ids:
         return issues
 
-    # Only emit when Minimum Viable COPE is satisfied - avoid noise on incomplete subs
-    if not (_fv(facts, "occupancy_type") and _fv(facts, "construction_type")):
-        return issues
-
+    # Raised from the start (owner, 24 Oct 2026: "every step visible from the
+    # start"). It used to wait for Minimum Viable COPE (occupancy + construction),
+    # so fixing that hard stop made this card APPEAR and swallow the COPE rows the
+    # page already listed. While the hard stop fires, its 60 governs - no score
+    # moves.
     missing_quality: List[str] = []
     if not _fv(facts, "year_built"):
         missing_quality.append("year built")
@@ -3010,6 +3120,7 @@ _RULE_FUNCTIONS = [
     _check_property_valuation_consistency,
     _check_crime_silent_exposure,
     _check_cyber_silent_exposure,
+    _check_expiring_policies_need_acord101,
     _check_acord101_triggers,   # must run last
 ]
 

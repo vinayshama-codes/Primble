@@ -200,14 +200,20 @@ def test_wc_payroll_is_derived_from_a_complete_class_table():
 def test_the_scorer_stops_charging_for_a_payroll_we_hold():
     """The whole point: a false warning and a 12-point Exposure deduction on a
     package whose payroll is printed on our own ACORD 130."""
-    from services.sqs_service import _calculate_exposure_consistency, evaluate_stops
+    from services.sqs_service import completeness_deduction_items, evaluate_stops
     flags = {"has_workers_comp": True}
     without = {"wc_class_codes": _wc_rows()}          # the 8 Oct behaviour
     with_it = {"wc_class_codes": _wc_rows()}
     derive_wc_facts_from_class_rows(with_it)
-    before, _ = _calculate_exposure_consistency(without, flags, [], [])
-    after, _ = _calculate_exposure_consistency(with_it, flags, [], [])
-    assert after > before
+
+    def _charged(facts):
+        return [(i["fact"], i["points"])
+                for i in completeness_deduction_items(facts, flags, [], [])]
+
+    # (19 Oct 2026, Brent: missing details are Completeness) the same 12, charged there.
+    assert ("wc_payroll", 12) in _charged(without)
+    assert "wc_payroll" not in {fact for fact, _pts in _charged(with_it)}
+    assert sum(p for _f, p in _charged(with_it)) < sum(p for _f, p in _charged(without))
     _h, soft = evaluate_stops(with_it, flags)
     assert not [m for m in soft if "payroll is missing" in str(m)]
 

@@ -570,6 +570,11 @@ class ResolveIssueRequest(BaseModel):
     # form to create" the same field, which is how a mis-send creates a form
     # nobody asked for.
     add_form_id: Optional[str] = None
+    # mode=field: every value the same fix-window save sends (the window posts
+    # its boxes one request at a time). The proposed-term pair is judged as the
+    # whole save, never box by box (21 Oct 2026 review, M2). Optional - a card
+    # or an old tab sends one box and is judged against the date on file.
+    same_save: Optional[Dict[str, str]] = None
 
 
 class ReopenIssueRequest(BaseModel):

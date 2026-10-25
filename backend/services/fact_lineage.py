@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from functools import lru_cache
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from services.fact_comparison import values_agree
 from services.fact_state import _verify_norm, _TEXT_VERIFY_MIN_CHARS
@@ -220,6 +221,16 @@ def sources_for_fact(fact_key: str, raw: Any, doc_index: List[dict]) -> List[dic
             return dict_sources(fact_key, doc_index)
         if isinstance(value, bool) or value is None:
             return []
+        # A two-way boolean's "No" has no document behind it: each document's
+        # own False is its silence (B8), so citing it as "extracted" support
+        # is a false citation - and a person's No came from the person.
+        # Right-or-blank (module docstring) - no citation.
+        try:
+            from services.extraction_service import unevidenced_boolean_negative
+            if unevidenced_boolean_negative(fact_key, value):
+                return []
+        except Exception:                                      # noqa: BLE001
+            pass
         return scalar_sources(fact_key, value, doc_index)
     except Exception as ex:                                    # noqa: BLE001
         # Lineage is additive evidence for the record - a failure here must
@@ -227,6 +238,81 @@ def sources_for_fact(fact_key: str, raw: Any, doc_index: List[dict]) -> List[dic
         logger.warning("fact_lineage failed for %s: %s", fact_key, ex,
                        exc_info=True)
         return []
+
+
+# A money figure as printed: grouped ("1,425.00") or plain ("1425", "425.00"),
+# never the middle of a longer number or a date.
+_MONEY_TOKEN_RE = re.compile(r"(?<![\d,./])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?(?![\d,/]|\.\d)")
+_AMOUNT_TEXT_RE = re.compile(r"^\$?\s?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?$")
+
+
+def _cents(whole: str, frac: Optional[str]) -> int:
+    return int(whole.replace(",", "")) * 100 + int(frac or 0)
+
+
+# 16 documents (19 Oct 2026): a stored text runs to ~700k characters and each
+# entry keeps a normalized copy too; one package's table reads about seven.
+@lru_cache(maxsize=16)
+def _marked_pages(text: str) -> Tuple[Tuple[int, str, frozenset], ...]:
+    """(printed page number, verify-normalized text, every money figure the page
+    prints in cents) for every marked page of one document's stored text.
+    Cached by the text itself: a request locates many values in the same few
+    documents."""
+    out: List[Tuple[int, str, frozenset]] = []
+    matches = list(_PAGE_MARKER_RE.finditer(text))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        seg = text[m.end(): end]
+        if seg.strip():
+            amounts = frozenset(_cents(a, c) for a, c in _MONEY_TOKEN_RE.findall(seg))
+            out.append((int(m.group(1)), _verify_norm(seg), amounts))
+    return tuple(out)
+
+
+def locate_page(text: Any, value: Any, near: Iterable[Any] = ()) -> Optional[int]:
+    """The printed page of a document's stored text that prints ``value`` - an
+    amount only as the SAME number, read as a whole printed figure ("425.00"
+    is never the tail of "1,425.00", and "$1,000,000" is "1000000"), any other
+    value literally (`_verify_norm`, the 4-character floor) - and, when
+    ``near`` is given, also one of those words (the line's or the label's own
+    name), so a figure printed beside another line is never cited (Brent,
+    19 Oct 2026: "keep the source and page reference for every extracted
+    coverage and limit").
+
+    None when the text carries no page markers (a long .txt upload is not
+    "page 1"), when nothing matches, or for a value too short to locate."""
+    raw = str(text or "")
+    val = str(value if value is not None else "").strip()
+    if not raw or not val:
+        return None
+    pages = _marked_pages(raw)
+    if not pages:
+        return None
+    nears = [n for n in (_verify_norm(str(x)) for x in (near or ()) if x)
+             if len(n) >= _TEXT_VERIFY_MIN_CHARS]
+    if _AMOUNT_TEXT_RE.match(val):
+        m = _MONEY_TOKEN_RE.search(val.replace("$", "").replace(" ", ""))
+        if not m:
+            return None
+        target = _cents(m.group(1), m.group(2))
+        if target <= 0:
+            return None                       # a zero is printed everywhere
+        if target < 100_000 and not nears:
+            return None                       # under $1,000: too common to cite alone
+
+        def _has(p) -> bool:
+            return target in p[2]
+    else:
+        needle = _verify_norm(val)
+        if len(needle) < _TEXT_VERIFY_MIN_CHARS:
+            return None
+
+        def _has(p) -> bool:
+            return needle in p[1]
+    for p in pages:
+        if _has(p) and (not nears or any(n in p[1] for n in nears)):
+            return p[0]
+    return None
 
 
 def format_source(src: dict) -> str:

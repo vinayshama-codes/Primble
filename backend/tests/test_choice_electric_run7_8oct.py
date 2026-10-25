@@ -61,7 +61,7 @@ def test_every_step_change_asks_for_the_header_back():
     effect = effect[:effect.index("}, [step]);")]
     assert 'window.dispatchEvent(new Event("app-header:reset"))' in effect
     # and "Back to review" asks too, before it opens a section
-    back = src[src.index("const goBackToReview = async () => {"):]
+    back = src[src.index("const goBackToReview = async (toSection) => {"):]  # takes a page since 23 Oct 2026
     back = back[:back.index("const confirmDocChange")]
     assert back.index('new Event("app-header:reset")') < back.index("showReviewSection(section)")
 
@@ -259,16 +259,17 @@ def _f125(lines):
 def test_cyber_parts_are_not_other_rows():
     rows = ps._other_lob_rows(_f125(_CE_LINES))
     names = [r["name"] for r in rows]
-    assert names == ["Employee Benefit Liability Coverage Part", "Excess (Following Form) Liability"]
-    assert [r["premium"] for r in rows] == ["$ 425.00", "$ 10,692"]
+    # 19 Oct 2026: the EBL coverage part is the GL policy's (Brent) - no row.
+    assert names == ["Excess (Following Form) Liability"]
+    assert [r["premium"] for r in rows] == ["$ 10,692"]
 
 
 def test_the_total_is_the_rows_the_form_prints():
     f = _f125(_CE_LINES)
     printed = ps._printed_lob_premiums(f)
-    assert sum(printed) == 58385
+    assert sum(printed) == 57960                    # less the EBL part (19 Oct 2026)
     assert printed.count(4162) == 1, "the cyber premium is printed once"
-    assert ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A", f) == "$58,385"
+    assert ps._resolve_estimated_total("Policy_Payment_EstimatedTotalAmount_A", f) == "$57,960"
 
 
 def test_a_line_of_its_own_keeps_its_row_but_not_another_lines_premium():
@@ -281,7 +282,8 @@ def test_a_line_of_its_own_keeps_its_row_but_not_another_lines_premium():
          "premium": "$16,818.00"},
     ]
     rows = ps._other_lob_rows(_f125(lines))
-    assert rows == [{"name": "Employment Practices Liability Coverage Part", "premium": None}]
+    # the row prints the LINE - "Coverage Part" is dropped (19 Oct 2026)
+    assert rows == [{"name": "Employment Practices Liability", "premium": None}]
 
 
 def test_an_odd_line_from_another_carrier_is_untouched():
@@ -292,7 +294,7 @@ def test_an_odd_line_from_another_carrier_is_untouched():
          "premium": "$4,162.00"},
     ]
     rows = ps._other_lob_rows(_f125(lines))
-    assert rows == [{"name": "Employment Practices Liability Coverage Part", "premium": "$4,162.00"}]
+    assert rows == [{"name": "Employment Practices Liability", "premium": "$4,162.00"}]
 
 
 # ── 5. an answered cross-form issue leaves Warnings ─────────────────────────

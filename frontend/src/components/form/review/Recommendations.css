@@ -84,3 +84,10 @@
   .rec-group { padding: 12px; }
   .rec-row { flex-wrap: wrap; }
 }
+
+/* Loss-run coverage (24 Oct 2026): the years the included loss runs cover. */
+.rec-losscov { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11.5px; color: #475569; padding: 4px 0 6px; }
+.rec-losscov__lead { font-weight: 600; }
+.rec-losscov__chip { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid #cbd5e1; background: #f1f5f9; color: #94a3b8; white-space: nowrap; }
+.rec-losscov__chip--on { background: #dcfce7; color: #166534; border-color: #86efac; }
+.rec-losscov__label { font-weight: 600; color: #334155; }

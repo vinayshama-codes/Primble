@@ -23,7 +23,7 @@
 # ---------------------------------------------------------------------------
 
 import re
-from typing import Optional, Callable
+from typing import Any, Optional, Callable
 
 # ---------------------------------------------------------------------------
 # Shared validators
@@ -104,12 +104,97 @@ def _is_us_mailing_address(v: str) -> bool:
         return True
 
 
+def _us_states_answer(v: str) -> bool:
+    """The state question's box (23 Oct 2026): one US state or a list of them
+    ("CO", "Colorado", "CO, CA") - read by the same door the state readers use
+    (`form_service.state_codes_of`), so a value the box takes is a state every
+    reader sees."""
+    s = str(v or "").strip()
+    if not s or len(s) > 120:
+        return False
+    try:
+        from services.form_service import state_codes_of, _STATE_LIST_SPLIT_RE, _state_token
+    except Exception:                                          # noqa: BLE001
+        return True        # a broken reader never refuses a real answer
+    parts = [p for p in _STATE_LIST_SPLIT_RE.split(s) if p.strip()]
+    return bool(parts) and all(_state_token(p) for p in parts) and bool(state_codes_of(s))
+
+
+def takes_amount_or_percent(entry_or_key: Any) -> bool:
+    """A fact whose own declaration takes a dollar amount OR a percentage: a
+    money shape (`validate` is `_is_currency`) whose format hint or question
+    also names a percentage - "Dollar amount or percentage", the wind / hail
+    and earthquake deductibles (22 Oct 2026, Z33-PERCENT). Derived from the
+    declaration, never listed: a fact declared that way later is in the class
+    the day it is added. Takes a registry entry or a fact key."""
+    e = FACT_REGISTRY.get(entry_or_key) if isinstance(entry_or_key, str) else entry_or_key
+    if not isinstance(e, dict) or e.get("validate") is not _is_currency:
+        return False
+    return "percent" in f"{e.get('format_hint') or ''} {e.get('question') or ''}".lower()
+
+
+def _amount_or_percent_answer(v: str) -> bool:
+    """The person check of an amount-or-percent fact: its own dollar shape, or
+    a statement whose first figure is a percentage from 0 to 100 ("2%",
+    "1.5 percent", "2% of TIV", "2% / $25,000 minimum" - the reader is
+    `normalization.stated_percentage`). "-2%" and "200%" stay refused. Not
+    `_is_*` (the dec-entry backfill reason below)."""
+    if _is_currency(v):
+        return True
+    from services.normalization import stated_percentage
+    got = stated_percentage(v)
+    return got is not None and 0 <= got["number"] <= 100
+
+
 def answer_check(entry: Optional[dict]):
     """The check a PERSON's typed answer must pass: the box rule
     (`answer_validate`) where it is stricter than the fact's shape, else the
-    shape (`validate`). Every door that judges a typed answer reads this."""
+    shape (`validate`). Every door that judges a typed answer reads this. An
+    amount-or-percent fact (`takes_amount_or_percent`) takes a percentage too:
+    its `validate` stays the dollar shape the merge, the type sweep and the
+    stamper key on by identity."""
     e = entry if isinstance(entry, dict) else {}
+    if not e.get("answer_validate") and takes_amount_or_percent(e):
+        return _amount_or_percent_answer
     return e.get("answer_validate") or e.get("validate")
+
+
+def _descriptive_amount(text: str, format_hint: str) -> bool:
+    """True when a non-numeric answer is a legitimate convention, not garbage.
+
+    Real ACORD money boxes print words: "Statutory" on an Employers Liability
+    limit, "Waived" on a deductible, "Not covered" on an excluded peril. The
+    fact's own `format_hint` says which boxes those are - "Dollar amount (e.g.
+    $1,000,000)" is a money box, "Whole number of years (e.g. 5)" is not, and a
+    count box has no descriptive convention (so "no losses" is never accepted
+    into `loss_history_years`). Only an answer with NO digits at all: one that
+    has digits and still fails is a botched number, not a convention."""
+    if any(ch.isdigit() for ch in text):
+        return False
+    h = (format_hint or "").lower()
+    return "dollar" in h or "amount" in h or "percent" in h
+
+
+def answer_refusal(entry: Optional[dict], text) -> str:
+    """The words a person's typed answer is refused with when it fails its
+    fact's own check (`answer_check`), else "". ONE rule for the producer's
+    card (`audit_routes._validate_producer_answer`) and the client's
+    questionnaire (`arq_service`, where such an answer is HELD for the
+    producer, never written - 22 Oct 2026). A broken validator never refuses a
+    real answer; an amount box's descriptive convention is kept."""
+    checker = answer_check(entry)
+    if not callable(checker):
+        return ""
+    s = str(text if text is not None else "")
+    try:
+        ok = bool(checker(s))
+    except Exception:                                          # noqa: BLE001
+        ok = True          # a broken validator must never block a real answer
+    hint = str((entry or {}).get("format_hint") or "").strip()
+    if ok or _descriptive_amount(s, hint):
+        return ""          # "Statutory" / "Waived" / "Not covered"
+    return (f"That does not look right for this field. Expected: {hint}"
+            if hint else "That value is not valid for this field.")
 
 
 def _is_url(v: str) -> bool:
@@ -212,6 +297,89 @@ def _coverage_part_lines_answer(v: str) -> bool:
     return is_valid_part_lines(v)
 
 
+# ── A PERSON's real answers the facts' shapes refused (22 Oct 2026) ─────────
+# Box rules (`answer_validate`, read through `answer_check`): each fact's
+# `validate` stays the shape extraction keys on - `fire_protection_class`'s is
+# what reduces an extracted "8B" to a whole number. Not `_is_*` (the dec-entry
+# backfill reason above). Only these real printings are added.
+_XMOD_ANSWER_RE = re.compile(r'^(?:\d+(?:\.\d{1,3})?|\.\d{1,3})$')     # also ".87"
+# Four decimals ("1.0800", ".8765" on an NCCI worksheet) only as the number the
+# scorer's own reader reads (`coverage_evidence.parse_xmod`, same shape).
+_XMOD_FOUR_DP_RE = re.compile(r'^(?:\d{1,3}\.\d{4}|\.\d{4})$')
+_VALUATION_ANSWERS = frozenset({
+    "RCV", "ACV", "REPLACEMENT COST", "REPLACEMENT COST VALUE", "ACTUAL CASH VALUE",
+    "AGREED VALUE", "FUNCTIONAL REPLACEMENT COST",
+    "AGREED AMOUNT", "MARKET VALUE",          # ACORD's own words (the 140's ValuationCode)
+})
+# ISO public protection classes 1-10 plus 8B and 10W, alone or split ("4/9"),
+# each with the leading zeros a dec page prints ("03", "010") - the shape's own
+# check took those, and the person check must not refuse what it took.
+_PPC_CLASS = r"(?:10W|10|8B|[1-9])"
+_PPC_ANSWER_RE = re.compile(rf"^0*({_PPC_CLASS})(?:\s*/\s*0*({_PPC_CLASS}))?$", re.I)
+
+
+def _xmod_answer(v: str) -> bool:
+    s = str(v or "").strip()
+    if _XMOD_ANSWER_RE.match(s):
+        return True
+    if not _XMOD_FOUR_DP_RE.match(s):
+        return False
+    try:
+        from services.coverage_evidence import parse_xmod
+        return parse_xmod(s) is not None
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _valuation_answer(v: str) -> bool:
+    return str(v or "").strip().upper() in _VALUATION_ANSWERS
+
+
+def _protection_class_answer(v: str) -> bool:
+    """1-10, 8B, 10W, or a split class whose second class is the higher ("4/9")."""
+    m = _PPC_ANSWER_RE.match(str(v or "").strip())
+    if not m:
+        return False
+    if not m.group(2):
+        return True
+    first, second = (int(re.match(r"\d+", g).group(0)) for g in (m.group(1), m.group(2)))
+    return first < second
+
+
+_PERCENT_SHARE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b)", re.I)
+
+
+def _revenue_shares_answer(v: str) -> bool:
+    """Brent's B.3 (23 Oct 2026): operations by percentage of revenue "must
+    total 100%". Two or more stated shares must add up to 100 (half a point of
+    rounding either way); a description with fewer than two shares is free text
+    and passes."""
+    shares = [float(m.group(1)) for m in _PERCENT_SHARE_RE.finditer(str(v or ""))]
+    if len(shares) < 2:
+        return True
+    return abs(sum(shares) - 100.0) <= 0.5
+
+
+def _questionnaire_fact(question: str, hint: Optional[str] = None,
+                        answer_validate: Optional[Callable[[str], bool]] = None) -> dict:
+    """A fact only the narrative questionnaire asks (Brent's attachment A,
+    `services/questionnaire.py`, 23 Oct 2026): printed on no form (`forms` is
+    empty, so no ARQ form scan asks it), unscored (no tier), and with NO
+    `validate` - the extraction merge, the dec-entry backfill and the type sweep
+    key on that callable, and nothing extracts these. A person's typed answer
+    is judged by `answer_validate` (`answer_check`) alone."""
+    entry = {"forms": set(), "question": question, "tier": None, "required": False,
+             "validate": None, "format_hint": hint}
+    if answer_validate is not None:
+        entry["answer_validate"] = answer_validate
+    return entry
+
+
+_QN_DATE_HINT = "Date (MM/DD/YYYY)"
+_QN_COUNT_HINT = "Whole number (e.g. 4)"
+_QN_MONEY_HINT = "Dollar amount (e.g. $1,500,000)"
+
+
 # ---------------------------------------------------------------------------
 # FACT_REGISTRY
 # ---------------------------------------------------------------------------
@@ -247,6 +415,22 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
+    },
+    # THE STATE QUESTION (Brent, 23 Oct 2026 - Z34-1 #6). Asked only when no
+    # insured document places the risk (`cross_form_validator`'s
+    # `auto_state_unverified` card); a person's answer is the one value of this
+    # fact any state reader counts (`form_service.coverage_states`) - the
+    # model's own reading of it never is. Unscored (no tier). `validate` stays
+    # None so the extraction merge, the type sweep and the dec-entry backfill
+    # never key on it; the box rule is `answer_validate`.
+    "state_of_operations": {
+        "forms":       {"ACORD_125"},
+        "question":    "Which state does your business operate in? If your vehicles are "
+                       "kept in another state, list that state too.",
+        "tier": None, "required": False,
+        "validate":    None,
+        "answer_validate": _us_states_answer,
+        "format_hint": "US state code (e.g. CO or CO, CA)",
     },
     "contact_name": {
         "forms":       {"ACORD_125"},
@@ -605,6 +789,18 @@ FACT_REGISTRY: dict[str, dict] = {
                                   or "prior operations" in v.lower()),
         "format_hint": "Yes or No (is this a new venture with no prior operations?)",
     },
+    "loss_run_ownership_confirmed": {
+        # 23 Oct 2026 (package fc04c74f): the producer's "these loss runs belong
+        # to this insured". Read by the one match door
+        # (`loss_run_identity.match_loss_run_identity`): Yes lifts a name-matched
+        # run to a person-confirmed strong match. Answered from the Loss History
+        # row, never asked to the client, never stamped on a form.
+        "forms":       set(),
+        "question":    None,
+        "tier": None, "required": False,
+        "validate":    lambda v: str(v or "").strip().lower().startswith(("yes", "no")),
+        "format_hint": "Yes or No (do these loss runs belong to this insured?)",
+    },
     "loss_run_status": {
         # Client 2.10 (Prior Claims Exist): whether loss runs have been
         # requested / are available. Extraction also writes "pending" /
@@ -929,6 +1125,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "Has your business received a workers comp experience modification factor (X-Mod)?",
         "tier": None, "required": False,
         "validate":    lambda v: bool(re.match(r'^\d+(\.\d{1,3})?$', v.strip())),
+        "answer_validate": _xmod_answer,
         "format_hint": "Decimal number (e.g. 0.95 or 1.10)",
     },
     "wc_xmod_effective_date": {
@@ -1088,10 +1285,12 @@ FACT_REGISTRY: dict[str, dict] = {
         "forms":       {"ACORD_140"},
         "question":    "What is your building mainly made of?",
         "tier": None, "required": False,
+        # "MASONRY" (22 Oct 2026): the hint below names it, and the check
+        # refused it - a client typing it was held, a producer refused.
         "validate":    lambda v: v.strip().upper() in {
             "FRAME", "WOOD FRAME", "JOISTED MASONRY", "MASONRY NON-COMBUSTIBLE",
             "NON-COMBUSTIBLE", "MODIFIED FIRE RESISTIVE", "FIRE RESISTIVE",
-            "BRICK", "CONCRETE", "STEEL", "MIXED",
+            "MASONRY", "BRICK", "CONCRETE", "STEEL", "MIXED",
         },
         "format_hint": "Frame, Masonry, Concrete, Steel, etc.",
     },
@@ -1130,6 +1329,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "What is your building's fire protection class? (1–10 scale)",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().isdigit() and 1 <= int(v.strip()) <= 10,
+        "answer_validate": _protection_class_answer,
         "format_hint": "Number from 1 to 10",
     },
     "distance_to_hydrant": {
@@ -1151,6 +1351,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "question":    "If there is a loss, how would you like your property valued? (RCV or ACV)",
         "tier": None, "required": False,
         "validate":    _is_valuation,
+        "answer_validate": _valuation_answer,
         "format_hint": "RCV (Replacement Cost Value) or ACV (Actual Cash Value)",
     },
     "coinsurance_percentage": {
@@ -1188,19 +1389,21 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $5,000)",
     },
+    # Amount OR percentage (`takes_amount_or_percent`): `validate` stays the
+    # dollar shape; a person's "2%" passes `answer_check`.
     "property_deductible_wind": {
         "forms":       {"ACORD_140"},
         "question":    "How much would you pay out of pocket for wind or hail damage?",
         "tier": None, "required": False,
         "validate":    _is_currency,
-        "format_hint": "Dollar amount or percentage",
+        "format_hint": "Dollar amount or percentage (e.g. $5,000 or 2%)",
     },
     "property_deductible_earthquake": {
         "forms":       {"ACORD_140"},
         "question":    "How much would you pay out of pocket for earthquake damage?",
         "tier": None, "required": False,
         "validate":    _is_currency,
-        "format_hint": "Dollar amount or percentage",
+        "format_hint": "Dollar amount or percentage (e.g. $25,000 or 5%)",
     },
     "property_deductible_flood": {
         "forms":       {"ACORD_140"},
@@ -1710,6 +1913,87 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    _coverage_part_lines_answer,
         "format_hint": "A line chosen for each coverage part",
     },
+
+    # ── The narrative questionnaire (Brent's attachment A, 23 Oct 2026) ─────
+    # Facts no other fact already holds - `services/questionnaire.py` maps
+    # every other question onto an existing fact. Keyed `qn_` (never a line
+    # prefix, so `lob_canon.fact_line_family` and `line_presence` read none of
+    # them as evidence of a coverage line) and named so the answer readers'
+    # name heuristics (`answer_semantics._declared_kind`,
+    # `audit_routes._validate_producer_answer`) give each its intended type -
+    # pinned by tests/test_build26_questionnaire.py. Kept out of the gap-fill
+    # facts block (`pdf_service._build_facts_block`); only the approved carrier
+    # narrative prints, on ACORD 101 (`pdf_service._acord101_blocks`).
+    "contact_title":               _questionnaire_fact("What is the primary contact's role or title?"),
+    "qn_submission_purpose":       _questionnaire_fact("Is this submission new business, a renewal or a remarketing?"),
+    "qn_requested_terms":          _questionnaire_fact("What limits and deductibles are wanted?"),
+    "qn_decision_deadline":        _questionnaire_fact("What is the decision deadline?", _QN_DATE_HINT, _is_date),
+    "qn_quote_due":                _questionnaire_fact("When is the quote due?", _QN_DATE_HINT, _is_date),
+    "qn_attractive_summary":       _questionnaire_fact("What makes this account attractive to underwrite? Brief factual summary of operations and controls."),
+    "qn_owner_experience":         _questionnaire_fact("How many years of experience do the owners have?", _QN_COUNT_HINT, _is_positive_int),
+    "qn_ownership_changes":        _questionnaire_fact("Any ownership changes or acquisitions?"),
+    "qn_customer_types":           _questionnaire_fact("Who are the primary customers?"),
+    "qn_operations_mix":           _questionnaire_fact("What share of revenue comes from each operation? The shares must total 100%.",
+                                                       "Each operation with its share of revenue - the shares must add up to the whole (100)",
+                                                       _revenue_shares_answer),
+    "qn_work_type_mix":            _questionnaire_fact("How does the work split between new construction, service and repair?"),
+    "qn_prior_year_revenue":       _questionnaire_fact("What was the prior year's annual gross revenue?", _QN_MONEY_HINT, _is_currency),
+    "qn_projected_revenue":        _questionnaire_fact("What annual gross revenue is projected for next year?", _QN_MONEY_HINT, _is_currency),
+    "qn_growth_explanation":       _questionnaire_fact("What explains any material change in revenue?"),
+    "qn_seasonal_staff":           _questionnaire_fact("How many seasonal employees are there?", _QN_COUNT_HINT, _is_positive_int),
+    "qn_leased_temp_labor":        _questionnaire_fact("Are leased employees or temporary labor used?"),
+    "qn_jobsite_locations":        _questionnaire_fact("Where are the jobsites?"),
+    "qn_international_exposure":   _questionnaire_fact("Any international exposures?"),
+    "qn_new_operations":           _questionnaire_fact("Any unusual or newly added operations?"),
+    "qn_credentials":              _questionnaire_fact("Which licenses and certifications are held?"),
+    "qn_contract_requirements":    _questionnaire_fact("Any contractual insurance requirements?"),
+    "qn_planned_changes":          _questionnaire_fact("Any major changes anticipated in the next 12 months?"),
+    "qn_loss_run_gaps":            _questionnaire_fact("Loss runs by line: valuation dates and any missing years."),
+    "qn_corrective_actions":       _questionnaire_fact("What corrective actions followed material losses, and have conditions changed?"),
+    "qn_safety_program":           _questionnaire_fact("Describe the safety program, employee training, inspections, incident reporting, contractual risk transfer and management oversight."),
+    "qn_prior_nonrenewals":        _questionnaire_fact("Any prior nonrenewals, cancellations, declinations, significant underwriting restrictions or coverage gaps? Please explain."),
+    "qn_work_exposures":           _questionnaire_fact("Work types, largest projects, project values, jobsite hazards, height/depth work, hot work, excavation and other exposures."),
+    "qn_gl_wc_alignment":          _questionnaire_fact("Do the GL operations align with the WC classifications?"),
+    "qn_subcontractor_controls":   _questionnaire_fact("Subcontracted work percentage, subcontractor selection, certificates, additional insured and waiver requirements."),
+    "qn_contract_indemnity":       _questionnaire_fact("Contract terms, indemnity, hold harmless, additional insured requirements and any wrap-up / OCIP / CCIP work."),
+    "qn_completed_ops_exposure":   _questionnaire_fact("Products / completed operations exposure, warranties, recalls, professional / design responsibilities and prior completed-work losses."),
+    "qn_estimated_or_actual":      _questionnaire_fact("Is the payroll estimated or actual?"),
+    "qn_loss_control":             _questionnaire_fact("Loss-control practices and safety responsibilities."),
+    "qn_independent_contractors":  _questionnaire_fact("Subcontractor / independent-contractor labor, certificates, uninsured subcontractor exposure and out-of-state work."),
+    "qn_alternate_employer":       _questionnaire_fact("Any alternate employer or waiver of subrogation requirements?"),
+    "qn_fleet_mix":                _questionnaire_fact("Any leased or employee-owned vehicles?"),
+    "qn_garaging_locations":       _questionnaire_fact("Where are the vehicles garaged?"),
+    "qn_commodities_hauled":       _questionnaire_fact("What commodities are carried?"),
+    "qn_special_vehicle_exposures": _questionnaire_fact("Any special vehicle exposures?"),
+    "qn_driver_program":           _questionnaire_fact("Driver eligibility, MVR review, telematics, driver training, accident controls and vehicle maintenance."),
+    "qn_fleet_changes_filings":    _questionnaire_fact("Prior auto losses, changes to the fleet and applicable filings."),
+    "qn_building_upgrades":        _questionnaire_fact("Stories, updates and protective safeguards, per building."),
+    "qn_cat_exposure":             _questionnaire_fact("Stock and equipment values, and catastrophe exposures."),
+    "qn_alarms_systems":           _questionnaire_fact("Alarms and critical building systems, where known."),
+    "qn_bi_continuity":            _questionnaire_fact("Business Income basis, dependencies, maximum expected downtime and continuity plan."),
+    "qn_vacancy_renovation":       _questionnaire_fact("Vacancy, renovations, property in transit, offsite property and seasonal inventory changes."),
+    "qn_umbrella_gaps":            _questionnaire_fact("Known exclusions, gaps, differing underlying terms, auto / WC / GL coordination and contractual limit requirements."),
+    "qn_excess_severity":          _questionnaire_fact("Large contracts, high-hazard operations and prior severe losses relevant to excess underwriting."),
+    "qn_cyber_data_types":         _questionnaire_fact("Business use of technology, sensitive data types and reliance on critical vendors."),
+    "qn_cyber_other_controls":     _questionnaire_fact("Endpoint protection, patching and access controls."),
+    "qn_cyber_incident_plan":      _questionnaire_fact("Incident response plan, employee security training, ransomware / payment fraud exposure and outsourcing."),
+    "qn_cyber_dependencies":       _questionnaire_fact("Business interruption dependencies, revenue impact and contractual requirements."),
+    "qn_epli_practices":           _questionnaire_fact("EPLI: workforce geography, HR practices, employee handbook, complaint procedures, turnover and employment claims."),
+    "qn_do_governance":            _questionnaire_fact("D&O: entity ownership, board / governance, funding, debt, financial changes and known disputes."),
+    "qn_professional_controls":    _questionnaire_fact("Professional liability: professional services, contracts, project / client concentration, quality controls and claims."),
+    "qn_ebl_administration":       _questionnaire_fact("Employee Benefits Liability: benefit plans administered, enrollment / eligibility procedures, third-party administrators and known administrative errors."),
+    "qn_specialty_property":       _questionnaire_fact("Specific insured property, activities, locations, values, custody / control, transit and catastrophe exposure."),
+    "qn_crime_controls":           _questionnaire_fact("Crime: funds-transfer approval, segregation of duties, employee dishonesty and social engineering controls."),
+    "qn_pollution_exposure":       _questionnaire_fact("Pollution: materials handled, disposal practices, historical incidents and remediation obligations."),
+    "qn_other_exposures":          _questionnaire_fact("Any other unusual exposures or requested endorsements not captured above?"),
+    "qn_submission_reason":        _questionnaire_fact("Why is this account being submitted now, and what coverage outcome is requested?"),
+    "qn_top_strengths":            _questionnaire_fact("What are the top three risk strengths and supporting evidence?"),
+    "qn_top_concerns":             _questionnaire_fact("What are the top three material underwriting concerns and how are they mitigated?"),
+    "qn_changes_since_prior":      _questionnaire_fact("What has changed since the prior policy period, and what must the underwriter know?"),
+    "qn_outstanding_plan":         _questionnaire_fact("What information is still outstanding, who owns it and when will it be provided?"),
+    # The carrier-facing narrative the producer APPROVED (C110): written by
+    # `questionnaire.approve_narrative`, printed first on ACORD 101's remarks.
+    "qn_carrier_narrative":        _questionnaire_fact("The approved carrier-facing submission narrative."),
 
 }
 

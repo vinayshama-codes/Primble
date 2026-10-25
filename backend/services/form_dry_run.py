@@ -425,6 +425,14 @@ def _probe_values(route: dict) -> List[str]:
         except Exception:                                      # noqa: BLE001
             opts = []
         out.extend(opts[:1])
+        # A fact that takes a percentage fills its percent box only with one
+        # (ACORD 160's earthquake "%" box, Z33-PERCENT).
+        try:
+            from services.fact_registry import takes_amount_or_percent
+            if takes_amount_or_percent(fact):
+                out.append("2%")
+        except Exception:                                      # noqa: BLE001
+            pass
         low = fact.lower()
         out.extend(v for k, v in _SHAPE_PROBES if k in low)
         out.extend(_GENERIC_PROBES)

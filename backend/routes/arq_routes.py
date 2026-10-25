@@ -31,6 +31,7 @@ from services.arq_service import (
     save_arq_draft,
     save_session_schedule,
     send_arq_reminder,
+    served_field_type,
     submit_arq_answers,
 )
 from services.arq_service import recalculate_session_scores
@@ -252,11 +253,32 @@ async def send_arq(
     current_user: dict = Depends(get_current_user),
 ):
     body = await request.json()
+    return JSONResponse(await send_questions_to_client(
+        session_id=body.get("session_id", ""),
+        client_email=body.get("client_email", ""),
+        client_name=body.get("client_name", ""),
+        questions=body.get("questions", []),
+        current_user=current_user,
+    ))
 
-    session_id   = _sanitize_str(body.get("session_id", ""), 128)
-    client_email = _sanitize_str(body.get("client_email", ""), 254).lower()
-    client_name  = _sanitize_str(body.get("client_name", ""), 100)
-    questions    = body.get("questions", [])
+
+async def send_questions_to_client(
+    session_id: str,
+    client_email: str,
+    client_name: str,
+    questions: list,
+    current_user: dict,
+) -> dict:
+    """THE one way a questionnaire reaches the insured: guard, sanitize, store
+    the ARQ, e-mail the link, log the activity. `POST /api/arq/send` and the
+    narrative questionnaire page's "Send to client" (23 Oct 2026,
+    `routes/questionnaire_routes`) both come through here, so there is one
+    mailer and one set of guards. Raises HTTPException exactly as the route
+    always has; returns the route's response body."""
+    session_id   = _sanitize_str(session_id or "", 128)
+    client_email = _sanitize_str(client_email or "", 254).lower()
+    client_name  = _sanitize_str(client_name or "", 100)
+    questions    = questions if isinstance(questions, list) else []
 
     if not session_id:
         raise HTTPException(400, "session_id is required")
@@ -355,6 +377,14 @@ async def send_arq(
             q_entry[SHOW_IF_KEY] = _cond
             q_entry[FOLLOW_UP_OF_KEY] = _cond["field"]
 
+        # A per-location question ("@loc2", 22 Oct 2026) keeps the row it named,
+        # so the apply never writes onto another row if the list moved
+        # (`premises_interest.row_is_still`). It can only ever stop a write.
+        from services.premises_interest import ROW_ADDRESS_KEY, ROW_BUILDING_KEY
+        for _rk in (ROW_ADDRESS_KEY, ROW_BUILDING_KEY):
+            if _rk in q:
+                q_entry[_rk] = _sanitize_str(str(q.get(_rk) or ""), 200)
+
         # Chat 5 - confirm-or-correct. A confirm question carries the value we
         # already hold so the client can say "that is right" or fix it. The
         # value is REBUILT from the session's own facts, never trusted from the
@@ -450,13 +480,13 @@ async def send_arq(
         {"client_first": _client_first, "question_count": len(clean_questions)},
     )
 
-    return JSONResponse({
+    return {
         "success":    True,
         "arq_id":     arq_data["arq_id"],
         "email_sent": email_sent,
         "expires_at": arq_data["expires_at"],
         "link":       arq_link,
-    })
+    }
 
 
 @router.get("/client-view/{token}")
@@ -522,7 +552,10 @@ async def client_view(token: str, request: Request):
             "question":      q["question"],
             "hint":          q.get("hint", ""),
             "forms":         q.get("forms", ""),
-            "field_type":    q.get("field_type", "text"),
+            # The box the submit checks against (`served_field_type`): an
+            # amount-or-percent fact's question takes "2%" even if it was sent
+            # before 22 Oct 2026 as a dollar or text box.
+            "field_type":    served_field_type(q),
             "code_digits":   q.get("code_digits") or 0,
             "current_value": "",
         }
@@ -663,6 +696,50 @@ async def save_draft(token: str, request: Request):
     return JSONResponse({"success": True})
 
 
+def client_term_dates(questions: list, answers: dict) -> dict:
+    """{question field_name: (fact key, answer)} for the proposed-term dates a
+    client's answers GIVE - a sent question whose field resolves to
+    `effective_date` / `expiration_date`, answered with a value (never "I'm not
+    sure", a confirmation, a table or a signature). A form box counts only when
+    it writes the proposed term on one of the question's forms (never a
+    certificate's or an underlying policy's date box); a question asked as the
+    fact itself still counts. The rule is `arq_service.client_answer_fact`, the
+    one the apply writes the fact by, so the two cannot drift."""
+    from services.arq_service import client_answer_fact, is_not_sure_value
+    from services.pdf_service import PROPOSED_TERM_FACTS
+    out: dict = {}
+    for q in questions or []:
+        if not isinstance(q, dict) or q.get("field_type") == "signature":
+            continue
+        name = q.get("field_name")
+        val = str((answers or {}).get(name) or "").strip()
+        if (not name or not val or is_not_sure_value(val) or confirm_known.is_confirmed_value(val)
+                or schedule_capture.is_schedule_answer_key(name)):
+            continue
+        key = client_answer_fact(name, q.get("form_ids"))
+        if key in PROPOSED_TERM_FACTS:
+            out[name] = (key, val)
+    return out
+
+
+async def _client_term_refusal(arq: dict, answers: dict) -> dict:
+    """{field_name: refusal} when the client's dates would leave the proposed
+    term backwards or ended (the term judged is the one the save LEAVES:
+    supplied over stored); {} otherwise or when no date is given."""
+    given = client_term_dates(arq.get("questions") or [], answers)
+    if not given:
+        return {}
+    try:
+        proc = await get_processing_session(arq.get("session_id")) or {}
+    except Exception:                                          # noqa: BLE001
+        proc = {}
+    from routes.audit_routes import _term_save_refusal
+    same_save = {key: val for key, val in given.values()}
+    key, val = next(iter(given.values()))
+    err = _term_save_refusal(proc.get("facts") or {}, key, val, same_save)
+    return {name: err for name in given} if err else {}
+
+
 @router.post("/submit/{token}")
 async def submit_arq(token: str, request: Request):
     client_ip = get_client_ip(request)
@@ -696,6 +773,19 @@ async def submit_arq(token: str, request: Request):
     if not arq:
         return JSONResponse({"success": False, "message": "Questionnaire not found."}, status_code=404)
 
+    # A client's answers that would leave the proposed term backwards or
+    # already ended are refused like a producer's (22 Oct 2026, the one door
+    # `validators.term_save_refusal`). Same 422 + field_errors shape the page
+    # already renders; nothing is written.
+    if arq.get("status") != "submitted":
+        _term_errors = await _client_term_refusal(arq, sanitized_answers)
+        if _term_errors:
+            return JSONResponse(
+                {"success": False, "message": "Some answers need a small correction before we can submit.",
+                 "field_errors": _term_errors},
+                status_code=422,
+            )
+
     ok, msg, updated_fields, field_errors = await submit_arq_answers(
         token=token,
         raw_answers=sanitized_answers,
@@ -717,6 +807,13 @@ async def submit_arq(token: str, request: Request):
     if not ok:
         return JSONResponse({"success": False, "message": msg}, status_code=400)
 
+    # The row before the answers land, so the recalculation below can re-run
+    # the form recommender before forms when an answer moved it (Z36 review).
+    # The refreshed list is stored for the producer, never sent to the client.
+    try:
+        _row_before = await get_processing_session(arq["session_id"])
+    except Exception:                                          # noqa: BLE001
+        _row_before = None
     apply_ok, applied_fields = await apply_arq_answers_to_session(
         arq_id=arq["id"],
         processing_session_id=arq["session_id"],
@@ -744,7 +841,7 @@ async def submit_arq(token: str, request: Request):
         try:
             from services.arq_service import CLIENT_ANSWERS_TRIGGER
             score_update = await recalculate_session_scores(
-                arq["session_id"], trigger=CLIENT_ANSWERS_TRIGGER,
+                arq["session_id"], trigger=CLIENT_ANSWERS_TRIGGER, before=_row_before,
             )
         except Exception as _recalc_ex:
             logger.error(f"ARQ submit: score recalculation failed: {_recalc_ex}", exc_info=True)
@@ -871,6 +968,7 @@ _ANSWER_TYPE_HELP = {
     "text":     "free text",
     "number":   "a number",
     "currency": "a dollar amount, e.g. $250,000",
+    "amount_or_percent": "a dollar amount or a percentage, e.g. $5,000 or 2%",
     "date":     "a date written MM/DD/YYYY",
     "code":     "a numeric code",
     "select":   "one of the listed options, nothing else",
@@ -890,7 +988,7 @@ def _assistant_field_block(q: dict) -> str:
     if hint:
         lines.append(f"GUIDANCE ALREADY ON SCREEN: {hint}")
 
-    ft = q.get("field_type") or "text"
+    ft = served_field_type(q)                 # the box the client page draws
     lines.append(f"ANSWER TYPE: {_ANSWER_TYPE_HELP.get(ft, ft)}")
 
     if ft == "code" and q.get("code_digits"):
@@ -1385,15 +1483,19 @@ async def save_session_schedule_route(
     # not turn a persisted change into a 500. `recalculate_session_scores`
     # keeps the last good score on its own failure (H1-G) and re-applies
     # outstanding dismissal credits (F5).
+    _form_list: dict = {}
     try:
-        from services.arq_service import recalculate_session_scores
-        await recalculate_session_scores(session_id)
+        from services.arq_service import recalculate_session_scores, refreshed_form_list
+        # `before=`: before forms, a table the recommender reads re-runs it, and
+        # the new list rides along only when it changed (Z36 review).
+        _impact = await recalculate_session_scores(session_id, before=proc_session)
+        _form_list = refreshed_form_list(_impact, await get_processing_session(session_id))
     except Exception as _re:
         logger.error(
             f"save_session_schedule_route: rescore failed (non-fatal): {_re}",
             exc_info=True,
         )
-    return JSONResponse({"success": True, **result})
+    return JSONResponse({"success": True, **result, **_form_list})
 
 
 # Small in-process cache: a fleet import decodes many VINs at once and the same

@@ -932,10 +932,217 @@ def is_abbreviation_heading(value: Any) -> bool:
     return all(_ABBREVIATION_TOKEN_RE.match(t) for t in toks)
 
 
+# ── A PERSON IN A ROLE IS NOT THE INSURED (21 Oct 2026) ──────────────────────
+# Brent's Choice Electric test of 17 Oct (session ecab28dd, 25sepChanges.md Z29
+# item 4): a handwritten narrative reads "I met with Eric / Berger owner of
+# Choice Electric", and extraction took "Berger Owner of Choice Electric" as the
+# narrative's applicant name. `same_entity_name` rightly says that is not CHOICE
+# ELECTRIC LLC, so a Data Consistency name conflict - "documents name different
+# companies", a hard stop (60) - came out of a sentence naming a PERSON and the
+# job he holds AT the insured. Same family as a role label ("Certificate
+# Holder") and a column heading ("S.B. MO."): a value in an insured-name fact
+# that is not the insured.
+#
+# STRUCTURAL - the WHOLE value must read
+#     [title] <person, 1-4 words> <job title> of | at | for <organisation>
+# * the job title holds a ROLE word, singular ("owner", "managing member",
+#   "chief executive officer"); a plural names a GROUP ("Partners of Michigan
+#   Inc", "The Members of X Association");
+# * at least one PERSON word stands in front of it - no article or function
+#   word, no business or legal-form word (this module's own company vocabulary,
+#   `_glue_words`), no other role word: "Owner Operator Trucking LLC",
+#   "President Homes LLC", "Principal Financial Group" and "Director Supply Co"
+#   carry none (and no "of / at / for" after the role either), and a job title
+#   with nobody in front ("Property Manager of Detroit LLC") stays a name;
+# * a fiduciary capacity is NOT a role here: "John Smith, Trustee of the Smith
+#   Family Trust" and "Jane Doe, Executor of the Estate of John Doe" are how a
+#   trust or an estate IS named on a policy; nor is a profession ("Attorney at
+#   Law").
+# Never a reading of prose: a sentence fails the person part at its first
+# non-name word ("Choice Electric LLC is owned by ...", "I met with ...").
+_PERSON_ROLE_WORDS: FrozenSet[str] = frozenset({
+    "owner", "coowner", "proprietor", "president", "vp", "ceo", "cfo", "coo", "cto",
+    "cio", "founder", "cofounder", "manager", "member", "partner", "principal",
+    "director", "officer", "agent", "employee", "operator", "chairman", "chairwoman",
+    "chairperson", "secretary", "treasurer", "superintendent", "foreman", "supervisor",
+    "executive", "representative", "controller", "comptroller", "shareholder",
+    "stockholder", "estimator", "bookkeeper",
+})
+# Words that qualify a role inside a job title - "VICE president", "MANAGING
+# member", "CHIEF financial officer", "OFFICE manager", "CO-owner".
+_PERSON_ROLE_MODIFIERS: FrozenSet[str] = frozenset({
+    "co", "vice", "managing", "general", "assistant", "associate", "senior", "junior",
+    "chief", "deputy", "acting", "interim", "regional", "district", "area", "branch",
+    "store", "office", "project", "property", "operations", "operating", "sales",
+    "account", "plant", "safety", "risk", "finance", "financial", "technology",
+    "information", "marketing", "human", "resources", "sole", "majority", "minority",
+    "founding", "lead", "business", "home", "corporate",
+})
+_PERSON_ROLE_CONNECTORS = frozenset({"and", "&"})
+_PERSON_ROLE_PREPOSITIONS = frozenset({"of", "at", "for"})
+_PERSON_TITLES = frozenset({"mr", "mrs", "ms", "miss", "mx", "dr", "sir"})
+# Words no person's name is made of: articles, pronouns, connectors, the verbs a
+# note puts in front of a name, and the party / role nouns of a policy.
+_NOT_A_PERSON_WORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "at", "for", "to", "by", "with", "from", "in",
+    "on", "as", "per", "via", "is", "was", "are", "were", "be", "been", "i", "we", "you",
+    "he", "she", "they", "it", "me", "us", "him", "her", "them", "my", "our", "your",
+    "his", "their", "its", "this", "that", "these", "those", "met", "spoke", "talked",
+    "contact", "attn", "attention", "named", "insured", "applicant", "producer",
+    "carrier", "insurer", "certificate", "holder", "additional", "interest", "landlord",
+    "lessor", "lessee", "tenant", "mortgagee", "owned", "operated", "aka", "fka", "nka",
+})
+_PERSON_ROLE_SPLIT_RE = re.compile(r"[\s,;:()\[\]{}/\\|\"\u2013\u2014-]+")
+_PERSON_WORD_RE = re.compile(r"[a-z][a-z']*[a-z]")
+_PERSON_ROLE_MAX_TOKENS = 16
+
+
+# The organisation a person serves can END in a legal-form or body designator.
+# Then the value may just as well be a company NAMED that way ("Lord Agent of
+# Change LLC", "Hope Agent of Mercy Foundation") - review of 21 Oct 2026 - so it
+# reads as a person only when punctuation sets the person apart from the title
+# ("Eric Berger, Managing Member of Choice Electric LLC").
+_ORG_DESIGNATORS = frozenset({
+    "llc", "inc", "co", "corp", "corporation", "company", "companies", "ltd", "limited",
+    "lp", "llp", "pc", "pllc", "plc", "pa", "na", "incorporated", "foundation", "church",
+    "association", "trust", "society", "institute", "ministries", "fund",
+})
+_ORG_FILLER = frozenset({"the", "a", "an", "of", "and", "&"})
+_PERSON_TITLE_BREAK_RE = re.compile(r"[,;:()\u2013\u2014-]")
+
+
+def _person_role_tokens(value: str, with_breaks: bool = False):
+    """The value's words, lower case. `with_breaks`: also, per word, whether
+    punctuation (a comma, a dash, a bracket) stands right before it."""
+    toks: List[str] = []
+    breaks: List[bool] = []
+    text = value.replace("&", " & ").lower()
+    pos, pending = 0, False
+    for m in re.finditer(r"[^\s,;:()\[\]{}/\\|\"\u2013\u2014-]+", text):
+        pending = pending or bool(_PERSON_TITLE_BREAK_RE.search(text[pos:m.start()]))
+        pos = m.end()
+        tok = m.group(0).strip("'`")
+        if not re.fullmatch(r"[a-z]\.", tok):          # an initial keeps its dot ("j.")
+            tok = tok.strip(".")
+        if tok:
+            toks.append(tok)
+            breaks.append(pending)
+            pending = False
+    return (toks, breaks) if with_breaks else toks
+
+
+def _is_person_word(tok: str) -> bool:
+    """A word a person's name can be made of - an initial ("J.", "J") or a word
+    that is no function word, business / legal-form word or role word."""
+    if re.fullmatch(r"[a-z]\.?", tok):
+        return tok.endswith(".") or tok not in ("a", "i")
+    if not _PERSON_WORD_RE.fullmatch(tok):
+        return False
+    return (tok not in _NOT_A_PERSON_WORDS and tok not in _glue_words()[0]
+            and tok not in _PERSON_ROLE_WORDS and tok not in _PERSON_ROLE_MODIFIERS)
+
+
+def is_person_in_a_role(value: Any) -> bool:
+    """True when `value` names a PERSON in his job at an organisation -
+    "Berger Owner of Choice Electric", "Eric Berger, Managing Member of Choice
+    Electric LLC" - never a company named after a role ("Owner Operator Trucking
+    LLC", "Partners of Michigan Inc"). See the note above."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    toks, breaks = _person_role_tokens(value, with_breaks=True)
+    if not toks or len(toks) > _PERSON_ROLE_MAX_TOKENS:
+        return False
+    i = 0
+    while i < len(toks) and toks[i] in _PERSON_TITLES:
+        i += 1
+    start = i
+    role_or_modifier = _PERSON_ROLE_WORDS | _PERSON_ROLE_MODIFIERS
+    while i < len(toks) and toks[i] not in role_or_modifier:
+        if not _is_person_word(toks[i]):
+            return False
+        i += 1
+    if not 1 <= i - start <= 4:
+        return False
+    j = i
+    while j < len(toks) and (toks[j] in role_or_modifier or toks[j] in _PERSON_ROLE_CONNECTORS):
+        j += 1
+    title = toks[i:j]
+    if not title or title[0] in _PERSON_ROLE_CONNECTORS or title[-1] in _PERSON_ROLE_CONNECTORS:
+        return False
+    if not any(t in _PERSON_ROLE_WORDS for t in title):
+        return False
+    if j >= len(toks) or toks[j] not in _PERSON_ROLE_PREPOSITIONS:
+        return False
+    org = [t for t in toks[j + 1:] if re.search(r"[a-z0-9]", t) and t not in _ORG_FILLER]
+    if not org:
+        return False
+    if breaks[i]:
+        return True                    # "Eric Berger, Owner of ..." - set apart
+    # Run together ("Berger Owner of Choice Electric") the value must read as a
+    # person: the organisation names no legal form or body of its own ("Lord
+    # Agent of Change LLC" is a company) and is more than one word ("Michigan
+    # Secretary of State", "Liberty Agent for Change" are names).
+    return org[-1] not in _ORG_DESIGNATORS and len(org) >= 2
+
+
 def is_not_a_party_name(value: Any) -> bool:
-    """True when a value in an insured-name fact names nobody: a party ROLE
-    ("Certificate Holder") or a column heading ("S.B. MO.")."""
-    return is_party_role_label(value) or is_abbreviation_heading(value)
+    """True when a value in an insured-name fact names no insured: a party ROLE
+    ("Certificate Holder"), a column heading ("S.B. MO."), a PERSON IN A ROLE
+    ("Berger Owner of Choice Electric", 21 Oct 2026) or a PLACEHOLDER ("FIO",
+    "TBD", "Sample", "N/A", 22 Oct 2026 - `is_party_placeholder`). The one
+    insured-name door: the per-document drop, the merge vote and its floor, the
+    identity checks, Submission Integrity, `insured_scope` and the Documents
+    list all ask it."""
+    return (is_party_role_label(value) or is_abbreviation_heading(value)
+            or is_person_in_a_role(value) or is_party_placeholder(value))
+
+
+# ── A PLACEHOLDER IS NOT A PARTY (22 Oct 2026, Orbin "Not done") ────────────
+# What a document prints in a party's PLACE when it names nobody, beside the
+# role words of `_PARTY_ROLE_LABELS`: a certificate's informational disclaimer
+# and its initialism (the Orbin COI's holder was "FIO" - an initialism reads
+# exactly like "3M", "EMC" or "CRS", so the shape test `names_a_party` passed
+# it), a deferral ("to be determined", "TBA") and a specimen marker ("Sample",
+# "Void"). Plus everything that carries no information at all - the one door
+# for that, `answer_semantics.is_placeholder_text` ("N/A", "unknown", "--").
+#
+# WHOLE VALUES ONLY, like the role words: "Various Builders LLC", "Sample
+# Electric Inc", "Void Studios LLC", "FIO Holdings LLC" and "TBA Electric" are
+# names. A spaced or dotted initialism ("F.I.O.", "F I O") is the same word.
+# Kept apart from `is_party_role_label` on purpose: Guard 3c reads that one on
+# every gap-filled box and reports "a party ROLE".
+_PARTY_PLACEHOLDERS: FrozenSet[str] = frozenset({
+    "for informational purposes only", "for information purposes only",
+    "for informational purpose only", "for informational purposes",
+    "for information purposes", "for information only", "for info only",
+    "informational purposes only", "information purposes only",
+    "informational only", "information only", "fio", "fipo",
+    "to be determined", "to be announced", "to be advised", "to be confirmed",
+    "to be named", "to be provided", "tbd", "tba", "tbc", "tbn",
+    "sample", "specimen", "void", "voided", "sample only", "specimen only",
+})
+
+
+def is_party_placeholder(value: Any) -> bool:
+    """True when the WHOLE value holds a party's place without naming one -
+    "FIO", "For Informational Purposes Only", "TBD", "Sample", "Void", or a
+    value that carries no information ("N/A", "Unknown", "--"). Never true of a
+    name that merely contains such a word. See the note above."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    s = re.sub(r"[^a-z0-9 ]+", " ", value.strip().lower())
+    s = re.sub(r"\s+", " ", s).strip()
+    if s in _PARTY_PLACEHOLDERS:
+        return True
+    toks = s.split()
+    if len(toks) > 1 and all(len(t) == 1 for t in toks) \
+            and "".join(toks) in _PARTY_PLACEHOLDERS:
+        return True                          # "F.I.O." / "F I O" = "FIO"
+    try:
+        from services.answer_semantics import is_placeholder_text
+        return bool(is_placeholder_text(value))
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 # ── A VEHICLE'S USE / RADIUS IS NOT WHAT THE BUSINESS DOES (13 Oct 2026) ──────
@@ -957,9 +1164,6 @@ _VEHICLE_USE_ONLY_WORDS = frozenset({
 _VEHICLE_USE_WORDS = _VEHICLE_USE_ONLY_WORDS | frozenset({
     "service", "commercial", "retail", "business", "personal", "pleasure", "farm",
     "use", "miles", "mile", "mi", "of", "to", "and",
-})
-_PERSON_FACT_SOURCES = frozenset({
-    "producer", "client", "client_arq", "user", "manual", "user_confirmed",
 })
 
 
@@ -984,16 +1188,54 @@ def description_restates_vehicle_use(description: Any, vehicle_use: Any) -> bool
     return bool(use_words) and use_words <= desc_words
 
 
+# Z37 (W2, 24 Oct 2026): "Business auto coverage for a fleet of vehicles garaged
+# in Denver, Colorado." printed as the business description on ACORD 125 / 130 /
+# both 131s - the model's summary of the AUTO POLICY. Talk of coverage, a policy
+# or where autos are garaged describes the insurance, not the business. Two
+# conditions, both required: that vocabulary AND words the documents do not
+# print (a printed description always stands). One reading for the merge's
+# per-document pass and the AI fill's guard.
+# Strong talk names the insurance itself; one weak word ("policies", "garaged",
+# a bare "coverage") is also ordinary business wording - an insurance agency
+# "selling commercial policies", a trucker's "tractors garaged at the Denver
+# terminal", a guard firm's "24/7 coverage" - so it takes two of them.
+_COVERAGE_TALK_RE = re.compile(
+    r"\b(?:covered\s+autos?|declarations|endorsements?|insured\s+under|"
+    r"(?:auto(?:mobile)?|liability|property|umbrella|excess|physical\s+damage|"
+    r"compensation|hired|non-?owned)\s+coverages?)\b", re.I)
+_COVERAGE_TALK_WEAK_RE = re.compile(r"\b(coverages?|polic(?:y|ies)|garaged)\b", re.I)
+
+
+def _folded_words(text: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+def describes_insurance_not_business(value: Any, document_text: Any) -> bool:
+    """True when `value`, offered as what the business does, talks about the
+    insurance (coverage / policy / garaging) in words `document_text` does not
+    print. False for an empty value or no text to judge against."""
+    text = str(value or "").strip()
+    if not text or not str(document_text or "").strip():
+        return False
+    weak = {re.sub(r"(?:ies|s)$", "", w.lower()) for w in _COVERAGE_TALK_WEAK_RE.findall(text)}
+    if not _COVERAGE_TALK_RE.search(text) and len(weak) < 2:
+        return False
+    words = _folded_words(text)
+    return bool(words) and words not in _folded_words(document_text)
+
+
 def vehicle_use_as_operations(facts: Any) -> bool:
     """The ONE ruling (scorer, stamper, fix-window pre-fill, questionnaire):
     the package's operations description is its vehicles' use class and no
-    person stated or confirmed it - so it is not an answer."""
+    person stated or confirmed it - so it is not an answer. Who stated or
+    confirmed it is the one door's call, `fact_state.confirmed_by_person`
+    (21 Oct 2026, review L1)."""
     if not isinstance(facts, dict):
         return False
     raw = facts.get("operations_description")
     env = raw if isinstance(raw, dict) else {}
-    if str(env.get("source") or "").lower() in _PERSON_FACT_SOURCES \
-            or str(env.get("evidence_state") or "").lower() == "user_confirmed":
+    from services.fact_state import confirmed_by_person
+    if confirmed_by_person(raw):
         return False
     use = facts.get("auto_vehicle_use")
     use = use.get("value") if isinstance(use, dict) else use
@@ -2023,6 +2265,160 @@ def normalize_fein(value: Any) -> str:
     return digits if len(digits) == 9 else ""
 
 
+# ── A STATED PERCENTAGE (22 Oct 2026, Z33-PERCENT) ───────────────────────────
+# A wind / hail or earthquake deductible is printed as a share of the insured
+# value ("2%", "2% of TIV", "1.5 percent"). A value whose FIRST figure carries a
+# percent unit is a percentage, never that many dollars. The one reader for
+# every door that must tell the two apart: a person's answer (the amount-or-
+# percent check in `fact_registry`, `answer_semantics`, the client page's
+# normalizer `arq_service._normalize_amount_or_percent` and its JavaScript twin
+# `frontend/src/utils/answerFormats.js`), the dec-entry backfill, the stamper's
+# amount / percent boxes and the money readers. The first figure decides:
+# "$25,000 or 2%" is a dollar statement, "2% / $25,000 minimum" a percentage.
+# A minus sign counts only when it touches the figure ("-2%"); "Wind - 2%" is a
+# separator.
+#
+# A FRACTION IS ONE FIGURE (22 Oct 2026, Z33-PERCENT review). A dec page prints
+# a wind deductible "1-1/2%" or "1½%" as often as "1.5%", and the reader took
+# its first figure "1" - no unit after it, so no percentage, and the ACORD 160
+# amount box printed "$ 1-1/2%". A whole number with a proper fraction
+# ("1-1/2", "1 1/2"), a fraction glyph ("1½", "½") or a plain fraction ("1/2")
+# is read as one figure when its decimal is exact in six places (the
+# denominator divides 10**6), so the "1.5%" it is written as is the same
+# number. A date's "12/31", "80/90" or "1/3" is no such fraction, and a range
+# ("1-2%") is still no percentage: its first figure "1" carries no unit.
+#
+# ASCII on purpose: the browser twin (`frontend/src/utils/answerFormats.js`)
+# reads ASCII digits and glues a figure only to an ASCII word character.
+_FRACTION_GLYPHS = {"½": (1, 2), "¼": (1, 4), "¾": (3, 4), "⅕": (1, 5), "⅖": (2, 5),
+                    "⅗": (3, 5), "⅘": (4, 5), "⅛": (1, 8), "⅜": (3, 8), "⅝": (5, 8),
+                    "⅞": (7, 8), "⅒": (1, 10)}
+_FIRST_FIGURE_RE = re.compile(
+    r"(?<![\w.,])(?P<sign>[-−–])?"
+    r"(?P<num>\d+(?:-| +)\d+/\d+"
+    r"|(?:\d+ ?)?[" + "".join(_FRACTION_GLYPHS) + r"]"
+    r"|\d+/\d+"
+    r"|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)", re.ASCII)
+# The word ends where an ASCII word character does not follow - JavaScript's
+# \b, so the browser twin ends "percent" at the same place.
+_PERCENT_UNIT = r"\s*(?:%|percent(?![A-Za-z0-9_])|per\s*cent(?![A-Za-z0-9_])|pct(?![A-Za-z0-9_])\.?)"
+_PERCENT_UNIT_RE = re.compile(_PERCENT_UNIT, re.I)
+# A figure's last character, then a percent unit: the value speaks of a
+# percentage whether or not the reader takes that figure as one ("2,5 percent",
+# "$25,000 or 2%", "1-2%").
+_MENTIONS_PERCENT_RE = re.compile(r"[0-9" + "".join(_FRACTION_GLYPHS) + r"]" + _PERCENT_UNIT, re.I)
+
+
+def opens_with_percent_unit(text: Any) -> bool:
+    """True when `text` starts with a percent unit ("%", " percent", "per
+    cent", "pct") - the words that make the figure before them a percentage."""
+    return bool(_PERCENT_UNIT_RE.match(str(text if text is not None else "")))
+
+
+def mentions_a_percentage(value: Any) -> bool:
+    """True when any figure of the value is followed by a percent unit, read as
+    a percentage or not: "$25,000 or 2%" (whose FIRST figure is a dollar
+    amount, so `stated_percentage` is None), "2,5 percent", "2%" - never
+    "$2,500" or "2 per month". A door that reads such a value as dollars keeps
+    only its first figure, so it does not read it at all."""
+    if value is None or isinstance(value, (bool, int, float, list, dict)):
+        return False
+    return bool(_MENTIONS_PERCENT_RE.search(str(value)))
+
+
+def _figure_value(num: str) -> Optional[float]:
+    """The number one figure of `_FIRST_FIGURE_RE` states, or None for a
+    fraction that is not proper with an exact six-place decimal."""
+    glyph = _FRACTION_GLYPHS.get(num[-1:])
+    if glyph is not None:
+        whole_text, (n, d) = num[:-1].strip(), glyph
+    elif "/" in num:
+        head, den = num.rsplit("/", 1)
+        parts = re.split(r"[- ]+", head)
+        whole_text = parts[0] if len(parts) == 2 else ""
+        n, d = int(parts[-1]), int(den)
+    else:
+        try:
+            return float(num.replace(",", ""))
+        except ValueError:
+            return None
+    if not 0 < n < d or 10 ** 6 % d:
+        return None
+    return float(f"{(int(whole_text) if whole_text else 0) + n / d:.6f}")
+
+
+def _figure_text(number: float) -> str:
+    return (str(int(number)) if number.is_integer()
+            else f"{number:.6f}".rstrip("0").rstrip("."))
+
+
+def stated_percentage(value: Any) -> Optional[Dict[str, Any]]:
+    """{"number": 2.0, "figure": "2", "text": "2% of TIV", "plain": False,
+    "before": "", "after": " of TIV"} when the value's first figure is printed
+    as a percentage, else None.
+
+    `text` is the value with that figure written "<n>%" ("2 %", "2 percent",
+    "2.0 pct", "1-1/2%" -> "2%" / "1.5%") and everything around it kept as
+    written (`before` / `after`); `plain` is True when nothing else is there. A
+    "$" written straight before the figure is dropped: "$2 %" is what the old
+    dollar box made of "2%" (22 Oct 2026). `number` keeps its sign, so a caller
+    that takes a person's answer refuses "-2%" and "200%" itself (0 to 100). A
+    figure glued to a word ("A2%") is not read."""
+    if value is None or isinstance(value, (bool, int, float, list, dict)):
+        return None
+    s = str(value).strip()
+    m = _FIRST_FIGURE_RE.search(s)
+    if not m:
+        return None
+    unit = _PERCENT_UNIT_RE.match(s, m.end("num"))
+    if not unit:
+        return None
+    number = _figure_value(m.group("num"))
+    if number is None:
+        return None
+    if m.group("sign"):
+        number = -number
+    figure = _figure_text(number)
+    # A minus sign or currency letters straight before the "$" ("-$2%",
+    # "US$2%") would be reshaped into "-2%" / "US2%" by dropping it: refused
+    # (review C, 22 Oct 2026).
+    if re.search(r"(?:[-−–]|[A-Za-z])\$\s*$", s[:m.start()]):
+        return None
+    before, after = re.sub(r"\$\s*$", "", s[:m.start()]), s[unit.end():]
+    text = re.sub(r"\s+", " ", f"{before}{figure}%{after}").strip()
+    return {"number": number, "figure": figure, "text": text,
+            "plain": not before.strip() and not after.strip(),
+            "before": before, "after": after}
+
+
+# A BARE FIGURE ON AN AMOUNT-OR-PERCENT DEDUCTIBLE (22 Oct 2026, owner's call).
+# The deductible basis check (`cross_form_validator._deductible_basis_evident`)
+# already reads a bare amount of 100 or more as flat dollars ("a percentage
+# deductible is never 100 or more") and a smaller bare number on a wind /
+# earthquake deductible as that peril's percentage column. A person's bare "2"
+# for such a fact is read by the same line: under 100 it is "2%", 100 or more
+# dollars as before. Anything carrying a "$" (or a comma, a word, a k / m) is
+# not bare and stays dollars. Twin: `frontend/src/utils/answerFormats.js`
+# `bareFigurePercent`.
+PERCENT_DEDUCTIBLE_CEILING = 100
+_BARE_FIGURE_RE = re.compile(r"\d+(?:\.\d+)?|\.\d+", re.ASCII)
+
+
+def bare_figure_as_percentage(value: Any) -> Optional[Dict[str, Any]]:
+    """`stated_percentage` of "<value>%" when `value` is a bare plain figure
+    ("2", "1.5", ".5") under `PERCENT_DEDUCTIBLE_CEILING`, else None. A
+    fraction ("1-1/2", "½") is read as before."""
+    if value is None or isinstance(value, (bool, list, dict)):
+        return None
+    s = str(value).strip()
+    if not s or not _BARE_FIGURE_RE.fullmatch(s):
+        return None
+    got = stated_percentage(f"{s}%")
+    if got is None or not got["plain"] or not 0 <= got["number"] < PERCENT_DEDUCTIBLE_CEILING:
+        return None
+    return got
+
+
 def normalize_general(value: Any) -> str:
     """General fallback for any scalar field with no dedicated normalizer.
 
@@ -2041,11 +2437,37 @@ def normalize_general(value: Any) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     for variant, canon in _GENERAL_SYNONYMS_SORTED:
         s = re.sub(rf"\b{re.escape(variant)}\b", canon, s)
-    # Drop insignificant trailing decimals: 1000000.00 -> 1000000, 12.50 -> 12.5
-    s = re.sub(r"(\d)\.0+\b", r"\1", s)
-    s = re.sub(r"(\d\.\d*?)0+\b", r"\1", s)
-    s = re.sub(r"(\d)\.\b", r"\1", s)
-    return re.sub(r"\s+", " ", s).strip()
+    return re.sub(r"\s+", " ", _canonical_figures(s)).strip()
+
+
+# A DECIMAL POINT IS PART OF ITS NUMBER (22 Oct 2026, Z33-PERCENT review). The
+# last of the three rules this replaced was `(\d)\.\b`, which deleted every
+# decimal point a DIGIT follows: "2.5" became "25", so "$2.5M" and "$25M",
+# "2.5%" and "25%", "1.05" and "105" were one comparison key, and a client's
+# "25%" replaced a document's "2.5%" without being held. It never touched the
+# point that ends a sentence ("1,000." stayed "1000." against "1000"). Each
+# figure is now read whole:
+#   * one point between digits is a decimal point: it stays, and insignificant
+#     trailing zeros go ("12.50" -> "12.5", "1,000,000.00" -> "1000000",
+#     "$1.0M" -> "1m");
+#   * two or more points join an identifier's digit groups ("555.123.4567",
+#     "1.000.000"): its digits compare (the phone always did; "1.000.000" was
+#     cut to "1." by the zero rule);
+#   * a point no digit follows ends the sentence ("1,000." -> "1000");
+#   * a leading point is a decimal ("$.5M" -> "0.5m").
+_DOTTED_DIGITS_RE = re.compile(r"\d+(?:\.\d+)+")
+
+
+def _canonical_figures(s: str) -> str:
+    def _figure(m: "re.Match") -> str:
+        whole, *fracs = m.group(0).split(".")
+        if len(fracs) > 1:
+            return whole + "".join(fracs)
+        frac = fracs[0].rstrip("0")
+        return f"{whole}.{frac}" if frac else whole
+    s = re.sub(r"(?<![a-z0-9.])\.(?=\d)", "0.", s)
+    s = _DOTTED_DIGITS_RE.sub(_figure, s)
+    return re.sub(r"(\d)\.(?!\d)", r"\1", s)
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

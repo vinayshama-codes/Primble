@@ -155,9 +155,13 @@ def _property_package():
     return s
 
 
-# A row with points on this package: the loss-history answer (+5). The property rows add
-# nothing here - the pillar is 0 until its Minimum Viable COPE is answered, so they are
-# not listed (the page's own rule).
+# A row with points on this package: the Loss History plan's "requested" answer (the
+# claims question is weighed last since 23 Oct 2026 - its number would depend on which
+# answer is true - so the first Loss History row is "Record that loss runs have been
+# requested"). The property rows add nothing here - the pillar is 0 until its Minimum
+# Viable COPE is answered, so they are not listed (the page's own rule).
+# 24 Oct 2026 (TEST updated): with nothing known the claims question is the
+# plan's first row, weighed with "no claims" - the row this test fixes.
 _LOSS = "loss_history_no_prior_losses_indicator"
 _NO_LOSSES = "No - no claims or losses in the past 5 years"
 
@@ -232,7 +236,7 @@ def test_a_value_changed_after_the_fix_is_never_erased_by_open_again():
 
 def test_a_status_is_filed_under_the_recommendations_page():
     import services.audit_service as au
-    assert au.ISSUE_STATUS_PAGES == ("hard", "warning", "recommendation")
+    assert au.ISSUE_STATUS_PAGES[:3] == ("hard", "warning", "recommendation")   # + "overview" (23 Oct)
     src = (Path(au.__file__)).read_text(encoding="utf-8")
     assert "severity = severity if severity in ISSUE_STATUS_PAGES else None" in src
 
@@ -314,7 +318,7 @@ def test_the_screens_wire_it_through_the_one_reopen_door():
     assert 'handleReopenIssue(target.iid, "open", target.meta, { optimistic: false });' in modal
     assert "severity: REC_PAGE," in modal
     # the editor's Cross-Form Resolved list never shows a recommendation
-    assert "&& pageOfStatus(st, iid) !== REC_PAGE)" in modal
+    assert "&& pageOfStatus(st, iid) !== REC_PAGE && pageOfStatus(st, iid) !== KD_PAGE)" in modal
     # both layouts render it
     assert "onReopenResolved={onReopenRecommendation}" in rail
     assert "onReopenResolved={reopenRecommendation}" in modal

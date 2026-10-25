@@ -42,6 +42,7 @@ carrier name.
 from __future__ import annotations
 
 import logging
+import re as _re
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,41 @@ WC_STATE_FUND_OPTIONS = _with_other(
     "Yes - the payroll in ND, OH, WA or WY is placed with the state fund",
     "No - private-carrier coverage is being requested for those states",
 )
+
+# What a placement answer SAYS (21 Oct 2026 review, M1). The monopolistic hard
+# stop has this answer as its only input, and it read it by bare prefix
+# (`startswith("no")`), so free "Other" text - "North Dakota WSI", "Nothing -
+# all payroll is in Colorado", "Now with the ND state fund" - raised the HARD
+# private-carrier stop. An answer is read as one of the two options only when
+# it IS that option: its leading "Yes" / "No" as a whole word, then (for "No"
+# after a separator, so "No private carrier" - which can mean the opposite -
+# is not read as a request) nothing but that option's own words. A "No" must
+# name the private carrier. Anything else is unverified free text (None), and
+# the rule keeps the warning that asks to confirm the placement.
+_PLACEMENT_WORDS = _re.compile(r"[a-z0-9]+")
+_PLACEMENT_YES_WORDS = frozenset(_PLACEMENT_WORDS.findall(WC_STATE_FUND_OPTIONS[0].lower())) | {"placed"}
+_PLACEMENT_NO_WORDS = frozenset(_PLACEMENT_WORDS.findall(WC_STATE_FUND_OPTIONS[1].lower())) | {"carriers"}
+_PLACEMENT_YES_RE = _re.compile(r"^\s*yes\b(?:\s*[-–—,:;(]\s*(?P<rest>.*))?\s*$", _re.I | _re.S)
+_PLACEMENT_NO_RE = _re.compile(r"^\s*no\s*[-–—,:;(]\s*(?P<rest>.*)$", _re.I | _re.S)
+
+
+def wc_placement(value) -> Optional[str]:
+    """"state_fund" / "private_carrier" when the answer is that option (the
+    canonical text or its short form, "Yes - placed with the state fund",
+    "No - private carrier", "No (private carrier requested)"); else None."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return None
+    m = _PLACEMENT_YES_RE.match(text)
+    if m:
+        rest = set(_PLACEMENT_WORDS.findall((m.group("rest") or "").lower()))
+        return "state_fund" if rest <= _PLACEMENT_YES_WORDS else None
+    m = _PLACEMENT_NO_RE.match(text)
+    if m:
+        rest = set(_PLACEMENT_WORDS.findall((m.group("rest") or "").lower()))
+        if "private" in rest and rest <= _PLACEMENT_NO_WORDS:
+            return "private_carrier"
+    return None
 
 # Silent-exposure decisions (15 Oct 2026): the crime / cyber warnings are a
 # coverage question; the producer's decision IS the answer.
@@ -392,9 +428,11 @@ def _lazy_catalogue() -> Dict[str, Tuple[List[str], bool]]:
         pass
     try:
         from services.loss_history_state import (
+            LOSS_RUN_OWNERSHIP_FIELD, LOSS_RUN_OWNERSHIP_OPTIONS,
             LOSS_RUN_STATUS_OPTIONS, NEW_VENTURE_OPTIONS,
         )
         out["loss_run_status"] = (list(LOSS_RUN_STATUS_OPTIONS) + [OTHER], False)
+        out[LOSS_RUN_OWNERSHIP_FIELD] = (list(LOSS_RUN_OWNERSHIP_OPTIONS), False)
         out["new_venture_indicator"] = (list(NEW_VENTURE_OPTIONS), False)
     except Exception:                                         # noqa: BLE001
         pass
@@ -469,7 +507,8 @@ def control_for(fact_key: str) -> str:
     except Exception:                                         # noqa: BLE001
         kind = None
     return {"currency": "currency", "date": "date", "code": "code",
-            "integer": "number", "percent": "percent"}.get(kind or "", "text")
+            "integer": "number", "percent": "percent",
+            "amount_or_percent": "amount_or_percent"}.get(kind or "", "text")
 
 
 def catalogued_facts() -> List[str]:

@@ -42,17 +42,20 @@ _CSL = {"auto_liability_limit": "$1,000,000 CSL",
 def test_a_stated_csl_is_not_split_whatever_the_flag_says():
     assert auto_csl_stated(_CSL)
     assert not auto_limits_are_split(_CSL, {"auto_split_limits": True})
-    hard, _soft = sq.evaluate_stops(dict(_CSL), {"has_auto_coverage": True,
-                                                 "auto_split_limits": True})
-    assert not any("Split liability limits incomplete" in h for h in hard)
+    hard, soft = sq.evaluate_stops(dict(_CSL), {"has_auto_coverage": True,
+                                                "auto_split_limits": True})
+    # (19 Oct 2026, Brent: the split stop is a warning now) so neither list may carry it.
+    assert not any("Split liability limits incomplete" in m for m in hard + soft)
 
 
-def test_a_real_split_policy_missing_a_part_still_stops():
+def test_a_real_split_policy_missing_a_part_still_warns():
     facts = {"auto_liability_structure": "split",
              "auto_bi_per_person": "$100,000", "auto_bi_per_accident": "$300,000"}
     assert auto_limits_are_split(facts, {})
-    hard, _soft = sq.evaluate_stops(facts, {"has_auto_coverage": True})
-    assert any("Split liability limits incomplete" in h for h in hard)
+    hard, soft = sq.evaluate_stops(facts, {"has_auto_coverage": True})
+    # (19 Oct 2026, Brent: hard stops only for what is essential) the rule still fires - as a warning.
+    assert any("Split liability limits incomplete" in s for s in soft)
+    assert not any("Split liability limits incomplete" in h for h in hard)
 
 
 def test_a_slash_limit_is_never_read_as_a_csl():
@@ -939,8 +942,10 @@ def test_the_producers_split_answer_wins_in_any_spelling():
     facts = {"auto_liability_limit": "$1,000,000 CSL", "auto_liability_structure": _p("Split Limits"),
              "auto_bi_per_person": "$250,000", "auto_bi_per_accident": "$500,000"}
     assert ce.auto_limits_are_split(facts, {})
-    hard, _soft = sq.evaluate_stops(facts, {"has_auto_coverage": True})
-    assert any("Split liability limits incomplete" in h for h in hard)
+    hard, soft = sq.evaluate_stops(facts, {"has_auto_coverage": True})
+    # (19 Oct 2026, Brent: the split stop is a warning now) the producer's answer still raises it.
+    assert any("Split liability limits incomplete" in s for s in soft)
+    assert not any("Split liability limits incomplete" in h for h in hard)
 
 
 def test_the_producers_csl_answer_wins_without_an_amount():

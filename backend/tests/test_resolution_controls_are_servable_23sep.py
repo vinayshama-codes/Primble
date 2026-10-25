@@ -195,6 +195,11 @@ def test_every_schedule_a_rule_offers_is_reachable_from_some_form():
         if isinstance(res, dict) and res.get("mode") == "schedule"
         and res.get("schedule_key")
     }
+    # A table declared as a review item (the GL classification window, 21 Oct
+    # Z31) is served through the issues that offer it
+    # (arq_service._schedules_offered_by_issues), not through a form's boxes.
+    carried |= {k for k, d in schedule_capture.SCHEDULE_DEFS.items()
+                if isinstance(d, dict) and d.get("review_item")}
     unreachable = sorted(offered - carried)
     assert not unreachable, (
         f"these rules offer a schedule no ACORD form carries: {unreachable} - "

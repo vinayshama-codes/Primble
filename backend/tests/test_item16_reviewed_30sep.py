@@ -24,6 +24,12 @@ The fix, three parts:
      too instead of in the Cross-Form panel. Each row renders once.
   3. The 60 is never silent: when every stop still holding the score is
      handled, a short note replaces the red block and names them.
+
+19 Oct 2026 (Brent): an open hard stop also blocks "Submission Ready"; the
+block prints the package's `ready_blockers` (with `ready_blocker_items`).
+20 Oct 2026 (owner): the 60 cap is back as it was - the stop caps the package
+at 60 AND blocks readiness, a marked stop does both until its value is fixed,
+and the note says what raises the score again.
 """
 from __future__ import annotations
 
@@ -172,48 +178,61 @@ class _Session:
 
 
 def _expired_item(pkg):
-    items = [i for i in (pkg.get("cap_hard_stop_items") or [])
-             if str(i.get("message", "")).startswith("Policy term already expired")]
-    assert len(items) == 1, pkg.get("cap_hard_stop_items")
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the block's rows are the blockers'.
+    # (20 Oct 2026, the cap is back) - and the 60's own rows carry the same row.
+    def _rows(key):
+        return [i for i in (pkg.get(key) or [])
+                if str(i.get("message", "")).startswith("Policy term already expired")]
+    items = _rows("ready_blocker_items")
+    assert len(items) == 1, pkg.get("ready_blocker_items")
+    assert _rows("cap_hard_stop_items") == items, pkg.get("cap_hard_stop_items")
     return items[0]
 
 
 @pytest.fixture()
-def capped():
+def blocked():
     s = _Session(_row())
     s.recalc()
     pkg = s.store["package_sqs"]
     # The fixture is the screenshot's shape, or every test below is vacuous.
+    # (20 Oct 2026, the cap is back) - the expired term holds the package at 60 ...
     assert pkg["cap_applied"] == 60, pkg.get("cap_reason")
     assert pkg["package_sqs_score"] <= 60
+    assert pkg["package_sqs_score"] == min(pkg["raw_sqs_score"], 60)
     assert pkg["cap_reason"].startswith("Policy term already expired")
+    # ... and blocks Submission Ready (19 Oct 2026, Brent).
+    assert pkg["submission_ready"] is False and pkg["open_hard_stops"] == 1
+    assert pkg["ready_blockers"][0].startswith("Policy term already expired")
     return s
 
 
 # ══ 1. Measured: what "Resolved" does and does not do ═════════════════════════
 
-def test_the_stop_carries_an_open_to_fix_row(capped):
-    item = _expired_item(capped.store["package_sqs"])
+def test_the_stop_carries_an_open_to_fix_row(blocked):
+    item = _expired_item(blocked.store["package_sqs"])
     assert item["code"] == _EXPIRED_CODE
     assert (item.get("resolution") or {}).get("mode") == "field"
     assert item.get("forms") == []
 
 
-def test_marking_a_stop_resolved_never_moves_the_cap(capped):
+def test_marking_a_stop_resolved_never_clears_the_blocker(blocked):
     """The real status route, then the real recalculation: the stop still caps
-    the package at 60 with the same reason. This is why the panel must keep
-    explaining a 60 whose stop was only marked."""
-    pkg_before = copy.deepcopy(capped.store["package_sqs"])
+    the package at 60 with the same reason and still blocks it. This is why the
+    panel must keep explaining a 60 whose stop was only marked."""
+    pkg_before = copy.deepcopy(blocked.store["package_sqs"])
     item = _expired_item(pkg_before)
-    out = capped.body(ar.set_issue_status_route, IssueStatusRequest(
+    out = blocked.body(ar.set_issue_status_route, IssueStatusRequest(
         session_id=_SID, issue_id="issf_x", status="resolved",
         rule_code=item["code"], message=item["message"]))
     assert out == {"success": True, "issue_id": "issf_x", "status": "resolved"}
-    assert capped.statuses and capped.statuses[0]["status"] == "resolved"
-    capped.recalc()
-    pkg_after = capped.store["package_sqs"]
+    assert blocked.statuses and blocked.statuses[0]["status"] == "resolved"
+    blocked.recalc()
+    pkg_after = blocked.store["package_sqs"]
     assert pkg_after["cap_applied"] == 60
     assert pkg_after["cap_reason"] == pkg_before["cap_reason"]
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - a mark leaves the blocker and the number.
+    assert pkg_after["ready_blockers"] == pkg_before["ready_blockers"]
+    assert pkg_after["open_hard_stops"] == 1 and pkg_after["submission_ready"] is False
     assert pkg_after["package_sqs_score"] == pkg_before["package_sqs_score"]
     assert _expired_item(pkg_after)["message"] == item["message"]
 
@@ -237,29 +256,33 @@ def _fix_the_term(s):
         code=_EXPIRED_CODE, issue_id="issf_expired"))
 
 
-def test_open_to_fix_clears_the_cap_and_the_headline_alone_would_leave_it(capped):
-    before = copy.deepcopy(capped.store["package_sqs"])
-    out = _fix_the_term(capped)
+def test_open_to_fix_clears_the_blocker_and_the_headline_alone_would_leave_it(blocked):
+    before = copy.deepcopy(blocked.store["package_sqs"])
+    out = _fix_the_term(blocked)
     assert out["success"] is True
-    persisted = capped.store["package_sqs"]
+    persisted = blocked.store["package_sqs"]
     assert persisted["cap_applied"] != 60
     assert not persisted.get("cap_hard_stops")
     assert out["new_package_sqs_score"] == persisted["package_sqs_score"] > 60
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - fixing the value clears the blocker.
+    assert persisted["ready_blockers"] == [] and persisted["open_hard_stops"] == 0
     # What the editor used to do with this reply: merge the headline. The
     # result is the screenshot - a score above 60 under a block that still
-    # says the package is capped at 60 by the stop just fixed.
+    # says the package is capped at 60 (and blocked) by the stop just fixed.
     merged = {**before, "package_sqs_score": out["new_package_sqs_score"],
               "tier": out["new_package_tier"]}
     assert merged["package_sqs_score"] > 60 and merged["cap_applied"] == 60
     assert merged["cap_reason"].startswith("Policy term already expired")
+    assert merged["open_hard_stops"] == 1
+    assert merged["ready_blockers"][0].startswith("Policy term already expired")
 
 
-def test_the_editor_reply_ships_the_whole_package_and_form_scores(capped):
-    out = _fix_the_term(capped)
-    assert out["editor_package_sqs"] == capped.store["package_sqs"]
+def test_the_editor_reply_ships_the_whole_package_and_form_scores(blocked):
+    out = _fix_the_term(blocked)
+    assert out["editor_package_sqs"] == blocked.store["package_sqs"]
     assert out["editor_package_sqs"]["package_sqs_score"] == out["new_package_sqs_score"]
     form = out["updated_forms"]["ACORD_125"]
-    assert form["new_sqs"] == capped.store["generated_forms"]["ACORD_125"]["sqs"]
+    assert form["new_sqs"] == blocked.store["generated_forms"]["ACORD_125"]["sqs"]
     assert form["new_sqs_score"] == form["new_sqs"]["sqs_score"]
     # the pre-form score stays pre-form only (Step 2, item 2); the Key Details
     # list now rides along after generation, for the package page (Orbin item
@@ -268,16 +291,16 @@ def test_the_editor_reply_ships_the_whole_package_and_form_scores(capped):
     assert "key_details" in out
 
 
-def test_the_editor_reopen_reply_ships_them_too(capped):
-    _fix_the_term(capped)
-    back = capped.body(ar.reopen_issue, ReopenIssueRequest(
+def test_the_editor_reopen_reply_ships_them_too(blocked):
+    _fix_the_term(blocked)
+    back = blocked.body(ar.reopen_issue, ReopenIssueRequest(
         session_id=_SID, code=_EXPIRED_CODE, issue_id="issf_expired",
         message="Policy term already expired", legacy_clear=True))
     assert back["cleared"] is True
-    assert back["editor_package_sqs"] == capped.store["package_sqs"]
-    assert back["new_package_sqs_score"] == capped.store["package_sqs"]["package_sqs_score"]
+    assert back["editor_package_sqs"] == blocked.store["package_sqs"]
+    assert back["new_package_sqs_score"] == blocked.store["package_sqs"]["package_sqs_score"]
     assert back["updated_forms"]["ACORD_125"]["new_sqs"] == \
-        capped.store["generated_forms"]["ACORD_125"]["sqs"]
+        blocked.store["generated_forms"]["ACORD_125"]["sqs"]
     assert "package_sqs" not in back
 
 
@@ -361,6 +384,23 @@ console.log(JSON.stringify([
   R.packageCapReasons({cap_applied: 60}),
 ]));""")
     assert out == [[], [], [], ["r"], ["a", "b"], ["r"], []]
+
+
+def test_package_reasons_read_the_blockers_on_a_new_payload(tmp_path):
+    """A payload scored since 19 Oct 2026 carries `ready_blockers`: the block
+    prints exactly those (an empty list too), whatever cap fields ride along."""
+    out = _node(tmp_path, """
+console.log(JSON.stringify([
+  R.packageCapReasons({ready_blockers: ["a"], cap_applied: null}),
+  R.packageCapReasons({ready_blockers: [], cap_applied: 60, cap_reason: "r"}),
+  R.packageCapReasons({ready_blockers: ["a", "b"], cap_hard_stops: ["x"]}),
+  R.packageCapItems(null),
+  R.packageCapItems({ready_blocker_items: [{message: "a"}], cap_hard_stop_items: [{message: "x"}]}),
+  R.packageCapItems({cap_hard_stop_items: [{message: "x"}]}),
+  R.packageCapItems({}),
+]));""")
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the blockers win over any cap field.
+    assert out == [["a"], [], ["a", "b"], [], [{"message": "a"}], [{"message": "x"}], []]
 
 
 def test_handled_stops_leave_the_block_and_open_ones_stay(tmp_path):
@@ -454,28 +494,32 @@ console.log(JSON.stringify([
     assert out[0] == "" and out[1] == ""
     # Positive wording since Choice Electric #16 (9 Oct 2026): what raises the
     # score, not the cap - the same facts (marked, still to fix, reopen).
+    # (20 Oct 2026, the cap is back) - the note names the score again, as before 19 Oct.
     assert out[2] == ("Fix the value of an item you marked resolved to increase the package's "
-                      "Submission Quality Score (SQS)\u2122, or reopen it under Reviewed.")
+                      "Submission Quality Score (SQS)™, or reopen it under Reviewed.")
     assert out[3] == ("Fix the value of an item you marked dismissed to increase this form's "
-                      "Submission Quality Score (SQS)\u2122, or reopen it under Reviewed.")
-    assert out[4].startswith("Fix the value of 2 items you marked resolved or dismissed to increase the package's")
-    assert out[4].endswith("or reopen them under Reviewed.")
-    assert out[5].startswith("Fix the value of 3 items you marked resolved to increase this form's")
+                      "Submission Quality Score (SQS)™, or reopen it under Reviewed.")
+    assert out[4] == ("Fix the value of 2 items you marked resolved or dismissed to increase the "
+                      "package's Submission Quality Score (SQS)™, or reopen them under Reviewed.")
+    assert out[5] == ("Fix the value of 3 items you marked resolved to increase this form's "
+                      "Submission Quality Score (SQS)™, or reopen them under Reviewed.")
     for text in out:
         assert not any(d in text for d in _EM_DASHES)
 
 
 @pytest.mark.parametrize("status", [None, "open", "resolved", "dismissed"])
-def test_a_60_is_never_silent_on_the_real_payload(capped, tmp_path, status):
+def test_a_blocker_is_never_silent_on_the_real_payload(blocked, tmp_path, status):
     """The package the REAL scorer persisted, through the REAL panel helpers,
-    in every status the stop can carry: the package is capped at 60, so the
-    screen must either print the stop in the red block or print the note."""
-    pkg = capped.store["package_sqs"]
+    in every status the stop can carry: the package is capped at 60 and
+    blocked, so the screen must either print the stop in the red block or
+    print the note."""
+    pkg = blocked.store["package_sqs"]
     item = _expired_item(pkg)
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the block reads the blockers' rows.
     out = _node(tmp_path, f"""
 const pkg = {json.dumps(pkg)};
 const st = {json.dumps({f"{item['message']}|": status} if status else {})};
-const r = R.splitCapStops(R.packageCapReasons(pkg), pkg.cap_hard_stop_items,
+const r = R.splitCapStops(R.packageCapReasons(pkg), R.packageCapItems(pkg),
   {{idOf, statusOf: (i) => st[i]}});
 console.log(JSON.stringify({{open: r.open.map((x) => x.message), handled: r.handled.length,
   note: R.stillCappedNote(r.handled, "package")}}));""")
@@ -485,8 +529,8 @@ console.log(JSON.stringify({{open: r.open.map((x) => x.message), handled: r.hand
     assert bool(out["open"]) or out["note"].startswith("Fix the value of an item you marked")
 
 
-def test_once_fixed_the_block_is_gone_and_the_stop_is_under_reviewed(capped, tmp_path):
-    out_fix = _fix_the_term(capped)
+def test_once_fixed_the_block_is_gone_and_the_stop_is_under_reviewed(blocked, tmp_path):
+    out_fix = _fix_the_term(blocked)
     pkg = out_fix["editor_package_sqs"]
     ghost = {"issue_id": "issf_expired", "code": _EXPIRED_CODE,
              "message": "Policy term already expired", "forms": []}
@@ -535,9 +579,11 @@ def _between(src, start, end):
     return src[i:src.index(end, i)]
 
 
-def test_the_package_block_prints_open_stops_and_never_a_silent_60():
-    block = _between(_modal(), "{packageSqs && packageSqs.cap_applied === 60 && (() => {",
+def test_the_package_block_prints_open_stops_and_never_a_silent_block():
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the block renders on blockers, not on a 60.
+    block = _between(_modal(), "{packageSqs && packageCapReasons(packageSqs).length > 0 && (() => {",
                      "TOTAL PACKAGE SCORE (collapsible")
+    assert "packageSqs.cap_applied === 60 && (() => {" not in _modal()
     assert "const { open, handled } = pkgCapSplit;" in block
     assert "if (!open.length && !handled.length) return null;" in block
     assert 'stillCappedNote(handled, "package")' in block
@@ -545,7 +591,9 @@ def test_the_package_block_prints_open_stops_and_never_a_silent_60():
     # Item 16 (1 Oct): a handled stop's sentence prints once, on its Reviewed
     # row ("Fix its value to increase the package score") - the block keeps the note only.
     assert "handled.map((r, i) =>" not in block
+    # (20 Oct 2026, the cap is back) - the header says what raises the score again, as before 19 Oct.
     assert "Fulfill to increase the package's Submission Quality Score (SQS)\u2122" in block
+    assert "Block Submission Ready until fixed" not in block
     assert "itemResolveAndStatus(r.item, r.item.forms || [])" in block
 
 
@@ -565,7 +613,8 @@ def test_the_split_is_keyed_like_the_controls():
     src = _modal()
     prep = _between(src, "const _capStatusOf = ", "const activeKeyIssues")
     assert "splitCapStops(packageCapReasons(packageSqs)," in prep
-    assert "packageSqs?.cap_hard_stop_items, { idOf: issueIdOf, statusOf: _capStatusOf });" in prep
+    # (19 Oct 2026, Brent: a hard stop blocks Submission Ready) - the rows are the blockers' (old payloads: the cap's).
+    assert "packageCapItems(packageSqs), { idOf: issueIdOf, statusOf: _capStatusOf });" in prep
     assert "fallbackForms: activeFormId ? [activeFormId] : []" in prep
     assert "routeGhostIssues(ghostIssues, new Set(reviewedStops.map((r) => r.iid)))" in prep
     assert "dismissedRecDetails.size + reviewedStops.length + reviewedGhosts.length" in prep

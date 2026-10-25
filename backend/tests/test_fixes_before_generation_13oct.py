@@ -409,7 +409,8 @@ console.log(JSON.stringify([
     assert twin is True and unrelated is False
     assert gap == "Construction on row 2"
     src = (_FRONT / "components" / "form" / "ResolutionModal.jsx").read_text(encoding="utf-8")
-    assert "rowNeedsSummary(rows, resolution.row_needs, schedule.columns || [])" in src
+    # + the server's building rule (21 Oct 2026, review M1 - the pin named the old call)
+    assert "rowNeedsSummary(rows, resolution.row_needs, schedule.columns || [], resolution.building_columns)" in src
 
 
 def test_the_narrative_card_names_the_missing_depth():

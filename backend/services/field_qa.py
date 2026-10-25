@@ -536,6 +536,16 @@ def run_field_qa(
                     continue                  # decided empty - the AI was never asked
                 if _spare_row_of_an_answered_group(field, mapped):
                     continue                  # an empty extra row, not a question
+                # ...nor a row after the last one its section uses (Brent's
+                # 17 Oct item 9: ACORD 130 listed rows 2 and 3 of a one-officer
+                # table) - the side panel's one rule, `needs_attention.
+                # unused_trailing_row`, so this record and the panel agree.
+                try:
+                    from services.needs_attention import unused_trailing_row
+                    if unused_trailing_row(field, mapped, form_id):
+                        continue
+                except Exception:                 # noqa: BLE001
+                    pass
                 if field in _guard_fields:
                     continue                  # answered, then refused - see above
                 # An explanation box follows its question: it is needed only once

@@ -289,8 +289,10 @@ _CURRENCY_SCALE = {
 # A figure carrying a NON-MONEY unit is not an amount (round 5, 7 Oct 2026):
 # a property deductible box holds "2%" (a wind / hail percentage) or "72 Hours"
 # (a business income waiting period), and they printed "$2" / "$72".
+# "pct" / "per cent" too (22 Oct 2026, Z33-PERCENT): "2 pct" printed "$2".
 _NON_MONEY_UNIT_RE = re.compile(
-    r"%|\bpercent\b|\b(?:hours?|hrs?|days?|weeks?|wks?|months?|mos?|years?|yrs?)\b",
+    r"%|\bpercent\b|\bper\s*cent\b|\bpct\b"
+    r"|\b(?:hours?|hrs?|days?|weeks?|wks?|months?|mos?|years?|yrs?)\b",
     re.IGNORECASE)
 
 

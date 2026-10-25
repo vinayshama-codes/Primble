@@ -77,9 +77,12 @@ def test_client_reported_case_toast_matches_the_three_rendered_cards():
     assert _rendered(grouped)["warnings"] == 3, "the screen draws three warning cards"
     assert grouped["counts"]["warnings"] == 3, 'toast used to say "1 warning found"'
     assert grouped["counts"]["hard_stops"] == 0
-    # The three clusters from the screenshot, one per tier.
+    # The three clusters from the screenshot, one per tier. The GL one carries
+    # Brent's title since 21 Oct 2026 (17 Oct item 6 - one GL window, one GL
+    # item; it was "GL exposure basis").
     assert {c["cluster"] for cs in grouped["warnings"].values() for c in cs} == {
-        "Missing baseline form", "GL exposure basis", "Auto optional coverage gaps",
+        "Missing baseline form", "General Liability Classification & Exposure Details",
+        "Auto optional coverage gaps",
     }
 
 

@@ -138,8 +138,9 @@ def test_no_new_capped_message_can_reach_the_screen_unrewritten():
     # here until positiveWording.js rewrites it and a case is added above.
     assert _backend_cap_strings() == {
         "Carrier-Grade COPE incomplete - Submission Quality Score (SQS) capped at 85. Missing: ",
-        "[hard_stop] code=fein_conflict FEIN differs across uploaded documents. Submission Quality Score (SQS) "
-        "is capped at 60 until this is confirmed.",
+        # 21 Oct (Z30, b-identity-verified-only): the sentence is built once and
+        # prefixed by severity at the call, so the harvested literal is bare.
+        "FEIN differs across uploaded documents. Submission Quality Score (SQS) is capped at 60 until this is confirmed.",
         " Submission Quality Score (SQS) is capped at 60 unless the difference is explained.",
         ". Submission can proceed but your Submission Quality Score (SQS) will be capped.",
         "Data consistency: a No Known Losses attestation conflicts with claims found in the uploaded loss runs. "
@@ -197,6 +198,13 @@ def test_the_reviewed_notes_say_what_raises_the_score(tmp_path):
 console.log(JSON.stringify({
   hard: R.railCapNote({ cap_applied: 60, raw_sqs_score: 80, package_sqs_score: 60 }, { hardTotal: 1, hardOpen: 0 }),
   warn: R.railCapNote({ cap_applied: 85, raw_sqs_score: 90, package_sqs_score: 85 }, { warnTotal: 2, warnOpen: 0 }),
+  ready: R.railCapNote({ ready_blockers: ["x"], cap_applied: 60, raw_sqs_score: 80, package_sqs_score: 60 },
+                       { hardTotal: 1, hardOpen: 0 }),
+  readyOpen: R.railCapNote({ ready_blockers: ["x"], cap_applied: 60, raw_sqs_score: 80, package_sqs_score: 60 },
+                           { hardTotal: 1, hardOpen: 1 }),
+  readyNone: R.railCapNote({ ready_blockers: [], cap_applied: 85, raw_sqs_score: 90, package_sqs_score: 85 },
+                           { warnTotal: 2, warnOpen: 0 }),
+  uncapped: R.railCapNote({ ready_blockers: ["x"], package_sqs_score: 95 }, { hardTotal: 1, hardOpen: 0 }),
   one: R.stillCappedNote([{ status: "dismissed" }], "package"),
   many: R.stillCappedNote([{ status: "resolved" }, { status: "dismissed" }], "form"),
 }));
@@ -205,6 +213,11 @@ console.log(JSON.stringify({
                            "(SQS)™ - marking it records your review only.")
     assert out["warn"] == ("Fix the value of the warning you marked to increase your Submission Quality Score "
                            "(SQS)™ - marking it records your review only.")
+    # (20 Oct 2026, the cap is back) - the note follows the cap alone, as before 19 Oct: the
+    # readiness fields riding along change nothing (a marked warning holds the 85 again), an
+    # open stop prints in the red block instead, and no cap means no note.
+    assert out["ready"] == out["hard"] and out["readyNone"] == out["warn"]
+    assert out["readyOpen"] is None and out["uncapped"] is None
     assert out["one"] == ("Fix the value of an item you marked dismissed to increase the package's Submission "
                           "Quality Score (SQS)™, or reopen it under Reviewed.")
     assert out["many"] == ("Fix the value of 2 items you marked resolved or dismissed to increase this form's "
@@ -218,6 +231,11 @@ def test_the_headings_use_brents_words():
     assert 'description="Fulfill to increase your Submission Quality Score (SQS)™"' in rail
     assert "Fulfill to increase the package's Submission Quality Score (SQS)™" in modal
     assert "Fulfill to increase this form's Submission Quality Score (SQS)™" in modal
+    # (20 Oct 2026, the cap is back) - the 19 Oct readiness copy is gone again: the
+    # editor's package block and the review rail say what raises the score.
+    assert "Block Submission Ready until fixed" not in modal
+    assert "blocks Submission Ready until it is fixed." not in rail
+    assert "block Submission Ready until they are fixed." not in rail
     # No em-dashes in UI text: the new files whole, and every new line elsewhere
     # (older code comments in the modal carry some; they are not on screen).
     for text in (rail, _WORDING.read_text(encoding="utf-8"), _SELECTION.read_text(encoding="utf-8")):

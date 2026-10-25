@@ -93,6 +93,8 @@ export default function PDFJsViewer({
   const [pageDims,      setPageDims]      = useState([]);
   const [fieldValues,   setFieldValues]   = useState({});
   const [saveStatus,    setSaveStatus]    = useState("idle");
+  // The server's own reason when it refused a save (e.g. an ended term).
+  const [saveErrorText, setSaveErrorText] = useState("");
   const [pendingEdits,  setPendingEdits]  = useState(false);
   const [fieldsLoaded,  setFieldsLoaded]  = useState(false);
   const [isSignedLocal, setIsSignedLocal] = useState(isSigned);
@@ -768,7 +770,7 @@ export default function PDFJsViewer({
     }
     if (!hasUnsavedEdits()) return Promise.resolve(true);
     const run = (async () => {
-      setSaveStatus("saving");
+      setSaveStatus("saving"); setSaveErrorText("");
       try {
         const { allValues, clearedSigFields, body } = _editsPayload();
         const res = await fetch(`${API_BASE}/api/update-pdf`, {
@@ -777,7 +779,12 @@ export default function PDFJsViewer({
           headers: { "Content-Type": "application/json" },
           body,
         });
-        if (!res.ok) { setSaveStatus("error"); return false; }
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          setSaveErrorText(typeof err?.detail === "string" ? err.detail : "");
+          setSaveStatus("error"); return false;
+        }
+        setSaveErrorText("");
         const data = await res.json();
         setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
         // The panel's score is current again as of this response. Cleared
@@ -985,7 +992,7 @@ export default function PDFJsViewer({
               score is from the last save while edits are pending (AcordModal). */}
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-          {saveStatus === "error"   && <span title="Your edits are still in their boxes. Save again before leaving this form." style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Save failed - edits kept</span>}
+          {saveStatus === "error"   && <span title="Your edits are still in their boxes. Save again before leaving this form." style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>{saveErrorText || "Save failed - edits kept"}</span>}
 
           <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
             title="Refresh - picks up client-submitted answers and shows green highlights"

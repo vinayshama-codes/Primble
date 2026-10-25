@@ -9,7 +9,10 @@ any scoring ceiling.
 
 Test 18 drives the REAL ceiling engine (`sqs_service._resolve_cap` +
 `final_score_with_credits`) and the REAL audit ledger (`build_score_trace`)
-with the client's three literal examples.
+with the client's three literal examples. 20 Oct 2026 (owner): the ceiling is
+back exactly as before 19 Oct - a hard stop holds 60, a warning 85. The 19 Oct
+readiness rule stays beside it: a hard stop also blocks the "Submission Ready"
+STATUS (`tier_for_score`, `readiness_fields`).
 
 Test 17 drives the REAL download gate (`routes.download_routes.
 _enforce_completeness_gate` and `field_qa.check_hard_block`). The route
@@ -38,20 +41,32 @@ BACKEND = Path(__file__).resolve().parents[1]
 # TEST 18 - SQS Ceiling Behavior
 # =============================================================================
 
-# The client's three literal examples.
+# The client's three literal examples, plus three at 90+. The 19 Oct readiness
+# rule rides along: under the ceiling a 90+ is reached only with nothing open.
 CEILING_EXAMPLES = [
-    (88, [], ["Auto exposure detected but no vehicle schedule"], 85, sq.SOFT_STOP_CAP),
-    (88, ["Umbrella has no underlying coverage"], [], 60, sq.HARD_STOP_CAP),
-    (42, ["Umbrella has no underlying coverage"], [], 42, sq.HARD_STOP_CAP),
+    # raw, hard, soft, displayed, cap, submission_ready
+    (88, [], ["Auto exposure detected but no vehicle schedule"], 85, sq.SOFT_STOP_CAP, False),
+    (88, ["Umbrella has no underlying coverage"], [], 60, sq.HARD_STOP_CAP, False),
+    (42, ["Umbrella has no underlying coverage"], [], 42, sq.HARD_STOP_CAP, False),
+    (92, ["Umbrella has no underlying coverage"], [], 60, sq.HARD_STOP_CAP, False),
+    (92, [], ["Auto exposure detected but no vehicle schedule"], 85, sq.SOFT_STOP_CAP, False),
+    (92, [], [], 92, None, True),
 ]
 
 
-@pytest.mark.parametrize("raw,hard,soft,displayed,cap", CEILING_EXAMPLES)
-def test_r18_client_ceiling_examples(raw, hard, soft, displayed, cap):
+@pytest.mark.parametrize("raw,hard,soft,displayed,cap,ready", CEILING_EXAMPLES)
+def test_r18_client_ceiling_examples(raw, hard, soft, displayed, cap, ready):
     """Raw 88 + warning -> 85; Raw 88 + hard stop -> 60; Raw 42 + hard stop -> 42."""
+    # (20 Oct 2026, owner: the caps are back) - a hard stop holds 60, a warning 85.
     resolved_cap, reason = sq._resolve_cap(hard, soft)
     assert resolved_cap == cap
+    assert reason == (hard or soft or [None])[0]
     assert sq.final_score_with_credits(raw, 0, resolved_cap) == displayed
+    # (19 Oct 2026, kept) a hard stop also blocks Submission Ready.
+    status = sq.readiness_fields(displayed, hard)
+    assert status["submission_ready"] is ready
+    assert status["open_hard_stops"] == len(hard)
+    assert (sq.tier_for_score(displayed, len(hard))[1] == "Submission Ready") is ready
 
 
 def test_r18_raw_score_is_preserved():
@@ -96,16 +111,26 @@ def test_r18_ceiling_is_preserved():
 
 
 def test_r18_reason_is_preserved():
-    """The REASON is preserved - a capped score reads as one sentence."""
+    """The REASON is preserved - a capped score reads as one sentence, and the
+    hard stop holding it is also the one that blocks Submission Ready."""
     hard_msg = "Umbrella policy has no underlying coverage identified"
     soft_msg = "Auto exposure detected but no vehicle schedule provided"
 
     cap, reason = sq._resolve_cap([hard_msg], [soft_msg])
     assert cap == 60
     assert reason == hard_msg, "a hard stop must name ITS OWN condition, not the warning"
+    # (19 Oct 2026, kept) the same hard stop is the readiness blocker, with a row.
+    status = sq.readiness_fields(sq.final_score_with_credits(92, 0, cap), [hard_msg])
+    assert status["ready_blockers"] == [hard_msg]
+    assert status["ready_blocker_items"][0]["message"] == hard_msg
+    assert status["ready_blocker_items"][0]["severity"] == "hard_stop"
+    assert status["submission_ready"] is False
 
     cap, reason = sq._resolve_cap([], [soft_msg])
     assert cap == 85 and reason == soft_msg
+    # A warning is no readiness blocker - its 85 is what keeps a 92 from Ready.
+    status = sq.readiness_fields(sq.final_score_with_credits(92, 0, cap), [])
+    assert status["ready_blockers"] == [] and status["submission_ready"] is False
 
     trace = sq.build_score_trace(
         pillars={k: 88.0 for k in sq.SPEC_PILLAR_WEIGHTS},
@@ -124,15 +149,27 @@ def test_r18_ceiling_never_raises_a_low_raw_score():
     for raw in (0, 42, 70, 84):
         cap, _ = sq._resolve_cap([], ["a warning"])
         assert sq.final_score_with_credits(raw, 0, cap) == raw, raw
+    # ...and it holds a high one (20 Oct 2026, the caps are back).
+    for raw in (60, 88, 95):
+        cap, _ = sq._resolve_cap(["a hard stop"], [])
+        assert sq.final_score_with_credits(raw, 0, cap) == 60, raw
+    for raw in (85, 88, 95):
+        cap, _ = sq._resolve_cap([], ["a warning"])
+        assert sq.final_score_with_credits(raw, 0, cap) == 85, raw
 
 
 def test_r18_hard_outranks_soft_and_stops_never_stack():
-    """One hard stop and fifteen produce the identical ceiling."""
+    """One hard stop and fifteen produce the identical ceiling - and the
+    identical Submission Ready status (19 Oct 2026, kept)."""
     assert sq._resolve_cap(["a"], ["b"])[0] == sq.HARD_STOP_CAP
     assert sq._resolve_cap(["a"] * 15, [])[0] == sq._resolve_cap(["a"], [])[0]
     assert sq._resolve_cap([], ["b"] * 15)[0] == sq._resolve_cap([], ["b"])[0]
     # Cross-form hard stops cap like any other hard stop.
     assert sq._resolve_cap([], [], hard_cross=["cross"])[0] == sq.HARD_STOP_CAP
+    # A hard stop blocks Submission Ready - one or fifteen, the status is the same.
+    assert sq.tier_for_score(95, 1) == sq.tier_for_score(95, 15)
+    assert sq.tier_for_score(95, 1)[1] == "Almost There"
+    assert sq.tier_for_score(95, 0)[1] == "Submission Ready"
 
 
 def test_r18_credits_add_to_raw_then_the_ceiling_binds():
@@ -183,8 +220,10 @@ def test_r17_download_remains_possible_with_open_issues():
 def test_r17_stops_never_gate_the_download_route():
     """THE SEAM: nothing in the download route raises on hard stops or warnings.
 
-    The standing rule is that stops only CAP a score (60/85). This reads the
-    route source and fails if a gate on the stop lists is ever introduced.
+    The standing rule is that stops only CAP a score (60/85) and a hard stop
+    blocks the Submission Ready status (19 Oct 2026) - neither gates a download.
+    This reads the route source and fails if a gate on the stop lists is ever
+    introduced.
     """
     src = inspect.getsource(dr)
     tree = ast.parse(src)

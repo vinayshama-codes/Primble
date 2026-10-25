@@ -135,9 +135,13 @@ def test_typeable_legacy_stops_get_a_field_resolution_from_their_message():
     """evaluate_stops() emits uncoded strings, so make_issue derives the fix from
     the MESSAGE. Every mapped fact must be a writable canonical scalar."""
     from services.arq_service import _canonical_key
+    # The GL "no revenue or payroll" warning LEFT this list on 21 Oct 2026 (Brent
+    # 17 Oct item 6): it opens the GL classification window (a table), whose
+    # rows' basis + exposure it reads - tests/test_build22_gl-window.py.
+    gl = make_issue("legacy_soft_0", "soft_warning",
+                    "GL coverage detected but no revenue or payroll found. Fix: ...")
+    assert gl["resolution"] == {"mode": "schedule", "schedule_key": "gl_class_code_schedule"}
     cases = [
-        ("GL coverage detected but no revenue or payroll found. Fix: ...",
-         {"total_revenue", "total_payroll"}),
         ("Workers Comp detected but payroll is missing. Fix: ...",
          {"wc_payroll", "total_payroll"}),
         ("Physical damage coverage present but deductibles not specified.",

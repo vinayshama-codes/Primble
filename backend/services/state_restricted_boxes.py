@@ -115,6 +115,8 @@ def outside_its_state(form_id: str, field_name: str, facts: Any) -> bool:
     states = restricted_boxes(base_form_id(str(form_id or ""))).get(str(field_name or ""))
     if not states:
         return False
-    from services.form_service import _collect_states
-    risk = _collect_states(facts if isinstance(facts, dict) else {})
+    # The form's own coverage first, then the insured's address (Brent, 23 Oct
+    # 2026) - never the model's state_of_operations by itself.
+    from services.form_service import _collect_states, form_coverage
+    risk = _collect_states(facts if isinstance(facts, dict) else {}, form_coverage(form_id))
     return bool(risk) and not (risk & states)

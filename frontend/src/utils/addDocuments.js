@@ -10,7 +10,48 @@
 
 import { formLabel } from "./formInstances.js";
 
-export const ACCEPT_UPLOAD = ".pdf,.zip,.txt,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.webp";
+// What a document upload takes - the server's own list (backend
+// utils/mime_validator: DOCUMENT_EXTENSIONS plus .zip). Both file inputs, the
+// first upload and "Add documents", read this one string. Brent's 17 Oct item 1
+// (21 Oct 2026): an Excel workbook (.xlsx) and a CSV are documents too.
+export const ACCEPT_UPLOAD = ".pdf,.zip,.txt,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.webp,.xlsx,.csv";
+
+// The upload box's list of what it takes.
+export const UPLOAD_TYPES_NOTE = "PDFs · Images (JPG, PNG, BMP, TIFF) · Excel (XLSX) · CSV · ZIP archives";
+
+// Spreadsheet formats the server refuses with a sentence saying what to do
+// ("save it as an Excel Workbook (.xlsx) or as CSV"). A DROPPED one is kept in
+// the list so that sentence shows, instead of the file silently vanishing.
+const EXPLAINED_SPREADSHEETS = [".xls", ".xlsm", ".xlsb", ".xltx", ".xltm", ".ods", ".numbers"];
+
+const extensionOf = (name) => {
+  const m = /\.[^./\\]+$/.exec(String(name || "").toLowerCase());
+  return m ? m[0] : "";
+};
+
+/** Does a DROPPED file join the upload list? What the file picker offers
+ *  (by extension, or a PDF / image by its type), plus the spreadsheet formats
+ *  the server explains. Anything else is left out, as before. */
+export function isDroppableUpload(file) {
+  if (!file) return false;
+  const ext = extensionOf(file.name);
+  if (ACCEPT_UPLOAD.split(",").includes(ext) || EXPLAINED_SPREADSHEETS.includes(ext)) return true;
+  const type = String(file.type || "");
+  return type === "application/pdf" || type.startsWith("image/");
+}
+
+/** The upload list's badge for a file: {label, kind} - kind is "zip",
+ *  "image", "sheet" (a spreadsheet) or "document". The label is the file's
+ *  own extension ("PDF", "XLSX", "CSV", "TXT"). */
+export function uploadBadge(file) {
+  const ext = extensionOf(file && file.name);
+  const type = String((file && file.type) || "");
+  const label = ext ? ext.slice(1).toUpperCase() : (type === "application/pdf" ? "PDF" : "FILE");
+  if (ext === ".zip") return { label: "ZIP", kind: "zip" };
+  if (type.startsWith("image/")) return { label, kind: "image" };
+  if (ext === ".xlsx" || ext === ".csv" || EXPLAINED_SPREADSHEETS.includes(ext)) return { label, kind: "sheet" };
+  return { label, kind: "document" };
+}
 
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || `${word}s`)}`;
 
@@ -266,24 +307,81 @@ export function errorText(body, fallback) {
 //     services/document_tags.py, `insured_status` on each doc_summary row) -
 //     names are never compared here.
 
+// Brent's words (17 Oct 2026, item 2): "Highly Confident" / "Needs
+// Verification" / "Unable to Classify", no "Type:" in front. The hover text is
+// his table's "Meaning" column plus the 14 Oct note that the pill rates the
+// TYPE, never whose document it is. Display only: the buckets and colours are
+// as before.
+const TYPE_TAG_NOTE = "This rates the document's TYPE - not whose document it is.";
 const TYPE_TAGS = {
-  high: { label: "Type: sure", color: "#16a34a" },
-  medium: { label: "Type: likely", color: "#d97706" },
+  high: { label: "Highly Confident", color: "#16a34a",
+    meaning: "Primble has high confidence in its document classification." },
+  medium: { label: "Needs Verification", color: "#d97706",
+    meaning: "Primble has identified a probable document type, but confirmation is recommended." },
 };
-const TYPE_TAG_UNSURE = { label: "Type: unsure", color: "#dc2626" };
+const TYPE_TAG_UNSURE = { label: "Unable to Classify", color: "#dc2626",
+  meaning: "Primble cannot confidently identify the document type." };
 
 // The type pill for one row: {label, color, title}, or null when the row
-// carries no confidence. A type the producer set reads "Type: set by you".
+// carries no confidence. A type the producer set reads "Set by you" (no
+// "Type:" either, to match).
 export function documentTypeTag(row) {
   if (!row || typeof row !== "object") return null;
   if (row.doc_type_overridden) {
-    return { label: "Type: set by you", color: "#2563eb", title: "You set this document's type." };
+    return { label: "Set by you", color: "#2563eb", title: "You set this document's type." };
   }
   const conf = typeof row.doc_type_confidence === "string" ? row.doc_type_confidence : "";
   if (!conf) return null;
-  const tag = TYPE_TAGS[conf] || TYPE_TAG_UNSURE;
-  return { ...tag, title: "How sure Primble is of this document's TYPE - not whose document it is." };
+  const { label, color, meaning } = TYPE_TAGS[conf] || TYPE_TAG_UNSURE;
+  return { label, color, title: `${meaning} ${TYPE_TAG_NOTE}` };
 }
+
+// Does this row still need its TYPE confirmed? The ONE rule for the Documents
+// list (22 Oct 2026: "Needs Verification" joins "Unable to Classify"): the
+// section's count, Brent's review sentence, the pink row and every "to review"
+// number in both layouts read it, so they cannot disagree.
+//   * excluded: handled;
+//   * no type yet ("unknown"): pick one or exclude it;
+//   * a type the producer set or confirmed (the pill's "Set by you"): done;
+//   * otherwise the pill's own buckets - anything it does not call "Highly
+//     Confident" - and a type read from the filename alone.
+// A row with no confidence at all (an older session) is not flagged.
+export function documentNeedsTypeReview(row) {
+  if (!row || typeof row !== "object" || row.excluded) return false;
+  if ((row.doc_type || "unknown") === "unknown") return true;
+  if (row.doc_type_overridden) return false;
+  if (row.doc_type_source === "filename") return true;
+  const conf = typeof row.doc_type_confidence === "string" ? row.doc_type_confidence : "";
+  return conf !== "" && conf !== "high";
+}
+
+// Can the producer confirm the type shown as it is? A flagged row with a type
+// the server's own list offers (`available_doc_types`, the types
+// /api/document/reclassify accepts), so the button never sends a type the
+// server refuses. "Unknown" is never confirmed: it needs a type, or Exclude.
+// Without this a correct "Needs Verification" type could not be cleared - the
+// type list does not fire for the type it already shows.
+export function canConfirmDocumentType(row, availableDocTypes) {
+  if (!documentNeedsTypeReview(row)) return false;
+  const type = row.doc_type || "unknown";
+  if (type === "unknown") return false;
+  return (Array.isArray(availableDocTypes) ? availableDocTypes : [])
+    .some((t) => t && typeof t === "object" && t.value === type);
+}
+
+// The button beside the type list, and its hover text.
+export const CONFIRM_TYPE_LABEL = "Confirm type";
+export const CONFIRM_TYPE_TIP = "Keeps the type shown and marks it as confirmed by you.";
+
+// The Documents list's review sentence (Brent, 17 Oct 2026, item 2): under the
+// list's title, in pink, while a document still needs its type confirmed. Both
+// layouts print this one string.
+export const DOCUMENTS_REVIEW_NOTE = "Some documents require review. Confirm their document type to ensure accurate"
+  + " scoring and form recommendations, or exclude any that don't belong in this submission.";
+
+// The app's pink notes are plain pink text - no box, no dot (the editor's
+// unsaved-edits line, the form names on a card).
+export const REVIEW_NOTE_STYLE = { fontSize: 12, fontWeight: 600, color: "#E61B84", lineHeight: 1.45 };
 
 // The amber "Different insured: <name>" tag, or null (the applicant's own
 // document, a document naming nobody, or an older payload).

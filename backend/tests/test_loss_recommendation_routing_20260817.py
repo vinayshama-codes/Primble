@@ -56,7 +56,9 @@ def test_confirming_no_known_losses_actually_moves_the_pillar():
         {"narrative_states_no_losses": True},
     )
     assert after is None, "the producer's confirmation must take the pillar out"
-    assert any("not applicable" in r.lower() for r in recs)
+    # Brent, 23 Oct 2026: worded "Unable to Verify / Confirmation Required" (the TEST
+    # pinned the old "Not Applicable" wording and was updated).
+    assert any("unable to verify / confirmation required" in r.lower() for r in recs)
 
 
 def test_the_old_field_still_moves_nothing_which_is_why_it_was_wrong():
@@ -86,7 +88,9 @@ def test_no_loss_history_at_all_is_answerable_by_attesting():
     ("Loss run insured name does not match - verify these runs belong to this "
      "submission", "applicant_name"),
     ("Loss run ownership partially verified - name and address match but "
-     "FEIN/policy number not confirmed", "fein"),
+     # 23 Oct 2026 (fc04c74f): the producer's ownership answer, not the package
+     # FEIN (already filled - that row measured 0 and lifted nothing).
+     "FEIN/policy number not confirmed", "loss_run_ownership_confirmed"),
     ("3 years of loss runs provided - 5 years preferred for full credit",
      "loss_history_years"),
     ("Loss history incomplete - fewer than 3 years provided", "loss_history_years"),

@@ -212,6 +212,8 @@ OWNED_NO_SCHEDULE_FACTS = {
     "auto_garaging_addresses": [{"address": "4800 Dahlia St, Denver, CO 80216"}],
     "auto_radius_of_operation": "50 miles",
     "auto_vehicle_use": "Service",
+    # (19 Oct 2026, Brent: no proposed term is a hard stop) - a term, so the vehicle schedule is all this tests.
+    "effective_date": "07/15/2026",
 }
 OWNED_NO_SCHEDULE_FLAGS = {"has_auto_coverage": True}
 
@@ -237,6 +239,13 @@ def test_r13_auto_completeness_deducts_15():
                             "vin": "1FTFW1ET5DFC10312"}])
     assert ce.auto_completeness_deduction(with_schedule, OWNED_NO_SCHEDULE_FLAGS) == 0
 
+    # (19 Oct 2026, Brent: missing information is Completeness's) - the package charges the -15 there, once.
+    missing = [(i["bucket"], i["points"], i["fact"]) for i in sq.completeness_deduction_items(
+        OWNED_NO_SCHEDULE_FACTS, OWNED_NO_SCHEDULE_FLAGS, [], [])]
+    assert ("auto_completeness", 15, "auto_vin_schedule") in missing
+    assert not any(i["bucket"] == "auto_completeness" for i in sq.exposure_deduction_items(
+        OWNED_NO_SCHEDULE_FACTS, OWNED_NO_SCHEDULE_FLAGS, [], []))
+
 
 def test_r13_warning_is_generated():
     """A warning is generated (a warning, not a hard stop)."""
@@ -246,7 +255,8 @@ def test_r13_warning_is_generated():
 
 
 def test_r13_displayed_sqs_cannot_exceed_85():
-    """The displayed SQS cannot exceed 85 while the warning remains."""
+    """The displayed SQS cannot exceed 85 while the warning remains (the cap is
+    back, 20 Oct 2026)."""
     hard, soft = sq.evaluate_stops(OWNED_NO_SCHEDULE_FACTS, OWNED_NO_SCHEDULE_FLAGS)
     cap, reason = sq._resolve_cap(hard, soft)
     assert cap == sq.SOFT_STOP_CAP == 85
@@ -264,8 +274,15 @@ def test_r13_displayed_sqs_cannot_exceed_85():
     # Still a ceiling, not a floor.
     assert sq.final_score_with_credits(70, 0, cap) == 70
 
-    # POSITIVE CONTROL - once the schedule is supplied the warning clears and
-    # the ceiling lifts, so the 85 above is this warning doing the capping.
+    # (19 Oct 2026, kept) a warning is never a readiness blocker - it is its 85
+    # that keeps a 95 from Submission Ready.
+    shown = sq.final_score_with_credits(95, 0, cap)
+    status = sq.readiness_fields(shown, hard)
+    assert status["ready_blockers"] == [] and status["submission_ready"] is False
+    assert sq.tier_for_score(shown, len(hard))[1] == "Almost There"
+
+    # POSITIVE CONTROL - once the schedule is supplied the warning clears, so the
+    # warning above is this fixture's own vehicle-schedule warning.
     fixed = dict(
         OWNED_NO_SCHEDULE_FACTS,
         auto_vin_schedule=[{"year": "2021", "make": "Ford", "model": "F-150",

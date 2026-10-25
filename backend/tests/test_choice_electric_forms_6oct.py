@@ -129,13 +129,15 @@ class TestLinesOfBusiness:
         f = _facts()
         assert ps._resolve_lob_premium("CommercialUmbrellaLineOfBusiness_PremiumAmount_A", f) == "$ 17,082.00"
         rows = ps._other_lob_rows(f)
-        assert [r["name"] for r in rows] == ["Employee Benefit Liability Coverage Part",
-                                             "Excess (Following Form) Liability"]
-        assert [r["premium"] for r in rows] == ["$ 425.00", "$ 10,692"]
-        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherLineOfBusinessDescription_B", f) \
+        # 19 Oct 2026 (Brent): the Employee Benefit Liability coverage part is
+        # written with the GL policy by the same company - ACORD 126's, never a
+        # page-1 row - so the excess layer takes row A.
+        assert [r["name"] for r in rows] == ["Excess (Following Form) Liability"]
+        assert [r["premium"] for r in rows] == ["$ 10,692"]
+        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherLineOfBusinessDescription_A", f) \
             == "Excess (Following Form) Liability"
-        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_B", f) == "Yes"
-        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_C", f) is None
+        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_A", f) == "Yes"
+        assert ps._resolve_other_lob_row("Policy_LineOfBusiness_OtherIndicator_B", f) is None
 
     def test_the_other_premium_boxes_are_found_by_their_own_tooltip(self):
         boxes = ps._other_lob_premium_boxes(_schema("ACORD_125"))
@@ -147,9 +149,8 @@ class TestLinesOfBusiness:
         f = _facts()
         s = _schema("ACORD_125")
         box = {v: k for k, v in ps._other_lob_premium_boxes(s).items()}
-        assert ps._resolve_other_lob_premium(box["A"], f, s) == "$ 425.00"
-        assert ps._resolve_other_lob_premium(box["B"], f, s) == "$ 10,692"
-        assert ps._resolve_other_lob_premium(box["C"], f, s) is None
+        assert ps._resolve_other_lob_premium(box["A"], f, s) == "$ 10,692"
+        assert ps._resolve_other_lob_premium(box["B"], f, s) is None
         # no per-line data: the box keeps its old (blank, never asked) behaviour
         assert ps._resolve_other_lob_premium(box["A"], {}, s) is ps._SCHED_SKIP
         # not an OTHER premium box at all
@@ -207,15 +208,19 @@ class TestEstimatedTotal:
     def test_the_total_is_the_sum_of_the_premiums_the_grid_prints(self):
         f = _facts(total_policy_premium="$ 10,692.00")     # one policy's own total
         printed = ps._printed_lob_premiums(f)
-        assert sum(printed) == 58385
+        # 57,960 since 19 Oct 2026: the $425 Employee Benefit Liability part is
+        # the GL policy's coverage, not a page-1 row (Brent) - the total is the
+        # rows the page prints, as it already was for workers comp.
+        assert sum(printed) == 57960
         assert 29278 not in printed                         # WC: no row on ACORD 125
-        assert ps._resolve_estimated_total(self._BOX, f) == "$58,385"
+        assert 425 not in printed                           # EBL: ACORD 126's, not page 1
+        assert ps._resolve_estimated_total(self._BOX, f) == "$57,960"
 
     def test_one_policys_own_total_is_not_the_pages(self):
         # the package dec's $26,449 is larger than any row but totals ONE of
         # the five carriers' policies the grid prints
         f = _facts(total_policy_premium="$ 26,449.00")
-        assert ps._resolve_estimated_total(self._BOX, f) == "$58,385"
+        assert ps._resolve_estimated_total(self._BOX, f) == "$57,960"
 
     def test_a_one_carrier_page_keeps_its_stated_total(self):
         lines = [dict(r, carrier="One Carrier Co") for r in _LINES]
@@ -233,7 +238,7 @@ class TestEstimatedTotal:
         assert ps._resolve_estimated_total(self._BOX, f) == "$60,000.00"
 
     def test_no_stated_total_prints_the_printed_sum(self):
-        assert ps._resolve_estimated_total(self._BOX, _facts()) == "$58,385"
+        assert ps._resolve_estimated_total(self._BOX, _facts()) == "$57,960"
 
     def test_no_per_line_data_keeps_the_legacy_path(self):
         assert ps._resolve_estimated_total(self._BOX, {}) is ps._SCHED_SKIP

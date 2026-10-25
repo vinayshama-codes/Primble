@@ -221,9 +221,11 @@ def _src(path):
 
 def test_the_side_panel_sections_start_closed_like_every_other_section():
     sections = [line for line in _src(PANEL).splitlines() if "<Section " in line]
-    # Needs attention, AI held back, and (7 Oct 2026, C103) "New document" -
-    # the open choices a document added after forms raised. All start closed.
-    assert len(sections) == 3 and not any("defaultOpen" in line for line in sections)
+    # Needs attention and (7 Oct 2026, C103) "New document" - the open choices
+    # a document added after forms raised. All start closed. ("AI held back"
+    # left the panel 23 Oct 2026 - Brent: the audit record is fine.)
+    assert len(sections) == 2 and not any("defaultOpen" in line for line in sections)
+    assert not any("AI held back" in line for line in sections)
     assert any("New document (" in line for line in sections)
     assert "function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false," in _src(ACORD_MODAL)
 
@@ -276,9 +278,9 @@ def test_the_groups_split_in_node(tmp_path):
     run = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr
     groups, empty, one = json.loads(run.stdout)
+    # 23 Oct 2026 (Brent): a stale "AI held back" row ("h1") is drawn in no group.
     assert groups == [["missing", "Missing", ["m1", "m2"]],
                       ["applicant", na._APPLICANT_ROW_TITLE, ["s1", "s2"]],
-                      ["ai_held_back", "AI held back", ["h1"]],
                       ["verify", "Please verify", ["v1", "x"]]]
     assert empty == [] and one == 1
 

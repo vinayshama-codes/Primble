@@ -54,6 +54,18 @@ def _same(a, b) -> bool:
     return json.dumps(a, sort_keys=True, default=str) == json.dumps(b, sort_keys=True, default=str)
 
 
+# Tags every re-score stamps onto a fact from the fact itself
+# (`fact_state.derive_states`) - never a change of the answer. Comparing them
+# refused "Open again" on an untouched answer (owner, 24 Oct 2026).
+_DERIVED_TAGS = frozenset({"value_state", "evidence_state", "evidence_actor"})
+
+
+def _same_fact(a, b) -> bool:
+    def core(v):
+        return {k: x for k, x in v.items() if k not in _DERIVED_TAGS} if isinstance(v, dict) else v
+    return _same(core(a), core(b))
+
+
 def _absent(v) -> bool:
     return isinstance(v, dict) and v.get("__absent__") is True and len(v) == 1
 
@@ -237,6 +249,32 @@ async def record_fix(session_id: str, issue_id: str, receipt: dict) -> None:
 
 
 # ── Undo ─────────────────────────────────────────────────────────────────────
+def _changed_documents_state(fingerprint: str, session: dict, keys: list) -> bool:
+    """Does a document added, taken out or re-typed since `fingerprint` state any of
+    `keys` (a fact key, or "flag:<name>")? A document that is gone, one whose own
+    facts are not on file, a flag, or a fingerprint that cannot be read counts as
+    stating it - the undo is refused."""
+    try:
+        then = {str(r[0]): r for r in json.loads(fingerprint)}
+    except Exception:                                          # noqa: BLE001
+        return True
+    docs = [d for d in ((session or {}).get("docs") or []) if isinstance(d, dict)]
+    now = {str(d.get("doc_id") or d.get("filename") or ""): d for d in docs}
+    if any(k not in now for k in then):
+        return True                                   # removed since: its facts are unknown
+    current = {r[0]: r for r in json.loads(docs_fingerprint(session))}
+    changed = [now[k] for k in now if then.get(k) != current.get(k)]
+    if any(str(k).startswith("flag:") for k in keys):
+        return bool(changed)
+    for d in changed:
+        stated = d.get("facts")
+        if not isinstance(stated, dict) or not stated:
+            return True                               # what it states is not on file
+        if any(k in stated and not _empty(stated.get(k)) for k in keys):
+            return True
+    return False
+
+
 def plan_undo(session: dict, receipt: dict) -> Tuple[str, dict]:
     """("changed", {"changed": [...]}) when anything the fix wrote has moved since (or the
     receipt is blocked, or the documents changed); else ("ok", plan) - the facts to set and
@@ -247,11 +285,24 @@ def plan_undo(session: dict, receipt: dict) -> Tuple[str, dict]:
     forms = session.get("generated_forms") or {}
     if receipt.get("blocked"):
         return "changed", {"changed": ["a later change"]}
+    # A changed document set blocks the undo only when the undo would put back a
+    # value the OLD documents gave (a fix that replaced something). A fix that
+    # filled a blank is undone by clearing the person's answer - safe whatever
+    # documents were added since (owner, 24 Oct 2026: uploading loss runs after
+    # answering blocked "Open again" on every earlier answer).
     if receipt.get("docs") and receipt["docs"] != docs_fingerprint(session):
-        return "changed", {"changed": ["documents"]}
+        restores = [k for k, ch in (receipt.get("facts") or {}).items() if not _empty(ch.get("before"))]
+        restores += [f"flag:{k}" for k, ch in (receipt.get("flags") or {}).items()
+                     if not _absent(ch.get("before"))]
+        # ...and only when a document that changed since states one of them (audit,
+        # 24 Oct 2026: loss runs uploaded after a COPE table fix blocked its "Open
+        # again" - the runs say nothing about buildings, so the old documents'
+        # table is still the documents' table).
+        if restores and _changed_documents_state(receipt["docs"], session, restores):
+            return "changed", {"changed": ["documents"]}
     changed = []
     for key, ch in (receipt.get("facts") or {}).items():
-        if not _same(facts.get(key, MISSING), ch["after"]):
+        if not _same_fact(facts.get(key, MISSING), ch["after"]):
             changed.append(key)
     for key, subs in (receipt.get("subfacts") or {}).items():
         now = facts.get(key) if isinstance(facts.get(key), dict) else {}

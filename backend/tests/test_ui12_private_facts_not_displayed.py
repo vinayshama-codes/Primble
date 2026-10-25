@@ -106,31 +106,51 @@ def test_no_losing_value_leaks_through_any_row():
     assert rows["entity_type"] == "Limited Liability Company"
 
 
+# The two rows Brent reported on 17 Oct (item 3). Both facts are bare `boolean`
+# in the extraction schema, so their False is the document's SILENCE (B8) and
+# the popup no longer prints them - see the test below.
+_SILENT_TWO_WAY_FALSE = {"agreed_value_endorsement", "cyber_controls_mfa"}
+
+
 def test_every_real_fact_still_renders_unchanged():
-    """No collateral. Same rows, same labels, same values, same order."""
+    """No collateral. Same rows, same labels, same values, same order - apart
+    from the private note and the two silent two-way booleans."""
     rows = _document_fact_rows(LIVE_FACTS)
     expected_keys = sorted(
-        (k for k in LIVE_FACTS if not k.startswith("_")),
+        (k for k in LIVE_FACTS
+         if not k.startswith("_") and k not in _SILENT_TWO_WAY_FALSE),
         key=lambda k: k.replace("_", " ").title(),
     )
     assert [r["key"] for r in rows] == expected_keys
-    assert len(rows) == len(LIVE_FACTS) - 1               # exactly one dropped
+    assert len(rows) == len(LIVE_FACTS) - 1 - len(_SILENT_TWO_WAY_FALSE)
     for r in rows:
         assert r["confidence"] == "ai_high"
         assert r["label"] == r["key"].replace("_", " ").title()
 
 
-def test_a_real_no_answer_is_not_mistaken_for_debug_output():
-    """`agreed_value_endorsement: False` is an ANSWER, not machinery.
+def test_a_two_way_false_is_silence_not_a_row():
+    """CHANGED 21 Oct 2026 - this test used to pin the defect.
 
-    It reads like debug output and is not - `audit_service` drops BARE python
-    bools for that reason, but these arrive as envelopes carrying an explicit
-    `value_state`. Dropping them would blank real extracted answers, which is
-    the opposite of the standing blank-over-wrong rule.
+    It asserted that `agreed_value_endorsement` / `cyber_controls_mfa` = "False"
+    keep rendering as "real extracted no answers", because the envelope carried
+    `value_state: explicit_no`. Written 1 Sep, three days before B8 showed that a
+    bare-`boolean` fact's False cannot be told from silence (the model has no way
+    to answer "not mentioned"); the `explicit_no` label is fact_state's STRING
+    path reading the word "false". Brent's 17 Oct test (item 3) reported exactly
+    these rows on a narrative that mentions neither. The door is
+    `extraction_service.is_silent_boolean`.
+
+    A real No still renders: a string-typed fact (the model CAN leave it null)
+    holding "No" is an answer, and so is a two-way fact's True.
     """
     rows = {r["key"]: r["value"] for r in _document_fact_rows(LIVE_FACTS)}
-    assert rows["agreed_value_endorsement"] == "False"
-    assert rows["cyber_controls_mfa"] == "False"
+    assert "agreed_value_endorsement" not in rows
+    assert "cyber_controls_mfa" not in rows
+    rows = {r["key"]: r["value"] for r in _document_fact_rows({
+        "auto_hired_nonowned": _env("No"),
+        "cyber_controls_backups": _env("True"),
+    })}
+    assert rows == {"auto_hired_nonowned": "No", "cyber_controls_backups": "Yes"}   # booleans read Yes / No (25 Oct)
 
 
 def test_only_a_LEADING_underscore_is_private():

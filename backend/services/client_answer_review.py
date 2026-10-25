@@ -84,17 +84,63 @@ def build_review_rows(session: Optional[dict]) -> List[dict]:
     """
     rows: List[dict] = []
     for fact_key, held in sorted(held_conflicts(session).items()):
+        own_reason = str(held.get("reason") or "").strip()
         rows.append({
             "fact_key":     fact_key,
-            "label":        _label_for(fact_key),
+            # A held answer about ONE policy names its policy and why it was
+            # held (policy_lines.hold_entry, 22 Oct 2026); every other keeps
+            # the fact's own label and the standing reason.
+            "label":        str(held.get("label") or "") or _label_for(fact_key),
             "client_value": str(held.get("client_value") or ""),
             "source_value": str(held.get("source_value") or ""),
             "field_name":   held.get("field_name") or fact_key,
             "held_at":      held.get("held_at"),
-            "reason":       "The client's questionnaire answer does not match "
-                            "the uploaded documents.",
+            "reason":       own_reason
+                            or "The client's questionnaire answer does not match "
+                               "the uploaded documents.",
+            # "format": the answer failed its field's own check and was held
+            # before reaching the form (22 Oct 2026); "conflict": it disagrees
+            # with the documents or the policy records. The card's intro reads it.
+            "kind":         "format" if held.get("kind") == "format" else "conflict",
+            # The entry states its own reason - shown on its row - rather than
+            # the generic sentence the card's intro already says.
+            "own_reason":   bool(own_reason),
         })
     return rows
+
+
+_CANNOT_APPLY = ("That value can't be applied to the forms directly. "
+                 "Edit the field on the form instead.")
+
+
+def _refused_by_its_check(fact_key: str, entry: dict, value: str) -> bool:
+    """The held value fails its fact's own check (`fact_registry.answer_refusal`,
+    read like the client's answer was - `arq_service._answer_check_refusal`).
+    A building answer ("year_built@loc2") is judged as its package fact."""
+    try:
+        from services.arq_service import _answer_check_refusal
+        from services.premises_cope import parse_building_field
+        building = parse_building_field(fact_key)
+        fact = building[0] if building else fact_key
+        return bool(_answer_check_refusal(fact, str(entry.get("field_name") or fact_key), value))
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def release_superseded_holds(held: Optional[dict], written_keys) -> List[str]:
+    """Drop, IN PLACE, every open hold that a later good value now answers: a
+    later questionnaire answer applied for the same fact (or "<fact>@locN"
+    building item), or a person setting the fact (the producer door). The
+    row asked "which value?" and the person has since answered it (22 Oct
+    2026). Returns the keys released. The ONE rule - both apply doors call it
+    just before they persist the held map."""
+    if not isinstance(held, dict) or not held:
+        return []
+    keys = {str(k) for k in (written_keys or ()) if k}
+    gone = [k for k in list(held) if k in keys]
+    for k in gone:
+        held.pop(k, None)
+    return gone
 
 
 def _strip_hold(container: Optional[dict], fact_key: str) -> Optional[dict]:
@@ -140,13 +186,16 @@ async def resolve_client_answer(
     applied_forms: List[str] = []
 
     if choice == CHOICE_USE_CLIENT:
+        # A value its fact's own check refuses ("2050" for year built) is not
+        # written by this door either (22 Oct 2026) - the same answer a held
+        # building value gets; the hold stays until the producer fixes the box.
+        if _refused_by_its_check(fact_key, entry, client_value):
+            return {"ok": False, "message": _CANNOT_APPLY}
         from services.arq_service import apply_producer_answer_to_session
         ok, updated = await apply_producer_answer_to_session(
             session_id, fact_key, client_value)
         if not ok:
-            return {"ok": False,
-                    "message": "That value can't be applied to the forms directly. "
-                               "Edit the field on the form instead."}
+            return {"ok": False, "message": _CANNOT_APPLY}
         applied_forms = list(updated or [])
 
     # Release the hold on BOTH copies, whichever choice was made. Re-read the
@@ -176,7 +225,7 @@ async def resolve_client_answer(
         from services.audit_service import log_underwriting_confirmation
         await log_underwriting_confirmation(
             session_id, str(user_id) if user_id is not None else None,
-            fact_key=fact_key, label=_label_for(fact_key),
+            fact_key=fact_key, label=str(entry.get("label") or "") or _label_for(fact_key),
             confirmed_value=(client_value if choice == CHOICE_USE_CLIENT else source_value),
             previous_value=source_value,
             candidates=[

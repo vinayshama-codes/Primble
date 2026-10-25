@@ -843,8 +843,18 @@ def _tower_view(facts: dict, slots: List[dict], assign: Dict[str, Optional[int]]
                 facts.get("underlying_policies"),
                 lambda r: not (r in upper_rows and r not in low_rows))
     else:
-        # Its underlying is the layer below, printed from that layer's record.
+        # Its underlying is the layer below, printed from that layer's record
+        # (OTHER POLICY row A) - and, Brent 23 Oct 2026 (Z34-1 #3), "list the
+        # applicable underlying coverages - but do not automatically require
+        # all three": the lines the lowest layer sits over
+        # (`applicable_underlying_lines`, on the marker), printed in their own
+        # rows by `pdf_service._resolve_upper_layer_box`. The layer's own
+        # schedule stays its own (empty): no score reads another layer's.
         out["underlying_policies"] = []
+        base_view = _tower_view(facts, slots, assign, 0, keys.get(0, ""))
+        underlying_lines = applicable_underlying_lines(base_view)
+        base_rows = _val(base_view.get("underlying_policies"))
+        base_rows = [r for r in base_rows if isinstance(r, dict)] if isinstance(base_rows, list) else []
 
     # Declarations index (present only before the post-generation purge): an
     # entry tagged with another layer's contract number is that layer's; an
@@ -921,8 +931,29 @@ def _tower_view(facts: dict, slots: List[dict], assign: Dict[str, Optional[int]]
         "own_documents": sorted(_exclusive_docs(slots, idx) or _slot_sources(slot)),
         "other_layer_documents": sorted(other_docs),
         **_producer_marker(slot),
+        **({"underlying_lines": underlying_lines,
+            "base_underlying_policies": base_rows} if idx > 0 else {}),
     }
     return out
+
+
+def applicable_underlying_lines(view: Any) -> List[str]:
+    """The underlying lines an umbrella-family layer sits over - general
+    liability, auto, employers liability - in that order: the ones
+    `sqs_service.umbrella_underlying` calls applicable on `view` (the lowest
+    layer's own schedule lists it, or the package carries it and the schedule
+    does not exclude it; the stamping facts carry the flags). Brent, 23 Oct
+    2026: "list the applicable underlying coverages - but do not automatically
+    require all three". [] when the door cannot be read - nothing is listed."""
+    if not isinstance(view, dict):
+        return []
+    try:
+        from services.sqs_service import UMB_UNDERLYING_LINES, umbrella_underlying
+        lines = umbrella_underlying(view, view)["lines"]
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("umbrella_layers: applicable underlying lines unread - %s", exc)
+        return []
+    return [fam for fam, _label in UMB_UNDERLYING_LINES if (lines.get(fam) or {}).get("applicable")]
 
 
 # ── the boxes a copy answers for itself (gap fill) ───────────────────────────
@@ -960,9 +991,39 @@ _SHARED_PREFIXES: Tuple[str, ...] = (
 )
 
 
+# The UNDERLYING lines' own blocks (Brent, 23 Oct 2026, Z34-1 #3: "list the
+# applicable underlying coverages"): the General Liability, Automobile and
+# Employers Liability policies every layer of a tower sits over. Each copy
+# prints them the way the plain 131 does (`pdf_service._upper_layer_
+# underlying_line_box`), so they are SHARED boxes - one gap-fill answer for
+# every copy, never one per layer's own documents. The OTHER POLICY rows, the
+# rest of the checklist and the expiring-policy box stay private.
+UNDERLYING_LINE_BLOCKS: Tuple[Tuple["re.Pattern", str], ...] = (
+    (re.compile(r"^(?:UnderlyingPolicy_GeneralLiability_|GeneralLiability_|"
+                r"UnderlyingCoverage_Coverage_GeneralLiability)"), "general_liab"),
+    (re.compile(r"^(?:UnderlyingPolicy_Automobile_|"
+                r"Vehicle_(?:CombinedSingleLimit|BodilyInjury|PropertyDamage)_|"
+                r"UnderlyingCoverage_Coverage_AnyAutoIndicator_)"), "auto"),
+    (re.compile(r"^(?:UnderlyingPolicy_EmployersLiability_|"
+                r"WorkersCompensationEmployersLiability_)"), "workers_comp"),
+)
+
+
+def underlying_line_family(field: Any) -> Optional[str]:
+    """"general_liab" / "auto" / "workers_comp" for a box of that underlying
+    line's own 131 block, else None."""
+    f = str(field or "")
+    for rx, fam in UNDERLYING_LINE_BLOCKS:
+        if rx.match(f):
+            return fam
+    return None
+
+
 def field_rule(field: str) -> Optional[str]:
     """"private" / "shared" by the declared tables, or None (no rule)."""
     f = str(field or "")
+    if underlying_line_family(f):
+        return "shared"
     if any(f.startswith(p) for p in _PRIVATE_PREFIXES):
         return "private"
     if any(f.startswith(p) for p in _SHARED_PREFIXES):
@@ -1001,6 +1062,52 @@ def layer_text(docs: Any, facts: dict, form_id: str) -> Optional[str]:
         return " ".join(str(d.get("text") or "") for d in active if _doc_name(d) not in upper)
     own = set(m.get("own_documents") or ())
     return " ".join(str(d.get("text") or "") for d in active if _doc_name(d) in own)
+
+
+# ── follow form belongs to the layer whose own document states it (Z37 B) ──
+
+def upper_layer_documents(facts: Any) -> Set[str]:
+    """The documents that belong ONLY to a layer above the umbrella, on a tower
+    whose lowest layer is the umbrella; empty otherwise. "Follow Form Excess
+    Liability Policy" on such a document describes the excess layer, never
+    the umbrella (Choice Electric X4)."""
+    try:
+        slots = _all_slots(facts)
+        if len(slots) < 2 or slots[0]["layer"] != UMBRELLA_LAYER:
+            return set()
+        out: Set[str] = set()
+        for i in range(1, len(slots)):
+            out |= _exclusive_docs(slots, i)
+        return out - _slot_sources(slots[0])
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("umbrella_layers: upper layer documents unread: %s", exc)
+        return set()
+
+
+def settle_umbrella_follow_form(mf: dict) -> bool:
+    """On a tower whose lowest layer is the umbrella, the package's
+    `umbrella_follow_form` is the umbrella's OWN documents' value: a value
+    only an upper (excess) layer's document prints is dropped (it stays in
+    that layer's `facts[DOCS_KEY]` entry for its own 131). A person's answer
+    is never touched. Returns True when it changed the fact. Never raises."""
+    key = "umbrella_follow_form"
+    try:
+        if not isinstance(mf, dict) or not upper_layer_documents(mf):
+            return False
+        held = mf.get(key)
+        if not _has(_val(held)) or _person_sourced(held):
+            return False
+        settled = _base_value(mf, _all_slots(mf), key, person_ok=True)
+        if settled is held:
+            return False
+        if settled is None or not _has(_val(settled)):
+            mf.pop(key, None)
+        else:
+            mf[key] = settled
+        return True
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("umbrella_layers: follow form not settled: %s", exc)
+        return False
 
 
 # ── merge time: each layer document's own values ─────────────────────────────

@@ -546,9 +546,12 @@ class TestSubmissionIntegrityUsesTheDoor:
         # No legal-form designator in the name: since 7 Oct 2026 (Choice
         # Electric) an "LLC" in the insured's own name settles a contradicting
         # entity reading as a misread, so a REAL divergence needs a bare name.
+        # A carrier is compared only on ONE contract (24 Oct 2026): two carriers
+        # with no line read clash when both print the same policy number.
+        same = {"policy_number": "CPP-1001"} if field == "carrier_name" else {}
         r = self._assess([
-            self._d("a.pdf", {"applicant_name": "Orbin Contracting", field: a}),
-            self._d("b.pdf", {"applicant_name": "Orbin Contracting", field: b},
+            self._d("a.pdf", {"applicant_name": "Orbin Contracting", field: a, **same}),
+            self._d("b.pdf", {"applicant_name": "Orbin Contracting", field: b, **same},
                     "application")])
         assert any(needle in x for x in r["reasons"]), r["reasons"]
 

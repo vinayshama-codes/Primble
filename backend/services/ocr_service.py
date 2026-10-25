@@ -8,7 +8,6 @@ import logging
 import tempfile
 import threading
 import uuid
-import zipfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +27,9 @@ from utils.page_layout import (
 # What a person typed into a fillable PDF lives in its form fields, not in the
 # content stream pdfplumber reads - appended per page at assembly below.
 from utils.form_field_text import read_filled_fields, form_field_block
+# An Excel workbook / a CSV as text: one "Sheet: <name>" block per sheet, rows
+# as " | "-joined cells, dates as MM/DD/YYYY (Brent's 17 Oct item 1).
+from utils.spreadsheet_text import SPREADSHEET_EXTENSIONS, spreadsheet_text
 
 logger = logging.getLogger(__name__)
 
@@ -1930,6 +1932,27 @@ async def _read_text_file(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Spreadsheets (.xlsx, .csv) - 21 Oct 2026, Brent's 17 Oct item 1
+# ---------------------------------------------------------------------------
+
+def _read_spreadsheet_sync(path: str) -> str:
+    """A workbook / CSV as document text (utils/spreadsheet_text.py). A file
+    it will not read gives "" - the document then has no usable text, exactly
+    like an unreadable PDF - and the reason is logged."""
+    try:
+        return spreadsheet_text(path)
+    except Exception as ex:                              # noqa: BLE001
+        logger.error(f"_read_spreadsheet: cannot read {path}: {ex}")
+        return ""
+
+
+async def _read_spreadsheet(path: str) -> str:
+    """Async wrapper — reads off the event loop via the shared executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_OCR_EXECUTOR, _read_spreadsheet_sync, path)
+
+
+# ---------------------------------------------------------------------------
 # Public file dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1944,6 +1967,8 @@ async def extract_text(file_path: str) -> Tuple[str, List[str]]:
         raw_text, low_conf = await extract_text_from_pdf(file_path)
     elif ext == ".txt":
         raw_text, low_conf = await _read_text_file(file_path), []
+    elif ext in SPREADSHEET_EXTENSIONS:
+        raw_text, low_conf = await _read_spreadsheet(file_path), []
     elif ext in SUPPORTED_IMG:
         raw_text, low_conf = await ocr_image_file(file_path)
     else:
@@ -1952,46 +1977,8 @@ async def extract_text(file_path: str) -> Tuple[str, List[str]]:
     return clean_text(raw_text), low_conf
 
 
-# ---------------------------------------------------------------------------
-# ZIP extraction
-# ---------------------------------------------------------------------------
-
-_ZIP_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024  # 500 MB
-_ZIP_MAX_RATIO              = 100
-
-
-def extract_zip(zip_path: str) -> List[str]:
-    """Extract PDF and image files from a ZIP archive. ZIP bomb guarded."""
-    extracted: List[str] = []
-    supported_exts = {".pdf"} | set(SUPPORTED_IMG)
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            infos = zf.infolist()
-            total_uncompressed = sum(i.file_size for i in infos)
-            if total_uncompressed > _ZIP_MAX_UNCOMPRESSED_BYTES:
-                logger.error(
-                    f"extract_zip: archive too large when uncompressed "
-                    f"({total_uncompressed / 1024 / 1024:.0f} MB): {zip_path}"
-                )
-                return []
-            for info in infos:
-                if info.compress_size > 0:
-                    ratio = info.file_size / info.compress_size
-                    if ratio > _ZIP_MAX_RATIO:
-                        logger.warning(
-                            f"extract_zip: skipping '{info.filename}' — "
-                            f"compression ratio {ratio:.0f}:1 exceeds limit"
-                        )
-                        continue
-                ext = os.path.splitext(info.filename.lower())[1]
-                if ext in supported_exts:
-                    safe_name = f"{uuid.uuid4().hex}_{os.path.basename(info.filename)}"
-                    out = os.path.join(UPLOAD_DIR, safe_name)
-                    with open(out, "wb") as fh:
-                        fh.write(zf.read(info.filename))
-                    extracted.append(out)
-    except zipfile.BadZipFile as ex:
-        logger.error(f"extract_zip: bad zip file {zip_path}: {ex}")
-    except Exception as ex:
-        logger.error(f"extract_zip: unexpected error on {zip_path}: {ex}")
-    return extracted
+# A ZIP upload is opened in ONE place: services/upload_intake.store_uploads
+# (bounded reads under the per-file and aggregate caps, every entry type-checked
+# and virus-scanned). The extract_zip that sat here had no caller and read each
+# entry whole; it was removed on 21 Oct 2026, and
+# tests/test_build22_excel-formats.py fails the build on a second ZIP reader.

@@ -74,7 +74,14 @@ ROW_ID_KEY = "_row_id"
 # relationship, gender, MVR facts - none of them columns, all wiped by the old
 # rebuild-from-columns save (17 of 17 live vehicles lost class code / territory
 # on any edit). Same class as the location table's LOC # loss (Brent #14 / #23).
-MERGE_ON_SAVE = frozenset({"property_locations", "auto_vin_schedule", "auto_drivers"})
+# The GL classification window joined 21 Oct 2026 (Brent 17 Oct item 6): a GL
+# row carries its territory and subcontracted % - no columns, both kept.
+# The loss table joined 21 Oct 2026 (lane C review): a claim row carries its
+# claim number, total incurred and SUBROGATION code (ACORD 125 prints Y / N
+# from it) - no columns, all wiped by a save, and the claims card now sends
+# producers into that save (`claim_checks`).
+MERGE_ON_SAVE = frozenset({"property_locations", "auto_vin_schedule", "auto_drivers",
+                           "gl_class_code_schedule", "loss_history"})
 # The stored row's own stable id, per schedule (consolidation issues it).
 _STORED_ROW_ID_FIELD: Dict[str, str] = {"property_locations": "location_id"}
 # A row a save carries with no usable hidden id (an import, an older copy of
@@ -85,7 +92,36 @@ _STORED_ROW_ID_FIELD: Dict[str, str] = {"property_locations": "location_id"}
 _MERGE_IDENTITIES: Dict[str, Tuple[Tuple[str, ...], ...]] = {
     "auto_vin_schedule": (("vin",),),
     "auto_drivers": (("license_number",), ("name", "dob")),
+    "gl_class_code_schedule": (("location", "class_code"),),
+    # A claim: its loss date and line, else those and its description (two
+    # claims of one accident). The claim number is no column, so it cannot
+    # identify a typed row.
+    "loss_history": (("date", "line_of_business"), ("date", "line_of_business", "description")),
 }
+# A row whose every cell the person CLEARED (the stored row showed values, the
+# save shows none) is deleted, not kept by its hidden id: a claim with no date,
+# line, description or amounts left is not a claim the person kept (its claim
+# number and incurred would print on alone). A row that showed nothing from the
+# start still stays (a redacted or column-less row, as for every table).
+_CLEARED_ROW_IS_DELETED = frozenset({"loss_history"})
+# A hidden field derived from columns goes stale when a person changes them:
+# the document's total incurred is its paid + reserve (+ expense), so a typed
+# paid or reserve drops it rather than keep a total that no longer adds up.
+_STALE_WHEN_CHANGED: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "loss_history": {"amount": ("paid", "reserved_amount"),
+                     "incurred": ("paid", "reserved_amount"),
+                     "open": ("open_code",)},     # extraction's twin of the status cell
+}
+
+# "Unknown - follow up" (21 Oct 2026, Brent 17 Oct item 6: "allow producers to
+# mark unknown information for follow-up rather than guess"). A row-level mark,
+# never a column (it binds no ACORD box): a table that declares `follow_up`
+# keeps it on each row it is ticked on. The row is saved; what it does not
+# state stays a gap - the form prints nothing it does not have (the same key
+# as `pdf_service._ROW_FOLLOW_UP_KEY`) and no score counts an unknown as an
+# answer. A typed non-answer ("unknown", "TBD", "not sure") in such a table's
+# cell is not stored: the cell is left blank and the row is marked instead.
+FOLLOW_UP_KEY = "follow_up"
 _ADDRESS_PART_KEYS = ("address_line1", "address_line2", "address_city",
                       "address_state", "address_zip")
 
@@ -112,6 +148,8 @@ class Column(dict):
         width: int = 0,
         producer_only: bool = False,
         options: Optional[List[str]] = None,
+        units_by: Optional[dict] = None,
+        evidence_only: bool = False,
     ):
         super().__init__(
             key=key, label=label, type=type, required=required,
@@ -123,6 +161,18 @@ class Column(dict):
         # ("NON-COMBUSTIBLE - LIGHT STEEL") is never refused for not being one.
         if options:
             self["options"] = list(options)
+        # A column no ACORD box prints but the checks read (25 Oct 2026: the loss
+        # table's first-made date, expense, incurred and claim number feed the
+        # claims checks) - kept on the row, never discarded.
+        if evidence_only:
+            self["evidence_only"] = True
+        # The unit an amount is in, read off another cell of the same row
+        # (21 Oct 2026, the GL window: an exposure is dollars on a payroll /
+        # sales / cost basis, square feet on an area basis) - {"column": key,
+        # "units": {lower-case cell text: unit}}. Shown beside the cell only.
+        if units_by:
+            self["units_by"] = {"column": str(units_by.get("column") or ""),
+                                "units": dict(units_by.get("units") or {})}
 
 
 class ScheduleDef(dict):
@@ -138,6 +188,18 @@ class ScheduleDef(dict):
     `row_capacity`: physical rows the ACORD form prints for THIS schedule.
     Defaults to the 14-row (A..N) convention; ACORD 130 prints only four
     officer rows, and an overflow notice counted against 14 would be wrong.
+
+    Added 21 Oct 2026 for the GL classification window (Brent 17 Oct item 6);
+    every default leaves the other tables exactly as they were:
+      `follow_up`   - each row can be marked "Unknown - follow up" (FOLLOW_UP_KEY);
+      `answers`     - facts this table ANSWERS: a card asking one opens the table
+                      (`answer_routing.answer_mode`);
+      `review_item` - the review shows every open item whose fix opens this
+                      whole table as ONE item, this sentence when two or more fire
+                      (`issue_registry._fold_one_item_tables`);
+      `title` / `intro` - the fix window's own heading and the line under it;
+      `restamp_derived` - a save after forms also re-stamps the boxes the stamper
+                      DERIVES from these rows (`arq_service.save_session_schedule`).
     """
 
     def __init__(
@@ -151,6 +213,12 @@ class ScheduleDef(dict):
         vin_decode: bool = False,
         producer_only: bool = False,
         row_capacity: int = ROW_CAPACITY,
+        follow_up: bool = False,
+        answers: Tuple[str, ...] = (),
+        review_item: str = "",
+        title: str = "",
+        intro: str = "",
+        restamp_derived: bool = False,
     ):
         super().__init__(
             list_key=list_key, label=label, singular=singular,
@@ -158,6 +226,36 @@ class ScheduleDef(dict):
             scalar_key=scalar_key, vin_decode=vin_decode,
             producer_only=producer_only, row_capacity=row_capacity,
         )
+        if follow_up:
+            self["follow_up"] = True
+        if answers:
+            self["answers"] = list(answers)
+        if review_item:
+            self["review_item"] = review_item
+        if title:
+            self["title"] = title
+        if intro:
+            self["intro"] = intro
+        if restamp_derived:
+            self["restamp_derived"] = True
+
+
+# ACORD 126's own rating-basis legend, printed beside the PREMIUM BASIS box:
+# (S) GROSS SALES (P) PAYROLL (A) AREA (C) TOTAL COST (M) ADMISSIONS (U) UNIT
+# (T) OTHER. Each word is one `pdf_service.rating_basis_code` reads into its
+# letter (pinned by tests/test_build22_gl-window.py). Brent's list (17 Oct item
+# 6) leads: Payroll, Gross Sales, Total Cost (his "Subcontractor Cost" - the
+# cost of work sublet, which also reads as C), Area, Other; ACORD's other two
+# are kept because the box takes them.
+GL_RATING_BASES: Tuple[str, ...] = ("Payroll", "Gross Sales", "Total Cost", "Area",
+                                    "Admissions", "Units", "Other")
+# What an exposure is counted in, by its basis (a letter or a word).
+_GL_EXPOSURE_UNITS: Dict[str, str] = {
+    "payroll": "$", "p": "$", "gross sales": "$", "sales": "$", "s": "$",
+    "total cost": "$", "subcontractor cost": "$", "cost": "$", "c": "$",
+    "area": "sq ft", "a": "sq ft", "admissions": "admissions", "m": "admissions",
+    "units": "units", "unit": "units", "u": "units",
+}
 
 
 # Column sets mirror the sub_keys actually bound in
@@ -329,6 +427,33 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             Column("description",      "What happened", "text",     required=True, placeholder="Slip and fall at job site", width=240),
             Column("paid",             "Amount paid",   "currency", placeholder="$8,500", width=125),
             Column("reserved_amount",  "Amount reserved", "currency", placeholder="$2,000", width=135),
+            # ACORD 125's DATE OF CLAIM and CLAIM OPEN Y/N boxes (21 Oct 2026,
+            # Brent's claims file - attachment C). Both were extracted from loss
+            # runs and printed, yet a table save dropped them (no column), and an
+            # imported claims list had nowhere to put its report date or status,
+            # so the claims checks (`claim_checks`: a report date before the loss
+            # date, none given, an open claim with no reserve) could not read
+            # them. Appended LAST: a header-less list imports by position. "Open"
+            # / "Closed" print Y / N (`pdf_service._yn_gate`), as the extracted
+            # "O" / "C" already do.
+            Column("claim_date",       "Date reported", "date",     placeholder="03/20/2022", width=120),
+            Column("open_code",        "Open or closed", "text",    placeholder="Closed", width=115,
+                   options=["Open", "Closed"]),
+            # The claims checks' other fields (25 Oct 2026, live f575160b): their
+            # card asked to correct "incurred $9,200 vs $9,300" and "no date first
+            # made", and the table had no column for either - the card could not
+            # be cleared from its own window. Appended LAST (position imports).
+            # PRODUCER-ONLY (Z42 review A): carrier loss-run figures the claims
+            # checks read - the insured's copy of the table asks what happened,
+            # never the carrier's claim number, expense or first-made date.
+            Column("first_made_date",  "Date first made", "date",   placeholder="03/18/2022", width=125,
+                   evidence_only=True, producer_only=True),
+            Column("expense",          "Expense",       "currency", placeholder="$500", width=110,
+                   evidence_only=True, producer_only=True),
+            Column("incurred",         "Total incurred", "currency", placeholder="$11,000", width=125,
+                   evidence_only=True, producer_only=True),
+            Column("claim_number",     "Claim #",       "text",     placeholder="CL-10234", width=120,
+                   evidence_only=True, producer_only=True),
         ],
     ),
     # ── V1 H3 (client section 8.1) - WC exposure at the employee-group level ──
@@ -392,6 +517,55 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             # what the model was previously inventing here from the group table.
             Column("duties",          "Duties",             "text",    placeholder="Estimating and sales", width=180),
             Column("remuneration",    "Remuneration",       "currency", placeholder="$85,000", width=125),
+        ],
+    ),
+    # ── Brent 17 Oct item 6 (21 Oct 2026) - ONE GL classification window ──────
+    # "Please combine the two existing GL pop-ups into one titled General
+    # Liability Classification & Exposure Details." ONE table on the EXISTING
+    # `gl_class_code_schedule` fact (never a parallel one): the extraction rows
+    # are the prefill, the ACORD 126 schedule of hazards prints the rows
+    # (`pdf_service._resolve_gl_hazard_row`), and both GL warnings read them
+    # (`sqs_service.gl_class_codes_present` / `_dec_entries_state_payroll`).
+    # Each column is a real 126 hazard box (`pdf_service._SCHEDULE_REGISTRY`);
+    # the row's territory and subcontracted % ride along (MERGE_ON_SAVE).
+    #   * Location - the package's premises (`columns_for`, "Location 1 - <street>",
+    #     which the 126 LOC # reads as ACORD 125's number for it);
+    #   * Classification - the account's own operations and the documents' own
+    #     classifications, or any wording (Other);
+    #   * GL class code - only a code a document prints is ever prefilled; never
+    #     suggested (Brent: "do not assume the GL class code"); another line's
+    #     code is refused at the cell ("do not substitute WC class codes");
+    #   * Rating basis - ACORD 126's own legend; Annual exposure - the amount in
+    #     the basis' unit.
+    # PRODUCER-ONLY: rating classification is insurance judgment (core
+    # principle 5) - never a client question. Three rows print on the 126; more
+    # are kept and scored.
+    "gl_class_code_schedule": ScheduleDef(
+        list_key="gl_class_code_schedule",
+        label="GL classifications",
+        singular="classification",
+        dedup_keys=("location", "class_code", "classification"),
+        producer_only=True,
+        row_capacity=3,
+        follow_up=True,
+        answers=("gl_class_codes_by_location",),
+        review_item=("GL class codes and rating exposures are missing - complete "
+                     "them for each operation and location."),
+        title="General Liability Classification & Exposure Details",
+        intro=("Enter each GL classification and its rating exposure, one row per "
+               "operation and location. Pick a location or description from the "
+               "list, or type your own (Other). Do not know a value? Leave it blank "
+               "and tick Unknown - it stays open for follow-up."),
+        restamp_derived=True,
+        columns=[
+            Column("location",        "Location",           "text",     width=210),
+            Column("classification",  "Classification description", "text", width=230),
+            Column("class_code",      "GL class code",      "code",     required=True, width=115),
+            Column("premium_basis",   "Rating basis",       "text",     required=True,
+                   placeholder="Payroll", width=135, options=list(GL_RATING_BASES)),
+            Column("exposure_amount", "Annual exposure",    "currency", required=True,
+                   placeholder="1,400,000", width=140,
+                   units_by={"column": "premium_basis", "units": _GL_EXPOSURE_UNITS}),
         ],
     ),
 }
@@ -618,6 +792,37 @@ _DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{2}-\d{2}$")
 _STATE_RE = re.compile(r"^[A-Za-z]{2}$")
 _NUMERIC_RE = re.compile(r"^\d+(\.\d+)?$")
 _COUNT_RE = re.compile(r"^\d+$")
+_CODE_DIGITS_RE = re.compile(r"\d{3,}")
+
+
+def _is_marked(raw: Any) -> bool:
+    """A row mark as the table sends it (a checkbox) - True / "true" / "yes" / 1."""
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in ("true", "yes", "y", "1", "on")
+
+
+def _is_non_answer(col: dict, value: str) -> bool:
+    """A cell that says only "I don't know" (21 Oct 2026, the GL window): the
+    whole cell is a placeholder ("unknown", "TBD", "N/A" -
+    `answer_semantics.is_placeholder_text`, the one door for "carries no
+    information"), or - in a cell that takes a code, an amount, a date or one of
+    its offered choices, never prose - a short uncertainty with no figure ("not
+    sure", "need to check", "will follow up"). A description is judged by the
+    placeholder test only: "Waiting room services" is a classification."""
+    v = str(value or "").strip()
+    if not v:
+        return False
+    try:
+        from services.answer_semantics import _UNCERTAIN_RE, is_placeholder_text
+    except Exception:                                         # noqa: BLE001
+        return False
+    if is_placeholder_text(v):
+        return True
+    closed = col.get("options") or col.get("type") in (
+        "code", "currency", "percent", "number", "year", "date", "state", "vin")
+    return bool(closed and len(v.split()) <= 5 and not re.search(r"\d", v)
+                and _UNCERTAIN_RE.search(v))
 
 
 def _cell_value(raw: Any) -> Any:
@@ -671,6 +876,11 @@ def validate_cell(col: dict, value: str) -> str:
         # A count (employees per group). Whole number only - "8", "1,200".
         if not _COUNT_RE.match(val.replace(",", "").strip()):
             return f"{col['label']} must be a whole number"
+    elif ctype == "code":
+        # A rating class code (the GL window, 21 Oct 2026): its digits - "91580",
+        # "GL 91580" - never a word ("Electrical"), which no rater can read.
+        if not _CODE_DIGITS_RE.search(val):
+            return f"{col['label']} must be the class code's number"
     return ""
 
 
@@ -697,12 +907,36 @@ def _dedup_signature(defn: ScheduleDef, row: dict) -> Optional[str]:
     return "|".join(parts)
 
 
-def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
+def _as_shown(rows: Any) -> Tuple[Dict[str, dict], List[dict]]:
+    """`shown` rows by their hidden id, and the ones that carry none."""
+    by_id: Dict[str, dict] = {}
+    bare: List[dict] = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        rid = _clean_cell(r.get(ROW_ID_KEY))
+        if rid:
+            by_id.setdefault(rid, r)
+        else:
+            bare.append(r)
+    return by_id, bare
+
+
+def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tuple[List[dict], dict]:
     """Clean + validate a schedule.
 
     Returns `(clean_rows, report)`. Rows are ALWAYS returned (validation is
     advisory, never destructive) so a client can save a partially-complete fleet
     and come back to it — matching how scalar questionnaire answers behave.
+
+    `shown` - the rows as the table SHOWED them (`rows_from_facts`). In a table
+    with the "Unknown - follow up" mark, a typed non-answer is the mark - but a
+    cell left exactly as the table showed it was not typed by this person: a
+    document row's "N/A" is kept as it is and marks nothing (review of 21 Oct
+    2026 - serving a stored table, or saving another row, used to tick the mark
+    on it and delete its value). A row is matched by its hidden id, else (a
+    seeded row, which has none) by identical cells. Serving passes the rows it
+    serves. None: every non-answer is the mark (a fresh import).
 
     report = {
         "errors":     {row_index: {col_key: message}},
@@ -733,6 +967,16 @@ def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
     errors: Dict[int, Dict[str, str]] = {}
     seen: Dict[str, int] = {}
     duplicates: List[int] = []
+    _col_keys = [c["key"] for c in columns]
+    _shown_by_id, _shown_bare = _as_shown(shown) if defn.get("follow_up") else ({}, [])
+
+    def _shown_row(raw_row: dict) -> Optional[dict]:
+        rid = _clean_cell(raw_row.get(ROW_ID_KEY))
+        if rid:
+            return _shown_by_id.get(rid)
+        cells = [_clean_cell(raw_row.get(k)) for k in _col_keys]
+        return next((s for s in _shown_bare
+                     if [_clean_cell(s.get(k)) for k in _col_keys] == cells), None)
 
     for idx, raw_row in enumerate(rows):
         # Accept a bare string for scalar schedules (additional named insureds)
@@ -743,10 +987,19 @@ def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
 
         row: Dict[str, str] = {}
         row_errors: Dict[str, str] = {}
+        # "Unknown - follow up" (a table that declares it, FOLLOW_UP_KEY): the
+        # mark rides on the row; a typed non-answer is the mark, not a value -
+        # never a cell left as the table showed it (`shown`, above).
+        _follow = bool(defn.get("follow_up")) and _is_marked(raw_row.get(FOLLOW_UP_KEY))
+        _was = _shown_row(raw_row) if (_shown_by_id or _shown_bare) else None
         for col in columns:
             val = _clean_cell(raw_row.get(col["key"]))
             if col["type"] == "vin" and val:
                 val = normalize_vin(val)
+            if (defn.get("follow_up") and val and _is_non_answer(col, val)
+                    and not (_was is not None and _clean_cell(_was.get(col["key"])) == val)):
+                val = ""
+                _follow = True
             row[col["key"]] = val
             msg = validate_cell(col, val)
             if msg:
@@ -765,6 +1018,8 @@ def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
             continue
         if _rid:
             row[ROW_ID_KEY] = _rid
+        if _follow:
+            row[FOLLOW_UP_KEY] = True
 
         sig = _dedup_signature(defn, row)
         if sig is not None:
@@ -910,7 +1165,7 @@ def _identity_norm(key: str, raw: Any) -> str:
 
 
 def merge_saved_rows(list_key: str, stored: Any, typed: List[dict],
-                     source: str = "producer") -> List[Any]:
+                     source: str = "producer", facts: Optional[dict] = None) -> List[Any]:
     """The stored schedule after a person saved `typed` (validated rows).
 
     Each typed row is matched to the stored row it came from - by its hidden
@@ -926,13 +1181,21 @@ def merge_saved_rows(list_key: str, stored: Any, typed: List[dict],
 
     A CLIENT save never writes a producer-only column - the client's copy of
     the table does not show those columns, so their blank cells are not an
-    answer. Schedules outside MERGE_ON_SAVE keep `rows_for_facts`."""
+    answer. Schedules outside MERGE_ON_SAVE keep `rows_for_facts`.
+
+    A stored row the table does not SHOW (`_shown_row_indices` with `facts`: the
+    GL window's policy-level lines and another line's classes) was never on the
+    person's screen, so no save claims, changes or deletes it - it is kept, after
+    the rows the save wrote (21 Oct 2026). The "Unknown - follow up" mark of a
+    table that declares it is written by a producer save, ticked or cleared."""
     defn = SCHEDULE_DEFS.get(list_key)
     if defn is None:
         return []
     if list_key not in MERGE_ON_SAVE:
         return rows_for_facts(list_key, typed)
     stored_rows = [dict(r) for r in (_bare_rows(stored) or []) if isinstance(r, dict)]
+    _shown = _shown_row_indices(list_key, stored_rows, facts)
+    hidden = sorted(set(range(len(stored_rows))) - set(_shown)) if _shown is not None else []
     all_keys = [c["key"] for c in defn["columns"]]
     edit_keys = [c["key"] for c in defn["columns"]
                  if source == "producer" or not c.get("producer_only")]
@@ -948,7 +1211,7 @@ def merge_saved_rows(list_key: str, stored: Any, typed: List[dict],
     by_id: Dict[str, int] = {}
     for i, r in enumerate(stored_rows):
         by_id.setdefault(_stored_row_id(list_key, r, i), i)
-    claimed: set = set()
+    claimed: set = set(hidden)           # never shown: no save claims them
     identities = _MERGE_IDENTITIES.get(list_key, ())
 
     def _unique(cands: List[int]) -> Optional[int]:
@@ -1011,25 +1274,43 @@ def merge_saved_rows(list_key: str, stored: Any, typed: List[dict],
             if all(num):
                 idx = _unique([i for i in free
                                if (views[i].get("location_number"), views[i].get("building_number")) == num])
+        if (idx is not None and list_key in _CLEARED_ROW_IS_DELETED
+                and not any(str(t.get(k) or "").strip() for k in edit_keys)
+                and any(views[idx][k] for k in edit_keys)):
+            claimed.add(idx)             # every cell cleared: the row is deleted
+            continue
         base = stored_rows[idx] if idx is not None else {}
         merged = dict(base)
         address_moved = idx is None
+        _stale = _STALE_WHEN_CHANGED.get(list_key, {})
         for k in edit_keys:
             new = str(t.get(k) or "").strip()
             old = views[idx][k] if idx is not None else ""
             if new == old:
                 continue
             merged[k] = new or None
+            for derived, sources in _stale.items():
+                # A derived total the person can see as a column is theirs to
+                # keep or change - never dropped because paid moved beside it.
+                if k in sources and derived not in edit_keys:
+                    merged.pop(derived, None)
             if k in _ADDRESS_PART_KEYS:
                 address_moved = True
         if address_moved:
             composed = _compose_address(merged)
             if composed or idx is not None:
                 merged["address"] = composed or None
+        if defn.get("follow_up") and source == "producer":
+            if _is_marked(t.get(FOLLOW_UP_KEY)):
+                merged[FOLLOW_UP_KEY] = True
+            else:
+                merged.pop(FOLLOW_UP_KEY, None)
         merged.pop(ROW_ID_KEY, None)
         if idx is not None:
             claimed.add(idx)
         out.append(merged)
+    # The rows the table never showed, as they were (see the docstring).
+    out.extend(dict(stored_rows[i]) for i in hidden)
 
     id_field = _STORED_ROW_ID_FIELD.get(list_key)
     if id_field:
@@ -1069,11 +1350,18 @@ def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
         except Exception:
             raw = []
     if not isinstance(raw, list):
-        return []
+        raw = []
 
     scalar_key = defn.get("scalar_key") or defn["columns"][0]["key"]
+    # The rows this table shows (21 Oct 2026, the GL window: never another
+    # line's class or the carrier's policy-level line) - the others stay in the
+    # fact untouched (`merge_saved_rows`). A row keeps its stored position id.
+    _shown = _shown_row_indices(list_key, raw[:MAX_ROWS], facts)
+    shown = set(_shown) if _shown is not None else None
     out: List[dict] = []
     for _pos, item in enumerate(raw[:MAX_ROWS]):
+        if shown is not None and _pos not in shown:
+            continue
         if isinstance(item, dict):
             row = {c["key"]: _clean_cell(_cell_value(item.get(c["key"]))) for c in defn["columns"]}
             if list_key in MERGE_ON_SAVE:
@@ -1086,12 +1374,233 @@ def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
                     row["include_exclude"] = officer_treatment_label(item)
                 except Exception:                             # noqa: BLE001
                     pass
+            if defn.get("follow_up") and _is_marked(item.get(FOLLOW_UP_KEY)):
+                row[FOLLOW_UP_KEY] = True
             out.append(row)
         else:
             row = {c["key"]: "" for c in defn["columns"]}
             row[scalar_key] = _clean_cell(item)
             out.append(row)
+    if not out:
+        out = _seed_rows_from_facts(list_key, facts)
     return out
+
+
+def _shown_row_indices(list_key: str, rows: Any, facts: Optional[dict]) -> Optional[List[int]]:
+    """The positions of the stored rows a table SHOWS, or None (all of them).
+
+    The GL window (21 Oct 2026, Brent 17 Oct item 6) shows only GL's own
+    classifications - `pdf_service.gl_own_row_indices`, the rows the ACORD 126
+    prints: a Workers Compensation class a combined package files under GL
+    ("do not substitute WC class codes for GL codes") and the carrier's
+    policy-level line ("Location 000 / Fungi Or Bacteria Exclusion") are not
+    classifications to confirm. Every other table shows every row."""
+    if list_key != "gl_class_code_schedule" or not isinstance(rows, list):
+        return None
+    try:
+        from services.pdf_service import gl_own_row_indices
+        return list(gl_own_row_indices(rows, facts or {}))
+    except Exception as ex:                                   # noqa: BLE001
+        logger.warning("schedule_capture: GL rows shown in full (%s)", ex)
+        return None
+
+
+def _seed_rows_from_facts(list_key: str, facts: Optional[dict]) -> List[dict]:
+    """The rows a table opens with when it holds none of its own.
+
+    The GL window (21 Oct 2026): the GL class codes the package already holds
+    in its other home (`gl_class_codes_by_location` - the documents' "location
+    + codes" reading, or the old card's answer), each as a row with its code
+    and location, so the producer completes them instead of retyping them
+    ("prefill verified information from uploaded documents"). Only a code that
+    stands AS a code and is not another line's (`pdf_service.
+    _gl_code_only_rows`, the 126's own reader of that home). A seeded row has
+    no stored identity: a save writes it as a new row."""
+    if list_key != "gl_class_code_schedule" or not isinstance(facts, dict):
+        return []
+    defn = SCHEDULE_DEFS.get(list_key)
+    try:
+        from services.pdf_service import _gl_code_only_rows
+        seeds = _gl_code_only_rows(facts)
+    except Exception as ex:                                   # noqa: BLE001
+        logger.warning("schedule_capture: GL rows not seeded (%s)", ex)
+        return []
+    out: List[dict] = []
+    for s in seeds[:MAX_ROWS]:
+        if not isinstance(s, dict):
+            continue
+        row = {c["key"]: "" for c in defn["columns"]}
+        row["class_code"] = _clean_cell(s.get("class_code"))
+        row["location"] = _clean_cell(s.get("location"))
+        if row["class_code"]:
+            out.append(row)
+    return out
+
+
+# ── A column's choices for THIS package (21 Oct 2026, the GL window) ─────────
+# A static `options` list is the same on every package; some choices can only
+# come from the package itself - "Location: dropdown populated with the
+# insured's locations", "Classification description: searchable dropdown with
+# applicable operations, plus an Other option" (Brent). Served with the table
+# (`columns_for`, read by `arq_service.get_session_schedules`), never stored.
+_MAX_CHOICES = 40
+_MAX_CHOICE_LEN = 150
+
+
+def _choice_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _add_choice(out: List[str], value: Any) -> None:
+    text = _choice_text(value)
+    if not text or len(text) > _MAX_CHOICE_LEN or len(out) >= _MAX_CHOICES:
+        return
+    try:
+        from services.answer_semantics import is_placeholder_text
+        if is_placeholder_text(text):
+            return
+    except Exception:                                         # noqa: BLE001
+        pass
+    if text.lower() not in {o.lower() for o in out}:
+        out.append(text)
+
+
+def gl_location_choices(facts: Optional[dict]) -> List[str]:
+    """The insured's locations as the GL window offers them: one per premises
+    (the location table's rows - one row per BUILDING, so a premises with two
+    buildings is offered once), "Location <n> - <address>" - the label the 126
+    LOC # reads back as ACORD 125's number for that premises (`pdf_service.
+    _hazard_location_number`). A premises numbered with anything but digits is
+    offered by its address (the box takes a number). No premises table: the
+    loose location list, as written."""
+    facts = facts if isinstance(facts, dict) else {}
+    out: List[str] = []
+    numbered: set = set()
+    rows = _bare_rows(facts.get("property_locations")) or []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        num = _choice_text(r.get("location_number"))
+        addr = _choice_text(_compose_address(r) or r.get("address"))
+        if num.isdigit():
+            if int(num) in numbered:
+                continue
+            numbered.add(int(num))
+            _add_choice(out, f"Location {num} - {addr}" if addr else f"Location {num}")
+        elif addr:
+            _add_choice(out, addr)
+    if not out:
+        for loc in _bare_rows(facts.get("locations")) or []:
+            if isinstance(loc, str):
+                _add_choice(out, loc)
+    return out
+
+
+def gl_classification_choices(facts: Optional[dict]) -> List[str]:
+    """The account's own operations, as the GL window offers them: the
+    classifications its own GL rows state (the documents' words), the business'
+    operations description and each premises' "what happens here" - short
+    enough to be a classification. Anything else is typed (Other). Never a
+    Workers Compensation class description (another line's row is not shown)."""
+    facts = facts if isinstance(facts, dict) else {}
+    out: List[str] = []
+    rows = _bare_rows(facts.get("gl_class_code_schedule")) or []
+    _shown = _shown_row_indices("gl_class_code_schedule", rows, facts)
+    for i in (_shown if _shown is not None else range(len(rows))):
+        r = rows[i]
+        if isinstance(r, dict):
+            _add_choice(out, r.get("classification"))
+    try:
+        from services.fact_lineage import envelope_value
+        ops = envelope_value(facts.get("operations_description"))
+    except Exception:                                         # noqa: BLE001
+        ops = facts.get("operations_description")
+        ops = ops.get("value") if isinstance(ops, dict) else ops
+    if isinstance(ops, str):
+        _add_choice(out, ops)
+    for loc in _bare_rows(facts.get("property_locations")) or []:
+        if isinstance(loc, dict):
+            _add_choice(out, loc.get("operations_description"))
+    return out
+
+
+def _gl_refused_codes(facts: Optional[dict]) -> List[str]:
+    """The codes the documents give only to ANOTHER line's rating, as the GL
+    code cell refuses them ("do not substitute WC class codes for GL codes") -
+    exactly the codes `pdf_service._gl_row_is_another_lines` keeps off the 126
+    and the score (an ISO GL code's five digits is never refused)."""
+    try:
+        from services.pdf_service import _ISO_GL_CLASS_CODE_RE, _gl_codes_owned_elsewhere
+        return sorted(c for c in _gl_codes_owned_elsewhere(facts or {})
+                      if c and not _ISO_GL_CLASS_CODE_RE.match(c))
+    except Exception:                                         # noqa: BLE001
+        return []
+
+
+# The GL code cell's refusal - served with the columns (`columns_for`) and
+# enforced at the save (`refused_rows`), one sentence for both.
+GL_REFUSED_CODE_MESSAGE = ("This is another line's class code in these documents - enter "
+                           "the General Liability class code.")
+_HIDDEN_ROW_MESSAGE = ("This row reads as the policy's own line, not a classification - "
+                       "add its GL class code or rating basis.")
+
+
+def refused_rows(list_key: str, rows: Any, facts: Optional[dict]) -> Dict[str, Dict[str, str]]:
+    """The typed rows the server will not store, {row index: {column: message}};
+    {} stores them all.
+
+    A table that shows only some of its rows (`_shown_row_indices` - the GL
+    window shows GL's own classifications) HIDES a stored row it does not show:
+    a typed row like that was saved, then vanished from the window and the form
+    with no word, and no later save could delete it (review of 21 Oct 2026: a
+    WC class 5190 typed into the GL window). The cell refuses another line's
+    code on screen (`columns_for` "refused"); the server refuses the same rows,
+    so what the window offers is what the server stores (BUG-05). Every other
+    table: {}."""
+    if not isinstance(rows, list) or not rows:
+        return {}
+    shown = _shown_row_indices(list_key, rows, facts)
+    if shown is None:
+        return {}
+    keep = set(shown)
+    refused_codes = set(_gl_refused_codes(facts))
+    out: Dict[str, Dict[str, str]] = {}
+    for i, r in enumerate(rows):
+        if i in keep or not isinstance(r, dict):
+            continue
+        code = re.sub(r"[^a-z0-9]", "", str(r.get("class_code") or "").lower())
+        out[str(i)] = ({"class_code": GL_REFUSED_CODE_MESSAGE} if code and code in refused_codes
+                       else {"row": _HIDDEN_ROW_MESSAGE})
+    return out
+
+
+def columns_for(list_key: str, facts: Optional[dict] = None) -> List[dict]:
+    """The table's columns as the window shows them for THIS package - a copy
+    of the static columns, plus the choices only the package can give (the GL
+    window: its locations, its operations, the other lines' codes the code
+    cell refuses). Every other table: its columns, unchanged."""
+    defn = SCHEDULE_DEFS.get(list_key)
+    if defn is None:
+        return []
+    cols = [dict(c) for c in defn["columns"]]
+    if list_key != "gl_class_code_schedule" or not isinstance(facts, dict):
+        return cols
+    try:
+        refused = _gl_refused_codes(facts)
+        extra = {
+            "location": {"options": gl_location_choices(facts)},
+            "classification": {"options": gl_classification_choices(facts)},
+            "class_code": ({"refused": refused,
+                            "refused_message": GL_REFUSED_CODE_MESSAGE} if refused else {}),
+        }
+    except Exception as ex:                                   # noqa: BLE001
+        logger.warning("schedule_capture: GL window choices skipped (%s)", ex)
+        return cols
+    for c in cols:
+        for k, v in (extra.get(c.get("key")) or {}).items():
+            if v:
+                c[k] = v
+    return cols
 
 
 @lru_cache(maxsize=None)

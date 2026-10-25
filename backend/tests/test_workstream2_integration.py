@@ -64,9 +64,13 @@ def test_equivalent_names_no_hard_stop():
 
 
 def test_genuinely_different_names_still_hard_stop():
+    # Two VERIFIED documents. Until 21 Oct 2026 the second one was a narrative -
+    # the shape Brent rejected on 20 Oct ("only hard stop on VERIFIED
+    # information"): a narrative naming another company is now a warning to
+    # confirm (tests/test_build21oct_b-identity-verified-only.py).
     docs = [
         doc({"applicant_name": env("Orbin Contracting LLC")}),
-        doc({"applicant_name": env("Wake County Government")}, "narrative"),
+        doc({"applicant_name": env("Wake County Government")}, "application"),
     ]
     assert any("name_conflict" in i and "hard_stop" in i for i in check_doc_consistency(docs))
 
@@ -78,15 +82,19 @@ def test_equivalent_dates_cross_document_no_hard_stop():
         doc({"effective_date": env("07/15/25")}),
         doc({"effective_date": env("7/15/2025", "ai_low")}, "certificate"),
     ]
-    assert _hard(check_doc_consistency(docs)) == []
+    # (19 Oct 2026, Brent: a date conflict is a warning now) so equivalent dates must not even warn.
+    assert _blocking(check_doc_consistency(docs)) == []
 
 
-def test_different_dates_cross_document_hard_stop():
+def test_different_dates_cross_document_warns():
     docs = [
         doc({"effective_date": env("07/15/2025")}),
         doc({"effective_date": env("08/01/2025")}, "certificate"),
     ]
-    assert any("date_conflict" in i and "hard_stop" in i for i in check_doc_consistency(docs))
+    issues = check_doc_consistency(docs)
+    # (19 Oct 2026, Brent: hard stops only for what is essential) a date conflict is a WARNING.
+    assert any(i.startswith("[warning] code=date_conflict") for i in issues), issues
+    assert not any("date_conflict" in i for i in _hard(issues))
 
 
 # ── §5.2 — equivalent DATES do not hard stop, cross-FORM umbrella (the bug) ────

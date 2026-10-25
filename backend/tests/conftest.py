@@ -14,3 +14,6 @@ os.environ.setdefault("GAP_FILL_TEXT_SELECTION", "1")
 # The narrative reader (services/narrative_reader) makes a model call on every
 # narrative save; the suite runs offline. Its own tests stub the call.
 os.environ.setdefault("NARRATIVE_READER", "0")
+# The carrier narrative writer (services/questionnaire, improving-ll.md C110)
+# makes a model call per draft; the suite runs offline and its tests stub it.
+os.environ.setdefault("CARRIER_NARRATIVE", "0")

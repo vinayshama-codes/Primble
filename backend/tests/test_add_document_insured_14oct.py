@@ -705,7 +705,8 @@ def test_the_words_in_node(tmp_path):
     assert o["up"] == o["flat"] == o["oneside"] == "No new issues on the review page."
     assert o["sections"] == ["overview", "warnings", None, None]
     labels = [t and t["label"] for t in o["types"]]
-    assert labels == ["Type: sure", "Type: likely", "Type: unsure", "Type: set by you", None, None, None]
+    # Brent's words from 17 Oct (build 21 Oct, item 2) replaced "Type: sure / likely / unsure / set by you".
+    assert labels == ["Highly Confident", "Needs Verification", "Unable to Classify", "Set by you", None, None, None]
     assert all("TYPE" in t["title"] for t in o["types"][:3])
     ins = o["insured"]
     assert ins[0]["label"] == "Different insured: MERIDIAN FABRICATION INC - kept by you"

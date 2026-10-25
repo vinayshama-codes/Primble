@@ -42,7 +42,7 @@ from services.form_service import (
     active_document_text, filter_available_forms, load_all_forms, match_forms,
     process_single_form, score_extra_forms,
 )
-from services.ocr_service import extract_text, extract_zip
+from services.ocr_service import extract_text
 # A signed form is served with the producer's signature on the producer's
 # boxes only (1 Oct 2026); unsigned forms go through pdf_service unchanged.
 from services.signature_boxes import (
@@ -57,11 +57,11 @@ from services.pdf_service import (
     log_dec_index_coverage,
 )
 from services.sqs_service import (
-    check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
+    check_tier1, check_tier2, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
     current_package_sqs, key_details, with_current_bucket_labels,
-    _check_loss_run_insured_match, _extract_narrative_doc_text, doc_consistency_stops,
-    doc_consistency_normalizations,
+    _check_loss_run_insured_match, _extract_narrative_doc_text,
+    doc_consistency_normalizations, is_pre_form_session,
 )
 from services.issue_registry import (
     build_grouped_view, build_structured_from_sources, make_issue, normalize_issue_type,
@@ -162,15 +162,31 @@ def _document_fact_rows(facts: dict) -> list:
     Consistency picker's plain-language question - the very thing UI-12 asks for
     in its place. Stripping it at extraction would silence that picker on
     single-document packages. The defect was only ever the DISPLAY.
+
+    SILENCE IS NOT A ROW (Brent, 17 Oct item 3). A fact the extraction schema
+    asks as a bare `boolean` (cyber controls, agreed value) comes back False from
+    a document that never mentions it. The popup printed that as "False" - read
+    as a No the document never gave. The one door,
+    `extraction_service.is_silent_boolean`, decides; a True still prints.
     """
+    try:
+        from services.extraction_service import is_silent_boolean as _silent
+    except Exception:                                        # noqa: BLE001
+        _silent = None
     rows = []
     for key, raw in (facts or {}).items():
         if str(key).startswith("_"):
+            continue
+        if _silent is not None and _silent(str(key), raw):
             continue
         confidence = raw.get("confidence") if isinstance(raw, dict) and "value" in raw else None
         display = _humanize_fact(raw)
         if not display:
             continue
+        # A boolean reads as a person would say it (live 85e51d02: "True" /
+        # "true" beside Agreed Value and Hired / Non-owned).
+        if str(display).strip().lower() in ("true", "false"):
+            display = "Yes" if str(display).strip().lower() == "true" else "No"
         rows.append({
             "key":        key,
             "label":      str(key).replace("_", " ").title(),
@@ -232,7 +248,9 @@ async def _remember_pre_form_score(session_id: str, row: Optional[dict], pkg: An
     if not isinstance(row, dict) or row.get("generated_forms"):
         return
     score = pkg.get("package_sqs_score") if isinstance(pkg, dict) else None
-    snap = ({"package_sqs_score": int(round(float(score))), "tier": pkg.get("tier")}
+    snap = ({"package_sqs_score": int(round(float(score))), "tier": pkg.get("tier"),
+             # Brent, 19 Oct 2026: "Quote Ready" also needs no open hard stop.
+             "submission_ready": pkg.get("submission_ready")}
             if isinstance(score, (int, float)) and not isinstance(score, bool) else None)
     if row.get("pre_form_score") == snap:
         return
@@ -426,11 +444,13 @@ def _evidence_status(d: dict) -> Optional[dict]:
     return {"state": "different" if name else "none", "name": name or None,
             "kept_by_you": False, "evidence_only": True}
 
-# Drop the declarations index from the session once forms have been generated.
-# ON by default because the owner's product rule makes it dead weight: a package
-# is single-shot, so nothing can re-generate off it. `0` keeps it, which is what
-# you want the day the product grows an "add another form" flow - and then this
-# comment is the thing to read first. See the purge site in select_forms_bulk.
+# Drop the declarations index from the session once forms have been generated
+# (it is PII, ~33 KB a session). ON by default - NOT because nothing reads the
+# facts after generation (several doors do: an answer's re-stamp, a form added
+# later - see the purge site in select_forms_bulk), but because they lose very
+# little without the index: measured over all 17 schemas, 9 of 5,852 fields
+# degrade to a blank or a shorter printing of the same policy number, and none
+# gets a wrong value. `0` keeps it (debugging a live run).
 _PURGE_DEC_INDEX_AFTER_GENERATION = os.getenv(
     "PURGE_DEC_INDEX_AFTER_GENERATION", "1").strip().lower() not in ("0", "false", "no")
 
@@ -514,13 +534,16 @@ async def _bg_lite_generate(session_id: str) -> None:
             logger.warning("bg_lite: no forms generated for session=%s", session_id)
             return
 
-        cross_issues_raw = cross_validate(session.get("facts", {}), session.get("flags", {}), form_ids)
-        seen_msgs, cross_issues = set(), []
-        for issue in cross_issues_raw:
-            msg = issue.get("message", "")
-            if msg not in seen_msgs:
-                seen_msgs.add(msg)
-                cross_issues.append(issue)
+        # The cross-form issues every reader of `cross_issues_last` expects -
+        # the one stops door's coded list, as the full generation stores it
+        # (22 Oct 2026; was the legacy 16-rule `cross_validate`'s uncoded list).
+        # A failure here never loses the forms just generated.
+        try:
+            from services.stops_now import stops_now
+            cross_issues = stops_now(session, form_ids, pre_form=False)["cross_issues"]
+        except Exception as _sx:                                   # noqa: BLE001
+            logger.warning("bg_lite: cross-form issues skipped session=%s: %s", session_id, _sx)
+            cross_issues = []
 
         await upd_processing_session(session_id, {
             "selected_form_ids": form_ids,
@@ -822,15 +845,19 @@ def _export_carried_lines(session: dict, facts: dict) -> list:
 
 
 def enforce_building_value_gate(session: dict) -> None:
-    """Block form generation while a building-value conflict is unresolved.
+    """Block form generation while a GENERATION_BLOCKING conflict is unresolved.
 
     Client Property Integrity directive: when building values appear duplicated,
     inflated, or inconsistent across documents, "require review before forms are
     generated." The cross-document reconciler (underwriting_consistency) already
-    detects the conflict and surfaces the picker; this gate makes that review
+    detects the conflict and surfaces the picker; this gate made that review
     mandatory before generation. Confirming the correct value (the existing
-    underwriting-confirm flow) clears review_required and opens the gate. Scoring
-    and recommendations are unaffected — only generation is gated.
+    underwriting-confirm flow) clears review_required and opens the gate.
+
+    Since 19 Oct 2026 the blocking set is EMPTY (Brent: hard stops only for what
+    is essential - a building value is fixable later, and it can be confirmed
+    after forms since 5 Oct), so this never raises. It stays the one door: a
+    key added to GENERATION_BLOCKING_RECONCILABLE_KEYS blocks again.
     """
     from services.underwriting_consistency import GENERATION_BLOCKING_RECONCILABLE_KEYS
     # A package that carries no PROPERTY line has no building value to confirm
@@ -1432,7 +1459,7 @@ async def underwriting_confirm_value_in_editor(
         score = (fdata.get("sqs") or {}).get("sqs_score") if isinstance(fdata, dict) else None
         if score is None:
             continue
-        g, t, c = _grade_from_score(int(score))
+        g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
         updated_forms[fid] = {"new_sqs_score": int(score), "new_grade": g, "new_tier": t,
                               "new_tier_color": c, "new_sqs": fdata.get("sqs")}
     cross_issues = sess.get("cross_issues_last") or []
@@ -1448,7 +1475,10 @@ async def underwriting_confirm_value_in_editor(
         "new_package_sqs_score": package_sqs.get("package_sqs_score"),
         "new_package_tier": package_sqs.get("tier"),
         "cross_issues": cross_issues,
-        "grouped_cross_issues": _grouped_cross_issues_for_panel(cross_issues),
+        # The session facts: a COPE card's fix follows the package (2+ buildings:
+        # per building, only what is missing - premises_cope, 21 Oct 2026).
+        "grouped_cross_issues": _grouped_cross_issues_for_panel(
+            cross_issues, facts=sess.get("facts") or {}),
         "hard_stops": _view["hard_stops"],
         "soft_stops": _view["soft_stops"],
         "grouped_issues": _view["grouped_issues"],
@@ -1660,23 +1690,30 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 await upd_processing_session(
                     req.session_id, {"dec_index_coverage": _dec_cov})
 
-            # ── Data minimisation: the index has no consumer left ────────────
-            # OWNER'S PRODUCT RULE (2026-08-13): "once any form is generated,
-            # user cannot go back in that same package to generate another form,
-            # they have to restart new package." That removes the only reason
-            # this was being kept - re-generating a different ACORD form later
-            # off the same extraction.
+            # ── Data minimisation: the index is deleted once forms exist ─────
+            # Built on the owner's 2026-08-13 rule ("once any form is generated,
+            # user cannot go back in that same package to generate another
+            # form"). That rule no longer holds - a form can be added and the
+            # documents changed after generation - and the purge stays for the
+            # reason measured below, not because nothing reads the facts.
             #
-            # Verified against the code before deleting, not assumed. Every
-            # consumer of `dec_page_entries` runs at or before generation:
+            # The index's readers DURING generation all run before this line:
             #   _backfill_empty_facts_from_entries   merge time
             #   text-selection rescue net            gap fill
             #   _render_dec_index (Stage A)          gap fill
             #   _second_claim_on_a_single_printed_value   stamping
             #   dec_index_coverage                   the line above this one
-            # Everything AFTER generation - download, signature, the ARQ
-            # confidence updates - reads `generated_forms[...]["mapped"]`, which
-            # is already-stamped values, never the facts.
+            # AFTER generation the FACTS are read again (corrected 22 Oct 2026 -
+            # this comment used to say they never were): an answer re-stamps its
+            # boxes from them (`arq_service._restamp_canonical_into_forms` /
+            # `_restamp_changed_boxes`, through `pdf_service._deterministic_map`,
+            # the Pass 1 engine), and a form added later is stamped from them
+            # (`services/form_addition`) - both without the index. Measured over
+            # all 17 schemas: 9 of 5,852 fields degrade to a blank or a shorter
+            # printing of the same policy number; none gets a wrong value. The
+            # documents door (`session_documents.remerge_package`) rebuilds the
+            # index in its re-merge and deletes it again. The downloaded PDFs and
+            # the signatures print the stamped `generated_forms[...]["mapped"]`.
             #
             # ONLY ON THIS PATH. `lite_generate_internal` also generates forms,
             # silently, for scoring and ARQ - and it runs BEFORE the producer has
@@ -1980,12 +2017,15 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     if not results:
         raise HTTPException(400, "No forms could be generated internally.")
 
-    cross_issues_raw = cross_validate(session["facts"], session["flags"], form_ids)
-    seen_msgs, cross_issues_deduped = set(), []
-    for issue in cross_issues_raw:
-        msg = issue.get("message", "")
-        if msg not in seen_msgs:
-            seen_msgs.add(msg); cross_issues_deduped.append(issue)
+    # The one stops door's coded list, like the full generation (see
+    # `_bg_lite_generate`).
+    # A failure here never turns a finished generation into a 500.
+    try:
+        from services.stops_now import stops_now
+        cross_issues_deduped = stops_now(session, form_ids, pre_form=False)["cross_issues"]
+    except Exception as _sx:                                       # noqa: BLE001
+        logger.warning("lite_generate_internal: cross-form issues skipped session=%s: %s", session_id, _sx)
+        cross_issues_deduped = []
 
     await upd_processing_session(session_id, {
         "selected_form_ids": form_ids,
@@ -2020,6 +2060,10 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
             "raw_sqs_score": _pkg.get("raw_sqs_score"),
             "cap_applied":   _pkg.get("cap_applied"),
             "cap_reason":    _pkg.get("cap_reason"),
+            # The package's readiness (19 Oct 2026): its open hard stops block
+            # Submission Ready - never the first form's.
+            **{k: _pkg.get(k) for k in ("ready_blockers", "ready_blocker_items",
+                                        "open_hard_stops", "submission_ready") if k in _pkg},
             "breakdown":     _pkg.get("pillars", first_sqs.get("breakdown", {})),
             "tier":          _pkg.get("tier", first_sqs.get("tier")),
         }
@@ -2277,7 +2321,8 @@ def printed_typed_amounts(form_id: str, field_updates: dict, schema: Optional[di
 
 
 # ASYNC-SAFE
-def label_producer_edits(confidence: dict, client_filled: set, field_updates: dict) -> None:
+def label_producer_edits(confidence: dict, client_filled: set, field_updates: dict,
+                         answer_written: Optional[set] = None) -> None:
     """The labels a producer's box edits leave behind, in place.
 
     A value the PRODUCER typed is the producer's (30 Sep 2026; the rule Orbin
@@ -2288,8 +2333,13 @@ def label_producer_edits(confidence: dict, client_filled: set, field_updates: di
     stale-"filled" correction in `update_pdf` / `get_form_fields`, which
     re-labels a "filled" box the AI can map as AI on every read.
     A CLEARED box keeps the old rule: low_confidence, unless the client filled
-    it or the form requires it."""
+    it or the form requires it.
+    `answer_written` (Z38 lane E): the form's boxes an ANSWER wrote
+    (`arq_service.answer_written_boxes`); a box the producer edits is theirs
+    now, so it leaves that list and no re-stamp may clear it."""
     for k, v in (field_updates or {}).items():
+        if answer_written is not None:
+            answer_written.discard(k)
         val = str(v).strip() if v is not None else ""
         if val and val not in ("null", "None"):
             confidence[k] = "producer"
@@ -2323,6 +2373,33 @@ def issue_list_outdated(structured_issues: Any, hard_stops: Any, soft_stops: Any
     return False
 
 
+def editor_term_refusal(form_id: str, form: dict, field_updates: dict, facts: dict) -> str:
+    """The refusal sentence when an editor save changes a box that writes the
+    proposed effective / expiration date and leaves the term backwards or
+    ended; "" otherwise. Which boxes write it is the write-back's own rule,
+    `pdf_service.proposed_term_fact` - never a certificate's (ACORD 25 / 28)
+    or another policy's box (ACORD 131's underlying grid)."""
+    from services.pdf_service import proposed_term_fact
+    state = (form or {}).get("field_state") or (form or {}).get("mapped") or {}
+    supplied: dict = {}
+    for pdf_field, new_val in (field_updates or {}).items():
+        if str(pdf_field).startswith("__"):
+            continue
+        if _fi.is_instance(form_id) and _fi.is_private_field(form_id, pdf_field):
+            continue
+        text = str(new_val).strip() if new_val is not None else ""
+        if not text or text == str(state.get(pdf_field) or "").strip():
+            continue
+        fact_key = proposed_term_fact(form_id, pdf_field)
+        if fact_key:
+            supplied[fact_key] = text
+    if not supplied:
+        return ""
+    from routes.audit_routes import _term_save_refusal
+    key, val = next(iter(supplied.items()))
+    return _term_save_refusal(facts or {}, key, val, supplied)
+
+
 @router.post("/api/update-pdf")
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
     import hashlib, json
@@ -2346,6 +2423,14 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
     if not form_id or form_id not in generated:
         raise HTTPException(400, "No active form to update")
+
+    # A save that would leave the proposed term backwards or already ended is
+    # refused (22 Oct 2026, the one door `validators.term_save_refusal`), like
+    # the fix window. Only boxes this save CHANGES count.
+    _term_err = editor_term_refusal(form_id, generated[form_id], req.field_updates,
+                                    session.get("facts") or {})
+    if _term_err:
+        raise HTTPException(400, _term_err)
 
     _sem_token = await try_acquire_heavy()
     if not _sem_token:
@@ -2400,7 +2485,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     confidence[field_name] = "low_confidence"
 
         _client_filled = set(r.get("client_filled_fields") or [])
-        label_producer_edits(confidence, _client_filled, req.field_updates)
+        from services.arq_service import ANSWER_WRITTEN_KEY, answer_written_boxes
+        _answer_written = answer_written_boxes(r)
+        label_producer_edits(confidence, _client_filled, req.field_updates, _answer_written)
 
         confidence = apply_acord125_missing_field_highlights(
             form_id, session.get("facts", {}), current_state, confidence
@@ -2411,6 +2498,11 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         from services.pdf_service import (
             _ACORD_FIELD_RULES,
+            PROPOSED_TERM_FACTS as _PROPOSED_TERM_FACTS,
+            box_fact_value as _box_fact_value,
+            box_withdraws_fact as _box_withdraws_fact,
+            proposed_term_fact as _proposed_term_fact,
+            scalar_rules_reach as _scalar_rules_reach,
             writeback_fact_for_field as _writeback_fact_for_field,
             normalize_writeback_value as _normalize_writeback_value,
         )
@@ -2427,6 +2519,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # D18 is the standing rule for exactly this and was not being followed:
         # a genuine retraction goes through `delete_facts`, never a bare None.
         _touched_fact_keys: set = set()
+        _box_withdrew: set = set()          # boxes whose untick withdrew their fact
+        _rule_written: set = set()          # package facts a person set by the rule walk
         for pdf_field, new_val in req.field_updates.items():
             # A form's second copy (the excess layer's ACORD 131, 7 Oct 2026):
             # a box about ITS OWN policy is that copy's alone - the edit stays
@@ -2436,6 +2530,34 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
                 if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
+                    # A non-primary row's box (a second named insured, another
+                    # premises) is that row's own entity, never the package fact:
+                    # the client door's row rule (`scalar_rules_reach`, 22 Oct
+                    # 2026). Editing ACORD 125's NamedInsured_FullName_B wrote
+                    # `applicant_name`, and every form printing it followed.
+                    if not _scalar_rules_reach(pdf_field):
+                        break
+                    # A certificate's or another policy's date box (ACORD 131's
+                    # underlying grid) is that policy's own term: it stays on
+                    # this form and never becomes the proposed term (22 Oct
+                    # 2026 - the refusal's own rule, `proposed_term_fact`).
+                    if (fact_key in _PROPOSED_TERM_FACTS
+                            and _proposed_term_fact(form_id, pdf_field) != fact_key):
+                        break
+                    # A checkbox never writes its raw state into a fact that is
+                    # not Yes / No: it writes the meaning it states, or nothing
+                    # (`pdf_service.box_fact_value`, 22 Oct 2026). An untick of a
+                    # choice box withdraws the choice the fact still states
+                    # (`box_withdraws_fact`) through the clear step below.
+                    _box_val = _box_fact_value(pdf_field, val_str, fact_key)
+                    if _box_val is None:
+                        if _box_withdraws_fact(pdf_field, val_str, fact_key,
+                                               updated_facts.get(fact_key)):
+                            _touched_fact_keys.add(fact_key)
+                            updated_facts[fact_key] = None
+                            _box_withdrew.add(pdf_field)
+                        break
+                    val_str = _box_val
                     _touched_fact_keys.add(fact_key)
                     # E&O 5.9 (2026-08-26): a producer edit keeps a provenance
                     # ENVELOPE, never a bare string. The bare string destroyed
@@ -2451,6 +2573,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                          "source": "producer"}
                         if val_str not in ("", "null", "None") else None
                     )
+                    if updated_facts[fact_key] is not None:
+                        _rule_written.add(fact_key)
                     break
             else:
                 # SYS-02. `_ACORD_FIELD_RULES` is primarily the FACT -> FORM
@@ -2494,10 +2618,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         # Re-evaluate stops against the LATEST facts so SQS can actually improve
         # when the producer fixes a field. Without this, stale hard_stops from
-        # extraction would keep capping the score regardless of user edits.
-        from services.cross_form_validator import (
-            run_cross_form_validation, split_cross_form_issues,
-        )
+        # extraction would keep capping the score regardless of user edits
+        # (the stops door, below the flag recompute).
 
         # Recompute coverage flags from the latest facts (downgrade-only).
         # When the user clears the last fact backing a coverage flag, the
@@ -2566,33 +2688,25 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         except Exception as _rfx:                              # noqa: BLE001
             logger.warning("coverage flag reconciliation skipped: %s", _rfx)
 
-        _re_hard, _re_soft = evaluate_stops(updated_facts, fresh_flags)
-        # Cross-DOCUMENT identity conflicts are a third detector that runs at
-        # extraction only. This block rebuilds the stop list from scratch, so
-        # without re-running it an unresolved FEIN / applicant-name / policy-date
-        # conflict stopped capping the score on the first field edit while its
-        # card stayed on screen. Merged into the field-level list to match what
-        # form generation feeds the per-form scorer. Per-document facts are not
-        # changed by a producer edit to the merged facts, so a genuine conflict
-        # correctly persists here until it is confirmed in the Data Consistency
-        # picker - which re-runs the full pipeline and clears it properly.
-        _dc_hard, _dc_soft = doc_consistency_stops(session)
-        _re_hard = list(_re_hard) + [m for m in _dc_hard if m not in _re_hard]
-        _re_soft = list(_re_soft) + [m for m in _dc_soft if m not in _re_soft]
-        _triggered_ids = set(session.get("selected_form_ids") or []) | {form_id}
-        _cf_issues = run_cross_form_validation(updated_facts, fresh_flags, _triggered_ids)
-        _cf_hard, _cf_soft, _cf_advisories = split_cross_form_issues(_cf_issues)
-        # ONE STATUS FROM START TO FINISH (14 Oct 2026, owner): a cross-form
-        # hard stop is a warning before forms AND after - the stops door's
-        # severity (`stops_now.cross_form_severity`), in its order (the demoted
-        # ones first). A field edit used to re-promote it and cap the package
-        # at 60 for a check the Review screen had always called a warning.
-        from services.stops_now import cross_form_severity
-        _cf_soft = list(_cf_hard) + [m for m in _cf_soft if m not in _cf_hard]
-        _cf_hard = []
-        _cf_issues = cross_form_severity(_cf_issues)
-        fresh_hard_stops = list(_re_hard) + list(_cf_hard)
-        fresh_soft_stops = list(_re_soft) + list(_cf_soft)
+        # THE STOPS AS THEY STAND - THE ONE DOOR (22 Oct 2026, Z28 E "named, not
+        # fixed"). This block rebuilt its own lists (field-level, the documents'
+        # identity conflicts, the cross-form rules) and never the Data
+        # Consistency picker's open conflicts, the documents' source conflicts
+        # or the OCR "confirm this field" warnings - so a stop generation and
+        # the Review screen held stopped holding its 60 / 85 on the first field
+        # edit. `stops_now` is generation's own recipe, on the facts and flags
+        # this save is about to store (a date typed here settles its documents'
+        # disagreement now, an OCR field typed here is confirmed now). Cross-form
+        # rules are scoped to the generated package and every cross-form hard
+        # stop stays a warning (one status, 14 Oct 2026). `form_hard` /
+        # `form_soft` are what ONE form is scored with (spec 10).
+        from services.stops_now import stops_now
+        _edit_stops = stops_now({**session, "facts": updated_facts, "flags": fresh_flags},
+                                None, pre_form=False, facts=updated_facts, flags=fresh_flags)
+        _re_hard, _re_soft = list(_edit_stops["form_hard"]), list(_edit_stops["form_soft"])
+        _cf_issues = list(_edit_stops["cross_issues"])
+        fresh_hard_stops = list(_edit_stops["hard"])
+        fresh_soft_stops = list(_edit_stops["soft"])
 
         # Pass confidence_dict so structural completeness reflects producer edits
         # (1.00) vs AI-high (0.85) vs AI-low (0.50) per spec.
@@ -2623,7 +2737,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             confidence_dict=confidence,
             has_narrative_doc="narrative" in _edit_present,
             has_loss_run_doc=_edit_has_loss_runs,
-            loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
+            loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name, updated_facts),
             cross_issues_full=_cf_issues,
             narrative_doc_text=_extract_narrative_doc_text(_edit_docs),
         )
@@ -2692,6 +2806,13 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     break
             if _fi.is_instance(form_id) and _fi.is_private_field(form_id, field_name):
                 _canon_key = None         # a layer copy's own box writes no package fact
+            if _canon_key and not _scalar_rules_reach(field_name):
+                _canon_key = None         # a non-primary row's box - the write-back skipped it too
+            if _canon_key in _PROPOSED_TERM_FACTS and _proposed_term_fact(form_id, field_name) != _canon_key:
+                _canon_key = None         # another policy's date - the write-back skipped it too
+            if (_canon_key and field_name not in _box_withdrew
+                    and _box_fact_value(field_name, new_str, _canon_key) is None):
+                _canon_key = None         # the box wrote no fact (box_fact_value)
             try:
                 await log_field_change(
                     session_id=req.session_id,
@@ -2731,6 +2852,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             # Which boxes the signature in `pdf_bytes` covers (1 Oct 2026).
             "signature_scope": _SIGNATURE_SCOPE if new_sig_applied else None,
             "client_filled_fields": sorted(_client_filled),
+            ANSWER_WRITTEN_KEY: sorted(_answer_written),
             # this PDF is not the door's applicant render; the next serve
             # renders it afresh (signature_boxes._render_with_applicant)
             "_applicant_render": None,
@@ -2772,7 +2894,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                         confidence_dict=_pdata.get("confidence") or {},
                         has_narrative_doc="narrative" in _edit_present,
                         has_loss_run_doc=_edit_has_loss_runs,
-                        loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
+                        loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name, updated_facts),
                         cross_issues_full=_cf_issues,
                         narrative_doc_text=_extract_narrative_doc_text(_edit_docs),
                     )
@@ -2789,13 +2911,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # the package score, pillars, top recommendations, and cross-form
         # validation update live as the producer edits fields.
         _sqs_results_live = [r2.get("sqs") for r2 in generated.values() if r2.get("sqs")]
-        # Dedup cross_issues by message to match select_forms_bulk behavior.
-        _seen_cf_msgs, _cf_deduped = set(), []
-        for _iss in (_cf_issues or []):
-            _m = _iss.get("message", "") if isinstance(_iss, dict) else ""
-            if _m and _m not in _seen_cf_msgs:
-                _seen_cf_msgs.add(_m)
-                _cf_deduped.append(_iss)
+        # The door's cross-form issues, each sentence once - the list
+        # select_forms_bulk scores with (`stops_now.cross_form_run`).
+        _cf_deduped = list(_cf_issues)
 
         # §4.3 item 2: re-run the cross-form stamped-value check after a manual
         # field edit so a money field edited on one form (Gross Sales / Building
@@ -2864,13 +2982,17 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 req.session_id, facts=updated_facts,
             )
             if _credits_total:
-                # Per-form ceiling uses FIELD-LEVEL stops only; the package
-                # ceiling adds the cross-form stops. Same split the scorers use.
+                # Per-form ceiling: the stops ONE form is scored with (the
+                # door's `form_hard` / `form_soft` - 22 Oct 2026; the package's
+                # lists here held every form at the package's 85 whenever a
+                # cross-form, picker, source or OCR warning was open). The
+                # package ceiling: the package's own lists. Same split the
+                # scorers use.
                 _cf_hard_msgs = [
                     i.get("message") for i in _cf_deduped
                     if isinstance(i, dict) and i.get("type") == "hard_stop"
                 ]
-                _form_cap, _ = _resolve_cap(fresh_hard_stops, fresh_soft_stops)
+                _form_cap, _ = _resolve_cap(_re_hard, _re_soft)
                 _pkg_cap, _ = _resolve_cap(
                     fresh_hard_stops, fresh_soft_stops, hard_cross=_cf_hard_msgs,
                 )
@@ -2897,7 +3019,25 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 exc_info=True,
             )
 
+        # A person set a package fact: a client answer held for it ("Needs your
+        # decision") is answered (`client_answer_review.release_superseded_holds`,
+        # 22 Oct 2026). Only facts the rule walk above wrote with a value.
+        _hold_updates: dict = {}
+        if _rule_written:
+            from services.client_answer_review import (
+                held_conflicts as _held_of, release_superseded_holds,
+            )
+            _held = _held_of({**session, "facts": updated_facts})
+            if release_superseded_holds(_held, _rule_written):
+                _hold_updates["client_answer_conflicts"] = _held
+                if _held:
+                    updated_facts["_client_answer_conflicts"] = _held
+                else:
+                    updated_facts.pop("_client_answer_conflicts", None)
+                    _cleared_fact_keys = sorted(set(_cleared_fact_keys)
+                                                | {"_client_answer_conflicts"})
         await upd_processing_session(req.session_id, {
+            **_hold_updates,
             "generated_forms": generated,
             "facts": updated_facts,
             "flags": fresh_flags,
@@ -3108,10 +3248,24 @@ async def get_extraction_result(
 
     hard_stops = proc_session.get("hard_stops", [])
     mflags     = proc_session.get("flags", {})
-    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
     integrity  = proc_session.get("integrity") or {}
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = proc_session.get("soft_stops", [])
+    _cross_shown = proc_session.get("cross_issues_last") or []
+    # Before forms the page draws the stops AS THEY STAND (24 Oct 2026) - the
+    # same door the score and its plan read (`stops_now`), never the stored
+    # display copy, which a reload of an older row would show without a card
+    # the current rules raise (so it would APPEAR after the first fix).
+    if is_pre_form_session(proc_session) and not integrity.get("review_required"):
+        try:
+            from services.stops_now import stops_now as _stops_now
+            _st_live = _stops_now(proc_session, pre_form=True)
+            hard_stops = list(_st_live.get("hard") or [])
+            _final_soft_stops = list(_st_live.get("soft") or [])
+            _cross_shown = list(_st_live.get("cross_issues") or [])
+        except Exception as _sx:                                 # noqa: BLE001
+            logger.warning(f"extraction-result: live stops not read [session={session_id}]: {_sx}")
+    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
     # cross_issues_last is passed explicitly: cross-form issues are never copied
     # into structured_issues, so without it every one of them lands in
     # build_grouped_view's uncoded safety net and collapses into a single
@@ -3126,7 +3280,7 @@ async def get_extraction_result(
     _pkg_now, _key_now = _status_now
     _grouped_issues = _grouped_with_package_caps(
         proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
-        _pkg_now, cross_issues=proc_session.get("cross_issues_last") or [],
+        _pkg_now, cross_issues=_cross_shown,
         facts=proc_session.get("facts") or {},
     )
     return JSONResponse({
@@ -3443,7 +3597,7 @@ async def clarity_analyze(
     without generating ACORD PDF forms.
     """
     from services.pipeline_router import is_assembly
-    from services.sqs_service import calculate_sqs_from_facts, cross_validate
+    from services.sqs_service import calculate_sqs_from_facts
     from services.arq_service import generate_arq_questions_from_facts
     from services.form_service import match_forms_deterministic, derive_account_profile
 
@@ -3520,13 +3674,13 @@ async def clarity_analyze(
         soft_stops=soft_stops,
     )
 
-    cross_issues_raw = cross_validate(facts, flags, selected_form_ids)
-    seen_msgs, cross_issues = set(), []
-    for issue in cross_issues_raw:
-        msg = issue.get("message", "")
-        if msg not in seen_msgs:
-            seen_msgs.add(msg)
-            cross_issues.append(issue)
+    # The cross-form issues from the same door as the stop lists (22 Oct 2026):
+    # the legacy 16-rule `cross_validate` fed this score its own list - its
+    # "hard_stop" typed issues held the package at 60 through the scorer's
+    # cross-form cap while every other path keeps a cross-form check a warning
+    # (one status, 14 Oct 2026), and its warnings were charged in the pillars
+    # while the lists above capped on the modern engine's. One door, one list.
+    cross_issues = list(_clarity_stops["cross_issues"])
 
     # Combined SQS comes from the package scorer (the same engine the Assembly and
     # ARQ-remediation paths use) so the client-tuned pillar logic - not a plain
@@ -3549,6 +3703,10 @@ async def clarity_analyze(
             "tier":               _clarity_pkg["tier"],
             "routing_decision":   _clarity_pkg["routing_decision"],
             "category_breakdown": _clarity_pkg.get("category_breakdown", sqs_combined.get("category_breakdown")),
+            **{k: _clarity_pkg.get(k) for k in ("ready_blockers", "ready_blocker_items",
+                                                "open_hard_stops", "submission_ready",
+                                                "raw_sqs_score", "cap_applied", "cap_reason")
+               if k in _clarity_pkg},
         }
     except Exception as _clarity_pkg_ex:
         logger.error(f"Clarity package SQS failed, keeping per-form average: {_clarity_pkg_ex}")

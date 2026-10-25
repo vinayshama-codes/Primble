@@ -263,10 +263,14 @@ def schedule_is_confirmed(facts: Optional[dict], list_key: str, rows: Any) -> bo
 
 
 def record_schedule_confirmation(facts: dict, list_key: str, shown_rows: Any,
-                                 arq_id: Optional[str], at_iso: str) -> None:
+                                 arq_id: Optional[str], at_iso: str,
+                                 by: str = "client_arq") -> None:
+    """`by`: who confirmed - the client's questionnaire ("client_arq", the
+    default) or the producer's narrative questionnaire page ("producer",
+    23 Oct 2026). Either way the table is confirmed as it was shown."""
     conf = dict(_confirmations(facts))
     conf[f"schedule::{list_key}"] = {
-        "at": at_iso, "arq_id": arq_id, "by": "client_arq",
+        "at": at_iso, "arq_id": arq_id, "by": by,
         "rows": len(shown_rows or []), "signature": rows_signature(shown_rows),
     }
     facts[CONFIRMATIONS_KEY] = conf
@@ -309,12 +313,18 @@ def schedule_row_changes(list_key: str, seed_rows: Any, submitted_rows: Any) -> 
 # ── scalar facts ────────────────────────────────────────────────────────────
 
 def record_fact_confirmation(facts: dict, fact_key: str, shown_value: Any,
-                             arq_id: Optional[str], at_iso: str) -> bool:
+                             arq_id: Optional[str], at_iso: str,
+                             by: str = "client_arq") -> bool:
     """Mark the client's confirmation on the fact envelope, value untouched.
 
     Only when the fact still says what the client was shown - a producer edit
     after the questionnaire went out must not inherit a confirmation of the
     old value. Returns True when recorded.
+
+    `by` (23 Oct 2026): "client_arq" (the default - the client's
+    confirm-or-correct) or "producer" (the narrative questionnaire page's
+    "Confirm"). The envelope's `evidence_actor` follows it, so
+    `fact_state.derive_evidence_state` names who vouched for the value.
     """
     if not isinstance(facts, dict) or not fact_key:
         return False
@@ -342,14 +352,14 @@ def record_fact_confirmation(facts: dict, fact_key: str, shown_value: Any,
         USER_CONFIRMED = "user_confirmed"
     env = dict(raw)
     env["evidence_state"] = USER_CONFIRMED
-    env["evidence_actor"] = "client"
-    env["confirmed_by"] = "client_arq"
+    env["evidence_actor"] = "producer" if by == "producer" else "client"
+    env["confirmed_by"] = by
     env["confirmed_at"] = at_iso
     if arq_id:
         env["confirmed_arq_id"] = arq_id
     facts[fact_key] = env
     conf = dict(_confirmations(facts))
-    conf[f"fact:{fact_key}"] = {"at": at_iso, "arq_id": arq_id, "by": "client_arq",
+    conf[f"fact:{fact_key}"] = {"at": at_iso, "arq_id": arq_id, "by": by,
                                 "value": current}
     facts[CONFIRMATIONS_KEY] = conf
     return True

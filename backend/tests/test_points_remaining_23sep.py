@@ -67,24 +67,35 @@ def test_every_pillar_short_of_100_is_listed():
     assert short == listed, f"pillars short of 100 but not listed: {short - listed}"
 
 
+def _by_pillar(recs):
+    """Each pillar's rows' points together, in the order the pillars are listed
+    (Loss History lists one row per step of its plan since 23 Oct 2026)."""
+    out = {}
+    for r in recs:
+        out[r["pillar"]] = out.get(r["pillar"], 0.0) + float(r["points_available"])
+    return out
+
+
 def test_rows_are_ranked_by_points_not_by_score():
     """A low score on a light pillar must not outrank a mild gap on a heavy one."""
     pkg = _pkg()
-    pts = [r["points_available"] for r in _recs(pkg)]
+    pts = list(_by_pillar(_recs(pkg)).values())
     assert pts == sorted(pts, reverse=True), f"not ranked by points: {pts}"
 
 
 def test_points_available_uses_the_effective_weight():
     """The same weights the SCORE used, so a Not Applicable pillar's weight is
-    already redistributed and the numbers describe the real gap."""
+    already redistributed and the numbers describe the real gap. Loss History's
+    rows are its plan's steps, each the WHOLE points the score moves (23 Oct
+    2026), so together they are the gap to within the rounding of one point."""
     pkg = _pkg()
     pillars = pkg.get("pillars") or {}
     na = [k for k, v in pillars.items() if v is None]
     live = sum(w for k, w in SPEC_PILLAR_WEIGHTS.items() if k not in na) or 1.0
-    for r in _recs(pkg):
-        eff = SPEC_PILLAR_WEIGHTS[r["pillar"]] / live
-        assert r["points_available"] == pytest.approx(
-            round((100 - pillars[r["pillar"]]) * eff, 1), abs=0.05)
+    for pillar, pts in _by_pillar(_recs(pkg)).items():
+        eff = SPEC_PILLAR_WEIGHTS[pillar] / live
+        tol = 1.0 if pillar == "loss_history_alignment" else 0.05
+        assert pts == pytest.approx(round((100 - pillars[pillar]) * eff, 1), abs=tol), pillar
 
 
 def test_points_remaining_closes_the_gap_to_100():
@@ -123,16 +134,19 @@ def test_loss_history_without_a_loss_run_says_it_needs_a_document():
     """The distinction that matters most: a gap waiting on the insured reads
     exactly like one the producer could close in ten seconds, unless it says so."""
     pkg = _pkg()
-    loss = next((r for r in _recs(pkg)
-                 if r["pillar"] == "loss_history_alignment"), None)
-    if loss is not None:          # None = Not Applicable, which is not a gap
-        # 29 Sep 2026 (Orbin item 15): when the gap's own answer is the "no
-        # known losses" attestation, selecting it closes the gap (the pillar
-        # becomes Not Applicable) - so it is typed, not waiting on a document.
-        if loss.get("field") == "loss_history_no_prior_losses_indicator":
-            assert loss["closes_with"] == "type"
-        else:
-            assert loss["closes_with"] == "document"
+    loss = [r for r in _recs(pkg) if r["pillar"] == "loss_history_alignment"]
+    if loss:                      # none = Not Applicable, which is not a gap
+        # The plan's rows (23 Oct 2026): an answer a person types says so, and
+        # with no loss runs on file what is left after the answers is the one
+        # upload row - waiting on a document, and saying so.
+        for r in loss:
+            assert r["closes_with"] == ("type" if r.get("field") else "document"), r
+        # 24 Oct (TEST updated): with nothing known the claims question comes
+        # first and an honest "no claims" closes the pillar, so the plan may end
+        # on it; otherwise it ends on the one upload row.
+        assert loss[-1].get("plan_step") in ("upload", "claims")
+        if loss[-1].get("plan_step") == "upload":
+            assert loss[-1]["closes_with"] == "document"
 
 
 def test_an_na_pillar_is_never_listed_as_a_gap():

@@ -107,6 +107,14 @@ _FAMILY_BLIND_PHRASES: dict = {
     PROPERTY: ("property damage", "property protection"),
 }
 
+# Z38: the same idea for a phrase that is a PREFIX of another word. "work
+# comp" (an abbreviation) matched inside "WORK - Completed Ops" ("work
+# completed ops") and read the completed-work part as Workers Compensation.
+# Local to `canon_line` on purpose - not in the flattened export below.
+_FAMILY_BLIND_PATTERNS: dict = {
+    WORKERS_COMP: (re.compile(r"\bwork comp(?=[a-z])(?!ensation)"),),
+}
+
 # The same phrases, flattened, for consumers that tokenise a line name WITHOUT
 # knowing which family they are about to compare it against.
 #
@@ -200,6 +208,65 @@ _ABBREVIATIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     (WORKERS_COMP,  ("wc",)),
     (AUTO,          ("bap",)),          # Business Auto Policy
 )
+
+# ACORD AL3 line-of-business CODES (Z37 lane B, owner-approved 24 Oct 2026 -
+# the D9 / D57 decision for this set). An agency system prints them beside or
+# instead of the line name ("UMBRC", "INMRC", "WORK"). Matched as WHOLE tokens,
+# never substrings, and checked AFTER `_SPECIFIC` like `_ABBREVIATIONS`.
+# None = recognised but not a line family: CPKGE is a package CONTAINER
+# (`is_container_label`), BOP a Business Owners policy, which has no family
+# here (its long name "Businessowners" maps to none either - a new family is
+# a D9 decision of its own). "WORK" is an English word, so it counts only when
+# it is the whole label ("WORK", "WORK (Expiring)"), never "Completed Work".
+ACORD_LOB_CODES: Dict[str, Optional[str]] = {
+    "cgl": GENERAL_LIAB,
+    "autob": AUTO,
+    "garag": AUTO,
+    "umbrc": UMBRELLA,
+    "exlia": UMBRELLA,          # excess liability: umbrella family, excess layer
+    "inmrc": INLAND_MARINE,
+    "propc": PROPERTY,
+    "work": WORKERS_COMP,
+    "cpkge": None,
+    "bop": None,
+}
+_LOB_CODE_WORDS = frozenset({"work"})
+# Z38: "WORK - Completed Ops" is the completed-WORK coverage part, not the WC
+# code. A dash remainder naming a coverage part or another line rules the
+# code out; a carrier / status remainder ("WORK - Magnolia", "WORK - Expiring")
+# does not.
+_CODE_REMAINDER_PART_WORDS = frozenset({
+    "ops", "operations", "products", "product", "completed", "premises"})
+
+
+def _code_remainder_names_other_coverage(text: Any, family: Optional[str]) -> bool:
+    s = re.sub(r"\([^)]*\)", " ", str(text or ""))
+    parts = re.split(r"\s[-–—]\s", s, maxsplit=1)
+    if len(parts) < 2:
+        return False
+    rest = parts[1]
+    if set(_clean(rest).split()) & _CODE_REMAINDER_PART_WORDS:
+        return True
+    try:
+        other = canon_line(rest)
+    except Exception:                                          # noqa: BLE001
+        other = None
+    return bool(other and other != family)
+
+
+def acord_lob_code_family(text: Any) -> Optional[str]:
+    """The family an ACORD LOB code in `text` names, or None."""
+    words = [w for w in _container_text(text).split() if w not in _CONTAINER_FILLER]
+    if len(words) == 1 and words[0] in _LOB_CODE_WORDS:
+        fam = ACORD_LOB_CODES[words[0]]
+        if _code_remainder_names_other_coverage(text, fam):
+            return None
+        return fam
+    for w in _clean(text).split():
+        if w in ACORD_LOB_CODES and w not in _LOB_CODE_WORDS and ACORD_LOB_CODES[w]:
+            return ACORD_LOB_CODES[w]
+    return None
+
 
 # Phrases that name General Liability outright.
 _GL_PHRASES: Tuple[str, ...] = (
@@ -342,6 +409,8 @@ def canon_line(text: Any) -> Optional[str]:
         hay = s
         for blind in _FAMILY_BLIND_PHRASES.get(key, ()):
             hay = hay.replace(blind, " ")
+        for blind_re in _FAMILY_BLIND_PATTERNS.get(key, ()):
+            hay = blind_re.sub(" ", hay)
         if any(p in hay for p in phrases):
             return key
     for key, phrases in _SPECIALTY:
@@ -356,6 +425,9 @@ def canon_line(text: Any) -> Optional[str]:
     for key, abbreviations in _ABBREVIATIONS:
         if _tokens.intersection(abbreviations):
             return key
+    _coded = acord_lob_code_family(text)
+    if _coded:
+        return _coded
     if any(p in s for p in _GL_PHRASES):
         return GENERAL_LIAB
     if "liability" in s.split() or "liab" in s.split():
@@ -491,7 +563,7 @@ def umbrella_layer(text: Any) -> Optional[str]:
     s = _clean(text)
     if re.search(r"\bumbrella\b", s):
         return UMBRELLA_LAYER
-    if re.search(r"\bexcess\b|\bfollow(?:ing|s)? form\b", s):
+    if re.search(r"\bexcess\b|\bexlia\b|\bfollow(?:ing|s)? form\b", s):
         return EXCESS_LAYER
     return UMBRELLA_LAYER
 
@@ -513,6 +585,35 @@ _ALL_FAMILIES = frozenset({
 SPECIALTY_LIABILITY_FAMILIES = frozenset({
     PROFESSIONAL, EPLI, POLLUTION, DIRECTORS_OFFICERS, EMPLOYEE_BENEFITS, LIQUOR,
 })
+
+# A line WRITTEN AS PART of another line's policy when the same company writes
+# both (Brent, 19 Oct 2026): "Employee Benefits Liability ... is generally
+# written on ACORD 126 when written with GL" - a coverage of the GL policy, not
+# a line of business of its own on ACORD 125's page 1. Read by
+# `written_with_line`; a family with its own company stays a policy of its own.
+WRITTEN_WITH: Dict[str, str] = {EMPLOYEE_BENEFITS: GENERAL_LIAB}
+
+
+def written_with_line(family: Optional[str], carrier: Any, rows: Any) -> Optional[str]:
+    """The line whose policy ``family`` is written as part of - WRITTEN_WITH's
+    parent when ``rows`` (coverage rows, {"line", "carrier"}) hold a policy of
+    that line written by the same company (or either prints no company) - else
+    None. Never raises."""
+    parent = WRITTEN_WITH.get(str(family or ""))
+    if not parent:
+        return None
+    try:
+        from services.normalization import strict_entity_key as _ek
+    except Exception:                                         # noqa: BLE001
+        return None
+    own = _ek(str(carrier or ""))
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict) or canon_line(str(r.get("line") or "")) != parent:
+            continue
+        theirs = _ek(str(r.get("carrier") or ""))
+        if not own or not theirs or own == theirs:
+            return parent
+    return None
 
 
 # ── EXPLICIT DENIAL OF A LINE (client 1.7 "Active vs. Listed Coverage") ──────

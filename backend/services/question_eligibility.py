@@ -233,6 +233,9 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     # recommendation card - which is a different surface from the questionnaire
     # and is untouched by this entry.
     "new_venture_indicator",
+    # Whether the loss runs are this insured's (23 Oct 2026) - the producer's
+    # call, answered from the Loss History row.
+    "loss_run_ownership_confirmed",
 
     # Workers Compensation (4.4 "Workers Compensation")
     "wc_xmod",
@@ -329,6 +332,16 @@ REASON_ALREADY_KNOWN = "already_provided"
 REASON_INSURANCE_JUDGMENT = "insurance_judgment_producer"
 REASON_CONFLICTING = "conflicting_route_to_producer"
 REASON_UNABLE = "unable_to_determine"
+REASON_ATTACHMENT_KNOWN = "attachment_point_known"
+
+
+def _sir_not_needed(facts: Optional[dict]) -> bool:
+    """`sqs_service.umbrella_sir_not_needed` - fail-closed (asked as today)."""
+    try:
+        from services.sqs_service import umbrella_sir_not_needed
+        return bool(umbrella_sir_not_needed(facts))
+    except Exception:                                         # noqa: BLE001
+        return False
 
 
 def is_insurance_judgment(*keys: Optional[str]) -> bool:
@@ -510,6 +523,20 @@ def overlay_for(
         # Core principle 5 is unconditional: a classification / policy-
         # interpretation fact is the producer's in EVERY state, not only the
         # states we happened to enumerate.
+        if judgment and audience == AUDIENCE_CLIENT:
+            out["audience"] = AUDIENCE_PRODUCER
+        return out
+
+    # ── "SIR OR attachment point" is ONE ACORD 131 item (Brent, 23 Oct 2026) ──
+    # With the attachment point known - stated, or an excess layer's established
+    # by what it sits on - the SIR is not asked. The scorer's own door
+    # (`sqs_service.umbrella_sir_not_needed`), so the ask and the checklist agree.
+    if canon == "umbrella_sir" and _sir_not_needed(facts):
+        out["suppressed"] = True
+        out["suppressed_reason"] = REASON_ATTACHMENT_KNOWN
+        out["priority"] = PRIORITY_INTERNAL
+        out["eligibility_step"] = 2
+        out["eligibility_reason"] = REASON_ATTACHMENT_KNOWN
         if judgment and audience == AUDIENCE_CLIENT:
             out["audience"] = AUDIENCE_PRODUCER
         return out

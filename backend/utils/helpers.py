@@ -186,6 +186,97 @@ _TRAILING_US_COUNTRY_RE = re.compile(
     r"(?<=\d)\s+(?:u\.?\s?s\.?\s?a\.?|united\s+states(?:\s+of\s+america)?)\s*$", re.I)
 
 
+# ── A NON-US ADDRESS WHOSE COUNTRY IS PRINTED (Z41, 25 Oct 2026) ─────────────
+# The account address "C-52, Astrea It services, sector 65, Noida, India,
+# 201301" parsed as city "India", state "201301": the country-strip below only
+# knew a country printed LAST, after a postal code, and the US reader then took
+# the last two parts as city and "ST ZIP". A printed country is positive
+# evidence the address is not American, so it is read by its own rule: the
+# postal code is the PIN / postcode standing alone beside the country (or
+# glued to it), the city is the part before them, and the state is filled only
+# from a real province code (Canada) - never from a postal code or a country.
+# A region printed WITH the postal code ("New Delhi, Delhi 110001, India") is
+# left to the reader below, which already reads it as city + region.
+_FOREIGN_COUNTRY_RE = re.compile(
+    r"^(?:canada|india|mexico|united\s+kingdom|u\.?k\.?|great\s+britain|england|"
+    r"scotland|wales|northern\s+ireland|ireland|australia|new\s+zealand|singapore|"
+    r"philippines|south\s+africa|united\s+arab\s+emirates|u\.?a\.?e\.?|germany|"
+    r"france)$", re.I)
+_FOREIGN_POSTAL_RE = re.compile(
+    r"^(?:\d{6}|\d{3}\s\d{3}|\d{4,5}|[A-Z]\d[A-Z]\s?\d[A-Z]\d"
+    r"|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})$", re.I)
+_CA_PROVINCE_CODES = frozenset({"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU",
+                                "ON", "PE", "QC", "SK", "YT"})
+# "ON M5H 1A1" / "London SW1A 1AA": words, then an alphanumeric postcode.
+_WORDS_THEN_ALNUM_POSTAL_RE = re.compile(
+    r"^(?P<words>.*?)\s*(?P<pc>[A-Z]\d[A-Z]\s?\d[A-Z]\d|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})$",
+    re.I)
+
+
+_CITY_THEN_PIN_RE = r"^(?P<city>[A-Za-z][A-Za-z .'-]*?)\s+(?P<pc>\d{6}|\d{3}\s\d{3}|\d{4,5})$"
+
+
+def _parse_foreign_address(parts: list) -> Optional[dict]:
+    """Read a comma-split address that PRINTS a non-US country, or None when
+    it does not (or the shape is the region-with-postal one the US reader
+    already handles)."""
+    if len(parts) < 2:
+        return None
+    last, prev = parts[-1].strip(" ."), parts[-2].strip(" .")
+    postal = region = None
+    if _FOREIGN_COUNTRY_RE.match(prev) and _FOREIGN_POSTAL_RE.match(last):
+        country, postal, rest = prev, last, parts[:-2]           # "..., India, 201301"
+    elif _FOREIGN_COUNTRY_RE.match(last):
+        country, rest = last, parts[:-1]
+        if rest and _FOREIGN_POSTAL_RE.match(rest[-1].strip(" .")):
+            postal, rest = rest[-1].strip(" ."), rest[:-1]        # "..., Noida, 201301, India"
+        elif rest and _WORDS_THEN_ALNUM_POSTAL_RE.match(rest[-1].strip(" .")):
+            m = _WORDS_THEN_ALNUM_POSTAL_RE.match(rest[-1].strip(" ."))
+            postal, words = m.group("pc").upper(), m.group("words").strip(" ,")
+            rest = rest[:-1]
+            if words.upper() in _CA_PROVINCE_CODES and country.lower() == "canada":
+                region = words.upper()                            # "Toronto, ON M5H 1A1, Canada"
+            elif words:
+                rest = rest + [words]                             # "London SW1A 1AA, UK"
+        elif (len(rest) >= 2 and not re.search(r"\d", rest[-1])
+              and rest[-1].split()[-1].upper() not in _US_ZIP_STATES):
+            pass                                                  # "..., Monterrey, Mexico" - no postal
+        elif len(rest) == 1 and re.match(_CITY_THEN_PIN_RE, rest[0].strip(" .")):
+            # "Noida 201301, India": a city and its postal code, no street.
+            m = re.match(_CITY_THEN_PIN_RE, rest[0].strip(" ."))
+            return {"city": m.group("city"), "zip": m.group("pc")}
+        else:
+            return None                                           # region + postal: the US reader
+    else:
+        m = re.match(r"^(?P<c>.+?)\s+(?P<pc>\S+(?:\s\S{3})?)$", last)
+        if not (m and _FOREIGN_COUNTRY_RE.match(m.group("c").strip(" .,"))
+                and _FOREIGN_POSTAL_RE.match(m.group("pc"))):
+            return None
+        country, postal, rest = m.group("c"), m.group("pc"), parts[:-1]  # "..., India 201301"
+    rest = [r for r in rest if r]
+    if not rest:
+        # Only a postal code beside the country ("201301, India"): the code is
+        # the ZIP, never a street line (Z42 review A).
+        return {"zip": postal} if postal else None
+    if len(rest) >= 3 and _HOUSE_NUMBER_PART_RE.match(rest[0]) and rest[1][:1].isalpha():
+        rest[:2] = [f"{rest[0]} {rest[1]}"]
+    out: dict = {"line1": rest[0]}
+    if len(rest) >= 2:
+        city = rest[-1]
+        toks = city.split()
+        if (country.lower() == "canada" and len(toks) >= 2
+                and toks[-1].upper() in _CA_PROVINCE_CODES and not region):
+            region, city = toks[-1].upper(), " ".join(toks[:-1])
+        out["city"] = city
+        if len(rest) > 2:
+            out["line2"] = ", ".join(rest[1:-1])
+    if region:
+        out["state"] = region
+    if postal:
+        out["zip"] = postal
+    return out
+
+
 def _parse_address(addr: str) -> dict:
     # SHAPE FIRST (2026-09-06). This went straight to `addr.split(",")`, so a
     # fact that arrived as a bool, an int, a list or a dict raised
@@ -202,6 +293,9 @@ def _parse_address(addr: str) -> dict:
     if not isinstance(addr, str) or not addr:
         return {}
     parts  = [p.strip() for p in addr.split(",")]
+    _foreign = _parse_foreign_address(parts)
+    if _foreign is not None:
+        return _foreign
     # A trailing COUNTRY is not the state (round 5, 7 Oct 2026). "1234 Elm
     # Street, Suite 500, Dallas, TX 75201, USA" parsed as city "TX 75201",
     # state "USA" and line two "Suite 500, Dallas"; the stored corpus printed

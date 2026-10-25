@@ -326,9 +326,11 @@ def test_after_forms_the_forms_group_is_the_editors_needs_attention_list(tmp_pat
         " loadingCount: loading.count, loadingReady: loading.formsReady,\n"
         "}));"))
     # Missing rows only (the producer's boxes): the applicant's signature steps
-    # are not a to-do here, "verify" / "held back" are counted, not listed; the
-    # mailing address is the warning card's; the loss box is the score row's.
-    assert o["forms"] == [["ACORD_125", ["F1", "F5"], 2]]
+    # are not a to-do here, "verify" is counted, not listed (23 Oct 2026, review
+    # of Z35: "held back" is no longer counted - only Please verify rows are
+    # values to confirm); the mailing address is the warning card's; the loss
+    # box is the score row's.
+    assert o["forms"] == [["ACORD_125", ["F1", "F5"], 1]]
     assert o["score"] == [["Loss History", ["ACORD 125"]], ["Narrative Quality", []]]
     assert o["count"] == 2 + 2 and o["ready"] is True
     assert o["loadingCount"] == 2 and o["loadingReady"] is False
@@ -337,8 +339,10 @@ def test_after_forms_the_forms_group_is_the_editors_needs_attention_list(tmp_pat
 def test_needs_attention_statuses_are_the_ones_the_util_reads():
     from services import needs_attention as na
     src = UTIL.read_text(encoding="utf-8")
-    for status in (na.STATUS_MISSING, na.STATUS_VERIFY, na.STATUS_HELD_BACK):
+    for status in (na.STATUS_MISSING, na.STATUS_VERIFY):
         assert f'"{status}"' in src
+    # 23 Oct 2026 (review of Z35): "to confirm" counts Please verify rows only
+    assert 'r.status === "verify").length' in src
 
 
 # ── 3. The page ──────────────────────────────────────────────────────────────
@@ -346,7 +350,9 @@ def test_needs_attention_statuses_are_the_ones_the_util_reads():
 def test_the_rail_has_a_recommendations_section_after_warnings():
     src = RAIL.read_text(encoding="utf-8")
     ids = re.findall(r'\{ id: "([a-z]+)", label: "[^"]+", group:', src)
-    assert ids[-2:] == ["warnings", "recommendations"]
+    # right after Warnings; the Questionnaire page follows it since 23 Oct 2026
+    at = ids.index("warnings")
+    assert ids[at:at + 2] == ["warnings", "recommendations"]
     assert "recommendations: recommendationsSection" in src
     assert re.search(r'id: "recommendations",\s*\n\s*sub:', src)          # its rail entry
 

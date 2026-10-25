@@ -212,22 +212,28 @@ def test_pre_generation_score_is_the_scorers_dict_with_its_label():
     assert pkg["calculation_stage"] == "initial_extract"
     assert pkg["tier"] in ("Submission Ready", "Almost There", "Needs Work", "Major Gaps", "Not Ready")
     # the label IS the ladder applied to the displayed score - one ladder
-    assert pkg["tier"] == sq.tier_for_score(pkg["package_sqs_score"])[1]
+    # (19 Oct 2026, Brent: an open hard stop holds the label below Submission Ready) - the ladder reads both.
+    assert pkg["tier"] == sq.tier_for_score(pkg["package_sqs_score"], pkg["open_hard_stops"])[1]
 
 
 def test_the_label_is_never_a_relabelled_tier2_ratio():
     """The client's screenshot: Tier 2 at 100% beside 12 warnings. A warning
-    caps the SQS at 85, so the band can be "Almost There" at best."""
+    caps the SQS at 85 (the cap is back, 20 Oct 2026), so the band can be
+    "Almost There" at best."""
     sess = _session(soft_stops=[f"warning {i}" for i in range(12)])
     assert sq.check_tier2(sess["facts"], sess["flags"])[0] == 100
     pkg = sq.current_package_sqs(sess, "sess-1")
     assert pkg["cap_applied"] == 85
+    assert pkg["package_sqs_score"] == min(pkg["raw_sqs_score"], 85)
+    # (19 Oct 2026, Brent) - the label is the ladder read with the open hard stops.
+    assert pkg["tier"] == sq.tier_for_score(pkg["package_sqs_score"], pkg["open_hard_stops"])[1]
     assert pkg["tier"] != "Submission Ready"
 
 
 def test_a_suggested_forms_hard_stop_is_a_warning_before_generation():
     """C75: nothing is selected yet, so a cross-form hard stop raised by a
-    RECOMMENDED form's rule caps at 85 (warning), never at 60."""
+    RECOMMENDED form's rule caps at 85 (warning), never at 60 - and, a warning,
+    it blocks nothing (19 Oct 2026)."""
     sess = _session(
         soft_stops=["ACORD 133 selected but no builders risk exposure"],
         cross_form_issues=[{"type": "hard_stop", "code": "br_no_exposure",
@@ -236,6 +242,8 @@ def test_a_suggested_forms_hard_stop_is_a_warning_before_generation():
     )
     pkg = sq.current_package_sqs(sess, "sess-1")
     assert pkg["cap_applied"] == 85
+    # (19 Oct 2026, Brent: only a hard stop blocks Submission Ready) - the demoted warning does not.
+    assert pkg["ready_blockers"] == [] and pkg["open_hard_stops"] == 0
     demoted = sq._pre_generation_cross_issues(sess)
     assert [i["type"] for i in demoted] == ["soft_warning"]
 

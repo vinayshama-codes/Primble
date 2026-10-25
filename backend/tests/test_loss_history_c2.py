@@ -161,10 +161,12 @@ def test_no_loss_runs_available_state():
 
 
 def test_caps_are_ceilings_never_floors():
-    # Narrative-only (40) under an open contradiction stays 40 - the 45 cap
-    # never lifts a lower score.
+    # Narrative-only (40) under an open contradiction: the ceiling is the lower
+    # of 45 and the value once the claims are confirmed (owner, 23 Oct 2026 -
+    # never above the honest answer): known claims, no runs = 25. A ceiling
+    # still never lifts a lower score.
     score, _ = _p4({"num_claims": "3"}, {"narrative_states_no_losses": True})
-    assert score == 40
+    assert score == 25 and score <= 40
 
 
 # ── 2.1 Frequency / ratio are advisory only ──────────────────────────────────
@@ -764,7 +766,9 @@ def test_the_moderate_message_does_not_assert_the_wrong_identifiers():
     _, recs = _p4({"prior_carrier": "X"}, doc=True, match="moderate")
     msg = next(r for r in recs if "ownership partially verified" in r)
     assert "address" not in msg.lower()
-    assert loss_recommendation_field(msg) == "fein", "routing must still work"
+    # 23 Oct 2026 (fc04c74f): routed to the producer's ownership answer, which
+    # the match door reads - `fein` was the package FEIN and lifted nothing.
+    assert loss_recommendation_field(msg) == "loss_run_ownership_confirmed", "routing must still work"
 
 
 # ── S6 / S7 second pass, 2026-08-25: the SECOND and THIRD copies ────────────

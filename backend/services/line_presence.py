@@ -346,16 +346,17 @@ def _submission_declines(prof: LineProfile, facts: Optional[dict]) -> bool:
 
 
 def _is_a_persons(env: Any) -> bool:
-    """A person (producer, client, the Data Consistency picker) gave this value
-    - `fact_state.derive_evidence_state`, the one owner of that question."""
+    """A person (producer, client, the Data Consistency picker, a client's
+    confirm-or-correct) gave or vouched for this value - the one door,
+    `fact_state.confirmed_by_person` (21 Oct 2026, review L1)."""
     if not isinstance(env, dict):
         return False
     try:
-        from services.fact_state import derive_evidence_state, USER_CONFIRMED
+        from services.fact_state import confirmed_by_person
     except Exception:                                          # noqa: BLE001
         return False
     try:
-        return derive_evidence_state(env)[0] == USER_CONFIRMED
+        return confirmed_by_person(env)
     except Exception:                                          # noqa: BLE001
         return False
 

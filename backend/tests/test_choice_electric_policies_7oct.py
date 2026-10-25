@@ -275,7 +275,8 @@ def test_the_excess_layer_is_corrected_alone(merged):
     assert after["conflict_count"] == before["conflict_count"] == 0
     assert {f["fact_key"]: f["status"] for f in after["fields"]} == \
         {f["fact_key"]: f["status"] for f in before["fields"]}
-    assert after["policy_lines"] == pl.table_rows(facts)
+    # (19 Oct 2026, Brent: source + page for every coverage) built with the same documents.
+    assert after["policy_lines"] == pl.table_rows(facts, docs)
 
 
 def test_two_carriers_on_one_line_are_addressed_separately():
@@ -506,14 +507,16 @@ def test_the_store_survives_a_pipeline_rerun(merged, monkeypatch):
     _plan(sess, "edit", edit_key=EXCESS, fields={"premium": "$11,000"})
     prior = copy.deepcopy(mf)
     prior[pl.STORE_KEY] = sess["facts"][pl.STORE_KEY]
-    calls = _run_pipeline(monkeypatch, _docs(), prior, flags)
+    run_docs = _docs()
+    calls = _run_pipeline(monkeypatch, run_docs, prior, flags)
     facts = calls["payload"]["facts"]
     rows = _rows(facts)
     assert rows[AUTO]["policy_number"] == "BA-7731042"
     assert rows[EXCESS]["premium"] == "$11,000"
     assert sorted(r["line"] for r in rows.values() if r["producer_added"]) == ["epli", "umbrella"]
     uw = calls["payload"]["underwriting_consistency"]
-    assert uw["policy_lines"] == pl.table_rows(facts)
+    # (19 Oct 2026, Brent: source + page for every coverage) the documents the run read.
+    assert uw["policy_lines"] == pl.table_rows(facts, run_docs)
     assert uw["conflict_count"] == 0 and uw["unmatched_policy_edits"] == []
     # The documents' own rows are kept beside the producer's.
     assert not any(r.get(pl.ROW_ADDED) or r.get(pl.ROW_FIELDS)
@@ -772,7 +775,8 @@ def test_a_refused_value_comes_back_as_field_errors(merged, monkeypatch):
         "s1", r.PolicyLineEditRequest(edit_key=AUTO, fields={"carrier_name": row["carrier_name"]}),
         current_user={"id": "owner"}))
     body = json.loads(resp.body)
-    assert body["changed"] is False and body["policy_lines"] == pl.table_rows(mf)
+    # (19 Oct 2026, Brent: source + page for every coverage) the route reads the session's documents.
+    assert body["changed"] is False and body["policy_lines"] == pl.table_rows(mf, docs)
 
 
 def test_the_add_form_route_adds_only_an_offered_form(merged, monkeypatch):
@@ -1197,7 +1201,7 @@ def test_the_pre_form_response_carries_the_dry_run_and_passes_the_facts(monkeypa
     status = {"value": fr.PreFormStatus({"package_sqs_score": 77}, {"missing": []},
                                         {"forms": ["ACORD_125"]})}
 
-    async def _status(_sid, facts, _flags, _integrity, _user, session_row=None):
+    async def _status(_sid, facts, _flags, _integrity, _user, session_row=None, **_kw):
         seen["status_facts"] = facts
         return status["value"]
 

@@ -240,7 +240,10 @@ def test_a_typed_claim_contradicts_a_no_loss_attestation():
 
     facts = dict(_ESTABLISHED, loss_history=_CLAIM_ROW)
     assert asserted_claims(facts) == (1, 14000.0)
-    assert _p4(facts, _ATTESTED) == 45, (
+    # Contradicted, so held - since 23 Oct 2026 at the lower of 45 and what the
+    # pillar scores once the claims are confirmed (owner: never above the honest
+    # answer): known claims, no loss runs = 25.
+    assert _p4(facts, _ATTESTED) == 25, (
         "a claim typed into the loss_history table must contradict a no-loss "
         "attestation exactly as num_claims does"
     )
@@ -251,7 +254,7 @@ def test_the_two_sources_agree_on_the_same_claim():
     one fact and must not score differently."""
     scalar = _p4(dict(_ESTABLISHED, num_claims="1"), _ATTESTED)
     table = _p4(dict(_ESTABLISHED, loss_history=_CLAIM_ROW), _ATTESTED)
-    assert scalar == table == 45
+    assert scalar == table == 25          # min(45, the honest value) - 23 Oct 2026
 
 
 def test_one_claim_stated_twice_is_not_two_claims():
@@ -263,7 +266,7 @@ def test_one_claim_stated_twice_is_not_two_claims():
     both = dict(_ESTABLISHED, num_claims="1", loss_history=_CLAIM_ROW)
     claims, _ = asserted_claims(both)
     assert claims == 1, "double counted: {0}".format(claims)
-    assert _p4(both, _ATTESTED) == 45
+    assert _p4(both, _ATTESTED) == 25     # min(45, the honest value) - 23 Oct 2026
 
 
 def test_an_empty_row_never_manufactures_a_claim():
@@ -315,7 +318,7 @@ def test_the_rows_are_read_through_the_fact_envelope():
 
     wrapped = dict(_ESTABLISHED, loss_history={"value": _CLAIM_ROW})
     assert asserted_claims(wrapped) == (1, 14000.0)
-    assert _p4(wrapped, _ATTESTED) == 45
+    assert _p4(wrapped, _ATTESTED) == 25  # min(45, the honest value) - 23 Oct 2026
 
 
 def test_a_typed_claim_blocks_a_new_venture_not_applicable():

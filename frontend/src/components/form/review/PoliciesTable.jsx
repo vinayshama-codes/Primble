@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "../../../config/constants";
+import { sourceLabel } from "../../../utils/formatters";
+import { clientMarked, CLIENT_MARK_TEXT, CLIENT_MARK_TITLE } from "../../../utils/policyClientMarks";
 import "./PoliciesTable.css";
 
 // "Policies in this submission" (Brent, Choice Electric #9, 7 Oct 2026):
@@ -44,11 +46,31 @@ const EMPTY_DRAFT = Object.fromEntries([...FIELDS, ...LIMIT_FIELDS].map((f) => [
 function LimitCell({ r }) {
   const parts = Array.isArray(r.limit_parts) ? r.limit_parts.filter((p) => p && p.amount) : [];
   if (!parts.length) return "-";
+  // The page that prints the limit (19 Oct 2026); the file too when it is not
+  // this policy's own document (a GL limit read off the umbrella's schedule).
+  const own = new Set(r.sources || []);
+  const where = (p) => (p.file && !own.has(p.file) ? sourceLabel(p) : `p.${p.page}`);
   return parts.map((p, i) => (
     <div key={i} className="pt-limit">
       <span className="pt-limit__amount">{p.amount}</span>{p.label ? <span className="pt-muted"> {p.label}</span> : null}
+      {p.page ? <span className="pt-muted" title={p.file ? `${p.file}, page ${p.page}` : undefined}> ({where(p)})</span> : null}
     </div>
   ));
+}
+
+// Where a policy prints in ACORD 125's PRIOR CARRIER INFORMATION when the
+// grid lists the expiring policies (Brent, 19 Oct 2026): the Other column's
+// one policy, or ACORD 101 for the ones the grid has no column for.
+// A client's questionnaire answer in this cell (Z37) - see utils/policyClientMarks.
+function ClientMark({ r, column }) {
+  if (!clientMarked(r, column)) return null;
+  return <span className="pt-tag pt-tag--client" title={CLIENT_MARK_TITLE}>{CLIENT_MARK_TEXT}</span>;
+}
+
+function priorGridTag(r) {
+  if (r?.prior_other_line) return "ACORD 125 Other column";
+  if (r?.prior_grid === "ACORD_101") return "Listed on ACORD 101";
+  return "";
 }
 
 // A stated premium as a number ("$16,818" -> 16818), else null.
@@ -315,6 +337,14 @@ export default function PoliciesTable({
     if (ok) { setAdding(false); setAddDraft({ line: "", ...EMPTY_DRAFT }); }
   };
 
+  // ACORD 125's prior-carrier OTHER column holds one policy (Brent, 19 Oct
+  // 2026: the primary umbrella / excess unless the agent chooses another);
+  // the server re-stamps the grid and the ACORD 101 list.
+  const choosePriorOther = async (r) => {
+    await send(`${API_BASE}/api/policy-lines/${sessionId}/prior-other`, "POST",
+      { edit_key: r.edit_key }, `prior:${r.edit_key}`);
+  };
+
   const remove = async (r) => {
     if (!window.confirm(`Remove the ${r.line_label || "policy"} you added?`)) return;
     const id = String(r.edit_key || "").replace(/^added:/, "");
@@ -436,15 +466,29 @@ export default function PoliciesTable({
                     {labelOf(r)}
                     {r.producer_added && <span className="pt-tag">Added by you</span>}
                     {!r.producer_added && edited && <span className="pt-tag pt-tag--edited">Corrected by you</span>}
+                    {priorGridTag(r) && <span className="pt-tag pt-tag--grid">{priorGridTag(r)}</span>}
+                    {editable && r.prior_other_candidate && (
+                      <button type="button" className="pt-link-btn pt-prior-btn" disabled={locked || anyBusy}
+                        title="ACORD 125's prior carrier section has one Other column; the rest are listed on ACORD 101"
+                        onClick={() => choosePriorOther(r)}>
+                        {busy === `prior:${r.edit_key}` ? "Saving..." : "Use for the ACORD 125 Other column"}
+                      </button>
+                    )}
                   </td>
-                  <td className="pt-wrap">{r.carrier_name || "-"}</td>
-                  <td>{r.carrier_naic || "-"}</td>
-                  <td className="pt-wrap">{r.policy_number || "-"}</td>
-                  <td>{term(r)}</td>
-                  {editable && <td>{r.premium || "-"}</td>}
+                  <td className="pt-wrap">{r.carrier_name || "-"}<ClientMark r={r} column="carrier" /></td>
+                  <td>{r.carrier_naic || "-"}<ClientMark r={r} column="naic" /></td>
+                  <td className="pt-wrap">{r.policy_number || "-"}<ClientMark r={r} column="policy" /></td>
+                  <td>{term(r)}<ClientMark r={r} column="term" /></td>
+                  {editable && (
+                    <td>{r.premium || (r.premium_missing
+                      ? <span className="pt-missing">Missing / Requires Confirmation</span> : "-")}
+                      <ClientMark r={r} column="premium" /></td>
+                  )}
                   {editable && <td className="pt-wrap pt-limit-cell"><LimitCell r={r} /></td>}
                   <td className="pt-wrap pt-muted">
-                    {r.producer_added ? "You" : ([...new Set(r.sources || [])].join(", ") || "-")}
+                    {r.producer_added ? "You" : (Array.isArray(r.source_refs) && r.source_refs.length
+                      ? r.source_refs.map(sourceLabel).join(", ")
+                      : ([...new Set(r.sources || [])].join(", ") || "-"))}
                   </td>
                   {editable && (
                     <td className="pt-actions">

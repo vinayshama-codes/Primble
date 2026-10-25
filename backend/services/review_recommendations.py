@@ -18,6 +18,9 @@ about which gaps exist. It only attaches, to each row a person can answer, the
 * a live capture table opens the table; the ACORD 101 remarks open the remarks
   box (the only fact the narrative write appends to); any other prose fact is
   typed like a field;
+* a per-building COPE fact on a package with 2+ location rows opens the
+  location table with its column (`premises_cope.per_building_fix`, 21 Oct
+  2026 - Brent 17 Oct item 8: one store for building details);
 * a row with no route (mode `none`, no field, the synthetic "hard stops need
   attention" row) gets no resolution - the page does not list it.
 
@@ -57,6 +60,25 @@ def fix_route_for_row(row: Any, facts: Optional[dict] = None) -> Optional[dict]:
     field = str(row.get("field") or "").strip()
     if not field:
         return None
+    # A merged sub-point row (review_plan.merge_subpoint_rows): one window, all its questions.
+    merged = [str(f) for f in (row.get("merged_fields") or []) if str(f or "").strip()]
+    if len(merged) > 1:
+        from services.review_plan import merged_resolution
+        return merged_resolution(merged, facts)
+    # ONE STORE FOR BUILDING DETAILS (21 Oct 2026, Brent 17 Oct item 8): on a
+    # package with 2+ location rows a per-building COPE row (year built, roof
+    # year, sprinkler, protection class, construction, building / BPP value)
+    # opens the location table with its column, one row per building - the
+    # same window the COPE cards open - never one package box. Decided from
+    # THESE facts, whatever an older payload stamped on the row.
+    try:
+        from services.premises_cope import per_building_fix
+        per_building = per_building_fix(field, facts)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.debug("review_recommendations: per-building route failed for %s: %s", field, ex)
+        per_building = None
+    if per_building:
+        return per_building
     mode = row.get("answer_mode")
     schedule_key = row.get("schedule_key")
     fact = field

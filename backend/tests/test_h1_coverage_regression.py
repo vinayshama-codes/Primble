@@ -13,7 +13,7 @@ message text. Every fixture below is the LIVE shape the writers produce
 of dicts, `coverage_lines` dicts with a premium.
 """
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -36,11 +36,30 @@ def _exposure(facts, flags):
     return sq._calculate_exposure_consistency(facts, flags, [], [])[1]
 
 
+def _completeness(facts, flags):
+    """What Completeness's coverage details deduct, by bucket - since 19 Oct 2026
+    the home of every MISSING detail this file pins (Exposure keeps the conflicts)."""
+    out = {}
+    for it in sq.completeness_deduction_items(facts, flags, [], []):
+        out[it["bucket"]] = out.get(it["bucket"], 0) + it["points"]
+    return out
+
+
+def _in_days(days):
+    return (datetime.now() + timedelta(days=days)).strftime("%m/%d/%Y")
+
+
+# A proposed term (19 Oct 2026, Brent: without one a package carries a hard stop of
+# its own, which the rules below have nothing to do with).
+_TERM = {"effective_date": _in_days(30), "expiration_date": _in_days(395)}
+
+
 # ── 6.1 General Liability: spec 3.2 Operations / Coverage rows ───────────────
 
 def test_gl_with_no_class_codes_at_all_is_minus_20():
-    subs = _exposure({"gl_limits": "$1,000,000"}, GL)
-    assert subs["operations_description"] == 80
+    # (19 Oct 2026, Brent: missing details are Completeness) the same -20, charged there.
+    assert _completeness({"gl_limits": "$1,000,000"}, GL) == {"operations_description": 20}
+    assert _exposure({"gl_limits": "$1,000,000"}, GL)["operations_description"] == 100
 
 
 def test_gl_class_code_mismatching_operations_is_minus_15():
@@ -53,17 +72,19 @@ def test_gl_class_code_mismatching_operations_is_minus_15():
 
 
 def test_gl_with_no_limits_is_minus_8():
-    subs = _exposure({"gl_class_codes_by_location": [{"code": "91580"}]}, GL)
-    assert subs["coverage_information"] == 92
+    # (19 Oct 2026, Brent: missing details are Completeness) the same -8, charged there.
+    facts = {"gl_class_codes_by_location": [{"code": "91580"}]}
+    assert _completeness(facts, GL) == {"coverage_information": 8}
+    assert _exposure(facts, GL)["coverage_information"] == 100
 
 
 def test_contractor_with_no_subcontracted_percentage_is_minus_8():
     facts = {"gl_limits": "$1,000,000", "gl_class_codes_by_location": [{"code": "91580"}]}
-    assert _exposure(facts, {"has_general_liability": True, "is_contractor": True})[
-        "operations_description"] == 92
-    assert _exposure(dict(facts, percent_subcontracted="15"),
-                     {"has_general_liability": True, "is_contractor": True})[
-        "operations_description"] == 100
+    flags = {"has_general_liability": True, "is_contractor": True}
+    # (19 Oct 2026, Brent: missing details are Completeness) the same -8, charged there.
+    assert _completeness(facts, flags) == {"operations_description": 8}
+    assert _completeness(dict(facts, percent_subcontracted="15"), flags) == {}
+    assert _exposure(facts, flags)["operations_description"] == 100
 
 
 def test_gl_revenue_payroll_and_operations_are_not_charged_here():
@@ -73,6 +94,9 @@ def test_gl_revenue_payroll_and_operations_are_not_charged_here():
     base = {"gl_limits": "$1,000,000", "gl_class_codes_by_location": [{"code": "91580"}]}
     assert _exposure(base, GL) == _exposure(dict(base, total_revenue="$2,000,000",
                                                  operations_description="Roofing"), GL)
+    # (19 Oct 2026, Brent: the coverage details sit in Structural beside Tier 2) nor there.
+    assert _completeness(base, GL) == _completeness(dict(base, total_revenue="$2,000,000",
+                                                         operations_description="Roofing"), GL)
 
 
 def test_gl_claims_made_without_retro_date_warns_and_caps_at_85():
@@ -126,6 +150,9 @@ def test_gl_location_information_is_available_to_facts_and_questionnaire():
     assert "property_locations" in SCHEDULE_DEFS, "the location schedule is a client table"
     subs = _exposure({"gl_limits": "$1,000,000", "gl_class_codes_by_location": [{"code": "91580"}]}, GL)
     assert all(v == 100 for v in subs.values()), "no GL location deduction exists"
+    # (19 Oct 2026, Brent: missing details are Completeness) nor one there.
+    assert _completeness({"gl_limits": "$1,000,000",
+                          "gl_class_codes_by_location": [{"code": "91580"}]}, GL) == {}
 
 
 # ── 6.2 Property: spec 3.3 Property Integrity ────────────────────────────────
@@ -247,9 +274,14 @@ def test_umbrella_pillar_is_not_applicable_without_an_umbrella():
 
 def test_umbrella_with_no_underlying_is_zero_and_a_hard_stop():
     assert sq._calculate_umbrella_adequacy({"umbrella_limit": "$5,000,000"}, UMB) == 0
-    hard, _soft = sq.evaluate_stops({"umbrella_limit": "$5,000,000"}, UMB)
-    assert any("Umbrella detected but no underlying" in h for h in hard)
-    assert sq._resolve_cap(hard, [])[0] == 60
+    hard, _soft = sq.evaluate_stops(dict(_TERM, umbrella_limit="$5,000,000"), UMB)
+    assert hard == ["Umbrella detected but no underlying GL or Auto limits found"]
+    assert sq._resolve_cap(hard, []) == (60, hard[0])
+    # (19 Oct 2026, kept) the stop also blocks Submission Ready - even at 95, on
+    # a path that ever forgot the 60.
+    ready = sq.readiness_fields(sq.final_score_with_credits(95, 0, 60), hard)
+    assert ready["ready_blockers"] == hard and ready["submission_ready"] is False
+    assert sq.tier_for_score(95, len(hard))[1] == "Almost There"
 
 
 def test_umbrella_full_credit_and_each_deduction_of_spec_3_5():
@@ -340,6 +372,7 @@ def test_pillar_weights_ceilings_and_rescale_are_unchanged_by_h1():
         "property_integrity": 0.15, "loss_history_alignment": 0.15,
         "umbrella_limit_adequacy": 0.10, "narrative_quality": 0.10,
     }
+    # (20 Oct 2026, owner: the caps are back) 60 / 85, exactly as before 19 Oct.
     assert (sq.HARD_STOP_CAP, sq.SOFT_STOP_CAP) == (60, 85)
     eff = sq.effective_pillar_weights(
         {"structural_completeness": 80, "exposure_consistency": 80, "property_integrity": 80,

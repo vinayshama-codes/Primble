@@ -20,6 +20,8 @@ THE TIERS are the client's, verbatim, and nothing else:
     strong      name matches AND (FEIN matches OR policy number matches)
     moderate    name matches AND address matches (containment counts)
     possible    name matches only - or ownership cannot be verified at all
+                (a producer's "Yes" to `loss_run_ownership_confirmed` lifts a
+                name-matched possible / moderate run to strong, 23 Oct 2026)
     no_match    the insured name on the run is a different entity
     no_loss_run no loss-run document in the package
 
@@ -127,6 +129,20 @@ def _package_identity(docs: List[dict], merged_facts: Optional[dict]) -> Dict[st
                     v = _text(ln.get(key))
                     if v and v not in out[bucket]:
                         out[bucket].append(v)
+        # The insured's FEIN as a PERSON entered it (24 Oct 2026): a producer's
+        # typed FEIN witnesses "this insured's FEIN" as an application printing
+        # it does, so complete loss runs that show it match on it. Only a typed
+        # value - the merge's FEIN may be the loss run's own (no self-verify).
+        # ...or CONFIRMED (live bcfd175b, 25 Oct: confirming 84-1234567 in Data
+        # Consistency after forms stored it as `user_confirmed`, and the
+        # loss runs printing that very FEIN dropped from strong to possible).
+        try:
+            from services.fact_state import confirmed_by_person
+            v = _text(_fv(merged_facts, "fein"))
+            if v and confirmed_by_person(merged_facts.get("fein")) and v not in out["fein"]:
+                out["fein"].append(v)
+        except Exception:                                       # noqa: BLE001
+            pass
     return out
 
 
@@ -160,6 +176,8 @@ def match_loss_run_identity(
 
     ctx = build_context(merged_facts, docs)
     pkg = _package_identity(docs, merged_facts)
+    from services.loss_history_state import loss_run_ownership_answer
+    ownership_confirmed = loss_run_ownership_answer(merged_facts) is True
 
     per_doc: List[dict] = []
     best: Optional[dict] = None
@@ -231,13 +249,25 @@ def match_loss_run_identity(
                 else:
                     tier = NO_MATCH
 
+        # THE PRODUCER'S CONFIRMATION (23 Oct 2026, package fc04c74f): a run
+        # whose insured name (or a declared DBA) matches, or whose tax ID
+        # matches under a different name, is the producer's to confirm. A "Yes"
+        # makes it a person-confirmed strong match; a "No" changes nothing. A
+        # run naming no insured, or another company, is never promoted.
+        if tier in (MODERATE, POSSIBLE) and ownership_confirmed and (
+                "name" in matched or "dba_name" in matched or fein_ok):
+            tier = STRONG
+            matched.append("person_confirmed")
+            notes = [n for n in notes if n not in (NOTE_DBA, NOTE_FEIN_NAME_DIFFERS)]
+
         row = {"filename": d.get("filename") or "loss run", "tier": tier,
                "matched_on": matched, "failed_on": failed, "notes": notes}
         per_doc.append(row)
         if best is None or _RANK[tier] > _RANK[best["tier"]]:
             best = row
-        if tier == STRONG:
-            break
+        # No early stop at the first STRONG run (live ff2ba3e5, 25 Oct): every
+        # loss run gets its own verdict, so a later run naming another company
+        # still shows on the review screen.
 
     if best is None:                                        # pragma: no cover
         return {"tier": NO_LOSS_RUN, "matched_on": [], "failed_on": [],

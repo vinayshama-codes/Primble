@@ -2385,7 +2385,7 @@ All resolved 2026-07-29 in one change set. Files touched:
 | **C28** | MED | **Budget shrink was process-global, never reset, and cross-contaminated.** `_effective_budget_chars` only ever decreased for the life of the worker, so one pathological document doubled the chunk count and cost of **every later submission** until restart. Worse, concurrent sub-batches all tested `if _effective_budget_chars < budget_before`, so ONE thread's overflow made every other in-flight batch discard completed work and re-run every chunk. **Introduced by the C20 fix.** | Overflow is now tracked in a `threading.local` (`_note_context_overflow` / `_consume_context_overflow`), so only the batch that actually overflowed re-splits. `reset_call_budget()` runs once per submission from `combined_gap_fill`, keeping the within-run learning and dropping the cross-run leak. Guarded by `tests/test_batch_packing_and_budget.py`. |
 | **C27** | MED | **Warm-up was scoped per outer batch, not per run.** `_warmup_enabled` was local to `_fill_unmatched_with_gpt`, which runs once per outer batch, so an 8-batch run paid up to **16 serialized warm-up round trips** (8 gap-fill + 8 compliance) and batches 2-8 each warmed a prefix batch 1 had already warmed. | `_claim_warmup(stage, prefix_key)` memoises in a module-level set; `reset_prefix_warmup()` clears it per submission. The prefix is identical across outer batches by construction (that is the point of C1's reordering), so one warm-up per (stage, prefix) is exactly right. Guarded by `tests/test_batch_packing_and_budget.py`. |
 | **C26** | MED | **Majority-vote conflict resolution was dead code.** `all_filled[field] = max(candidates, key=…)` implies multiple votes per field, but the chunk loop stopped once a batch's fields were answered, so every count was exactly 1. | Fixed as a side effect of C25's auto-rescan: on a multi-chunk document every field is now re-asked against every chunk, so the resolver receives real votes. Still vacuous on a single-chunk document, which is correct — there is only one chunk to vote. |
-| **C16** | MED | **PII in logs.** `_absorb` logged `DIAG_RESPONSE … sample=<up to 2000 chars of model output>` at INFO on every call — real applicant names, addresses and FEINs, which CLAUDE.md classes as sensitive and `utils/crypto.py` encrypts at rest. | INFO now carries field NAMES and the response size only; the values moved to DEBUG behind an `isEnabledFor` check. **Correction to the original report:** `FIELD_SOURCE_AUDIT` was also named there but logs only the field name and an agreement count — no values — so it was left alone. |
+| **C16** | MED | **PII in logs.** `_absorb` logged `DIAG_RESPONSE … sample=<up to 2000 chars of model output>` at INFO on every call — real applicant names, addresses and FEINs, which CLAUDE.md classes as sensitive and `utils/crypto.py` encrypts at rest. | INFO now carries field NAMES and the response size only; the values moved to DEBUG behind an `isEnabledFor` check. **Correction to the original report:** `FIELD_SOURCE_AUDIT` was also named there but logs only the field name and an agreement count — no values — so it was left alone. **Finished 22 Oct 2026 (no LLM call or prompt changed):** `DIAG_RESPONSE` is DEBUG only, field names and counts only; the DEBUG values sample is gone; `REJECT_SAMPLE`, `NON_NULL_REJECTED`, the per-field `REJECT` and the slot-dedup line print field names only, at DEBUG. No document value is logged by `_absorb` at any level; the per-call counts stay at INFO. Pinned by `tests/test_build23_small-fixes.py`. |
 | **C19** | **CRITICAL** | *(found in the second live run — WRONG VALUES ON THE FORM)* `combined_gap_fill` sliced the cross-form union with a plain `field_items[i:i+200]`. Each outer batch is a separate `_fill_unmatched_with_gpt` invocation — separate LLM calls that never see each other — so a schedule cut by that slice left the stranded rows with no view of their siblings. Measured on the real 5-form union (1,354 fields): **`Vehicle_*` split across 3 outer batches, `Driver_*` across 2, `CommercialProperty_*` across 3.** It shipped wrong values: `Vehicle_CostNewAmount_D = $58,900` (vehicle **1's** cost; vehicle 4 is $41,800), and `Vehicle_RateClassCode_D = 91560` / `Vehicle_SpecialIndustryClassCode_D = 92478` — the two **General Liability** class codes, borrowed from an unrelated page. C18's fix unmasked it: the per-value dedup had been accidentally deleting `CostNewAmount_D` as a "duplicate" of row A. | New `_pack_schedule_aware_batches`. A "schedule" is any leading name segment appearing with more than one row letter across the union; its fields are kept in ONE outer batch, bounded by `_COMBINED_BATCH_HARD_MAX` (600) so a pathological schedule cannot build an unbounded call. This is the same rule `_pack_field_batches` already applied one level down — the level ABOVE it was doing the cutting. Verified on the real union: all three schedules now whole. Guarded by `tests/test_schedule_aware_batching.py`. |
 | **C24** | **CRITICAL — silent data destruction** | *(found by an independent review, 2026-07-30. Invalidated the headline "no data is lost" claim.)* `utils/text_cleaner.py::clean_text`, called at `ocr_service.py:1704` **before extraction, before gap fill, before anything**, deleted content: (1) any line of >8 words that was >80% uppercase — declarations pages are written in capitals; (2) any paragraph under 10 chars; (3) every repeat of any paragraph, MD5-hashed across the whole document; (4) any line of only digits. Measured on a realistic dec page: **56% deleted**, including the named insured, both GL limits, and a vehicle schedule row. Whether a line survived depended on how many of its tokens were pure digits (not `.isupper()`), so a mailing address with three numeric tokens scored 70% and lived while the line above scored 100% and died. A 3-vehicle fleet's garaging address collapsed 3 → 1. **`_verify_coverage` reporting `671654/671654 chars — 100%` was 100% of what survived this function; the denominator was wrong**, and that figure was quoted as proof that nothing was lost. | Filters 1, 2 and 4 **deleted**. Paragraph floor 10 → 1 (empty only). De-duplication is now **default OFF** and, when enabled, requires ≥`TEXT_DEDUP_MIN_REPEATS` (5) occurrences AND ≤120 chars, so a 271-page running header still goes and a fleet row still stays. The saving it gave was ~2.4% of a real package, which at a 99% cache rate is noise. `clean_text` now accounts for every character it removes on every call. **The metric counts NON-WHITESPACE characters only, and the threshold is 2%.** A raw-length metric was tried first and was useless: pdfplumber pads columns with runs of spaces, so a perfectly intact layout-extracted declarations page reports **22.1% "removed"** purely from the lossless whitespace collapse and trips the alarm. An alarm that fires on the normal case gets ignored and then disbelieved on the day it is real — which is precisely how the original 56% deletion survived several rounds of review. The log line reports content-lost and whitespace-collapsed separately. Guarded by `tests/test_text_cleaner_preserves_content.py` (16 tests). |
 | **C25** | **HIGH — the coverage test was blind** | *(same review)* `tests/test_full_document_coverage.py` proved "every word reaches the model" using a recorder that always returned `{"values": {}}`. With nothing ever answered, `active_fields` never shrank, the chunk loop never stopped early, and every chunk always shipped. With a recorder that ANSWERS, as production does: one 40-field batch against a 2-chunk document sent **1 call instead of 2 and skipped 38% of the document**. The test written to guard against dropped text could not see text being dropped. A "run-level coverage is still complete" defence was offered (0/400 markers missing on a 120-field run) and **does not hold as a property**: re-measuring showed that run came out clean only because two of its five batches had their answers discarded as `UNKNOWN_KEYS` and therefore happened to read every chunk. With a single batch that fills up, **185 of 400 markers (46%) never ship**. Coverage by luck is not coverage. | Recorder now answers fields and derives the stage from the system prompt. **Rescan is now AUTOMATIC whenever the document actually split** (`_rescan_enabled` → `GAP_FILL_FULL_RESCAN=auto`): zero cost on a single chunk because there is nothing to re-read, and correct the moment there are two. The previous OFF default relied on documents staying under ~890k chars — and fixing C24 removed up to 25% of deletion from every document, pushing large packages TOWARD that line, so **the shredder fix had armed this hole.** `GAP_FILL_FULL_RESCAN=0` keeps the legacy first-answer-wins path as a kill switch and logs `COVERAGE_PARTIAL` when it drops text. Also revives C26. |
@@ -4528,6 +4528,18 @@ unpriced coverage-part menu row, a question, and not only as excluded / not cove
   documents are attached only by the two generation doors, so the C103 new-document fill judges sections on the NEW
   documents it is given.
 
+- **Z41 addendum (25 Oct 2026, run f575160b) - rule (g), a line carried ONLY AS A PREMIUM.** No prompt text changed,
+  FEWER fields again. The Package dec's menu prints "CRIMEANDFIDELITY COVERAGEPART $ 500.00" and nothing else about
+  crime; ACORD 141 was asked all 345 of its unmatched boxes and filled them from the cyber / EPL / property /
+  driver / WC documents. `scoped_evidence.premium_only_line` (a line in `_LINE_DETAIL_PREFIXES` whose coverage rows
+  carry a premium and no limit / deductible / basis, no fact of that line holds a value, no document is that line's
+  own policy, and no printed line names the coverage beside a limit / deductible word) makes
+  `absent_section_fields` drop every non-identity box of that line's section form (Producer / NamedInsured / Insurer
+  / Policy / Form / CommercialStructure / Location stay) - on f575: **345 of 345 ACORD 141 questions not asked**,
+  roughly 9 fewer 40-field batches; `out_of_scope_values` blanks a stored value with `COVERAGE_STATED_AS_PREMIUM_ONLY`.
+  ACORD 141 also left `_NOT_JUDGED_FORMS` (its label is the template's own since 14 Sep; ACORD 160 / 138 stay).
+  Lines with detail facts (GL, auto, WC, umbrella, property) never trip it in practice; prefix caching unchanged.
+
 ## C105 - 2026-10-08 A partial extraction reply is retried once and never cached; a slip near the end is rewound, not repaired from 3,000 characters
 **No prompt text changed. One conditional extra call, only when LLM call 1's result is partial.** The owner's Choice
 Electric runs `805049a7` and `b38a4367`: the Workers Compensation dec - **10,829 characters, byte-identical text on
@@ -4574,6 +4586,14 @@ are commercial remodels") failed it - the card stayed with no way to tell why (o
 **Cost:** one call per narrative save (~2-3k input tokens, a few hundred out) - fractions of a cent; no call
 on scoring, recalculation or generation. **Off:** `NARRATIVE_READER=0` (the test suite sets it; a failed or
 refused call leaves the keyword pass alone).
+**Addendum 2026-10-24 - the same call also returns the narrative's LOSS STANCE (no new call).** The reply gains
+`"loss": {"stance": "claims|no_claims|mixed|not_stated", "quote": "..."}` (a few more output tokens per save).
+`gate_reply` keeps it only as `loss:claims` / `loss:no_claims` with a quote found word for word in the text (same
+8-character gate); "mixed" / "not_stated" keep nothing. The stored reading now carries `"version": 2`
+(`READER_VERSION`); `narrative_reader.loss_stance` reads a stance only from a version-2 reading of exactly the
+current text, so readings stored before are never asked for one and the next save re-reads. Consumer:
+`loss_history_state.narrative_claims_stance` uses it only when its rules read no stance; where the rules and the
+reading disagree there is no stance, so a model reply can never invent the `legacy_loss_narrative_mismatch` warning.
 
 ## C107 - 2026-10-14 Fillable PDFs: the typed values reach extraction (more input tokens on such files only)
 **No prompt, call site, chunker or batch size changed.** A fillable PDF keeps what a person typed in its form
@@ -4587,3 +4607,39 @@ all 17 blank templates. The owner's three filled ACORD 125s add 4,193 / 15,463 /
 gap-fill document block (cached prefix). A form with EVERY box filled grows to 2-3 extraction chunks (ACORD 125
 1 -> 2, ACORD 127 1 -> 2, ACORD 160 1 -> 3). Bounds: 8,000 chars per value, 100,000 per page, 2,000,000 per document.
 Off: `OCR_FORM_FIELDS=0`. Tests: `tests/test_filled_form_fields_14oct.py`.
+
+## C108 - 2026-10-19 The policy-line store leaves the gap-fill facts block (smaller prompt on edited packages)
+**No call site, chunker, batch size or system prompt changed - one key leaves the facts block.**
+`_producer_policy_lines` (the policies table's edit / add / remove store, 7 Oct; since 19 Oct also the agent's pick for
+ACORD 125's Other column) rode the EXTRACTED FACTS block of every gap-fill call. Its edits are already applied to the line
+records that block carries, so the model gained nothing. It added who made each edit and when - an internal user id and
+a timestamp - to every prompt, and churned the cached prefix with them. Found by the 19 Oct review's prompt probe
+(`combined_gap_fill` with a recording client: the store, the pick and the user id were in the block). Now in
+`pdf_service._GAP_FILL_FACTS_EXCLUDE`. A package with no policy-line edit is byte-identical; an edited one sends a
+shorter facts block. Tests: `tests/test_brent_19oct_wc_ebl_sources.py`.
+
+## C109 - 2026-10-22 ARQ assistant: an amount-or-percent question's answer type (copy only, no cost change)
+**No call site, chunker, batch size or extraction / gap-fill prompt changed.** The wind / hail and earthquake
+deductible questions are now typed `amount_or_percent` (25sepChanges.md Z33-PERCENT), so the Form Assistant's
+per-question block (`routes/arq_routes._assistant_field_block`) reads "ANSWER TYPE: a dollar amount or a percentage,
+e.g. $5,000 or 2%" for them (was "a dollar amount" for wind, "free text" for earthquake), read off the box the page
+draws (`served_field_type`). One line, two questions; this prompt is outside the gap-fill cached prefix (C-UI01).
+Tests: `tests/test_build24_percent_deductibles.py`.
+
+## C110 - 2026-10-23 Carrier narrative writer: ONE call per producer "Create carrier narrative" (Brent's attachment A)
+**New call site:** `services/questionnaire.write_narrative`, from `POST /api/questionnaire/{id}/narrative/draft`
+(`routes/questionnaire_routes.py`) - only when the producer asks for a draft; never on scoring, recalculation,
+generation or a page load. Input: the narrative questionnaire's answers whose state is extracted / producer confirmed
+/ insured confirmed (`narrative_evidence` - never conflicting, unverified, unknown, pending or missing, never the FEIN),
+each as `[id] (section) question: answer` (each answer capped at 800 chars, the listing at 40,000). Output:
+`{"sections": [{"heading", "text", "cites"}]}`, `max_tokens` 3,000, temperature 0, one retry.
+**Evidence-gated (`gate_narrative`):** a section citing no given answer id is dropped, and so is every sentence holding
+a number no answer states - an invented amount, year or count never reaches the page. Stored as an encrypted DRAFT on
+the session row (`carrier_narrative`); it prints nowhere until the producer approves it, which writes the approved text
+to `qn_carrier_narrative` through the producer answer door, printed first in ACORD 101's remarks
+(`pdf_service._acord101_blocks`).
+**Cost:** one call per draft (~2-6k input tokens on a full questionnaire, up to 3k out) - about a cent at most.
+**The gap-fill prompt is unchanged:** every `qn_` fact (the questionnaire's own answers and the approved narrative) is
+kept out of the gap-fill facts block (`_GAP_FILL_FACTS_EXCLUDE_PREFIX`), so a package that answers the questionnaire
+sends exactly the prompt it sent before. Making the producer's narrative answers gap-fill hints is a separate decision.
+**Off:** `CARRIER_NARRATIVE=0` (the test suite sets it; the tests stub the call). Tests: `tests/test_build26_questionnaire.py`.

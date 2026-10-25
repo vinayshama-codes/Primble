@@ -98,8 +98,13 @@ export function clearedByReason(title) {
 
 // { iid, title } of the fix that cleared a row, from its stored status; null
 // when the row was not cleared by another fix.
+// A reopened answer the documents now answer stays Resolved with this reason
+// (backend audit_routes.ANSWERED_BY_DOCUMENTS) - nothing to take back.
+export const ANSWERED_BY_DOCUMENTS = "Answered by your documents.";
+
 export function clearedByOf(st) {
   const reason = String((st && st.reason) || "");
+  if (reason === ANSWERED_BY_DOCUMENTS) return { iid: null, title: "", documents: true };
   if (!reason.startsWith(CLEARED_BY_PREFIX)) return null;
   const iid = String((st && st.rule_code) || "").trim();
   return { iid: iid || null, title: reason.slice(CLEARED_BY_PREFIX.length).replace(/\.$/, "").trim() };
@@ -118,10 +123,61 @@ export function rowsClearedBy(entries, clearingIid) {
   return out;
 }
 
-// The page a stored status belongs to: "hard", "warning" or "recommendation"
-// (unknown -> warning). A recommendation is known by its page or its id - an
-// older status never recorded a page, and one must never land under Warnings.
+// ── Overview: key details (23 Oct 2026) ─────────────────────────────────────
+// A missing key detail fixed through its own link on the Overview page moves
+// to a collapsed "Resolved (n)" there, like the Recommendations rows: its fix
+// is filed under "kd:<label>" (services/issue_fix_undo.py), so "Open again"
+// takes the answer - and its points - back through the one reopen door. A
+// status under this page shows only on Overview.
+export const KD_PAGE = "overview";
+export const KD_ID_PREFIX = "kd:";
+const kdLabel = (label) => String(label ?? "").trim().replace(/\s+/g, " ");
+export const keyDetailIssueId = (label) => (kdLabel(label) ? `${KD_ID_PREFIX}${kdLabel(label).toLowerCase()}` : null);
+export const isKeyDetailId = (iid) => String(iid || "").startsWith(KD_ID_PREFIX);
+
+// The key details still missing, by their fix id.
+export function liveKeyDetailIds(keyDetails) {
+  const ids = new Set();
+  const kd = keyDetails && typeof keyDetails === "object" ? keyDetails : {};
+  for (const l of Array.isArray(kd.missing) ? kd.missing : []) ids.add(keyDetailIssueId(l));
+  for (const it of Array.isArray(kd.missing_items) ? kd.missing_items : []) ids.add(keyDetailIssueId(it && it.label));
+  ids.delete(null);
+  return ids;
+}
+
+// What a save did to the key detail it was for: "fixed" (no longer missing),
+// "open" (still missing) or null (the reply carried no key details - unknown).
+export function keyDetailFixState(label, keyDetailsAfter) {
+  if (!keyDetailsAfter || typeof keyDetailsAfter !== "object") return null;
+  const iid = keyDetailIssueId(label);
+  if (!iid) return null;
+  return liveKeyDetailIds(keyDetailsAfter).has(iid) ? "open" : "fixed";
+}
+
+// Overview's Resolved rows: key details filed "resolved" that are no longer
+// missing, oldest first. Rows in the Recommendations list's shape, so its
+// Resolved list draws them.
+export function keyDetailResolvedRows({ statusEntries = [], keyDetails = null } = {}) {
+  const live = liveKeyDetailIds(keyDetails);
+  const out = [];
+  const seen = new Set();
+  for (const [iid, st] of Array.isArray(statusEntries) ? statusEntries : []) {
+    if (!isKeyDetailId(iid) || !st || seen.has(iid) || live.has(iid)) continue;
+    if (st.status !== "resolved" && st.status !== "dismissed") continue;
+    const title = String(st.message || "").trim();
+    if (!title) continue;
+    seen.add(iid);
+    out.push({ iid, kind: "detail", status: st.status, title, forms: [], clearedBy: null });
+  }
+  return out;
+}
+
+// The page a stored status belongs to: "hard", "warning", "recommendation" or
+// "overview" (unknown -> warning). A recommendation or a key detail is known by
+// its page or its id - an older status never recorded a page, and one must
+// never land under Warnings.
 export function pageOfStatus(st, iid = null) {
+  if ((st && st.severity === KD_PAGE) || isKeyDetailId(iid)) return KD_PAGE;
   if ((st && st.severity === REC_PAGE) || isRecommendationId(iid)) return REC_PAGE;
   return st && st.severity === "hard" ? "hard" : "warning";
 }

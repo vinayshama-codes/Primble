@@ -236,8 +236,11 @@ def test_the_client_is_still_asked_construction_and_year():
     table = next(q for q in client if q.get("field_name") == "schedule::property_locations")
     keys = {c["key"]: c.get("producer_only") for c in table["columns"]}
     assert keys["construction_type"] is False and keys["year_built"] is False
-    text = " ".join(q.get("question") or "" for q in client).lower()
-    assert "made of" in text and "originally built" in text
+    # Build 24 (22 Oct 2026): on 2+ buildings the table asks construction and
+    # year PER BUILDING, so the package-level scalar ("What is your building
+    # mainly made of?") is no longer asked a second time beside it.
+    names = {q.get("field_name") for q in client}
+    assert not names & {"construction_type", "year_built"}
 
 
 def test_each_new_column_binds_a_live_box():

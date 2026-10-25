@@ -78,6 +78,11 @@ _INTENT_TO_STATE = {
     UNKNOWN: STATE_NOT_STATED,
 }
 
+# The declared kind of a fact that takes a dollar amount OR a percentage
+# (`fact_registry.takes_amount_or_percent`) - also the client page's question
+# type for it (`arq_service._resolve_input_type`).
+AMOUNT_OR_PERCENT = "amount_or_percent"
+
 
 class Interpretation(NamedTuple):
     """What the person meant, and what to do about it."""
@@ -188,7 +193,32 @@ _PLACEHOLDER_TOKENS = frozenset({
     "not disclosed", "undisclosed", "no data", "no information", "no value",
     "blank", "empty", "none known", "none reported", "none to report",
     "nothing to report", "none at all",
+    # 22 Oct 2026 (GAP 1, 25sepChanges.md Z32-FACTS): the same three ideas in
+    # the other spellings an extraction reply or a declarations page uses.
+    # Each is information-free in every box on every form - the set's own test.
+    "tba", "tbc", "to be announced", "to be supplied", "not supplied",
+    "not furnished", "not determined", "undetermined", "unspecified",
+    "unstated", "unavailable", "not on file", "none provided", "none given",
+    "none stated", "none specified", "none indicated", "none supplied",
+    "no info", "information not available", "information not provided",
+    "info not available", "data not available",
 })
+# A time qualifier says WHEN the information is missing, never what it is:
+# "unknown at this time", "not available at present", "currently unknown".
+# Stripped once before the second membership test; a value it leaves that is
+# not itself a placeholder ("not covered at this time") stays a value.
+_PLACEHOLDER_QUALIFIER_RE = re.compile(
+    r"^(?:currently|presently|still)\s+|"
+    r"\s+(?:at\s+this\s+time|at\s+the\s+present\s+time|at\s+present|"
+    r"currently|as\s+yet|yet|for\s+now|as\s+of\s+now)$")
+
+
+def _without_time_qualifier(s: str) -> str:
+    """A normalised placeholder candidate with its time qualifier stripped
+    once, and "not yet known" read as "not known". The one copy of that rule
+    (`is_placeholder_text` and `extracted_non_answer` both read it)."""
+    out = _PLACEHOLDER_QUALIFIER_RE.sub("", re.sub(r"\bnot yet\b", "not", s))
+    return out.strip(_PLACEHOLDER_EDGES)
 # DELIBERATELY NOT IN THE SET, though every one of them was drafted into it:
 #   "see attached" / "see schedule" - a real cross-reference a broker writes,
 #       and CLAUDE.md C22 records that amount boxes legitimately hold
@@ -235,13 +265,87 @@ def is_placeholder_text(value: Any) -> bool:
     s = re.sub(r"\s+", " ", s)
     if s in _PLACEHOLDER_TOKENS:
         return True
+    _bare = _without_time_qualifier(s)
+    if _bare and _bare != s and _bare in _PLACEHOLDER_TOKENS:
+        return True
     # "n / a", "n.a.", "n-a" are one token wearing separators. Collapsing is
     # scoped to the few abbreviations that are ambiguous when spaced; a longer
     # phrase must match the set literally.
     compact = re.sub(r"[\s./\-]+", "", s)
-    if compact in {"na", "nk", "tbd", "nil", "none", "null", "unknown", "unk"}:
+    if compact in {"na", "nk", "tbd", "tba", "tbc", "nil", "none", "null",
+                   "unknown", "unk"}:
         return True
     return False
+
+
+# ── 3d. A MACHINE-READ VALUE THAT IS NO ANSWER (GAP 1, 22 Oct 2026) ─────────
+# CLAUDE.md "Answer Interpretation", GAP 1: this module judged only what a
+# PERSON types. The extraction merge wrote `facts[key]` straight from the model,
+# so a document's or the model's "TBD", "Not provided", "N/A." or "--" was
+# DATA: `fact_answered` called it answered, the Structural pillar credited it,
+# and the Data Consistency picker set it against the real value as a rival.
+#
+# The ruling for a machine-read value, built on the two doors above:
+#   * a whole value that carries no information (`is_placeholder_text`) is a
+#     NON-ANSWER - dropped as missing, whatever the fact;
+#   * EXCEPT a whole-value ABSENCE ("None reported", "Nil", "Nothing to
+#     report"): an absence is an answer exactly where `interpret_answer` takes
+#     one for this fact, so it is kept there and refused only where that door
+#     refuses it (a fact the submission cannot exist without - `required` in
+#     FACT_REGISTRY - is never "there is none").
+#
+# WHY AN EXTRACTED "N/A" IS A NON-ANSWER when a PERSON's "N/A" is an answer
+# (Brent 24 Aug, "N/A is not 0"): a person answers OUR question, a document
+# answers none. The model writes "N/A" for "I found nothing" as often as a page
+# prints it, and the per-chunk validator has nulled a bare "N/A" since day one
+# (`extraction_service._NULL_STRINGS`); this only closes its other spellings.
+#
+# WHOLE VALUES ONLY. A description that merely CONTAINS "unknown", "later",
+# "not applicable" or "TBD" is data - `interpret_answer`'s sentence readers are
+# never applied to a document's text, because their scope is a person's short
+# answer to one question.
+def extracted_non_answer(fact_key: str, raw: Any) -> Optional[str]:
+    """Why a MACHINE-READ fact is no answer for ``fact_key``, or None.
+
+    THE ONE DOOR for GAP 1 - the extraction merge (per document and the merged
+    result) and the Data Consistency picker's candidates ask it. Returns
+    ``"non_answer"`` or ``"absence_refused"`` (see the note above), else None.
+
+    Never judges a person's value: an envelope a person typed or confirmed
+    (`fact_state.confirmed_by_person`) is always None, as is anything that is
+    not text (a count, a boolean, a list, a row). Never raises.
+    """
+    try:
+        if isinstance(raw, dict):
+            if "value" not in raw:
+                return None
+            try:
+                from services.fact_state import confirmed_by_person
+                if confirmed_by_person(raw):
+                    return None
+            except Exception:                                 # noqa: BLE001
+                return None                 # cannot tell whose it is - leave it
+            value = raw.get("value")
+        else:
+            value = raw
+        if not isinstance(value, str) or not value.strip():
+            return None
+        if not is_placeholder_text(value):
+            return None
+        core = re.sub(r"\s+", " ", _normalize(value).strip(_PLACEHOLDER_EDGES))
+        for form in (core, _without_time_qualifier(core)):
+            if form and (form in _ABSENCE_TOKENS
+                         or re.sub(r"[\s./\-]+", "", form) in ("none", "nil")):
+                # A whole-value absence ("None at this time" too): kept where
+                # this fact takes one as an answer. Judged on the absence
+                # itself - the required-fact rule reads a bare absence word,
+                # so a time qualifier must not carry "None" past it.
+                if interpret_answer(fact_key, form).intent == UNKNOWN:
+                    return "absence_refused"
+                return None
+        return "non_answer"
+    except Exception:                                         # noqa: BLE001
+        return None
 
 
 
@@ -421,6 +525,14 @@ def _declared_kind(fact_key: str, entry: dict) -> Optional[str]:
     own naming for facts that table does not cover.
     """
     key = (fact_key or "").lower()
+    # A fact declared "Dollar amount or percentage" takes either (Z33-PERCENT):
+    # its own declaration, read before the widget table.
+    try:
+        from services.fact_registry import takes_amount_or_percent
+        if takes_amount_or_percent(entry or fact_key):
+            return AMOUNT_OR_PERCENT
+    except Exception:                                         # noqa: BLE001
+        pass
     try:
         from services.arq_service import _FIELD_INPUT_TYPE
         declared = _FIELD_INPUT_TYPE.get(fact_key)
@@ -471,9 +583,146 @@ def is_absence_affirmative(fact_key: str) -> bool:
                          "operation", "coverage", "exclusion", "violation"))
 
 
-def _coerce_typed(kind: Optional[str], text: str) -> Optional[str]:
+# ── WHAT AN AMOUNT BOX HOLDS INSTEAD OF A FIGURE (22 Oct 2026, Z33-PERCENT) ──
+# A deductible box legitimately holds words: "None", "N/A", "No deductible",
+# "Not covered", "Excluded", "Waived", "Same as AOP", "Included", "See
+# schedule". The client page refused every one of them on the wind / earthquake
+# question (its check reads only a dollar amount or a percentage), and the
+# server refused all but the first three, while the producer card took them all. ONE
+# rule for the page and the server's submit check (`arq_service._clean_answer_ex`),
+# written twice - this and `isAmountBoxConvention` in
+# `frontend/src/utils/answerFormats.js`, run over shared vectors - because the
+# server may block only on a check the browser also runs (`_blocks_submit`).
+#
+# Every word must be the box's own vocabulary and one of them must say which
+# convention it is: a word alone ("None", "Waived", "Included", "AOP"), a
+# negation of a state ("Not covered", "Does not apply"), or a pointer at a
+# document ("See schedule", "Per policy"). Text that says nothing ("lots",
+# "not much", "covered") is still refused. No figure: a figure is read as one.
+_BOX_WORD_ALONE = frozenset({
+    "none", "nil", "nothing", "nada", "zero", "no", "n", "na", "never", "irrelevant",
+    "excluded", "exclude", "excludes", "exclusion", "exclusions",
+    "waived", "waive", "waives", "waiver", "declined", "rejected", "uninsured",
+    "included", "include", "includes", "inclusive", "same", "aop",
+})
+_BOX_NEGATORS = frozenset({
+    "not", "non", "dont", "doesnt", "didnt", "isnt", "arent", "wasnt", "werent",
+    "havent", "hasnt", "hadnt", "without",
+})
+_BOX_NEGATED = frozenset({
+    "covered", "cover", "included", "purchased", "purchase", "carried", "carry",
+    "carries", "insured", "elected", "selected", "written", "offered",
+    # Not "available": the door reads "Not available" as uncertainty and drops
+    # it, so the box rule must not take it (review C, 22 Oct 2026).
+    "applicable", "apply", "applies", "relevant", "required",
+    "taken", "bought", "buy", "have", "has", "had", "need", "needed", "chosen",
+})
+_BOX_POINTERS = frozenset({"see", "per", "refer", "refers", "as"})
+_BOX_DOCUMENTS = frozenset({
+    "schedule", "scheduled", "attached", "attachment", "policy", "policies",
+    "dec", "decs", "declaration", "declarations", "page", "endorsement", "form",
+    "forms", "quote",
+})
+_BOX_FILLER = frozenset({
+    "deductible", "deductibles", "coverage", "coverages", "insurance",
+    "earthquake", "earthquakes", "eq", "quake", "earth", "movement", "wind",
+    "windstorm", "hail", "named", "storm", "storms", "hurricane", "peril",
+    "perils", "all", "other", "the", "a", "an", "any", "for", "on", "of", "in",
+    "to", "as", "at", "is", "are", "was", "were", "be", "been", "it", "its",
+    "this", "that", "there", "under", "with", "by", "from", "building",
+    "buildings", "property", "location", "locations", "do", "does", "did", "we",
+    "i", "our", "us", "they", "amount", "separate", "specific", "longer",
+    "known", "reported", "report", "percentage", "percent", "shown", "stated",
+    "listed",
+})
+_BOX_VOCABULARY = (_BOX_WORD_ALONE | _BOX_NEGATORS | _BOX_NEGATED
+                   | _BOX_POINTERS | _BOX_DOCUMENTS | _BOX_FILLER)
+
+
+def is_amount_box_convention(text: Any) -> bool:
+    """True when an answer with no figure is what an amount box holds instead
+    of one (see the vocabulary above): "None", "N/A", "Not covered",
+    "Excluded", "Waived", "Same as AOP", "See schedule" - never "lots"."""
+    s = str(text if text is not None else "").lower()
+    if re.search(r"[0-9]", s):
+        return False
+    words = [w for w in re.split(r"[^a-z]+", re.sub(r"[’‘'`]", "", s)) if w]
+    if not words or any(w not in _BOX_VOCABULARY for w in words):
+        return False
+    said = set(words)
+    return bool(said & _BOX_WORD_ALONE
+                or (said & _BOX_NEGATORS and said & _BOX_NEGATED)
+                or (said & _BOX_POINTERS and said & _BOX_DOCUMENTS))
+
+
+def _trim_answer(raw: str) -> str:
+    """A person's answer with only what FRAMES it removed: whitespace, quotes,
+    a closing full stop / comma / semicolon / colon / "!", a pair of
+    parentheses around the WHOLE answer ("(2%)"), and a bracket at either edge
+    that has no partner ("2%)"). A bracket the answer itself closes stays:
+    "2% (min $25,000)" and "(2% of TIV) per building" are stored balanced (22
+    Oct 2026, Z33-PERCENT review - an edge strip kept "2% (min $25,000")."""
+    s = str(raw or "")
+    while True:
+        prev = s
+        s = re.sub(r"[\s.,;:!\"']+$", "", s.strip().lstrip("\"'").strip())
+        opened: List[int] = []
+        partner: Dict[int, int] = {}
+        stray_close: List[int] = []
+        for i, ch in enumerate(s):
+            if ch == "(":
+                opened.append(i)
+            elif ch == ")":
+                if opened:
+                    partner[opened.pop()] = i
+                else:
+                    stray_close.append(i)
+        if s.startswith("(") and partner.get(0) == len(s) - 1:
+            s = s[1:-1]
+        elif s.endswith(")") and len(s) - 1 in stray_close:
+            s = s[:-1]
+        elif s.startswith("(") and 0 in opened:
+            s = s[1:]
+        if s == prev:
+            return s
+
+
+def _coerce_typed(kind: Optional[str], text: str, raw: Optional[str] = None) -> Optional[str]:
     """Canonicalize a value into the shape downstream code already reads.
-    Returns None when the text is not a value of that kind."""
+    Returns None when the text is not a value of that kind.
+
+    `raw` is the person's own text: an amount-or-percent answer reads its
+    percentage there, so a sign the edge strip would drop ("-2%") still
+    refuses and the words around the figure keep their case ("2% of TIV")."""
+    # A NEGATIVE count, amount or percentage is no answer to any of these
+    # questions; its sign used to be stripped at the edge, so "-3" years in
+    # business saved as 3 (live bcfd175b, 25 Oct).
+    if kind in ("integer", "currency", "percent", AMOUNT_OR_PERCENT) and re.match(
+            r"^\s*[-\u2212\u2013]\s*\$?\s*\d", str(raw if raw is not None else text or "")):
+        return None
+    if kind == AMOUNT_OR_PERCENT:
+        from services.normalization import mentions_a_percentage, stated_percentage
+        own = _trim_answer(raw) if raw is not None else text
+        got = stated_percentage(own)
+        if got is None and stated_percentage(text) is not None:
+            return None                   # a percentage that is not a valid one
+        if got is not None:
+            return got["text"] if 0 <= got["number"] <= 100 else None
+        # A bare figure under the basis check's line is a percentage ("2" is
+        # 2%; owner, 22 Oct 2026) - `normalization.bare_figure_as_percentage`.
+        from services.normalization import bare_figure_as_percentage
+        bare = bare_figure_as_percentage(own)
+        if bare is not None:
+            return bare["text"]
+        # A percentage that is not the first figure is never read as dollars
+        # (22 Oct 2026, Z33-PERCENT review): the dollar reading below keeps
+        # only the first figure, so "the greater of $25,000 or 2%" was stored
+        # and printed as a flat $25,000, and the decimal comma of "2,5 percent"
+        # made it $25. Not read - the person writes the percentage first ("2% /
+        # $25,000 minimum"), the way "$25,000 / 2%" was always refused.
+        if mentions_a_percentage(own):
+            return None
+        kind = "currency"                 # a dollar amount reads exactly as before
     if not kind or kind == "code":
         # An identifier is a STRING of characters, not a quantity. Its own
         # registry validator judges it; this must never reshape it.
@@ -488,6 +737,12 @@ def _coerce_typed(kind: Optional[str], text: str) -> Optional[str]:
         except Exception:                                     # noqa: BLE001
             pass
         return None
+    if kind == "percent":
+        # "80%", "80 %", "80 percent" are how a person types a percentage
+        # (live 85e51d02, 25 Oct: the coinsurance box refused "80%", the way
+        # the dec prints it). The sign is stripped; the 0-100 check is the
+        # fact's own validator's.
+        text = re.sub(r"\s*(?:%|per\s*cent|pct\.?)\s*$", "", str(text or "").strip(), flags=re.I)
     n = words_to_number(text)
     if n is None:
         return None
@@ -563,17 +818,26 @@ def canonical_option_value(fact_key: str, label: str,
     checker = answer_check(entry)
     if not callable(checker):
         return label          # nothing declares a shape - the label IS the value
-    seen = set()
-    for cand in _option_candidates(label, entry):
-        cand = (cand or "").strip()
-        if not cand or cand in seen:
-            continue
-        seen.add(cand)
-        try:
-            if bool(checker(cand)):
-                return cand
-        except Exception:                                     # noqa: BLE001
-            continue
+    # A fact whose person check (`answer_validate`) is wider than its shape
+    # (`validate`) takes the candidate BOTH accept first (22 Oct 2026): the
+    # "Replacement Cost" option still stores "RCV", the value the ACORD 140's
+    # valuation boxes read, though a person may now type "Replacement Cost".
+    shape = (entry or {}).get("validate")
+    checks = [checker]
+    if callable(shape) and shape is not checker:
+        checks.insert(0, lambda c: checker(c) and shape(c))
+    for check in checks:
+        seen = set()
+        for cand in _option_candidates(label, entry):
+            cand = (cand or "").strip()
+            if not cand or cand in seen:
+                continue
+            seen.add(cand)
+            try:
+                if bool(check(cand)):
+                    return cand
+            except Exception:                                 # noqa: BLE001
+                continue
     return None
 
 
@@ -693,7 +957,7 @@ def interpret_answer(fact_key: str, answer: Any,
 
     # 2. A parseable value of the field's declared type beats negation, so a
     #    count of "0" stays a VALUE rather than becoming an absence.
-    coerced = _coerce_typed(kind, stripped)
+    coerced = _coerce_typed(kind, stripped, raw)
     if coerced is not None:
         return out(VALUE, value=coerced, reason=f"typed:{kind}")
 
@@ -789,12 +1053,22 @@ def interpret_answer(fact_key: str, answer: Any,
     #     Applies to percent-typed boxes too: a deductible whose format hint
     #     offers "$25,000 or 2%" is the same kind of box and holds the same
     #     conventions ("NOT COVERED DEDUCTIBLE - EARTHQUAKE COVERAGE").
-    if kind in ("currency", "percent") and not any(ch.isdigit() for ch in stripped):
+    if kind in ("currency", "percent", AMOUNT_OR_PERCENT) and not any(ch.isdigit() for ch in stripped):
         return out(VALUE, value=raw.strip(), reason="descriptive_amount")
 
     # 6b. A typed field that reached here was NOT readable as its own type.
     #     Refuse it rather than storing text a scorer will silently read as 0 -
     #     and record it, so coverage is measured instead of assumed.
+    if kind == AMOUNT_OR_PERCENT:
+        _record_unreadable(fact_key, raw, kind)
+        return out(UNKNOWN, reason=f"unreadable:{kind}", message=(
+            "That does not read as a dollar amount or a percentage for this "
+            "field. Enter it as e.g. $5,000 or 2%, or answer \"None\" if there "
+            "is none."))
+    if kind in ("currency", "integer", "percent") and re.match(r"^\s*[-\u2212\u2013]\s*\$?\s*\d", str(raw or "")):
+        return out(UNKNOWN, reason=f"negative:{kind}", message=(
+            "This can't be a negative number. Enter it as digits (e.g. 12 or $50,000), "
+            "or answer \"None\" if there is none."))
     if kind in ("currency", "integer", "percent", "date"):
         _record_unreadable(fact_key, raw, kind)
         return out(UNKNOWN, reason=f"unreadable:{kind}", message=(

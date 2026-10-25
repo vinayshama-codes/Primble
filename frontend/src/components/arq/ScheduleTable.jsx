@@ -8,7 +8,7 @@
 //
 // Used by BOTH the client questionnaire and the producer pre-load panel.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { API_BASE } from '../../config/constants';
 import {
   MAX_ROWS,
@@ -16,8 +16,17 @@ import {
   exampleHint,
   isBlankRow,
   parseScheduleFile,
+  skippedRowsText,
   validateRows,
 } from '../../utils/scheduleImport';
+import {
+  FOLLOW_UP_HINT,
+  FOLLOW_UP_LABEL,
+  cellOptions,
+  isFollowUp,
+  unitFor,
+  withFollowUp,
+} from '../../utils/scheduleCells';
 
 const PINK = '#E61B84';
 
@@ -37,8 +46,18 @@ export default function ScheduleTable({
   vinDecode = false,
   rowCapacity = 0,
   compact = false,
+  // A window that asks some cells of the rows it shows (21 Oct 2026: a
+  // building detail per building - services/premises_cope). Its rows are the
+  // buildings: no adding, removing or importing one from a few cells.
+  fixedRows = false,
+  // The table lets a row be marked "Unknown - follow up" (21 Oct 2026, the GL
+  // window - schedule_capture `follow_up`): a tick per row, saved with it.
+  followUp = false,
 }) {
   const fileRef = useRef(null);
+  // One searchable list per column that offers choices (utils/scheduleCells).
+  const listBase = useId();
+  const listIdOf = (key) => `${listBase}-${key}`;
   const [importMsg, setImportMsg] = useState(null); // {type, text}
   const [decoding, setDecoding] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -61,6 +80,10 @@ export default function ScheduleTable({
     setRows(next);
   };
 
+  const toggleFollowUp = (rowIdx, on) => {
+    setRows(rows.map((r, i) => (i === rowIdx ? withFollowUp(r, on) : r)));
+  };
+
   const addRow = () => {
     if (rows.length >= MAX_ROWS) return;
     setRows([...rows, blankRow(columns)]);
@@ -78,7 +101,9 @@ export default function ScheduleTable({
     if (!file) return;
     setImportMsg(null);
     try {
-      const { rows: parsed, usedHeader, unmatched } = await parseScheduleFile(file, columns);
+      const {
+        rows: parsed, usedHeader, unmatched, skippedAbove = 0, skippedInside = 0, skippedTotals = 0,
+      } = await parseScheduleFile(file, columns);
       if (!parsed.length) {
         setImportMsg({ type: 'err', text: 'No rows found in that file.' });
         return;
@@ -96,6 +121,8 @@ export default function ScheduleTable({
       let text = `Imported ${parsed.length} ${parsed.length === 1 ? singular : `${singular}s`}.`;
       if (!usedHeader) text += ' No header row was recognised, so columns were matched in order - please check them.';
       if (unmatched.length) text += ` Ignored extra column(s): ${unmatched.slice(0, 4).join(', ')}.`;
+      // Rows the import set aside are named, never dropped without a word (21 Oct review, H1).
+      text += skippedRowsText({ skippedAbove, skippedInside, skippedTotals });
       if (existing.length + parsed.length > MAX_ROWS) text += ` Only the first ${MAX_ROWS} were kept.`;
       setImportMsg({ type: usedHeader ? 'ok' : 'warn', text });
     } catch (ex) {
@@ -197,9 +224,9 @@ export default function ScheduleTable({
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragOver={(e) => { e.preventDefault(); if (!fixedRows) setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
+      onDrop={(e) => { if (fixedRows) { e.preventDefault(); return; } onDrop(e); }}
       style={{
         border: `1px ${dragOver ? 'dashed' : 'solid'} ${dragOver ? PINK : '#e2e8f0'}`,
         borderRadius: 10,
@@ -217,13 +244,13 @@ export default function ScheduleTable({
             {errorCount} row{errorCount === 1 ? '' : 's'} need attention
           </span>
         )}
-        {duplicates.size > 0 && (
+        {duplicates.size > 0 && !fixedRows && (
           <button type="button" onClick={removeDuplicates} style={{ ...btn(false), borderColor: '#fbbf24', color: '#92400e' }}>
             Remove {duplicates.size} duplicate{duplicates.size === 1 ? '' : 's'}
           </button>
         )}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {!fixedRows && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {vinDecode && (
             <button type="button" onClick={decodeVins} disabled={decoding} style={{ ...btn(false), opacity: decoding ? 0.6 : 1 }}>
               {decoding ? 'Looking up...' : 'Look up VINs'}
@@ -238,7 +265,7 @@ export default function ScheduleTable({
           <button type="button" onClick={addRow} style={btn(true)}>
             + Add {singular}
           </button>
-        </div>
+        </div>}
 
         <input
           ref={fileRef}
@@ -271,6 +298,18 @@ export default function ScheduleTable({
         </div>
       )}
 
+      {/* The choices a column offers, searchable - typing anything else is
+          the "Other" (utils/scheduleCells). */}
+      {columns.filter((c) => cellOptions(c).length > 0).map((c) => (
+        <datalist key={c.key} id={listIdOf(c.key)}>
+          {cellOptions(c).map((o) => <option key={o} value={o} />)}
+        </datalist>
+      ))}
+
+      {followUp && rows.length > 0 && (
+        <div style={{ marginBottom: 8, fontSize: 11, color: '#64748b' }}>{FOLLOW_UP_HINT}</div>
+      )}
+
       {/* Table */}
       {rows.length === 0 ? (
         <div style={{ padding: '18px 12px', textAlign: 'center', color: '#64748b', fontSize: 12.5 }}>
@@ -291,6 +330,14 @@ export default function ScheduleTable({
                     {c.label}{c.required && <span style={{ color: PINK }}> *</span>}
                   </th>
                 ))}
+                {followUp && (
+                  <th title={FOLLOW_UP_HINT} style={{
+                    fontSize: 10.5, color: '#475569', fontWeight: 700, textAlign: 'center',
+                    padding: '0 4px', whiteSpace: 'nowrap',
+                  }}>
+                    {FOLLOW_UP_LABEL}
+                  </th>
+                )}
                 <th style={{ width: 30 }} />
               </tr>
             </thead>
@@ -303,26 +350,55 @@ export default function ScheduleTable({
                     <td style={{ fontSize: 11, color: isDup ? '#b45309' : '#94a3b8', padding: '0 4px', verticalAlign: 'middle' }}>
                       {isDup ? '!' : idx + 1}
                     </td>
-                    {columns.map((c) => (
-                      <td key={c.key} style={{ padding: '0 4px', verticalAlign: 'top' }}>
-                        {/* An empty box shows its column's example as a hint
-                            ("e.g. ...", italic, lighter) - never something that
-                            reads as an entered value (12 Oct 2026). */}
+                    {columns.map((c) => {
+                      const hasList = cellOptions(c).length > 0;
+                      const unit = unitFor(c, row);
+                      // An empty box shows its column's example as a hint
+                      // ("e.g. ...", italic, lighter) - never something that
+                      // reads as an entered value (12 Oct 2026).
+                      const box = (
                         <input
                           className="schedule-cell"
                           value={row[c.key] ?? ''}
                           onChange={(e) => updateCell(idx, c.key, e.target.value)}
                           placeholder={exampleHint(c)}
                           title={rowErr[c.key] || ''}
-                          style={cellInput(!!rowErr[c.key])}
+                          list={hasList ? listIdOf(c.key) : undefined}
+                          style={c.units_by ? { ...cellInput(!!rowErr[c.key]), flex: 1, minWidth: 0 } : cellInput(!!rowErr[c.key])}
                         />
+                      );
+                      return (
+                      <td key={c.key} style={{ padding: '0 4px', verticalAlign: 'top' }}>
+                        {c.units_by ? (
+                          // The unit the amount is in, from the row's own basis.
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {unit === '$' && <span style={{ fontSize: 11, color: '#64748b' }}>$</span>}
+                            {box}
+                            {unit && unit !== '$' && (
+                              <span style={{ fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>{unit}</span>
+                            )}
+                          </div>
+                        ) : box}
                         {rowErr[c.key] && (
                           <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>{rowErr[c.key]}</div>
                         )}
                       </td>
-                    ))}
+                      );
+                    })}
+                    {followUp && (
+                      <td style={{ padding: '0 4px', verticalAlign: 'middle', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={isFollowUp(row)}
+                          onChange={(e) => toggleFollowUp(idx, e.target.checked)}
+                          aria-label={FOLLOW_UP_LABEL}
+                          title={FOLLOW_UP_HINT}
+                          style={{ accentColor: PINK, cursor: 'pointer' }}
+                        />
+                      </td>
+                    )}
                     <td style={{ padding: '0 4px', verticalAlign: 'middle' }}>
-                      <button
+                      {!fixedRows && <button
                         type="button"
                         onClick={() => removeRow(idx)}
                         title={`Remove this ${singular}`}
@@ -332,7 +408,7 @@ export default function ScheduleTable({
                         }}
                       >
                         ×
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 );

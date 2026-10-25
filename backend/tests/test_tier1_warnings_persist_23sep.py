@@ -58,8 +58,9 @@ _ALL_BUT_CONTACT = {
 
 
 def _tier1_msgs(facts, flags=None):
-    _hard, soft = evaluate_stops(facts, flags or {})
-    return [m for m in soft if m.startswith(_PREFIX)]
+    # Both lists (19 Oct 2026, Brent: no proposed term is a HARD stop; the rest stay warnings).
+    hard, soft = evaluate_stops(facts, flags or {})
+    return [m for m in list(hard) + list(soft) if m.startswith(_PREFIX)]
 
 
 def test_the_engine_emits_them_so_every_recompute_keeps_them():
@@ -78,6 +79,11 @@ def test_resolving_one_item_does_not_silence_another():
     before = _tier1_msgs(no_date)
     assert any("Proposed effective date" in m for m in before)
     assert any("Contact information" in m for m in before)
+    # (19 Oct 2026, Brent: no quote without a term) the date gap blocks; contact only warns.
+    hard, soft = evaluate_stops(no_date, {})
+    assert any(m.startswith(f"{_PREFIX} Proposed effective date") for m in hard)
+    assert any(m.startswith(f"{_PREFIX} Contact information") for m in soft)
+    assert not any(m.startswith(f"{_PREFIX} Contact information") for m in hard)
 
     after = _tier1_msgs(_ALL_BUT_CONTACT)          # date now supplied
     assert not any("Proposed effective date" in m for m in after), \

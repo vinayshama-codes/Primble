@@ -39,10 +39,43 @@ function rowTargets(packageSqs) {
   return out;
 }
 
+// THE PAGE'S ONE PLAN (owner, 24 Oct 2026): when the server sends
+// `review_plan`, every number comes from it, by item - each item is worth what
+// the score gains when it is done after every item above it on the page
+// (services/review_plan.py). A card or key detail offering a fix an earlier item
+// already offers shows that item's number as `mirror` (never added twice); a step
+// a hold withholds says so (`held`), and a step under a point says that
+// (`under`). Older payloads keep the share-out below.
+function fromPlan(plan, packageSqs) {
+  const items = plan.items.filter((it) => it && typeof it === "object");
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const entry = (it) => {
+    const first = it.mirror_of && byId.has(it.mirror_of) ? byId.get(it.mirror_of) : null;
+    const mirror = first ? Number(first.points) || 0 : 0;
+    return {
+      points: (Number(it.points) || 0) + mirror, exact: it.exact !== false && !(first && first.exact === false),
+      mirror, held: it.held_by ? String(it.held_by) : null, under: it.under === true, id: it.id,
+    };
+  };
+  const cards = new Map();
+  const details = new Map();
+  const dc = new Map();
+  for (const it of items) {
+    if (it.kind === "card" && clean(it.code)) cards.set(clean(it.code), entry(it));
+    else if (it.kind === "detail" && clean(it.label)) details.set(clean(it.label), entry(it));
+    else if (it.kind === "dc" && clean(it.fact)) dc.set(clean(it.fact), entry(it));
+  }
+  const unanswerable = Array.isArray(packageSqs && packageSqs.screen_unanswerable)
+    ? packageSqs.screen_unanswerable.filter((u) => u && Number(u.points) > 0) : [];
+  return { cards, details, dc, unanswerable };
+}
+
 // `openConflicts`: the facts the Data Consistency panel lists as open conflicts
 // (utils/dcFacts.openConflictFacts). Without it, every fact the server shares a
 // conflict's points to is taken to have its row.
 export function screenPoints(packageSqs, groupedIssues, keyDetails, openConflicts = null) {
+  const plan = packageSqs && packageSqs.review_plan;
+  if (plan && Array.isArray(plan.items)) return fromPlan(plan, packageSqs);
   const shares = (packageSqs && packageSqs.screen_shares) || {};
   const targets = rowTargets(packageSqs);
   const targetsOf = (f) => targets[f] || [`fact:${f}`];
@@ -153,5 +186,11 @@ export function screenPoints(packageSqs, groupedIssues, keyDetails, openConflict
   return { cards, details, dc, unanswerable };
 }
 
-// "+3 pts" / "up to +2 pts"; nothing for a share of 0.
-export const screenPointsText = (p) => (p && p.points > 0 ? `${p.exact ? "" : "up to "}+${p.points} pts` : "");
+// "+3 pts" / "up to +2 pts"; "under 1 pt" for a step that adds a fraction;
+// "Counts once <hold> is fixed" for one a hold withholds; nothing for a 0.
+export const screenPointsText = (p) => {
+  if (!p) return "";
+  if (p.held) return `Counts once ${p.held} is fixed`;
+  if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts`;
+  return p.under ? "under 1 pt" : "";
+};

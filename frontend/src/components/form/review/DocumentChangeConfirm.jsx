@@ -18,7 +18,8 @@ const ACTION_WORDS = {
 
 export default function DocumentChangeConfirm({ pending, onConfirm, onCancel }) {
   if (!pending) return null;
-  const verb = ACTION_WORDS[pending.action] || "Change";
+  // "Confirm type" sends the type the row already shows (22 Oct 2026).
+  const verb = pending.busyBtn === "confirm" ? "Confirm the type of" : (ACTION_WORDS[pending.action] || "Change");
   const title = pending.sameInsured ? "This document names a different insured" : DOCUMENTS_UPDATE_FORMS_TEXT;
   const body = pending.sameInsured
     ? (pending.message || "Include it only if it belongs to this insured.")

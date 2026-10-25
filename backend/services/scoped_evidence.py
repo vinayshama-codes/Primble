@@ -76,8 +76,14 @@ REASON_SECTION_EXCLUDED = "COVERAGE_EXCLUDED_IN_DOCUMENTS"
 REASON_UNSCHEDULED = "UNDERLYING_NOT_SCHEDULED"          # (c): a rule's row, logged only
 REASON_TRIGGER_NOT_STATED = "COVERAGE_TRIGGER_NOT_STATED"  # (d)
 REASON_RETENTION_NOT_STATED = "RETENTION_NOT_STATED"       # (e)
+REASON_HIRED_PD_NOT_STATED = "HIRED_PD_DEDUCTIBLE_NOT_STATED"  # (f)
+REASON_PREMIUM_ONLY = "COVERAGE_STATED_AS_PREMIUM_ONLY"     # (g) Z41
 
 HELD_BACK_TEXT: Dict[str, str] = {
+    REASON_PREMIUM_ONLY: ("Your documents show this coverage only as a premium, with no limit, "
+                          "deductible or other detail, so the AI's value was left blank."),
+    REASON_HIRED_PD_NOT_STATED: ("The auto policy's documents do not print this amount for hired "
+                                 "autos' physical damage, so the AI's value was left blank."),
     REASON_RETENTION_NOT_STATED: ("This policy's documents do not print this amount as a "
                                   "retention or deductible, so the AI's value was left blank."),
     REASON_OTHER_POLICY: ("The AI used a value your documents print only for another "
@@ -102,7 +108,11 @@ def held_back_text(reason: Any) -> Optional[str]:
 # form-level line the repo itself records as unsure (`pdf_service.
 # _SECTION_FORM_LINE_PHRASES`: "contractors equipment" on the Garage and Dealers
 # section). No rule here acts on them.
-_NOT_JUDGED_FORMS = frozenset({"ACORD_141", "ACORD_160", "ACORD_138_CA", "ACORD_138_CO"})
+# Z41 (25 Oct 2026): ACORD 141 is judged again - its label is the template's own
+# ("Crime Section", corrected 14 Sep) and its line is crime, so the reason for
+# the freeze is gone; the owner's run f575160b printed the cyber policy's limits
+# and retentions as crime coverage. ACORD 160 / 138 stay frozen.
+_NOT_JUDGED_FORMS = frozenset({"ACORD_160", "ACORD_138_CA", "ACORD_138_CO"})
 
 _UMBRELLA = "umbrella"
 _LAYER_MARKER_KEY = "_umbrella_layer"
@@ -791,7 +801,10 @@ def absent_section_fields(form_id: Any, fields: Iterable[str], facts: Any) -> Di
     try:
         if not _documents(facts):
             return out
+        out.update(premium_only_fields(form_id, list(fields or ()), facts))
         for f in fields or ():
+            if f in out:
+                continue
             st = section_state(facts, form_id, f)
             if st == "absent":
                 out[f] = REASON_SECTION_ABSENT
@@ -1024,6 +1037,230 @@ def retention_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
     return out
 
 
+# ══ (f) ACORD 137's HIRED physical damage deductible is printed as one ═══════
+# (Z37, 24 Oct 2026.) The Business Auto page's COMP / SCL / COLL deductible
+# boxes sit in the HIRED PHYSICAL DAMAGE block (`state_auto_grid._PD_BASES`), so
+# the engine asks the document; the owned autos' $1,000 or any other auto
+# amount printed in the auto policy passed rule (a) unread for its meaning.
+# Same shape as (e): the AI's amount must sit beside a "hired" label in the
+# auto policy's own documents. The Truckers / Motor Carrier pages' boxes are
+# the owned autos' own deductibles and are not judged here.
+_HIRED_PD_BOX_RE = re.compile(
+    r"^Vehicle_(?:Comprehensive|Collision|SpecifiedCauseOfLoss)_DeductibleAmount_[A-Z]$")
+_HIRED_LABEL_RE = re.compile(r"\bhired\b", re.I)
+_HIRED_BEFORE = 40           # "$1,000 deductible - hired autos"
+_HIRED_AFTER = 240           # "HIRED AUTO PHYSICAL DAMAGE ... Collision $1,000 deductible"
+
+
+def _prints_as_hired(doc: Doc, number: str) -> bool:
+    # Distances are read on the text with its layout spacing collapsed: a
+    # column-laid-out HIRED AUTO PHYSICAL DAMAGE table pads every cell, which
+    # pushed its own deductible past the window in raw characters.
+    text = re.sub(r"\s+", " ", doc.text or "")
+    return any(number in _numbers_in(text[max(0, m.start() - _HIRED_BEFORE):
+                                          m.end() + _HIRED_AFTER])
+               for m in _HIRED_LABEL_RE.finditer(text))
+
+
+def _hired_pd_boxes(form_id: Any) -> Set[str]:
+    try:
+        from services import auto_symbols as _sym
+        from services.state_auto_grid import FORMS, field_families
+    except Exception:                                         # noqa: BLE001
+        return set()
+    if _base(form_id) not in FORMS:
+        return set()
+    return {f for f, fam in field_families(_base(form_id)).items()
+            if fam == _sym.BUSINESS_AUTO and _HIRED_PD_BOX_RE.match(f)}
+
+
+def hired_pd_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
+                    ai_fields: Iterable[str]) -> Dict[str, str]:
+    """{field: reason} for an AI hired-auto physical damage deductible the auto
+    policy's own documents do not print beside a "hired" label (rule (f)).
+    Never raises."""
+    out: Dict[str, str] = {}
+    try:
+        docs = _documents(facts)
+        if not docs:
+            return out
+        boxes = _hired_pd_boxes(form_id) & set(ai_fields or ())
+        for field in sorted(boxes):
+            number = _value_number((mapped or {}).get(field))
+            if number is None:
+                continue                  # "Included", "None" - another rule's question
+            witnesses = witness_documents(facts, form_id, box_line(form_id, field), docs)
+            if not witnesses or any(_prints_as_hired(d, number) for d in witnesses):
+                continue
+            out[field] = (REASON_OTHER_POLICY if any(_prints_as_hired(d, number) for d in docs)
+                          else REASON_HIRED_PD_NOT_STATED)
+            logger.info("scoped_evidence %s (hired PD) form=%s field=%s value=%r",
+                        out[field], form_id, field, str((mapped or {}).get(field))[:20])
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("scoped_evidence: hired PD check skipped (form=%s): %s", form_id, exc)
+    return out
+
+
+
+# ══ (g) A line the documents carry ONLY AS A PREMIUM (Z41, 25 Oct 2026) ══════
+# Run f575160b: the Package dec's coverage-part menu prints "CRIMEANDFIDELITY
+# COVERAGEPART $ 500.00" and nothing else about crime - no limit, deductible or
+# coverage basis anywhere. Asked about ACORD 141's every block, the model filled
+# it from the nearest document: the cyber policy's limits and retentions, the
+# property deductible, the driver schedule as employees, the carrier's head
+# office as the auditor. A line whose only evidence is a premium row has no
+# details to give; its section form's detail boxes are not asked (C104) and a
+# stored AI value there is blank. Judged only for lines whose detail facts are
+# known (`_LINE_DETAIL_PREFIXES`); any detail - a fact, a row's limit, a
+# document that is that line's own policy, a printed line naming the coverage
+# beside a limit / deductible word - and nothing here acts.
+_LINE_DETAIL_PREFIXES: Dict[str, Tuple[str, ...]] = {
+    "crime": ("crime_", "employee_theft", "fidelity", "employee_dishonesty"),
+    "general_liab": ("gl_",),
+    "auto": ("auto_",),
+    "workers_comp": ("wc_", "employers_liability"),
+    "umbrella": ("umbrella_",),
+    "property": ("building_value", "bpp", "business_income", "property_", "coinsurance"),
+}
+# Printed words that name the line on a text line (letters only, so the glued
+# OCR "CRIMEANDFIDELITY" reads).
+_LINE_WORDS: Dict[str, Tuple[str, ...]] = {
+    "crime": ("crime", "fidelity", "employeetheft", "employeedishonesty", "forgery"),
+}
+_DETAIL_WORD_RE = re.compile(
+    r"limit|deductible|retention|eachloss|eachoccurrence|eachclaim|aggregate|discovery|"
+    r"losssustained", re.I)
+# The form's own identity boxes (who, which policy, which form) - never a detail.
+_IDENTITY_PREFIXES = ("Producer_", "NamedInsured_", "Insurer_", "Policy_", "Form_",
+                      "CommercialStructure_", "Location_", "Applicant_")
+_PREMIUM_ONLY_SKIP_FORMS = frozenset({"ACORD_160", "ACORD_138_CA", "ACORD_138_CO",
+                                      "ACORD_125", "ACORD_101", "ACORD_25", "ACORD_28",
+                                      "ACORD_131"})
+_ROW_DETAIL_KEY_RE = re.compile(r"limit|deductible|retention|basis|sublimit", re.I)
+# Z42 review B (25 Oct 2026): only lines whose section form is the coverage
+# part's own schedule of limits are judged. ACORD 126 / 186 (GL), 127 / 137
+# (auto), 130 / 133 (WC) and 140 (property) ask mostly about the INSURED's
+# operations, vehicles, employees and buildings; a GL / auto / WC / property
+# line whose limits the extraction missed on one run (extraction is not
+# repeatable) would have lost every one of those questions, the whole ACORD 186
+# with them. Their policy terms are rules (a) / (b)'s.
+_PREMIUM_ONLY_JUDGED_LINES = frozenset({"crime"})
+_AMOUNT_IN_LINE_RE = re.compile(r"(?<![\w.])\$?\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:k|m|mm)\b)?", re.I)
+_SCHEDULE_WINDOW = 6         # lines a coverage heading's table may run below it
+
+
+def _amounts(line: str) -> Set[str]:
+    out = set()
+    for m in _AMOUNT_IN_LINE_RE.finditer(line or ""):
+        tok = m.group(0)
+        digits = re.sub(r"\D", "", tok.split(".")[0])
+        if digits and (len(digits) >= 3 or "$" in tok or re.search(r"[km]\s*$", tok, re.I)):
+            out.add(digits.lstrip("0") or "0")
+    return out
+
+
+def _states_line_detail(lines: List[str], i: int, words: Tuple[str, ...],
+                        premiums: Set[str]) -> bool:
+    """Does the coverage named on lines[i] have a detail printed with it: a
+    limit / deductible word on its own line, an amount other than its premium on
+    a line that is not a premium menu row ("Employee theft 25k" in a note), or a
+    table under it (a limit / deductible header and an amount, before the next
+    coverage part's heading)?"""
+    compact = re.sub(r"[^a-z]", "", lines[i].lower())
+    if _DETAIL_WORD_RE.search(compact):
+        return True
+    menu = re.search(r"coveragepart|premium|total", compact)
+    if not menu and _amounts(lines[i]) - premiums:
+        return True
+    saw_word = saw_amount = False
+    for ln in lines[i + 1:i + 1 + _SCHEDULE_WINDOW]:
+        c = re.sub(r"[^a-z]", "", ln.lower())
+        if c and not any(w in c for w in words) and (
+                "coveragepart" in c or (_canon(ln) not in (None, "crime"))):
+            break                          # the next coverage part's own line
+        saw_word = saw_word or bool(_DETAIL_WORD_RE.search(c))
+        saw_amount = saw_amount or bool(_amounts(ln) - premiums)
+        if saw_word and saw_amount:
+            return True
+    return False
+
+
+def _row_family(row: dict) -> Optional[str]:
+    key = str(row.get("_policy_key") or "")
+    if key:
+        fam = key.split("#", 1)[0].split("~", 1)[0]
+        if fam:
+            return fam
+    return _canon(row.get("line"))
+
+
+def premium_only_line(facts: Any, form_id: Any) -> Optional[str]:
+    """The line of this section form when the documents carry it ONLY as a
+    premium (rule (g)); None otherwise or when it cannot be told. Never raises."""
+    try:
+        base = _base(form_id)
+        if base in _PREMIUM_ONLY_SKIP_FORMS or not isinstance(facts, dict):
+            return None
+        line = form_line(form_id)
+        if not line or line not in _LINE_DETAIL_PREFIXES or line not in _PREMIUM_ONLY_JUDGED_LINES:
+            return None
+        docs = _documents(facts)
+        if not docs:
+            return None
+        rows = _val(facts.get("coverage_lines"))
+        rows = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        mine = [r for r in rows if _row_family(r) == line and not r.get("_part_of")]
+        if not mine:
+            return None                 # not carried at all: rule (b)'s question
+        if not any(str(r.get("premium") or "").strip() for r in mine):
+            return None
+        for r in mine:
+            for k, v in r.items():
+                if _ROW_DETAIL_KEY_RE.search(str(k)) and str(v or "").strip():
+                    return None
+        prefixes = _LINE_DETAIL_PREFIXES[line]
+        for k, v in facts.items():
+            if not isinstance(k, str) or k.startswith(("_", "has_")):
+                continue
+            if any(k.startswith(p) or p in k for p in prefixes):
+                vv = _val(v)
+                if vv not in (None, "", [], {}) and not isinstance(vv, bool):
+                    return None
+        if any(d.own is not None and d.own == frozenset({line}) for d in docs):
+            return None                 # that line's own policy is in the package
+        words = _LINE_WORDS.get(line) or (line.replace("_", ""),)
+        premiums = set()
+        for r in mine:
+            premiums |= _amounts(str(r.get("premium") or ""))
+        for d in docs:
+            lines = d.text.splitlines()
+            for i, ln in enumerate(lines):
+                compact = re.sub(r"[^a-z]", "", ln.lower())
+                if any(w in compact for w in words) and _states_line_detail(lines, i, words, premiums):
+                    return None
+        return line
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("scoped_evidence: premium-only check skipped (form=%s): %s", form_id, exc)
+        return None
+
+
+def premium_only_fields(form_id: Any, fields: Iterable[str], facts: Any) -> Dict[str, str]:
+    """{field: REASON_PREMIUM_ONLY} for every detail box of a premium-only
+    line's section form (rule (g)). Never raises."""
+    line = premium_only_line(facts, form_id)
+    if not line:
+        return {}
+    return {f: REASON_PREMIUM_ONLY for f in (fields or ())
+            if isinstance(f, str) and not f.startswith(_IDENTITY_PREFIXES)
+            and not _INSURED_BUSINESS_BOX_RE.search(f)}
+
+
+# The INSURED's business figures a section form asks beside its coverage (the
+# 141's annual gross receipts): not a coverage detail, so a premium-only line
+# still asks them (owner, 25 Oct 2026 - print the revenue there).
+_INSURED_BUSINESS_BOX_RE = re.compile(r"GrossReceipts|GrossSales|AnnualRevenue|AnnualSales", re.I)
+
+
 def out_of_scope_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
                         ai_fields: Iterable[str]) -> Dict[str, str]:
     """The guard's one call: rules (b) then (a) over the AI values of one form.
@@ -1031,7 +1268,12 @@ def out_of_scope_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
     ai = set(ai_fields or ())
     if not ai or not _documents(facts):
         return {}
-    out = uncarried_section_values(mapped, schema, facts, form_id, ai)
+    out = {f: r for f, r in premium_only_fields(form_id, ai, facts).items()
+           if str((mapped or {}).get(f) or "").strip()}
+    for f, r in out.items():
+        logger.info("scoped_evidence %s form=%s field=%s value=%r", r, form_id, f,
+                    str((mapped or {}).get(f))[:40])
+    out.update(uncarried_section_values(mapped, schema, facts, form_id, ai - set(out)))
     rest = ai - set(out)
     out.update(foreign_policy_values(mapped, schema, facts, form_id, rest))
     rest = rest - set(out)
@@ -1040,6 +1282,8 @@ def out_of_scope_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
     out.update(trigger_values(mapped, schema, facts, form_id, rest))
     rest = rest - set(out)
     out.update(retention_values(mapped, schema, facts, form_id, rest))
+    rest = rest - set(out)
+    out.update(hired_pd_values(mapped, schema, facts, form_id, rest))
     return out
 
 

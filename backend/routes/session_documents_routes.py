@@ -366,6 +366,17 @@ async def add_session_documents(
 
     from routes.form_routes import _doc_summary_entry
     page = await _package_page(session_id, current_user)
+    # The dashboard keeps its own copy of the pre-form score: an add moves the
+    # score, so it refreshes that copy like every other pre-form action (24 Oct
+    # 2026: the page read 100 while the dashboard kept 92).
+    if not door.get("forms_exist"):
+        try:
+            from repositories.session_repository import get_processing_session
+            from routes.form_routes import _remember_pre_form_score
+            await _remember_pre_form_score(session_id, await get_processing_session(session_id),
+                                           page.get("package_sqs"))
+        except Exception as _ps:                                # noqa: BLE001
+            logger.warning(f"add documents: dashboard score not refreshed: {_ps}")
     page.update({"documents_added": [_doc_summary_entry(d) for d in added],
                  "duplicates_skipped": duplicates,
                  "evidence_only": [str(d.get("filename") or "") for d in added if d.get("evidence_only")],

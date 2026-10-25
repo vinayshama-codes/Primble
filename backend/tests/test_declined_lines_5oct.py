@@ -292,8 +292,9 @@ def test_wc_and_im_recommendations_carry_their_line():
     text = "workers compensation declarations class code 8810 payroll inland marine floater"
     by_id = {m["form_id"]: m for m in fs.match_forms_deterministic({}, flags, text=text)}
     assert by_id["ACORD_130"]["for_line"] == "workers_comp"
-    assert by_id["ACORD_160"]["for_line"] == "inland_marine"
-    assert all("for_line" not in m for f, m in by_id.items() if f not in ("ACORD_130", "ACORD_133", "ACORD_160"))
+    # Z37 (24 Oct 2026): ACORD 160 is Business Owners - inland marine offers no form.
+    assert "ACORD_160" not in by_id
+    assert all("for_line" not in m for f, m in by_id.items() if f not in ("ACORD_130", "ACORD_133"))
 
 
 def test_a_string_false_flag_is_not_carried():

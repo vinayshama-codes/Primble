@@ -16,6 +16,11 @@ Data Consistency conflicts are hard before forms AND after (unchanged).
 
 The "Becomes a hard stop when ACORD 140 is generated" tag and its count are
 gone with the promotion they announced.
+
+19 Oct 2026 (Brent): a hard stop also blocks "Submission Ready", and only a
+name / FEIN disagreement is a blocking document conflict (a building value is a
+warning). 20 Oct 2026 (owner): the caps are back - a hard stop holds the
+package at 60, a warning at 85. One status before and after forms still holds.
 """
 from __future__ import annotations
 
@@ -36,7 +41,9 @@ from services import stops_now as sn                                     # noqa:
 from services.issue_registry import (                                    # noqa: E402
     build_structured_from_sources, grouped_with_package_caps,
 )
-from services.sqs_service import HARD_STOP_CAP, calculate_package_sqs    # noqa: E402
+from services.sqs_service import (                                       # noqa: E402
+    HARD_STOP_CAP, SOFT_STOP_CAP, calculate_package_sqs,
+)
 
 BI = "Business Income limit is specified but Period of Restoration is missing"
 MV_LEGACY = "Property Minimum Viable COPE incomplete"
@@ -54,6 +61,8 @@ def _facts(**over):
         "occupancy_type": {"value": "Contractor shop or yard", "source": "producer",
                            "confidence": "filled"},
         "business_income_limit": "$1,000,000",
+        # (19 Oct 2026, Brent: no proposed term is a hard stop) - a term, so each test sees only its own check.
+        "effective_date": "07/15/2026",
     }
     facts.update(over)
     return facts
@@ -100,13 +109,18 @@ def test_a_cross_form_hard_stop_is_a_warning_before_forms_and_after():
     assert [m for m in post["soft"] if BI in m] == [m for m in pre["soft"] if BI in m]
 
 
-def test_after_generation_the_package_is_not_capped_at_60_by_it():
+def test_after_generation_the_package_is_not_blocked_by_it():
     session = _session()
     pre, post = _both(session)
     for st in (pre, post):
         pkg = _score(session, st)
+        # (20 Oct 2026, the cap is back) - a warning holds 85, never 60.
         assert pkg["cap_applied"] != HARD_STOP_CAP
+        assert pkg["cap_applied"] == SOFT_STOP_CAP
         assert BI not in str(pkg.get("cap_reason") or "")
+        # (19 Oct 2026, Brent: only a hard stop blocks Submission Ready) - a warning does not.
+        assert not _listed(BI, pkg["ready_blockers"])
+        assert pkg["ready_blockers"] == []
     assert _score(session, pre)["package_sqs_score"] == _score(session, post)["package_sqs_score"]
 
 
@@ -120,17 +134,36 @@ def test_a_field_level_hard_stop_stays_hard_both_times():
         # its coded cross-form twin is a warning both times
         assert not _listed(MV_CODED, st["hard"]) and _listed(MV_CODED, st["soft"])
         pkg = _score(session, st)
+        # (19 Oct 2026, Brent: Minimum Viable COPE stays hard) - it holds the 60 (20 Oct
+        # 2026, the cap is back) and blocks Submission Ready.
         assert pkg["cap_applied"] == HARD_STOP_CAP
         assert MV_LEGACY in str(pkg.get("cap_reason") or "")
+        assert [b for b in pkg["ready_blockers"] if MV_LEGACY in b] == \
+            [m for m in st["hard"] if MV_LEGACY in m]
+        assert pkg["submission_ready"] is False
 
 
-def test_a_blocking_document_conflict_stays_hard_both_times():
+def test_a_document_conflict_keeps_one_status_both_times():
+    # (19 Oct 2026, Brent: hard only for documents naming different companies) - a building value is a warning both times...
     uw = {"review_required": True, "fields": [
         {"fact_key": "property_building_value", "label": "Building Value", "review_required": True,
          "values": [{"display": "$798,556"}, {"display": "$421,714"}]}]}
     pre, post = _both(_session(underwriting_consistency=uw))
     for st in (pre, post):
-        assert _listed("Building Value: documents disagree", st["hard"]), st["pre_form"]
+        assert not _listed("Building Value: documents disagree", st["hard"]), st["pre_form"]
+        assert _listed("Building Value: documents disagree", st["soft"]), st["pre_form"]
+    # ...and a name the documents disagree on is hard both times, blocking Submission Ready.
+    uw = {"review_required": True, "fields": [
+        {"fact_key": "applicant_name", "label": "Applicant / Named Insured", "review_required": True,
+         "values": [{"display": "Choice Electric LLC"}, {"display": "Harborline Plumbing Inc"}]}]}
+    session = _session(underwriting_consistency=uw)
+    pre, post = _both(session)
+    for st in (pre, post):
+        assert _listed("Applicant / Named Insured: documents disagree", st["hard"]), st["pre_form"]
+        pkg = _score(session, st)
+        assert _listed("Applicant / Named Insured: documents disagree", pkg["ready_blockers"])
+        # (20 Oct 2026, the cap is back) - and it holds the package at 60.
+        assert pkg["cap_applied"] == HARD_STOP_CAP
 
 
 def test_the_severity_door_changes_only_hard_stops():
@@ -152,7 +185,8 @@ def test_the_severity_door_changes_only_hard_stops():
 def test_the_post_form_recalculation_keeps_the_warning(monkeypatch):
     """The real `recalculate_session_scores` (answers, resolve, reopen, added
     documents, policy lines) on a generated package: BI stays a warning, the
-    package is not held at 60, and the stored card copies say warning too."""
+    package is not held at 60 or blocked by it, and the stored card copies say
+    warning too."""
     import tests.test_reopen_takes_the_fix_back_9oct as H
     row = H._row()
     row["facts"].update(_facts())
@@ -171,7 +205,10 @@ def test_the_post_form_recalculation_keeps_the_warning(monkeypatch):
     assert not any(isinstance(i, dict) and i.get("type") == "hard_stop"
                    for i in store.get("cross_issues_last") or [])
     pkg = store["package_sqs"]
+    # (20 Oct 2026, the cap is back) - the warning never holds a 60 ...
     assert pkg["cap_applied"] != HARD_STOP_CAP, pkg.get("cap_reason")
+    # ... (19 Oct 2026, Brent: a hard stop blocks Submission Ready) and blocks nothing.
+    assert not _listed(BI, pkg["ready_blockers"]), pkg["ready_blockers"]
     bi_cards = [i for i in store.get("structured_issues") or []
                 if i.get("code") == "bi_missing_period_of_restoration"]
     assert all((i.get("severity") or i.get("type")) != "hard_stop" for i in bi_cards)
@@ -202,10 +239,12 @@ def test_no_scorer_runs_the_cross_form_rules_without_the_severity_door():
                 if "cross_form_severity" not in calls and "stops_now" not in calls:
                     offenders.append(f"{path.name}:{fn.lineno} {fn.name}")
     assert not offenders, "re-promotes cross-form hard stops:\n" + "\n".join(offenders)
-    # ...and the two inline post-form scorers this change fixed are among them
+    # ...and the two post-form scorers this change fixed are among them - since
+    # 22 Oct 2026 (build 23) through the stops door itself, which decides the
+    # severity with `cross_form_severity` (they no longer run the rules inline).
     names = {fn.name for p in (BACKEND / "routes" / "form_routes.py",
                                BACKEND / "services" / "arq_service.py")
-             for fn, calls in _functions(p) if "cross_form_severity" in calls}
+             for fn, calls in _functions(p) if calls & {"cross_form_severity", "stops_now"}}
     assert {"update_pdf", "recalculate_session_scores"} <= names
 
 

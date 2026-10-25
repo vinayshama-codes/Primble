@@ -72,5 +72,10 @@ def test_the_download_list_folds_the_boxes_into_the_cards(tmp_path):
 
 
 def test_the_start_button_says_it_is_the_first_of_several():
+    # 23 Oct 2026 (Brent, Z34-1 #1): the "your last points are on the forms" notice and
+    # its "Start with ... (most to confirm)" button are gone - the forms no longer hold
+    # points. Each form's to-dos are on the Forms ready meter instead. The TEST pinned
+    # the removed button and was updated.
     src = (ROOT / "frontend" / "src" / "components" / "form" / "review" / "ReviewRailLayout.jsx").read_text()
-    assert "(most to confirm)" in src
+    assert "(most to confirm)" not in src
+    assert "data-forms-ready-form={f.formId}" in src

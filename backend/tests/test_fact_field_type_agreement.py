@@ -29,6 +29,7 @@ import services.pdf_service as ps                        # noqa: E402
 from services.fact_registry import (                     # noqa: E402
     FACT_REGISTRY, _is_currency, _is_date, _is_email, _is_fein,
     _is_percent, _is_phone, _is_positive_int, _is_url,
+    takes_amount_or_percent,
 )
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "..", "forms_schemas")
@@ -44,10 +45,14 @@ _BY_VALIDATOR = {
 # (C22's ~49,000-pair sweep settled that amount boxes hold prose legitimately).
 _COMPATIBLE = {
     "date":       {"date"},
-    "amount":     {"currency", "int"},
+    "amount":     {"currency", "int", "amount_or_percent"},
     "limit":      {"currency"},
-    "deductible": {"currency"},
-    "percentage": {"percent"},
+    "deductible": {"currency", "amount_or_percent"},
+    # An amount-or-percent fact (the wind / quake deductibles, Z33-PERCENT)
+    # may sit behind an amount box AND a percentage box: its resolver
+    # (`pdf_service._resolve_amount_or_percent_box`) routes a percentage to the
+    # percentage box and a dollar amount to the amount box, by the value.
+    "percentage": {"percent", "amount_or_percent"},
     "rate":       {"percent", "currency"},
     "number":     {"int", "currency", "percent", "phone", "fein"},
     "year":       {"int", "date"},
@@ -60,6 +65,10 @@ def _fact_type(fact_key):
     so a validator-only sweep would have SKIPPED the exact bug this file exists
     for (proved by test_the_sweep_bites_on_the_bug_it_was_written_for)."""
     meta = FACT_REGISTRY.get(fact_key) or {}
+    # The class door first: its validator is `_is_currency`, so the validator
+    # table alone would call it a dollar-only fact.
+    if takes_amount_or_percent(meta):
+        return "amount_or_percent"
     named = _BY_VALIDATOR.get(meta.get("validate"))
     if named:
         return named

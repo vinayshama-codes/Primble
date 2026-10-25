@@ -99,3 +99,24 @@ export const lineLabel = (key, lineRecords) => {
   const s = k.replace(/_/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
+
+// A document source with the page that prints its value (Brent, 19 Oct 2026:
+// "keep the source and page reference"): "Package Policy.pdf p.1". The server
+// names a page only when the document prints the value there.
+export const sourceLabel = (src) => {
+  const name = String(src?.filename || src?.file || "").trim();
+  if (!name) return "";
+  return src?.page ? `${name} p.${src.page}` : name;
+};
+
+// "Submission Ready" (Brent, 19 Oct 2026): 90+ AND no open hard stop. Read from
+// the score as shown and the score's own open hard stops, so a credit patched
+// onto the number moves it too; else the server's flag; else 90+, which the 60
+// cap a hard stop holds makes the same rule.
+export const submissionReady = (pkg) => {
+  if (!pkg) return false;
+  const score = Number(pkg.package_sqs_score ?? pkg.sqs_score ?? 0);
+  if (pkg.open_hard_stops != null) return score >= 90 && !Number(pkg.open_hard_stops);
+  if (typeof pkg.submission_ready === "boolean") return pkg.submission_ready;
+  return score >= 90;
+};

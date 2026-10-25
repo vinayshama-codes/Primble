@@ -508,7 +508,9 @@ from services import sqs_service as sq                     # noqa: E402
 _NO_LOSSES, _HAD_CLAIMS = arq._NO_LOSS_OPTIONS
 _INDICATOR = arq.NO_LOSS_INDICATOR_FIELD
 _NA_STATE = "no_known_losses_not_applicable"
-_NA_LABEL = "Not applicable - No Known Losses attested"
+# Brent, 23 Oct 2026 (Z34-1 #2): the same state reads "Unable to Verify / Confirmation
+# Required" - the TEST pinned the old wording and was updated; the logic is unchanged.
+_NA_LABEL = "Unable to Verify / Confirmation Required - No Known Losses attested"
 
 
 def _env(value, source):
@@ -630,14 +632,17 @@ class TestItem15WhatKeepsThePillarScored:
         {"num_claims": _env("2", "producer")},        # a person stated it
     ])
     def test_a_corroborated_claim_keeps_the_45_ceiling(self, claim):
+        # Since 23 Oct 2026 the ceiling is the lower of 45 and the value once
+        # the claims are confirmed (owner: never above the honest answer) -
+        # known claims and no loss runs: 25.
         facts, flags = _attested(**copy.deepcopy(claim))
         assert lhs.attested_no_losses_not_applicable(facts, flags) is False
         score, recs = sq.calculate_p4_loss_history(facts, flags)
-        assert score == 45
+        assert score == 25
         assert any(r.startswith("Loss history conflict") for r in recs)
         assert sq._get_loss_history_state(facts, flags) == "loss_history_conflicting"
-        assert _package(facts, flags)["pillars"]["loss_history_alignment"] == 45
-        assert _form(facts, flags)["breakdown"]["loss_history_alignment"] == 45
+        assert _package(facts, flags)["pillars"]["loss_history_alignment"] == 25
+        assert _form(facts, flags)["breakdown"]["loss_history_alignment"] == 25
 
     def test_a_loss_run_with_claims_keeps_the_ceiling(self):
         facts, flags = _attested(loss_history_years="5", num_claims="3",

@@ -54,6 +54,14 @@ def _rows(tag):
     return na.needs_attention(gf["ACORD_125"], facts, "ACORD_125", flags=flags)
 
 
+def _refused(tag):
+    """The AI's refused values - the audit record's only since 23 Oct 2026."""
+    gf, facts, flags = _live(tag)
+    out: list = []
+    na.needs_attention(gf["ACORD_125"], facts, "ACORD_125", flags=flags, refused=out)
+    return out
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -77,7 +85,13 @@ def test_latest_live_run_counts_are_the_rows():
     # rule is not a to-do (`needs_attention._page_one_premiums_withheld`; the
     # owner's run `18ecbfa8` counted 8 of them into "49 items to fix"). The
     # TEST pinned the 30 Sep rule Brent reversed; the code follows his answer.
-    assert res["counts"] == {"missing": 11, "ai_held_back": 13, "verify": 0, "total": 24}
+    # 23 Oct 2026 (Brent: "Users only need to see relevant information. The
+    # audit record is fine."): no "AI held back" rows. Of the 13, the six
+    # unanswered Yes/No questions and the SIC / NAICS details (a fact behind
+    # them) are Missing; the five refused values with nothing behind them are
+    # the audit record's only (`_refused`).
+    assert res["counts"] == {"missing": 19, "ai_held_back": 0, "verify": 0, "total": 19}
+    assert len(_refused("b8d6")) == 13
     form = res["forms"][0]
     assert form["form_id"] == "ACORD_125" and form["form_label"] == "ACORD 125" and form["ok"] is True
     assert form["counts"] == na.count_rows(form["rows"]) == res["counts"]
@@ -115,12 +129,16 @@ def test_baseline_box_listed_twice_is_now_listed_once():
     # the QA no longer also calls it "left blank by the AI" (not_answered).
     assert codes == {"guard_removed_value"}
     mine = [r for r in _rows("8992") if r["field"] == "AdditionalInterest_FullName_A"]
-    assert len(mine) == 1 and mine[0]["status"] == na.STATUS_HELD_BACK
+    # 23 Oct 2026: a refused box with a fact behind it is a Missing detail; the
+    # refused value itself is never shown - the audit record keeps it.
+    assert len(mine) == 1 and mine[0]["status"] == na.STATUS_MISSING
     assert mine[0]["label"] == "Additional interest's full name"
+    assert "additional insured" not in mine[0]["reason"] and mine[0]["found_value"] is None
     # 30 Sep (owner's live run): "Found" is said only of a value the documents
     # or our records are known to hold. This stored run predates the guard
     # report's document check, so the refused value is the AI's suggestion.
-    assert 'The AI suggested "additional insured"' in mine[0]["reason"]
+    rec = [r for r in _refused("8992") if r["field"] == "AdditionalInterest_FullName_A"]
+    assert len(rec) == 1 and 'The AI suggested "additional insured"' in rec[0]["reason"]
 
 
 def test_viewer_required_badge_equals_missing_plus_required_held_back():
@@ -154,7 +172,8 @@ def test_viewer_required_badge_equals_missing_plus_required_held_back():
 
 
 def test_held_back_reasons_name_what_the_value_really_was():
-    by_field = {r["field"]: r for r in _rows("b8d6")}
+    # The audit record's sentences (23 Oct 2026: no user list shows them).
+    by_field = {r["field"]: r for r in _refused("b8d6")}
     assert "GL class codes" in by_field["NamedInsured_SICCode_A"]["reason"]
     assert '"AGENT PHONE"' in by_field["NamedInsured_Primary_PhoneNumber_A"]["reason"]
     assert '"Servicing Company"' in by_field["BusinessInformation_ParentOrganizationName_A"]["reason"]
@@ -235,11 +254,14 @@ def test_a_box_with_a_value_is_verify_only_when_ai_inferred():
     assert found[0]["reason"] == "Filled by the AI from your documents. Confirm it belongs in this box."
 
 
-def test_held_back_outranks_missing_and_keeps_required():
+def test_a_refused_required_box_is_missing_and_keeps_required():
+    # Was test_held_back_outranks_missing_and_keeps_required: since 23 Oct 2026
+    # (Brent) a refused value is the audit record's and its box is Missing.
     f = "NamedInsured_BusinessStartDate_A"          # required on every 125
     rows = _one(_form({}, {f: "missing_required"}, [{"field": f, "removed_value": "07/15/25"}]))
     r = next(x for x in rows if x["field"] == f)
-    assert r["status"] == na.STATUS_HELD_BACK and r["required"] is True
+    assert r["status"] == na.STATUS_MISSING and r["required"] is True
+    assert r["found_value"] is None and "07/15/25" not in r["reason"]
     rows = _one(_form({}, {f: "missing_required"}))
     assert next(x for x in rows if x["field"] == f)["status"] == na.STATUS_MISSING
 
@@ -327,7 +349,8 @@ def test_every_label_on_every_schema_is_words():
 def _qa_8992():
     gf, facts, flags = _live("8992")
     qa = fq.run_field_qa(gf, merged_facts=facts, confirmations={}, flags=flags)
-    att = na.needs_attention_for_session(gf, facts, flags=flags)
+    # audit=True, as the record's own call (audit_service.run_and_log_field_qa)
+    att = na.needs_attention_for_session(gf, facts, flags=flags, audit=True)
     return qa, att
 
 
@@ -350,7 +373,9 @@ def test_with_the_door_each_form_and_box_is_named_and_counted_once():
     assert [r["rec_id"] for r in attn] == [
         "fieldqa_attn_ACORD_125_missing",
         "fieldqa_attn_ACORD_125_missing_applicant", "fieldqa_attn_ACORD_125_ai_held_back"]
-    assert attn[0]["message"].startswith("ACORD 125 - Missing (12): ")   # 14 less the 2 applicant steps
+    # 20 less the 2 applicant steps (23 Oct 2026: +6 - two unanswered questions
+    # and four details a fact stands behind, which were "AI held back" rows)
+    assert attn[0]["message"].startswith("ACORD 125 - Missing (18): ")
     assert "Signature" not in attn[0]["message"]
     assert attn[1]["message"].startswith("ACORD 125 - To be signed by the applicant (2): Signature")
     assert "Fix: Fill" not in attn[1]["message"]
@@ -458,7 +483,9 @@ def test_route_returns_the_door_for_the_owner(monkeypatch):
     body = _call(ar.get_needs_attention("sid", None, {"id": "u1"}))
     # +1 unanswered question (30 Sep); +5 blank premiums of ticked lines (30 Sep
     # night), -5 again 12 Oct (a renewal's page-1 premiums are blank by Brent's rule)
-    assert body["success"] is True and body["counts"]["total"] == 24
+    # 23 Oct 2026: no "AI held back" rows (13 -> 8 Missing, 5 audit record only)
+    assert body["success"] is True and body["counts"]["total"] == 19
+    assert body["counts"]["ai_held_back"] == 0 and "refused" not in body["forms"][0]
     body = _call(ar.get_needs_attention("sid", "ACORD_125", {"id": "u1"}))
     assert [f["form_id"] for f in body["forms"]] == ["ACORD_125"]
 
@@ -535,7 +562,8 @@ def test_side_panel_section_refreshes_with_the_score_and_jumps():
     # section (the one Recommendations uses), each with its (i) tip.
     assert "Section={CollapsibleSection}" in block
     assert "title={`Needs attention (${need.length})`} tooltip={NEEDS_ATTENTION_TIP}" in panel
-    assert "title={`AI held back (${held.length})`} tooltip={AI_HELD_BACK_TIP}" in panel
+    # 23 Oct 2026 (Brent): the "AI held back" section is gone.
+    assert "AI held back (" not in panel and "AI_HELD_BACK_TIP" not in panel
 
 
 def test_pre_download_review_reads_the_same_door():
@@ -564,7 +592,7 @@ def test_pre_form_key_details_are_actions_in_both_layouts_and_no_em_dashes():
     comp = _read(FORM_DIR / "review" / "KeyDetailsMissing.jsx")
     assert "onClick={() => onFix(it)}" in comp and "it.resolution ?" in comp
     # a key detail is not an issue: nothing is marked resolved for it
-    assert "if (issue?.__keyDetail) { setResolutionIssue(null); return; }" in modal
+    assert "if (issue?.__keyDetail) {" in modal and "keyDetailFixState(issue.__keyDetailLabel" in modal   # 23 Oct: Overview Resolved
     for p in (FORM_DIR / "NeedsAttentionPanel.jsx", FORM_DIR / "usePdfFieldFocus.js",
               FORM_DIR / "review" / "KeyDetailsMissing.jsx",
               FRONTEND / "utils" / "needsAttention.js", BACKEND / "services" / "needs_attention.py"):
@@ -575,10 +603,14 @@ def test_the_dec_index_purge_changes_wording_only():
     # Production deletes dec_page_entries after generation
     # (PURGE_DEC_INDEX_AFTER_GENERATION). The list must not change shape.
     gf, facts, flags = _live("b8d6")
-    before = na.needs_attention(gf["ACORD_125"], facts, "ACORD_125", flags=flags)
+    rb: list = []
+    ra: list = []
+    before = na.needs_attention(gf["ACORD_125"], facts, "ACORD_125", flags=flags, refused=rb)
     purged = {k: v for k, v in facts.items() if k != "dec_page_entries"}
-    after = na.needs_attention(gf["ACORD_125"], purged, "ACORD_125", flags=flags)
+    after = na.needs_attention(gf["ACORD_125"], purged, "ACORD_125", flags=flags, refused=ra)
     shape = lambda rows: [(r["field"], r["status"], r["score_effect"], r["label"]) for r in rows]  # noqa: E731
     assert shape(before) == shape(after)
-    phone = next(r for r in after if r["field"] == "NamedInsured_Primary_PhoneNumber_A")
+    assert [(r["field"], r["label"]) for r in rb] == [(r["field"], r["label"]) for r in ra]
+    # The wording lives in the audit record since 23 Oct 2026.
+    phone = next(r for r in ra if r["field"] == "NamedInsured_Primary_PhoneNumber_A")
     assert "expiring producer contact phone" in phone["reason"]

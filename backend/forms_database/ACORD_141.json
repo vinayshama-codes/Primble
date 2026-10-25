@@ -1,28 +1,33 @@
 {
   "form_id": "ACORD_141",
-  "form_name": "ACORD 141 - Property Schedule",
-  "form_type": "schedule",
+  "form_name": "ACORD 141 - Crime Section",
+  "form_type": "section",
   "template_file": "ACORD_141.pdf",
-  "description": "Per-location property schedule supplement to ACORD 140.",
+  "description": "Crime section - employee dishonesty / theft, forgery, money and securities coverage.",
   "always_include": false,
-  "matching_flags": ["has_property_coverage","has_multiple_locations"],
-  "matching_keywords": ["property schedule","multiple locations","location schedule","building schedule","BPP schedule"],
-  "coverage_types": ["property"],
-  "policy_types": ["commercial"],
+  "matching_flags": [
+    "has_crime"
+  ],
+  "matching_keywords": [
+    "commercial crime",
+    "crime coverage",
+    "employee dishonesty",
+    "employee theft",
+    "fidelity"
+  ],
+  "coverage_types": [
+    "crime"
+  ],
+  "policy_types": [
+    "commercial"
+  ],
   "tier1_minimum_fields": [
     "applicant_name",
     "effective_date",
     "expiration_date",
-    "property_locations",
-    "locations",
-    "occupancy_type",
-    "construction_type",
-    "property_building_value",
-    "property_bpp_value",
-    "valuation_method",
-    "property_deductible_aop",
-    "coinsurance_percentage",
-    "business_income_limit",
-    "period_of_restoration"
+    "crime_limit",
+    "crime_deductible",
+    "crime_employee_count",
+    "crime_locations_count"
   ]
 }

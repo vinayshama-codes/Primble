@@ -1,7 +1,9 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, List, Optional
+
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -46,16 +48,24 @@ router = APIRouter(tags=["audit"])
 logger = logging.getLogger(__name__)
 
 
-def _grade_from_score(score: int) -> tuple:
+def _grade_from_score(score: int, open_hard_stops: Any = 0) -> tuple:
     """Return (grade, tier, tier_color) for a given SQS score.
 
     Delegates to sqs_service.tier_for_score - the ONE ladder. This function used
     to carry its own copy that returned "Submission Ready" at exactly 90, while
     both scorers require ABOVE 90, so a dismissal credit landing on 90 relabelled
     a submission the scorers still called "Almost There".
+
+    ``open_hard_stops`` - the score's own count (`open_hard_stops` on the stored
+    sqs dict): an open hard stop holds the tier below Submission Ready (Brent,
+    19 Oct 2026). A payload stored before that has none - read as 0.
     """
     from services.sqs_service import tier_for_score
-    return tier_for_score(score)
+    try:
+        _open = int(open_hard_stops or 0)
+    except (TypeError, ValueError):
+        _open = 0
+    return tier_for_score(score, _open)
 
 
 def _cap_from(hard_count: int, soft_count: int) -> int:
@@ -218,6 +228,8 @@ async def _apply_dismiss_score_credit(
                 SELECT ge.key AS form_id,
                        (ge.value->'sqs'->>'sqs_score')::int AS score,
                        (ge.value->'sqs'->>'raw_sqs_score')::int AS raw_score,
+                       (ge.value->'sqs'->>'open_hard_stops')::int AS open_hard,
+                       (ge.value->'sqs'->>'cap_applied')::int AS stored_cap,
                        COALESCE((
                            SELECT SUM((c->>'impact')::int)
                            FROM jsonb_array_elements(
@@ -259,6 +271,24 @@ async def _apply_dismiss_score_credit(
                 "FROM processing_sessions WHERE id = $1",
                 session_id,
             )
+            # The package's own open hard stops (19 Oct 2026): its tier and its
+            # Submission Ready flag read them beside the credited number.
+            existing_pkg_open = await conn.fetchval(
+                "SELECT (data->'package_sqs'->>'open_hard_stops')::int "
+                "FROM processing_sessions WHERE id = $1",
+                session_id,
+            )
+            # ...and the ceiling its own scorer applied (20 Oct 2026): the stop
+            # counts above miss the scorer's own items (the building value the
+            # documents disagree on), so a credit could release their cap -
+            # `apply_credits_to_score`, same rule.
+            _pkg_own_cap = await conn.fetchval(
+                "SELECT (data->'package_sqs'->>'cap_applied')::int "
+                "FROM processing_sessions WHERE id = $1",
+                session_id,
+            )
+            if _pkg_own_cap is not None:
+                pkg_cap = min(pkg_cap, int(_pkg_own_cap))
             # `pkg_base` is bound on BOTH branches. It used to be assigned only
             # inside the legacy `else`, while the log line further down
             # interpolates it unconditionally - so on every modern session (any
@@ -281,7 +311,7 @@ async def _apply_dismiss_score_credit(
                 # original compounding behaviour so old submissions still credit.
                 pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
                 new_pkg_score = _credited_score(pkg_base, score_impact, pkg_cap)
-            _, new_pkg_tier, _ = _grade_from_score(new_pkg_score)
+            _, new_pkg_tier, _ = _grade_from_score(new_pkg_score, existing_pkg_open)
 
             # Build per-form updates: bump each affected form independently.
             updated_forms: dict = {}
@@ -290,22 +320,40 @@ async def _apply_dismiss_score_credit(
             for row in affected_rows:
                 fid = row["form_id"]
                 _form_credits = int(row["form_credits"] or 0)
+                # The form's own ceiling binds too (20 Oct 2026): the counts miss
+                # its gates (COPE, the umbrella, the property gate), and a credit
+                # released their 60 / 85 - open since 2026-08-31.
+                _row_cap = (min(form_cap, int(row["stored_cap"]))
+                            if row["stored_cap"] is not None else form_cap)
                 if row["raw_score"] is not None:
+                    # A SCORED form's ceiling is its own scorer's (`cap_applied`;
+                    # none = no cap) - 22 Oct 2026. The session's lists are the
+                    # PACKAGE's (every scoring path takes them from the stops
+                    # door): the picker's, the documents' source, the OCR and the
+                    # cross-form stops no form is scored with (spec 10). Counted
+                    # here they held every form at 85 / 60, so a dismiss
+                    # anywhere LOWERED an uncapped 95 form to 85. A legacy
+                    # payload (no raw score) keeps the counted ceiling below.
+                    _row_cap = (int(row["stored_cap"]) if row["stored_cap"] is not None
+                                else None)
                     # A form carrying none of the dismissed recommendations has
                     # zero scoped credit, so this is a no-op resync for it.
                     new_score = final_score_with_credits(
-                        row["raw_score"], _form_credits, form_cap,
+                        row["raw_score"], _form_credits, _row_cap,
                     )
                 elif _form_credits:
                     # Legacy session scored before raw_sqs_score existed: keep the
                     # original compounding behaviour so old submissions still credit.
                     base_score = row["score"] if row["score"] is not None else score_at_action
-                    new_score  = _credited_score(base_score, score_impact, form_cap)
+                    new_score  = _credited_score(base_score, score_impact, _row_cap)
                 else:
                     continue
                 if row["score"] is not None and new_score == int(row["score"]):
                     continue                      # nothing changed for this form
-                new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
+                new_grade, new_tier, new_tier_color = _grade_from_score(new_score, row["open_hard"])
+                # The readiness flag moves with the credited number (19 Oct
+                # 2026); `create_missing=false` - a payload without it gains none.
+                new_ready = bool(new_score >= 90 and not int(row["open_hard"] or 0))
 
                 await conn.execute(
                     """
@@ -314,24 +362,28 @@ async def _apply_dismiss_score_credit(
                         jsonb_set(
                             jsonb_set(
                                 jsonb_set(
-                                    data,
-                                    ARRAY['generated_forms', $1, 'sqs', 'sqs_score'],
-                                    to_jsonb($2::int), false
+                                    jsonb_set(
+                                        data,
+                                        ARRAY['generated_forms', $1, 'sqs', 'sqs_score'],
+                                        to_jsonb($2::int), false
+                                    ),
+                                    ARRAY['generated_forms', $1, 'sqs', 'grade'],
+                                    to_jsonb($3::text), false
                                 ),
-                                ARRAY['generated_forms', $1, 'sqs', 'grade'],
-                                to_jsonb($3::text), false
+                                ARRAY['generated_forms', $1, 'sqs', 'tier'],
+                                to_jsonb($4::text), false
                             ),
-                            ARRAY['generated_forms', $1, 'sqs', 'tier'],
-                            to_jsonb($4::text), false
+                            ARRAY['generated_forms', $1, 'sqs', 'tier_color'],
+                            to_jsonb($5::text), false
                         ),
-                        ARRAY['generated_forms', $1, 'sqs', 'tier_color'],
-                        to_jsonb($5::text), false
+                        ARRAY['generated_forms', $1, 'sqs', 'submission_ready'],
+                        to_jsonb($8::boolean), false
                     ),
                     updated_at = $6
                     WHERE id = $7
                     """,
                     fid, new_score, new_grade, new_tier, new_tier_color,
-                    now_ts, session_id,
+                    now_ts, session_id, new_ready,
                 )
                 updated_forms[fid] = {
                     "new_sqs_score":  new_score,
@@ -356,26 +408,31 @@ async def _apply_dismiss_score_credit(
                         jsonb_set(
                             jsonb_set(
                                 jsonb_set(
-                                    data,
-                                    ARRAY['package_sqs', 'package_sqs_score'],
-                                    to_jsonb($1::int), false
+                                    jsonb_set(
+                                        data,
+                                        ARRAY['package_sqs', 'package_sqs_score'],
+                                        to_jsonb($1::int), false
+                                    ),
+                                    ARRAY['package_sqs', 'tier'],
+                                    to_jsonb($2::text), false
                                 ),
-                                ARRAY['package_sqs', 'tier'],
-                                to_jsonb($2::text), false
+                                ARRAY['package_sqs', 'credits_applied'],
+                                to_jsonb($5::int), true
                             ),
-                            ARRAY['package_sqs', 'credits_applied'],
-                            to_jsonb($5::int), true
+                            ARRAY['package_sqs', 'score_trace', 'arithmetic', 'credits'],
+                            to_jsonb($5::int), false
                         ),
-                        ARRAY['package_sqs', 'score_trace', 'arithmetic', 'credits'],
-                        to_jsonb($5::int), false
+                        ARRAY['package_sqs', 'score_trace', 'arithmetic', 'displayed'],
+                        to_jsonb($1::int), false
                     ),
-                    ARRAY['package_sqs', 'score_trace', 'arithmetic', 'displayed'],
-                    to_jsonb($1::int), false
+                    ARRAY['package_sqs', 'submission_ready'],
+                    to_jsonb($6::boolean), false
                 ),
                 updated_at = $3
                 WHERE id = $4
                 """,
                 new_pkg_score, new_pkg_tier, now_ts, session_id, credits_total,
+                bool(new_pkg_score >= 90 and not int(existing_pkg_open or 0)),
             )
 
         # DIAGNOSTICS CANNOT BE ALLOWED TO EAT THE RESULT. The work is done and
@@ -520,31 +577,6 @@ def _registry_entry(field: str) -> Optional[dict]:
     return FACT_REGISTRY.get(canon) if canon else None
 
 
-def _is_descriptive_money_answer(text: str, format_hint: str) -> bool:
-    """True when a non-numeric answer is a legitimate convention, not garbage.
-
-    Real ACORD money boxes print words: "Statutory" on an Employers Liability
-    limit, "Waived" on a deductible, "Not covered" on an excluded peril. The
-    monetary branch above already allows that for fields whose NAME looks
-    money-ish, but the name is a poor signal - `wc_el_each_accident` is a dollar
-    limit with none of those tokens in it, and would have been refused the
-    moment a declared validator started running against it.
-
-    The fact's own `format_hint` is the better signal and costs no second list:
-    "Dollar amount (e.g. $1,000,000)" is a money box, "Whole number of years
-    (e.g. 5)" is not. That is the line that matters - a count box has no
-    descriptive convention, which is exactly why "no losses" must not be
-    accepted into `loss_history_years`.
-
-    Only ever applies to an answer with NO digits at all. A value that contains
-    digits and still fails to parse is a botched number, not a convention.
-    """
-    if any(ch.isdigit() for ch in text):
-        return False
-    h = (format_hint or "").lower()
-    return "dollar" in h or "amount" in h or "percent" in h
-
-
 def _validate_producer_answer(field: str, answer: str) -> tuple:
     """Lightweight type validation for a producer-entered recommendation answer.
 
@@ -611,6 +643,15 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
         logger.warning("answer interpretation skipped (%s) - falling back to "
                        "type validation only", _ase)
 
+    # A fact declared "Dollar amount or percentage" (Z33-PERCENT, 22 Oct 2026)
+    # is judged by its own check alone (`fact_registry.answer_check`): "2%" is
+    # its answer, and the money keyword in its name ("deductible") never reads
+    # it as dollars.
+    from services.fact_registry import answer_refusal, takes_amount_or_percent
+    if takes_amount_or_percent(field):
+        refusal = answer_refusal(_registry_entry(field), text)
+        return (False, refusal) if refusal else (True, "")
+
     f = (field or "").lower()
     if any(t in f for t in ("percent", "pct", "coinsurance", "itv")):
         ok, msg = validate_percent(text, "Percentage")
@@ -627,24 +668,47 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
             return True, ""  # legitimate non-numeric convention, not garbage
         return False, msg
 
-    # Type check from the fact's own declared validator, when it has one.
-    entry = _registry_entry(field)
-    from services.fact_registry import answer_check
-    checker = answer_check(entry)
-    if callable(checker):
+    # Type check from the fact's own declared validator, when it has one - the
+    # one rule the client's questionnaire reads too (`fact_registry.answer_refusal`:
+    # a broken validator never blocks, "Statutory" / "Waived" in an amount box
+    # is a convention, `wc_el_each_accident`'s name carries no money token).
+    refusal = answer_refusal(_registry_entry(field), text)
+    return (False, refusal) if refusal else (True, "")
+
+
+_TERM_DATE_FIELDS = ("effective_date", "expiration_date")
+
+
+def _term_save_refusal(stored_facts: dict, field: str, value: str,
+                       same_save=None) -> str:
+    """A person's save that would leave the proposed term running backwards is
+    refused (21 Oct 2026 review, M2) - "The expiration date must be after the
+    effective date." - and so is one that would leave it already ENDED, its
+    expiration before today (22 Oct 2026) - "The proposed policy term has
+    already ended. Enter the upcoming term's dates." The pair is judged as the
+    WHOLE save (`same_save`: every box the fix window sends, one request at a
+    time), so moving both dates forward together is never refused box by box;
+    a date the save does not give is the one on file. Each value is read as the
+    answer it is (the one interpretation door), so "7/15/27" and "07/15/2027"
+    agree. Without this a "Confirm these values" save of a backwards or expired
+    pair read off a document made both dates a person's and turned the warning
+    into the hard stop. The one door: `validators.term_save_refusal`."""
+    supplied = {}
+    for key, val in list((same_save or {}).items()) + [(field, value)]:
+        key = str(key or "").strip()
+        text = str(val or "").strip()
+        if key not in _TERM_DATE_FIELDS or not text:
+            continue
         try:
-            ok = bool(checker(text))
-        except Exception:
-            ok = True          # a broken validator must never block a real answer
-        hint = ((entry.get("format_hint") or "") if entry else "").strip()
-        if not ok and _is_descriptive_money_answer(text, hint):
-            return True, ""    # "Statutory" / "Waived" / "Not covered"
-        if not ok:
-            return False, (
-                f"That does not look right for this field. Expected: {hint}"
-                if hint else "That value is not valid for this field."
-            )
-    return True, ""
+            from services.answer_semantics import interpret_answer
+            text = interpret_answer(key, text).value or text
+        except Exception:                                    # noqa: BLE001
+            pass
+        supplied[key] = text
+    if not supplied:
+        return ""
+    from utils.validators import term_save_refusal
+    return term_save_refusal(stored_facts or {}, supplied)
 
 
 @router.post("/api/audit/answer")
@@ -666,7 +730,7 @@ async def answer_recommendation(
         })
 
     from services.answer_routing import (
-        MODE_NARRATIVE, MODE_NONE, MODE_SCHEDULE, answer_mode, refusal_note,
+        MODE_FIELD, MODE_NARRATIVE, MODE_NONE, MODE_SCHEDULE, answer_mode, refusal_note,
     )
     from services.arq_service import (
         NARRATIVE_ANSWER_MAX, append_producer_narrative,
@@ -704,6 +768,16 @@ async def answer_recommendation(
     _routed = answer_mode(req.field, _prev_facts)
     _mode = _routed["mode"]
 
+    # ONE STORE FOR BUILDING DETAILS (21 Oct 2026, Brent 17 Oct item 8): a
+    # per-building COPE fact on a 2+ building package is answered per building
+    # in the location table - a stale card's typed value is refused and the
+    # reply opens the table (`answer_routing.per_building_redirect`).
+    if _mode == MODE_FIELD:
+        from services.answer_routing import per_building_redirect
+        _per_building = per_building_redirect(req.field, _prev_facts)
+        if _per_building:
+            return JSONResponse({"success": False, **_per_building})
+
     if _mode == MODE_NONE:
         return JSONResponse({
             "success": False,
@@ -737,6 +811,9 @@ async def answer_recommendation(
         ok, err = _validate_producer_answer(req.field, req.answer)
         if not ok:
             return JSONResponse({"success": False, "validation_error": err})
+        _term_err = _term_save_refusal(_prev_facts, req.field, req.answer)
+        if _term_err:
+            return JSONResponse({"success": False, "validation_error": _term_err})
         applied, _updated = await apply_producer_answer_to_session(
             req.session_id, req.field, req.answer,
         )
@@ -789,7 +866,8 @@ async def answer_recommendation(
     except Exception as _le:
         logger.warning(f"answer_recommendation: audit log failed: {_le}")
 
-    impact = await recalculate_session_scores(req.session_id)
+    # Before forms, an answer the form recommender reads re-runs it (Z36-S).
+    impact = await recalculate_session_scores(req.session_id, before=_prev_sess or None)
 
     # Read back the recomputed per-form scores so the UI can update each form tile,
     # in the same {new_sqs_score/new_grade/new_tier/new_tier_color} shape the
@@ -798,6 +876,7 @@ async def answer_recommendation(
     # dismiss path.
     updated_forms: dict = {}
     _package_full = None
+    sess: dict = {}
     try:
         sess = await get_processing_session(req.session_id)
         # C2-C (2026-08-24 live run): an ANSWER changes FACTS, so pillar rows,
@@ -806,13 +885,23 @@ async def answer_recommendation(
         # them wholesale; patching only the score left the screen internally
         # inconsistent (package 76 beside a pillar row still reading 25).
         _package_full = sess.get("package_sqs")
+        # Before forms the screen reads the same points as on a page load
+        # (23 Oct 2026): the one helper every pre-form fix reply uses.
+        try:
+            from services.sqs_service import is_pre_form_session
+            if is_pre_form_session(sess) and isinstance(_package_full, dict) and _package_full:
+                _card = await _pre_form_readiness(sess, req.session_id, current_user, scored=_package_full)
+                if _card and _card.get("package_sqs"):
+                    _package_full = _card["package_sqs"]
+        except Exception as _px:                              # noqa: BLE001
+            logger.warning("answer reply: screen points skipped: %s", _px)
         for fid, fdata in (sess.get("generated_forms") or {}).items():
             if not isinstance(fdata, dict):
                 continue
             score = (fdata.get("sqs") or {}).get("sqs_score")
             if score is None:
                 continue
-            g, t, c = _grade_from_score(int(score))
+            g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
             updated_forms[fid] = {
                 "new_sqs_score":  int(score),
                 "new_grade":      g,
@@ -833,6 +922,10 @@ async def answer_recommendation(
         "new_package_tier":      impact.get("tier"),
         "package_sqs":           _package_full,
         "open_recommendations":  open_recs,
+        # The form list the recalculation re-ran (before forms, only when the
+        # answer moved it) - stored above, so the screen gets it too (review of
+        # Z36, 23 Oct).
+        **_refreshed_form_list(impact, sess),
     })
 
 
@@ -891,7 +984,7 @@ async def _forms_payload_with_recs(session_id: str) -> tuple:
             score = sqs.get("sqs_score")
             if score is None:
                 continue
-            g, t, c = _grade_from_score(int(score))
+            g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
             updated_forms[fid] = {
                 "new_sqs_score":   int(score),
                 "new_grade":       g,
@@ -903,7 +996,7 @@ async def _forms_payload_with_recs(session_id: str) -> tuple:
         pkg_score = pkg.get("package_sqs_score")
         if pkg_score is not None:
             pkg_score = int(pkg_score)
-            pkg_tier = _grade_from_score(pkg_score)[1]
+            pkg_tier = _grade_from_score(pkg_score, pkg.get("open_hard_stops"))[1]
     except Exception as ex:
         logger.error(f"_forms_payload_with_recs failed for {session_id}: {ex}")
     return updated_forms, pkg_score, pkg_tier
@@ -1103,8 +1196,9 @@ def _form_selection_view(sess: dict, cross_issues: list,
         can_proceed, _, warning_stops = classify_stops(hard, sess.get("flags") or {})
         # ── THROUGH THE SAME DOOR AS form_routes (2026-09-23) ───────────────
         # This called bare `build_grouped_view`, so the 60-cap the PACKAGE
-        # scorer holds privately - the manufactured property_building_value
-        # conflict, or a hard_cross entry - had no card here, while all five
+        # scorer holds privately - a hard_cross entry (until 19 Oct 2026 also
+        # the manufactured property_building_value conflict, a warning since) -
+        # had no card here, while all five
         # form_routes responses folded it in. Both `resolve_issue` and
         # `reopen_issue` rebuild this screen, so fixing ANY unrelated issue
         # succeeded and simultaneously deleted the only row explaining why the
@@ -1127,6 +1221,12 @@ def _form_selection_view(sess: dict, cross_issues: list,
         "can_proceed_with_warning":  can_proceed,
         "warning_stops":            warning_stops,
     }
+
+
+def _refreshed_form_list(impact: Any, sess: dict) -> dict:
+    """The refreshed form-selection list for the response, or {} (Z36-S)."""
+    from services.arq_service import refreshed_form_list
+    return refreshed_form_list(impact, sess)
 
 
 async def _pre_form_readiness(sess: dict, session_id: str,
@@ -1170,6 +1270,23 @@ async def _pre_form_readiness(sess: dict, session_id: str,
             card = {"package_sqs": with_fix_routes(scored, sess.get("facts") or {}),
                     "key_details": key_details(sess.get("facts") or {},
                                                sess.get("flags") or {})}
+            # The screen's points (23 Oct 2026, owner's live run 715b3c8f): this
+            # shortcut returned the score WITHOUT `complete_screen_shares`, so
+            # after every pre-form fix the per-row points and the "upload a
+            # document" rows vanished until a reload, while the page load
+            # (`form_routes._pre_form_status`) showed them. Both doors now add
+            # the same screen fields.
+            try:
+                from services.sqs_service import complete_screen_shares
+                _pkg, _kd = complete_screen_shares(
+                    sess, session_id, str(sess.get("user_id") or ""),
+                    card["package_sqs"], card["key_details"])
+                if _pkg is not None:
+                    card["package_sqs"] = _pkg
+                if _kd is not None:
+                    card["key_details"] = _kd
+            except Exception as _sx:                          # noqa: BLE001
+                logger.warning("screen shares skipped on the fix reply: %s", _sx)
             dry = await _pre_form_dry_run(
                 session_id, sess.get("facts") or {}, sess.get("flags") or {}, sess)
             if dry is not None:
@@ -1379,6 +1496,51 @@ def _trade_off_note(introduced: dict, open_facts: list, applied_field: str,
     return note
 
 
+class PreviewAnswerRequest(BaseModel):
+    """`field` + `value`, or `answers` [{field, value}]; `shown_fields`: the
+    facts the fix window already shows (never offered again)."""
+    session_id: str
+    field: Optional[str] = None
+    value: Optional[str] = None
+    answers: Optional[List[dict]] = None
+    shown_fields: Optional[List[str]] = None
+    # The window opening (Z38 lane F): read the page as stored ahead of the
+    # first pick, so a pick reads only the page WITH the answer.
+    warm: Optional[bool] = None
+
+
+@router.post("/api/review/preview-answer")
+async def preview_answer(req: PreviewAnswerRequest, current_user: dict = Depends(get_current_user)):
+    """What an answer will ask next, before it is saved (owner, 24 Oct 2026):
+    the review page's items the answer would raise, read on an in-memory copy
+    of the session (`services.answer_preview`). Pre-form only; never persists.
+    An answer the save would refuse previews nothing."""
+    session = await _verify_session_owner(req.session_id, current_user)
+    pairs = [(str(a.get("field") or "").strip(), str(a.get("value") or "").strip())
+             for a in (req.answers or []) if isinstance(a, dict)]
+    if req.field:
+        pairs.append((req.field.strip(), str(req.value or "").strip()))
+    pairs = [(f, v) for f, v in pairs if f and v]
+    if (session or {}).get("generated_forms"):
+        return {"success": True, "follow_ups": []}
+    if not pairs:
+        if req.warm:
+            import asyncio as _aio
+            from services.answer_preview import warm
+            await _aio.to_thread(warm, session, req.session_id, str(current_user["id"]))
+        return {"success": True, "follow_ups": []}
+    for f, v in pairs:
+        ok, _err = _validate_producer_answer(f, v)
+        if not ok:
+            return {"success": True, "follow_ups": []}
+    import asyncio as _aio
+    from services.answer_preview import preview_follow_ups
+    follow_ups = await _aio.to_thread(
+        preview_follow_ups, session, req.session_id, str(current_user["id"]), pairs,
+        req.shown_fields or [])
+    return {"success": True, "follow_ups": follow_ups}
+
+
 @router.post("/api/audit/resolve-issue")
 async def resolve_issue(
     req: ResolveIssueRequest,
@@ -1457,6 +1619,15 @@ async def resolve_issue(
         ok, err = _validate_producer_answer(field, value)
         if not ok:
             return JSONResponse({"success": False, "validation_error": err})
+        _term_err = _term_save_refusal(_pre_facts, field, value, req.same_save)
+        if _term_err:
+            return JSONResponse({"success": False, "validation_error": _term_err})
+        # One store for building details (21 Oct 2026, Brent 17 Oct item 8): a
+        # per-building COPE fact on 2+ buildings is never one typed value.
+        from services.answer_routing import per_building_redirect
+        _per_building = per_building_redirect(field, _pre_facts)
+        if _per_building:
+            return JSONResponse({"success": False, **_per_building})
         try:
             from services.issue_registry import resolution_for as _res_for
             _before = _issues_bound_to_fact(
@@ -1489,7 +1660,12 @@ async def resolve_issue(
         _pre_session = await _snapshot()
         applied, _ = await append_producer_narrative(req.session_id, text)
         if not applied:
-            return JSONResponse({"success": False, "message": "Could not save the explanation."})
+            # Say WHY (live bcfd175b, 25 Oct: a "TBD" narrative got "Could not
+            # save the explanation."): a placeholder is not an explanation.
+            return JSONResponse({"success": False, "message": (
+                "That reads as 'not known yet' rather than an explanation. Write what "
+                "applies, or leave it for later." if len(text.split()) <= 3 else
+                "Could not save the explanation.")})
         # The card this explains is answered (15 Oct 2026): its code is kept with
         # the explanation, and a rule whose only fix is an explanation stops
         # counting it (issue_registry.explained_issue_codes). "Open again" takes
@@ -1640,7 +1816,8 @@ async def resolve_issue(
             logger.warning(f"resolve_issue: fix receipt not recorded: {_ux}")
 
     # Re-run field + cross-form rules and per-form / package SQS from updated facts.
-    impact = await recalculate_session_scores(req.session_id)
+    # Before forms, an answer the form recommender reads re-runs it (Z36-S).
+    impact = await recalculate_session_scores(req.session_id, before=_pre_session)
     if not isinstance(impact, dict):
         impact = {}
 
@@ -1656,7 +1833,7 @@ async def resolve_issue(
             score = (fdata.get("sqs") or {}).get("sqs_score")
             if score is None:
                 continue
-            g, t, c = _grade_from_score(int(score))
+            g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
             updated_forms[fid] = {
                 "new_sqs_score":  int(score),
                 "new_grade":      g,
@@ -1766,6 +1943,8 @@ async def resolve_issue(
         # Pre-form only: `package_sqs` (the whole door payload) and
         # `key_details`. Absent on the editor and Clarity / Lite.
         **(_review_card or {}),
+        # Pre-form only, when the answer moved the recommended forms (Z36-S).
+        **_refreshed_form_list(impact, sess),
         # Editor only (item 16): the whole package, cap fields included.
         **_editor_score_refresh(sess),
         # After generation: the package page's Key Details list (item 1).
@@ -1820,7 +1999,7 @@ async def _issue_still_live(session_id: str, issue_id) -> bool:
     if not issue_id:
         return False
     try:
-        from services.issue_registry import issue_id_for
+        from services.issue_registry import issue_id_for, review_item_id_of
         _sess = await get_processing_session(session_id)
         for i in (_sess.get("cross_issues_last") or []) + (_sess.get("structured_issues") or []):
             if not isinstance(i, dict):
@@ -1830,10 +2009,19 @@ async def _issue_still_live(session_id: str, issue_id) -> bool:
                                         if i.get("message") else None)
             if iid == issue_id:
                 return True
+            # ...or, folded into one review item (the GL window, 21 Oct 2026),
+            # the item's own id - the id its status was saved under.
+            if review_item_id_of(i) == issue_id:
+                return True
         return False
     except Exception as _lx:                                      # noqa: BLE001
         logger.warning(f"reopen_issue: live-check failed: {_lx}")
         return False
+
+
+# The status reason a reopened item keeps when its documents now answer it
+# (frontend twin: resolvedIssues.ANSWERED_BY_DOCUMENTS).
+ANSWERED_BY_DOCUMENTS = "Answered by your documents."
 
 
 @router.post("/api/audit/reopen-issue")
@@ -1873,6 +2061,13 @@ async def reopen_issue(
     # services/issue_fix_undo.py). Put all of it back - a typed value, a table,
     # an ACORD 101 note alike - so the points the fix earned come off the score.
     _undo_state, _undo_info = "none", {}
+    # The row before anything is taken back: an undone answer the form
+    # recommender reads re-runs it, both ways (Z36-S).
+    _pre_reopen = None
+    try:
+        _pre_reopen = await get_processing_session(req.session_id)
+    except Exception as _prx:                                     # noqa: BLE001
+        logger.warning(f"reopen_issue: pre-undo snapshot failed: {_prx}")
     if req.issue_id:
         try:
             from services.issue_fix_undo import undo_fix
@@ -1995,7 +2190,7 @@ async def reopen_issue(
             "success": True, "cleared": False, "still_live": bool(_live_now),
         })
 
-    _impact = await recalculate_session_scores(req.session_id)
+    _impact = await recalculate_session_scores(req.session_id, before=_pre_reopen)
     if not isinstance(_impact, dict):
         _impact = {}
     sess = await get_processing_session(req.session_id)
@@ -2008,7 +2203,7 @@ async def reopen_issue(
             score = (fdata.get("sqs") or {}).get("sqs_score")
             if score is None:
                 continue
-            g, t, c = _grade_from_score(int(score))
+            g, t, c = _grade_from_score(int(score), (fdata.get("sqs") or {}).get("open_hard_stops"))
             updated_forms[fid] = {
                 "new_sqs_score":  int(score),
                 "new_grade":      g,
@@ -2033,9 +2228,39 @@ async def reopen_issue(
     if _review_card is not None:
         package_sqs = _review_card["package_sqs"] or {}
 
+    # Taken back, but nothing on the page asks it any more - the documents now
+    # answer it (owner, 24 Oct 2026: the claims answer reopened beside loss runs
+    # showing 12 claims and vanished). It stays in Resolved, saying so.
+    answered_by_documents = False
+    try:
+        if req.issue_id and not sess.get("generated_forms") and _review_card is not None:
+            from services.issue_fix_undo import load_receipts
+            _rfacts = set((load_receipts(_pre_reopen or {}).get(req.issue_id) or {}).get("facts") or {})
+            asked: set = set()
+            for r in (package_sqs.get("top_recommendations") or []):
+                if isinstance(r, dict):
+                    asked.update(x for x in [r.get("field")] + list(r.get("merged_fields") or []) if x)
+                    asked.update((r.get("resolution") or {}).get("facts") or [])
+            for it in ((_review_card.get("key_details") or {}).get("missing_items") or []):
+                asked.update(((it or {}).get("resolution") or {}).get("facts") or [])
+            for i in (sess.get("structured_issues") or []) + (sess.get("cross_issues_last") or []):
+                if isinstance(i, dict):
+                    asked.update(((i.get("resolution") or {}).get("facts")) or [])
+            if _rfacts and not (_rfacts & asked) and not await _issue_still_live(req.session_id, req.issue_id):
+                await set_issue_status(
+                    session_id=req.session_id, issue_id=req.issue_id, status="resolved",
+                    reason=ANSWERED_BY_DOCUMENTS, user_id=str(current_user["id"]),
+                    form_id=req.form_id, rule_code=req.code, message=req.message,
+                    severity=("recommendation" if str(req.issue_id).startswith("rec:")
+                              else "overview" if str(req.issue_id).startswith("kd:") else None))
+                answered_by_documents = True
+    except Exception as _abd:                                    # noqa: BLE001
+        logger.warning(f"reopen_issue: answered-by-documents check skipped: {_abd}")
+
     return JSONResponse({
         "success":               True,
         "cleared":               True,
+        "answered_by_documents": answered_by_documents,
         "updated_forms":         updated_forms,
         "new_package_sqs_score": package_sqs.get("package_sqs_score"),
         "new_package_tier":      package_sqs.get("tier"),
@@ -2049,6 +2274,8 @@ async def reopen_issue(
         **_form_selection_view(sess, cross_issues, package_sqs=package_sqs),
         # Pre-form only: `package_sqs` + `key_details`. Absent elsewhere.
         **(_review_card or {}),
+        # Pre-form only, when the undo moved the recommended forms (Z36-S).
+        **_refreshed_form_list(_impact, sess),
         # Editor only (item 16): the whole package, cap fields included.
         **_editor_score_refresh(sess),
         # After generation: the package page's Key Details list (item 1).

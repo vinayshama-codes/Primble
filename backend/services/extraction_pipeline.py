@@ -1124,6 +1124,17 @@ async def _finalize_pipeline(
                     return True
             return True
 
+        # Z37 lane B (Choice Electric X4): on an umbrella + excess tower the
+        # excess policy's "Follow Form Excess Liability" heading describes the
+        # EXCESS layer. The umbrella's follow form comes only from documents
+        # that are not the upper layers' own.
+        try:
+            from services.umbrella_layers import (
+                settle_umbrella_follow_form, upper_layer_documents)
+            settle_umbrella_follow_form(merged_facts)
+            _upper_docs = upper_layer_documents(merged_facts)
+        except Exception:                                      # noqa: BLE001
+            _upper_docs = set()
         _need_schedule    = not _fact_present("schedule_of_underlying_insurance")
         _need_follow_form = not _fact_present("umbrella_follow_form")
         if _need_schedule or _need_follow_form:
@@ -1146,7 +1157,9 @@ async def _finalize_pipeline(
                         "confidence": "filled", "source": "policy_doc_text",
                     }
                     _need_schedule = False
-                if _need_follow_form and _has_explicit_follow_form(_utext):
+                _udoc_name = str(_udoc.get("filename") or _udoc.get("doc_id") or "").strip()
+                if _need_follow_form and _udoc_name not in _upper_docs \
+                        and _has_explicit_follow_form(_utext):
                     merged_facts["umbrella_follow_form"] = {
                         # Value intentionally contains "follows form" so the umbrella
                         # scorer's phrase detection credits it (parity with extraction).
@@ -1522,16 +1535,13 @@ async def _finalize_pipeline(
         # ── BLOCKING MEANS HARD STOP, AND RELEVANCE IS A PRECONDITION (C75) ───
         # Two owner rules applied here, both to the same loop.
         #
-        # SEVERITY. The client's Property Integrity directive - quoted verbatim
-        # in underwriting_consistency.GENERATION_BLOCKING_RECONCILABLE_KEYS -
-        # is "generate a warning and require review BEFORE FORMS ARE
-        # GENERATED". That is blocking, and `calculate_package_sqs` has always
-        # treated it as a hard stop (it caps the score at 60). The display
-        # called it a warning, so the producer saw a soft item that was
-        # actually costing 8 points and holding up generation. Owner's rule:
-        # "if anything can be blocking, put it in hard stop". The two
-        # DECLARED sets in underwriting_consistency are the authority - no
-        # local list, so adding a key there is still a one-line change.
+        # SEVERITY. Owner's rule: "if anything can be blocking, put it in hard
+        # stop" - and since 19 Oct 2026 (Brent: hard stops only for what is
+        # essential) only documents naming different companies block:
+        # underwriting_consistency.READY_BLOCKING_RECONCILABLE_KEYS (applicant
+        # name, FEIN). Dates and building value are warnings. The DECLARED set
+        # is the authority - no local list, so adding a key there is still a
+        # one-line change.
         #
         # RELEVANCE. Owner: "this is not a mandatory hard stop, it should only
         # be shown if declaration page has some relevant data". A building
@@ -1548,9 +1558,11 @@ async def _finalize_pipeline(
         # so the stop a scorer applies and the card drawn here cannot differ.
         # A contract-scoped difference on a multi-policy package is not
         # blocking - the reconciler decides that once (see
-        # underwriting_consistency.CONTRACT_SCOPED_HARD_STOP_KEYS).
+        # underwriting_consistency.CONTRACT_SCOPED_HARD_STOP_KEYS). Nor is a
+        # name / FEIN difference only an unverified source raises (21 Oct 2026,
+        # `document_tags.is_verified_source`) - hence the documents.
         from services.stops_now import underwriting_conflict_stops
-        for _key, _uw_msg, _blocking in underwriting_conflict_stops(underwriting, mflags):
+        for _key, _uw_msg, _blocking in underwriting_conflict_stops(underwriting, mflags, active_docs):
             if _blocking:
                 hard_stops = list(hard_stops) + [_uw_msg]
             else:
@@ -2059,7 +2071,12 @@ async def apply_document_action(
         # type-specific extraction behaviour the first (mis-classified) pass
         # skipped. Reuses the stored OCR text (no re-OCR). Non-fatal — on failure
         # we keep the previously extracted facts so the correction still applies.
-        if nt in _REEXTRACT_DOC_TYPES and target.get("text"):
+        # A CONFIRMED type (the same type sent back - the review's "Confirm
+        # type", 22 Oct 2026) changes only who set it: the document already
+        # carries the type, so its reading is the one that type was given, and
+        # a second LLM reading is not repeatable - a confirmation could move
+        # facts and scores. Never re-read on one.
+        if nt in _REEXTRACT_DOC_TYPES and nt != prev_type and target.get("text"):
             try:
                 _raw = await extract_facts_long(
                     target["text"], nt,
@@ -2127,8 +2144,24 @@ async def reclassify_document(
     docs = list(session.get("docs") or [])
     if not docs:
         raise ValueError("reclassify_no_docs")
+    import copy as _copy
+    docs_before = _copy.deepcopy(docs)
+    docs = _copy.deepcopy(docs)
 
     target, prev_type = await apply_document_action(docs, doc_id, action, new_doc_type)
+
+    # What only the changed document stated (or the merge derived from it) leaves
+    # with it - the after-forms documents door's own rule, before forms too (owner,
+    # 24 Oct 2026: both loss runs excluded and the score did not move - their
+    # period, claims and rows stayed in the stored facts). A person's answer and
+    # anything the re-merge still produces are kept (`_document_retractions`).
+    retract: List[str] = []
+    try:
+        from services.session_documents import merge_only_keys, stated_fact_keys
+        derived_gone = merge_only_keys(docs_before, docs)
+        retract = sorted((stated_fact_keys(docs_before) - stated_fact_keys(docs)) | set(derived_gone))
+    except Exception as _rx:                                   # noqa: BLE001
+        logger.warning("reclassify: retractions not planned: %s", _rx)
 
     logger.info(
         "reclassify_document: session=%s doc=%s action=%s %s->%s (user=%s)",
@@ -2149,6 +2182,7 @@ async def reclassify_document(
         client_answer_conflicts=session.get("client_answer_conflicts") or {},
             prior_facts=session.get("facts") or {},
             prior_flags=session.get("flags") or {},
+            retract_document_keys=retract,
     )
     # Surface the before/after classification so the route can record an accurate
     # §4.2 audit row without re-deriving the previous type.

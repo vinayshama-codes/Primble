@@ -25,7 +25,8 @@ from services.answer_semantics import VALUE, interpret_answer
 
 # The two genuinely binary questions. "Other" on "have you had claims - yes or
 # no?" would be nonsense, so they are the documented exceptions to the rule.
-_BINARY = {"loss_history_no_prior_losses_indicator", "new_venture_indicator"}
+_BINARY = {"loss_history_no_prior_losses_indicator", "new_venture_indicator",
+           "loss_run_ownership_confirmed"}
 
 
 def test_the_catalogue_is_not_empty():

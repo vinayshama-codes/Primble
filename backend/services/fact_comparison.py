@@ -43,7 +43,7 @@ from services.fact_equivalence import (          # re-exported on purpose
 from services.normalization import (
     normalize_value, normalize_fein, normalize_carrier, strict_entity_key,
     entity_identity_conflict as _entity_identity_conflict,
-    entity_compact_key, deglue_entity_text,
+    entity_compact_key, deglue_entity_text, stated_percentage,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ __all__ = [
     "SAME", "DIFFERENT", "INCOMPARABLE", "PackageContext",
     "ComparisonResult", "compare", "conflict", "values_agree", "verdict",
     "identifiers_match", "feins_match", "carriers_same_family", "same_agency",
-    "build_context",
+    "build_context", "comparison_key",
     "document_witnesses", "entities_materially_differ",
     "same_policy_contract", "policy_contract_groups",
 ]
@@ -113,6 +113,37 @@ def build_context(merged_facts: Optional[dict] = None,
     except Exception as exc:                                 # noqa: BLE001
         logger.warning("fact_comparison: package context unavailable - %s", exc)
         return None
+
+
+def comparison_key(fact_key: str, value: Any) -> str:
+    """The first-pass grouping key of one printing: `normalize_value`, except
+    on a money fact (22 Oct 2026, Z33-PERCENT), where two printings that are
+    not the same amount never share a key:
+      * a percentage is keyed by its own parsed figure and the words around it
+        ("2%" = "2 percent" = "2 %", "1-1/2%" = "1.5%", and "2.5%" is never
+        "25%" whatever the text normaliser makes of a decimal point);
+      * a dollar-marked figure a percentage could share (0 to 100: "$2") is
+        keyed apart from the bare figure ("2"), so "$2", "2" and "2%" are
+        judged pair by pair in every document order, never folded first by
+        position. "$2,000" and "2000" still share their key.
+    The typed comparator then decides what is left. Shared with the Data
+    Consistency picker's own grouping (`underwriting_consistency._normalize`)."""
+    key = normalize_value(fact_key, value)
+    if _fe.value_kind(fact_key) != _fe.KIND_MONEY:
+        return key
+    # The percentage is read before the empty-key exit: a glyph-only "½%" has
+    # no ASCII digit, so its text key is "" (review C, 22 Oct 2026).
+    pct = stated_percentage(value)
+    if pct is not None:
+        words = normalize_value(fact_key, f"{pct['before']} {pct['after']}")
+        return f"{pct['figure']}%" + (f" {words}" if words else "")
+    if not key:
+        return key
+    if _fe._CURRENCY_MARK_RE.search(str(value)):
+        amounts = _fe.money_amounts(value)
+        if len(amounts) == 1 and 0 <= float(amounts[0]) <= 100:
+            return f"{key}$"
+    return key
 
 
 def _usable(values: Sequence[Any], fact_key: str = "") -> List[int]:
@@ -185,7 +216,7 @@ def compare(fact_key: str, values: Sequence[Any],
                 # OCR ("EMCProperty&CasualtyCompany") is the same printing.
                 key = entity_compact_key(values[i])
             else:
-                key = normalize_value(fact_key, values[i])
+                key = comparison_key(fact_key, values[i])
             key = key or f"__raw__{str(values[i]).strip().lower()}"
             if key not in by_norm:
                 by_norm[key] = []
@@ -349,16 +380,29 @@ def policy_contract_groups(values: Sequence[Any]) -> List[List[int]]:
     closure is computed over every pair), which matters because the merge sees
     documents in upload order and must not produce a different answer for the
     same package uploaded the other way round.
+
+    A NUMBER PRINTED WITHOUT ITS PREFIX ("7263-26" for "BBC7263-26", 22 Oct
+    2026) joins the prefixed contract only when every prefixed printing it
+    matches carries ONE prefix. A package numbering two policies off one core
+    ("CPP0123456" / "CA0123456") prints a bare "0123456" that matches both -
+    it cannot be placed, so it stays its own group and never bridges the two
+    (which a plain closure would do).
     """
     n = len(values or [])
     adj: Dict[int, set] = {i: set() for i in range(n)}
+    links: List[tuple] = []               # (bare index, prefixed index, prefix)
     for i in range(n):
         for j in range(i + 1, n):
-            if same_policy_contract(values[i], values[j]):
+            if _fe._same_policy_contract_as_printed(values[i], values[j]):
                 adj[i].add(j)
                 adj[j].add(i)
+                continue
+            prefix = _fe._number_without_its_prefix(values[i], values[j])
+            if prefix is not None:
+                bare_i = _fe._policy_alnum(values[i])[1][:1].isdigit()
+                links.append((i, j, prefix) if bare_i else (j, i, prefix))
+    base: List[List[int]] = []
     seen: set = set()
-    out: List[List[int]] = []
     for start in range(n):
         if start in seen:
             continue
@@ -370,8 +414,30 @@ def policy_contract_groups(values: Sequence[Any]) -> List[List[int]]:
             comp.add(node)
             stack.extend(adj[node] - comp)
         seen |= comp
-        out.append(sorted(comp))
-    return out
+        base.append(sorted(comp))
+    if not links:
+        return base
+    comp_of = {i: k for k, comp in enumerate(base) for i in comp}
+    families: Dict[int, Dict[str, set]] = {}
+    for bare, full, prefix in links:
+        families.setdefault(comp_of[bare], {}).setdefault(prefix, set()).add(comp_of[full])
+    parent = list(range(len(base)))
+
+    def _root(k: int) -> int:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    for bare_comp, by_prefix in families.items():
+        if len(by_prefix) != 1:
+            continue                       # two prefixes: the number cannot be placed
+        for full_comp in next(iter(by_prefix.values())):
+            parent[_root(full_comp)] = _root(bare_comp)
+    merged: Dict[int, List[int]] = {}
+    for k, comp in enumerate(base):
+        merged.setdefault(_root(k), []).extend(comp)
+    return sorted((sorted(g) for g in merged.values()), key=lambda g: g[0])
 
 
 # ── Document role (client 1.2: "carrier role", "insured/producer role") ──────
@@ -431,6 +497,12 @@ _ROLE_BLIND_FACTS: Dict[str, frozenset] = {
         "effective_date", "expiration_date",
         "policy_effective_date", "policy_expiration_date",
         "coverage_lines", "lines_of_business",
+        # Z41 (25 Oct 2026): the prior_* twins of the term above. A loss run's
+        # "Policy Periods 01/01/2021 - 01/01/2025" became the prior term and
+        # won the ACORD 125 prior grid (extraction_service.
+        # drop_loss_run_policy_terms removes them per document as well).
+        "prior_carrier", "prior_carrier_naic", "prior_policy_number",
+        "prior_effective_date", "prior_expiration_date",
     }),
     "certificate": frozenset({
         # Values of the risk. A certificate states LIMITS only.

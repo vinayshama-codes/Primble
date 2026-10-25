@@ -38,6 +38,7 @@ from models.schemas import ReopenIssueRequest, ResolveIssueRequest   # noqa: E40
 _SID = "sid-reopen-9oct"
 _UID = "u-reopen-9oct"
 _EXPIRED_CODE = "legacy_policy_term_expired"
+_GL_CODE = "legacy_gl_no_class_codes"
 _FRONT = Path(__file__).resolve().parents[2] / "frontend" / "src"
 
 
@@ -50,7 +51,8 @@ def _producer(value):
 
 
 def _row(**over):
-    """A package whose producer-typed term ended 90 days ago - a hard stop capping at 60."""
+    """A package whose producer-typed term ended 90 days ago - a hard stop capping at 60
+    (the cap is back, 20 Oct 2026) and blocking Submission Ready (19 Oct 2026)."""
     exp = datetime.now() - timedelta(days=90)
     eff = exp - timedelta(days=365)
     base = {
@@ -189,16 +191,34 @@ _ROWS = [{"address_line1": "100 Main St", "address_city": "Denver", "address_sta
 def test_reopening_a_typed_fix_puts_the_score_back_exactly(over):
     s = _fresh(**over)
     before_score, before_term = s.score(), copy.deepcopy(s.store["facts"]["expiration_date"])
-    assert s.store["package_sqs"]["cap_applied"] == 60
+    # (20 Oct 2026, the cap is back) the ended term holds the package at 60 - and
+    # (19 Oct 2026, Brent) blocks Submission Ready.
+    pkg = s.store["package_sqs"]
+    assert pkg["cap_applied"] == 60 and pkg["open_hard_stops"] == 1
+    blockers = list(pkg["ready_blockers"])
+    assert any(m.startswith("Policy term already expired") for m in blockers)
     out = s.fix("iss-term", mode="field", field="expiration_date", value=_NEW_TERM, code=_EXPIRED_CODE)
     assert out["success"] is True and s.score() > before_score           # the fix earned points
+    assert s.store["package_sqs"]["ready_blockers"] == []                # ...and unblocked
     back = s.reopen("iss-term", code=_EXPIRED_CODE)
     assert back["cleared"] is True
     assert s.score() == before_score                                     # ...and they came off
     assert s.store["package_sqs"]["cap_applied"] == 60
+    assert s.store["package_sqs"]["ready_blockers"] == blockers          # the blocker is back
     # The value it REPLACED is back - not a blank (the old reopen deleted the fact).
     assert s.store["facts"]["expiration_date"] == before_term
     assert undo.load_receipts(s.store) == {}                             # the receipt is used up
+    # A typed fix under the open 60: the GL class code its warning asks for. Its points
+    # land on the raw score while the cap holds the number, and the reopen takes them off.
+    before_raw = s.store["package_sqs"]["raw_sqs_score"]
+    out = s.fix("iss-gl", mode="field", field="gl_class_codes_by_location", value="91580", code=_GL_CODE)
+    assert out["success"] is True and s.store["package_sqs"]["raw_sqs_score"] > before_raw
+    assert s.score() == before_score                                     # the 60 still holds
+    assert s.reopen("iss-gl", code=_GL_CODE)["cleared"] is True
+    assert s.store["package_sqs"]["raw_sqs_score"] == before_raw         # ...and they came off
+    assert s.score() == before_score
+    assert "gl_class_codes_by_location" not in s.store["facts"]
+    assert undo.load_receipts(s.store) == {}
 
 
 def test_a_fixed_form_box_comes_back_too():
@@ -397,7 +417,7 @@ def test_adding_a_form_is_never_recorded_for_undo():
     assert 'if mode != "add_form" and req.issue_id and _pre_session is not None:' in body
     # recorded between the write and the re-score
     assert body.index("record_fix(req.session_id, req.issue_id, _receipt)") < \
-        body.index("impact = await recalculate_session_scores(req.session_id)")
+        body.index("impact = await recalculate_session_scores(req.session_id")
 
 
 # ══ The rules, unit by unit ═══════════════════════════════════════════════════

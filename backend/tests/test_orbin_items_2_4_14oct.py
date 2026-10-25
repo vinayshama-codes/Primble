@@ -58,14 +58,23 @@ def _remember(row, pkg, monkeypatch):
 
 
 def test_the_pre_form_score_is_saved_for_the_dashboard(monkeypatch):
-    w = _remember({"facts": {}}, {"package_sqs_score": 72, "tier": "Needs Work"}, monkeypatch)
-    assert w == [("s1", {"pre_form_score": {"package_sqs_score": 72, "tier": "Needs Work"}})]
+    # (19 Oct 2026, Brent: "Quote Ready" needs no open hard stop) - the copy carries the readiness flag too.
+    pkg = {"package_sqs_score": 92, "tier": "Almost There", "submission_ready": False}
+    snap = {"package_sqs_score": 92, "tier": "Almost There", "submission_ready": False}
+    w = _remember({"facts": {}}, pkg, monkeypatch)
+    assert w == [("s1", {"pre_form_score": snap})]
     # unchanged -> no write; forms exist -> the saved package score rules, no write
-    same = {"pre_form_score": {"package_sqs_score": 72, "tier": "Needs Work"}}
-    assert _remember(same, {"package_sqs_score": 72, "tier": "Needs Work"}, monkeypatch) == []
+    same = {"pre_form_score": dict(snap)}
+    assert _remember(same, pkg, monkeypatch) == []
     assert _remember({"generated_forms": {"ACORD_125": {}}}, {"package_sqs_score": 72}, monkeypatch) == []
+    # a copy saved before 19 Oct 2026 (no flag) is rewritten once, with it
+    old = {"pre_form_score": {"package_sqs_score": 92, "tier": "Almost There"}}
+    assert _remember(old, pkg, monkeypatch) == [("s1", {"pre_form_score": snap})]
     # no score (integrity review, scorer failure) clears a stale copy
     assert _remember(same, None, monkeypatch) == [("s1", {"pre_form_score": None})]
+    # the dashboard reads the flag from the same score as the number
+    repo = (ROOT / "backend/repositories/session_repository.py").read_text()
+    assert "ELSE data->'pre_form_score'->>'submission_ready' END" in repo
 
 
 def test_only_the_pre_form_actions_write_it_never_a_page_view():

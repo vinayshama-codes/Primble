@@ -5,6 +5,7 @@ import ScheduleTable from './ScheduleTable';
 import SignatureQuestion from './SignatureQuestion';
 import { answersForShown, shownQuestions } from '../../utils/followUps';
 import { isBlankRow } from '../../utils/scheduleImport';
+import { isAmountBoxConvention, normalizeAmountOrPercent, normalizeCurrency } from '../../utils/answerFormats';
 // BUG-01: the progress rule lives in one pure module so the ring, the badge,
 // the per-question styling and the submission receipt cannot disagree.
 import {
@@ -72,7 +73,9 @@ function isPhoneField(fieldName) {
 // ---------------------------------------------------------------------------
 // The backend now sends field_type "currency" | "date" | "code" | "number" for
 // questions that hold exactly one scalar (see _FIELD_INPUT_TYPE in
-// arq_service.py). These helpers mirror the SERVER normalizers one-for-one, so
+// arq_service.py), and "amount_or_percent" for a fact declared "Dollar amount
+// or percentage" (a wind / earthquake deductible: "$5,000" or "2%"). These
+// helpers mirror the SERVER normalizers one-for-one, so
 // what the client sees on blur is exactly what gets stored - no surprise
 // reformatting after submit.
 //
@@ -116,26 +119,12 @@ function normalizeDate(raw) {
   return null;
 }
 
-// Mirrors _normalize_currency, including the "keep the trailing qualifier"
-// rule ("$20,000 per month") and the "leave compound answers alone" guard
-// ("$1,000,000 / $2,000,000" is two amounts, not one).
-function normalizeCurrency(raw) {
-  const s = (raw || '').trim();
-  if (!s) return null;
-  const m = s.match(/^\$?\s*([\d,]*\.?\d+)\s*([kKmM])?\b(.*)$/);
-  if (!m) return null;
-  let amount = parseFloat(m[1].replace(/,/g, ''));
-  if (!isFinite(amount)) return null;
-  const suffix = (m[2] || '').toLowerCase();
-  if (suffix === 'k') amount *= 1000;
-  if (suffix === 'm') amount *= 1000000;
-  const rest = (m[3] || '').trim().replace(/^[,;]+|[,;]+$/g, '');
-  if (rest && /^[/\-]?\s*\$?[\d,]/.test(rest)) return null;
-  const body = amount % 1
-    ? `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.replace('.00', '')
-    : `$${amount.toLocaleString('en-US')}`;
-  return rest ? `${body} ${rest}` : body;
-}
+// normalizeCurrency (mirrors _normalize_currency) and normalizeAmountOrPercent
+// (mirrors _normalize_amount_or_percent - a wind / earthquake deductible takes
+// "$5,000" or "2%") live in utils/answerFormats.js, so a test can run them
+// beside the server's.
+const AMOUNT_OR_PERCENT = 'amount_or_percent';
+const AMOUNT_OR_PERCENT_ERROR = 'Enter a dollar amount or a percentage (e.g. $5,000 or 2%)';
 
 // Mirrors _normalize_code. FEIN (9 digits) is written XX-XXXXXXX on ACORD.
 function normalizeCode(raw, digits) {
@@ -309,6 +298,11 @@ export default function ClientQuestionnaire({ token }) {
       } else if (ft === 'currency') {
         if (!normalizeCurrency(val))
           errors[fn] = 'Enter a dollar amount (e.g. $200,000)';
+      } else if (ft === AMOUNT_OR_PERCENT) {
+        // "None", "Not covered", "Same as AOP" are what the box holds when
+        // there is no figure - the server's submit check takes the same words.
+        if (!normalizeAmountOrPercent(val) && !isAmountBoxConvention(val))
+          errors[fn] = AMOUNT_OR_PERCENT_ERROR;
       } else if (ft === 'code') {
         const digits = q.code_digits || 0;
         const got    = val.replace(/\D/g, '');
@@ -1058,7 +1052,8 @@ export default function ClientQuestionnaire({ token }) {
               // Figure 18: single-scalar structured types get a real input
               // instead of a free-form textarea.
               const isStructured = fieldType === 'currency' || fieldType === 'date'
-                                || fieldType === 'code'     || fieldType === 'number';
+                                || fieldType === 'code'     || fieldType === 'number'
+                                || fieldType === AMOUNT_OR_PERCENT;
 
               return (
                 <div
@@ -1390,6 +1385,10 @@ export default function ClientQuestionnaire({ token }) {
                             } else if (fieldType === 'currency') {
                               out = normalizeCurrency(val) || val;
                               if (!normalizeCurrency(val)) err = 'Enter a dollar amount (e.g. $200,000)';
+                            } else if (fieldType === AMOUNT_OR_PERCENT) {
+                              out = normalizeAmountOrPercent(val) || val;
+                              if (!normalizeAmountOrPercent(val) && !isAmountBoxConvention(val))
+                                err = AMOUNT_OR_PERCENT_ERROR;
                             } else if (fieldType === 'code') {
                               out = normalizeCode(val, digits) || val;
                               const got = val.replace(/\D/g, '');
@@ -1425,10 +1424,13 @@ export default function ClientQuestionnaire({ token }) {
                                 // and an empty box looking like a zero payroll
                                 // is exactly the wrong thing to show.
                                 fieldType === 'currency' ? 'Amount...' :
+                                fieldType === AMOUNT_OR_PERCENT ? 'Amount or percentage...' :
                                 fieldType === 'code'     ? (digits ? `${digits} digits` : 'Your answer...') :
                                                            'Your answer...'
                               }
-                              inputMode={fieldType === 'currency' ? 'decimal' : 'numeric'}
+                              // A percentage needs the "%" key, which a numeric keypad lacks.
+                              inputMode={fieldType === 'currency' ? 'decimal'
+                                : fieldType === AMOUNT_OR_PERCENT ? 'text' : 'numeric'}
                               autoComplete="off"
                               style={{
                                 width: '100%', padding: '9px 12px', fontSize: 13,

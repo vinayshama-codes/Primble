@@ -7,6 +7,13 @@ row with no fix window, and the Recommendations section lists only rows it can o
 so the page showed nothing. The row is now listed after forms - only while the forms'
 needs-attention lists hold Please verify values, the one thing "Confirm all" can fix -
 and "Open to fix" opens the form with the most of them.
+
+REVERSED 23 Oct 2026 (Brent, Z34-1 #1: "Yes, this is acceptable"): the package score
+is independent of the forms, so the fill rate is no slice of it and there is no
+"last point on the forms" to list. The fill-rate row and the Overview's "your last
+points are on the forms" notice are gone; the forms' to-dos are the "Forms ready"
+meter (tests/test_build25_score.py). Every test below that pinned the row or the
+notice pinned the 14 Oct rule - the TESTS were updated, the code is the new rule.
 """
 import json
 import pathlib
@@ -71,19 +78,11 @@ def _build(tmp_path, pkg, attention, forms_exist=True):
 
 @needs_node
 def test_the_live_99_lists_its_last_point(tmp_path):
+    # 23 Oct 2026: no fill-rate row, after forms or before; the two Missing boxes on
+    # ACORD 101 still stay in "your forms need".
     o = _build(tmp_path, _pkg(), ATTENTION)
-    fill = [s for s in o["score"] if s["id"] == "score:fill"]
-    assert len(fill) == 1
-    row = fill[0]
-    assert row["title"] and "Form Fill Rate 93%" in row["detail"] and "3 forms" in row["detail"]
-    assert '"Confirm all"' in row["detail"]
-    # the form with the most Please verify values opens first; Missing-only forms are not counted
-    assert row["resolution"] == {"mode": "forms", "form_id": "ACORD_28",
-                                 "forms": ["ACORD_28", "ACORD_125", "ACORD_131__excess"]}
-    assert row["points"] == {"points": 1, "exact": False}
-    # the two Missing boxes on ACORD 101 stay in "your forms need"
-    assert o["consider"] == "1 to raise your score \u00b7 2 your forms need"
-    assert "—" not in row["detail"]
+    assert not [s for s in o["score"] if s["id"] == "score:fill"]
+    assert o["consider"] == "2 your forms need"
 
 
 @needs_node
@@ -104,31 +103,24 @@ def test_not_listed_when_confirm_all_cannot_move_it(tmp_path):
 
 @needs_node
 def test_a_tier_gap_row_and_the_fill_row_are_both_listed(tmp_path):
-    # Tier 1 incomplete: the scorer's structural row asks for the box (a field),
-    # and the fill slice's points come from its own bound
+    # Tier 1 incomplete: the scorer's structural row asks for the box (a field) and
+    # is listed; a fill rate below 100 adds no row any more (23 Oct 2026).
     tier_row = dict(FILL_ROW, field="mailing_address", answer_mode="field",
                     action="Applicant mailing address", points_available=3.2)
-    # a 3.2-point tier gap and a 1.47-point fill gap leave the score near 95
-    # (15 Oct 2026: the fixture said 99, which no package with these gaps has)
     o = _build(tmp_path, _pkg(fill=80, rows=[tier_row], score=95), ATTENTION)
     ids = [s["id"] for s in o["score"]]
-    assert "score:fill" in ids and any(i != "score:fill" for i in ids)
-    fill = [s for s in o["score"] if s["id"] == "score:fill"][0]
-    # (100 - 80) x 0.25 x 0.25 / 0.85 = 1.47 -> "up to +1 pts"
-    assert fill["points"] == {"points": 1, "exact": False}
-    # at 99 the list holds one point: the tier row takes it, the fill row stays
-    # listed with no number (owner, 15 Oct 2026: never past 100)
+    assert "score:fill" not in ids and ids
+    # at 99 the list holds one point and the tier row takes it (never past 100)
     o = _build(tmp_path, _pkg(fill=80, rows=[tier_row], score=99), ATTENTION)
     pts = {s["id"]: s["points"] for s in o["score"]}
-    assert pts["score:fill"] == {"points": 0, "exact": False}
-    assert sum(p["points"] for p in pts.values()) == 1
+    assert "score:fill" not in pts and sum(p["points"] for p in pts.values()) == 1
 
 
 @needs_node
 def test_the_scorer_row_alone_is_still_not_a_fix_window(tmp_path):
-    # the scorer's own row has no window; only the fill row lists it (no twin)
+    # the scorer's own row has no window, and no fill row stands in for it now
     o = _build(tmp_path, _pkg(), ATTENTION)
-    assert [s["id"] for s in o["score"]] == ["score:fill"]
+    assert [s["id"] for s in o["score"]] == []
 
 
 def test_open_to_fix_opens_the_forms_not_a_window():
@@ -137,8 +129,9 @@ def test_open_to_fix_opens_the_forms_not_a_window():
     body = src[start:src.index("};", start)]
     assert 'item.resolution.mode === "forms"' in body
     assert "openFormAtBox(item.resolution.form_id" in body
-    # the forms branch returns before the fix window is set
-    assert body.index("openFormAtBox(") < body.index("setResolutionIssue(")
+    # the forms branch returns before the fix window is set (through the deep-link
+    # door since 23 Oct 2026, `openFixWindow`)
+    assert body.index("openFormAtBox(") < body.index("openFixWindow(")
 
 
 # ── The Overview notice (owner, 14 Oct 2026): "your last points are on the forms" ──
@@ -146,53 +139,14 @@ def test_open_to_fix_opens_the_forms_not_a_window():
 RAIL = ROOT / "frontend" / "src" / "components" / "form" / "review" / "ReviewRailLayout.jsx"
 
 
-def _left(tmp_path, pkg, attention, open_on_page=0):
-    return _run(tmp_path, (
-        f"const pkg = {json.dumps(pkg)};\n"
-        f"const m = R.buildRecommendations({{ packageSqs: pkg, groupedIssues: null, keyDetails: null, "
-        f"attention: {json.dumps(attention)}, formsExist: true }});\n"
-        f"const l = R.scoreLeftOnForms({{ packageSqs: pkg, model: m, openOnPage: {open_on_page} }});\n"
-        "console.log(JSON.stringify(l ? { score: l.score, formId: l.formId, formCount: l.formCount, "
-        "reaches100: l.reaches100, points: l.points } : null));"))
-
-
-@needs_node
-def test_the_notice_shows_when_only_the_forms_are_left(tmp_path):
-    o = _left(tmp_path, _pkg(), ATTENTION)
-    assert o == {"score": 99, "formId": "ACORD_28", "formCount": 3, "reaches100": True,
-                 "points": {"points": 1, "exact": False}}
-
-
-@needs_node
-def test_the_notice_stays_away_while_the_page_can_still_raise_the_score(tmp_path):
-    # something still open on the review page
-    assert _left(tmp_path, _pkg(), ATTENTION, open_on_page=1) is None
-    # a capped score: its hard stops / warnings are the fix
-    assert _left(tmp_path, dict(_pkg(), cap_applied=85, cap_reason="warning"), ATTENTION) is None
-    # a "Raise your score" row the page can fix itself
-    typed = dict(FILL_ROW, field="mailing_address", answer_mode="field",
-                 action="Applicant mailing address", points_available=3.2)
-    assert _left(tmp_path, _pkg(rows=[typed]), ATTENTION) is None
-    # nothing on the forms to confirm, or a full score
-    no_verify = {"forms": [{"form_id": "ACORD_125", "form_label": "ACORD 125", "rows": _rows(3, "missing")}]}
-    assert _left(tmp_path, _pkg(), no_verify) is None
-    assert _left(tmp_path, dict(_pkg(), package_sqs_score=100), ATTENTION) is None
-
-
-@needs_node
-def test_the_notice_never_promises_100_when_more_than_the_forms_is_missing(tmp_path):
-    o = _left(tmp_path, dict(_pkg(), without_forms={"score": 96}), ATTENTION)
-    assert o and o["reaches100"] is False
-
-
-def test_the_overview_renders_it_in_neutral_words():
+def test_the_overview_notice_is_gone_and_the_meter_is_in_its_place(tmp_path):
+    """The 14 Oct notice ("Everything on this review is done. Your last points are
+    on the forms.") promised points the forms no longer hold (23 Oct 2026)."""
+    if shutil.which("node") is not None:
+        o = _run(tmp_path, "console.log(JSON.stringify({ left: typeof R.scoreLeftOnForms, fill: typeof R.fillRateItem }));")
+        assert o == {"left": "undefined", "fill": "undefined"}
     src = RAIL.read_text(encoding="utf-8")
-    assert 'data-testid="overview-forms-left"' in src
-    assert "scoreLeftOnForms({ packageSqs, model: recModel" in src
-    # everything the page still lists keeps it away
-    assert "openOnPage: docsOpen + conflictsOpen + hardOpen + warnOpen" in src
-    block = src[src.index('data-testid="overview-forms-left"'):]
-    block = block[:block.index("</div>\n        )}")]
-    assert "rr-note--amber" not in block and "—" not in block
+    assert 'data-testid="overview-forms-left"' not in src and "scoreLeftOnForms" not in src
+    assert 'data-forms-ready="review"' in src
     css = (ROOT / "frontend" / "src" / "components" / "form" / "review" / "ReviewRailLayout.css").read_text(encoding="utf-8")
-    assert ".rr-forms-left {" in css and "#f8fafc" in css
+    assert ".rr-forms-left {" not in css

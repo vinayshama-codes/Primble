@@ -302,12 +302,12 @@ def test_a_restamp_prints_only_what_generations_guards_allow():
     assert gen["ACORD_131"]["confidence"]["BusinessInformation_EmployeeCount_A"] == "producer"
 
 
-def test_a_by_location_gl_code_another_table_repeats_keeps_the_grid_open():
+def test_a_by_location_gl_code_another_table_repeats_prints():
     # Stored May kits: the by-location GL code 91340 was copied into
-    # wc_class_codes too. The deployed rule drops the code from the printed
-    # rows (the score's other-line rule), and the grid stays open to gap fill,
-    # exactly as before - it is GL evidence, not an absence.
+    # wc_class_codes too. A five-digit GL code a WC table repeats is the Z14
+    # misfile: the score counts it (Z32) and the 126 prints it (22 Oct 2026,
+    # build 24 - this test pinned the old drop, which disagreed with the score).
     f = {"gl_class_codes_by_location": [{"location": "1245 Industrial Blvd, Aurora, CO 80011", "codes": ["91340"]}],
          "wc_class_codes": [{"code": "91340", "description": "Carpentry", "payroll": "$1,240,000"}],
          "has_general_liability": True}
-    assert _box("ACORD_126", HZ + "A", f) == "UNMATCHED"
+    assert _box("ACORD_126", HZ + "A", f) == "91340"

@@ -105,14 +105,18 @@ def test_two_answers_clearing_one_deduction_share_it():
 
 
 def test_rows_held_by_a_gate_take_what_the_gate_unlocks():
+    """PAGE ORDER (owner, 24 Oct 2026): the answers go in in the order they are
+    listed - the order a person works - so a gate listed FIRST takes its own 8 and
+    the rows after it what it unlocks (3 each); listed LAST, the rows before it
+    add nothing yet and the gate takes all 14. The total is the same."""
     gate, h1, h2 = "occupancy_type", "distance_to_hydrant", "fire_department_type"
 
     def effect(f):
         if gate not in f:
             return 0
         return 8 + (3 if h1 in f else 0) + (3 if h2 in f else 0)
-    rows = [_row(h1, "property_integrity", 0), _row(h2, "property_integrity", 0),
-            _row(gate, "property_integrity", 0)]
+    rows = [_row(gate, "property_integrity", 0), _row(h1, "property_integrity", 0),
+            _row(h2, "property_integrity", 0)]
     _unify(rows, _floored(70.0, effect), 70.0)
     by = {r["field"]: r for r in rows}
     assert by[gate]["answer_gain"] == 8 and by[gate]["answer_gain_is_exact"] is True
@@ -120,6 +124,10 @@ def test_rows_held_by_a_gate_take_what_the_gate_unlocks():
         assert by[h]["answer_gain"] == 3 and by[h]["answer_gain_alone"] == 0
         assert by[h]["answer_gain_is_exact"] is False                # nothing on its own: "up to"
     assert sum(r["answer_gain"] for r in rows) == 14 == effect({gate, h1, h2})
+    last = [_row(h1, "property_integrity", 0), _row(h2, "property_integrity", 0),
+            _row(gate, "property_integrity", 0)]
+    _unify(last, _floored(70.0, effect), 70.0)
+    assert [r["answer_gain"] for r in last] == [0, 0, 14]
 
 
 def test_fractions_too_small_alone_still_reach_the_total():
@@ -292,11 +300,14 @@ def test_the_real_scorers_rows_add_up_to_answering_them_all():
     pkg = S.calculate_package_sqs(facts=facts, **kw)
     rows = [r for r in pkg["top_recommendations"] if r.get("field")]
     shared = [r for r in rows if r.get("answer_gain_share")]
-    assert {r["field"] for r in shared} >= {"loss_history_no_prior_losses_indicator", "distance_to_hydrant",
+    # Loss History's first row is "requested" since 23 Oct 2026 (the claims question is
+    # weighed last - its number would depend on which answer is true).
+    assert {r["field"] for r in shared} >= {"loss_history_no_prior_losses_indicator", "distance_to_hydrant",  # build 26: claims question first
                                             "fire_department_type", "auto_radius_of_operation"}
     # prose cannot be probed: the narrative row carries no number of its own
     narrative = next(r for r in rows if r["pillar"] == "narrative_quality")
-    assert "answer_gain" not in narrative and "answer_gain_share" not in narrative
+    # ...but shows its pillar's whole remaining share, "up to" (23 Oct 2026), never a share
+    assert narrative.get("answer_gain_is_exact") is False and not narrative.get("answer_gain_share")
     answered = dict(facts)
     for r in shared:
         answered[r["field"]] = S._package_probe_answer(r["field"])[0]

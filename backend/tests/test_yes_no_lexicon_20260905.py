@@ -115,16 +115,30 @@ def test_an_absence_never_becomes_a_negative(value, monkeypatch):
 @pytest.mark.parametrize("value", ["Not Applicable", "N/A", "TBD", "Unknown"])
 def test_a_non_answer_still_reaches_the_producer_as_a_question(
         value, monkeypatch):
-    """The consequence that matters: the card still appears.
+    """The consequence that matters: a non-answer never counts as an answer,
+    so the producer is still asked.
 
-    "None" is deliberately absent. It is dropped as a MACHINE non-value before
-    the comparison ever runs (`underwriting_consistency._normalize`, the H7-D
-    fix), so it produces one candidate and no card - which predates this module
-    and is a different path. Asserting a card for it here would pin the wrong
-    owner."""
+    UPDATED 22 Oct 2026 (25sepChanges.md Z32-FACTS, GAP 1). This used to assert
+    a Data Consistency card for "No" against the non-answer - pinning the
+    non-answer as a RIVAL candidate. Since GAP 1 the picker drops a machine
+    non-answer before the comparison (`answer_semantics.extracted_non_answer`),
+    the same path that already dropped "None" (the H7-D fix this docstring
+    always set apart as "a different path"). What must hold: the lexicon never
+    reads the non-answer as a No; with no real answer the fact stays MISSING,
+    so its producer question is asked; a document's real "No" stands; and a
+    real disagreement is still carded."""
     _stub(monkeypatch, {lex.normalize_term(value) or "": "N"})
     asyncio.run(lex.learn([value]))
-    assert _card("auto_hired_nonowned", "No", value) is True
+    assert fe._yesno_answer(value) != "N"
+    from services.extraction_service import merge_facts
+    from services.fact_registry import FACT_REGISTRY
+    docs = [{"doc_id": "0", "filename": "d0.pdf", "doc_type": "policy", "text": "",
+             "facts": {"applicant_name": "X LLC", "auto_hired_nonowned": value}}]
+    mf, _flags = merge_facts(docs, docs[0])
+    assert mf.get("auto_hired_nonowned") is None          # still an open question
+    assert FACT_REGISTRY["auto_hired_nonowned"].get("question")
+    assert _card("auto_hired_nonowned", "No", value) is False   # no false rival
+    assert _card("auto_hired_nonowned", "No", "Yes") is True    # a real one stays
 
 
 # ── 3. WHAT NEVER GOES ON THE WIRE ──────────────────────────────────────────

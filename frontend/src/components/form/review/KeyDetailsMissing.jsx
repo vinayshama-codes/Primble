@@ -1,5 +1,25 @@
 import { splitMissingDetails } from "../../../utils/keyDetailCards";
 import { screenPointsText } from "../../../utils/screenPoints";
+import { keyDetailResolvedRows } from "../../../utils/resolvedIssues";
+import { ResolvedGroup } from "./Recommendations";
+
+// Overview's "Resolved (n)" (23 Oct 2026): a key detail fixed through its link
+// leaves the list above and tucks in here, with "Open again" (the fix and its
+// points come back through the one reopen door). The Recommendations page's
+// own Resolved list, drawn with this page's rows.
+export function KeyDetailsResolved({ keyDetails, issueStatuses, onReopen, reopeningIds, reopenNotices }) {
+  if (typeof onReopen !== "function") return null;
+  const rows = keyDetailResolvedRows({
+    statusEntries: issueStatuses?.entries ? Array.from(issueStatuses.entries()) : [],
+    keyDetails,
+  });
+  if (!rows.length) return null;
+  return (
+    <div className="rec" data-testid="overview-resolved" style={{ marginTop: 8 }}>
+      <ResolvedGroup rows={rows} onReopen={onReopen} reopeningIds={reopeningIds} reopenNotices={reopenNotices} />
+    </div>
+  );
+}
 
 // "Key details missing" on the pre-form Review screen, as ACTIONS (Orbin 22 Sep
 // item 9; owner, 30 Sep 2026: "do the action, not just mention it on the

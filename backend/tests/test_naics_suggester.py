@@ -383,7 +383,9 @@ def test_both_question_serializers_preserve_suggestions():
     import inspect
     from routes import arq_routes
 
-    for fn in (arq_routes.send_arq, arq_routes.client_view):
+    # The send serializer moved into `send_questions_to_client` (23 Oct 2026 -
+    # one mailer for /api/arq/send and the narrative questionnaire page).
+    for fn in (arq_routes.send_questions_to_client, arq_routes.client_view):
         body = inspect.getsource(fn)
         assert '"hint"' in body, f"{fn.__name__}: expected a hint key to compare against"
         assert "_sanitize_suggestions(" in body, (

@@ -1,0 +1,63 @@
+/* Questionnaire page of the review (owner, 23 Oct 2026). Every class is
+   prefixed qn- so nothing here reaches another screen; panels, buttons and
+   inputs reuse ReviewRailLayout.css (rr-*). */
+
+.qn-heading { margin-bottom: 2px; }
+
+.qn-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.qn-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: #1e293b; cursor: pointer; }
+.qn-toggle input { margin: 0; accent-color: #e61b84; }
+.qn-count { font-size: 12.5px; color: #64748b; }
+
+.qn-row { padding: 14px 18px; scroll-margin-top: 16px; transition: background 0.25s, box-shadow 0.25s; }
+.qn-row.is-highlight { background: rgba(230, 27, 132, 0.08); box-shadow: inset 0 0 0 2px rgba(230, 27, 132, 0.55); }
+.qn-row__head { display: flex; align-items: flex-start; gap: 10px; }
+.qn-row__text { flex: 1 1 auto; min-width: 0; font-size: 13.5px; font-weight: 600; line-height: 1.45; color: #1e293b; }
+.qn-row__help { margin-top: 2px; font-size: 12px; line-height: 1.45; color: #64748b; }
+.qn-critical {
+  display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 6px; vertical-align: 1px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase;
+  color: #9d0f5a; background: rgba(230, 27, 132, 0.08);
+}
+
+.qn-tag {
+  flex-shrink: 0; padding: 1px 8px; border: 1px solid; border-radius: 10px;
+  font-size: 10.5px; font-weight: 700; line-height: 1.6; white-space: nowrap;
+}
+.qn-tag--blue { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+.qn-tag--green { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+.qn-tag--amber { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.qn-tag--red { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.qn-tag--pink { color: #9d0f5a; background: rgba(230, 27, 132, 0.08); border-color: rgba(230, 27, 132, 0.3); }
+.qn-tag--gray { color: #475569; background: #f8fafc; border-color: #e2e8f0; }
+
+.qn-value { margin-top: 6px; font-size: 13px; font-weight: 600; color: #0f172a; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qn-source { font-size: 11.5px; color: #64748b; overflow-wrap: anywhere; }
+.qn-row > .qn-source { margin-top: 2px; }
+.qn-conflicts { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.qn-conflict { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.qn-conflict .qn-value { margin-top: 0; }
+
+.qn-edit { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.qn-input-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 0 1 420px; min-width: 0; }
+.qn-select { max-width: 300px; padding: 5px 8px; font-size: 12.5px; }
+.qn-choices { display: inline-flex; gap: 6px; }
+.qn-textarea { flex: 1 1 100%; width: 100%; resize: vertical; font-family: inherit; line-height: 1.5; }
+.qn-narrative { min-height: 140px; }
+.qn-table { margin-top: 8px; }
+
+.qn-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.qn-ask { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; font-size: 11.5px; color: #475569; cursor: pointer; }
+.qn-ask input { margin: 0; accent-color: #e61b84; }
+.qn-error { margin-top: 6px; font-size: 12px; font-weight: 600; color: #b91c1c; }
+
+.qn-send { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.qn-send__text { flex: 1 1 260px; min-width: 0; }
+.qn-send__actions { display: flex; align-items: center; gap: 8px; }
+.qn-send__to { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; }
+.qn-send__to .rr-conf__input { flex: 1 1 220px; }
+.qn-send .qn-error, .qn-sent { flex: 1 1 100%; }
+.qn-sent { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12.5px; font-weight: 600; color: #15803d; }
+.qn-link { font-weight: 500; color: #1d4ed8; overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) { .qn-row { transition: none; } }

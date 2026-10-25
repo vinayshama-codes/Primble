@@ -153,9 +153,6 @@ function AttentionRow({ row, onJump, onConfirm, busy = false, locked = false }) 
       {(row.status !== "missing" || row.blocks_download || row.finding) && row.reason && (
         <div style={{ fontSize: 10.5, color: "#475569", marginTop: 2, lineHeight: 1.4 }}>{row.reason}</div>
       )}
-      {row.status === "ai_held_back" && row.required && !row.blocks_download && (
-        <div style={{ fontSize: 10, color: "#92400e", marginTop: 2 }}>Required on this form.</div>
-      )}
       {/* A box the download gate holds (14 Oct 2026): said here, before the
           download review lists it as a hard stop. */}
       {row.blocks_download && (
@@ -207,8 +204,8 @@ const GROUP_PREVIEW = 6;
 
 // `showAll`: the side panel's sections list every row once opened (owner,
 // 30 Sep 2026); the pre-download review keeps its short preview.
-// `hideHeading`: a section that holds one status only (AI held back) does not
-// repeat that status as a sub-heading under its own title.
+// `hideHeading`: a list that holds one status only does not repeat that status
+// as a sub-heading under its own title.
 // `confirmingKeys`: the rows whose confirm is being saved (`rowKey`), so only
 // those say "Confirming..." - and "Confirm all" only when it is the one saving.
 function StatusGroups({ rows, onJump, showAll = false, hideHeading = false, onConfirm = null, confirmingKeys = null }) {
@@ -252,16 +249,17 @@ function StatusGroups({ rows, onJump, showAll = false, hideHeading = false, onCo
   });
 }
 
-// The two side-panel sections' (i) tips - short, like the other sections'.
+// The side-panel section's (i) tip - short, like the other sections'.
 export const NEEDS_ATTENTION_TIP = "Boxes on this form to fill in or check. Click one to see it on the form.";
-export const AI_HELD_BACK_TIP = "The AI found a value that did not fit these boxes, so it left them blank. Check your documents and fill them in.";
 
-// Side panel sections for the ACTIVE form (owner, 30 Sep 2026): "Needs
-// attention" (Missing, the applicant's steps, Please verify) and "AI held
-// back", drawn with the SAME collapsible section the Recommendations and
-// Cross-Form Validation panels use (passed in as `Section`), every row listed.
-// CLOSED by default like every other section (owner, 1 Oct 2026 retest); a
-// section is only drawn when it has rows.
+// The side panel section for the ACTIVE form (owner, 30 Sep 2026): "Needs
+// attention" (Missing, the applicant's steps, Please verify), drawn with the
+// SAME collapsible section the Recommendations and Cross-Form Validation panels
+// use (passed in as `Section`), every row listed. CLOSED by default like every
+// other section (owner, 1 Oct 2026 retest); drawn only when it has rows. The
+// "AI held back" section is gone (Brent, 23 Oct 2026: "Users only need to see
+// relevant information. The audit record is fine.") - refused AI values are
+// the audit record's; a refused question or detail comes as Missing.
 // Re-reads the list whenever the panel's own score state is replaced (Done
 // Editing, a card answer, a questionnaire refresh, a re-stamp).
 export default function NeedsAttentionPanel({ sessionId, formId, formSqs, packageSqs, refreshTick, onJump, Section, onApplySuggestion, onConfirmValues }) {
@@ -312,23 +310,16 @@ function NeedsAttentionSections({ sessionId, formId, formSqs, packageSqs, refres
   if (!formId || !Section || (failed && !data)) return null;
   const form = (data?.forms || []).find(f => f.form_id === formId);
   if (!form) return null;
-  const rows = form.rows || [];
-  const need = rows.filter(r => r.status !== "ai_held_back");
-  const held = rows.filter(r => r.status === "ai_held_back");
-  if (!need.length && !held.length) return null;
+  // The rows the groups draw - one split (`attentionGroups`), so the count is
+  // what is listed and a stale row of a retired status is never counted.
+  const need = attentionGroups(form.rows).flatMap(g => g.rows);
+  if (!need.length) return null;
 
   return (
     <div data-testid="needs-attention-panel">
-      {need.length > 0 && (
-        <Section resetKey={formId} title={`Needs attention (${need.length})`} tooltip={NEEDS_ATTENTION_TIP}>
-          <StatusGroups rows={need} onJump={onJump} showAll onConfirm={confirm} confirmingKeys={confirmingKeys} />
-        </Section>
-      )}
-      {held.length > 0 && (
-        <Section resetKey={formId} title={`AI held back (${held.length})`} tooltip={AI_HELD_BACK_TIP}>
-          <StatusGroups rows={held} onJump={onJump} showAll hideHeading />
-        </Section>
-      )}
+      <Section resetKey={formId} title={`Needs attention (${need.length})`} tooltip={NEEDS_ATTENTION_TIP}>
+        <StatusGroups rows={need} onJump={onJump} showAll onConfirm={confirm} confirmingKeys={confirmingKeys} />
+      </Section>
     </div>
   );
 }
@@ -336,8 +327,8 @@ function NeedsAttentionSections({ sessionId, formId, formSqs, packageSqs, refres
 // THE DOWNLOAD REVIEW'S LIST - both download screens (the pre-download review
 // and the post-download checklist) draw exactly this (owner, 14 Oct 2026). One
 // by one: the items to fix - Hard Stops (the download gate's boxes included),
-// Warnings, Missing boxes, Recommendations. Then "Please verify", "AI held
-// back", the applicant's steps and new-document choices as ONE line each, with
+// Warnings, Missing boxes, Recommendations. Then "Please verify", the
+// applicant's steps and new-document choices as ONE line each, with
 // its count and Show, which opens the group in place. Not clickable - the
 // review is a last look, and the side panel is where boxes are fixed.
 const pts = (r) => (typeof r?.score_impact === "number" && r.score_impact > 0 ? r.score_impact : 0);
@@ -394,7 +385,7 @@ export function DownloadReviewList({ openRecs, attention }) {
   const [open, setOpen] = useState({});
   const p = downloadReviewParts(openRecs, attention);
   const missingCount = p.missing.reduce((n, f) => n + f.rows.length, 0);
-  const groupRows = { verify: p.verify, heldBack: p.heldBack, applicant: p.applicant, choices: p.choices };
+  const groupRows = { verify: p.verify, applicant: p.applicant, choices: p.choices };
   const groupCount = (key) => (key === "choices" ? p.choices.length
     : groupRows[key].reduce((n, f) => n + f.rows.length, 0));
   const lines = DOWNLOAD_GROUPS.filter((g) => groupCount(g.key) > 0);

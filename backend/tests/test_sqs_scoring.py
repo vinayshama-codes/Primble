@@ -703,10 +703,11 @@ def test_single_form_package_computed_independently():
 
 
 def test_single_form_package_hard_cross_issue_caps_at_60():
-    # A cross-form HARD stop (e.g. building-value / FEIN conflict across documents)
-    # is something only the package layer can see. It must cap the PACKAGE at 60,
+    # A cross-form HARD stop (e.g. a FEIN conflict across documents) is
+    # something only the package layer can see. It must cap the PACKAGE at 60,
     # while the form keeps its own (higher) score - the honest divergence the
-    # "Form vs Package can differ" UI note explains.
+    # "Form vs Package can differ" UI note explains. (19 Oct 2026) it also blocks
+    # the PACKAGE's Submission Ready; (20 Oct 2026, owner) the 60 is back with it.
     form = _run_form("ACORD_125")
     assert form["sqs_score"] > 60, f"need an uncapped form (>60) for this guard, got {form['sqs_score']}"
     pkg = sq.calculate_package_sqs(
@@ -721,13 +722,39 @@ def test_single_form_package_hard_cross_issue_caps_at_60():
         f"package must sit below the uncapped form: "
         f"package={pkg['package_sqs_score']} form={form['sqs_score']}"
     )
+    assert pkg["cap_applied"] == 60 and pkg["cap_reason"] == "FEIN differs across submitted documents"
+    assert pkg["ready_blockers"] == ["FEIN differs across submitted documents"]
+    assert pkg["open_hard_stops"] == 1 and pkg["submission_ready"] is False
+    assert form["ready_blockers"] == []                   # the form never sees it
+
+    # The same disagreement as the document check states it (the package's
+    # `hard_stops`): it holds the 60 and blocks Ready, and costs no points of its
+    # own - identity is not an exposure.
+    base = sq.calculate_package_sqs(
+        _PARITY_FACTS, _PARITY_FLAGS, form_results=[form], cross_issues=[],
+        hard_stops=[], soft_stops=[], session_data={},
+    )["package_sqs_score"]
+    _env = lambda v: {"value": v, "confidence": "ai_high", "source": "ai"}   # noqa: E731
+    doc_hard = [m for m in sq.check_doc_consistency([
+        {"filename": "dec.pdf", "doc_type": "dec_page", "facts": {"fein": _env("12-3456789")}},
+        {"filename": "coi.pdf", "doc_type": "certificate", "facts": {"fein": _env("98-7654321")}},
+    ]) if m.startswith("[hard_stop]")]
+    assert doc_hard, "the document check no longer states a FEIN conflict"
+    doc_pkg = sq.calculate_package_sqs(
+        _PARITY_FACTS, _PARITY_FLAGS, form_results=[form], cross_issues=[],
+        hard_stops=doc_hard, soft_stops=[], session_data={},
+    )
+    assert base > 60, f"need an uncapped package (>60) for this guard, got {base}"
+    assert doc_pkg["raw_sqs_score"] == base
+    assert doc_pkg["package_sqs_score"] == 60 and doc_pkg["cap_applied"] == 60
+    assert doc_pkg["ready_blockers"] == doc_hard and doc_pkg["submission_ready"] is False
 
 
 def test_single_form_package_soft_cross_issue_never_raises_package():
     # A cross-form WARNING feeds the package exposure pillar (deduction) and so can
-    # only LOWER the package, never raise it. (Current cap policy: cross warnings
-    # reduce via the exposure pillar; the 60/85 ceilings come from hard stops /
-    # field-level soft stops.)
+    # only LOWER the package, never raise it. (Cap policy: cross warnings reduce via
+    # their pillar - a conflict in Exposure, a missing detail in Completeness (19 Oct
+    # 2026); the 60/85 ceilings come from hard stops / field-level soft stops.)
     form = _run_form("ACORD_125")
     base = sq.calculate_package_sqs(
         _PARITY_FACTS, _PARITY_FLAGS, form_results=[form], cross_issues=[],
@@ -787,30 +814,35 @@ def test_cross_form_issue_does_not_cap_per_form_score():
     # property gates) may cap it. If this breaks, the recompute paths would
     # silently re-cap forms by cross-form stops, the exact behaviour the design
     # removes (per-form keeps its real score; only the package is capped).
-    def _score(**extra):
+    # (19 Oct 2026) the same guard on readiness: a cross-form stop blocks only the
+    # PACKAGE; a form is blocked by its own hard stops alone.
+    def _score(hard_stops=(), **extra):
         return sq.calculate_sqs(
             facts=_PARITY_FACTS, flags=_PARITY_FLAGS,
             mapped_data={k: _PARITY_FACTS[k] for k in _PARITY_FACTS},
             form_schema={k: {} for k in _PARITY_FACTS}, selected_form_ids=["ACORD_125"],
-            hard_stops=[], soft_stops=[], tier2_score=80, form_id="ACORD_125", **extra,
-        )["sqs_score"]
+            hard_stops=list(hard_stops), soft_stops=[], tier2_score=80, form_id="ACORD_125",
+            **extra,
+        )
 
     base = _score()
     # Guard is only meaningful if the uncapped baseline is above the 60 cap.
-    assert base > 60, f"baseline should be uncapped (>60) for this guard, got {base}"
-    # A hard cross-form issue must NOT move the per-form headline.
+    assert base["sqs_score"] > 60, f"baseline should be uncapped (>60) for this guard, got {base['sqs_score']}"
+    # A hard cross-form issue must NOT move the per-form headline - nor block the form.
     with_cross = _score(cross_issues_full=[{"type": "hard_stop", "message": "FEIN differs across forms"}])
-    assert with_cross == base, (
-        f"cross-form issue must not cap the per-form score: base={base} with_cross={with_cross}"
+    assert with_cross["sqs_score"] == base["sqs_score"], (
+        f"cross-form issue must not cap the per-form score: base={base['sqs_score']} "
+        f"with_cross={with_cross['sqs_score']}"
     )
-    # Sanity: a genuine per-form hard stop still caps at 60.
-    with_hard = sq.calculate_sqs(
-        facts=_PARITY_FACTS, flags=_PARITY_FLAGS,
-        mapped_data={k: _PARITY_FACTS[k] for k in _PARITY_FACTS},
-        form_schema={k: {} for k in _PARITY_FACTS}, selected_form_ids=["ACORD_125"],
-        hard_stops=["Named insured missing"], soft_stops=[], tier2_score=80, form_id="ACORD_125",
-    )["sqs_score"]
-    assert with_hard <= 60, f"per-form hard stop must cap at 60, got {with_hard}"
+    assert with_cross["cap_applied"] is None
+    assert with_cross["ready_blockers"] == [] and with_cross["open_hard_stops"] == 0
+    # Sanity: a genuine per-form hard stop still caps at 60 - its raw score kept -
+    # and blocks the form's Submission Ready.
+    with_hard = _score(hard_stops=["Named insured missing"])
+    assert with_hard["sqs_score"] <= 60, f"per-form hard stop must cap at 60, got {with_hard['sqs_score']}"
+    assert with_hard["cap_applied"] == 60 and with_hard["raw_sqs_score"] == base["sqs_score"]
+    assert with_hard["ready_blockers"] == ["Named insured missing"]
+    assert with_hard["open_hard_stops"] == 1 and with_hard["submission_ready"] is False
 
 
 def test_spec_compliant_emits_umbrella_enrichment_parity():
@@ -1066,14 +1098,14 @@ def test_humanized_name_conflict_still_always_hard():
     assert can_proceed is False
 
 
-def test_auto_split_message_clean_and_still_hard():
-    hard, _soft = sq.evaluate_stops({"bi_per_person": "100000"}, {"has_auto_coverage": True})
+def test_auto_split_message_clean_and_now_a_warning():
+    hard, soft = sq.evaluate_stops({"bi_per_person": "100000"}, {"has_auto_coverage": True})
     # New message has no code prefix...
-    assert not any(h.startswith("auto_split_limits_incomplete:") for h in hard)
-    assert any("Split liability limits incomplete" in h for h in hard)
-    # ...but is still always-hard for a non-property (auto-only) submission.
-    _cp, remaining, _dg = sq.classify_stops(hard, {"has_auto_coverage": True})
-    assert any("Split liability limits incomplete" in r for r in remaining)
+    assert not any(m.startswith("auto_split_limits_incomplete:") for m in hard + soft)
+    # (19 Oct 2026, Brent: hard stops only for what is essential) ...and it is a
+    # WARNING now - the missing parts are asked for, never a block.
+    assert any("Split liability limits incomplete" in s for s in soft)
+    assert not any("Split liability limits incomplete" in h for h in hard)
 
 
 # ── Fix #4: SIC code satisfies the industry-classification readiness slot ──────

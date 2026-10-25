@@ -9,6 +9,7 @@ regressed:
         schedule deduction is explained with a warning.
   WI-2  Building-value duplication blocks form generation (gating key + the
         cross-doc reconciler flags review_required on conflicting values).
+        19 Oct 2026 (Brent): no longer blocks - the picker still asks.
   WI-3  Structural "Supporting Documents" sub-row relabelled "Form Fill Quality".
   WI-4  Property breakdown surfaces the ACV/RCV valuation-basis line.
   WI-5  Class-code vs operations mismatch detector hardened (industry table).
@@ -98,8 +99,18 @@ def test_wi1_schedule_and_followform_earn_full_umbrella_credit():
 
 # ── WI-2: building-value duplication gates generation ─────────────────────────
 
-def test_wi2_building_value_is_a_generation_blocking_key():
-    assert "property_building_value" in uc.GENERATION_BLOCKING_RECONCILABLE_KEYS
+def test_wi2_building_value_no_longer_blocks_generation():
+    # (19 Oct 2026, Brent: "fixable later without stopping the work") no 409 on
+    # generation - the blocking set is empty and the one gate never raises on an
+    # open building-value conflict; the picker below still asks for the value.
+    assert uc.GENERATION_BLOCKING_RECONCILABLE_KEYS == frozenset()
+    assert "property_building_value" not in uc.READY_BLOCKING_RECONCILABLE_KEYS
+    from routes.form_routes import enforce_building_value_gate
+    session = {"facts": {}, "flags": {"has_property_coverage": True},
+               "underwriting_consistency": {"review_required": True, "fields": [
+                   {"fact_key": "property_building_value", "label": "Building Value",
+                    "review_required": True}]}}
+    assert enforce_building_value_gate(session) is None
 
 
 def test_wi2_conflicting_building_values_flag_review_required():

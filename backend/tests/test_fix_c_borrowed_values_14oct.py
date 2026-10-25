@@ -441,9 +441,10 @@ def test_every_new_reason_has_its_sentence_and_quotes_nothing():
 
 
 def test_frozen_forms_are_untouched():
-    s141 = _schema("ACORD_141")
-    f = next(f for f in s141 if f.endswith("Description_A") and "Enter text" in str(s141[f].get("tu")))
-    assert g.refuse_non_answers({f: "Prem #: 001 Bldg #: 001"}, s141, {}, CE_RAW, {f}, "ACORD_141") == {}
+    # ACORD 141 left the frozen set on 25 Oct 2026 (Z41 lane 3); ACORD 160 stays.
+    s160 = _schema("ACORD_160")
+    f = next(f for f in s160 if f.endswith("Description_A") and "Enter text" in str(s160[f].get("tu")))
+    assert g.refuse_non_answers({f: "Prem #: 001 Bldg #: 001"}, s160, {}, CE_RAW, {f}, "ACORD_160") == {}
 
 
 # ══ W10: a coverage table row is no explanation ═══════════════════════════════

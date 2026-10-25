@@ -67,6 +67,11 @@ export function fixKeys(resolution) {
     if (cols.length) cols.forEach((c) => keys.push(`col:${sk}:${c}`));
     else keys.push(`table:${sk}`);
     facts.forEach((f) => keys.push(`fact:${f}`));
+    // The submission facts a per-building table answers (21 Oct 2026, Brent's
+    // item 8 - premises_cope `derives`): its cells ARE that fact's answer, so a
+    // form box or another row asking the same fact is the same to-do.
+    (Array.isArray(res.derives) ? res.derives : []).map(clean).filter(Boolean)
+      .forEach((f) => keys.push(`fact:${f}`));
   }
   return [...new Set(keys)];
 }
@@ -147,6 +152,29 @@ function belowOnePoint(row) {
 // the rows above it - still listed while it adds anything on its own
 // (`answer_gain_alone`) or is worth under a point, with no number.
 export function pointsFor(row) {
+  // THE REVIEW PAGE'S PLAN (24 Oct 2026, services/review_plan.py): a row carrying
+  // `plan_id` shows exactly the plan's number - what it adds after every item
+  // above it on the page. A hold that withholds it says so; a fraction of a
+  // point says "under 1 pt"; a step that adds nothing is not listed.
+  if (row && row.plan_id) {
+    if (row.answer_gain_held_by) return { points: 0, exact: true, share: true, held: clean(row.answer_gain_held_by) };
+    const p = Math.round(num(row.answer_gain) ?? 0);
+    if (p >= 1) return { points: p, exact: row.answer_gain_is_exact === true, share: true };
+    // A fix an earlier item on the page offers first (a card, a key detail):
+    // its number, as a mirror - the page lists the row only where nothing
+    // already offers it, and a mirror is never added to the total.
+    const m = Math.round(num(row.answer_gain_mirror) ?? 0);
+    if (row.answer_gain_mirror_of && m >= 1) return { points: m, exact: true, share: true, mirror: true };
+    if (row.answer_gain_under === true) return { points: 0, exact: false, share: true, under: true };
+    // A question the plan lists although it adds nothing itself (the claims
+    // question when the narrative already says claims - the request / upload
+    // rows after it carry the points): listed, with no number.
+    // The claims question asked alone (option A): "up to" what its follow-ups
+    // unlock once it is answered.
+    const unlocks = Math.round(num(row.unlocks_points) ?? 0);
+    if (unlocks >= 1) return { points: unlocks, exact: false, share: true };
+    return row.listed_at_zero === true ? { points: 0, exact: true, share: true } : null;
+  }
   const gain = num(row?.answer_gain);
   if (gain !== null) {
     const n = Math.round(gain);
@@ -171,8 +199,14 @@ export function pointsFor(row) {
   return { points: Math.max(1, Math.round(avail)), exact: false };
 }
 
-// A listed row with no points to its name prints nothing.
-export const pointsText = (p) => (p && p.points > 0 ? `${p.exact ? "" : "up to "}+${p.points} pts` : "");
+// A listed row with no points to its name prints nothing; one a hold withholds
+// says what it waits on; a fraction of a point says "under 1 pt".
+export const pointsText = (p) => {
+  if (!p) return "";
+  if (p.held) return `Counts once ${p.held} is fixed`;
+  if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts`;
+  return p.under ? "under 1 pt" : "";
+};
 
 // What a row's answer adds ON ITS OWN: the scorer's lone measurement when the
 // row carries a share, else the number it carries.
@@ -211,7 +245,8 @@ export function scoreItems(packageSqs, covered = new Set()) {
       resolution = { ...resolution, gaps: row.narrative_gaps };
     }
     const gate = gates[row.pillar];
-    const heldBy = gate && !(aloneGain(row) > 0) && num(row.score) === 0 ? gate : null;
+    // A plan row already carries what it adds in page order (holds included).
+    const heldBy = !row.plan_id && gate && !(aloneGain(row) > 0) && num(row.score) === 0 ? gate : null;
     const avail = num(row.points_available);
     // A held row carrying a share shows what it adds once the rows before it -
     // the gate among them - are in; with no share left it is listed, unnumbered.
@@ -223,7 +258,15 @@ export function scoreItems(packageSqs, covered = new Set()) {
     if (!points) continue;                           // answering adds nothing
     const keys = fixKeys(resolution);
     if (!keys.length || allCovered(keys, covered)) continue;   // a card already asks
-    const id = `score:${row.pillar || ""}:${keys.join("|")}`;
+    // A row whose fix an earlier item on the page offers first is listed there,
+    // not here (one fix, one number) - it stays "asked" for the Resolved rules,
+    // which read the rows with nothing covered.
+    if (points.mirror && covered.size) continue;
+    // A per-building table row is keyed on the submission fact it answers, not
+    // its cells (21 Oct 2026): it keeps its id - and its Resolved status - when
+    // the package gains or loses a building and the row turns table <-> box.
+    const derived = Array.isArray(resolution.derives) && resolution.derives.length && clean(row.field);
+    const id = `score:${row.pillar || ""}:${derived ? `fact:${clean(row.field)}` : keys.join("|")}`;
     if (keys.every((k) => seen.has(k))) continue;    // two rows, one answer
     keys.forEach((k) => seen.add(k));
     out.push({
@@ -238,8 +281,59 @@ export function scoreItems(packageSqs, covered = new Set()) {
       keys,
       alsoOnForms: [],
       heldBy,
+      // The Loss History plan's step order (23 Oct 2026): the page lists the
+      // pillar's answer and document rows in this order (`scoreSequence`).
+      planOrder: num(row.plan_order),
     });
   }
+  return out;
+}
+
+// The "Raise your score" list in the order it is drawn (23 Oct 2026): each
+// pillar's rows in turn. A pillar whose rows carry a plan order (Loss History,
+// `sqs_service.loss_history_plan`) lists its answer rows and its document rows
+// (`screen_unanswerable` with the Documents action) interleaved in that order,
+// at the place of its first row. Any other document row follows the last
+// answer row of its pillar; one whose pillar has no answer row comes last.
+// [{ kind: "item", item } | { kind: "doc", doc }]
+export function scoreSequence(items, docRows) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  const docs = Array.isArray(docRows) ? docRows.filter(Boolean) : [];
+  const titleOf = (t) => clean(t).split(":")[0].trim();
+  const docTitle = (u) => titleOf(u.title || "Needs documents");
+  const orderOf = (n) => (num(n) === null ? Number.POSITIVE_INFINITY : n);
+  const planned = new Set([
+    ...list.filter((it) => num(it.planOrder) !== null).map((it) => titleOf(it.title)),
+    ...docs.filter((u) => num(u.plan_order) !== null).map(docTitle),
+  ]);
+  const out = [];
+  const placed = new Set();
+  const done = new Set();
+  list.forEach((it, idx) => {
+    const title = titleOf(it.title);
+    if (planned.has(title)) {
+      if (done.has(title)) return;
+      done.add(title);
+      const group = [
+        ...list.filter((x) => titleOf(x.title) === title)
+          .map((x) => ({ kind: "item", item: x, order: orderOf(x.planOrder) })),
+        ...docs.map((u, k) => ({ u, k })).filter(({ u }) => docTitle(u) === title)
+          .map(({ u, k }) => { placed.add(k); return { kind: "doc", doc: u, order: orderOf(u.plan_order) }; }),
+      ];
+      group.sort((a, b) => a.order - b.order);
+      group.forEach(({ kind, item, doc }) => out.push(kind === "item" ? { kind, item } : { kind, doc }));
+      return;
+    }
+    out.push({ kind: "item", item: it });
+    const next = idx + 1 < list.length ? titleOf(list[idx + 1].title) : null;
+    if (next === title) return;
+    docs.forEach((u, k) => {
+      if (!placed.has(k) && docTitle(u) === title) { placed.add(k); out.push({ kind: "doc", doc: u }); }
+    });
+  });
+  docs.map((u, k) => ({ u, k })).filter(({ k }) => !placed.has(k))
+    .sort((a, b) => orderOf(a.u.plan_order) - orderOf(b.u.plan_order))
+    .forEach(({ u }) => out.push({ kind: "doc", doc: u }));
   return out;
 }
 
@@ -248,7 +342,11 @@ export function scoreItems(packageSqs, covered = new Set()) {
 // changes under it, so "Open again" in the page's Resolved list takes the fix -
 // and its points - back.
 export function scoreFixIssue(item) {
-  const what = [item?.title, item?.detail].filter(Boolean).join(": ");
+  // A narrative row's detail is a status line ("... but does not include ...")
+  // that is wrong once the narrative is written - its Resolved row keeps the
+  // section name only (owner, 24 Oct 2026).
+  const narrative = item?.resolution?.mode === "narrative";
+  const what = [item?.title, narrative ? null : item?.detail].filter(Boolean).join(": ");
   const adds = pointsText(item?.points);
   const gain = adds ? ` Answering adds ${adds} to your score.` : "";
   return {
@@ -324,7 +422,7 @@ export function formItemsAfterForms(attention, covered, score) {
         page: r.page ?? null,
       });
     }
-    const toCheck = rows.filter((r) => r && (r.status === "verify" || r.status === "ai_held_back")).length;
+    const toCheck = rows.filter((r) => r && r.status === "verify").length;
     if (items.length || toCheck) out.push({ form_id: form.form_id, form_label: form.form_label, items, toCheck });
   }
   return { forms: out, count: out.reduce((n, f) => n + f.items.length, 0) };
@@ -373,87 +471,19 @@ export function offerItems(formOffers) {
   return out;
 }
 
-// The last points after forms are the Form Fill Rate (14 Oct 2026, owner: "package
-// score is 99/100 and I can't see anything to make it 100"): AI values on the
-// forms nobody confirmed (0.85 / 0.50 against a confirmed 1.00). The scorer's row
-// for it has no fix window, so `scoreItems` never listed it. Its fix is each
-// form's "Confirm all"; this row opens the form with the most Please verify
-// values. Listed only while the needs-attention list has some - a fill rate held
-// by anything else is not a promise this row can keep.
-function verifyCounts(attention) {
-  const out = [];
-  for (const f of (Array.isArray(attention?.forms) ? attention.forms : [])) {
-    const n = (Array.isArray(f?.rows) ? f.rows : []).filter((r) => r && r.status === "verify").length;
-    if (n && f.form_id) out.push({ form_id: f.form_id, n });
-  }
-  return out.sort((a, b) => b.n - a.n);
-}
-
-function fillPoints(packageSqs, fill) {
-  const rows = Array.isArray(packageSqs?.top_recommendations) ? packageSqs.top_recommendations : [];
-  const own = rows.find((r) => r && r.pillar === "structural_completeness" && !clean(r.field)
-    && !(r.resolution && r.resolution.mode && r.resolution.mode !== "none"));
-  if (own) return pointsFor(own);
-  // No scorer row (a Tier 1 / Tier 2 gap took it): the fill slice's own bound.
-  const w = packageSqs?.weights_used || {};
-  const pillars = packageSqs?.pillars || {};
-  let total = 0;
-  for (const [k, v] of Object.entries(pillars)) {
-    const sc = v && typeof v === "object" ? num(v.score) : num(v);
-    if (sc !== null && num(w[k]) !== null) total += w[k];
-  }
-  const fw = num(packageSqs?.category_breakdown?.structural_completeness?.fill?.weight);
-  const sw = num(w.structural_completeness);
-  if (!total || fw === null || sw === null) return null;
-  return pointsFor({ points_available: ((100 - fill) * fw * sw) / total });
-}
-
-export function fillRateItem(packageSqs, attention) {
-  const fill = num(packageSqs?.category_breakdown?.structural_completeness?.fill?.score);
-  if (fill === null || fill >= 100) return null;
-  const forms = verifyCounts(attention);
-  if (!forms.length) return null;
-  const points = fillPoints(packageSqs, fill);
-  if (!points) return null;
-  const n = forms.length;
-  return {
-    id: "score:fill", kind: "score", pillar: "structural_completeness",
-    title: pillarLabel("structural_completeness"),
-    detail: `Confirm the Please verify values on ${n} form${n === 1 ? "" : "s"} (Form Fill Rate ${Math.round(fill)}%). Each form's side panel has "Confirm all".`,
-    points,
-    closesWith: null,
-    resolution: { mode: "forms", form_id: forms[0].form_id, forms: forms.map((f) => f.form_id) },
-    keys: ["forms:verify"], alsoOnForms: [],
-  };
-}
-
-// The Overview's "last points are on your forms" notice (owner, 14 Oct 2026): after
-// forms, the review page can be finished - nothing open on it, no cap, no "Raise
-// your score" row it can fix itself - while the score is under 100 because AI
-// values on the forms wait to be confirmed. Null whenever the review page itself
-// can still raise the score, or the forms cannot (no Please verify values).
-// `openOnPage`: what the page still lists (documents, values to confirm, hard
-// stops, warnings, key details).
-export function scoreLeftOnForms({ packageSqs, model, openOnPage = 0 } = {}) {
-  const score = num(packageSqs?.package_sqs_score);
-  if (score === null || score >= 100 || Number(openOnPage) > 0) return null;
-  if (packageSqs?.cap_applied || packageSqs?.cap_reason) return null;
-  const items = Array.isArray(model?.score) ? model.score : [];
-  if (items.some((s) => s?.resolution?.mode !== "forms")) return null;
-  const row = items.find((s) => s?.resolution?.mode === "forms");
-  if (!row) return null;
-  const forms = Array.isArray(row.resolution.forms) ? row.resolution.forms : [];
-  // "To reach 100" only when everything but the forms is already full marks.
-  const reaches100 = (num(packageSqs?.without_forms?.score) ?? 0) >= 100;
-  return { score, points: row.points || null, formId: row.resolution.form_id || null, formCount: forms.length, reaches100, item: row };
-}
+// THE FILL RATE IS NOT IN THE SCORE (Brent, 23 Oct 2026, Z34-1 #1). The 14 Oct
+// "Form Fill Rate" row ("Confirm the Please verify values ...") and the Overview's
+// "your last points are on the forms" notice are gone: the package score is the
+// same number before and after forms, and what the forms still need is the
+// "Forms ready" meter (utils/scoreWithForms.formsReady). "Confirm all" moves the
+// meter, never this list.
 
 // THE LIST NEVER ADDS UP PAST 100 (owner, 15 Oct 2026: "score should be
 // distributed in such a manner that it should not go past 100 ... for all the
 // packages"). The scorer's shares already add up to what answering every row
 // makes. This is the guarantee for everything else the list prints - a payload
-// scored before the shares, a bound the page works out itself ("up to"), the
-// Form Fill Rate row: the shares first, then the rest, each in the order
+// scored before the shares, a bound the page works out itself ("up to"): the
+// shares first, then the rest, each in the order
 // listed, every number takes at most what is still left below 100. A number
 // cut down becomes "up to"; a row left with nothing stays listed, unnumbered.
 // Mutates and returns `items` (each is built fresh by this module).
@@ -477,8 +507,6 @@ export function withinHundred(items, score) {
 export function buildRecommendations({ packageSqs, groupedIssues, keyDetails, attention, formsExist, formOffers } = {}) {
   const covered = onScreenFixKeys(groupedIssues, keyDetails);
   const score = scoreItems(packageSqs, covered);
-  const fillRow = formsExist ? fillRateItem(packageSqs, attention) : null;
-  if (fillRow) score.push(fillRow);
   withinHundred(score, packageSqs?.package_sqs_score);
   // BEFORE FORMS THIS SECTION IS THE SCORE ONLY (owner, 14 Oct 2026: "we are
   // trying to make SQS independent of forms ... this section does not increase
@@ -515,11 +543,22 @@ export const recommendationsText = (n) => `${n} recommendation${n === 1 ? "" : "
 //   dry   - fixed once a FINISHED check of its form no longer lists it; a check
 //           still running, or one that did not look at that form, is "unknown"
 //           (the caller judges it on the next one).
+// The fix keys a score row's id carries ("score:<pillar>:<key>|<key>...").
+function scoreIdKeys(itemId) {
+  const m = /^score:[^:]*:(.+)$/.exec(String(itemId || ""));
+  return new Set(m ? m[1].split("|").filter(Boolean) : []);
+}
+
 export function recommendationFixState(kind, itemId, { packageSqs, dryRun, formId } = {}) {
   if (!itemId) return "unknown";
   if (kind === "score") {
     if (!packageSqs || typeof packageSqs !== "object") return "unknown";
-    return scoreItems(packageSqs, new Set()).some((s) => s.id === itemId) ? "open" : "fixed";
+    // A merged row (same-pillar sub-point rows, services/review_plan.py, 24 Oct
+    // 2026) saved with one box left blank leaves its other question listed as a
+    // row of its own, under a NEW id - still open, never "fixed" (Save progress).
+    const own = scoreIdKeys(itemId);
+    return scoreItems(packageSqs, new Set()).some((s) => s.id === itemId
+      || (own.size && (s.keys || []).some((k) => own.has(k)))) ? "open" : "fixed";
   }
   if (kind === "dry") {
     if (!dryRun || dryRun.status !== "ready") return "unknown";
@@ -608,7 +647,7 @@ export function clearedScoreItems(listed, packageSqsAfter, skipIds = new Set()) 
   for (const it of (Array.isArray(listed) ? listed : [])) {
     if (!it || it.kind !== "score" || !it.id || skipIds.has(it.id)) continue;
     const keys = Array.isArray(it.keys) ? it.keys : [];
-    // Only a scorer row (the Form Fill Rate row's fix is on the forms).
+    // Only a scorer row (a row whose fix keys are not scorer targets is never filed here).
     if (!keys.length || !keys.every((k) => SCORER_TARGET.test(k))) continue;
     if (keys.some((k) => stillAsked(k, asked))) continue;
     if (clean(it.detail) && stillMissingLabels(packageSqsAfter, it.pillar).has(clean(it.detail))) continue;
@@ -639,6 +678,7 @@ export function clearingFixOf(issue, idOf) {
 // The sentence a cleared row shows under its title.
 export function clearedByText(by) {
   if (!by) return "";
+  if (by.documents) return "Answered by your documents - nothing to do here.";
   const what = clean(by.title).replace(/[.\s]+$/, "") || "another item";
   return `Cleared by your answer to ${what}.${by.iid ? " Open again takes that answer back." : ""}`;
 }
@@ -721,7 +761,7 @@ export { REC_PAGE };
 // What the "to consider" count is made of (owner, 13 Oct 2026: "2 to consider" with
 // one card in view). One group: its own words; both: both, named.
 export function considerText(model) {
-  const score = Array.isArray(model?.score) ? model.score.length : 0;
+  const score = (Array.isArray(model?.score) ? model.score.length : 0) + (Number(model?.docRows) || 0);
   const forms = (Number(model?.forms?.count) || 0) + (Number(model?.choicesOpen) || 0);
   const offers = Array.isArray(model?.offers) ? model.offers.length : 0;
   const parts = [];

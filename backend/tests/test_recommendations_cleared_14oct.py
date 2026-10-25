@@ -29,6 +29,9 @@ Two rules come out of it:
    table filled year built, roof year, sprinkler and protection class - four listed rows
    left with no record. The hard stop / warning pages already file what a save clears
    (`resolvedIssues.clearedBlockers`); the Recommendations page now does too.
+   (21 Oct 2026, Brent 17 Oct item 8: on 2+ buildings those four rows open the same
+   location-table cells as the card, so they are no longer listed beside it - one to-do,
+   one place. The rule stands for every other row a fix answers.)
 
 The route tests drive the REAL resolve / reopen routes and scorer through the in-memory
 session of tests/test_reopen_takes_the_fix_back_9oct.py; the frontend rules run under node.
@@ -288,8 +291,10 @@ _ROWS = [{"address_line1": "100 Main St", "address_city": "Denver", "address_sta
           "construction_type": "Frame", "building_value": value, "bpp_value": "100000"}
          for n, value in ((1, "500000"), (2, "300000"))]
 _COPE_COLUMNS = {"year_built": "1999", "roof_year": "2015", "sprinkler": "100", "protection_class": "3"}
-_COPE_ROWS = [f"score:property_integrity:fact:{f}"
-              for f in ("year_built", "roof_year", "sprinkler_system", "fire_protection_class")]
+# On 2+ buildings each COPE row opens the location table with its column (21 Oct 2026,
+# Brent 17 Oct item 8 - one store for building details); its id stays keyed on its fact.
+_COPE_FACTS = ("year_built", "roof_year", "sprinkler_system", "fire_protection_class")
+_COPE_ROWS = [f"score:property_integrity:fact:{f}" for f in _COPE_FACTS]
 
 
 async def _noop(*_a, **_k):
@@ -343,7 +348,16 @@ def _card(screen: dict, code: str) -> dict:
 
 
 @pytest.mark.skipif(_NODE, reason="node is not installed")
-def test_a_card_fix_that_answers_score_rows_files_them_and_open_again_brings_them_back(tmp_path):
+def test_the_cope_card_asks_each_building_once_and_open_again_takes_it_back(tmp_path):
+    # REWRITTEN 21 Oct 2026 (Brent 17 Oct item 8, b-cope-one-store). This was
+    # "a card fix that answers score rows files them": the four COPE rows were
+    # listed BESIDE the COPE card that asks the same building cells - one row per
+    # package value, the card per building - and the card's save filed them as
+    # "Cleared by your answer to ...". That was Brent's "asked twice"; the TEST
+    # pinned it. Now each row opens the same location-table cells as the card,
+    # so it is not repeated beside it (one to-do, one place) and nothing is left
+    # to clear. Rule 2 itself (a row another fix answered goes to Resolved) is
+    # unchanged and pinned by the static tests above.
     import routes.audit_routes as ar
     import routes.form_routes as fr
     from models.schemas import ResolveIssueRequest, ReopenIssueRequest
@@ -353,6 +367,7 @@ def test_a_card_fix_that_answers_score_rows_files_them_and_open_again_brings_the
     before = _screen(s)
     card = _card(before, "legacy_carrier_grade_cope")
     assert card["resolution"]["mode"] == "schedule"           # 2+ buildings: the card opens the table
+    assert card["resolution"]["columns"] == list(_COPE_COLUMNS)   # the four it still misses
 
     # The COPE card's window saves the location table with the four columns filled.
     rows = [{**r, **_COPE_COLUMNS} for r in copy.deepcopy(_ROWS)]
@@ -363,45 +378,47 @@ def test_a_card_fix_that_answers_score_rows_files_them_and_open_again_brings_the
     assert out["success"] is True and s.score() > before_score
     assert card["issue_id"] in undo.load_receipts(s.store)   # the fix is on file under the card
 
-    o = _node(tmp_path, {"R": _REC, "V": _RESOLVED}, (
+    o = _node(tmp_path, {"R": _REC, "V": _RESOLVED, "P": _REC.with_name("screenPoints.js")}, (
         f"const before = {json.dumps(before)};\n"
         f"const after = {json.dumps(_payload(out))};\n"
         f"const card = {json.dumps(card)};\n"
         "const model = (sc) => R.buildRecommendations({packageSqs: sc.package_sqs, groupedIssues: sc.grouped_issues, keyDetails: sc.key_details});\n"
         "const listed = model(before).score;\n"
-        "const cleared = R.clearedScoreItems(listed, after.package_sqs);\n"
-        "const by = R.clearingFixOf(card, (i) => i.issue_id);\n"
-        # what AcordModal.markClearedRecommendations stores for each one
-        "const entries = cleared.map(it => [V.recScoreIssueId(it.id), {status: 'resolved', message: R.scoreFixIssue(it).__recTitle,\n"
-        "  severity: 'recommendation', form_id: null, rule_code: by.iid || '', reason: V.clearedByReason(by.title)}]);\n"
-        "const rows = R.recommendationResolvedRows({statusEntries: entries, liveIds: R.liveRecommendationIds({packageSqs: after.package_sqs})});\n"
         "console.log(JSON.stringify({\n"
         "  listed: listed.map(s => [s.id, R.pointsText(s.points)]),\n"
+        "  asked: R.scoreItems(before.package_sqs, new Set()).map(s => s.id),\n"
         "  after: model(after).score.map(s => s.id),\n"
-        "  cleared: cleared.map(s => s.id), by,\n"
-        "  rows: rows.map(r => [r.iid, r.title, R.clearedByText(r.clearedBy)]),\n"
-        "  targets: [...new Set(rows.map(r => R.recommendationReopenTarget(r).iid))],\n"
+        "  afterAsked: R.scoreItems(after.package_sqs, new Set()).map(s => s.id),\n"
+        "  cleared: R.clearedScoreItems(listed, after.package_sqs).map(s => s.id),\n"
+        "  cardPoints: (P.screenPoints(before.package_sqs, before.grouped_issues, before.key_details).cards.get(card.code) || {}).points || 0,\n"
         "}));"))
     listed = dict(o["listed"])
     for rid in _COPE_ROWS:
-        assert rid in listed                                     # all four were on screen
-    # The hydrant / fire department rows measure 0 here (pillar 70, worth 0.8 each): listed as
-    # the floor's bound, not dropped.
-    assert listed["score:property_integrity:fact:distance_to_hydrant"] == "up to +1 pts"
-    assert listed["score:property_integrity:fact:fire_department_type"] == "up to +1 pts"
-    # The table answered the four: gone from the list, filed as cleared by the card's answer.
-    assert sorted(o["cleared"]) == sorted(_COPE_ROWS)
+        assert rid in o["asked"]                 # the score still asks each of the four...
+        assert rid not in listed                 # ...once: on the card that opens those cells
+    # The hydrant / fire department rows are listed, never dropped. Location-wide: typed
+    # boxes, never the table. Since the page-wide plan (24 Oct 2026) each says what it
+    # adds after the items above it - here the 85 the COPE warning keeps (its table
+    # leaves valuation method and coinsurance) withholds them, and they say so.
+    for fact in ("distance_to_hydrant", "fire_department_type"):
+        text = listed[f"score:property_integrity:fact:{fact}"]
+        assert text.startswith("Counts once ") or text.endswith(" pts"), text
+    # The table answered the four: asked nowhere any more; the rest still listed.
+    assert not set(_COPE_ROWS) & set(o["afterAsked"])
     assert not set(_COPE_ROWS) & set(o["after"])
     assert "score:property_integrity:fact:distance_to_hydrant" in o["after"]   # not answered, still listed
-    assert o["by"]["iid"] == card["issue_id"]
-    assert [r[0] for r in o["rows"]] == [f"rec:{rid}" for rid in o["cleared"]]
-    for _iid, title, text in o["rows"]:
-        assert title.startswith("Property Integrity: ")
-        assert text.startswith("Cleared by your answer to Carrier-Grade COPE incomplete")
-        assert text.endswith("Open again takes that answer back.")
-    assert o["targets"] == [card["issue_id"]]                    # every one reopens the card's fix
+    assert o["cleared"] == []                    # nothing listed was answered by another fix
+    # The four rows' points are not lost with them: they print on the card that asks them
+    # (the page-wide plan, 24 Oct 2026: a fix offered twice counts at its first place -
+    # the card - and each row mirrors it, adding nothing to the total).
+    items = {i["id"]: i for i in (before["package_sqs"].get("review_plan") or {}).get("items") or []}
+    card_item = items[f"card:{card['code']}"]
+    rows = [i for i in items.values() if i["kind"] == "rec"
+            and i.get("field") in _COPE_FACTS]
+    assert card_item["points"] > 0 and o["cardPoints"] == card_item["points"]
+    assert rows and all(i["points"] == 0 and i.get("mirror_of") == card_item["id"] for i in rows)
 
-    # "Open again" on any of them: the one reopen door, with the card's id.
+    # "Open again" on the card: the one reopen door takes the four back with their points.
     with patch.object(fr, "_pre_form_dry_run", _noop):
         back = s.body(ar.reopen_issue, ReopenIssueRequest(
             session_id=H._SID, issue_id=card["issue_id"], code=card["code"], message=card["message"]))
@@ -413,7 +430,8 @@ def test_a_card_fix_that_answers_score_rows_files_them_and_open_again_brings_the
         "const live = R.liveRecommendationIds({packageSqs: back.package_sqs});\n"
         "const model = R.buildRecommendations({packageSqs: back.package_sqs, groupedIssues: back.grouped_issues, keyDetails: back.key_details});\n"
         "console.log(JSON.stringify({live: ids.map(i => live.has(i)), listed: ids.map(i => model.score.some(s => V.recScoreIssueId(s.id) === i))}));"))
-    assert o2["live"] == [True] * 4 and o2["listed"] == [True] * 4   # every row it cleared is back
+    assert o2["live"] == [True] * 4                  # asked again...
+    assert o2["listed"] == [False] * 4               # ...by the card, once
 
 
 def test_the_screens_wire_it_through():

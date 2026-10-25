@@ -362,9 +362,13 @@ class TestPageOneBoxes:
 
     def test_unmarked_packages_and_other_forms_are_untouched(self):
         assert ps._resolve_page_one_receiving_carrier("Insurer_FullName_A", self._facts()) is ps._SCHED_SKIP
-        for form in ("ACORD_25", "ACORD_126", "ACORD_131", "ACORD_101"):
+        for form in ("ACORD_25", "ACORD_126", "ACORD_131"):
             f = self._facts(carrier_is_current_policy=True, _form_id=form)
             assert ps._resolve_page_one_receiving_carrier("Insurer_FullName_A", f) is ps._SCHED_SKIP
+        # Z41 (25 Oct 2026): ACORD 101 is the application's continuation - its
+        # carrier header follows page one (live f575160b printed one of five).
+        f = self._facts(carrier_is_current_policy=True, _form_id="ACORD_101")
+        assert ps._resolve_page_one_receiving_carrier("Insurer_FullName_A", f) is None
 
     def test_page_one_through_the_stamper(self):
         schema = _schema("ACORD_125")
@@ -440,9 +444,13 @@ class TestPriorCarrierGrid:
         # the auto LINE's premium, never its $1,496 liability part
         assert _cell(f, "PriorCoverage_Automobile_TotalPremiumAmount_A") == "$2,991.00"
         assert _cell(f, "PriorCoverage_Automobile_EffectiveDate_A") == "07/15/2025"
-        # inland marine AND umbrella both belong to OTHER - one box cannot name both
-        assert _cell(f, "PriorCoverage_OtherLine_InsurerFullName_A") is None
-        assert _cell(f, "PriorCoverage_OtherLine_LineOfBusinessCode_A") is None
+        # inland marine AND umbrella both belong to OTHER - since 19 Oct 2026
+        # (Brent) the column holds the primary umbrella, and the inland marine
+        # policy is listed on ACORD 101
+        assert _cell(f, "PriorCoverage_OtherLine_InsurerFullName_A") == EMCC
+        assert _cell(f, "PriorCoverage_OtherLine_LineOfBusinessCode_A") == "Umbrella"
+        grid, _years = ps._prior_coverage_grid(f)
+        assert [e["_family"] for e in grid.set_aside] == ["inland_marine"]
         assert _cell(f, "PriorCoverage_Property_InsurerFullName_A") is None
         assert _cell(f, "PriorCoverage_GeneralLiability_InsurerFullName_B") is None
         assert _cell(f, "PriorCoverage_PolicyYear_B") is None

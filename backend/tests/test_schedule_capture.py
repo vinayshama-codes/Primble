@@ -414,6 +414,8 @@ def test_every_schedule_column_binds_to_a_live_acord_field():
         bound = live.get(list_key, set())
         assert bound, f"schedule {list_key} has no live ACORD binding at all"
         for col in defn["columns"]:
+            if col.get("evidence_only"):
+                continue            # read by the checks, kept on the row (25 Oct 2026)
             assert col["key"] in bound, (
                 f"{list_key}.{col['key']} is not bound to any real ACORD field - "
                 f"data entered in this column would be discarded"

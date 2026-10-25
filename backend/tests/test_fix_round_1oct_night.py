@@ -367,9 +367,21 @@ def test_every_card_says_one_number_on_every_form(unified):
 def test_the_number_is_what_answering_does_to_the_package(unified):
     _before, results, pkg = unified
     loss = _loss_card(results)[0]
-    answered = _package(_per_form(), facts={**_FACTS, loss["field"]: "Yes"})
-    assert loss["score_impact"] == answered["raw_sqs_score"] - pkg["raw_sqs_score"]
-    assert loss["impact_is_exact"] is True                    # no ceiling on this package
+    # Build 26 (TEST updated - it pinned the lone gain and a typed "Yes"): the
+    # number is the page-order share, what answering moves after the rows above
+    # it; the lone move is kept as answer_gain_alone. The claims question is
+    # weighed with "no claims" through the answer door and hedged ("up to"),
+    # since what it adds depends on the true answer (owner, 24 Oct).
+    from services.loss_history_state import claims_question_answers, with_claims_answer
+    no_claims, _had = claims_question_answers()
+    f2, fl2 = with_claims_answer(_FACTS, _FLAGS, no_claims)
+    answered = S.calculate_package_sqs(facts=f2, flags=fl2, form_results=_per_form(),
+                                       cross_issues=[], hard_stops=[], soft_stops=[],
+                                       session_data={"selected_form_ids": _FORMS})
+    row = next(r for r in pkg["top_recommendations"] if r.get("field") == loss["field"])
+    assert row["answer_gain_alone"] == answered["raw_sqs_score"] - pkg["raw_sqs_score"]
+    assert loss["score_impact"] == row["answer_gain"]
+    assert loss["impact_is_exact"] is False
 
 
 def test_a_card_no_score_reads_is_worth_nothing(unified):
@@ -410,9 +422,10 @@ def test_the_best_solutions_row_says_what_its_answer_adds(unified):
     loss_row = next(r for r in pkg["top_recommendations"] if r.get("pillar") == "loss_history_alignment")
     loss_card = _loss_card(results)[0]
     assert loss_row["answer_gain"] == loss_card["score_impact"]
-    assert loss_row["answer_gain_is_exact"] is True
+    assert loss_row["answer_gain_is_exact"] is False   # claims question: depends on the truth
     narrative = next(r for r in pkg["top_recommendations"] if r.get("pillar") == "narrative_quality")
-    assert "answer_gain" not in narrative                     # prose cannot be probed
+    # prose cannot be probed: it shows the pillar's whole remaining share, "up to" (23 Oct 2026)
+    assert narrative.get("answer_gain_is_exact") is False and not narrative.get("answer_gain_share")
     # points_remaining still adds the pillar gaps, untouched
     assert pkg["points_remaining"] == round(sum(r.get("points_available") or 0
                                                 for r in pkg["top_recommendations"]

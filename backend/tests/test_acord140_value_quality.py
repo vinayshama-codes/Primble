@@ -78,11 +78,18 @@ def test_valuation_code_lowercase_and_whitespace_tolerant():
     assert _deterministic_map("CommercialProperty_Premises_ValuationCode_A", {"valuation_method": "Acv"}) == "A"
 
 
-def test_valuation_code_unrecognized_value_passes_through_unchanged():
-    # Defensive: an unexpected valuation_method value must never be silently
-    # dropped or corrupted - only the two known industry terms are translated.
-    facts = {"valuation_method": "Agreed Value"}
-    assert _deterministic_map("CommercialProperty_Premises_ValuationCode_A", facts) == "Agreed Value"
+def test_valuation_code_unrecognized_value_is_blank_never_words():
+    # UPDATED 22 Oct 2026 (25sepChanges.md Z33-FOLLOWUPS R11) - the test was
+    # wrong by the new rule, not the code. It pinned the old two-code table
+    # ("Agreed Value" passed through as words). The box's own tooltip codes all
+    # four methods (A / R / V / M), so "Agreed Value" is "V"; a method with no
+    # code is a BLANK box, never words in the one-letter code box (generation's
+    # name-shape guard already blanked most such words, by accident - "Agreed
+    # Amount" printed as itself). The fact keeps the words; nothing is dropped.
+    assert _deterministic_map("CommercialProperty_Premises_ValuationCode_A",
+                              {"valuation_method": "Agreed Value"}) == "V"
+    assert _deterministic_map("CommercialProperty_Premises_ValuationCode_A",
+                              {"valuation_method": "Functional Replacement Cost"}) is None
 
 
 def test_row_b_valuation_code_falls_through_to_gap_fill_not_deterministic():

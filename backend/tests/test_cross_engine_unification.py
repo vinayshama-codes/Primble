@@ -37,13 +37,33 @@ FLAGS = {
 }
 TRIGGERED = {"ACORD_140", "ACORD_127"}
 
+# The package the score tests read (19 Oct 2026, Brent: a cross-form check asking
+# for a detail costs Completeness, a conflict Exposure). On FACTS alone the missing
+# coverage details floor Structural at 0, where no cross-form point can move it and
+# every test below would pass trivially; Tier 1 / Tier 2 and three coverage limits
+# leave the pillar 42 points of room.
+SCORED_FACTS = dict(
+    FACTS,
+    producer_name=_v("Broker Inc"), mailing_address=_v("1 Main St, Denver CO 80202"),
+    lines_of_business=_v(["General Liability"]), entity_type=_v("LLC"),
+    contact_name=_v("Jo"), fein=_v("12-3456789"), num_employees=_v("40"),
+    years_in_business=_v("12"), operations_description=_v("Commercial roofing contractor"),
+    naics_code=_v("238160"), gl_limits=_v("$1,000,000 / $2,000,000"),
+    auto_liability_limit=_v("$1,000,000"),
+    auto_covered_symbols=_v([{"coverage": "liability", "symbols": [1]}]),
+)
 
-def _score(cross_issues):
+
+def _package(cross_issues):
     return sq.calculate_package_sqs(
-        facts=FACTS, flags=FLAGS, form_results=[],
+        facts=SCORED_FACTS, flags=FLAGS, form_results=[],
         cross_issues=cross_issues, hard_stops=[], soft_stops=[],
         session_data={"docs": []}, calculation_stage="form_generated",
-    )["package_sqs_score"]
+    )
+
+
+def _score(cross_issues):
+    return _package(cross_issues)["package_sqs_score"]
 
 
 def test_both_warning_spellings_are_penalized_identically():
@@ -59,6 +79,14 @@ def test_cross_form_warnings_actually_cost_points():
     the score, otherwise the equality test above would pass trivially."""
     modern = [{"type": "soft_warning", "message": f"w{i}"} for i in range(3)]
     assert _score(modern) < _score([])
+    # (19 Oct 2026, Brent: a check asking for a detail is Completeness) 3 x 5 there...
+    assert [(i["bucket"], i["points"]) for i in sq.completeness_deduction_items(
+        SCORED_FACTS, FLAGS, [], modern) if i["fact"] is None] == [("cross_form_details", 15)]
+    assert _package(modern)["pillars"]["exposure_consistency"] == 100
+    # ...and a conflict between documented exposures is Exposure's, in either spelling.
+    for spelling in ("warning", "soft_warning"):
+        conflict = [{"type": spelling, "code": "location_address_mismatch", "message": "c"}]
+        assert _package(conflict)["pillars"]["exposure_consistency"] == 95, spelling
 
 
 def test_advisories_never_carry_a_penalty():
@@ -69,17 +97,30 @@ def test_advisories_never_carry_a_penalty():
 
 
 def test_hard_cross_issues_outweigh_warnings():
-    hard = [{"type": "hard_stop", "message": "h1"}]
-    warn = [{"type": "soft_warning", "message": "w1"}]
+    # (19 Oct 2026, Brent: Exposure = conflicts only) the 15 / 5 weights are pinned on a
+    # conflict between documented exposures, the bucket the rule keeps them in.
+    hard = [{"type": "hard_stop", "code": "location_address_mismatch", "message": "h1"}]
+    warn = [{"type": "soft_warning", "code": "location_address_mismatch", "message": "w1"}]
     assert _score(hard) < _score(warn)
+    assert (_package(hard)["pillars"]["exposure_consistency"],
+            _package(warn)["pillars"]["exposure_consistency"]) == (85, 95)
+    # (19 Oct 2026: a hard stop also blocks Submission Ready; the 60 / 85 caps are back since 20 Oct) and only the hard one blocks it.
+    assert _package(hard)["ready_blockers"] == ["h1"] and _package(warn)["ready_blockers"] == []
 
 
 def test_cross_penalty_is_capped():
     """min(hard*15 + warn*5, 20) - a long list must not sink the score without
     bound, or one noisy submission would collapse to zero."""
-    few  = [{"type": "hard_stop", "message": f"h{i}"} for i in range(2)]
-    many = [{"type": "hard_stop", "message": f"h{i}"} for i in range(40)]
+    # (19 Oct 2026, Brent: Exposure = conflicts only) pinned on conflicts: one costs 15,
+    # a second only the 5 left, and the 20 is ONE cap shared with Completeness's
+    # cross-form details - conflicts first, so a detail check beside them adds nothing.
+    many = [{"type": "hard_stop", "code": "location_address_mismatch", "message": f"h{i}"}
+            for i in range(40)]
+    few = many[:2]
     assert _score(few) == _score(many)
+    assert _score(many[:1]) > _score(few)
+    assert _package(many)["pillars"]["exposure_consistency"] == 80
+    assert _score(many + [{"type": "soft_warning", "message": "w"}]) == _score(many)
 
 
 def test_every_emitted_severity_is_understood_by_the_scorer():

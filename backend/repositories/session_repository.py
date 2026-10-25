@@ -516,6 +516,20 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 COALESCE((data->'package_sqs'->>'package_sqs_score')::int,
                          (data->'pre_form_score'->>'package_sqs_score')::int)
                                                                      AS package_sqs_score,
+                -- "Quote Ready" needs NO open hard stop as well as the score
+                -- (Brent, 19 Oct 2026); read from the same score as above, and
+                -- derived from that score and its open hard stops whenever the
+                -- payload carries the count (a credit moves the score after
+                -- scoring). NULL on a score saved before then - the badge falls
+                -- back to 90+, which the 60 cap a hard stop holds makes the
+                -- same rule.
+                CASE WHEN (data->'package_sqs'->>'package_sqs_score') IS NOT NULL
+                     THEN CASE WHEN (data->'package_sqs'->>'open_hard_stops') IS NOT NULL
+                               THEN (((data->'package_sqs'->>'package_sqs_score')::int >= 90)
+                                     AND ((data->'package_sqs'->>'open_hard_stops')::int = 0))::text
+                               ELSE data->'package_sqs'->>'submission_ready' END
+                     ELSE data->'pre_form_score'->>'submission_ready' END
+                                                                     AS submission_ready,
                 (SELECT jsonb_object_agg(key, value->'sqs')
                    FROM jsonb_each(CASE WHEN jsonb_typeof(data->'generated_forms') = 'object'
                                         THEN data->'generated_forms' ELSE '{}'::jsonb END))
@@ -571,6 +585,8 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
             "form_ids":           form_ids,
             "sqs":                sqs_scores,
             "package_sqs_score":  row["package_sqs_score"],
+            "submission_ready":   (None if row.get("submission_ready") is None
+                                   else str(row["submission_ready"]).lower() == "true"),
             "status":             compute_session_status({
                                       "arq_pending":        bool(row.get("arq_pending")),
                                       "last_downloaded_at": row["last_downloaded_at"],

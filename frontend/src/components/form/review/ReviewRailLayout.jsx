@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar } from "../../../utils/formatters";
+import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar, sourceLabel } from "../../../utils/formatters";
 import { formLabel } from "../../../utils/formInstances";
-import KeyDetailsMissing from "./KeyDetailsMissing";
+import KeyDetailsMissing, { KeyDetailsResolved } from "./KeyDetailsMissing";
 import { screenPoints, screenPointsText } from "../../../utils/screenPoints";
 import { openConflictFacts } from "../../../utils/dcFacts";
 import Recommendations from "./Recommendations";
 import useAttentionList from "./useAttentionList";
-import { buildRecommendations, recommendationsText, considerText, scoreLeftOnForms, pointsText } from "../../../utils/recommendations";
+import { buildRecommendations, recommendationsText, considerText } from "../../../utils/recommendations";
 import PoliciesTable from "./PoliciesTable";
+import QuestionnairePage from "./QuestionnairePage";
+import { QUESTIONNAIRE_TITLE, QUESTIONNAIRE_DESC, railSub, railBadge } from "../../../utils/questionnaire";
 import {
   GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED, documentsLockedReason, confirmLockedReason, continueLabel, scoreHeading,
   GENERATION_DIDNT_FINISH, GENERATION_DIDNT_FINISH_NEXT, GENERATION_RUNNING_TEXT, DOCUMENTS_AFTER_FORMS_NOTE,
@@ -19,8 +21,13 @@ import {
   pageProgress,
 } from "../../../utils/resolvedIssues";
 import { positiveScoreWording } from "../../../utils/positiveWording";
-import { formsEffect } from "../../../utils/scoreWithForms";
+import { formsReady } from "../../../utils/scoreWithForms";
 import { documentTypeTag, documentInsuredTag, INSURED_TAG_STYLE } from "../../../utils/addDocuments";
+import { DOCUMENTS_REVIEW_NOTE } from "../../../utils/addDocuments";
+import { lossRunDocNote } from "../../../utils/lossCoverage";
+import {
+  documentNeedsTypeReview, canConfirmDocumentType, CONFIRM_TYPE_LABEL, CONFIRM_TYPE_TIP,
+} from "../../../utils/addDocuments";
 import "./ReviewRailLayout.css";
 
 // The "rail" layout of the pre-form Review step - the default layout
@@ -51,6 +58,9 @@ const SECTIONS = [
   // Choice Electric #22 / #27 (7 Oct 2026): score raisers and what the forms
   // will need, addressable before (and after) the forms.
   { id: "recommendations", label: "Recommendations", group: FIX_GROUP },
+  // The narrative questionnaire (owner, 23 Oct 2026): the last page before
+  // form selection. "Skip to form selection" still skips it; it never blocks.
+  { id: "questionnaire", label: "Questionnaire", group: FIX_GROUP },
 ];
 
 // The backend tier ladder (sqs_service.tier_for_score) and the grade colour
@@ -242,7 +252,7 @@ export default function ReviewRailLayout(props) {
     section, onSectionChange, banners, helpers,
     packageSqs, keyDetails, integrity, renderIntegrityStatus,
     docSummary, docsNeedingReview, availableDocTypes, reclassDocId, reclassBusyBtn, reviewLoadingId,
-    onReclassify, onReviewData, renderAddDocuments,
+    onReclassify, onReviewData, renderAddDocuments, lossCoverageNote = "",
     underwriting, openConflicts, underwritingPicks, setUnderwritingPicks, underwritingBusy, onConfirmUnderwriting,
     dcHighlight, dcSectionRef,
     groupedIssues, hardStops, softStops, issueStatuses, reviewIssueCounts, hasHardStops, hasWarnings,
@@ -258,7 +268,11 @@ export default function ReviewRailLayout(props) {
     // The Resolved section (8 Oct 2026): "Open again" and its in-flight state.
     onReopenIssue, reopeningIds, reopenNotices,
     // Recommendations' own Resolved list (13 Oct 2026): "Open again" there.
-    onReopenRecommendation,
+    onReopenRecommendation, onReopenKeyDetail,
+    // The Questionnaire page (23 Oct 2026): its data (useQuestionnaire), the
+    // question a narrative card's deep link opens, and the score / issue merge
+    // a saved answer's reply goes through.
+    questionnaire, questionnaireFocus, onQuestionnaireApplied,
   } = props;
   const {
     IssueLine, BareStopRow, HoverTip, RemediationDiffBand, IntegritySeverityChip,
@@ -431,7 +445,10 @@ export default function ReviewRailLayout(props) {
 
   const tierName = packageSqs?.tier || null;
   const tierIndex = tierName ? TIER_LADDER.findIndex((t) => t.name === tierName) : -1;
-  const tierColor = tierName ? gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) : "#64748b";
+  // The tier's own colour (19 Oct 2026): the chip is coloured by the tier it
+  // prints, never re-derived from the number beside it.
+  const tierColor = tierIndex >= 0 ? TIER_LADDER[tierIndex].color
+    : tierName ? gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) : "#64748b";
   // The package SQS before forms (Orbin item 2, 29 Sep 2026): the one door's number,
   // printed with the gauge and in the rail footer. Null means "Not scored yet".
   const soFar = scoreSoFar(packageSqs);
@@ -463,13 +480,16 @@ export default function ReviewRailLayout(props) {
     packageSqs, groupedIssues, keyDetails, dryRun, attention: recAttention, formsExist,
     tickedFormIds: dryRunFormIds || [], formOffers,
   });
+  // The rows only a document lifts sit in the same "Raise your score" list
+  // (23 Oct 2026), so every count of that list - this rail badge, the section's
+  // pill, the Overview link - counts them too.
+  const recDocRows = formsExist ? 0
+    : (screenPts.unanswerable || []).filter((u) => u && u.action === "add_documents").length;
+  if (recDocRows) { recModel.count += recDocRows; recModel.docRows = recDocRows; }
   const recChecking = !formsExist && genState !== GEN_RUNNING && dryRun?.status === "pending";
-  // After forms with this page finished and the score under 100 only because of
-  // unconfirmed AI values on the forms: say where the last points are.
-  const formsLeft = formsExist
-    ? scoreLeftOnForms({ packageSqs, model: recModel,
-      openOnPage: docsOpen + conflictsOpen + hardOpen + warnOpen + (keyDetails?.missing || []).length })
-    : null;
+  // The "Forms ready" meter (Brent, 23 Oct 2026): what the generated forms still
+  // need, off the same needs-attention list. The score never moves with it.
+  const formsMeter = formsExist ? formsReady(recAttention) : null;
 
   const integrityStatus = integrity?.status;
   const integrityContent = renderIntegrityStatus();
@@ -524,6 +544,11 @@ export default function ReviewRailLayout(props) {
       id: "recommendations",
       sub: recModel.count > 0 ? `${recModel.count} to consider` : recChecking ? "Checking your forms..." : "Nothing to add",
       badge: recModel.count > 0 ? recModel.count : recChecking ? null : "done",
+    },
+    {
+      id: "questionnaire",
+      sub: railSub(questionnaire?.model, questionnaire?.error),
+      badge: railBadge(questionnaire?.model),
     },
   ];
 
@@ -676,28 +701,6 @@ export default function ReviewRailLayout(props) {
         {genState === GEN_INTERRUPTED && (
           <div className="rr-note rr-note--amber rr-gen-note"><strong>{GENERATION_DIDNT_FINISH}.</strong> {GENERATION_DIDNT_FINISH_NEXT}</div>
         )}
-        {formsLeft && (
-          <div className="rr-forms-left" role="status" data-testid="overview-forms-left">
-            <div className="rr-forms-left__text">
-              <strong>Everything on this review is done. Your last points are on the forms.</strong>
-              <span>
-                Your score is {formsLeft.score}. {formsLeft.reaches100 ? "To reach 100" : "To raise it"}, confirm the values the AI filled on your forms
-                {formsLeft.formCount > 1 ? ` (${formsLeft.formCount} forms have some)` : ""}: open a form and, in its side
-                panel under Please verify, check each value and click Confirm, or Confirm all.
-                {pointsText(formsLeft.points) ? ` That adds ${pointsText(formsLeft.points)}.` : ""}
-              </span>
-            </div>
-            {typeof onFixScoreItem === "function" && (
-              <button type="button" className="rr-forms-left__btn" onClick={() => onFixScoreItem(formsLeft.item)}>
-                {formsLeft.formId
-                  ? (formsLeft.formCount > 1
-                    ? `Start with ${formLabel(formsLeft.formId)} (most to confirm)`
-                    : `Open ${formLabel(formsLeft.formId)}`)
-                  : "Open forms"}
-              </button>
-            )}
-          </div>
-        )}
         <div className="rr-overview-grid">
           <Panel title="Submission Readiness" right={<span className="rr-panel__meta rr-panel__meta--inline">Updates as you fix items</span>}>
             <div className="rr-ready">
@@ -719,15 +722,13 @@ export default function ReviewRailLayout(props) {
                 {soFar && (formsExist
                   ? <div className="rr-ready__note">Total Package Score</div>
                   : <div className="rr-ready__note">Submission Quality Score. Scored from your documents and answers - no forms needed.</div>)}
-                {/* With and without forms (13 Oct 2026): why the number moved at generation. */}
-                {formsExist && (() => {
-                  const fx = formsEffect(packageSqs);
-                  return fx ? (
-                    <div className="rr-ready__note" data-forms-effect="review">
-                      <strong>{fx.text}</strong>{fx.detail ? `. ${fx.detail}` : ""}
-                    </div>
-                  ) : null;
-                })()}
+                {/* Forms ready (Brent, 23 Oct 2026): one score before and after forms;
+                    the forms' own to-dos are this meter. "Confirm all" moves it. */}
+                {formsMeter && (
+                  <div className="rr-ready__note" data-forms-ready="review">
+                    <strong>{formsMeter.overall.text}</strong>
+                  </div>
+                )}
                 {(() => {
                   const capNote = railCapNote(packageSqs, {
                     hardOpen, hardTotal: hasHardStops ? hardTally.total : 0,
@@ -791,6 +792,8 @@ export default function ReviewRailLayout(props) {
             {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok rr-key-line">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
             <KeyDetailsMissing keyDetails={keyDetails} onFix={onFixKeyDetail} onShowSection={onSectionChange} className="tier2-missing rr-key-line"
               points={screenPts.details} />
+            <KeyDetailsResolved keyDetails={keyDetails} issueStatuses={issueStatuses} onReopen={onReopenKeyDetail}
+              reopeningIds={reopeningIds} reopenNotices={reopenNotices} />
           </Panel>
         )}
         {genForms.length > 0 && (
@@ -802,6 +805,15 @@ export default function ReviewRailLayout(props) {
                   {f.score != null ? `${f.score}${f.grade ? ` ${f.grade}` : ""}` : "Not scored"}
                 </span>
                 <span className="rr-form-row__tier">{f.tier || ""}</span>
+                {(() => {
+                  // This form's part of the Forms ready meter (Brent, 23 Oct 2026).
+                  const r = (formsMeter?.forms || []).find((x) => x.form_id === f.formId);
+                  return r ? (
+                    <span className="rr-form-row__ready" data-forms-ready-form={f.formId}>
+                      {r.verify || r.missing ? `${r.verify} to confirm · ${r.missing} to fill` : "Ready"}
+                    </span>
+                  ) : null;
+                })()}
                 <button type="button" className="rr-form-row__open" onClick={() => packageGen?.onOpenForm?.(f.formId)}>Open</button>
               </div>
             ))}
@@ -832,16 +844,28 @@ export default function ReviewRailLayout(props) {
         {docLockText
           ? <div className="rr-note rr-note--blue rr-gen-note">{docLockText}</div>
           : formsExist && <div className="rr-note rr-note--blue rr-gen-note">{DOCUMENTS_AFTER_FORMS_NOTE}</div>}
-        <Panel title={`Documents Processed (${docSummary.length})`} meta="Type, insured and how each file is used" bodyClassName="rr-rows">
+        {/* Brent, 17 Oct 2026 (item 2): the review sentence sits under the
+            list's title, in pink - shown while a document still needs its type
+            confirmed (`docsNeedingReview`, as in the classic layout: an
+            excluded document is done). */}
+        <Panel title={`Documents Processed (${docSummary.length})`} bodyClassName="rr-rows"
+          meta={<>
+            Type, insured and how each file is used
+            {docsNeedingReview.length > 0 && (
+              <div className="rr-doc-note-review" data-testid="doc-review-note">{DOCUMENTS_REVIEW_NOTE}</div>
+            )}
+            {lossCoverageNote && (
+              <div role="status" data-testid="loss-coverage-note" style={{ marginTop: 4, color: "#166534", fontWeight: 600 }}>{lossCoverageNote}</div>
+            )}
+          </>}>
           {docSummary.length === 0 && (
             <div className="rr-doc-empty">No document details are available for this submission.</div>
           )}
           {docSummary.map((d, i) => {
             const docType = d.doc_type || "unknown";
             const label = d.doc_type_label || docType.replace(/_/g, " ");
-            const conf = d.doc_type_confidence || "";
-            const isUnknown = docType === "unknown";
-            const needsReview = isUnknown || conf === "low" || d.doc_type_source === "filename";
+            // The pink row is the counted row (one rule, utils/addDocuments).
+            const needsReview = documentNeedsTypeReview(d);
             const excluded = !!d.excluded;
             const supportingOnly = !!d.supporting_only;
             const busy = reclassDocId && reclassDocId === d.doc_id;
@@ -861,6 +885,9 @@ export default function ReviewRailLayout(props) {
                     <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
                     {typeTag && <span title={typeTag.title} className="rr-doc__conf" style={{ color: typeTag.color }} data-testid="doc-type-tag">{typeTag.label}</span>}
                     {insuredTag && <span title={insuredTag.title} style={INSURED_TAG_STYLE} data-testid="doc-insured-tag">{insuredTag.label}</span>}
+                    {lossRunDocNote(packageSqs?.loss_coverage, d.doc_id) && (
+                      <span className="rr-doc__note" data-testid="doc-loss-years">{lossRunDocNote(packageSqs?.loss_coverage, d.doc_id)}</span>
+                    )}
                     {excluded && <span className="rr-doc__note">excluded from scoring</span>}
                     {supportingOnly && !excluded && <span className="rr-doc__note" title="Facts contribute, but this document is never treated as the primary source">supporting only</span>}
                   </div>
@@ -880,6 +907,16 @@ export default function ReviewRailLayout(props) {
                       </select>
                       {busy && reclassBusyBtn === "type" && <span className="rr-busy"><Spinner />Updating...</span>}
                     </span>
+                  )}
+                  {/* "Confirm their document type" (Brent's sentence): the type
+                      shown, as it is (22 Oct 2026, as in the classic layout). */}
+                  {canConfirmDocumentType(d, availableDocTypes) && (
+                    <HoverTip text={CONFIRM_TYPE_TIP} style={{ width: "auto", display: "inline-flex" }}>
+                      <button type="button" className={`rr-mini-btn${docLockText ? " is-locked" : ""}`} disabled={anyReclassBusy || !!docLockText}
+                        onClick={() => onReclassify(d.doc_id, "set_type", docType, "confirm")} data-testid="doc-confirm-type">
+                        {busy && reclassBusyBtn === "confirm" && <Spinner />}{CONFIRM_TYPE_LABEL}
+                      </button>
+                    </HoverTip>
                   )}
                   <HoverTip text={excluded ? DOC_ACTION_TIPS.include : DOC_ACTION_TIPS.exclude} style={{ width: "auto", display: "inline-flex" }}>
                     <button type="button" className={`rr-mini-btn rr-mini-btn--wide${docLockText ? " is-locked" : ""}`} disabled={anyReclassBusy || !!docLockText}
@@ -905,11 +942,6 @@ export default function ReviewRailLayout(props) {
             );
           })}
         </Panel>
-        {docSummary.some((d) => (d.doc_type || "unknown") === "unknown" || d.doc_type_confidence === "low") && (
-          <div className="rr-doc-note-review">
-            Some documents need review. Set the correct type so scoring and form recommendations use them - or exclude documents that don't belong.
-          </div>
-        )}
         {typeof renderAddDocuments === "function" && renderAddDocuments()}
       </div>
     </>
@@ -999,7 +1031,7 @@ export default function ReviewRailLayout(props) {
                               />
                               <span className="rr-opt__value">{v.display}</span>
                               <span className="rr-opt__source">
-                                <span className="rr-opt__from">from</span> {(v.sources || []).map((s) => s.filename).join(", ")}
+                                <span className="rr-opt__from">from</span> {(v.sources || []).map(sourceLabel).join(", ")}
                                 {f.suggested_value != null && v.display === f.suggested_value && <span className="rr-suggested">Suggested</span>}
                               </span>
                             </label>
@@ -1183,6 +1215,7 @@ export default function ReviewRailLayout(props) {
       <div className="rr-stack">
         <Recommendations model={recModel} attention={recAttention} packageSqs={packageSqs}
           screenUnanswerable={screenPts.unanswerable}
+          onAddDocuments={() => onSectionChange("documents")}
           dryRun={dryRun} sessionId={dryRunSessionId} tickedFormIds={dryRunFormIds || []}
           onDryRunUpdate={onDryRunUpdate} onOpenDryRunFix={onFixDryRunItem}
           onOpenScoreFix={onFixScoreItem} onAddForm={onAddForm} formOffers={formOffers} onAddOffer={onAddOffer}
@@ -1194,6 +1227,21 @@ export default function ReviewRailLayout(props) {
     </>
   );
 
+  // The narrative questionnaire (owner, 23 Oct 2026): what the documents
+  // say, to confirm, and what is missing, to answer - before and after forms.
+  const questionnaireSection = (
+    <>
+      <PageHead id="questionnaire" afterForms={afterForms} title={QUESTIONNAIRE_TITLE}
+        description={QUESTIONNAIRE_DESC} />
+      <QuestionnairePage sessionId={dryRunSessionId} model={questionnaire?.model || null}
+        error={!!questionnaire?.error} onReload={questionnaire?.reload}
+        active={section === "questionnaire"} focus={questionnaireFocus || null}
+        onAnswered={questionnaire?.applyQuestion || (() => {})}
+        onNarrative={questionnaire?.applyNarrative || (() => {})}
+        onApplied={onQuestionnaireApplied} lockedText={dcLockText} />
+    </>
+  );
+
   const sectionBodies = {
     overview,
     documents,
@@ -1202,6 +1250,7 @@ export default function ReviewRailLayout(props) {
     hardstops: hardStopsSection,
     warnings: warningsSection,
     recommendations: recommendationsSection,
+    questionnaire: questionnaireSection,
   };
 
   return (
@@ -1223,7 +1272,10 @@ export default function ReviewRailLayout(props) {
         <div className="rr-rail-foot">
           <div className="rr-rail-foot__label">{scoreHeading(genState)}</div>
           <div className="rr-rail-foot__tier" style={{ color: soFar ? tierColor : "#a1a1aa" }}>{soFar ? soFar.text : "Not scored yet"}</div>
-          <div className="rr-rail-foot__sub">{openItems > 0 ? `${plural(openItems, "item")} to go` : "Everything handled"}</div>
+          {/* Under 100 with only optional rows left, the footer says so - never
+              "Everything handled" beside an 88 (owner, 24 Oct 2026). */}
+          <div className="rr-rail-foot__sub">{openItems > 0 ? `${plural(openItems, "item")} to go`
+            : recModel.count > 0 ? considerText(recModel) : "Everything handled"}</div>
           <div className="rr-rail-foot__bar"><i style={{ width: `${progressPct}%` }} /></div>
         </div>
       </aside>

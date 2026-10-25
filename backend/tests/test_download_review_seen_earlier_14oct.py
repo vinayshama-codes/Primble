@@ -231,7 +231,9 @@ def test_the_side_panel_now_lists_every_gate_box_once_and_says_it_blocks():
     assert sorted(blocking) == sorted(_GATE)
     assert len([r for r in rows if r["field"] in _GATE]) == 6                     # one row per box
     for f in ("Construction_RoofMaterialCode_A", "Construction_RoofMaterialCode_B"):
-        assert blocking[f]["status"] == na.STATUS_HELD_BACK                     # its row kept, flagged
+        # its row kept, flagged - Missing since 23 Oct 2026 (Brent: the refused
+        # value is the audit record's, never "AI held back")
+        assert blocking[f]["status"] == na.STATUS_MISSING
     for f in ("CommercialStructure_BuiltYear_A", "BuildingFireProtection_ProtectionClassCode_B"):
         r = blocking[f]
         assert r["status"] == na.STATUS_MISSING and r["required"] is True
@@ -549,7 +551,7 @@ def test_the_review_page_view_is_the_page_reload_s_own(monkeypatch):
     call = seg[seg.index("_grouped_issues = _grouped_with_package_caps("):]
     call = call[:call.index("\n    )") + 6]
     for arg in ('proc_session.get("structured_issues") or []', "hard_stops", "_final_soft_stops",
-                "_pkg_now", 'cross_issues=proc_session.get("cross_issues_last") or []',
+                "_pkg_now", 'cross_issues=_cross_shown',  # build 26: live stops before forms (TEST updated)
                 'facts=proc_session.get("facts") or {}'):
         assert arg in call, arg
     assert 'hard_stops = proc_session.get("hard_stops", [])' in seg
@@ -775,8 +777,9 @@ console.log(JSON.stringify({{ c, head: A.downloadReviewHeadline(c),
   warnCodes: p.warnings.map(r => r.code),
   recIds: p.recommendations.map(r => r.rec_id),
   missingFields: p.missing.flatMap(f => f.rows.map(r => r.field)),
-  groups: [n(p.verify), n(p.heldBack), n(p.applicant), p.choices.length],
-  lines: ["verify", "heldBack", "applicant", "choices"].map(k => A.groupLineText(k, c[k])) }}));
+  groups: [n(p.verify), n(p.applicant), p.choices.length],
+  noHeldBack: !("heldBack" in p) && !("heldBack" in c),
+  lines: ["verify", "applicant", "choices"].map(k => A.groupLineText(k, c[k])) }}));
 """)
     c = out["c"]
     assert out["hardFirst"] is True                                   # the gate's boxes first
@@ -792,11 +795,12 @@ console.log(JSON.stringify({{ c, head: A.downloadReviewHeadline(c),
     assert c["hard"] == 7 and c["warnings"] == 4 and c["recommendations"] == 5
     assert c["toFix"] == c["hard"] + c["warnings"] + c["recommendations"] + c["missing"]
     assert out["head"] == f"{c['toFix']} items to fix - review before downloading"
-    assert out["groups"] == [c["verify"], c["heldBack"], c["applicant"], c["choices"]]
+    # 23 Oct 2026 (Brent): no "AI held back" group on the download screen
+    assert out["groups"] == [c["verify"], c["applicant"], c["choices"]] and out["noHeldBack"] is True
     assert c["verify"] >= 1 and c["applicant"] == 2 and c["choices"] == 1
     assert out["lines"][0] == f"{c['verify']} value{'s' if c['verify'] != 1 else ''} to confirm"
-    assert out["lines"][2:] == ["2 boxes for the applicant to sign", "1 new-document choice"]
-    assert c["total"] == c["toFix"] + c["verify"] + c["heldBack"] + c["applicant"] + c["choices"]
+    assert out["lines"][1:] == ["2 boxes for the applicant to sign", "1 new-document choice"]
+    assert c["total"] == c["toFix"] + c["verify"] + c["applicant"] + c["choices"]
 
 
 def test_a_verify_or_applicant_row_is_never_folded_into_a_card(tmp_path):
@@ -811,7 +815,9 @@ const att = {forms: [{form_id: "F", rows: [
   {field: "f", status: "missing", fact_key: "other"}]}]};
 console.log(JSON.stringify(A.withoutListedBoxes(recs, att).forms[0].rows.map(r => r.field)));
 """)
-    assert out == ["b", "c", "e", "f"]
+    # "d" (a stale "AI held back" row) is no longer folded either: since 23 Oct
+    # 2026 no list draws that status at all (`ATTENTION_STATUS_ORDER`).
+    assert out == ["b", "c", "d", "e", "f"]
 
 
 def test_the_list_component_shows_each_group_as_one_line_with_show():
@@ -822,7 +828,8 @@ def test_the_list_component_shows_each_group_as_one_line_with_show():
     assert "<FormRows groups={p.missing} />" in fn                    # Missing one by one
     assert "—" not in fn
     util = ATTN_JS.read_text(encoding="utf-8")
-    for words in ('"value to confirm"', '"values the AI held back"', '"boxes for the applicant to sign"',
+    for words in ('"value to confirm"', '"boxes for the applicant to sign"',
                   '"new-document choices"'):
         assert words in util
+    assert '"values the AI held back"' not in util                 # 23 Oct 2026 (Brent)
     assert "—" not in util[util.index("// THE DOWNLOAD REVIEW (owner, 14 Oct 2026)"):]

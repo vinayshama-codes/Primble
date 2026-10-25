@@ -73,15 +73,18 @@ def _card(facts: dict, code: str, severity: str = "hard_stop") -> dict:
     return _items(build_grouped_view([issue], hard, soft, facts=facts))[0]["resolution"]
 
 
-def test_live_shape_occupancy_only_card_opens_the_table_with_occupancy_typed_above():
-    # The live card: only occupancy missing; building 1's construction / values
-    # used to show as THE package's in a field modal.
+def test_live_shape_occupancy_only_card_is_a_field_window_with_just_occupancy():
+    # The live card: only occupancy missing. REVERSED 21 Oct 2026 (Brent 17 Oct
+    # item 8, build item b-cope-one-store): it opened the WHOLE two-building
+    # table for one submission-wide dropdown - the TEST pinned the 7 Oct rule,
+    # which Brent's "ask only what is missing" replaces. It is a field window
+    # with just the occupancy box - still never building 1's construction /
+    # values as the package's (the round-4 defect: no per-building box at all).
     res = _card(_two_buildings(), "minimum_viable_cope_missing")
-    assert res["mode"] == "schedule" and res["schedule_key"] == "property_locations"
-    assert res["columns"] == ["construction_type", "building_value", "bpp_value"]
+    assert res["mode"] == "field"
     assert res["facts"] == ["occupancy_type"]
-    assert res["controls"]["occupancy_type"]["options"]
-    assert "2 buildings" in res["note"]
+    assert set(res["controls"]) == {"occupancy_type"} and res["controls"]["occupancy_type"]["options"]
+    assert "schedule_key" not in res and "columns" not in res
 
 
 @pytest.mark.parametrize("code", sorted(COPE_CARD_CODES))
@@ -91,10 +94,22 @@ def test_no_per_building_fact_is_ever_one_package_box_on_two_buildings(code):
                     {"occupancy_type": "Office", "year_built": "1990", "valuation_method": "RCV"}):
         facts = _two_buildings(**package)
         res = route_cope_resolution(code, copy.deepcopy(base), facts)
-        assert res["mode"] == "schedule"
         assert not set(res.get("facts") or []) & set(PER_BUILDING_COPE)
         asked = [f for f in base["facts"] if f in PER_BUILDING_COPE]
-        assert res["columns"] == [PER_BUILDING_COPE[f] for f in asked]      # stated or not
+        # Ask only what is missing (21 Oct 2026, Brent 17 Oct item 8 - the TEST
+        # pinned "every asked column, stated or not"): the per-building items
+        # the package still misses; with only package-level items missing, a
+        # field window; with nothing missing, never an empty window.
+        missing = [f for f in asked if not facts.get(f)]
+        package_missing = [f for f in base["facts"] if f not in PER_BUILDING_COPE and not package.get(f)]
+        if missing:
+            assert res["mode"] == "schedule"
+            assert res["columns"] == [PER_BUILDING_COPE[f] for f in missing]
+        elif package_missing:
+            assert res["mode"] == "field" and res["facts"] == package_missing
+        else:
+            assert res["mode"] == "schedule"
+            assert res["columns"] == [PER_BUILDING_COPE[f] for f in asked]
         # every package-level item still missing rides along, nothing stated does
         for f in base["facts"]:
             if f in PER_BUILDING_COPE:
@@ -136,7 +151,9 @@ def test_the_legacy_hard_stop_twin_routes_too():
     view = build_grouped_view(build_structured_from_sources(legacy_hard=[msg]), [msg], [],
                               facts=_two_buildings())
     res = [i for i in _items(view) if "COPE" in i["message"]][0]["resolution"]
-    assert res["mode"] == "schedule" and res["facts"] == ["occupancy_type"]
+    # Only occupancy missing: just that box (21 Oct 2026, Brent 17 Oct item 8 -
+    # the TEST pinned the whole-table window his item reverses).
+    assert res["mode"] == "field" and res["facts"] == ["occupancy_type"]
     # one building: the legacy twin's own field card
     one = _two_buildings()
     one["property_locations"] = one["property_locations"][:1]
@@ -180,12 +197,15 @@ def test_every_reason_fact_belongs_to_its_cards_line():
 
 
 def test_160_never_prints_another_lines_value():
-    facts = {"cyber_limit": "$1,000,000", "umbrella_limit": "$5,000,000"}
-    assert fs._build_trigger_facts("ACORD_160", facts, for_line="inland_marine") == ([], None)
-    facts["inland_marine_total_value"] = "250000"
-    trig, suffix = fs._build_trigger_facts("ACORD_160", facts, for_line="inland_marine")
-    assert suffix == "Inland marine value: $250,000"
-    assert [t["code"] for t in trig] == ["inland_marine_total_value"]
+    # Z37 (24 Oct 2026): ACORD 160 is the Business Owners section - its
+    # evidence is the BOP values, never inland marine / cyber / umbrella.
+    facts = {"cyber_limit": "$1,000,000", "umbrella_limit": "$5,000,000",
+             "inland_marine_total_value": "250000"}
+    assert fs._build_trigger_facts("ACORD_160", facts) == ([], None)
+    facts["bop_property_limit"] = "250000"
+    trig, suffix = fs._build_trigger_facts("ACORD_160", facts)
+    assert suffix == "BOP property limit: $250,000"
+    assert [t["code"] for t in trig] == ["bop_property_limit"]
 
 
 def test_a_misdeclared_fact_is_refused_at_run_time(monkeypatch):

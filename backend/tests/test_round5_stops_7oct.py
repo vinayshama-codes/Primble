@@ -141,10 +141,12 @@ def test_after_generation_the_cope_twin_shows_once_and_both_stops_are_hard():
     # the COPE problem once - never the legacy sentence beside its twin
     assert not any(r["message"].startswith("Property Minimum Viable COPE incomplete")
                    for r in _rows(view))
-    # the kept row carries the routed fix: on two buildings it opens the table
+    # the kept row carries the routed fix. On two buildings with only occupancy
+    # missing it is that one box (21 Oct 2026, Brent 17 Oct item 8 - the TEST
+    # pinned the whole-table window his "ask only what is missing" replaces).
     cope = next(r for r in hard_rows if r["code"] == "minimum_viable_cope_missing")
-    assert cope["resolution"]["mode"] == "schedule"
-    assert cope["resolution"]["schedule_key"] == "property_locations"
+    assert cope["resolution"]["mode"] == "field"
+    assert "schedule_key" not in cope["resolution"]
     assert cope["resolution"]["facts"] == ["occupancy_type"]
 
 
@@ -216,8 +218,20 @@ def test_the_editor_hard_stops_block_names_the_cope_problem_once_with_its_fix():
     items = _cap_stop_items([LEGACY], coded_issues=cross, facts=_two_buildings())
     assert len(items) == 1
     assert items[0]["code"] == "legacy_minimum_viable_cope"
+    # Only occupancy missing on two buildings: just that box, the same routed
+    # fix the review draws (21 Oct 2026, Brent 17 Oct item 8 - the TEST pinned
+    # the whole-table window).
+    assert items[0]["resolution"]["mode"] == "field"
+    assert items[0]["resolution"]["facts"] == ["occupancy_type"]
+    # A per-building item missing still opens the table, per building.
+    two = _two_buildings()
+    two.pop("construction_type")
+    two["property_locations"][1]["construction_type"] = ""
+    msg = LEGACY.replace("occupancy type", "occupancy type, construction type")
+    items = _cap_stop_items([msg], coded_issues=[], facts=two)
     assert items[0]["resolution"]["mode"] == "schedule"
     assert items[0]["resolution"]["schedule_key"] == "property_locations"
+    assert items[0]["resolution"]["columns"] == ["construction_type"]
 
 
 def test_the_scorer_still_reads_both_twins():
@@ -289,8 +303,16 @@ def test_the_brief_and_the_lite_screen_print_through_the_door():
 # so it now pins the reversal.
 
 def _property_session(recs=("ACORD_125", "ACORD_140")):
+    from datetime import datetime, timedelta
+
+    def _in_days(days):
+        return (datetime.now() + timedelta(days=days)).strftime("%m/%d/%Y")
+
+    # A proposed term (19 Oct 2026, Brent: without one the package carries a hard
+    # stop of its own - these tests are about COPE and BI, not the term).
     facts = dict(_two_buildings(), business_income_limit=F("$100,000"),
-                 locations=F([{"address": "1 Main St, Denver, CO 80221"}]))
+                 locations=F([{"address": "1 Main St, Denver, CO 80221"}]),
+                 effective_date=F(_in_days(30)), expiration_date=F(_in_days(395)))
     return {"facts": facts, "flags": {"has_property_coverage": True},
             "recommendations": [{"form_id": f} for f in recs]}
 

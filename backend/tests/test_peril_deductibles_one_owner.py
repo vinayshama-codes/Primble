@@ -28,6 +28,8 @@ are REFERENCED and no amount was captured at all - the one version a producer
 can satisfy - at WARNING severity, matching the client ruling this file's
 sibling rules already record (carrier practice varies; flag, never block).
 """
+from datetime import datetime, timedelta
+
 import pytest
 
 from services.sqs_service import evaluate_stops
@@ -43,9 +45,16 @@ def _F(v):
     return {"value": v, "confidence": "filled", "source": "ai_high"}
 
 
+def _in_days(days):
+    return (datetime.now() + timedelta(days=days)).strftime("%m/%d/%Y")
+
+
 def _property_facts(**over):
     facts = {
         "applicant_name": _F("PANEL TEST LLC"),
+        # A proposed term (19 Oct 2026, Brent: without one the package carries a
+        # hard stop of its own, which this file's rule has nothing to do with).
+        "effective_date": _F(_in_days(30)), "expiration_date": _F(_in_days(395)),
         "property_building_value": _F("1200000"),
         "locations": _F([{"address": "100 Main St, Warren, MI 48089"}]),
         "occupancy_type": _F("Contractor office and shop"),

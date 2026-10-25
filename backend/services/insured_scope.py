@@ -54,6 +54,7 @@ NO LLM. Deterministic, and cheap: one entity comparison per document.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -133,9 +134,33 @@ def _same_entity(a: Any, b: Any) -> Optional[bool]:
     except Exception:                                          # noqa: BLE001
         return None                                # no door, no opinion
     try:
-        return bool(same_entity_name(sa, sb))
+        if same_entity_name(sa, sb):
+            return True
+        # A name printed WITHOUT its legal form is not decisively another
+        # company (live f575160b, 25 Oct 2026: Michelle's handwritten "Choice
+        # Electric" against "CHOICE ELECTRIC LLC" dropped her payroll, staff and
+        # revenue as another insured's). Two DIFFERENT legal forms still differ.
+        ba, fa = _base_and_form(sa)
+        bb, fb = _base_and_form(sb)
+        if ba and ba == bb and (not fa or not fb):
+            return True
+        return False
     except Exception:                                          # noqa: BLE001
         return None
+
+
+_LEGAL_FORM_WORDS = {"LLC", "LLP", "LP", "INC", "INCORPORATED", "CORP", "CORPORATION",
+                     "CO", "COMPANY", "LTD", "LIMITED", "PLLC", "PC", "PA", "LC"}
+
+
+def _base_and_form(name: str) -> tuple:
+    """("CHOICEELECTRIC", "LLC") for "Choice Electric, L.L.C." - the name's
+    words without trailing legal-form words, and that form ("" when none)."""
+    words = re.findall(r"[A-Z0-9]+", re.sub(r"(?<=\b[A-Z])\.(?=[A-Z]\b)", "", name.upper()))
+    form = []
+    while words and words[-1] in _LEGAL_FORM_WORDS:
+        form.insert(0, words.pop())
+    return "".join(words), " ".join(form)
 
 
 def other_insured_documents(facts: Optional[dict],
@@ -233,3 +258,209 @@ def drop_other_insured_identity(facts: Optional[dict],
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("insured_scope: scoping skipped: %s", exc)
         return []
+
+
+# ── An office line is not the insured's address (Z37, 24 Oct 2026) ──────────
+# Fourth / fifth sighting of one class on Choice Electric (8 and 13 Oct): a
+# carrier's details read as someone else's. Travelers' "OFFICE: PHOENIX AZ"
+# became the applicant's mailing state AZ and the producer's address; the
+# Amerisure dec header "AMERISURE INSURANCE COMPANY / 26777 HALSTED RD /
+# FARMINGTON HILLS MI" became the producer's mailing address. An address the
+# documents print ONLY under an insurer's name, or on an office / branch line,
+# is that office's - never the applicant's, never the submitting agency's.
+_OFFICE_LINE_RE = re.compile(
+    r"^\s*(?:(?:servicing|service|branch|regional|claims?|underwriting|issuing|"
+    r"company|insurer'?s?|carrier'?s?)\s+)?office\s*[:#-]|"
+    r"^\s*branch\s*[:#-]", re.I)
+# Z38: "HOME OFFICE" is an office label only beside an insurer-shaped name -
+# an insured prints its own head office as "Home Office: 123 Main St" too.
+_HOME_OFFICE_RE = re.compile(r"\bhome\s+office\b", re.I)
+_OFFICE_LABEL_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:servicing|service|branch|regional|home|claims?|underwriting|issuing)\s+)?"
+    r"(?:office|branch)\s*[:#-]\s*", re.I)
+
+
+def _compact(text: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
+
+
+def _address_needle(address: Any) -> str:
+    """The part of an address that identifies where it is printed: its street
+    line when it has one, else the whole (city / state) text."""
+    s = _OFFICE_LABEL_PREFIX_RE.sub("", str(_value(address) or "").strip())
+    parts = [p for p in re.split(r"[,\n]", s) if p.strip()]
+    street = next((p for p in parts if re.search(r"\d", p) and re.search(r"[A-Za-z]{2}", p)), None)
+    needle = _compact(street if street else s)
+    return needle if len(needle) >= 5 else ""
+
+
+def _cell_above(above: str, start: int, end: int) -> str:
+    """The part of the line above that sits over columns [start, end). A dec
+    page printing the insured's block beside the company's ("CHOICE ELECTRIC
+    LLC      TRAVELERS CASUALTY COMPANY" over "123 MAIN ST      ONE TOWER
+    SQUARE") puts the insurer above the OTHER column's address, not this one.
+    Cells are runs separated by 2+ spaces or a tab; a line with no such gap is
+    one cell."""
+    cells = [c for c in re.finditer(r"\S+(?:[ ]\S+)*", str(above or ""))]
+    hit = [c.group(0) for c in cells if c.start() < end and c.end() > start]
+    return " ".join(hit)
+
+
+def _names_an_insurer(text: Any, own_names: Iterable[Any] = ()) -> bool:
+    """Is `text` insurer-shaped once the insured's OWN name is taken out? An
+    applicant named "Mutual Plumbing LLC" / "Farmers Mutual Grain Co-op" is
+    insurer-shaped by spelling (Z38); its own block is never an insurer's."""
+    from services.fact_comparison import looks_like_an_insurer
+    text = str(text or "")
+    if not looks_like_an_insurer(text):
+        return False
+    own = [str(n).strip() for n in (own_names or ()) if str(n or "").strip()]
+    if not own:
+        return True
+    try:
+        from services.normalization import same_entity_name, entity_compact_key
+    except Exception:                                          # noqa: BLE001
+        return True
+    own_keys = [k for k in (entity_compact_key(n) for n in own) if k and len(k) >= 4]
+    kept = []
+    for cell in re.findall(r"\S+(?:[ ]\S+)*", text):
+        # One cell may print the insured AND another party ("Mutual Plumbing
+        # LLC c/o Grange Mutual Insurance Company"): take out only the
+        # insured's own name and judge what is left (25 Oct 2026).
+        rest = cell
+        for n in own:
+            pat = r"\s+".join(re.escape(w) for w in n.split())
+            rest = re.sub(pat, " ", rest, flags=re.I)
+        rest = re.sub(r"^[\W_]*(?:c/o|care of|attn:?|dba)?[\W_]*", "", rest.strip(), flags=re.I).strip()
+        if rest != cell.strip():
+            if rest and looks_like_an_insurer(rest):
+                kept.append(rest)
+            continue
+        if any(same_entity_name(cell, n) for n in own):
+            continue
+        ck = entity_compact_key(cell)
+        if ck and any(k in ck or (len(ck) >= 6 and ck in k) for k in own_keys):
+            continue
+        kept.append(cell)
+    return looks_like_an_insurer(" ".join(kept))
+
+
+def _own_names(facts: Any) -> List[str]:
+    """The insured's own names on a facts dict (applicant / DBA)."""
+    out: List[str] = []
+    if isinstance(facts, dict):
+        for key in ("applicant_name", "dba_name", "named_insured"):
+            v = _value(facts.get(key))
+            if isinstance(v, str) and v.strip():
+                out.append(v.strip())
+    return out
+
+
+def _names_a_known_party(text: Any, party_names: Iterable[Any]) -> bool:
+    """The cell names one of the package's own carriers (`party_names`): its
+    first distinctive word (5+ letters, not a generic insurance word) opens the
+    cell, an OCR'd logo's trailing stray letter allowed ("TRAVELERSJ")."""
+    cell = re.sub(r"[^A-Z]", "", str(text or "").upper())
+    if len(cell) < 5:
+        return False
+    generic = {"INSURANCE", "COMPANY", "MUTUAL", "AMERICAN", "NATIONAL", "GENERAL",
+               "PROPERTY", "CASUALTY", "FEDERAL", "AMERICA", "THE"}
+    for name in party_names or ():
+        words = [w for w in re.findall(r"[A-Z]+", str(name or "").upper())
+                 if len(w) >= 5 and w not in generic]
+        if words and cell.startswith(words[0]) and len(cell) - len(words[0]) <= 2:
+            return True
+    return False
+
+
+def address_is_a_party_office(address: Any, texts: Iterable[Any],
+                              own_names: Iterable[Any] = (),
+                              party_names: Iterable[Any] = ()) -> bool:
+    """True when every printing of `address` in `texts` is an insurer's or an
+    office's: on an OFFICE / BRANCH line, or under (or beside) an insurer-shaped
+    name (`fact_comparison.looks_like_an_insurer`). A short value (a state code,
+    a city, a ZIP) is matched as a whole word. False when it is printed nowhere
+    (nothing to judge) or anywhere else. Never raises.
+
+    `own_names` (Z38) are the insured's own names: a name that is the
+    applicant's is never an insurer here ("Mutual Plumbing LLC"). A HOME OFFICE
+    line is an office only with an insurer-shaped name on that line or in the
+    cell one or two lines above - an insured's own "Home Office:" is its own."""
+    try:
+        own_names = [n for n in (own_names or ())]
+        party_names = [n for n in (party_names or ()) if n]
+        _ins = lambda t: (_names_an_insurer(t, own_names)        # noqa: E731
+                          or _names_a_known_party(t, party_names))
+        needle = _address_needle(address)
+        if needle:
+            spread = re.compile(r"[^A-Z0-9]*".join(map(re.escape, needle)))
+        else:
+            words = re.findall(r"[A-Z0-9]+", _OFFICE_LABEL_PREFIX_RE.sub(
+                "", str(_value(address) or "")).upper())
+            if not words:
+                return False
+            spread = re.compile(r"(?<![A-Z0-9])" + r"[^A-Z0-9]+".join(map(re.escape, words))
+                                + r"(?![A-Z0-9])")
+        printings = 0
+        for text in texts or ():
+            lines = str(text or "").splitlines()
+            for i, line in enumerate(lines):
+                m = spread.search(line.upper())
+                # A street and its city are often printed on two lines ("26777
+                # HALSTED ROAD" / "FARMINGTON HILLS, MI" under an insurer's
+                # name, live f575160b 25 Oct 2026): a printing STARTS on this
+                # line when the address reads across it and the next two, and
+                # not from the next line on.
+                if needle and needle not in _compact(line) and not (
+                        needle in _compact(" ".join(lines[i:i + 3]))
+                        and needle not in _compact(" ".join(lines[i + 1:i + 3]))):
+                    continue
+                if not needle and not m:
+                    continue
+                printings += 1
+                head = line[:m.start()] if m else ""
+                a0, a1 = (m.start(), m.end()) if m else (0, len(line))
+                _prev = lines[i - 1] if i > 0 else ""
+                above = _cell_above(_prev, a0, a1)
+                # A short one-cell line above (a logo: "TRAVELERSJ" over "One
+                # Tower Square, Hartford ...") is the whole cell above, even when
+                # the match starts past its end (live f575160b, 25 Oct 2026).
+                # SHORT: a logo / a name (up to 4 words, 40 characters) - never a
+                # sentence that happens to name an insurer (Z42 review A).
+                if (not str(above or "").strip() and _prev.strip()
+                        and not re.search(r"\S\s{2,}\S", _prev.strip())
+                        and len(_prev.strip()) <= 40 and len(_prev.split()) <= 4):
+                    above = _prev.strip()
+                if _OFFICE_LINE_RE.search(line) or _ins(head) or _ins(above):
+                    continue
+                if _HOME_OFFICE_RE.search(line):
+                    above2 = _cell_above(lines[i - 2] if i > 1 else "", a0, a1)
+                    if _ins(_HOME_OFFICE_RE.sub(" ", line)) or _ins(above2):
+                        continue
+                return False
+        return printings > 0
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("insured_scope: office-address check skipped: %s", exc)
+        return False
+
+
+_INSURED_ADDRESS_KEYS = ("mailing_address", "physical_address")
+
+
+def drop_office_addresses(doc: Any) -> List[str]:
+    """Per document: an applicant address it prints only as an insurer's /
+    office's address leaves its facts (a person's answer never). Mutates the
+    document's facts; returns the keys removed."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("facts"), dict):
+        return []
+    facts, text = doc["facts"], doc.get("text") or ""
+    own = _own_names(facts)
+    out: List[str] = []
+    for key in _INSURED_ADDRESS_KEYS:
+        raw = facts.get(key)
+        if _is_blank(raw) or _is_human(raw):
+            continue
+        if address_is_a_party_office(raw, [text], own_names=own):
+            facts.pop(key, None)
+            out.append(key)
+    return out
