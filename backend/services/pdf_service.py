@@ -21370,6 +21370,12 @@ _ACORD140_BUILDING_CHAR_FIELDS = (
     "Construction_RoofMaterialCode",     # roof
     "BuildingFireProtection_ProtectionClassCode",  # protection class
 )
+# The ones that BLOCK a download: Minimum Viable COPE's own construction type
+# (`cross_form_validator._check_minimum_viable_cope_unit`). The rest are
+# Carrier-Grade COPE - listed as Missing, never a hard stop (25 Oct 2026: a
+# package at 100 with no hard stop got two "roof material" hard stops on the
+# download screen, which no earlier screen had asked for).
+_ACORD140_GATE_HARD_FIELDS = frozenset({"Construction_ConstructionCode"})
 
 # The nearest hydrant, fire station and fire district belong to the PREMISES
 # (13 Oct 2026, Choice Electric item 18): every building at one premises shares
@@ -21455,11 +21461,18 @@ def apply_acord140_missing_field_highlights(
     if form_id != "ACORD_140":
         return confidence
 
-    def _mark_required(field: str) -> None:
+    def _mark_required(field: str, hard: bool = True) -> None:
         if field not in field_state and field not in confidence:
             return  # not part of this rendered schema instance
         if not _acord125_has_value(field_state, field):
-            confidence[field] = "missing_required_gate"
+            # Only a Minimum Viable COPE piece blocks the download. Year built,
+            # roof material and protection class are Carrier-Grade COPE -
+            # warnings, never hard stops (Brent 19 Oct: "leave the field blank
+            # and flag it for agent confirmation"; a hard stop only where it is
+            # essential). They stay listed as Missing.
+            confidence[field] = "missing_required_gate" if hard else "missing_required"
+        elif confidence.get(field) in ("missing_required_gate", "missing_required") and not hard:
+            confidence[field] = "filled"
         elif confidence.get(field) == "missing_required_gate":
             confidence[field] = "filled" if _acord125_has_value(field_state, field) else "low_confidence"
 
@@ -21468,7 +21481,10 @@ def apply_acord140_missing_field_highlights(
         amount_field = f"CommercialProperty_Premises_LimitAmount_{row}"
         if not (_acord125_has_value(field_state, code_field) or _acord125_has_value(field_state, amount_field)):
             continue  # row never started - an empty schedule row is not a gap
-        _mark_required(amount_field)
+        # A Missing row, never a download block (25 Oct 2026): a package with no
+        # building or BPP value at all is already a Minimum Viable COPE hard stop
+        # on the review page; one that has a value only left a row unfinished.
+        _mark_required(amount_field, hard=False)
 
     # Confirmed via a live multi-location test (2026-07-17): the Premises/value
     # schedule's row lettering and the building-characteristics fields' row
@@ -21505,7 +21521,7 @@ def apply_acord140_missing_field_highlights(
         if not (premises_row_started or building_exists_in_facts):
             continue  # neither signal says this building/premises exists - not a gap
         for base in _ACORD140_BUILDING_CHAR_FIELDS:
-            _mark_required(f"{base}_{row}")
+            _mark_required(f"{base}_{row}", hard=base in _ACORD140_GATE_HARD_FIELDS)
 
     return confidence
 

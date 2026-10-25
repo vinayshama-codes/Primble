@@ -526,8 +526,10 @@ def test_replay_acord140_raises_no_completeness_hard_block():
     is the one honest gap. Every value a PERSON stated (year built 2001,
     protection class 3) still stands on both buildings."""
     mapped, conf, _ = _acord140_replay()
-    assert sorted(f for f, c in conf.items() if c == "missing_required_gate") == [
-        "Construction_RoofMaterialCode_A", "Construction_RoofMaterialCode_B"]
+    # UPDATED 25 Oct 2026: roof material is Carrier-Grade COPE - still the honest
+    # gap, now a Missing row, never a download hard block (Brent 19 Oct).
+    assert sorted(f for f, c in conf.items() if c == "missing_required_gate") == []
+    assert conf["Construction_RoofMaterialCode_A"] == conf["Construction_RoofMaterialCode_B"] == "missing_required"
     assert mapped["CommercialStructure_BuiltYear_B"] == "2001"
     assert mapped["BuildingFireProtection_ProtectionClassCode_B"] == "3"
 

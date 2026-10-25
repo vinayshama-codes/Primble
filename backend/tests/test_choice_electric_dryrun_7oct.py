@@ -120,7 +120,8 @@ def test_building_two_cope_is_listed_before_the_forms_exist():
     # (no document states it - the run's "Composition" was a gap-fill guess).
     assert items[0]["route"]["columns"] == ["roof_material"]
     for it in items.values():
-        assert it["blocks_download"] is True
+        # 25 Oct 2026: listed before forms, but Carrier-Grade COPE never blocks.
+        assert it["blocks_download"] is False
         assert it["resolution"] == {"mode": "schedule", "schedule_key": "property_locations",
                                     "columns": it["route"]["columns"],
                                     "rows": [it["route"]["row"]]}
@@ -135,7 +136,7 @@ def test_with_no_answers_both_buildings_list_year_roof_and_protection_class():
     cols = {it["route"]["row"]: it["route"]["columns"] for it in _items(out, "ACORD_140")}
     assert cols == {0: ["year_built", "roof_material", "protection_class"],
                     1: ["year_built", "roof_material", "protection_class"]}
-    assert out["blocking_count"] == 2
+    assert out["blocking_count"] == 0     # 25 Oct 2026: listed, never a hard block
 
 
 # ── 2. No false items ────────────────────────────────────────────────────────
@@ -253,7 +254,7 @@ def test_the_dry_run_promises_exactly_what_the_download_gate_blocks():
                      for b in it["boxes"] if b["blocks_download"]}
     dropped_blocking = {(b["form_id"], b["field"]) for b in out["dropped_blocking"]}
     assert gate == kept_blocking | dropped_blocking
-    assert gate and kept_blocking == gate                      # nothing blocking was lost
+    assert kept_blocking == gate          # nothing blocking was lost (25 Oct: none here)
     # Every other kept box is a finding the download review itself lists.
     qa = run_field_qa(gen, merged_facts=facts, flags=flags)
     att = needs_attention_for_session(gen, facts, flags=flags)

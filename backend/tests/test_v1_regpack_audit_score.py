@@ -243,7 +243,9 @@ def test_r17_stops_never_gate_the_download_route():
 def test_r17_acknowledgment_is_required_and_sufficient():
     """An acknowledgment is shown: a genuinely incomplete form is downloadable
     only as a labelled draft with a typed reason."""
-    gen = _form({"CommercialProperty_Premises_LimitAmount_A": "missing_required_gate"},
+    # 25 Oct 2026: construction type is the ACORD 140 box that still blocks
+    # (the premises value rows are Missing rows now).
+    gen = _form({"Construction_ConstructionCode_A": "missing_required_gate"},
                 {}, form_id="ACORD_140")
     session = {"generated_forms": gen, "facts": {}}
     blocking = check_hard_block(gen)

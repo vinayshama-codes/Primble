@@ -547,3 +547,12 @@ Att. C; 19 Oct R2c, R3d; 20 Oct #4; 23 Oct Q3, Q6 - not exercised on the live pa
 this package (23 Oct #4, #5); 12 not done / partial (17 Oct #10, B2, 16-PDF request; 19 Oct R2b, R3c declined; 20 Oct #5;
 23 Oct Q1, Q4, Q5, round-trip, form base, API keys). Several passed only after fixes made during 25 Oct testing (see Z43).
 - Download screen (live 654f34c4): summary said 'no material risk drivers' beside the high-loss-frequency advisory -> FIXED locally (C111: advisories passed to the summary prompt). 'Specify GL form type' card is CORRECT (no document states occurrence / claims-made) - no change. Suggested Brent proposal for the download screen (17 Oct #10 / Q1): show quote-blocking items first, fold optional Y/N questions per form, hide additional-interest blanks without an interest, count values-to-confirm and signatures. Both fixes need a push + deploy.
+- Download screen after deploy (live 654f34c4, 25 Oct night): two ACORD 140 "roof material" HARD STOPS on a package at 100 with no hard stop.
+  Cause: the old Figure 35 ACORD 140 gate blocked on year built / roof material / protection class; Minimum Viable COPE
+  needs only construction type (+ building/BPP value), and Brent 19 Oct says roof info missing = blank + flag. FIXED locally:
+  `pdf_service._ACORD140_GATE_HARD_FIELDS` = construction type only; the rest are Missing rows (`missing_required`).
+  Then (owner: "do it"): the premises value rows too - a download now blocks ONLY on a placeholder value or ACORD 140
+  construction type (Minimum Viable COPE, already a review-page hard stop). `field_qa._gate_still_blocks` reads today's rule,
+  so forms generated before the fix stop blocking without a re-stamp. 17 tests that pinned the old rule updated (test was wrong). Needs push + deploy; old forms keep their labels until regenerated
+  or re-stamped. Rest of that screen checked: correct per the documents (no premises address / roof material in any dec,
+  EPL + auto premiums redacted); the 84-row list is the 17 Oct #10 / Q1 proposal waiting on Brent.

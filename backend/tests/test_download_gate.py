@@ -119,7 +119,9 @@ def test_acord140_started_row_missing_amount_flagged():
     # production instead of skipping an unseeded field.
     confidence = {"CommercialProperty_Premises_LimitAmount_A": "low_confidence"}
     out = apply_acord140_missing_field_highlights("ACORD_140", {}, field_state, confidence)
-    assert out.get("CommercialProperty_Premises_LimitAmount_A") == "missing_required_gate"
+    # 25 Oct 2026: listed as Missing, never a download block (Minimum Viable COPE
+    # already stops a package with no building / BPP value on the review page).
+    assert out.get("CommercialProperty_Premises_LimitAmount_A") == "missing_required"
 
 
 def test_acord140_started_row_with_amount_not_flagged():
@@ -144,9 +146,9 @@ def test_acord140_building_characteristics_required_once_row_started():
         "BuildingFireProtection_ProtectionClassCode_A": "low_confidence",
     }
     out = apply_acord140_missing_field_highlights("ACORD_140", {}, field_state, confidence)
-    assert out.get("CommercialStructure_BuiltYear_A") == "missing_required_gate"
-    assert out.get("Construction_RoofMaterialCode_A") == "missing_required_gate"
-    assert out.get("BuildingFireProtection_ProtectionClassCode_A") == "missing_required_gate"
+    assert out.get("CommercialStructure_BuiltYear_A") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
+    assert out.get("Construction_RoofMaterialCode_A") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
+    assert out.get("BuildingFireProtection_ProtectionClassCode_A") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
 
 
 def test_acord140_building_b_independent_of_building_a():
@@ -189,9 +191,9 @@ def test_acord140_building_b_required_via_property_locations_even_when_premises_
     }
     facts = {"property_locations": [{"address": "1 A St"}, {"address": "2 B St"}]}
     out = apply_acord140_missing_field_highlights("ACORD_140", facts, field_state, confidence)
-    assert out.get("CommercialStructure_BuiltYear_B") == "missing_required_gate"
-    assert out.get("Construction_RoofMaterialCode_B") == "missing_required_gate"
-    assert out.get("BuildingFireProtection_ProtectionClassCode_B") == "missing_required_gate"
+    assert out.get("CommercialStructure_BuiltYear_B") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
+    assert out.get("Construction_RoofMaterialCode_B") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
+    assert out.get("BuildingFireProtection_ProtectionClassCode_B") == "missing_required"  # Carrier-Grade COPE: listed, never a hard block (25 Oct 2026)
 
 
 def test_acord140_building_b_not_required_when_only_one_location_exists():
@@ -231,9 +233,9 @@ def test_field_qa_flags_placeholder_value_as_fail():
 
 
 def test_field_qa_missing_required_gate_is_fail_and_hard_block():
-    gen = _form({"CommercialProperty_Premises_LimitAmount_A": "missing_required_gate"}, {})
+    gen = _form({"Construction_ConstructionCode_A": "missing_required_gate"}, {})
     r = run_field_qa(gen, merged_facts={})
-    item = next(i for i in r["results"] if i["field"] == "CommercialProperty_Premises_LimitAmount_A")
+    item = next(i for i in r["results"] if i["field"] == "Construction_ConstructionCode_A")
     assert item["verdict"] == "fail"
     assert item["reason_code"] == "missing_required_gate"
     assert item["reason_code"] in _HARD_BLOCK_REASON_CODES
@@ -260,7 +262,7 @@ def test_check_hard_block_returns_placeholder_and_gate_fails_only():
     gen = {
         "ACORD_140": {
             "confidence": {
-                "CommercialProperty_Premises_LimitAmount_A": "missing_required_gate",
+                "Construction_ConstructionCode_A": "missing_required_gate",
                 "NamedInsured_FullName_A": "missing_required",   # plain - must NOT be returned
                 "GeneralLiability_Hazard_ClassCode_A": "low_confidence",  # advisory - must NOT be returned
             },
@@ -327,3 +329,32 @@ if __name__ == "__main__":
         passed += 1
         print(f"  ok  {fn.__name__}")
     print(f"\n{passed}/{len(fns)} passed")
+
+
+def test_acord140_only_construction_type_blocks_the_download():
+    """25 Oct 2026, live 654f34c4: a package at 100 with no hard stop got two
+    "roof material" hard stops on the download screen. Only Minimum Viable
+    COPE's construction type blocks; the Carrier-Grade fields are Missing rows."""
+    field_state = {"CommercialProperty_Premises_LimitAmount_A": "$2,000,000"}
+    confidence = {f"{b}_A": "low_confidence" for b in (
+        "Construction_ConstructionCode", "CommercialStructure_BuiltYear",
+        "Construction_RoofMaterialCode", "BuildingFireProtection_ProtectionClassCode")}
+    out = apply_acord140_missing_field_highlights("ACORD_140", {}, field_state, confidence)
+    assert out["Construction_ConstructionCode_A"] == "missing_required_gate"
+    assert out["Construction_RoofMaterialCode_A"] == "missing_required"
+    from services.field_qa import _HARD_BLOCK_REASON_CODES
+    assert "missing_required" not in _HARD_BLOCK_REASON_CODES
+
+
+def test_a_stored_roof_gate_label_no_longer_blocks_the_download():
+    """Forms generated before 25 Oct 2026 STORE `missing_required_gate` on roof
+    material; the download check reads today's rule, so they stop blocking
+    without a re-stamp - while a stored construction-type gate still blocks."""
+    from services.field_qa import check_hard_block
+    gen = {"ACORD_140": {
+        "mapped": {"Construction_RoofMaterialCode_A": None, "Construction_ConstructionCode_B": None},
+        "confidence": {"Construction_RoofMaterialCode_A": "missing_required_gate",
+                       "Construction_ConstructionCode_B": "missing_required_gate"},
+    }}
+    blocked = {r["field"] for r in check_hard_block(gen)}
+    assert blocked == {"Construction_ConstructionCode_B"}

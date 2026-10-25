@@ -210,7 +210,7 @@ def test_march_1_2022_is_not_called_not_a_date():
 # ── 5b. A blocking box says which row ─────────────────────────────────────────
 def test_a_blocking_box_names_its_row():
     s140 = _schema("ACORD_140")
-    a, b = "CommercialStructure_BuiltYear_A", "CommercialStructure_BuiltYear_B"
+    a, b = "Construction_ConstructionCode_A", "Construction_ConstructionCode_B"  # still blocks (25 Oct 2026)
     fr = {"schema": s140, "mapped": {}, "field_state": {}, "confidence": {
         a: "missing_required_gate", b: "missing_required_gate"}}
     import services.field_qa as fq

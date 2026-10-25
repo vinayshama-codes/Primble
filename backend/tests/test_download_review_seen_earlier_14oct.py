@@ -49,13 +49,26 @@ PANEL = FRONT / "components" / "form" / "NeedsAttentionPanel.jsx"
 ATTN_JS = FRONT / "utils" / "needsAttention.js"
 
 # ── The live shape (18ecbfa8) ─────────────────────────────────────────────────
-_GATE = ["CommercialStructure_BuiltYear_A", "CommercialStructure_BuiltYear_B",
-         "Construction_RoofMaterialCode_A", "Construction_RoofMaterialCode_B",
-         "BuildingFireProtection_ProtectionClassCode_A", "BuildingFireProtection_ProtectionClassCode_B"]
+# 25 Oct 2026: the gate boxes are ones that still BLOCK (a started premises row
+# with no value). Year built / roof / protection class are Missing rows now
+# (`pdf_service._ACORD140_GATE_HARD_FIELDS`).
+_GATE = ["CommercialProperty_Premises_LimitAmount_A", "CommercialProperty_Premises_LimitAmount_B",
+         "CommercialProperty_Premises_LimitAmount_C", "CommercialProperty_Premises_LimitAmount_D",
+         "CommercialProperty_Premises_LimitAmount_E", "CommercialProperty_Premises_LimitAmount_G"]
+@pytest.fixture(autouse=True)
+def _premises_value_rows_block_here(monkeypatch):
+    """These tests check the download review's PLUMBING with six blocking boxes.
+    Since 25 Oct 2026 only construction type blocks on a real ACORD 140, so the
+    fixture's premises value rows are made blocking here, for the plumbing only."""
+    import services.pdf_service as _ps
+    monkeypatch.setattr(_ps, "_ACORD140_GATE_HARD_FIELDS",
+                        frozenset({"Construction_ConstructionCode", "CommercialProperty_Premises_LimitAmount"}))
+
+
 _GUARD = [
-    {"field": "Construction_RoofMaterialCode_A", "reason": "AI_OPTION_LIST_DUMP", "form_id": "ACORD_140",
+    {"field": "CommercialProperty_Premises_LimitAmount_C", "reason": "AI_OPTION_LIST_DUMP", "form_id": "ACORD_140",
      "in_documents": False, "removed_value": "Composition"},
-    {"field": "Construction_RoofMaterialCode_B", "reason": "AI_OPTION_LIST_DUMP", "form_id": "ACORD_140",
+    {"field": "CommercialProperty_Premises_LimitAmount_D", "reason": "AI_OPTION_LIST_DUMP", "form_id": "ACORD_140",
      "in_documents": False, "removed_value": "Metal"},
 ]
 _CARDS = {
@@ -193,12 +206,12 @@ def test_a_dismissed_or_resolved_row_never_reaches_the_review():
     assert "action IS DISTINCT FROM 'resolved'" in src and "action IS DISTINCT FROM 'dismissed'" in src
     # A fixed gate box is gone from the live list even while its stored row is open.
     gen = _generated()
-    gen["ACORD_140"]["field_state"] = {"CommercialStructure_BuiltYear_A": "1998"}
-    gen["ACORD_140"]["confidence"]["CommercialStructure_BuiltYear_A"] = "producer"
+    gen["ACORD_140"]["field_state"] = {"CommercialProperty_Premises_LimitAmount_A": "1998"}
+    gen["ACORD_140"]["confidence"]["CommercialProperty_Premises_LimitAmount_A"] = "producer"
     live = fq.to_recommendation_rows({"results": na.hard_block_findings(gen, {})})
     out = na.download_review_rows(copy.deepcopy(_STORED), gen, live)
     fields = [r["field"] for r in out if na.is_hard_block_row(r["rec_id"])]
-    assert "CommercialStructure_BuiltYear_A" not in fields and len(fields) == 5
+    assert "CommercialProperty_Premises_LimitAmount_A" not in fields and len(fields) == 5
 
 
 def test_a_failed_gate_check_keeps_the_stored_gate_rows():
@@ -219,7 +232,9 @@ def test_before_the_side_panel_never_named_four_of_the_six_gate_boxes():
     named = {r["field"] for r in rows} & set(_GATE)
     # Only the two the AI held back were listed - as "AI held back", not as
     # something that blocks the download.
-    assert named == {"Construction_RoofMaterialCode_A", "Construction_RoofMaterialCode_B"}
+    # (25 Oct 2026: the fixture's gate boxes moved to premises value rows; the
+    # point stands - at most the AI-refused ones were named, never the rest.)
+    assert named <= {"CommercialProperty_Premises_LimitAmount_C", "CommercialProperty_Premises_LimitAmount_D"}
     assert not any(r.get("blocks_download") for r in rows)
 
 
@@ -230,15 +245,15 @@ def test_the_side_panel_now_lists_every_gate_box_once_and_says_it_blocks():
     blocking = {r["field"]: r for r in rows if r.get("blocks_download")}
     assert sorted(blocking) == sorted(_GATE)
     assert len([r for r in rows if r["field"] in _GATE]) == 6                     # one row per box
-    for f in ("Construction_RoofMaterialCode_A", "Construction_RoofMaterialCode_B"):
+    for f in ("CommercialProperty_Premises_LimitAmount_C", "CommercialProperty_Premises_LimitAmount_D"):
         # its row kept, flagged - Missing since 23 Oct 2026 (Brent: the refused
         # value is the audit record's, never "AI held back")
         assert blocking[f]["status"] == na.STATUS_MISSING
-    for f in ("CommercialStructure_BuiltYear_A", "BuildingFireProtection_ProtectionClassCode_B"):
+    for f in ("CommercialProperty_Premises_LimitAmount_A", "CommercialProperty_Premises_LimitAmount_G"):
         r = blocking[f]
         assert r["status"] == na.STATUS_MISSING and r["required"] is True
         assert r["what_to_do"] == na.HARD_BLOCK_WHAT_TO_DO and r["page"]
-    assert "(row 2)" in blocking["CommercialStructure_BuiltYear_B"]["label"]
+    assert "(row 2)" in blocking["CommercialProperty_Premises_LimitAmount_B"]["label"]
     assert res["counts"]["total"] == len(rows)                                    # counts = rows
     # The route's door without the flag is exactly as before.
     plain = na.needs_attention_for_session(gen, {})["forms"][0]["rows"]
@@ -270,11 +285,11 @@ def test_a_placeholder_is_one_missing_row_never_a_verify_row():
 def test_a_gate_box_holding_a_value_asks_the_gate_itself():
     # A value under a stale gate label: the gate's own value-vs-source pass
     # decides, so the cheap path hands that form to `check_hard_block`.
-    fr = _form140({"CommercialStructure_BuiltYear_A": "1998"})
+    fr = _form140({"CommercialProperty_Premises_LimitAmount_A": "1998"})
     gen = {"ACORD_140": fr}
     assert _keys(na.hard_block_findings(gen, {})) == _keys(fq.check_hard_block(gen, merged_facts={}))
     rows = na.needs_attention_for_session(gen, {}, hard_blocks=True)["forms"][0]["rows"]
-    built = [r for r in rows if r["field"] == "CommercialStructure_BuiltYear_A"]
+    built = [r for r in rows if r["field"] == "CommercialProperty_Premises_LimitAmount_A"]
     assert len(built) == 1 and built[0]["status"] == na.STATUS_VERIFY and built[0]["blocks_download"]
 
 

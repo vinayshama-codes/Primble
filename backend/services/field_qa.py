@@ -75,6 +75,25 @@ _HARD_BLOCK_REASON_CODES = frozenset({"placeholder_value", "missing_required_gat
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
 
+def _gate_still_blocks(form_id: Any, field: str) -> bool:
+    """A stored ACORD 140 gate label blocks only under TODAY's rule: forms
+    generated before 25 Oct 2026 carry the label on year built / roof material /
+    protection class and the premises value rows too - Missing rows now, never
+    a hard stop; only construction type blocks. Reading the rule here frees those packages without a re-stamp."""
+    try:
+        from services.form_instances import base_form_id
+        base = base_form_id(form_id)
+    except Exception:                                          # noqa: BLE001
+        base = form_id
+    if base != "ACORD_140":
+        return True
+    try:
+        from services.pdf_service import _ACORD140_GATE_HARD_FIELDS
+    except Exception:                                          # noqa: BLE001
+        return True
+    return re.sub(r"_[A-Z]$", "", str(field or "")) in _ACORD140_GATE_HARD_FIELDS
+
+
 def _qa_label(form_id: Any) -> str:
     """The form as a QA message names it: "ACORD 131", and a form's second copy
     "ACORD 131 (Excess)" (7 Oct 2026). Plain ids keep their historic wording."""
@@ -478,7 +497,7 @@ def run_field_qa(
             if verdict == "fail":
                 checked += 1
                 fail += 1
-                _is_gate = conf == "missing_required_gate"
+                _is_gate = conf == "missing_required_gate" and _gate_still_blocks(form_id, field)
                 results.append({
                     "form_id":     form_id,
                     "field":       field,
