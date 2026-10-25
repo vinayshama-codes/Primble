@@ -15921,6 +15921,39 @@ def _sources_are_own_declarations(canon: str, sources: List[str], docs: Any) -> 
     return True
 
 
+_START_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def drop_purchase_year_as_start(doc: Any) -> bool:
+    """A document's AI ``business_start_date`` that is only the year the
+    business CHANGED HANDS - the year its own text gives beside "purchased /
+    acquired / bought / took over" - is not when the business started (live
+    654f34c4, 25 Oct: Michelle's note "He purchased the company in January of
+    2024" gave a business start of 2024 to a 15-year-old business; the start
+    feeds the business age, and so how many years of loss runs are required).
+    A person's value is never touched."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("facts"), dict):
+        return False
+    raw = doc["facts"].get("business_start_date")
+    if raw is None:
+        return False
+    src = str(raw.get("source") or "").lower() if isinstance(raw, dict) else "ai"
+    if src in _PERSON_FACT_SOURCES:
+        return False
+    start = _START_YEAR_RE.search(str(_fv(doc["facts"], "business_start_date") or ""))
+    if not start:
+        return False
+    year = start.group(0)
+    text = re.sub(r"\s+", " ", str(doc.get("text") or ""))
+    for m in re.finditer(r"\b(?:purchas\w*|acquir\w*|bought|took\s+over)\b", text, re.I):
+        window = text[max(0, m.start() - 40): m.end() + 80]
+        if year in window and not re.search(r"\b(?:founded|established|started|incorporated|formed|since)\b",
+                                             window, re.I):
+            doc["facts"].pop("business_start_date", None)
+            return True
+    return False
+
+
 def drop_menu_only_parts(doc: Any) -> List[str]:
     """A document whose coverage rows are a MENU - every row carries only the
     policy's own dates, no premium and no number - keeps the part(s) whose own
@@ -17710,6 +17743,13 @@ def merge_facts(docs: List[dict], primary: dict,
                             _cd.get("filename"), _na[:6])
         except Exception as exc:  # noqa: BLE001 - never block the pipeline
             logger.warning("merge_facts: non-answer drop failed: %s", exc)
+        # A purchase year is no business start (drop_purchase_year_as_start).
+        try:
+            if drop_purchase_year_as_start(_cd):
+                logger.info("merge_facts: %s - business start = the year it changed hands, removed",
+                            _cd.get("filename"))
+        except Exception as exc:  # noqa: BLE001 - never block the pipeline
+            logger.warning("merge_facts: purchase-year check failed: %s", exc)
         # A menu of coverage parts keeps only the part with its own section (drop_menu_only_parts).
         try:
             _mp = drop_menu_only_parts(_cd)

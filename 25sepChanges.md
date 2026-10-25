@@ -4358,6 +4358,32 @@ z42 reviews A/B, round 5 guards, restamp / reopen, sqs).
   are `evidence_only` (read by the checks, no ACORD box); 141 gross receipts kept on a premium-only line
   (`scoped_evidence._INSURED_BUSINESS_BOX_RE`, owner). Owner: ACORD 28 keeps the 2025-26 term. Full suite 20,385 / 1
   (known) / 19. Live status and what to verify after regeneration: client-checklist-25oct.md "After forms".
+### Z43 (25 Oct 2026, day + night) - four live runs (ff2ba3e5, 85e51d02, bcfd175b, e66d68d7), every bug fixed, tests in tests/test_z43_live_ff2.py
+Live pre-form script each run: fill, Loss History / narrative mismatch both ways, loss-run CSVs (4 -> 5 of 5 years),
+another insured's loss run (+ Data Consistency confirm), handwritten note, Brent's claims xlsx + CHALLENGE (9 of 9),
+driver xlsx, exclude / include, Michelle checks (bad inputs, policy edits, Open again, duplicate, junk file, Package dec
+out / in). Forms checked box by box after each generation. Bugs fixed (doors):
+- extraction_service: drop_unmentioned_ai_yes_no (listed coverage option, whole-word topics); drop_dec_page_submission_details
+  (a dec page is no submission program); derive_policy_terms_from_property_schedule (coinsurance / valuation);
+  drop_unlabelled_vehicle_use (driver xlsx title); assign_document_carrier_to_rows (heading-shaped carrier entry);
+  drop_menu_only_parts + _part_has_own_section + _sources_are_own_declarations (Chubb ForeFront menu -> EPL only).
+- loss_history_state.loss_period_date (bare years); coverage label year; sqs_service._get_loss_history_state follows the
+  narrative stance; _resolve_loss_history_years uses loss_period_date; loss_run_identity: no early stop, confirmed FEIN counts.
+- answer_semantics: "80%" accepted, negatives refused ("can't be a negative number"); audit_routes TBD narrative message.
+- ai_answer_guards: type words / field labels as contact type, data-table rows as explanations, TypeOfWorkSubcontracted,
+  GL PD deductible / inflation guard qualifiers, percent deductible as a limit, improvement year = roof year, section
+  amounts judged, insured's own party as additional interest (REASON_OWN_PARTY_AS_INTEREST) + row companions.
+- pdf_service: 125 years of loss history = counted years; 130 other-insurance follows the 125's rule; participating tick
+  follows a stated dividend plan. needs_attention: excess retention not a to-do when SIR / attachment known.
+- issue_registry: FEIN conflict drawn once. policy_lines: a premium typed back to the documents' value clears the edit
+  (`originals`). questionnaire H.1c: only umbrella underlying lines. form_routes: Review data booleans Yes / No.
+- Frontend: Add documents panel Cancel (owner verified).
+- SECURITY: backend/uvicorn_local.log (created when I restarted the server) and backend/run.log were committed with the
+  Google Vision API key (httpx INFO logs request URLs with ?key=). GitHub alert on commit 845e250. Fixed locally: httpx /
+  httpcore at WARNING (main.py, worker.py), logs untracked, *.log in .gitignore - NOT pushed yet. OWNER MUST ROTATE the
+  Vision key (Google Cloud Console -> new key restricted to Vision, update .env + Render, delete old AIzaSyBI4F...).
+Final suite 20,415 passed / 1 failed (known) / 19 skipped. Brent item-by-item status: client-checklist-25oct.md (end).
+
 <!-- Z36-S: append entries above this line -->
 
 #### Z36-D. Tell Brent

@@ -529,3 +529,12 @@ The 14 earlier form fixes: 14 / 14 PASS. New bugs found + fixed (each tested):
 1-3 verified on the package after a re-merge (141 Amerisure, grid / 101 / page one right, 100). 4-5 show on the next
 generation. Server restarted on all fixes.
 - FINAL suite 25 Oct night (after all e66d68d7 fixes): 20,415 passed, 1 failed (the known test_arq_acord125_missing_only), 19 skipped. Ready to report to Brent as tested on localhost (not deployed).
+
+### Brent items from 17 Oct onwards - status on the last run e66d68d7 (49 items)
+30 passed with no bug on the last run (5 of them fixed earlier the same day: 17 Oct #3, #5; 23 Oct #2a, #2b, #3b);
+5 failed on the last run and were fixed + re-verified (17 Oct #7 / Att. A questionnaire H.1c; 19 Oct R1b, R1c, R1d);
+2 built but not exercised by this package (23 Oct #4, #5); 12 not done / partial: 17 Oct #10 (Brent Q1 / Q4), B2 and the
+16-PDF request (ours to send), 19 Oct R2b (rating rows decided against), R3c (declined - caps kept), 20 Oct #5 (per-form
+waits Q4), 23 Oct Q1, Q4 (Brent), Q5 (reply owed), round-trip (reply owed), form base (Brent), API keys (security review).
+Nothing deployed at the time; owner pushed commit 845e250 on 25 Oct night (GitHub secret alert - see 25sepChanges Z43).
+- LIVE 654f34c4 (primble.ai, 25 Oct night, owner-driven): pre-form flow A/B passed (42 -> 100, mismatch both ways, loss runs 4 -> 5 of 5, Harborline). Bug found: the handwritten note's Review data showed Business Start Date 2024 = the PURCHASE year ('purchased the company in January of 2024'); the start feeds business age -> loss years required. Fixed locally (extraction_service.drop_purchase_year_as_start, test in test_z43_live_ff2.py, 3,402 related tests green) - NOT deployed. Note: local scripts cannot read/write live packages (Render's FIELD_ENCRYPTION_KEY differs) - live checks are owner-driven + read-only per-document data. Edge files EDGE1-5 created in ~/Downloads for C1-C6.

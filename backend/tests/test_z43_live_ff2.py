@@ -283,3 +283,14 @@ def test_a_stated_dividend_plan_is_a_participating_policy():
     assert _resolve_dividend_plan_box("Policy_ParticipatingIndicator_A", f) == "Yes"
     assert _resolve_dividend_plan_box("Policy_NonParticipatingIndicator_A", f) is None
     assert _resolve_dividend_plan_box("Policy_ParticipatingIndicator_A", {"_form_id": "ACORD_130"}) is _SCHED_SKIP
+
+
+def test_a_purchase_year_is_not_the_business_start():
+    from services.extraction_service import drop_purchase_year_as_start
+    note = {"text": "BERGER OWNER OF CHOICE ELECTRIC.\\nHE PURCHASED THE COMPANY\\nIN JANUARY OF 2024 WITH AN SBA LOAN.",
+            "facts": {"business_start_date": {"value": "2024", "source": "ai"}}}
+    note["text"] = note["text"].replace("\\\\n", "\\n")
+    assert drop_purchase_year_as_start(note) and "business_start_date" not in note["facts"]
+    founded = {"text": "Founded in 2011. The owner purchased new trucks in 2019.",
+               "facts": {"business_start_date": {"value": "2011", "source": "ai"}}}
+    assert not drop_purchase_year_as_start(founded)
