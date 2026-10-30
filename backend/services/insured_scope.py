@@ -86,11 +86,6 @@ APPLICANT_SCOPED_FACTS: Tuple[str, ...] = (
     "building_area", "num_stories", "num_buildings",
 )
 
-# Provenance that means A PERSON decided this, not a document stated it.
-_HUMAN_SOURCES = frozenset({
-    "producer", "client", "client_arq", "user", "user_confirmed", "manual",
-})
-
 _EMPTY = frozenset({"", "null", "none", "n/a", "na", "unknown"})
 
 
@@ -111,12 +106,15 @@ def _is_blank(raw: Any) -> bool:
 
 
 def _is_human(raw: Any) -> bool:
-    """A producer's or client's answer - never scoped away by this module."""
-    if not isinstance(raw, dict):
-        return False
-    if str(raw.get("source") or "").strip().lower() in _HUMAN_SOURCES:
-        return True
-    return str(raw.get("confidence") or "").strip().lower() in _HUMAN_SOURCES
+    """A producer's or client's answer - never scoped away by this module.
+
+    The one door's third question (`fact_state.put_by_person`, 27 Oct 2026):
+    a value a person typed or picked. This module kept its own set (with
+    "client", "user", "manual" - sources no code writes) and also read the
+    CONFIDENCE, which every writer of a person's confidence pairs with the
+    same person's source - so the answer is unchanged on every written shape."""
+    from services.fact_state import put_by_person
+    return put_by_person(raw)
 
 
 def _same_entity(a: Any, b: Any) -> Optional[bool]:
@@ -284,6 +282,19 @@ def _compact(text: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
 
 
+_CARE_OF_RE = re.compile(r"(?:^|[\s,;(])(?:c\s*/\s*o|care\s+of)\b[\s:.,-]*", re.I)
+
+
+def _care_of_party(line: Any) -> str:
+    """The party a "c/o" / "care of" marker names on `line` (the text after
+    the last marker), or "". Whose address is printed below it: a care-of
+    party's - and it is judged like any other name (`_names_an_insurer`), so
+    an accountant or an agency kept as the mailing "c/o" is never an insurer."""
+    s = str(line or "")
+    marks = list(_CARE_OF_RE.finditer(s))
+    return s[marks[-1].end():].strip() if marks else ""
+
+
 def _address_needle(address: Any) -> str:
     """The part of an address that identifies where it is printed: its street
     line when it has one, else the whole (city / state) text."""
@@ -354,6 +365,73 @@ def _own_names(facts: Any) -> List[str]:
             if isinstance(v, str) and v.strip():
                 out.append(v.strip())
     return out
+
+
+def is_the_insureds_own_name(value: Any, facts: Any = None,
+                             own_names: Iterable[Any] = ()) -> bool:
+    """Is `value` the insured's OWN name (applicant / DBA / named insured, or
+    `own_names`)? THE ONE DOOR every "is this an insurer?" reading asks first
+    (27 Oct 2026, Lane B item 4c): an applicant named "Mutual Plumbing
+    Company" or "Farmers Mutual Grain Co-op" reads carrier-shaped by spelling,
+    and was refused as "an insurance company" on its own interest / owner
+    boxes and read as its declarations' page-header INSURER. Same entity,
+    never a substring: "Grange Mutual" is not "Mutual Plumbing LLC"."""
+    v = str(_value(value) or "").strip()
+    if not v:
+        return False
+    names = [str(n).strip() for n in list(own_names or ()) + _own_names(facts) if str(n or "").strip()]
+    if not names:
+        return False
+    try:
+        from services.normalization import same_entity_name
+    except Exception:                                          # noqa: BLE001
+        return False
+    return any(same_entity_name(v, n) for n in names)
+
+
+_INSURED_LABEL_RE = re.compile(r"\b(?:named\s+)?insured\b|\bapplicant\b", re.I)
+
+
+def _names_the_insured(text: Any, own_names: Iterable[Any] = ()) -> bool:
+    """Does this line NAME the insured - one of its own names in a cell
+    ("Named Insured: X LLC", "X LLC"), or, with no own name known, an insured
+    label carrying a party's name? A bare label names nobody."""
+    s = str(text or "")
+    if not s.strip():
+        return False
+    own = [n for n in (own_names or ()) if str(n or "").strip()]
+    cells = re.findall(r"\S+(?:[ ]\S+)*", s)
+    # The line must NAME the insured, not merely use the word (Lane B review
+    # R3, 27 Oct 2026): "Insured: see schedule" or an "Applicant Information"
+    # heading between a carrier's letterhead and "Home Office:" names nobody,
+    # and the carrier's home office stays the carrier's.
+    if own:
+        for c in cells:
+            c2 = _INSURED_LABEL_RE.sub(" ", c).strip(" :.-,")
+            if is_the_insureds_own_name(c, own_names=own) or (
+                    c2 and is_the_insureds_own_name(c2, own_names=own)):
+                return True
+        return False
+    # No own name known: an insured LABEL carrying a value that reads as a
+    # party's name (not a placeholder, a role, or an insurer).
+    m = re.search(r"\b(?:named\s+)?insured\b|\bapplicant\b", s, re.I)
+    if not m:
+        return False
+    rest = s[m.end():]
+    if not rest.lstrip().startswith((":", "-")):
+        return False
+    val = rest.lstrip()[1:].strip()
+    val = re.split(r"\s{2,}", val)[0].strip(" .,")
+    if not val:
+        return False
+    try:
+        from services.normalization import is_not_a_party_name
+        from services.field_mapping_integrity import names_a_party
+        if is_not_a_party_name(val) or _names_an_insurer(val) or not names_a_party(val):
+            return False
+    except Exception:                                          # noqa: BLE001
+        return False
+    return bool(re.search(r"[A-Za-z]{2}", val))
 
 
 def _names_a_known_party(text: Any, party_names: Iterable[Any]) -> bool:
@@ -433,9 +511,20 @@ def address_is_a_party_office(address: Any, texts: Iterable[Any],
                     above = _prev.strip()
                 if _OFFICE_LINE_RE.search(line) or _ins(head) or _ins(above):
                     continue
+                # "<insured>   C/O   <insurer>" over the address (27 Oct 2026,
+                # Lane B item 4a): a care-of marker names WHOSE address follows,
+                # in whichever column of the line above it sits - the cell
+                # directly above the street is only the insured's own name.
+                if _ins(_care_of_party(_prev)):
+                    continue
                 if _HOME_OFFICE_RE.search(line):
                     above2 = _cell_above(lines[i - 2] if i > 1 else "", a0, a1)
-                    if _ins(_HOME_OFFICE_RE.sub(" ", line)) or _ins(above2):
+                    # Two lines up counts only when the line between does not
+                    # name the INSURED (27 Oct 2026, Lane B item 4d): a carrier's
+                    # letterhead over "Named Insured: X" / "X LLC" over "Home
+                    # Office: ..." is the insured's own home office.
+                    if _ins(_HOME_OFFICE_RE.sub(" ", line)) or (
+                            _ins(above2) and not _names_the_insured(above or _prev, own_names)):
                         continue
                 return False
         return printings > 0

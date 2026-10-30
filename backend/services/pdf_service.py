@@ -152,6 +152,12 @@ _GAP_FILL_FACTS_EXCLUDE: frozenset = frozenset(
      # The stamping documents `services.scoped_evidence` reads (round 5, C104):
      # the RAW DOCUMENT TEXT block already carries them; never a second copy.
      "_scoped_documents",
+     # Each line's declarations limits, kept past the index purge (27 Oct
+     # 2026, `policy_lines.DEC_LINE_LIMITS_KEY`) - bookkeeping, never a hint.
+     "_line_dec_limits",
+     # The Workers Compensation loss runs' own periods (Z44-A-R, 27 Oct 2026,
+     # `WC_LOSS_RUN_SPANS_KEY`) - bookkeeping for ACORD 130's loss boxes.
+     "_wc_loss_run_spans",
      # The WC endorsement schedule (19 Oct 2026) stamps deterministically; the
      # prompt's facts block stays byte-identical without it.
      "_wc_endorsements",
@@ -1087,6 +1093,15 @@ def _city_limits_cell(sub_key: str, item: dict) -> Optional[bool]:
     return city_limits_inside(own)
 
 
+def _location_rows_list_premises(base: str, facts: Any) -> bool:
+    """Is this box family a schedule of LOCATIONS (one row per premises), not
+    of buildings? ACORD 130 / 133 `Location_*` ("the producer assigned number
+    of the location"). NOT ACORD 131's location rows: each names a COMPANY at
+    a location, so a second named insured at premises 1 is a row of its own
+    (`_dedupe_repeated_location_rows` keeps it by its name)."""
+    return str(base or "").startswith("Location_")
+
+
 def _later_building_of_premises(items: Any, list_idx: int) -> Optional[int]:
     """The premises' first row when row `list_idx` is a LATER building of the
     same premises, else None."""
@@ -1201,7 +1216,12 @@ def premises_twin_reads(field_name: str, facts: dict,
 # printed in lower case on the FR125 replay, so it is formatted like a
 # document's value, exactly as before 1 Oct. One capital anywhere keeps the
 # whole text as typed ("JLL", "eBay Inc", "Astrea It services").
-_TYPED_VALUE_SOURCES = frozenset({"producer", "client_arq", "client", "user", "human", "account"})
+# A person TYPED the text, the login profile included (the one door's
+# vocabulary, 27 Oct 2026 - `fact_state.PERSON_ENTRY_SOURCES` plus the account:
+# a DIFFERENT question from `typed_by_person`, which leaves the account out, so
+# kept as its own name; "client" / "user" / "human" are never written).
+from services.fact_state import PERSON_ENTRY_SOURCES as _PERSON_ENTRY_SOURCES  # noqa: E402
+_TYPED_VALUE_SOURCES = _PERSON_ENTRY_SOURCES | {"account"}
 _TYPED_KEEPS_CASING = frozenset({"name", "address", "city"})
 
 
@@ -1240,12 +1260,59 @@ def _typed_by_a_person(value: Any, typed_texts: List[str]) -> bool:
     return isinstance(value, str) and any(_is_verbatim_piece(value, t) for t in typed_texts)
 
 
+# ── A date box prints a date or nothing (strict review, 29 Oct 2026) ─────────
+# "46023" (a spreadsheet's day serial) and "2027" printed as-is in
+# Policy_EffectiveDate_A: the date canonicalizer returns what it cannot read
+# unchanged, which is right for words ("Continuous", "Until cancelled") and
+# wrong for a run of digits that is no date. A box ACORD types as a date
+# (tooltip "Enter date:", or a name segment ending "Date" - the two coincide on
+# all 270 date boxes of the 17 schemas) whose value is digits and separators
+# only and parses as no date is left BLANK - blank over wrong. The fact keeps
+# its value, so the format warning on the fact still fires.
+_DATE_BOX_DIGITS_RE = re.compile(r"^[\d\s/.\-]+$")
+_PARTIAL_DATE_FORMATS = ("%m/%Y", "%m-%Y", "%m%d%Y", "%Y%m%d")
+
+
+def is_date_box(field: str, meta: Any = None) -> bool:
+    """ACORD types this box as a date (see above). A checkbox never is."""
+    info = meta if isinstance(meta, dict) else {}
+    if "/Btn" in str(info.get("ft") or ""):
+        return False
+    m = _TOOLTIP_TYPE_RE.match(str(info.get("tu") or ""))
+    if m:
+        return m.group(1).lower() == "date"
+    return any(seg.endswith("Date") for seg in str(field or "").split("_"))
+
+
+def unreadable_date_in_date_box(field: str, value: Any, meta: Any = None) -> bool:
+    """True when `value` in a date box is a digit run that is no date
+    ("46023", "2027", "13/45/2026"). A parseable date, a month/year, words and
+    an empty value are never unreadable here."""
+    s = str(value if value is not None else "").strip()
+    if not s or not _DATE_BOX_DIGITS_RE.match(s) or not is_date_box(field, meta):
+        return False
+    try:
+        from services.display_canonicalizer import _DATE_FORMATS
+        from datetime import datetime as _dt
+        for fmt in tuple(_DATE_FORMATS) + _PARTIAL_DATE_FORMATS:
+            try:
+                _dt.strptime(s, fmt)
+                return False
+            except ValueError:
+                continue
+    except Exception:                                     # noqa: BLE001
+        return False      # a broken reader never blanks a box
+    return True
+
+
 def _display_for_box(form_id: str, field: str, value, typed: bool):
     """The display canonicalization for one box (see `display_value_for_box`)."""
     from services.display_canonicalizer import canonicalize_for_field, category_for_field
     if (typed and _casing_is_chosen(value)
             and category_for_field(field) in _TYPED_KEEPS_CASING):
         return re.sub(r"\s+", " ", value).strip()
+    if unreadable_date_in_date_box(field, value):
+        return ""          # a date box prints a date or nothing (29 Oct 2026)
     clean = canonicalize_for_field(field, value)
     if (isinstance(clean, str) and clean.startswith("$")
             and field in _fields_with_printed_currency(form_id)):
@@ -1469,9 +1536,20 @@ _NAME_GIVEN_KEY = "_name_given"
 _NAME_SURNAME_KEY = "_name_surname"
 
 
+_NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+
 def _split_driver_name(full: Optional[str]):
     if not full or not str(full).strip():
         return None, None
+    # "Last, First [Middle]" - a roster / MVR order (27 Oct 2026, CH125 round
+    # trip: "Szymanski, Gregory" printed given name "Szymanski," and surname
+    # "Gregory"). The part before the comma is the surname; "Smith, Jr." is a
+    # suffix, not a given name.
+    if str(full).count(",") == 1:
+        last, first = (x.strip() for x in str(full).split(","))
+        if last and first and first.lower().strip(".") not in _NAME_SUFFIXES:
+            return first, last
     parts = str(full).strip().split()
     if len(parts) == 1:
         return parts[0], None
@@ -1617,6 +1695,18 @@ def _resolve_schedule_row_inner(field_name: str, facts: dict):
             return wc_period
 
     items = _countable_schedule_rows(defn.list_key, _fv(facts, defn.list_key), facts)
+    # A LOCATION schedule lists each premises once (end-user review, 29 Oct
+    # 2026): ACORD 130 / 133 `Location_*` rows are bound to the premises in order - a later building of a premises is not a
+    # row of its own. Bound building by building, the 29 Oct kit's 130 printed
+    # premises 1 on row A, a blank row B (its second building, folded by
+    # `_dedupe_repeated_location_rows`) and premises 2 on row C.
+    if (defn.list_key == "property_locations" and isinstance(items, list)
+            and _location_rows_list_premises(base, facts)):
+        _firsts = [i for i in range(len(items)) if _later_building_of_premises(items, i) is None]
+        if len(_firsts) < len(items):
+            if list_idx >= len(_firsts):
+                return None
+            list_idx = _firsts[list_idx]
     # Deferred premises bindings (6 Oct 2026, see the registry note): the row's
     # own value, or step aside - never an owned blank.
     if defn.list_key == "property_locations" and defn.sub_key in _PREMISES_DEFERRED_SUBKEYS:
@@ -2052,6 +2142,13 @@ _ACORD_FIELD_RULES = [
     ("CertificateOfInsurance_RevisionNumber",              None),
 
     # ── Insurer ──────────────────────────────────────────────────────────────
+    # ACORD 133's NOTICE OF ASSIGNMENT lists the insurers that REFUSED the risk
+    # (their names, representatives, refusal dates). The substring rule below
+    # printed the CURRENT carrier there - telling the assigned-risk plan that
+    # the incumbent declined the applicant - and the reader took it back as
+    # the carrier (Michelle review, 30 Oct 2026). Never a package fact; a
+    # declination is read from its own letter by gap fill, or typed.
+    ("RejectingInsurer_",                                  None),
     ("Insurer_FullName",                                   "carrier_name"),
     ("Insurer_NAICCode",                                   "carrier_naic"),
     ("_InsurerLetterCode",                                 None),
@@ -3040,6 +3137,230 @@ def _resolve_wc_period_loss_box(field_name: str, facts: dict):
     return None
 
 
+# ── ...AND THE PERIOD ALIGNMENT, BUILT (27 Oct 2026, Z41 open end) ─────────
+# The owned blank above is the RESOLVER's answer: the boxes' period is the
+# year printed beside them (`PriorCoverage_EffectiveYear_<row>`, "the year the
+# prior coverage policy term became effective"), which only the finished form
+# knows. Once it is printed, each row's totals are read off the loss runs:
+#   * the PERIOD is the Workers Compensation term that began that year - a WC
+#     term record (current, retired or prior), else the WC programme's own
+#     anniversary when no record overlaps it (annual terms renew on it);
+#   * the loss runs must COVER it (`loss_run_period_start` .. end / valuation,
+#     a day's slack for end-of-day printing) and must carry WC at all (at
+#     least one WC claim), or a zero would be a guess;
+#   * only WORKERS COMPENSATION claims count (the box is the WC policy's), by
+#     their date of loss; a claim of no line, or a WC claim with no date, that
+#     could fall in the period leaves the row blank - the total would be wrong;
+#   * CLAIMS = the count, PAID = paid to date, RESERVE = the outstanding
+#     reserve (a closed claim's is 0; an open claim with none unknown -> blank).
+# Every miss is a blank row, never a partial total. Written as the engine's
+# own value ("filled"), like ACORD 125's TOTAL LOSSES over the same claims.
+_WC_PERIOD_ROW_YEAR = "PriorCoverage_EffectiveYear_{}"
+_WC_PERIOD_SLACK_DAYS = 1
+_LOSS_DATE_KEYS = ("date", "loss_date", "date_of_loss", "occurrence_date")
+
+
+def _wc_terms(facts: dict) -> List[Tuple[Any, Any]]:
+    """(effective, expiration) dates of every Workers Compensation term the
+    facts record - current, retired and prior rows alike."""
+    from datetime import timedelta
+    from services.lob_canon import canon_line
+    from services.loss_history_state import loss_period_date
+    out = []
+    for key in ("coverage_lines", "prior_coverage_lines", "prior_coverage_by_line"):
+        rows = _fv(facts, key)
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict) or canon_line(str(r.get("line") or "")) != "workers_comp":
+                continue
+            eff = loss_period_date(r.get("effective_date") or r.get("effective"))
+            exp = loss_period_date(r.get("expiration_date") or r.get("expiration"))
+            if eff and not exp:
+                try:
+                    exp = eff.replace(year=eff.year + 1)
+                except ValueError:
+                    exp = eff + timedelta(days=365)
+            if eff and exp and exp > eff and (eff, exp) not in out:
+                out.append((eff, exp))
+    return sorted(out)
+
+
+def _same_anniversary(a, b) -> bool:
+    """Two dates fall on the same month and day (29 February reads as the 28th)."""
+    fold = lambda d: (d.month, 28 if (d.month, d.day) == (2, 29) else d.day)
+    return fold(a) == fold(b)
+
+
+def _wc_period_for_year(year: int, terms: List[Tuple[Any, Any]]):
+    from datetime import date
+    own = [t for t in terms if t[0].year == year]
+    if len(own) == 1:
+        return own[0]
+    if own or not terms:
+        return None                       # two terms began that year, or none known
+    m, d = terms[-1][0].month, terms[-1][0].day
+    d = 28 if (m, d) == (2, 29) else d
+    eff, exp = date(year, m, d), date(year + 1, m, d)
+    if any(a < exp and eff < b for a, b in terms):
+        return None                       # a recorded term overlaps it: not this anniversary
+    return eff, exp
+
+
+# WHICH RUNS COVER WORKERS COMPENSATION (Z44-A-R, 27 Oct 2026). The merged
+# `loss_run_period_start` / `_end` are the span of EVERY loss run: a WC run to
+# 2024 beside a GL-only run for 2025 "covered" the 2025 WC period and printed
+# "0 claims" there - a wrong value. A period is covered only by a run that is
+# WC's own: its claims name WC, or its own coverage rows are WC. Stored at the
+# merge (`extraction_pipeline`, beside `_line_dec_limits`) as [start, end] ISO
+# pairs, since a re-stamp has no documents; absent = no WC run known = blank.
+WC_LOSS_RUN_SPANS_KEY = "_wc_loss_run_spans"
+_ALL_LINES_RE = re.compile(r"\s*all\s+(?:lines(?:\s+of\s+business)?|coverages)\s*", re.I)
+
+
+def wc_loss_run_spans(docs: Any) -> List[List[str]]:
+    """[[start, end], ...] (ISO) of every ACTIVE document that is a Workers
+    Compensation loss run and states its own experience period. Never raises."""
+    out: List[List[str]] = []
+    try:
+        from services.lob_canon import canon_line
+        from services.loss_history_state import loss_period_date
+        from services.scoped_evidence import document_own_lines
+        for d in docs if isinstance(docs, (list, tuple)) else []:
+            if not isinstance(d, dict) or d.get("excluded"):
+                continue
+            df = d.get("facts") if isinstance(d.get("facts"), dict) else {}
+            start = loss_period_date(_fv(df, "loss_run_period_start"))
+            end = (loss_period_date(_fv(df, "loss_run_period_end"), end=True)
+                   or loss_period_date(_fv(df, "loss_run_valuation_date")))
+            if not start or not end or end < start:
+                continue
+            rows = _fv(df, "loss_history")
+            # A run whose own rows name WC, or that states it reports ALL lines
+            # (an account run: "2025-2026 | All lines | 12 | ..."), covers WC.
+            wc = any(isinstance(r, dict) and (
+                canon_line(str(r.get("line_of_business") or r.get("line") or "")) == "workers_comp"
+                or _ALL_LINES_RE.fullmatch(str(r.get("line_of_business") or r.get("line") or "")))
+                for r in (rows if isinstance(rows, list) else []))
+            if not wc:
+                wc = "workers_comp" in (document_own_lines(d) or ())
+            span = [start.isoformat(), end.isoformat()]
+            if wc and span not in out:
+                out.append(span)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("WC loss-run coverage skipped: %s", ex)
+        return []
+    return out
+
+
+def wc_period_loss_values(values: dict, facts: dict) -> Dict[str, str]:
+    """{box: value} for ACORD 130's per-period loss boxes, from the year each
+    prior-coverage row prints (`values`) and the loss runs (see above). Only
+    the rows it can total; {} on any other form. Never raises."""
+    out: Dict[str, str] = {}
+    try:
+        from datetime import timedelta
+        from services.lob_canon import canon_line
+        from services.loss_history_state import loss_period_date
+        if str((facts or {}).get("_form_id") or "").split("__", 1)[0] != "ACORD_130":
+            return out
+        from services.lob_canon import is_container_label
+        from services.loss_history_state import _row_is_a_period_total
+        raw_rows = _fv(facts, "loss_history")
+        rows = _countable_schedule_rows("loss_history", raw_rows)
+        claims = []
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            line = str(r.get("line_of_business") or r.get("line") or "")
+            # A package policy never carries Workers Compensation.
+            fam = canon_line(line) or ("package" if is_container_label(line) else None)
+            when = next((loss_period_date(r.get(k)) for k in _LOSS_DATE_KEYS
+                         if loss_period_date(r.get(k))), None)
+            claims.append((fam, when, r))
+        if not any(fam == "workers_comp" for fam, _w, _r in claims):
+            return out                    # the runs show no WC: a zero would be a guess
+        # A loss run's TOTAL row ("2023-2024 | All lines | 1 | 4200") reports
+        # claims the detail rows may not list. One whose paid equals the detail
+        # claims' paid over its window is their footer; any other may hold a
+        # WC claim, and every WC period its window touches stays blank.
+        doubt_windows = []
+        for r in raw_rows if isinstance(raw_rows, list) else []:
+            if not isinstance(r, dict) or not _row_is_a_period_total(r):
+                continue
+            line = str(r.get("line_of_business") or r.get("line") or "")
+            if (canon_line(line) or "workers_comp") != "workers_comp" or is_container_label(line):
+                continue                  # another line's total
+            years = sorted({int(y) for v in r.values() if isinstance(v, str)
+                            for y in re.findall(r"\b((?:19|20)\d{2})\b", v)})
+            window = ((loss_period_date(str(years[0])), loss_period_date(str(years[-1]), end=True))
+                      if years else None)
+            paid = str(r.get("paid") or "").strip()
+            inside = [c for c in claims if window is None
+                      or (c[1] is not None and window[0] <= c[1] <= window[1])]
+            if re.search(r"\d", paid) and _currency_to_int(paid) == sum(
+                    _currency_to_int(str(c[2].get("paid") or "")) for c in inside):
+                continue                  # the detail rows' own footer
+            doubt_windows.append(window)
+        # Coverage = the WC loss runs' own periods (see `wc_loss_run_spans`),
+        # never the merged span of every line's runs.
+        spans = []
+        for s in (facts or {}).get(WC_LOSS_RUN_SPANS_KEY) or []:
+            if isinstance(s, (list, tuple)) and len(s) == 2:
+                a, b = loss_period_date(s[0]), loss_period_date(s[1])
+                if a and b:
+                    spans.append((a, b))
+        if not spans:
+            return out
+        slack = timedelta(days=_WC_PERIOD_SLACK_DAYS)
+        terms = _wc_terms(facts)
+        for letter in _ROW_LETTERS:
+            ym = re.fullmatch(r"\s*((?:19|20)\d{2})\s*",
+                              str((values or {}).get(_WC_PERIOD_ROW_YEAR.format(letter)) or ""))
+            if not ym:
+                continue
+            period = _wc_period_for_year(int(ym.group(1)), terms)
+            if not period or not any(a <= period[0] + slack and b >= period[1] - slack
+                                     for a, b in spans):
+                continue                  # no known period, or no WC run covers it
+            # A period built from the ANNIVERSARY (no term record of its own)
+            # counts only when a WC loss run's own printed period runs on that
+            # anniversary (owner, 27 Oct 2026): a prior carrier that renewed on
+            # another date would total the wrong window. Blank over wrong.
+            if not any(t[0] == period[0] for t in terms) and not any(
+                    _same_anniversary(period[0], a) or _same_anniversary(period[0], b + slack)
+                    for a, b in spans):
+                continue
+            eff, exp = period
+            mine = []
+            doubt = any(w is None or (w[0] < exp and eff <= w[1]) for w in doubt_windows)
+            for fam, when, r in claims:
+                inside = when is not None and eff <= when < exp
+                if fam == "workers_comp" and when is None:
+                    doubt = True          # a WC claim we cannot place
+                elif fam is None and (when is None or inside):
+                    doubt = True          # a claim of no line that may be WC
+                elif fam == "workers_comp" and inside:
+                    mine.append(r)
+            if doubt:
+                continue
+            out[f"LossHistory_ClaimCount_{letter}"] = str(len(mine))
+            paid = [str(r.get("paid") or r.get("paid_amount") or "").strip() for r in mine]
+            if all(re.search(r"\d", p) for p in paid):
+                out[f"LossHistory_PaidAmount_{letter}"] = f"${sum(_currency_to_int(p) for p in paid):,}"
+            reserve, known = 0, True
+            for r in mine:
+                rv = str(r.get("reserved_amount") or r.get("reserve") or "").strip()
+                if re.search(r"\d", rv):
+                    reserve += _currency_to_int(rv)
+                elif r.get("open") is True or str(r.get("open_code") or "").upper() in ("O", "Y", "OPEN"):
+                    known = False         # an open claim with no reserve: unknown
+            if known:
+                out[f"LossHistory_ReservedAmount_{letter}"] = f"${reserve:,}"
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("ACORD 130 period loss totals skipped: %s", ex)
+        return {}
+    return out
+
+
 def _countable_schedule_rows(list_key: str, rows, facts: Optional[dict] = None):
     """The rows of a schedule that count as rows, for stamping and for capacity.
 
@@ -3396,6 +3717,57 @@ def _unanchored_schedule_row_fields(mapped: dict, schema: dict,
                 _note_guard_reason(f, _r_gar)
     except Exception:                                      # noqa: BLE001
         pass
+    return out
+
+
+# ── A VEHICLE ROW NAMES ITS VEHICLE, OR PRINTS NOTHING (27 Oct 2026) ────────
+# The Z31-W open end, and the class behind P15-3: run b117f010 (the auto
+# policy not uploaded yet) printed ACORD 127 row A's USE ticks - the policy's
+# stated use, which `_resolve_vehicle_use_indicator` gives row A whenever a use
+# is stated - beside no vehicle at all. Rows B..N inherit a policy-level value
+# only where the schedule lists a vehicle; row A did not, and the AI net
+# (`_unanchored_schedule_row_fields`) judges row A's garaging only, and AI
+# values only. Here, for EVERY source: a vehicle row whose naming cells (VIN,
+# year, make, model) are all empty, at a position the vehicle schedule does not
+# reach, carries no value in any per-vehicle column - a column being a
+# `Vehicle_*` box the form prints on every row the naming cells print on, so
+# a General Information table that only shares the prefix (ACORD 127's
+# `Vehicle_Question_ModifiedEquipment*`, rows A-B) is never one. A form
+# printing no naming cell (the 137 / 138 coverage grids) is not judged. Run on
+# the stamp and on every re-stamp (the guards), so a re-stamped USE tick
+# follows the same rule.
+REASON_ROW_WITHOUT_A_VEHICLE = "VEHICLE_ROW_WITHOUT_A_VEHICLE"
+REASON_GARAGING_WITHOUT_VEHICLE = "AI_GARAGING_WITHOUT_A_VEHICLE"
+_VEHICLE_NAMING_SUBKEYS = frozenset({"vin", "year", "make", "model"})
+_VEHICLE_ROW_CELL_RE = re.compile(r"^(Vehicle_.+)_([A-N])$")
+
+
+def _cells_of_rows_without_a_vehicle(mapped: dict, schema: dict, facts: Any) -> List[str]:
+    if not isinstance(mapped, dict) or not isinstance(schema, dict):
+        return []
+    naming = [b for b, sd in _SCHEDULE_REGISTRY.items()
+              if sd.list_key == "auto_vin_schedule" and sd.sub_key in _VEHICLE_NAMING_SUBKEYS]
+    rows = _fv(facts, "auto_vin_schedule") if isinstance(facts, dict) else None
+    listed = len(rows) if isinstance(rows, list) else 0
+    letters: Dict[str, set] = {}
+    for f in schema:
+        m = _VEHICLE_ROW_CELL_RE.match(f or "")
+        if m:
+            letters.setdefault(m.group(1), set()).add(m.group(2))
+    # The vehicle rows are the rows the naming cells print on; a column prints
+    # on every one of them. ACORD 127's "modified equipment" question table
+    # (`Vehicle_Question_ModifiedEquipment*`, rows A-B of four) is not one.
+    rows_printed = set().union(*(letters.get(b, set()) for b in naming)) if naming else set()
+    columns = {b for b, ls in letters.items() if len(ls) >= 2 and rows_printed and ls >= rows_printed}
+    out: List[str] = []
+    for letter in sorted({l for b in columns for l in letters[b]}):
+        anchors = [f"{b}_{letter}" for b in naming if f"{b}_{letter}" in schema]
+        if not anchors or any(str(mapped.get(a) or "").strip() for a in anchors):
+            continue                       # no naming cell to judge by, or a vehicle
+        if _ROW_LETTERS.find(letter) < listed:
+            continue                       # the schedule lists a vehicle at this row
+        out.extend(f for f in (f"{b}_{letter}" for b in sorted(columns))
+                   if f in schema and str(mapped.get(f) or "").strip())
     return out
 
 
@@ -12077,6 +12449,52 @@ def prints_a_calculated_value(form_id: str, field: str, value: Any, facts: dict)
             and _box_prints_fact_value(value, held.get("value")))
 
 
+# ── A value ASG Transcriber read asks to be verified (29 Oct 2026) ───────────
+# A box printing a fact that came off an OUTSIDE ACORD form through Transcriber
+# (fact confidence `acord_transcriber`, services/acord_intake/read.py) is
+# "found, please verify": the value is on the document, ASG's OCR read it at
+# some confidence, and ASG warrants no accuracy (pilot agreement 6.5). It takes
+# the `ai_verified` label - 0.85, a Please verify row with Confirm - never
+# "filled" (1.00, no question asked). `needs_attention.verify_reason` names
+# Transcriber for the same boxes through `prints_a_transcriber_value`.
+TRANSCRIBER_FACT_CONFIDENCE = "acord_transcriber"
+
+
+def prints_a_transcriber_value(form_id: str, field: str, value: Any, facts: dict) -> Optional[dict]:
+    """The Transcriber envelope `field` prints, else None. Never raises."""
+    if value is None or not str(value).strip():
+        return None
+    try:
+        fact_key = source_fact_for_field(field, facts or {}, form_id)
+    except Exception:                                          # noqa: BLE001
+        return None
+    held = (facts or {}).get(fact_key) if fact_key else None
+    if (isinstance(held, dict)
+            and str(held.get("confidence") or "").lower() == TRANSCRIBER_FACT_CONFIDENCE
+            and _box_prints_fact_value(value, held.get("value"))):
+        return held
+    return None
+
+
+def apply_transcriber_labels(form_id: str, facts: dict, mapped: dict, confidence: dict) -> dict:
+    """Relabel `filled` boxes printing a Transcriber-read value as `ai_verified`.
+    Never changes a value. Fails open."""
+    if not isinstance(confidence, dict) or not isinstance(mapped, dict):
+        return confidence
+    relabelled = 0
+    for field, label in list(confidence.items()):
+        if label != "filled":
+            continue
+        if prints_a_transcriber_value(form_id, field, mapped.get(field), facts) is None:
+            continue
+        confidence[field] = "ai_verified"
+        relabelled += 1
+    if relabelled:
+        logger.info("transcriber labels (form=%s): %d box(es) print a value ACORD Transcriber "
+                    "read and ask to be verified", form_id or "unknown", relabelled)
+    return confidence
+
+
 def apply_derived_value_labels(form_id: str, facts: dict, mapped: dict,
                                confidence: dict) -> dict:
     """Relabel `filled` boxes printing a self-declared ESTIMATE as
@@ -13039,6 +13457,14 @@ def _resolve_underlying_policy_row(field_name: str, facts: dict):
             same = ((_normalized_date_key(fact_val) or fact_val.lower())
                     == (_normalized_date_key(lines_val) or lines_val.lower()))
         if same:
+            if attr == "InsurerFullName":
+                # One carrier, one printing clipped at a box edge ("...Compai"):
+                # print the whole name (normalization.fuller_entity_printing).
+                try:
+                    from services.normalization import fuller_entity_printing
+                    return fuller_entity_printing(lines_val, fact_val)
+                except Exception:                         # noqa: BLE001
+                    pass
             return lines_val
         logger.warning(
             "underlying grid: %s left blank - underlying_policies says %r but "
@@ -14127,6 +14553,17 @@ def _resolve_vehicle_deductible_cell(field_name: str, facts: dict):
         return _SCHED_SKIP            # no fleet evidence: change nothing
     if _ROW_LETTERS.find(m.group(2)) >= len(sched):
         return _SCHED_SKIP            # phantom row: its own resolver owns it
+    # The vehicle's OWN reading of the dec first (26 Oct 2026,
+    # `extraction_service.read_vehicle_physical_damage`): not covered = blank,
+    # its own deductible = that; otherwise the policy-wide deductible.
+    row = sched[_ROW_LETTERS.find(m.group(2))]
+    cov = "comp" if "Comprehensive" in m.group(1) else "coll"
+    if isinstance(row, dict):
+        if row.get(f"{cov}_covered") is False:
+            return None
+        own = str(row.get(f"{cov}_deductible") or "").strip()
+        if own:
+            return _deductible_amount_of(own) or own
     return _deductible_amount_of(value) or value
 
 
@@ -14230,6 +14667,11 @@ def _resolve_vehicle_coverage_tick(field_name: str, facts: dict):
     box, item = m.group("box"), sched[idx]
     try:
         if box in _VEHICLE_OTHER_COVERAGE_BOXES:
+            return None
+        # The dec says this vehicle does not carry it (26 Oct 2026).
+        _cov = {"ComprehensiveIndicator": "comp", "ComprehensiveDeductibleIndicator": "comp",
+                "CollisionIndicator": "coll"}.get(box)
+        if _cov and isinstance(item, dict) and item.get(f"{_cov}_covered") is False:
             return None
         if box in _OTHER_THAN_COLLISION_ALTERNATIVES:
             if _vehicle_row_covered("ComprehensiveIndicator", item, facts):
@@ -15048,6 +15490,15 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
                       if _unpriced(e) and not key[0] else ())
 
     grid = PriorGrid()
+    # AN UNDATED POLICY NEVER UNKEYS THE WHOLE GRID (30 Oct 2026, live 8aa8f3ad):
+    # a dec's "renewal of WC-3398041-24" (a number, no term) beside a dated
+    # history threw every row back to document order with no years, and the
+    # GL / Auto / Property terms that HAVE a column were all listed on ACORD 101.
+    # With at least one dated policy, the undated ones go to ACORD 101 (their
+    # year is unknown, so no row can claim them) and the dated ones keep rows.
+    if any(y for _, y, _ in parsed) and not all(y for _, y, _ in parsed):
+        aside.extend(p for p in parsed if not p[1])
+        parsed = [p for p in parsed if p[1]]
     if all(y for _, y, _ in parsed):
         years = sorted({y for _, y, e in parsed if not _unpriced(e)}, reverse=True)[:3]
         _added_years = sorted({y for _, y, e in parsed if _unpriced(e)} - set(years),
@@ -15086,6 +15537,19 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
             # lowest umbrella-family layer.
             pick = ((_agent_other_pick(group, facts) or _lowest_umbrella_layer(group, facts))
                     if cell[0] == _PRIOR_COVERAGE_OTHER else None)
+            # A PACKAGE POLICY IS EACH OF ITS LINES' CONTRACT (30 Oct 2026, the
+            # policy-by-line kit): GL 2026 held the package policy QPC5519-26 and
+            # a separate project GL; both went to ACORD 101 while the same
+            # package number printed in the Property box of that year - one
+            # policy shown twice. When exactly one contract in the box is a
+            # number another column of the SAME year also holds, it is this
+            # line's part of that package: it takes the box, the rest are listed.
+            if pick is None:
+                _other_nums = {_pn(x.get("policy_no")) for (c2, r2), g2 in cells.items()
+                               if r2 == cell[1] and c2 != cell[0] for x in g2 if _pn(x.get("policy_no"))}
+                _pkg = [e for e in group if _pn(e.get("policy_no")) and _pn(e.get("policy_no")) in _other_nums]
+                if _pkg and len({_contract(e) for e in _pkg}) == 1:
+                    pick = _pkg[0]
             if pick is not None:
                 grid[cell] = pick
                 aside.extend((cell[0], years[cell[1]], e) for e in group if e is not pick)
@@ -15095,6 +15559,11 @@ def _prior_coverage_grid_build(facts: dict) -> Tuple[Dict[Tuple[str, int], dict]
                         cell[0], cell[1], max(len(contracts), len(_records)))
             aside.extend((cell[0], years[cell[1]], e) for e in group)
         window = sorted({y for _c, y, _e in all_parsed if y}, reverse=True)[:3]
+        # The grid's own rows are always inside the window (shape fuzz, 30 Oct
+        # 2026): an unpriced 2025 policy took no row, the grid printed 2026 /
+        # 2024 / 2023, and a 2023 policy no box held fell outside a window of
+        # 2026 / 2025 / 2024 - on neither the grid nor ACORD 101.
+        window = sorted(set(window) | set(years), reverse=True)
         grid.set_aside = _prior_grid_unplaced(grid, aside, window, years)
         grid.other_line = _placed_other_line(grid)
         return grid, years
@@ -15410,6 +15879,15 @@ def _prior_grid_unplaced(grid: Dict, aside: List[Tuple[str, Optional[str], dict]
         for pcol, pyear, p in placed:
             if _one_printing(e, year, p, pyear):
                 return True
+            # An UNDATED printing of a policy a box holds (same column, same
+            # number) is that policy again - its year is unknown, its number is
+            # its identity (30 Oct 2026: the undated-renewal fix sent such a
+            # printing to ACORD 101 beside the grid row that already held it).
+            if (year is None and pcol == col and _num(e.get("policy_no"))
+                    and _num(e.get("policy_no")) == _num(p.get("policy_no"))
+                    and _grid_entry_line(p) == _grid_entry_line(e)   # package parts share numbers
+                    and not _two_records(p, e)):
+                return True
             if pcol != col or pyear != year or _grid_entry_line(p) != _grid_entry_line(e):
                 continue
             if _two_records(p, e):
@@ -15427,7 +15905,10 @@ def _prior_grid_unplaced(grid: Dict, aside: List[Tuple[str, Optional[str], dict]
         if not isinstance(e, dict) or id(e) in seen:
             continue
         seen.add(id(e))
-        if window is not None and year not in window and not e.get("_current_term"):
+        # An undated policy is never out of the window - its year is unknown,
+        # so it is listed (Brent: "never omitted"; 30 Oct 2026).
+        if window is not None and year is not None and year not in window \
+                and not e.get("_current_term"):
             continue
         if _repeats(col, year, e):
             continue
@@ -16610,8 +17091,10 @@ def _attests_no_loss(val) -> bool:
     return attested_true(val)
 
 
-# Fact sources that mean a PERSON answered, not the extraction model.
-_NO_LOSS_HUMAN_SOURCES = frozenset({"producer", "client_arq", "user", "human", "client"})
+# Fact sources that mean a PERSON answered (typed), not the extraction model -
+# the one door's vocabulary (`fact_state.PERSON_ENTRY_SOURCES`, 27 Oct 2026; the
+# private set's "user" / "human" / "client" are never written on a fact).
+from services.fact_state import PERSON_ENTRY_SOURCES as _NO_LOSS_HUMAN_SOURCES  # noqa: E402
 
 
 def no_loss_attestation_verdict(facts: dict, raw_text: str = "") -> Optional[str]:
@@ -18878,6 +19361,14 @@ def _use_cell_reading(value: Any) -> Optional[Tuple[str, str]]:
         return None if re.search(r"\d", v) else ("na", "NA")
     if letters in _USE_NON_ANSWER_LETTERS:
         return ("na", "NA")
+    # Every other spelling of "nothing here" ("UNK", "TBA", "Not provided") is
+    # a non-answer too - the one door for it (27 Oct 2026, Lane B item 4e).
+    try:
+        from services.answer_semantics import is_placeholder_text
+        if is_placeholder_text(v):
+            return ("na", "NA")
+    except Exception:                                         # noqa: BLE001
+        pass
     if (re.search(r"\d", v) or _USE_CELL_UNREAD_RE.search(v)
             or any(len(piece) == 1 for piece in re.findall(r"[a-z]+", v.lower()))):
         return None
@@ -19172,6 +19663,10 @@ def _resolve_vehicle_cost_new(field_name: str, facts: dict):
 _VEHICLE_GARAGING_RE = re.compile(
     r"^Vehicle_PhysicalAddress_(LineOne|CityName|CountyName|StateOrProvinceCode|PostalCode)_([A-Z])$")
 _GARAGE_STORAGE_FIELD = "CommercialVehicleLineOfBusiness_GarageStorageDescription_A"
+# The vehicle row's OWN garaging columns each box prints (26 Oct 2026). ONE
+# table: the ACORD intake reads an uploaded 127's boxes back through it.
+VEHICLE_GARAGING_ROW_COLS = {"CityName": "garaging_city", "StateOrProvinceCode": "garaging_state",
+                             "PostalCode": "garaging_zip"}
 _GARAGING_LABEL_RE = re.compile(r"^\s*(?:loc(?:ation)?|garag\w*)\b", re.I)
 _STREET_TYPE_WORDS = frozenset({
     "STREET", "ST", "AVENUE", "AVE", "ROAD", "RD", "BOULEVARD", "BLVD", "DRIVE",
@@ -19225,6 +19720,13 @@ def _resolve_vehicle_garaging_cell(field_name: str, facts: dict):
     if m and _real_vehicle_row(facts, m.group(2)) is None:
         return _SCHED_SKIP                # a phantom row has its own owner
     part = m.group(1) if m else None
+    # The row's OWN garaging, read off the vehicle table (26 Oct 2026,
+    # `extraction_service.read_vehicle_garaging`) - city, state and ZIP.
+    if m and part in ("CityName", "StateOrProvinceCode", "PostalCode"):
+        own = _real_vehicle_row(facts, m.group(2)) or {}
+        val = str(own.get(VEHICLE_GARAGING_ROW_COLS[part]) or "").strip()
+        if val:
+            return val
     # ONE VEHICLE ONLY (review of run 7). Nothing ties a garaging statement to
     # a particular vehicle, so on a fleet the one captured address could be
     # another vehicle's - the document decides there (COUNTY stays an owned
@@ -19392,9 +19894,10 @@ def _policy_documents_only(facts: dict) -> bool:
 
 
 # A value a person supplied or confirmed: an ARQ / producer answer, or a Data
-# Consistency confirmation (review of run 9). The no-loss rule's own set stays
-# as it is.
-_PERSON_SOURCES = _NO_LOSS_HUMAN_SOURCES | {"user_confirmed", "cross_form_conflict"}
+# Consistency confirmation (review of run 9) - the one door's third question
+# (`fact_state.PERSON_VALUE_SOURCES` / `put_by_person`, 27 Oct 2026; the
+# "cross_form_conflict" this carried is a question's source, never a fact's).
+from services.fact_state import PERSON_VALUE_SOURCES as _PERSON_SOURCES  # noqa: E402
 
 
 def _stated_by_a_person(facts: dict, key: str) -> bool:
@@ -19974,7 +20477,15 @@ def _deterministic_map(field_name: str, facts: dict):
     """
     result = _deterministic_map_inner(field_name, facts)
     if isinstance(result, str) and result.strip() and result != "UNMATCHED":
-        return _yn_gate(field_name, result, getattr(_SCHEMA_CTX, "schema", None))
+        _schema_now = getattr(_SCHEMA_CTX, "schema", None)
+        # A date box prints a date or nothing (strict review, 29 Oct 2026):
+        # an owned blank, so no later door - a re-stamp's `or raw` included -
+        # prints "46023" / "2027". The fact keeps its value and its warning.
+        if unreadable_date_in_date_box(
+                field_name, result, (_schema_now or {}).get(field_name)
+                if isinstance(_schema_now, dict) else None):
+            return ""
+        return _yn_gate(field_name, result, _schema_now)
     return result
 
 
@@ -20115,6 +20626,56 @@ def _vehicle_continuation(facts: dict) -> Optional[str]:
         return None
     return "\n".join([f"VEHICLE SCHEDULE (continued from ACORD 127) - {len(lines)} of "
                        f"{len(rows)} vehicles the form has no row for:"] + lines)
+
+
+def _premises_row_capacity(form_id: str) -> int:
+    """How many premises / building rows the form prints (its own schema's
+    `CommercialStructure_Location_ProducerIdentifier_<row>` boxes)."""
+    try:
+        import os as _os
+        from services.form_instances import base_form_id as _base_form_id
+        path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                             "forms_schemas", f"{_base_form_id(form_id)}_schema.json")
+        with open(path, encoding="utf-8") as fh:
+            schema = json.load(fh)
+        return len({f.rsplit("_", 1)[1] for f in schema
+                    if re.match(r"^CommercialStructure_Location_ProducerIdentifier_[A-Z]$", f)})
+    except Exception:                                     # noqa: BLE001
+        return 0
+
+
+def _building_continuation(facts: dict, form_id: str) -> Optional[str]:
+    """The ACORD 101 block for the buildings past the form's premises rows
+    (end-user review, 29 Oct 2026: ACORD 140 prints two buildings, and the
+    kit's third - 1720 Westland Rd, Cheyenne - printed nowhere, with nothing
+    telling the producer). Same shape as the vehicle continuation: each
+    building the form has no row for, LOC / BLDG, address and its COPE."""
+    rows = _countable_schedule_rows("property_locations", _fv(facts, "property_locations"))
+    capacity = _premises_row_capacity(form_id)
+    if not isinstance(rows, list) or capacity <= 0 or len(rows) <= capacity:
+        return None
+    labels = (("construction_type", "Construction"), ("year_built", "Year built"),
+              ("total_building_area", "Area (sq ft)"), ("building_value", "Building"),
+              ("bpp_value", "Business personal property"), ("occupancy", "Occupancy"),
+              ("operations_description", "Use"))
+    lines = []
+    for r in rows[capacity:]:
+        if not isinstance(r, dict):
+            continue
+        g = lambda k: str(_fv(r, k) or "").strip()                # noqa: E731
+        where = g("address") or ", ".join(x for x in (g("address_line1"), g("address_city"),
+                                                       " ".join(x for x in (g("address_state"), g("address_zip")) if x)) if x)
+        num = " ".join(x for x in ((f"Loc {g('location_number')}" if g("location_number") else ""),
+                                   (f"Bldg {g('building_number')}" if g("building_number") else "")) if x)
+        bits = [x for x in (num, where) if x]
+        bits += [f"{label} {g(k)}" for k, label in labels if g(k)]
+        if bits:
+            lines.append(" | ".join(bits))
+    if not lines:
+        return None
+    word = form_id.replace("_", " ")
+    return "\n".join([f"PREMISES (continued from {word}) - {len(lines)} of {len(rows)} "
+                       f"buildings the form has no row for:"] + lines)
 
 
 def _loss_continuation(facts: dict) -> Optional[str]:
@@ -26733,6 +27294,17 @@ def _looks_like_a_street_address(value: Any) -> bool:
                 or _TRAILING_ZIP_RE.search(text))
 
 
+def _tooltip_lists_value(meta: Any, value: str) -> bool:
+    """True when the box's own ACORD tooltip names `value` as a whole phrase -
+    an entry ACORD offers for that box ("* Joisted Masonry")."""
+    tu = (meta.get("tu") if isinstance(meta, dict) else meta) or ""
+    v = re.sub(r"\s+", " ", (value or "").strip()).lower()
+    if not isinstance(tu, str) or len(v) < 3:
+        return False
+    text = re.sub(r"\s+", " ", tu).lower()
+    return re.search(r"(?<![a-z0-9])" + re.escape(v) + r"(?![a-z0-9])", text) is not None
+
+
 def _rejects_declared_type(field: str, meta: Any, value: str,
                            schema: Optional[dict] = None) -> Optional[str]:
     """Reason string if `value` cannot possibly be valid for this field's
@@ -26765,6 +27337,12 @@ def _rejects_declared_type(field: str, meta: Any, value: str,
                 is_name = False
         except Exception:                                 # noqa: BLE001
             pass
+    if is_name and _tooltip_lists_value(meta, s):
+        # A value ACORD's own tooltip lists as an entry for this box is never a
+        # person's name (30 Oct 2026, live 6875e80c: "Joisted Masonry" was
+        # blanked from ACORD 140's construction box, whose tooltip lists it, and
+        # the blank then raised the 140 download hard stop).
+        is_name = False
 
     if dtype == "year":
         # A year is a year. This is the one place a real format check is safe:
@@ -27387,6 +27965,8 @@ def _question_explanation_pairs(schema: dict) -> Dict[str, str]:
         if not is_pairable:
             continue
         if any(t in nxt for t in _EVIDENCE_REQUIRED_TOKENS):
+            if not _QUESTION_CODE_RE.search(k) and not _checkbox_owns_description(k, nxt):
+                continue          # another question's description (Z31-W open end)
             pairs[k] = nxt
         elif (_QUESTION_CODE_RE.search(k)
               and any(re.search(rf"{t}(_[A-Z]{{1,2}})?$", nxt) for t in _PAIRING_ONLY_TOKENS)
@@ -27445,9 +28025,31 @@ def _question_explanation_pairs(schema: dict) -> Dict[str, str]:
             if cand.split("_", 1)[0] != root:
                 continue
             if any(t in cand for t in _EVIDENCE_REQUIRED_TOKENS):
+                if not _QUESTION_CODE_RE.search(q) and not _checkbox_owns_description(q, cand):
+                    break         # a checkbox pairs only with its own description
                 pairs[q] = cand
                 break
     return pairs
+
+
+# A CHECKBOX PAIRS ONLY WITH ITS OWN DESCRIPTION (27 Oct 2026, the Z31-W open
+# end). Layout adjacency alone paired ACORD 131's "named insured on the fire
+# policy?" tick with the box after it, `CareCustodyAndControl_InsuredLiability_
+# OtherDescription_A` - the free-standing "insured's liability, when other than
+# those listed" text, which belongs to no tick. Every real checkbox pair on
+# the 17 forms is the ACORD "Other" convention: the description's name is the
+# box's own with its last "Indicator" spelled as the description
+# ("..._OtherIndicator_B" -> "..._OtherDescription_B",
+# "...GuardWatchmenOtherIndicator_A" -> "...GuardWatchmenOtherDescription_A").
+# Measured over all 17 schemas: 67 checkbox pairs before, 66 after - the one
+# false pair gone, no real pair lost. A Question-code answer keeps its own rules.
+_DESCRIPTION_LEAF_RE = re.compile(
+    r"(?:ResolutionDescription|Description|Explanation)(?=_[A-Z]{1,2}$|$)")
+
+
+def _checkbox_owns_description(box: str, desc: str) -> bool:
+    stem = re.sub(r"Indicator(?=_[A-Z]{1,2}$|$)", "", str(box or ""), count=1)
+    return bool(stem) and stem != box and _DESCRIPTION_LEAF_RE.sub("", str(desc or ""), count=1) == stem
 
 
 @lru_cache(maxsize=32)
@@ -27724,6 +28326,12 @@ def _acord101_blocks(facts: dict) -> List[Tuple[str, str]]:
         vehicles = _vehicle_continuation(facts)
         if vehicles:
             blocks.append(("ACORD_127", vehicles))
+    # 3c. The buildings past ACORD 125's / 140's premises rows (29 Oct 2026).
+    for _bf in ("ACORD_125", "ACORD_140"):
+        if _holds(_bf):
+            buildings = _building_continuation(facts, _bf)
+            if buildings:
+                blocks.append((_bf, buildings))
     # 4. ACORD 130's endorsements box points here for the WC policy's whole
     #    endorsement schedule (19 Oct 2026).
     if _holds("ACORD_130"):
@@ -27863,6 +28471,20 @@ def _resolve_acord101_box(field_name: str, facts: dict):
     if m.group(1) == "FormIdentifier":
         return ", ".join(f.replace("ACORD_", "") for f in forms)
     return "; ".join(_ACORD101_ATTACHED_TITLES[f] for f in forms)
+
+
+def acord101_attached_forms(facts: dict) -> List[str]:
+    """The forms ACORD 101 names in its FORM NUMBER / FORM TITLE boxes - the one
+    answer the stamper (`_resolve_acord101_box`) and the per-form scorer share
+    (30 Oct 2026: the scorer read a `form_reference` fact nothing writes, so every
+    ACORD 101 stopped at 87 with nothing to answer)."""
+    if not isinstance(facts, dict):
+        return []
+    try:
+        blocks = _acord101_blocks({**facts, "_form_id": "ACORD_101"})
+    except Exception:                                     # noqa: BLE001
+        return []
+    return [f for f in dict.fromkeys(f for f, _t in blocks) if f in _ACORD101_ATTACHED_TITLES]
 
 
 def _apply_acord101_overflow(mapped: dict, schema: dict, facts: dict,
@@ -29445,6 +30067,14 @@ def _insurer_in_a_party_box(mapped: dict, facts: dict, gpt_filled_set) -> Dict[s
         # happened to put it among the names below.
         if _LENDING_INSTITUTION_RE.search(val) or _INSURANCE_INTERMEDIARY_RE.search(val):
             continue
+        # The insured's own name is never an insurer, however it is spelled
+        # ("Mutual Plumbing Company") - the one door (27 Oct 2026, Lane B 4c).
+        try:
+            from services.insured_scope import is_the_insureds_own_name
+            if is_the_insureds_own_name(val, facts):
+                continue
+        except Exception:                                     # noqa: BLE001
+            pass
         if carriers is None:
             carriers = _package_carrier_keys(facts)
         if _carrier_identity_key(val) in carriers or _same_value_key(val) in carriers:
@@ -29998,8 +30628,18 @@ def _document_text(facts: dict) -> str:
 
 
 def _refuse_misplaced_ai_values(mapped: dict, facts: dict,
-                                gpt_filled_set: Optional[set]) -> Dict[str, str]:
+                                gpt_filled_set: Optional[set],
+                                documents_required: bool = False) -> Dict[str, str]:
+    """`documents_required` (Z44-A-R, 27 Oct 2026): a rule whose escape is "the
+    documents print it" gives no verdict when the facts carry no documents -
+    the fact-change re-judge runs on re-stamp views that hold none, and a $100
+    deductible the dec prints went blank on a coinsurance answer."""
     refused: Dict[str, str] = {}
+    try:
+        from services.scoped_evidence import DOCS_KEY as _DK
+        _no_docs = documents_required and not (facts or {}).get(_DK)
+    except Exception:                                     # noqa: BLE001
+        _no_docs = documents_required
     gfs = gpt_filled_set if isinstance(gpt_filled_set, set) else set()
     percents = set()
     for k, raw in (facts or {}).items():
@@ -30019,7 +30659,7 @@ def _refuse_misplaced_ai_values(mapped: dict, facts: dict,
             continue
         text = val.strip()
         why = None
-        if _DOLLAR_BOX_RE.search(f) and percents:
+        if _DOLLAR_BOX_RE.search(f) and percents and not _no_docs:
             num = re.sub(r"[^\d.]", "", text)
             try:
                 if num and float(num) in percents and float(num) <= 100:
@@ -30064,6 +30704,77 @@ def _refuse_misplaced_ai_values(mapped: dict, facts: dict,
         if unq != text and unq.strip() and text[:1] in "\"\u201c\u2018'" and text[-1:] in "\"\u201d\u2019'":
             mapped[f] = unq.strip()
     return refused
+
+
+# ── AN AI VALUE IS RE-JUDGED WHEN A FACT IT WAS JUDGED BY CHANGES (27 Oct) ──
+# The Z31-W open end: ACORD 130's rating dates are judged against the proposed
+# term (`ai_answer_guards.rating_date_outside_the_term`) when the form is
+# stamped - and never again. Retyping the proposed effective date after forms
+# re-stamps the boxes the deterministic engine derives from it; an AI value is
+# no rule's output, so nothing re-asked whether it still stands, and the 130
+# kept a rating date of the OLD term. The class is every AI-value guard that
+# reads a FACT a person can change after forms (the term, the parties, a
+# percent, the experience mod, the package's other facts): run each over the
+# form's AI values on the facts before the change and after it, with the same
+# (absent) document text both times, so only a verdict the CHANGE moved acts.
+# A value a guard refuses now and kept before is blanked; nothing is ever
+# added or restored. Text-reading rules see the same text both times and so
+# cannot act here - they judged the value at generation and nothing they read
+# has changed.
+def _fact_reading_ai_guards() -> List[Tuple[str, Any]]:
+    from services.ai_answer_guards import refuse_non_answers
+    from services.ai_role_guards import drop_role_mismatches
+    return [
+        ("non_answer", lambda m, s, f, ai, fid: refuse_non_answers(m, s, f, "", ai, fid)),
+        ("role", lambda m, s, f, ai, fid: drop_role_mismatches(m, s, f, "", ai, fid)),
+        ("misplaced", lambda m, s, f, ai, fid: _refuse_misplaced_ai_values(
+            m, f, ai, documents_required=True)),
+        ("prior_mod", lambda m, s, f, ai, fid: _drop_unstated_prior_mods(m, f, ai)),
+    ]
+
+
+def ai_values_a_fact_change_refuses(form_id: str, schema: dict, values_before: dict,
+                                    values_after: dict, ai_boxes: Any,
+                                    facts_before: dict, facts_after: dict) -> Dict[str, str]:
+    """{box: reason} for every AI value in `ai_boxes` a fact-reading AI guard
+    refuses on the form AFTER the change (its boxes `values_after`, its facts
+    view `facts_after`) and kept BEFORE it - the form's printed boxes count,
+    since a guard reads the proposed term the form prints first. Pure: neither
+    box map is changed. Never raises."""
+    try:
+        ai = {b for b in (ai_boxes or ()) if isinstance(b, str) and isinstance(schema, dict)
+              and b in schema and str((values_after or {}).get(b) or "").strip()}
+        if not ai:
+            return {}
+        guards = _fact_reading_ai_guards()
+
+        def _refused(values: dict, facts: dict) -> Dict[str, str]:
+            out: Dict[str, str] = {}
+            trial = dict(values or {})
+            with _schema_context(schema):
+                for _name, fn in guards:
+                    left = ai - set(out)
+                    if not left:
+                        break
+                    try:
+                        got = fn(trial, schema, facts, set(left), form_id) or {}
+                    except Exception as ex:                    # noqa: BLE001
+                        logger.debug("fact-change re-judge: %s skipped on %s (%s)", _name, form_id, ex)
+                        continue
+                    for f, why in got.items():
+                        if f in left:
+                            out.setdefault(f, str(why).split(":", 1)[0])
+                            trial[f] = None
+            return out
+
+        after = _refused(values_after, facts_after or {})
+        if not after:
+            return {}
+        before = _refused(values_before, facts_before or {})
+        return {f: r for f, r in after.items() if f not in before}
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("fact-change re-judge skipped (form=%s): %s", form_id, ex)
+        return {}
 
 
 def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
@@ -31761,6 +32472,22 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
             mapped[_field], mapped[_two] = _m.group(1).strip(), _m.group(2).strip()
             logger.info("post_fill_guard unit_to_line_two %s -> %s (%r)",
                         _field, _two, mapped[_two])
+
+    # ── A VEHICLE ROW WITH NO VEHICLE prints nothing (27 Oct 2026) ─────────
+    # The Z31-W open end: ACORD 127 row A printed the policy's USE ticks with
+    # no vehicle on the package (the auto policy not uploaded yet). Every
+    # column, every source - see `_cells_of_rows_without_a_vehicle`.
+    try:
+        _no_vehicle = _cells_of_rows_without_a_vehicle(mapped, schema, facts)
+        for _f in _no_vehicle:
+            mapped[_f] = None
+            _note_guard_reason(_f, REASON_GARAGING_WITHOUT_VEHICLE
+                               if _VEHICLE_GARAGING_RE.match(_f) else REASON_ROW_WITHOUT_A_VEHICLE)
+        if _no_vehicle:
+            logger.info("post_fill_guard ROW_WITHOUT_A_VEHICLE blanked=%s - the row "
+                        "names no vehicle", _no_vehicle[:12])
+    except Exception as _nv_ex:                            # noqa: BLE001
+        logger.warning("vehicle-row check skipped: %s", _nv_ex)
 
     # ── A contact PERSON's line is not the COMPANY's business phone ────────
     # Runs last, so it judges the final values every other guard has settled.
@@ -37652,7 +38379,8 @@ def map_facts_to_form(
     # (`scoped_evidence.attach_documents`); without them nothing changes.
     try:
         from services.scoped_evidence import out_of_scope_values
-        _scoped_out = out_of_scope_values(mapped, schema, facts, form_id, gpt_filled_set)
+        _scoped_out = out_of_scope_values(mapped, schema, facts, form_id, gpt_filled_set,
+                                          grounding=gpt_question_grounding)
         for _f, _why in _scoped_out.items():
             logger.info("gpt_fill DROP_%s: field=%s value=%r", _why, _f,
                         str(mapped.get(_f))[:60])
@@ -38539,6 +39267,17 @@ def map_facts_to_form(
     except Exception as _dr_ex:                           # noqa: BLE001
         logger.warning("interest-row cascade skipped (form=%s): %s", form_id, _dr_ex)
 
+    # ── ACORD 130's per-period loss totals (27 Oct 2026) ─────────────────────
+    # After every guard, so a refused prior-coverage YEAR earns no totals; the
+    # boxes are owned blanks until here (`wc_period_loss_values`).
+    try:
+        for _f, _v in wc_period_loss_values(mapped, facts).items():
+            if _f in schema and not str(mapped.get(_f) or "").strip():
+                mapped[_f] = _v
+                _deterministic_filled.add(_f)
+    except Exception as _wcl_ex:                          # noqa: BLE001
+        logger.warning("ACORD 130 period loss totals skipped (form=%s): %s", form_id, _wcl_ex)
+
     # ── Display canonicalization (Beta feedback: stamp clean, standardized
     # values, not raw OCR strings) ───────────────────────────────────────────
     # NON-destructive: standardizes date / currency / address / name / state
@@ -38590,6 +39329,17 @@ def map_facts_to_form(
         except Exception as _cex:
             logger.warning("display canonicalization skipped (form=%s): %s", form_id, _cex)
 
+    # A date box prints a date or nothing (strict review, 29 Oct 2026 - see
+    # `unreadable_date_in_date_box`). Outside the canonicalization flag on purpose.
+    for _field in list(mapped.keys()):
+        try:
+            if unreadable_date_in_date_box(_field, mapped.get(_field), schema.get(_field)):
+                logger.info("DROP_UNREADABLE_DATE: field=%s value=%r form=%s",
+                            _field, str(mapped.get(_field))[:20], form_id)
+                mapped[_field] = ""
+        except Exception:                                 # noqa: BLE001
+            continue
+
     # ── Confidence / highlight assignment ────────────────────────────────────
     # Deterministic (Pass 1 / alias, from facts) values are trusted with no
     # highlight. AI-filled values are split by the raw-text verification above:
@@ -38636,6 +39386,7 @@ def map_facts_to_form(
     confidence = apply_fact_state_confidence_labels(form_id, facts, mapped, confidence)
     # Item 4 (1 Oct 2026): a calculated date is a "Please verify", not a print.
     confidence = apply_derived_value_labels(form_id, facts, mapped, confidence)
+    confidence = apply_transcriber_labels(form_id, facts, mapped, confidence)
 
     # Fill-rate denominator excludes non-fillable fields (signatures, premiums,
     # rate codes) so the reported coverage is meaningful.

@@ -554,7 +554,7 @@ def test_the_review_screen_shows_it_as_a_warning_with_its_window():
     view = build_grouped_view(
         build_structured_from_sources(legacy_soft=[BACKWARDS_TERM_TO_CONFIRM]),
         [], [BACKWARDS_TERM_TO_CONFIRM])
-    assert view["counts"] == {"hard_stops": 0, "warnings": 1}
+    assert view["counts"] == {"hard_stops": 0, "warnings": 1, "info": 0}
     item = view["warnings"]["required"][0]["items"][0]
     assert item["code"] == "legacy_policy_term_backwards"
     assert item["resolution"]["mode"] == "field"

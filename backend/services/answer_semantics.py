@@ -54,6 +54,7 @@ evidence.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any, Dict, List, NamedTuple, Optional
 
@@ -82,6 +83,14 @@ _INTENT_TO_STATE = {
 # (`fact_registry.takes_amount_or_percent`) - also the client page's question
 # type for it (`arq_service._resolve_input_type`).
 AMOUNT_OR_PERCENT = "amount_or_percent"
+
+# Why an answer to a NAME question names nobody (step 6c0 / 6c of
+# `interpret_answer`): a placeholder, a back-reference or a role word on any
+# party-name fact, or a third party's text that is no party's name. The
+# client door HOLDS these for the producer (`arq_service._answer_check_refusal`)
+# and the editor never writes them into the fact (`name_answer_refusal`).
+NOT_A_NAME = "not_a_name"
+NAME_REFUSAL_REASONS = frozenset({NOT_A_NAME, "not_a_party"})
 
 
 class Interpretation(NamedTuple):
@@ -154,6 +163,108 @@ _ABSENCE_PHRASE_RE = re.compile(
     r"first[- ]time (?:buyer|buying|purchase)|previously uninsured|"
     r"never (?:insured|carried|had|been insured)"
     r")\b", re.I)
+
+
+# ── 3c. A NAME QUESTION: an absence word may OPEN a real name ──────────────
+# (27 Oct 2026, Lane B review R1). "No Limits Roofing LLC", "Nothing Bundt
+# Cakes", "Zero Gravity Inc", "Never Again Ltd": the short-answer absence rule
+# reads an absence token in the first two words, so on a NAME fact the
+# applicant's legal name was refused ("cannot be absent") and a DBA, contact,
+# carrier or holder was stored as "there is none" - in the editor that cleared
+# the name the producer had just typed. Two structural conditions, no word
+# list of company names:
+#   * a legal-form designator CLOSING the answer ("... LLC", "... Inc") makes
+#     it an organisation's name - no reader of non-answers judges it;
+#   * otherwise an absence on a name fact must be ONLY the absence: every
+#     other word says WHEN or WHAT is missing ("None at this time", "No DBA",
+#     "no prior carrier" - the fact key's own words), never a word of a name.
+_NAME_LEGAL_FORMS = (
+    ("limited", "liability", "company"), ("limited", "liability", "partnership"),
+    ("limited", "partnership"), ("incorporated",), ("corporation",), ("company",),
+    ("limited",), ("llc",), ("inc",), ("corp",), ("co",), ("ltd",), ("llp",), ("lp",),
+    ("pllc",), ("pc",), ("plc",),
+)
+_ABSENCE_QUALIFIER_WORDS = frozenset({
+    "at", "this", "the", "time", "moment", "present", "presently", "currently", "yet",
+    "so", "far", "right", "now", "for", "as", "of", "known", "that", "we", "i", "know",
+    "to", "report", "reported", "on", "file", "listed", "given", "here", "there", "is",
+    "are", "applicable", "not", "needed", "required", "one", "any", "other", "all",
+    "name", "person", "company", "business", "entity", "n", "a", "na", "none", "no",
+    "nothing", "nil", "nada", "zero", "never", "-",
+})
+
+
+def _closes_with_legal_form(stripped: str) -> bool:
+    """True when the answer is an organisation's name closed by its legal-form
+    designator ("No Limits Roofing LLC", "Acme Co.") - two words at least."""
+    toks = re.sub(r"[^a-z0-9&]+", " ", stripped.replace(".", "")).split()
+    for form in _NAME_LEGAL_FORMS:
+        if len(toks) > len(form) and tuple(toks[-len(form):]) == form:
+            return True
+    return False
+
+
+# Words that only DEFER or POINT ELSEWHERE - never part of a company's name.
+# "TBD - will send", "N/A see attached", "Unknown, ask the client", "Pending
+# from the insured" stay non-answers; "TBD Construction", "N/A Holdings",
+# "Unknown Builders" are names (owner, 27 Oct 2026: a real company with no
+# legal-form word was refused - a dead end for the producer).
+_DEFERRAL_WORDS = frozenset({
+    "will", "send", "sending", "sent", "provide", "provided", "providing", "follow",
+    "following", "followup", "later", "soon", "shortly", "asap", "update", "updated",
+    "confirm", "confirmed", "confirming", "check", "checking", "ask", "asking", "asked",
+    "client", "insured", "customer", "owner", "agent", "broker", "waiting", "awaiting",
+    "pending", "get", "getting", "back", "info", "information", "details", "detail",
+    "see", "attached", "attachment", "above", "below", "same", "as", "to", "be", "by",
+    "from", "determined", "advised", "the", "of", "on", "for", "with", "an", "in",
+    "now", "moment", "call", "email", "contact", "us", "me", "you", "we", "they", "it",
+    "know", "dont", "idk", "unsure", "maybe", "possibly", "sure", "tbd", "tba", "tbc",
+    "unknown", "unk", "nil", "null", "blank", "empty", "na", "n", "a",
+})
+# Field nouns: "No DBA", "No carrier", "None - no agency" name nobody on any
+# name fact, whichever fact it is.
+_FIELD_NOUNS = frozenset({"dba", "applicant", "carrier", "agency", "landlord", "holder"})
+_DEFERRAL_WORDS = _DEFERRAL_WORDS | _FIELD_NOUNS
+
+
+_NAME_LEADING_ABSENCE = frozenset({"tbd", "tba", "tbc", "na", "unknown", "none", "nothing",
+                                   "no", "zero", "never", "nil", "pending", "unk"})
+_NOT_A_NAME_WORDS = frozenset({"coverage", "coverages", "insurance", "policy", "policies",
+                               "prior", "previous", "previously", "current", "currently",
+                               "applicable", "apply", "applies", "relevant", "needed",
+                               "required", "known", "yet", "available", "given", "idea"})
+
+
+def _reads_as_a_name(fact_key: str, raw: str) -> bool:
+    """On a name fact: an absence word FOLLOWED BY a name, as a company is typed
+    ("TBD Construction", "N/A Holdings", "Unknown Builders"): two to five words,
+    the first an absence word, every later one Capitalised and none a deferral,
+    coverage, qualifier or field word, nor a word of the fact key. A sentence
+    ("we have never had insurance", "No previous coverage", "TBD - will send")
+    is never one."""
+    own = set(re.split(r"[_\W]+", str(fact_key or "").lower())) - {""}
+    words = [w for w in re.split(r"[^0-9A-Za-z&']+", str(raw or "").replace("N/A", "NA").replace("n/a", "na")) if w]
+    if not 2 <= len(words) <= 5 or words[0].lower() not in _NAME_LEADING_ABSENCE:
+        return False
+    for w in words[1:]:
+        lw = w.lower()
+        if not (w[0].isupper() or w[0] == "&") or w.isdigit():
+            return False
+        if (lw in _ABSENCE_QUALIFIER_WORDS or lw in _DEFERRAL_WORDS or lw in _NOT_A_NAME_WORDS
+                or lw in own or lw in _NAME_LEADING_ABSENCE):
+            return False
+    return True
+
+
+def _only_an_absence(fact_key: str, words: List[str]) -> bool:
+    """On a name fact: every word is an absence token, a qualifier, or a word
+    of the fact key itself ("No DBA" on `dba_name`)."""
+    own = set(re.split(r"[_\W]+", str(fact_key or "").lower())) - {""}
+    for w in words:
+        w = w.strip(".,;:!?()\"'")
+        if w and w not in _ABSENCE_QUALIFIER_WORDS and w not in own and w not in _FIELD_NOUNS:
+            return False
+    return True
 
 
 # The ACORD 101 remarks - composed prose, read only on a short answer (0c).
@@ -330,6 +441,12 @@ def extracted_non_answer(fact_key: str, raw: Any) -> Optional[str]:
             value = raw
         if not isinstance(value, str) or not value.strip():
             return None
+        try:                       # "00-0000000" holds a tax ID's place (29 Oct)
+            from services.normalization import FEIN_FIELDS, is_placeholder_fein
+            if fact_key in FEIN_FIELDS and is_placeholder_fein(value):
+                return "non_answer"
+        except Exception:                                     # noqa: BLE001
+            pass
         if not is_placeholder_text(value):
             return None
         core = re.sub(r"\s+", " ", _normalize(value).strip(_PLACEHOLDER_EDGES))
@@ -448,6 +565,12 @@ def words_to_number(text: str) -> Optional[float]:
     "1.5k" -> 1500, "$2M" -> 2000000, "about 12" -> 12."""
     if not text:
         return None
+    try:            # past 15 significant digits a float is noise (29 Oct 2026)
+        from services.display_canonicalizer import too_many_digits
+        if too_many_digits(text):
+            return None
+    except Exception:                                         # noqa: BLE001
+        pass
     s = _HEDGE_SYMBOL_RE.sub(" ", _normalize(text))
     s = _HEDGE_RE.sub(" ", s)
     s = s.replace("$", " ").replace(",", "")
@@ -687,6 +810,11 @@ def _trim_answer(raw: str) -> str:
             return s
 
 
+_BOUND_RE = re.compile(
+    r"^\s*(?:less\s+than|fewer\s+than|under|below|more\s+than|over|above|at\s+least|at\s+most|"
+    r"up\s+to|no\s+more\s+than|not\s+more\s+than|<|>|<=|>=)\s*\$?\s*\d", re.I)
+
+
 def _coerce_typed(kind: Optional[str], text: str, raw: Optional[str] = None) -> Optional[str]:
     """Canonicalize a value into the shape downstream code already reads.
     Returns None when the text is not a value of that kind.
@@ -699,6 +827,12 @@ def _coerce_typed(kind: Optional[str], text: str, raw: Optional[str] = None) -> 
     # business saved as 3 (live bcfd175b, 25 Oct).
     if kind in ("integer", "currency", "percent", AMOUNT_OR_PERCENT) and re.match(
             r"^\s*[-\u2212\u2013]\s*\$?\s*\d", str(raw if raw is not None else text or "")):
+        return None
+    # A BOUND is not the number (expert review, 29 Oct 2026): "under 50"
+    # employees saved and printed as exactly 50, "less than 1" year in business
+    # as 1 (a new venture read as an established one), "over $5M" revenue as
+    # $5,000,000. Refused - the person is asked for the figure itself.
+    if kind in ("integer", "currency") and _BOUND_RE.match(str(raw if raw is not None else text or "")):
         return None
     if kind == AMOUNT_OR_PERCENT:
         from services.normalization import mentions_a_percentage, stated_percentage
@@ -744,7 +878,11 @@ def _coerce_typed(kind: Optional[str], text: str, raw: Optional[str] = None) -> 
         # fact's own validator's.
         text = re.sub(r"\s*(?:%|per\s*cent|pct\.?)\s*$", "", str(text or "").strip(), flags=re.I)
     n = words_to_number(text)
-    if n is None:
+    # (strict review, 29 Oct 2026) A run of hundreds of digits reads as an
+    # infinite float, and `_fmt_number`'s int(round(inf)) raised OverflowError
+    # out of `interpret_answer` - out of every person door and the review plan.
+    # A figure no float can hold is not a number anyone means.
+    if n is None or not math.isfinite(n):
         return None
     if kind == "percent":
         return _fmt_number(n, as_int=False)
@@ -862,8 +1000,12 @@ def _is_required_fact(fact_key: str, entry: Optional[dict]) -> bool:
 
 
 def interpret_answer(fact_key: str, answer: Any,
-                     entry: Optional[dict] = None) -> Interpretation:
-    """Interpret one human answer for one fact. Pure and deterministic."""
+                     entry: Optional[dict] = None,
+                     facts: Optional[dict] = None) -> Interpretation:
+    """Interpret one human answer for one fact. Pure and deterministic.
+    ``facts`` (optional): the package, for the one context-dependent rule - an
+    individual / sole proprietor may answer FEIN "None" / "N/A"
+    (`fact_registry.fein_may_be_absent`)."""
     raw = str(answer or "")
     text = _normalize(raw)
     stripped = _strip_edges(text)
@@ -949,6 +1091,65 @@ def interpret_answer(fact_key: str, answer: Any,
     _remarks = fact_key in _REMARKS_FACT_KEYS
     _short = len(stripped.split()) <= 5
 
+    def _name_refusal():
+        """Steps 6c0 / 6c: the Interpretation refusing a non-name on a name
+        fact, else None. Run by 0d and in sequence."""
+        # 6c0. A NAME QUESTION IS ANSWERED BY A NAME (27 Oct 2026, Lane B item 3).
+        #      What reaches here would be stored as the party's name. A value that
+        #      only HOLDS a party's place - "FIO", "Sample", "Void", "Same as above",
+        #      "See above" (`normalization.is_party_placeholder`) - or names only a
+        #      ROLE - "Owner", "Insured", "Carrier", "Agency" (`is_party_role_label`)
+        #      - names nobody, on every name fact (`is_party_name_fact`: the
+        #      applicant, DBA, contacts, producer, carriers, landlord, holders).
+        #      The machine-read paths already refuse these whole values through
+        #      `is_not_a_party_name`; a person's answer was the one door left open,
+        #      and the editor reads this same step (`name_answer_refusal`).
+        #      Absences ("None", "N/A") never reach here - they are answers above
+        #      (a business with no DBA), and refused above on a required fact.
+        try:
+            from services.normalization import (
+                is_party_name_fact, is_party_placeholder, is_party_role_label,
+            )
+            if is_party_name_fact(fact_key) and (
+                    is_party_placeholder(raw.strip()) or is_party_role_label(raw.strip())):
+                return out(UNKNOWN, reason=NOT_A_NAME, message=(
+                    "That does not read as a name. Enter the full name, or leave it "
+                    "blank if you do not have it yet and we will keep asking."))
+        except Exception:                                         # noqa: BLE001
+            pass
+
+        # 6c. A THIRD-PARTY NAME must name a party (24 Sep 2026, client item 8).
+        #     The merge and the box guards refuse "For Informational Purposes
+        #     Only" read off a certificate; a HUMAN typing it into the certificate
+        #     holder, loss payee or mortgagee was accepted here as free text and
+        #     printed as the Additional Interest on six forms. Same structural test
+        #     (`names_a_party(third_party=True)`) over the same fact list
+        #     (`extraction_service._THIRD_PARTY_NAME_KEYS`) - no phrase list.
+        try:
+            from services.extraction_service import _THIRD_PARTY_NAME_KEYS
+            if fact_key in _THIRD_PARTY_NAME_KEYS:
+                from services.field_mapping_integrity import names_a_party
+                if not names_a_party(raw.strip(), third_party=True):
+                    return out(UNKNOWN, reason="not_a_party", message=(
+                        "That does not read as the name of a person or organization. "
+                        "Enter the holder's, payee's or lender's name, or leave it "
+                        "blank if there is none."))
+        except Exception:                                         # noqa: BLE001
+            pass
+        return None
+
+    # 0d. A NAME QUESTION ANSWERED BY AN ORGANISATION'S NAME (Lane B review R1,
+    #     3c above): a closing legal-form designator makes it a name, so no
+    #     reader of non-answers below judges its words ("No Limits Roofing
+    #     LLC", "Unknown Pleasures LLC"). The name checks (6c0 / 6c) still run.
+    try:
+        from services.normalization import is_party_name_fact as _is_name_fact
+        _name_q = bool(_is_name_fact(fact_key))
+    except Exception:                                         # noqa: BLE001
+        _name_q = False
+    if _name_q and (_closes_with_legal_form(stripped) or _reads_as_a_name(fact_key, raw.strip())):
+        return _name_refusal() or out(VALUE, value=raw.strip(), reason="free_text:name")
+
     # 1. UNCERTAINTY first - "no idea" contains "no" but means unknown.
     if _UNCERTAIN_RE.search(text) and (_short or not _remarks):
         return out(UNKNOWN, reason="uncertainty", message=_ask_again)
@@ -983,9 +1184,54 @@ def interpret_answer(fact_key: str, answer: Any,
     #     FACT_REGISTRY already means "this submission is not a submission
     #     without it". A new required fact inherits the rule automatically.
     #     Everything else keeps Brent's behaviour exactly.
+    #
+    #     THE SAME ABSENCE TEST AS STEP 4 (27 Oct 2026, Lane B item 3). This
+    #     gate read only a WHOLE-answer token, while step 4 reads an absence in
+    #     a short answer's first two words or an existential sentence - so "None
+    #     at this time", "None currently" and "Nothing yet" for the APPLICANT'S
+    #     LEGAL NAME (or the effective date, the mailing address, the lines of
+    #     business) passed this gate and step 4 stored them as "there is none":
+    #     an answered required fact with no value. One reading of "is this an
+    #     absence?" now serves both steps (`_reads_as_absence`).
+    words = stripped.split()
+
+    def _reads_as_absence() -> bool:
+        return bool(
+            (stripped in _ABSENCE_TOKENS and not (kind and stripped in ("0", "zero")))
+            or (not _remarks and len(words) <= 5 and any(w in _ABSENCE_TOKENS for w in words[:2])
+                and not _AFFIRM_TOKENS.intersection(words[:1])
+                and (not _name_q or _only_an_absence(fact_key, words)))
+            or (not _remarks and bool(_ABSENCE_PHRASE_RE.search(text)))
+        )
+
+    # 2c. A FACT EVERY OPERATING BUSINESS HAS (strict review, 29 Oct 2026) -
+    #     FEIN, revenue, NAICS / SIC, years in business / start date
+    #     (`fact_registry.ALWAYS_EXISTS`). "N/A" / "None" there scored HIGHER
+    #     than the real value (C3 3.6 dropped it from the Tier 2 denominator).
+    #     A typed "0" already returned as a VALUE in step 2.
+    try:
+        from services.fact_registry import always_exists as _always_exists
+        _always_label = _always_exists(fact_key, facts)
+    except Exception:                                         # noqa: BLE001
+        _always_label = ""
+    if (fact_key == "fein" and not _always_label
+            and (stripped in _NA_TOKENS or _NA_RE.search(text) or _reads_as_absence())):
+        try:
+            from services.fact_registry import fein_may_be_absent as _fein_absent_ok
+            if _fein_absent_ok(facts):
+                # An individual / sole proprietor with no EIN: "None", "No EIN"
+                # and "N/A" all mean the box does not apply to it (29 Oct 2026).
+                return out(NOT_APPLICABLE, reason="individual_without_ein")
+        except Exception:                                     # noqa: BLE001
+            pass
+    if _always_label and (stripped in _NA_TOKENS or _NA_RE.search(text) or _reads_as_absence()):
+        return out(UNKNOWN, reason="always_exists_cannot_be_absent", message=(
+            f"Every business has {_always_label} - enter it, or leave it blank "
+            f"if you do not have it yet and we will keep asking."))
+
     if _is_required_fact(fact_key, entry) and (
             stripped in _NA_TOKENS or _NA_RE.search(text)
-            or stripped in _ABSENCE_TOKENS):
+            or _reads_as_absence()):
         return out(UNKNOWN, reason="required_cannot_be_absent", message=(
             "This one is needed to submit the application, so it cannot be "
             "marked not applicable. Please enter the value, or leave it blank "
@@ -998,13 +1244,7 @@ def interpret_answer(fact_key: str, answer: Any,
     # 4. NEGATIVE EXISTENCE. Short answers may be a bare token; longer ones
     #    need an explicit existential negation so a descriptive sentence that
     #    merely contains "not" is left alone as a value.
-    words = stripped.split()
-    _absent = (
-        (stripped in _ABSENCE_TOKENS and not (kind and stripped in ("0", "zero")))
-        or (not _remarks and len(words) <= 5 and any(w in _ABSENCE_TOKENS for w in words[:2])
-            and not _AFFIRM_TOKENS.intersection(words[:1]))
-        or (not _remarks and bool(_ABSENCE_PHRASE_RE.search(text)))
-    )
+    _absent = _reads_as_absence()
     if _absent:
         # On a negative-polarity fact ("no prior losses"), "none" is the
         # AFFIRMATIVE answer - it fills the fact. The person's own words are
@@ -1077,27 +1317,32 @@ def interpret_answer(fact_key: str, answer: Any,
             f"{'MM/DD/YYYY' if kind == 'date' else 'digits (e.g. 12 or $50,000)'}"
             ", or answer \"None\" if there is none."))
 
-    # 6c. A THIRD-PARTY NAME must name a party (24 Sep 2026, client item 8).
-    #     The merge and the box guards refuse "For Informational Purposes
-    #     Only" read off a certificate; a HUMAN typing it into the certificate
-    #     holder, loss payee or mortgagee was accepted here as free text and
-    #     printed as the Additional Interest on six forms. Same structural test
-    #     (`names_a_party(third_party=True)`) over the same fact list
-    #     (`extraction_service._THIRD_PARTY_NAME_KEYS`) - no phrase list.
-    try:
-        from services.extraction_service import _THIRD_PARTY_NAME_KEYS
-        if fact_key in _THIRD_PARTY_NAME_KEYS:
-            from services.field_mapping_integrity import names_a_party
-            if not names_a_party(raw.strip(), third_party=True):
-                return out(UNKNOWN, reason="not_a_party", message=(
-                    "That does not read as the name of a person or organization. "
-                    "Enter the holder's, payee's or lender's name, or leave it "
-                    "blank if there is none."))
-    except Exception:                                         # noqa: BLE001
-        pass
+    # 6c0 / 6c - see `_name_refusal` (defined before step 0d).
+    _refused = _name_refusal()
+    if _refused is not None:
+        return _refused
 
     # 7. Ordinary free text is the value.
     return out(VALUE, value=raw.strip(), reason="free_text")
+
+
+def name_answer_refusal(fact_key: str, text: Any) -> str:
+    """The words a typed answer to a NAME fact (`normalization.
+    is_party_name_fact`) is refused with, else "". The same reading as every
+    other person door (`interpret_answer`): a placeholder, a back-reference, a
+    role word, "not known yet" - and, on a required name, any absence. A fact
+    that is not a name, or an empty answer, is never judged here."""
+    s = str(text if text is not None else "").strip()
+    if not s:
+        return ""
+    try:
+        from services.normalization import is_party_name_fact
+        if not is_party_name_fact(fact_key):
+            return ""
+        got = interpret_answer(fact_key, s)
+    except Exception:                                         # noqa: BLE001
+        return ""
+    return "" if got.accepted else (got.message or "That does not read as a name.")
 
 
 def _record_unreadable(fact_key: str, raw: str, kind: str) -> None:
@@ -1106,6 +1351,13 @@ def _record_unreadable(fact_key: str, raw: str, kind: str) -> None:
     deterministic rules could not read is logged, so the gap is measured."""
     _UNREADABLE.append({"fact": fact_key, "answer": raw[:120], "kind": kind})
     del _UNREADABLE[:-200]
+    # Kept past the process (GAP 2, 27 Oct 2026): its SHAPE only, never the
+    # raw text - the person doors flush it (`services/unread_answers.py`).
+    try:
+        from services.unread_answers import note
+        note(fact_key, kind, raw)
+    except Exception:                                         # noqa: BLE001
+        pass
     logger.info("answer_semantics: could not read %r as %s for %s - "
                 "producer asked to rephrase", raw[:80], kind, fact_key)
 
@@ -1136,6 +1388,43 @@ def fact_answered(raw: Any) -> bool:
     if isinstance(raw, (list, dict)):
         return len(raw) > 0
     return str(raw).strip().lower() not in ("", "null", "none", "[]", "{}")
+
+
+def answered_for(fact_key: str, raw: Any, facts: Optional[dict] = None) -> bool:
+    """`fact_answered` for ONE fact: an absence ("None" / "N/A", stored as an
+    envelope state or a bare word) never answers a fact every operating
+    business has (`fact_registry.ALWAYS_EXISTS` - strict review, 29 Oct 2026).
+    The answer door refuses it now; this keeps a value stored before that rule
+    from scoring as answered."""
+    if not typed_absence_on_always_existing(fact_key, raw, facts):
+        return fact_answered(raw)
+    return False
+
+
+def typed_absence_on_always_existing(fact_key: str, raw: Any,
+                                      facts: Optional[dict] = None) -> bool:
+    """True when `raw` is an absence ("None" / "N/A", as an envelope state or
+    a bare word) on a fact every operating business has
+    (`fact_registry.ALWAYS_EXISTS`). A state the SYSTEM derived (source
+    "derived" - a confirmed new venture's years in business,
+    `loss_history_state`) is a proven inapplicability and is not one."""
+    if isinstance(raw, dict) and str(raw.get("source") or "").lower() == "derived":
+        return False
+    try:
+        from services.fact_registry import always_exists
+        if always_exists(fact_key, facts):
+            if isinstance(raw, dict) and raw.get("value_state") in (STATE_EXPLICIT_NO,
+                                                                     STATE_NOT_APPLICABLE):
+                return True
+            val = raw.get("value") if isinstance(raw, dict) else raw
+            if isinstance(val, str):
+                s = _strip_edges(_normalize(val))
+                if s in _NA_TOKENS or (s in _ABSENCE_TOKENS and s not in ("0", "zero")) \
+                        or _NA_RE.search(_normalize(val)):
+                    return True
+    except Exception:                                         # noqa: BLE001
+        pass
+    return False
 
 
 def build_fact_envelope(fact_key: str, interp: Interpretation,

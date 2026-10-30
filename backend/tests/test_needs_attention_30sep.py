@@ -570,9 +570,9 @@ def test_pre_download_review_reads_the_same_door():
     modal = _read(FORM_DIR / "AcordModal.jsx")
     assert "fetchNeedsAttention(sessionId)," in modal
     assert "withoutSupersededRecs(recsData?.open_recommendations || [], attention)" in modal
-    assert "if (openRecs.length === 0 && attentionTotal === 0) { downloadFn({}); return; }" in modal
-    # review + post-download checklist draw ONE list (14 Oct 2026: DownloadReviewList)
-    assert modal.count("<DownloadReviewList ") == 2
+    # 26 Oct 2026 (Brent): the review opens only for what can stop the package
+    assert "if (!downloadSteps(openRecs, attention).length && !hasHardBlock) { downloadFn({}); return; }" in modal
+    assert "<DownloadStepsList " in modal and "<DownloadStep " in modal
     util = _read(FRONTEND / "utils" / "needsAttention.js")
     assert "/api/needs-attention/" in util and "attention_superseded" in util
     assert "f?.ok === false" in util                                   # fail open per form

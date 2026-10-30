@@ -157,15 +157,19 @@ export function pointsFor(row) {
   // above it on the page. A hold that withholds it says so; a fraction of a
   // point says "under 1 pt"; a step that adds nothing is not listed.
   if (row && row.plan_id) {
-    if (row.answer_gain_held_by) return { points: 0, exact: true, share: true, held: clean(row.answer_gain_held_by) };
+    const withOthers = clean(row.answer_gain_with_others) || null;
+    const leadsTo = Array.isArray(row.answer_gain_leads_to) ? row.answer_gain_leads_to.map(clean).filter(Boolean) : [];
+    const cost = Math.round(num(row.answer_gain_cost) ?? 0);
+    const wo = { ...(withOthers ? { withOthers } : {}), ...(leadsTo.length ? { leadsTo } : {}), ...(cost > 0 ? { cost } : {}) };
     const p = Math.round(num(row.answer_gain) ?? 0);
-    if (p >= 1) return { points: p, exact: row.answer_gain_is_exact === true, share: true };
+    if (p >= 1) return { points: p, exact: row.answer_gain_is_exact === true || !!withOthers, share: true, ...wo };
+    if (row.answer_gain_under === true && !row.answer_gain_mirror_of) return { points: 0, exact: false, share: true, under: true, ...wo };
+    if (row.answer_gain_held_by) return { points: 0, exact: true, share: true, held: clean(row.answer_gain_held_by) };
     // A fix an earlier item on the page offers first (a card, a key detail):
     // its number, as a mirror - the page lists the row only where nothing
     // already offers it, and a mirror is never added to the total.
     const m = Math.round(num(row.answer_gain_mirror) ?? 0);
-    if (row.answer_gain_mirror_of && m >= 1) return { points: m, exact: true, share: true, mirror: true };
-    if (row.answer_gain_under === true) return { points: 0, exact: false, share: true, under: true };
+    if (row.answer_gain_mirror_of && m >= 1) return { points: m, exact: true, share: true, mirror: true, ...wo };
     // A question the plan lists although it adds nothing itself (the claims
     // question when the narrative already says claims - the request / upload
     // rows after it carry the points): listed, with no number.
@@ -201,11 +205,23 @@ export function pointsFor(row) {
 
 // A listed row with no points to its name prints nothing; one a hold withholds
 // says what it waits on; a fraction of a point says "under 1 pt".
+// What answering an item raises next (rule G2) and a dip it causes first
+// (G13) - short, after the number (services/review_plan leads_to / cost).
+export const followUpText = (p) => {
+  if (!p) return "";
+  const leads = Array.isArray(p.leadsTo) ? p.leadsTo.filter(Boolean) : [];
+  if (!leads.length) return "";
+  const first = String(leads[0]).split(" Fix:")[0].replace(/\s+/g, " ").trim().slice(0, 70);
+  const more = leads.length > 1 ? ` (+${leads.length - 1} more)` : "";
+  return p.cost > 0 ? ` · score dips until you also answer: ${first}${more}` : ` · then asks: ${first}${more}`;
+};
+
 export const pointsText = (p) => {
   if (!p) return "";
+  if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts${p.withOthers ? ` (${p.withOthers})` : ""}${followUpText(p)}`;
+  if (p.under) return `under 1 pt${p.withOthers ? ` (${p.withOthers})` : ""}${followUpText(p)}`;
   if (p.held) return `Counts once ${p.held} is fixed`;
-  if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts`;
-  return p.under ? "under 1 pt" : "";
+  return "";
 };
 
 // What a row's answer adds ON ITS OWN: the scorer's lone measurement when the
@@ -235,7 +251,7 @@ export function scoreItems(packageSqs, covered = new Set()) {
   const out = [];
   const seen = new Set();
   const gates = pillarGates(rows);
-  for (const row of rows) {
+  for (const [rowIndex, row] of rows.entries()) {
     if (!row || typeof row !== "object" || row.pillar === HARD_STOPS_ROW) continue;
     let resolution = row.resolution && row.resolution.mode && row.resolution.mode !== "none"
       ? row.resolution : fallbackResolution(row);
@@ -284,6 +300,9 @@ export function scoreItems(packageSqs, covered = new Set()) {
       // The Loss History plan's step order (23 Oct 2026): the page lists the
       // pillar's answer and document rows in this order (`scoreSequence`).
       planOrder: num(row.plan_order),
+      // The row's place in `top_recommendations` (the plan's `row_index`; the
+      // editor's side panel after forms, utils/editorPlanList.js).
+      rowIndex,
     });
   }
   return out;

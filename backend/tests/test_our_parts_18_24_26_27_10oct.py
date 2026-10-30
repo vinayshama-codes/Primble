@@ -321,24 +321,18 @@ console.log(JSON.stringify([A.downloadReviewHeadline(only), A.groupLineText("ver
 
 
 def test_both_download_screens_read_the_counts_and_list_hard_stops_first():
+    # 26 Oct 2026 (Brent): the steps are Hard Stops > Warnings > Cross-Form
+    # Validation; the download gate's boxes are Hard Stops, listed first.
     body = _src(_MODAL)
     assert "items flagged - review before downloading" not in body
     assert "Unresolved items ({" not in body
     pre = body[body.index("function DownloadPreflightModal"):body.index("function DashboardAssistant")]
-    assert "downloadReviewCounts(openRecs, attention)" in pre
-    assert "downloadReviewHeadline(counts)" in pre and "Also listed" not in pre
-    i = body.index("Post-download checklist")
-    post = body[i:i + 4000]
-    assert "downloadReviewCounts(recs, preflightAttention)" in post
-    assert "To fix before sending (${counts.toFix})" in post
-    # one list for both screens; hard stops first, the download gate's boxes
-    # first among them (a required box blocking the download is a hard stop)
-    assert body.count("<DownloadReviewList ") == 2
-    panel = _src(_PANEL)
-    fn = panel[panel.index("export function DownloadReviewList"):]
-    assert fn.index('title="Hard Stops"') < fn.index('title="Warnings"') < fn.index("Missing on the forms") \
-        < fn.index('title="Recommendations"') < fn.index("download-groups")
+    assert "downloadSteps(openRecs, attention)" in pre
+    post = body[body.index("Post-download checklist"):][:4000]
+    assert "downloadSteps(recs, preflightAttention)" in post
     util = _src(_ATTN_JS)
+    fn = util[util.index("export function downloadSteps"):]
+    assert fn.index('title: "Hard Stops"') < fn.index('title: "Warnings"') < fn.index('title: "Cross-Form Validation"')
     assert 'includes("hardblock_")' in util
 
 

@@ -143,7 +143,14 @@ async def run_arq_auto_reminders():
                    WHERE a.status = 'pending'
                      AND a.created_at <= $1
                      AND a.expires_at > $2
-                     AND COALESCE(a.reminder_count, 0) < 1""",
+                     AND COALESCE(a.reminder_count, 0) < 1
+                     -- An ARCHIVED package is closed: its questionnaire link
+                     -- reads "closed", so its client is never reminded
+                     -- (services/package_archive.py; review R2, 27 Oct 2026).
+                     AND NOT EXISTS (
+                         SELECT 1 FROM processing_sessions p
+                         WHERE p.id = a.session_id
+                           AND (p.data->>'archived_at') IS NOT NULL)""",
                 cutoff, now.isoformat(),
             )
         rows = [dict(r) for r in rows]
@@ -173,21 +180,55 @@ async def run_retention_cleanup():
     """
     import os as _os
 
+    from services.package_archive import (
+        AUTO_ARCHIVE_SQL, EXPIRED_PACKAGE_IDS_SQL,
+        active_retention_days, archive_retention_days, auto_archive_days,
+    )
+
     jobs_days    = int(_os.getenv("JOBS_RETENTION_DAYS",    "30"))
     arq_days     = int(_os.getenv("ARQ_RETENTION_DAYS",     "90"))
-    session_days = int(_os.getenv("SESSION_RETENTION_DAYS", "180"))
+    session_days = active_retention_days()          # SESSION_RETENTION_DAYS, default 180
+    # An ARCHIVED package keeps its own clock, from the day it was archived
+    # (services/package_archive.py; ARCHIVED_SESSION_RETENTION_DAYS, default 730,
+    # never shorter than the active retention).
+    archive_days = archive_retention_days()
+    auto_days    = auto_archive_days()              # PACKAGE_AUTO_ARCHIVE_DAYS, 0 = off
+    usage_days   = int(_os.getenv("ARQ_ASSISTANT_USAGE_RETENTION_DAYS", "365"))
 
     now            = datetime.now(timezone.utc)
     jobs_cutoff    = (now - timedelta(days=jobs_days)).isoformat()
     arq_cutoff     = (now - timedelta(days=arq_days)).isoformat()
     session_cutoff = (now - timedelta(days=session_days)).isoformat()
+    archive_cutoff = (now - timedelta(days=archive_days)).isoformat()
+    usage_cutoff   = (now - timedelta(days=usage_days)).isoformat()
     signup_cutoff  = (now - timedelta(hours=48)).isoformat()
 
     orphan_cutoff  = (now - timedelta(days=1)).isoformat()
 
+    def _row_count(status: str) -> int:
+        try:
+            return int(status.split()[-1])
+        except Exception:
+            return 0
+
     try:
         async with get_pool().acquire() as conn:
             async with conn.transaction():
+                # Auto-archive FIRST, and only packages still inside the active
+                # retention - turning it on never rescues one already due.
+                r_auto = "UPDATE 0"
+                if auto_days > 0:
+                    if auto_days >= session_days:
+                        logger.warning(
+                            "PACKAGE_AUTO_ARCHIVE_DAYS=%d is not below SESSION_RETENTION_DAYS=%d"
+                            " - packages are deleted before they could be archived",
+                            auto_days, session_days)
+                    else:
+                        r_auto = await conn.execute(
+                            AUTO_ARCHIVE_SQL,
+                            (now - timedelta(days=auto_days)).isoformat(),
+                            session_cutoff, now.isoformat(),
+                        )
                 r1 = await conn.execute(
                     "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at < $1",
                     jobs_cutoff,
@@ -196,45 +237,77 @@ async def run_retention_cleanup():
                     "DELETE FROM arq_sessions WHERE expires_at < $1 AND created_at < $2",
                     now.isoformat(), arq_cutoff,
                 )
-                # A package's PDFs (they can carry signatures) and its signing
-                # requests go WITH it, as the app's own Delete does
-                # (form_routes.delete_session). Deleting the package alone left
-                # 146 orphan PDFs by 15 Oct 2026; those whose package is already
-                # gone go too, a day after their last write.
+                # A package's PDFs (they can carry signatures), its signing
+                # requests and its fact lineage go WITH it, as the app's own
+                # Delete does (form_routes.delete_session). Deleting the package
+                # alone left 146 orphan PDFs by 15 Oct 2026; those whose package
+                # is already gone go too, a day after their last write. "Due" is
+                # ONE predicate (EXPIRED_PACKAGE_IDS_SQL): an active package
+                # untouched past the active retention, an archived one past its
+                # archive retention.
                 r_pdf = await conn.execute(
                     "DELETE FROM session_pdf_bytes b"
-                    " WHERE b.session_id IN (SELECT id FROM processing_sessions WHERE updated_at < $1)"
+                    " WHERE b.session_id IN (" + EXPIRED_PACKAGE_IDS_SQL + ")"
                     "    OR (NOT EXISTS (SELECT 1 FROM processing_sessions p WHERE p.id = b.session_id)"
-                    "        AND b.updated_at < $2)",
-                    session_cutoff, orphan_cutoff,
+                    "        AND b.updated_at < $3)",
+                    session_cutoff, archive_cutoff, orphan_cutoff,
                 )
                 r_sig = await conn.execute(
                     "DELETE FROM signature_requests s"
-                    " WHERE s.session_id IN (SELECT id FROM processing_sessions WHERE updated_at < $1)"
+                    " WHERE s.session_id IN (" + EXPIRED_PACKAGE_IDS_SQL + ")"
                     "    OR (NOT EXISTS (SELECT 1 FROM processing_sessions p WHERE p.id = s.session_id)"
-                    "        AND s.created_at < $2)",
-                    session_cutoff, orphan_cutoff,
+                    "        AND s.created_at < $3)",
+                    session_cutoff, archive_cutoff, orphan_cutoff,
                 )
+                # A savepoint each for the two V2 stores: one not created yet
+                # never rolls back the rest of the sweep.
+                r_lin = "DELETE 0"
+                try:
+                    async with conn.transaction():
+                        r_lin = await conn.execute(
+                            "DELETE FROM fact_lineage l"
+                            " WHERE l.session_id IN (" + EXPIRED_PACKAGE_IDS_SQL + ")"
+                            "    OR (NOT EXISTS (SELECT 1 FROM processing_sessions p"
+                            "                    WHERE p.id = l.session_id)"
+                            "        AND l.created_at < $3)",
+                            session_cutoff, archive_cutoff, orphan_cutoff,
+                        )
+                except Exception as ex:                        # noqa: BLE001
+                    logger.error("Retention cleanup: fact_lineage sweep skipped: %s", ex)
                 r3 = await conn.execute(
-                    "DELETE FROM processing_sessions WHERE updated_at < $1",
-                    session_cutoff,
+                    "DELETE FROM processing_sessions WHERE id IN (" + EXPIRED_PACKAGE_IDS_SQL + ")",
+                    session_cutoff, archive_cutoff,
                 )
                 r4 = await conn.execute(
                     "DELETE FROM pending_signups WHERE created_at < $1",
                     signup_cutoff,
                 )
-
-        def _row_count(status: str) -> int:
-            try:
-                return int(status.split()[-1])
-            except Exception:
-                return 0
+                try:
+                    # ASG Transcriber results (values read off the insured's forms,
+                    # encrypted) live no longer than the sessions they served.
+                    async with conn.transaction():
+                        await conn.execute("DELETE FROM transcriber_results WHERE created_at < $1",
+                                           session_cutoff)
+                except Exception as ex:                        # noqa: BLE001
+                    logger.error("Retention cleanup: transcriber results sweep skipped: %s", ex)
+                r_use = "DELETE 0"
+                try:
+                    async with conn.transaction():
+                        r_use = await conn.execute(
+                            "DELETE FROM arq_assistant_usage WHERE created_at < $1",
+                            usage_cutoff,
+                        )
+                except Exception as ex:                        # noqa: BLE001
+                    logger.error("Retention cleanup: assistant usage sweep skipped: %s", ex)
 
         logger.info(
             "Retention cleanup: deleted jobs=%d arq=%d sessions=%d pending_signups=%d "
-            "pdfs=%d signature_requests=%d",
+            "pdfs=%d signature_requests=%d fact_lineage=%d assistant_usage=%d; "
+            "auto-archived=%d (active %dd, archived %dd, auto-archive %s)",
             _row_count(r1), _row_count(r2), _row_count(r3), _row_count(r4),
-            _row_count(r_pdf), _row_count(r_sig),
+            _row_count(r_pdf), _row_count(r_sig), _row_count(r_lin), _row_count(r_use),
+            _row_count(r_auto), session_days, archive_days,
+            (f"{auto_days}d" if auto_days else "off"),
         )
     except Exception as ex:
         logger.error("Retention cleanup failed: %s", ex)
@@ -391,16 +464,35 @@ async def run_facts_retention():
                           AND  (ps.data->'facts' IS NULL
                                 OR ps.data->'facts'->>'purged' IS DISTINCT FROM 'true')
                         """,
-                        tombstone, tier, cutoff,
+                        # A dict, not the JSON text (27 Oct 2026): the pool's
+                        # jsonb codec json-encodes the parameter itself, so the
+                        # text was stored as a JSON STRING - `->>'purged'` never
+                        # matched, the guard above re-tombstoned every night and
+                        # nothing in SQL could find a purged package (measured on
+                        # a throwaway Postgres). Readers accept both shapes.
+                        _json.loads(tombstone), tier, cutoff,
                     )
                 totals[tier] = _row_count(result)
             except Exception as ex:
                 logger.error("Facts retention failed for tier=%s: %s", tier, ex)
                 totals[tier] = -1
 
+        # The fact lineage keeps a package's past values encrypted
+        # (services/fact_history.py). A package whose facts this policy purged
+        # keeps the record THAT its values changed - who, when, how - but not
+        # the values: they are blanked here, for every tombstoned package.
+        purged_lineage = 0
+        try:
+            from services.fact_history import PURGE_VALUES_SQL
+            async with get_pool().acquire() as conn:
+                purged_lineage = _row_count(await conn.execute(PURGE_VALUES_SQL))
+        except Exception as ex:
+            logger.error("Facts retention: lineage values not purged: %s", ex)
+            purged_lineage = -1
+
         logger.info(
-            "Facts retention: purged free=%d essentials=%d at=%s",
-            totals.get("free", 0), totals.get("essentials", 0), ts,
+            "Facts retention: purged free=%d essentials=%d lineage_rows=%d at=%s",
+            totals.get("free", 0), totals.get("essentials", 0), purged_lineage, ts,
         )
     except Exception as ex:
         logger.error("Facts retention cron failed: %s", ex)

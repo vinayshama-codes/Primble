@@ -117,6 +117,8 @@ CLUSTER_MAP: Dict[str, str] = {
     "umbrella_auto_period_misaligned": "Umbrella policy period alignment",
     "umbrella_auto_expiration_misaligned": "Umbrella policy period alignment",
     "umbrella_wc_period_misaligned": "Umbrella policy period alignment",
+    "proposed_term_coverage_gap": "Proposed policy term",
+    "location_revenue_over_total": "Location revenue vs. business total",
     "umbrella_gl_attachment_failure": "Umbrella attachment limits",
     "umbrella_gl_limits_not_found": "Umbrella attachment limits",
     "umbrella_auto_attachment_failure": "Umbrella attachment limits",
@@ -150,7 +152,7 @@ CLUSTER_MAP: Dict[str, str] = {
     "acord125_missing": "Missing baseline form",
     "legal_name_equals_dba": "Identity data quality",
     # Narrative
-    "acord101_required": "Narrative requirement (ACORD 101)",
+    "acord101_required": "Narrative requirement",
     # Expiring policies ACORD 125 has no box for (Brent, 19 Oct 2026)
     "acord101_for_expiring_policies": "Prior carrier information (ACORD 101)",
     # Coverage terminology / data consistency (2026-09-03). Both were falling
@@ -161,6 +163,8 @@ CLUSTER_MAP: Dict[str, str] = {
     # Renamed 14 Oct 2026 (owner): the heading asks for the line, it does not
     # announce that we have nothing ("not recognised").
     "unmapped_coverage_line": "Coverage part placement",
+    # Michelle review item 3 (29 Oct 2026): information only.
+    "requested_coverage_change": "Requested coverage changes",
     "loss_history_attestation_conflict": "Loss history conflict",
 }
 
@@ -177,6 +181,8 @@ TIER_MAP: Dict[str, str] = {
     "umbrella_auto_period_misaligned": "required",
     "umbrella_auto_expiration_misaligned": "required",
     "umbrella_wc_period_misaligned": "required",
+    "proposed_term_coverage_gap": "required",
+    "location_revenue_over_total": "required",
 
     "wc_gl_class_code_mismatch": "recommended",
     "gl_codes_no_operations": "recommended",
@@ -228,6 +234,7 @@ TIER_MAP: Dict[str, str] = {
     # skips binder_followup by design). Since 14 Oct 2026 it can be answered
     # (pick the line for each part), which does not change its tier.
     "unmapped_coverage_line": "binder_followup",
+    "requested_coverage_change": "binder_followup",
 }
 
 # ── Inline resolution (SQS panel: "Open" a validation and fix it in place) ────
@@ -478,6 +485,10 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "umbrella_auto_period_misaligned": _R_NARRATIVE,
     "umbrella_auto_expiration_misaligned": _R_NARRATIVE,
     "umbrella_wc_period_misaligned": _R_NARRATIVE,
+    # Confirm the proposed effective date, or move it to meet the current
+    # expiration (Michelle review, 29 Oct 2026) - a verify-a-figure card.
+    "proposed_term_coverage_gap": _r_field("effective_date"),
+    "location_revenue_over_total": _r_field("total_revenue"),
     "umbrella_gl_attachment_failure": _r_field("gl_each_occurrence", "gl_limits"),
     "umbrella_gl_limits_not_found": _r_field("gl_each_occurrence", "gl_limits"),
     "umbrella_auto_attachment_failure": _r_field("auto_liability_limit"),
@@ -570,6 +581,12 @@ RESOLUTION_MAP: Dict[str, dict] = {
         "Pick the line for each coverage part on the Review screen, where each "
         "part is listed with the standard lines to choose from."
     ),
+    # Information only (Michelle review item 3): the application asks for a
+    # different term than the current policy carries - nothing to answer.
+    "requested_coverage_change": _r_review(
+        "For your information - the application asks for a different coverage "
+        "term than the current policy. Nothing to answer here."
+    ),
     # ── Loss history attestation vs the uploaded loss runs (client C2 2.6) ──
     # Owner 2026-09-03: this one is a PROPER warning, because the condition
     # behind it caps the Loss History pillar at 45 (`_LOSS_CONFLICT_CAP`). It
@@ -635,6 +652,138 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
     return None
 
 
+
+# ── PACKAGE CHECKS vs FORM CHECKS (owner, 30 Oct 2026) ───────────────────────
+# "Before forms, the review screens show only what must be fixed before forms
+# are generated: package checks about the documents and data. After forms,
+# each form's side panel lists only the items that form needs to reach 100."
+# ONE table, every cross_form_validator code plus the one legacy rule that
+# names a form in its sentence:
+#   form    - the fix adds or chooses a form, OR the check reads the form
+#             itself (its rows, columns, layout or the form selection). Not
+#             shown before forms; after forms it holds ONLY the forms it names,
+#             never the package.
+#   package - it reads package facts and only names a form in its wording.
+#             Shown before forms (no "add a form" button, its data fix only)
+#             and holds the package before and after forms alike.
+# Unsure = package, so no real data gap is hidden before forms.
+# `tests/test_issue_scope_30oct.py` fails the build on a validator code with
+# no row here.
+FORM_SCOPE_CODES = frozenset({
+    # the fix is adding / choosing a form
+    "acord125_missing",
+    "acord127_missing_state_137",
+    "contractor_missing_acord186",
+    "certificate_requested_but_acord25_missing",
+    "property_evidence_requested_but_acord28_missing",
+    "acord101_required",
+    # the check reads the form itself: the 125 prior grid has no column for
+    # these policies; the 125 premises rows against the 140's
+    "acord101_for_expiring_policies",
+    "location_count_mismatch",
+    "location_count_mismatch_minor",
+    "location_address_mismatch",
+})
+
+PACKAGE_SCOPE_CODES = frozenset({
+    "acord186_high_sub_high_wc_payroll", "acv_high_value_building",
+    "auto_agreed_value_requires_schedule", "auto_doc_symbol_missing",
+    "auto_drive_other_car_not_specified", "auto_hired_nonowned_symbols_missing",
+    "auto_owned_fleet_not_covered_by_symbol", "auto_physical_damage_symbols_missing",
+    "auto_pip_medpay_not_specified", "auto_split_limits_incomplete",
+    "auto_state_unverified", "auto_symbols_not_captured", "auto_um_uim_not_specified",
+    "bi_coverage_no_limit", "bi_missing_period_of_restoration",
+    "builders_risk_project_value_missing", "builders_risk_property_duplication",
+    "carrier_grade_cope_incomplete", "claims_made_missing_prior_acts",
+    "claims_made_missing_retro_date", "crime_silent_exposure", "cyber_silent_exposure",
+    "gl_codes_no_operations", "high_subcontracting_no_wc_payroll", "legal_name_equals_dba",
+    "location_revenue_over_total", "minimum_viable_cope_missing",
+    "per_location_cope_incomplete", "physical_vs_mailing_address_unclear",
+    "property_aop_deductible_missing", "property_coinsurance_missing",
+    "property_coinsurance_unreasonable", "property_deductible_basis_missing",
+    "property_valuation_method_missing", "proposed_term_coverage_gap", "rcv_old_building",
+    "umbrella_auto_attachment_failure", "umbrella_auto_expiration_misaligned",
+    "umbrella_auto_limits_not_found", "umbrella_auto_period_misaligned",
+    "umbrella_el_below_minimum", "umbrella_gl_attachment_failure",
+    "umbrella_gl_expiration_misaligned", "umbrella_gl_limits_not_found",
+    "umbrella_gl_period_misaligned", "umbrella_missing_employers_liability",
+    "umbrella_no_underlying_coverage", "umbrella_wc_period_misaligned",
+    "wc_gl_class_code_mismatch", "wc_multi_state_no_breakdown", "wc_payroll_mismatch",
+    "wc_payroll_vs_revenue", "wc_state_payroll_total_mismatch",
+    "wc_subcontracting_payroll_conflict",
+    # legacy: "ACORD 125 minimum field missing: Producer" is a key detail -
+    # package data that names the application in its wording
+    "legacy_tier1_unrecognised_field",
+})
+
+
+def issue_scope(issue_or_code: Any) -> str:
+    """"form" or "package" for an issue dict or a rule code. Anything not in
+    the form table is "package" (unsure = package)."""
+    code = (issue_or_code.get("code") if isinstance(issue_or_code, dict)
+            else issue_or_code)
+    return "form" if str(code or "") in FORM_SCOPE_CODES else "package"
+
+
+# The line a form speaks for, for the pre-form wording ("Auto: ...").
+_FORM_LINE_LABELS = {
+    "126": "General Liability", "186": "General Liability",
+    "127": "Auto", "137": "Auto", "138": "Auto",
+    "130": "Workers Comp", "133": "Workers Comp",
+    "131": "Umbrella",
+    "140": "Property", "28": "Property", "160": "Business Owners", "141": "Crime",
+    "25": "Certificate", "125": "Application", "101": "Application",
+}
+_ACORD_IN_TEXT_RE = re.compile(r"\bACORD[\s_]+(\d{2,3})(?:[\s_]+(?:CA|CO))?\b")
+
+
+def _form_number(form_id: Any) -> str:
+    m = re.match(r"^ACORD[\s_]+(\d{2,3})", str(form_id or ""))
+    return m.group(1) if m else ""
+
+
+def issue_line_label(issue: dict) -> str:
+    """The line a cross-form issue is about, from the forms it names - a section
+    form's line first, the application's only when it names no other."""
+    labels = [_FORM_LINE_LABELS.get(_form_number(f)) for f in (issue.get("forms") or [])]
+    labels = [l for l in labels if l]
+    for l in labels:
+        if l != "Application":
+            return l
+    return labels[0] if labels else ""
+
+
+def pre_form_message(issue: dict) -> str:
+    """A package check's sentence as the pre-form screens show it: no form
+    numbers - each "ACORD n" reads as its line - led by the line it is about
+    ("Auto: ..."). A COPY of the words; the stored message never changes."""
+    msg = str(issue.get("message") or "")
+    body = _ACORD_IN_TEXT_RE.sub(
+        lambda m: {"Application": "the application", "Certificate": "the certificate"}.get(
+            _FORM_LINE_LABELS.get(m.group(1), ""), _FORM_LINE_LABELS.get(m.group(1), "the form")),
+        msg)
+    line = issue_line_label(issue)
+    if line and not body.lower().startswith(line.lower()):
+        return f"{line}: {body}"
+    return body
+
+
+def pre_form_issue(issue: dict) -> dict:
+    """The pre-form copy of a package-scope cross-form issue: its pre-form
+    wording and no "add a form" button (its data fix only). issue_id kept."""
+    if not isinstance(issue, dict):
+        return issue
+    out = dict(issue)
+    out["message"] = pre_form_message(issue)
+    out.setdefault("stored_message", issue.get("message"))
+    res = issue.get("resolution")
+    if isinstance(res, dict) and res.get("add_forms"):
+        res = dict(res)
+        res.pop("add_forms", None)
+        out["resolution"] = res
+    return out
+
+
 # ── Settled by a person / explained (15 Oct 2026) ────────────────────────────
 # The owner's rule: a warning a CORRECT answer cannot clear is a bug. Two shared
 # rules close the families that had no answer:
@@ -674,6 +823,62 @@ def person_settled_fact(facts: Any, key: str) -> bool:
     """A (possibly dotted) fact whose top-level value a person supplied."""
     facts = facts if isinstance(facts, dict) else {}
     return _is_human_supplied(facts.get(str(key or "").split(".")[0]))
+
+
+# A WARNING THAT ONLY ASKS TO VERIFY A FIGURE (27 Oct 2026, the reach-100 rule:
+# every item on the pre-form screen a person answers must clear). These rules
+# question a figure that can be TRUE as stated - a 50% coinsurance, payroll
+# that is most of revenue, a WC payroll that differs from total payroll, an
+# umbrella term that does not line up with the GL term - so typing the true
+# value again can never clear them. Once a person has entered or vouched for
+# every figure the card's window names (`fact_state.confirmed_by_person`; the
+# window confirms the values it shows when nothing is typed), the figure is
+# verified and the warning stands down - the low-OCR "confirm this field"
+# rule, for figures. A requirement the true value fails (an underlying limit
+# under the umbrella's minimum, a missing value) is never on this list: its
+# answer is the value that meets it.
+VERIFY_FIGURE_CODES = frozenset({
+    "property_coinsurance_unreasonable",
+    "wc_payroll_vs_revenue",
+    "acord186_high_sub_high_wc_payroll",
+    "wc_subcontracting_payroll_conflict",
+    "wc_payroll_mismatch",
+    "wc_state_payroll_total_mismatch",
+    "umbrella_gl_period_misaligned",
+    "umbrella_gl_expiration_misaligned",
+    "legacy_revenue_payroll_ratio",
+    "legacy_umbrella_gl_period_misaligned",
+    "legacy_umbrella_gl_expiration_misaligned",
+    "proposed_term_coverage_gap",
+    "location_revenue_over_total",
+})
+
+
+def figures_verified(code: Any, facts: Any) -> bool:
+    """True when `code` only asks to verify figures and a person has entered or
+    vouched for every one its window names."""
+    if str(code or "") not in VERIFY_FIGURE_CODES:
+        return False
+    facts = facts if isinstance(facts, dict) else {}
+    names = [str(f) for f in ((resolution_for(str(code)) or {}).get("facts") or []) if f]
+    if not names:
+        return False
+    from services.fact_state import confirmed_by_person
+    return all(confirmed_by_person(facts.get(f)) for f in names)
+
+
+def drop_verified_figure_stops(messages: Any, facts: Any, severity: str = "soft") -> List[str]:
+    """`messages` (plain legacy stop sentences) less the ones whose figures a
+    person has verified (`figures_verified`)."""
+    out: List[str] = []
+    for m in messages or []:
+        try:
+            code = classify_legacy(str(m), severity)[0]
+        except Exception:                                      # noqa: BLE001
+            code = None
+        if not figures_verified(code, facts):
+            out.append(m)
+    return out
 
 
 def explained_issue_codes(facts: Any) -> set:
@@ -753,6 +958,11 @@ SCORE_NEUTRAL_CODES: frozenset = frozenset({
     # never by a scorer. Principle 7 states the rule outright: "give it no new
     # scoring effect until a rule is explicitly defined."
     "unmapped_coverage_line",
+    # Michelle review item 3 (29 Oct 2026). Verified: built from the stored
+    # Data Consistency assessment's `requested_terms` (`requested_coverage_
+    # notes`), appended to `structured_issues` only - never a stop list, no
+    # fact behind it, no pillar reads it.
+    "requested_coverage_change",
 })
 
 SCORE_NEUTRAL_NOTE = "Advice only - this does not affect your score."
@@ -845,6 +1055,11 @@ def _tier1_label_to_facts() -> Dict[str, tuple]:
 
 
 _TIER1_MSG_PREFIX = "ACORD 125 minimum field missing: "
+_TIER1_CLUSTER_TITLE = "Missing baseline ACORD 125 fields"
+# Before forms the same key detail is the package's: no form name (G14).
+_PRE_FORM_TIER1_PREFIX = "Key detail missing: "
+_PRE_FORM_TIER1_TITLE = "Missing key details"
+_PRE_FORM_101_RE = re.compile(r"\b(an?\s+)?ACORD[\s_]*101\s+explanation", re.I)
 
 
 def _tier1_code_from_message(message: Optional[str]) -> Optional[str]:
@@ -997,6 +1212,8 @@ def _lookup(code: str) -> tuple:
 # here. test_legacy_rules.py fails the build if a message the engine can emit
 # matches no row, matches the WRONG row, or carries a resolution naming a fact
 # the producer-answer path cannot write.
+from services import identifier_checks as _ic  # noqa: E402  (leaf module)
+
 _LEGACY_MESSAGE_RULES: List[tuple] = [
     # ── ACORD 125 baseline (Tier 1) - BACKSTOP ONLY ─────────────────────────
     # A REAL Tier 1 sentence never reaches this table: `classify_legacy` parses
@@ -1236,6 +1453,13 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_auto_vehicle_schedule_missing", _r_schedule("auto_vin_schedule")),
     ("Driver schedule not provided", "Auto completeness", "recommended",
      "legacy_auto_driver_schedule_missing", _r_schedule("auto_drivers")),
+    # 30 Oct 2026: a fixed-format identifier read off the documents whose
+    # format is impossible (a VIN not 17 characters, a NAIC not 5 digits, a US
+    # ZIP not 5 / 9, a non-NANP phone, a backwards umbrella term). The rows come
+    # from the ONE door's own table (`identifier_checks.WARNING_RULES`), so the
+    # phrase, the code and the fix are declared once.
+    *[(_ir.phrase, _ir.cluster, "recommended", _ir.code, _ic.resolution_for_rule(_ir))
+      for _ir in _ic.WARNING_RULES],
     # ── Prior carrier / narrative ────────────────────────────────────────────
     # This rule is gated on _narrative_remarks_text(facts) being empty, so an
     # ACORD 101 note is LITERALLY what clears it - narrative, not a typed value.
@@ -1972,6 +2196,98 @@ def _drop_numbered_echoes(structured_issues: Optional[List[dict]]) -> List[dict]
     return [i for i in rows if not _echo(i)]
 
 
+# A RELATIONSHIP card (30 Oct 2026): its rule compares its boxes - a conflict,
+# a mismatch, a term out of line, a figure to verify - so the box holding a
+# well-formed value can be the very one that is wrong (the "no losses"
+# attestation beside a claims sheet). Read off the rule code's own naming and
+# the verify-figure set; such a card keeps every box (Rule 1 never narrows it).
+_RELATIONSHIP_CODE_RE = re.compile(
+    r"conflict|mismatch|misalign|inconsisten|_vs_|disagree|contradict|exceeds|"
+    r"below_|above_|_gap$|unclear|_over_|_ratio|unreasonable|"
+    # A filled value that is wrong, not missing: a term running backwards,
+    # already ended or about to end, a limit that fails to attach.
+    r"backward|revers|expired|expiring|failure")
+
+
+def is_relationship_code(code: Any) -> bool:
+    c = str(code or "")
+    return bool(c) and (c in VERIFY_FIGURE_CODES or bool(_RELATIONSHIP_CODE_RE.search(c)))
+
+
+_CATCH_ALL_RULE_CODES = frozenset({"uncovered_hard_stop", "uncovered_soft_stop", "uncategorized"})
+
+
+def rule_code_of(issue: Any) -> str:
+    """The rule a card belongs to: its code, or - for a catch-all card the safety
+    net drew (`uncovered_*`) - the rule its own sentence classifies as (seed 5036,
+    30 Oct 2026: a backwards term reached the net and lost its relationship)."""
+    if not isinstance(issue, dict):
+        return ""
+    code = str(issue.get("code") or "")
+    if code and code not in _CATCH_ALL_RULE_CODES:
+        return code
+    try:
+        found = classify_legacy(str(issue.get("message") or ""), "soft_warning")[0]
+    except Exception:                                          # noqa: BLE001
+        found = None
+    return str(found or code)
+
+
+def is_relationship_card(issue: Any) -> bool:
+    return is_relationship_code(rule_code_of(issue))
+
+
+def boxes_that_need_fixing(resolution: Any, facts: dict, code: Any = None) -> Any:
+    """Rule 1 (30 Oct 2026): a field-mode fix narrowed to its boxes that are empty
+    or hold a value failing their own check (`fact_registry.answer_refusal`, the
+    one person-answer check; identifier formats through `identifier_checks`).
+    Unchanged when none or all of them need it, for a table / narrative fix, or
+    for a relationship card (`is_relationship_code`). Returns a copy; never
+    raises."""
+    try:
+        if not isinstance(resolution, dict) or resolution.get("mode") != "field":
+            return resolution
+        if is_relationship_code(code):
+            return resolution
+        keys = [str(k) for k in (resolution.get("facts") or []) if k]
+        if len(keys) < 2:
+            return resolution
+        from services.fact_registry import FACT_REGISTRY, answer_refusal
+        try:
+            from services.identifier_checks import impossible_scalar
+        except Exception:                                      # noqa: BLE001
+            impossible_scalar = None
+
+        def _val(k):
+            v = (facts or {}).get(k)
+            return v.get("value") if isinstance(v, dict) and "value" in v else v
+
+        def _needs(k) -> bool:
+            v = _val(k)
+            if v in (None, "", [], {}):
+                return True
+            if isinstance(v, (list, dict)):
+                return False
+            try:
+                if answer_refusal(FACT_REGISTRY.get(k), str(v)):
+                    return True
+            except Exception:                                  # noqa: BLE001
+                pass
+            try:
+                return bool(impossible_scalar and impossible_scalar(k, v))
+            except Exception:                                  # noqa: BLE001
+                return False
+
+        bad = [k for k in keys if _needs(k)]
+        if not bad or len(bad) == len(keys):
+            return resolution
+        out = dict(resolution)
+        out["facts"] = bad
+        return out
+    except Exception:                                          # noqa: BLE001
+        return resolution
+
+
 def build_grouped_view(
     structured_issues: List[dict],
     hard_stops: List[str],
@@ -2333,6 +2649,18 @@ def build_grouped_view(
         except Exception as _rx:                              # noqa: BLE001
             logger.warning("issue_registry: COPE card routing skipped: %s", _rx)
 
+    # ── RULE 1: A FIX WINDOW OFFERS ONLY THE BOXES THAT NEED FIXING ──────────
+    # (owner, 30 Oct 2026: global, every card). A card whose fix names several
+    # boxes offers, when SOME of them are empty or hold a value that fails its
+    # own check, only those - a box holding a good value is never offered beside
+    # them (live 50a7d9e6: the carrier NAIC card also offered the prior carrier's,
+    # and the phone card the contact phone, inviting a value into a box that was
+    # right). When every box holds a good value (a real disagreement between two
+    # good values) all of them stay: the person decides which one changes.
+    if isinstance(facts, dict) and facts:
+        for _it in enriched:
+            _it["resolution"] = boxes_that_need_fixing(_it.get("resolution"), facts, rule_code_of(_it))
+
     hard_items = [i for i in enriched if i["severity"] == "hard_stop"]
     hard_clusters = _make_clusters(hard_items)
 
@@ -2405,10 +2733,18 @@ def build_grouped_view(
     # The hidden rows ride ALONGSIDE it instead, so a surface that reports a
     # CEILING can be honest ("1 warning, plus 1 item in Data Consistency")
     # without the warnings list and its badge ever disagreeing again.
+    #
+    # ADVICE IS DRAWN, NOT COUNTED AS A WARNING (owner, 29 Oct 2026): a
+    # score-neutral cluster (`is_score_neutral` - the requested-coverage note,
+    # the coverage-part placement card) is drawn in its tier with "Advice only"
+    # but is no warning, so it is counted on its own (`info`). Still "count ==
+    # what is drawn": warnings + info is every warning-tier card.
     counts = {
         "hard_stops": sum(c["count"] for c in hard_clusters),
         "warnings":   sum(c["count"] for tier_clusters in warnings.values()
-                          for c in tier_clusters),
+                          for c in tier_clusters if not c.get("score_neutral")),
+        "info":       sum(c["count"] for tier_clusters in warnings.values()
+                          for c in tier_clusters if c.get("score_neutral")),
     }
 
     return {
@@ -2540,6 +2876,136 @@ def unmapped_line_issue(facts: Any) -> Optional[dict]:
     return issue
 
 
+REQUESTED_COVERAGE_CODE = "requested_coverage_change"
+
+
+def requested_coverage_notes(underwriting: Any) -> List[dict]:
+    """One information note per coverage term an application / quote asks for
+    that differs from the current policy (`underwriting_consistency.
+    _requested_term_change`): "Requested Umbrella Limit $2,000,000 (current
+    $1,000,000)". Advisory and score-neutral - `structured_issues` only, never
+    a stop list (Michelle review item 3, 29 Oct 2026). Never raises."""
+    out: List[dict] = []
+    try:
+        for r in (underwriting or {}).get("requested_terms") or []:
+            if not isinstance(r, dict) or not r.get("requested"):
+                continue
+            msg = (f"Requested {r.get('label') or r.get('fact_key')} {r['requested']} "
+                   f"(current {r.get('current')}).")
+            issue = make_issue(REQUESTED_COVERAGE_CODE, "advisory", msg)
+            issue["fact_key"] = r.get("fact_key")
+            out.append(issue)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("issue_registry: requested-coverage notes skipped: %s", exc)
+    return out
+
+
+def refresh_requested_coverage_notes(structured_issues, underwriting) -> List[dict]:
+    """`structured_issues` with the requested-coverage notes redrawn from the
+    stored assessment (stored copies replaced). No assessment: unchanged."""
+    issues = list(structured_issues or [])
+    if not isinstance(underwriting, dict) or "requested_terms" not in underwriting:
+        return issues
+    kept = [i for i in issues
+            if not (isinstance(i, dict) and i.get("code") == REQUESTED_COVERAGE_CODE)]
+    return kept + requested_coverage_notes(underwriting)
+
+
+def with_live_conflict_issues(structured_issues, session, hard_stops=None,
+                              soft_stops=None) -> List[dict]:
+    """`structured_issues` plus a coded card for every Data Consistency stop the
+    stops AS THEY STAND raise but the stored list does not carry (end-user
+    review, 29 Oct 2026).
+
+    The review page draws the live stops (`stops_now`) beside the STORED
+    structured issues. A stored assessment re-read under newer rules
+    (`refresh_stale_assessment`), or a row whose wording changed, raises a
+    picker sentence the stored list never mirrored - so it reached
+    `build_grouped_view`'s uncoded safety net and printed as an extra warning
+    ("Mailing Address: documents disagree ...") beside its own Data
+    Consistency row, under "Other validations", with a fix window that opened
+    a phone box (the sentence classified by its words). With its code the
+    UI-13 rule hides the picker's copy and a document-conflict card keeps
+    "Fix in Data Consistency". Only a message the caller is about to show is
+    added - nothing is drawn that the lists do not hold. Never raises."""
+    issues = list(structured_issues or [])
+    if not isinstance(session, dict):
+        return issues
+    shown = [str(m) for m in list(hard_stops or []) + list(soft_stops or []) if m]
+    if not shown:
+        return issues
+    try:
+        from services.stops_now import conflict_stop_issues
+        live = conflict_stop_issues(session)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("issue_registry: live conflict cards not read: %s", exc)
+        return issues
+    have = {str((i or {}).get("message") or "").strip() for i in issues if isinstance(i, dict)}
+    hard_set = [str(m) for m in hard_stops or [] if m]
+    for c in live:
+        msg = str(c.get("message") or "").strip()
+        if not msg or msg in have:
+            continue
+        if any(h == msg or h.startswith(msg) or msg.startswith(h) for h in have if h):
+            continue
+        if not _listed_in(msg, shown):
+            continue
+        sev = "hard_stop" if _listed_in(msg, hard_set) else "soft_warning"
+        issues.append(make_issue(str(c.get("code") or "uncategorized"), sev, msg))
+        have.add(msg)
+    return issues
+
+
+def structured_as_they_stand(structured_issues, session, hard_stops, soft_stops,
+                             cross_issues=None) -> List[dict]:
+    """The stored structured issues as the stops AS THEY STAND see them, for a
+    view that draws the live lists (`stops_now`) - the review page and its
+    reload (end-user review, 29 Oct 2026).
+
+    A stored row keeps every card its upload wrote until the next
+    recalculation retires it. Reloaded under newer rules, the page drew cards
+    the current rules no longer raise - on the 29 Oct kit "Monopolistic WC
+    state detected" (the dec places WY with the state fund), "1 of 4 insured
+    locations are missing COPE" (three rows, all complete), "Policy date
+    mismatch" and the No Known Losses conflict - none of which any answer could
+    clear, so the plan listed them with no number. The SAME retirement doors the
+    recalculation runs (`retire_stopped_cross_form_issues`, `retire_stopped_
+    doc_conflict_issues`, `retire_settled_source_conflicts`, `retire_stopped_
+    loss_conflict`) plus a field-level (`legacy_*` / `tier1_missing_*`) copy
+    whose sentence the live lists no longer hold; then the live Data
+    Consistency cards the stored list lacks (`with_live_conflict_issues`).
+    Display only; never raises (a door that fails keeps its rows)."""
+    issues = [i for i in (structured_issues or []) if isinstance(i, dict)]
+    if not isinstance(session, dict):
+        return issues
+    facts = session.get("facts") if isinstance(session.get("facts"), dict) else {}
+    flags = session.get("flags") if isinstance(session.get("flags"), dict) else {}
+    docs = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
+    shown = [str(m) for m in list(hard_stops or []) + list(soft_stops or []) if m]
+    issues = [i for i in issues
+              if not (str(i.get("code") or "").startswith(_RECOMPUTED_CODE_PREFIXES)
+                      and (i.get("severity") or "soft_warning") in ("hard_stop", "soft_warning")
+                      and not _listed_in(str(i.get("message") or ""), shown))]
+    try:
+        issues = retire_stopped_cross_form_issues(issues, cross_issues or [])
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("issue_registry: cross-form retirement skipped: %s", exc)
+    try:
+        from services.underwriting_consistency import confirmed_fact_keys
+        issues = retire_stopped_doc_conflict_issues(
+            issues, docs,
+            set(confirmed_fact_keys(session.get("underwriting_confirmations") or {}))
+            | person_settled_keys(facts), explained_doc_conflict_codes(facts))
+        issues = retire_settled_source_conflicts(issues, facts)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("issue_registry: doc-conflict retirement skipped: %s", exc)
+    try:
+        issues = retire_stopped_loss_conflict(issues, facts, flags, docs)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("issue_registry: loss-conflict retirement skipped: %s", exc)
+    return with_live_conflict_issues(issues, session, hard_stops, soft_stops)
+
+
 def refresh_unmapped_line_issue(structured_issues, facts) -> List[dict]:
     """`structured_issues` with the coverage-part card redrawn from `facts`:
     the stored copy is replaced by the current card, or removed when every part
@@ -2565,8 +3031,14 @@ def grouped_with_package_caps(
     pkg,
     cross_issues=None,
     facts=None,
+    pre_form=None,
 ):
     """`build_grouped_view` plus any 60-cap the PACKAGE scorer holds privately.
+
+    `pre_form` (30 Oct 2026, package checks vs form checks): True on a screen
+    drawn before forms exist - every package-scope cross-form card reads
+    without form numbers, led by its line, and offers its data fix only
+    (`pre_form_view`). None / False: the view as before.
 
     `facts`: the session facts, passed through to `build_grouped_view` so a
     card's fix follows the package (Choice Electric #18, 7 Oct 2026).
@@ -2612,7 +3084,7 @@ def grouped_with_package_caps(
     # answer clears it here, "Open again" brings it back) - see
     # `refresh_unmapped_line_issue`. Advice only: no stop list is touched.
     structured_issues = refresh_unmapped_line_issue(structured_issues, facts)
-    return build_grouped_view(
+    view = build_grouped_view(
         structured_issues or [],
         list(hard_stops or []) + extra,
         soft_stops or [],
@@ -2621,6 +3093,103 @@ def grouped_with_package_caps(
         facts=facts,
         form_choices=pkg.get("form_choices"),
     )
+    return pre_form_view(view) if pre_form else view
+
+
+def _cross_rule_codes() -> frozenset:
+    try:
+        from services.cross_form_validator import rule_codes
+        return rule_codes()
+    except Exception:                                          # noqa: BLE001
+        return frozenset()
+
+
+def pre_form_view(view: Any) -> Any:
+    """The grouped view as the pre-form screens draw it (owner, 30 Oct 2026): a
+    FORM-scope card is not shown (it comes back after forms, on its forms);
+    every package-scope cross-form card's words name its line, not a form, and
+    its fix is its data fix (no "add a form" button). A copy - the stored
+    issues, the stop lists and every issue_id are untouched."""
+    if not isinstance(view, dict):
+        return view
+    import copy as _cp
+    view = _cp.deepcopy(view)
+    codes = _cross_rule_codes()
+
+    def _fix_item(it: dict) -> dict:
+        if str(it.get("code") or "") in codes and issue_scope(it) == "package":
+            new = pre_form_issue(it)
+            new.pop("stored_message", None)
+            return new
+        msg = it.get("message")
+        if isinstance(msg, str) and _PRE_FORM_101_RE.search(msg):
+            # "...or add an ACORD 101 explanation" - before forms the fix is the
+            # narrative window, a written explanation; no form named (G14).
+            it = dict(it)
+            msg = _PRE_FORM_101_RE.sub("a written explanation", msg)
+            it["message"] = msg
+        if isinstance(msg, str) and msg.startswith(_TIER1_MSG_PREFIX):
+            # A key detail is the package's, not ACORD 125's (G14, 30 Oct 2026):
+            # the scorer's sentence keeps its form name (stop lists, issue ids),
+            # the screen's copy does not.
+            it = dict(it)
+            it["message"] = _PRE_FORM_TIER1_PREFIX + msg[len(_TIER1_MSG_PREFIX):]
+        return it
+
+    def _fix_cluster(c: dict) -> Optional[dict]:
+        items = [i for i in (c.get("items") or []) if isinstance(i, dict)]
+        if items and all(str(i.get("code") or "") in FORM_SCOPE_CODES for i in items):
+            return None
+        kept = [_fix_item(i) for i in items
+                if str(i.get("code") or "") not in FORM_SCOPE_CODES]
+        if not items:
+            return c
+        if not kept:
+            return None
+        dropped = len(items) - len(kept)
+        c["items"] = kept
+        for _k in ("title", "cluster", "label"):
+            if c.get(_k) == _TIER1_CLUSTER_TITLE:
+                c[_k] = _PRE_FORM_TIER1_TITLE
+        if dropped and isinstance(c.get("count"), int):
+            c["count"] = max(0, c["count"] - dropped)
+        c["primary_message"] = kept[0].get("message")
+        if c.get("issue_id") and c["issue_id"] not in {i.get("issue_id") for i in kept}:
+            c["issue_id"] = kept[0].get("issue_id")
+        if all(str(i.get("code") or "") in codes and issue_scope(i) == "package" for i in kept):
+            res = c.get("resolution")
+            if isinstance(res, dict) and res.get("add_forms"):
+                res = dict(res)
+                res.pop("add_forms", None)
+                c["resolution"] = res
+        return c
+
+    def _clusters(lst: Any) -> Any:
+        if not isinstance(lst, list):
+            return lst
+        out = []
+        for c in lst:
+            if isinstance(c, dict):
+                c = _fix_cluster(c)
+                if c is not None:
+                    out.append(c)
+            else:
+                out.append(c)
+        return out
+
+    view["important"] = _clusters(view.get("important"))
+    view["hard_stops"] = _clusters(view.get("hard_stops"))
+    if isinstance(view.get("warnings"), dict):
+        view["warnings"] = {k: _clusters(v) for k, v in view["warnings"].items()}
+    counts = view.get("counts")
+    if isinstance(counts, dict):
+        counts["hard_stops"] = sum(int(c.get("count") or 0) for c in view.get("hard_stops") or []
+                                   if isinstance(c, dict))
+        counts["warnings"] = sum(int(c.get("count") or 0) for t in (view.get("warnings") or {}).values()
+                                 for c in (t or []) if isinstance(c, dict) and not c.get("score_neutral"))
+        counts["info"] = sum(int(c.get("count") or 0) for t in (view.get("warnings") or {}).values()
+                             for c in (t or []) if isinstance(c, dict) and c.get("score_neutral"))
+    return view
 
 
 def stops_for_display(hard_stops, soft_stops, issues=None) -> Tuple[List[str], List[str]]:
@@ -2996,15 +3565,12 @@ def _is_human_supplied(fact: Any) -> bool:
     """True when a person, not the extractor, is the source of this value.
 
     Same test recalculate_session_scores uses to decide whether a field was
-    user-provided, kept identical on purpose so the two never disagree about
-    what counts as human input.
+    user-provided - now literally the same: the one door's first question
+    (`fact_state.typed_by_person`, 27 Oct 2026). The confidence read it
+    replaced ("client_arq") is only ever written beside the same source.
     """
-    if not isinstance(fact, dict):
-        return False
-    return (
-        fact.get("source") in ("client_arq", "producer")
-        or fact.get("confidence") == "client_arq"
-    )
+    from services.fact_state import typed_by_person
+    return typed_by_person(fact)
 
 
 def drop_confirmed_ocr_issues(

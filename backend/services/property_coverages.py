@@ -703,6 +703,24 @@ def derive_property_coverages(facts: dict, docs: Any) -> Optional[dict]:
                            "different coverage lists - neither is used", key[0] or "?", key[1] or "?")
         if default is None:
             default = qualified_default_deductible(text)
+    # A filled ACORD 140's own grid (services/acord_intake, 27 Oct 2026) - only
+    # when no document's TEXT printed a schedule: a schedule a declaration
+    # prints is the policy's own and always decides, and two readings of one
+    # premises under different numbers would leave the row joined to neither.
+    for d in (docs if isinstance(docs, list) and not order and not conflicted else []):
+        if not isinstance(d, dict) or d.get("excluded"):
+            continue
+        blob = _fv(d.get("facts") or {}, KEY)
+        if not (isinstance(blob, dict) and blob.get("source") == "acord_form"):
+            continue
+        for s in blob.get("sections") or []:
+            if not isinstance(s, dict) or not s.get("coverages"):
+                continue
+            key = (s.get("premises") or "", s.get("building") or "")
+            if key in sections or key in conflicted:
+                continue
+            sections[key] = dict(s)
+            order.append(key)
     kept = [sections[k] for k in order if k not in conflicted]
     if not kept and default is None:
         facts.pop(KEY, None)
@@ -827,6 +845,164 @@ def premises_rows(facts: dict, idx: int) -> Optional[dict]:
                        "holds %d - the rest are not printed", idx + 1, len(covs),
                        ROWS_PER_PREMISES)
     return {"rows": covs[:ROWS_PER_PREMISES], "complete": complete}
+
+
+def schedule_states_limit(facts: dict, kind: str) -> bool:
+    """Does the property schedule (`_property_coverages`, read off the
+    declarations or a filled ACORD 140) print a coverage of `kind` with an
+    amount? A Business Income row per premises IS a stated BI limit, even when
+    the premises' limits differ and no single package value can be chosen
+    (Choice Electric: $1,000,000 and $25,000)."""
+    blob = _fv(facts, KEY)
+    for sec in (blob.get("sections") if isinstance(blob, dict) else None) or []:
+        for c in (sec.get("coverages") if isinstance(sec, dict) else None) or []:
+            if isinstance(c, dict) and c.get("kind") == kind and dollars(c.get("limit")):
+                return True
+    return False
+
+
+def business_income_limit_stated(facts: dict) -> bool:
+    """THE ONE question "is a Business Income limit stated?" - the package
+    value, or a BI row the property schedule prints. The pillar asked the
+    schedule and the two "no BI limit" warnings asked the package value alone,
+    so a schedule printing $1,000,000 and $25,000 held 85 with a card asking
+    for the limit the pillar had just credited (review, 27 Oct 2026)."""
+    v = _fv(facts, "business_income_limit")
+    return (bool(v not in (None, "") and str(v).strip()) or schedule_states_limit(facts, "bi")
+            or bi_actual_loss_sustained(facts))
+
+
+# ── ACTUAL LOSS SUSTAINED: NO PERIOD OF RESTORATION TO STATE (29 Oct 2026) ───
+# Michelle review item 6 (owner-approved build): a Business Income coverage
+# written on an Actual Loss Sustained basis (or with a monthly limitation of
+# indemnity in place of coinsurance) has no Period of Restoration limit the
+# producer could type - the dec prints "ALS", "Actual Loss Sustained",
+# "12 months ALS", "1/3 monthly limit". "Period of Restoration missing" on such
+# a package is a warning no correct answer clears (I1). Every reader asks this
+# ONE door; a BI coverage with a stated limit and no ALS wording (a period-of-
+# restoration form) keeps the warning exactly as before.
+ALS_FACT = "_bi_actual_loss_sustained"
+# Wording that names the basis itself. The bare abbreviation is read in capitals
+# only ("ALS"), and every reading needs a Business Income / time-element subject
+# on the line or the line beside it.
+_ALS_RE = re.compile(
+    r"\bactual\s+loss(?:es)?\s+sustained\b"
+    r"|\b(?:1|one)\s*/\s*(?:3|4|6)(?:rd|th)?\s+monthly\b"
+    # A monthly limitation counts only with its FRACTION: the ISO property dec
+    # prints "Monthly Limit of Indemnity (Fraction)" as a column heading on every
+    # BI schedule, blank or "N/A" when the option is not elected - the bare
+    # heading stood the Period of Restoration warning down on a coinsurance
+    # form (Michelle review, 30 Oct 2026).
+    r"|\bmonthly\s+limit(?:ation)?s?(?:\s+of\s+indemnity)?\b(?:\s*\(fraction\))?[\s:\-=]*"
+    r"(?:1|one)\s*/\s*(?:3|4|6)\b", re.I)
+_ALS_ABBR_RE = re.compile(r"(?<![A-Za-z])ALS(?![A-Za-z])")
+# "Actual Loss Sustained: N/A" / "ALS - Not Covered" names the option NOT taken.
+_ALS_DECLINED_RE = re.compile(r"^\s*[:\-=]?\s*(?:n/?a\b|none\b|not\b|no\b|excluded\b|x\s*$)", re.I)
+_BI_SUBJECT_RE = re.compile(
+    r"\bbusiness\s+(?:income|interruption)\b|\btime\s+element\b|\bextra\s+expense\b"
+    r"|(?<![A-Za-z])BI(?![A-Za-z])|\bBUSIN\b|\bBUSEE\b|\brental\s+value\b", re.I)
+# A cyber / network business interruption is not the property BI coverage.
+_NOT_PROPERTY_BI_RE = re.compile(
+    r"\bcyber\b|\bnetwork\b|\bdata\s+breach\b|\bsystem\s+failure\b|\bdependent\s+business\b", re.I)
+
+
+def _names_als(text: Any) -> bool:
+    s = str(text or "")
+    for rx in (_ALS_RE, _ALS_ABBR_RE):
+        for m in rx.finditer(s):
+            if not _ALS_DECLINED_RE.match(s[m.end():m.end() + 20]):
+                return True
+    return False
+
+
+def als_statement(text: Any) -> Optional[str]:
+    """The line of `text` that states a property Business Income coverage on an
+    Actual Loss Sustained / monthly-limitation basis, or None. The basis word
+    and a BI subject must sit on that line or the line beside it, and no cyber
+    / network wording may be in that window."""
+    lines = str(text or "").splitlines()
+    for n, ln in enumerate(lines):
+        if not _names_als(ln):
+            continue
+        window = " ".join(lines[max(0, n - 1): n + 2])
+        if _BI_SUBJECT_RE.search(window) and not _NOT_PROPERTY_BI_RE.search(window):
+            return re.sub(r"\s+", " ", ln).strip()[:200]
+    return None
+
+
+def bi_actual_loss_sustained(facts: Any) -> bool:
+    """THE ONE question "is the Business Income coverage written on an Actual
+    Loss Sustained basis?" - the merge's reading of the documents (`ALS_FACT`,
+    `derive_bi_actual_loss_sustained`), the BI limit's own wording, or a BI /
+    extra expense row of the property schedule printing it. Never raises."""
+    try:
+        if not isinstance(facts, dict):
+            return False
+        if _fv(facts, ALS_FACT) is True:
+            return True
+        if _names_als(_fv(facts, "business_income_limit")):
+            return True
+        blob = _fv(facts, KEY)
+        for sec in (blob.get("sections") if isinstance(blob, dict) else None) or []:
+            for c in (sec.get("coverages") if isinstance(sec, dict) else None) or []:
+                if not (isinstance(c, dict) and c.get("kind") in ("bi", "ee")):
+                    continue
+                parts = [c.get(k) for k in ("coverage", "limit", "coinsurance", "valuation",
+                                            "conditions")] + list(c.get("options") or [])
+                if _names_als(" ".join(str(p) for p in parts if p)):
+                    return True
+    except Exception:                                         # noqa: BLE001
+        return False
+    return False
+
+
+def period_of_restoration_needed(facts: Any) -> bool:
+    """False when the BI coverage has no Period of Restoration to state (Actual
+    Loss Sustained); True otherwise - the warning and the pillar's item stand."""
+    return not bi_actual_loss_sustained(facts)
+
+
+def derive_bi_actual_loss_sustained(facts: dict, docs: Any) -> Optional[str]:
+    """Record on `facts` whether the package's documents state an Actual Loss
+    Sustained BI basis (`ALS_FACT`, a derived envelope with the printed line).
+    Always written (True or False), so a removed document takes it back.
+    Returns the quoted line or None. Never raises."""
+    try:
+        quote = None
+        for d in docs or []:
+            if isinstance(d, dict):
+                quote = als_statement(d.get("text"))
+                if quote:
+                    break
+        facts[ALS_FACT] = {"value": bool(quote), "source": "derived", "confidence": "derived",
+                           **({"quote": quote} if quote else {})}
+        return quote
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("property_coverages: ALS reading skipped - %s", exc)
+        return None
+
+
+def schedule_states_deductible(facts: dict) -> Optional[str]:
+    """The deductible the property schedule prints on a direct-damage coverage
+    row (building, BPP, stock - never a waiting period), as printed ("$5,000"),
+    or None. That IS the all-other-perils deductible, per coverage (27 Oct 2026:
+    the round trip's ACORD 140 printed $5,000 on every row and was warned "AOP
+    deductible not specified"). The printing, not a yes, so a reader asking
+    "flat dollar or percentage?" sees its "$"."""
+    blob = _fv(facts, KEY)
+    for sec in (blob.get("sections") if isinstance(blob, dict) else None) or []:
+        for c in (sec.get("coverages") if isinstance(sec, dict) else None) or []:
+            if (isinstance(c, dict) and c.get("kind") in _DIRECT_DAMAGE_KINDS
+                    and dollars(c.get("deductible"))):
+                return str(c.get("deductible")).strip()
+    return None
+
+
+# The subjects whose deductible is the all-other-perils one: direct damage to
+# the insured's property. Never a time element (a waiting period) and never a
+# subject `subject_kind` cannot name - a "FLOOD" or "EARTHQUAKE" row's
+# deductible is that peril's (review, 27 Oct 2026).
+_DIRECT_DAMAGE_KINDS = frozenset({"building", "bpp", "stock", "potop", "pp", "ff", "maceq", "tib"})
 
 
 def default_deductible(facts: dict) -> Optional[dict]:

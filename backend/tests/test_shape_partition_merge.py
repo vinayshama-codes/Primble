@@ -119,10 +119,12 @@ def test_the_enforced_set_is_small_and_deliberate():
     "Statutory", "Included" or "See schedule". Currency ordering belongs to the
     C23 composite-consistency logic, not to this partition."""
     enforced = set(es._hard_shape_facts())
+    # applicant_business_phone: the ACORD 125 BUSINESS PHONE #, registered with
+    # `_is_phone` on 29 Oct 2026 (ACORD_INTAKE.md item 8) - a phone, by design.
     assert enforced == {
         "fein", "contact_email", "contact_phone", "applicant_website",
         "carrier_website", "producer_contact_email", "producer_contact_phone",
-        "producer_fax",
+        "producer_fax", "applicant_business_phone",
     }, sorted(enforced)
     for currency_fact in ("gl_each_occurrence", "total_revenue", "umbrella_limit"):
         assert currency_fact not in enforced

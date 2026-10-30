@@ -182,7 +182,12 @@ def test_check_tier1_is_unchanged(facts, expected):
     # 3.6: one N/A + one missing over a denominator of five is 80, not 83
     ({**FULL_T2, "num_employees": _na(), "years_in_business": None},
      (80, ["Years in business"])),
-    ({k: _na() for k in FULL_T2}, (100, [])),
+    # A person's N/A is no answer for a fact every business has (29 Oct strict
+    # review, `fact_registry.ALWAYS_EXISTS` - TEST updated by the end-user review):
+    # FEIN, revenue, years in business and NAICS stay missing; the other two leave
+    # the denominator.
+    ({k: _na() for k in FULL_T2},
+     (0, ["FEIN / Tax ID", "Annual revenue", "Years in business", "NAICS or SIC industry code"])),
 ])
 def test_check_tier2_is_unchanged(facts, expected):
     facts = dict(facts)

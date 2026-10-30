@@ -1381,6 +1381,14 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
             reason_label = (
                 "Detected as an uploaded ACORD form - generate a clean copy only if needed"
             )
+        # An uploaded, FILLED application form (27 Oct 2026, owner): its values
+        # were read into the package, and form selection PRE-TICKS it so the
+        # regenerated copy carries the package's answers. Certificates (25 / 28)
+        # are a carrier's proof of coverage, never pre-ticked. Selection only -
+        # which forms are recommended does not change.
+        _uploaded_application = _uploaded_this_form and _fi.base_form_id(form_id) not in ("ACORD_25", "ACORD_28")
+        if _uploaded_application:
+            reason_label = "Uploaded as a filled ACORD form - its values were read into this package"
         # A second copy of a form (7 Oct 2026, LAYERS) is scored by its base's
         # rules on its own view of the facts; a plain id is its own base and,
         # for every form without a layer view, the facts are the same object.
@@ -1390,6 +1398,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
         entry: dict = {
             "form_id":        form_id,
             "form_name":      form_name,
+            "uploaded_application_form": bool(_uploaded_application),
             "confidence":     confidence,
             "reason":         reason,
             "trigger_reason": trigger_reason,
@@ -2613,6 +2622,26 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
                        "deterministic boxes only", form_id)
         pre_filled_gpt = {"filled_values": {}, "raw_text_fields": set(),
                           "question_grounding": {}}
+    elif pre_filled_gpt is None:
+        # THE FALLBACK IS SCOPED TOO (27 Oct 2026, v1-20AUG "the per-form
+        # fallback is still unscoped"). No shared answers for this form - the
+        # package's shared pass failed, or it held no question for this form -
+        # used to send the form to `map_facts_to_form`'s own gap fill: the WHOLE
+        # document, every line's pages, and the questions about coverage the
+        # documents do not carry. Instead this form's slice goes through the one
+        # line-scoped door on its own; if that also gives nothing, the form is
+        # stamped deterministically. An error path never prints an unscoped value.
+        try:
+            pre_filled_gpt = (shared_gap_fill(session, [form_id]) or {}).get(form_id)
+        except Exception as _sg_ex:                           # noqa: BLE001
+            logger.warning("process_single_form: %s scoped fallback failed: %s", form_id, _sg_ex)
+            pre_filled_gpt = None
+        if pre_filled_gpt is None:
+            logger.warning("process_single_form: %s has no line-scoped gap-fill answers - "
+                           "deterministic boxes only (never the unscoped per-form fill)",
+                           form_id)
+            pre_filled_gpt = {"filled_values": {}, "raw_text_fields": set(),
+                              "question_grounding": {}}
     # Guard blanks: boxes a post-fill guard emptied because the value was not
     # possible for that box. They are invisible to `evaluate_stops` (which
     # validates FACTS, not stamped VALUES), which is why four consecutive runs
@@ -2631,6 +2660,14 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
         for _g in guard_blanks:
             if isinstance(_g, dict) and _g.get("form_id") in (base_id, "", None):
                 _g["form_id"] = form_id
+    # An uploaded, filled copy of this form: its boxes no fact sits behind print
+    # back in their own boxes (27 Oct 2026, services/acord_intake/carry).
+    try:
+        from services.acord_intake.carry import apply_carried
+        apply_carried(mapped, confidence, session.get("docs") or [], form_id,
+                      facts={**(form_facts or {}), "_form_id": base_id})
+    except Exception as _cx:                                  # noqa: BLE001
+        logger.warning("process_single_form: ACORD carry skipped for %s: %s", form_id, _cx)
 
     hard_stops, soft_stops = run_field_validations(mapped)
     if hard_stops:

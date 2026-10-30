@@ -402,7 +402,9 @@ def test_the_cope_card_asks_each_building_once_and_open_again_takes_it_back(tmp_
     # leaves valuation method and coinsurance) withholds them, and they say so.
     for fact in ("distance_to_hydrant", "fire_department_type"):
         text = listed[f"score:property_integrity:fact:{fact}"]
-        assert text.startswith("Counts once ") or text.endswith(" pts"), text
+        # SCORING_RULES P1 (29 Oct 2026): a listed item always shows a number - "+N pts"
+        # or "under 1 pt" - with its condition, never only "Counts once ...".
+        assert (" pts" in text or "under 1 pt" in text) and not text.startswith("Counts once "), text
     # The table answered the four: asked nowhere any more; the rest still listed.
     assert not set(_COPE_ROWS) & set(o["afterAsked"])
     assert not set(_COPE_ROWS) & set(o["after"])

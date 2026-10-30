@@ -115,8 +115,8 @@ class TestChoiceElectric:
         assert ("Excess (Following Form) Liability | " + TRAV + " | Policy no. not shown | "
                 "01/01/2025 to 01/01/2026 | Limit $4,000,000 each occurrence | Premium $10,692") in text
         assert ("Employment Practices Liability Coverage Part | Federal Insurance Company | "
-                "Policy no. not shown | 01/01/2025 to 01/01/2026 | Premium Missing / Requires "
-                "Confirmation") in text
+                "Policy no. not shown | 01/01/2025 to 01/01/2026 | Limit $1,000,000 aggregate | "
+                "Premium Missing / Requires Confirmation") in text      # its dec's limit (27 Oct)
         assert "$0" not in text
         assert ps._resolve_acord101_box("AdditionalRemark_FormIdentifier_A", f) == "125"
         assert ps._resolve_acord101_box("AdditionalRemark_FormName_A", f) == \
@@ -436,7 +436,11 @@ def test_with_no_years_one_policy_takes_one_row_and_its_fuller_printing():
         {"line": "Commercial Auto", "carrier": "Westgate", "policy_no": "AU-9", "premium": "$4,800",
          "effective": "06/01/2024"},                       # a number kept across renewals: two terms
     ])
-    assert years == []
+    # 30 Oct 2026 (live 8aa8f3ad): an undated printing no longer unkeys the
+    # grid - the dated policies keep their year rows, the undated repeat of
+    # WGM-1-25 is the same policy and is not listed again.
+    assert years == ["2025", "2024"]
+    assert all(e.get("policy_no") != "WGM-1-25" for e in grid.set_aside)
     rows = _rows(grid)
     gl = [v for k, v in rows.items() if k[0] == "GeneralLiability"]
     assert gl == [("General Liability", "WGM-1-25", "$26,900")]

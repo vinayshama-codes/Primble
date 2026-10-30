@@ -369,6 +369,27 @@ def _route_per_location(resolution: dict, facts: dict) -> dict:
 
 # ── The card ─────────────────────────────────────────────────────────────────
 
+# Minimum Viable COPE also checks a premises address (`sqs_service.
+# evaluate_stops`: "missing: locations"), which its window does not show - the
+# address is the location table's. With NO premises anywhere (no address, no
+# location row) the card shows the premises address box (28 Oct 2026 review:
+# "Premises address" answered "None" took its own row off the page, and the
+# hard stop holding 60 then named a box nothing on the page offered).
+_MIN_COPE_CARD_CODES = frozenset({"minimum_viable_cope_missing", "legacy_minimum_viable_cope"})
+_PREMISES_FACT = "locations"
+
+
+def _with_premises_box(code: str, resolution: dict, facts: dict) -> dict:
+    if code not in _MIN_COPE_CARD_CODES:
+        return resolution
+    asked = [str(f) for f in (resolution.get("facts") or []) if f]
+    # Present as the stop reads it (`bool(_fv(facts, "locations"))` - a list
+    # of addresses or a typed one).
+    if _PREMISES_FACT in asked or bool(_value(facts.get(_PREMISES_FACT))) or building_row_count(facts):
+        return resolution
+    return {**resolution, "facts": [_PREMISES_FACT] + asked}
+
+
 def route_cope_resolution(code: Any, resolution: Any, facts: Any) -> Any:
     """The fix a COPE card offers on THIS package (see the module note).
 
@@ -402,6 +423,7 @@ def route_cope_resolution(code: Any, resolution: Any, facts: Any) -> Any:
             return _route_per_location(resolution, facts)
         if code_s not in COPE_CARD_CODES or resolution.get("mode") != "field":
             return resolution
+        resolution = _with_premises_box(code_s, resolution, facts)
         if building_row_count(facts) < 2:
             return resolution
         asked = [str(f) for f in (resolution.get("facts") or []) if f]

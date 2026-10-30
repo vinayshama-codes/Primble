@@ -36,6 +36,7 @@ requires the same.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import re
@@ -392,6 +393,19 @@ def _clean(text: Any) -> str:
 
 
 def canon_line(text: Any) -> Optional[str]:
+    """Cached `_canon_line` for a string (the tables are constants; the scorer and
+    the review plan call it ~90,000 times per pre-form page, 28 Oct)."""
+    if isinstance(text, str):
+        return _canon_line_cached(text)
+    return _canon_line(text)
+
+
+@functools.lru_cache(maxsize=65536)
+def _canon_line_cached(text: str) -> Optional[str]:
+    return _canon_line(text)
+
+
+def _canon_line(text: Any) -> Optional[str]:
     """Which standard line of business a free-text line name denotes, or None.
 
     Resolution order: specific coverage names -> known specialty liability

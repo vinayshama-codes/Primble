@@ -115,6 +115,9 @@ def validate_fein(fein: str) -> Tuple[bool, str]:
     digits = re.sub(r"[\-\s]", "", str(fein))
     if not digits.isdigit() or len(digits) != 9:
         return False, f"FEIN '{fein}' must be exactly 9 digits (XX-XXXXXXX format)"
+    from services.normalization import is_placeholder_fein
+    if is_placeholder_fein(digits):
+        return False, f"FEIN '{fein}' is a placeholder, not a tax ID - enter the real EIN"
     return True, ""
 
 
@@ -287,6 +290,13 @@ def validate_monetary(value: str, label: str = "Amount") -> Tuple[bool, str]:
     if not value:
         return True, ""
     try:
+        from services.display_canonicalizer import too_many_digits
+        if too_many_digits(value):
+            # Past 15 significant digits a float is noise (29 Oct 2026).
+            return False, f"{label} has more than 15 digits - check the number"
+    except ImportError:
+        pass
+    try:
         amt = float(re.sub(r"[^\d.]", "", str(value)))
         if amt < 0:
             return False, f"{label} '{value}' cannot be negative"
@@ -298,6 +308,22 @@ def validate_monetary(value: str, label: str = "Amount") -> Tuple[bool, str]:
 # ---------------------------------------------------------------------------
 # Aggregate validator — called by sqs_service.evaluate_stops()
 # ---------------------------------------------------------------------------
+
+def _scalar_text(facts: dict, key: str) -> str:
+    """A fact's value as the text the format validators read (strict review, 29
+    Oct 2026): a number read off a spreadsheet / an ACORD box / a model reply
+    (an Excel serial date, a revenue 1500000) is its digits; a boolean, a list or
+    a dict is no scalar answer to check - "". The validators call `.strip()`,
+    and one non-string date (`effective_date = 46023`) raised inside the stops,
+    so the package had NO score and no plan at all (the review page showed
+    nothing to fix, R3)."""
+    val = _fv(facts or {}, key)
+    if isinstance(val, bool) or val is None:
+        return ""
+    if isinstance(val, (int, float)):
+        return str(int(val)) if isinstance(val, float) and val.is_integer() else str(val)
+    return val if isinstance(val, str) else ""
+
 
 def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
     """
@@ -323,21 +349,24 @@ def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
         ("contact_phone",   validate_phone),
         ("contact_email",   validate_email_format),
     ]:
-        val = _fv(facts, fn) or ""
+        val = _scalar_text(facts, fn)
         ok, msg = validator(val)
         if not ok:
             soft.append(msg)
 
     # ── FEIN format (soft — advisory, hard stop handled in check_doc_consistency) ──
-    fein = _fv(facts, "fein") or ""
+    # Through the one identifier door (30 Oct 2026): a statement with no digits
+    # ("Applied for") is not a malformed FEIN, and a FEIN a person typed or
+    # confirmed is theirs - never flagged.
+    fein = _scalar_text(facts, "fein")
     if fein:
-        ok, msg = validate_fein(fein)
-        if not ok:
-            soft.append(msg)
+        from services.identifier_checks import _by_person, fein_is_impossible
+        if fein_is_impossible(fein) and not _by_person(facts, "fein"):
+            soft.append(validate_fein(fein)[1])
 
     # ── Date format validation ────────────────────────────────────────────────
-    eff = _fv(facts, "effective_date") or ""
-    exp = _fv(facts, "expiration_date") or ""
+    eff = _scalar_text(facts, "effective_date")
+    exp = _scalar_text(facts, "expiration_date")
 
     if eff:
         ok, msg = validate_date_format(eff, "Effective date")
@@ -372,7 +401,7 @@ def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
         ("coinsurance_percentage", "Coinsurance percentage"),
         ("building_ITV_percentage","Building ITV percentage"),
     ]:
-        val = _fv(facts, field) or ""
+        val = _scalar_text(facts, field)
         if val:
             ok, msg = validate_percent(val, label)
             if not ok:
@@ -391,7 +420,7 @@ def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
         ("auto_liability_limit",    "Auto liability limit"),
         ("business_income_limit",   "Business income limit"),
     ]:
-        val = _fv(facts, field) or ""
+        val = _scalar_text(facts, field)
         if val:
             ok, msg = validate_monetary(val, label)
             if not ok:

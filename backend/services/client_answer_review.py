@@ -143,6 +143,46 @@ def release_superseded_holds(held: Optional[dict], written_keys) -> List[str]:
     return gone
 
 
+_ROW_MOVED = ("The building this answer is about is no longer at that place in the "
+              "location table. Enter it for that building in the location table.")
+
+
+def _parse_building(fact_key: str):
+    try:
+        from services.premises_cope import parse_building_field
+        return parse_building_field(fact_key)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+async def _apply_building_answer(session_id: str, building, entry: dict, value: str):
+    """Write an accepted per-building answer onto ITS building's row, as the
+    producer's choice; re-stamp only that building's boxes. (ok, forms, why)."""
+    from repositories.session_repository import (
+        get_processing_session, upd_processing_session,
+    )
+    from services import premises_cope as _pc
+    from services.premises_interest import row_is_still
+    from services.arq_service import _restamp_building_row, _without_other_prefix
+    fact, position = building
+    session = await get_processing_session(session_id)
+    facts = dict(session.get("facts") or {})
+    if not row_is_still(facts, position, entry):
+        return False, [], _ROW_MOVED
+    typed = _without_other_prefix(value, fact)
+    if not _pc.write_building_answer(facts, fact, position, typed, source="producer"):
+        return False, [], None
+    generated = session.get("generated_forms") or {}
+    touched = _restamp_building_row(generated, facts, position, _pc.PER_BUILDING_COPE[fact],
+                                    label="producer")
+    _pc.derive_package_cope(facts, source="producer")
+    update = {"facts": facts}
+    if touched:
+        update["generated_forms"] = {f: generated[f] for f in touched}
+    await upd_processing_session(session_id, update)
+    return True, touched, None
+
+
 def _strip_hold(container: Optional[dict], fact_key: str) -> Optional[dict]:
     """Remove one key from a held map, returning the remainder (or None)."""
     if not isinstance(container, dict):
@@ -191,11 +231,27 @@ async def resolve_client_answer(
         # building value gets; the hold stays until the producer fixes the box.
         if _refused_by_its_check(fact_key, entry, client_value):
             return {"ok": False, "message": _CANNOT_APPLY}
-        from services.arq_service import apply_producer_answer_to_session
-        ok, updated = await apply_producer_answer_to_session(
-            session_id, fact_key, client_value)
-        if not ok:
-            return {"ok": False, "message": _CANNOT_APPLY}
+        # ONE BUILDING OF SEVERAL (27 Oct 2026, the Z30 open end): a held
+        # "<fact>@locN" answer is a cell of that building's row - written there
+        # only while the row is still the one the question named - and a
+        # PACKAGE building detail on a package with 2+ buildings is never one
+        # package value (the producer doors' rule): it is entered per building.
+        building = _parse_building(fact_key)
+        if building:
+            ok, updated, why = await _apply_building_answer(session_id, building, entry,
+                                                            client_value)
+            if not ok:
+                return {"ok": False, "message": why or _CANNOT_APPLY}
+        else:
+            from services.arq_service import _per_building_hold_reason
+            per_building = _per_building_hold_reason(fact_key, session.get("facts") or {})
+            if per_building:
+                return {"ok": False, "message": per_building}
+            from services.arq_service import apply_producer_answer_to_session
+            ok, updated = await apply_producer_answer_to_session(
+                session_id, fact_key, client_value)
+            if not ok:
+                return {"ok": False, "message": _CANNOT_APPLY}
         applied_forms = list(updated or [])
 
     # Release the hold on BOTH copies, whichever choice was made. Re-read the

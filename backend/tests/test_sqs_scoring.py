@@ -1164,8 +1164,10 @@ def test_tier2_removes_not_applicable_from_the_denominator():
     from services.answer_semantics import build_fact_envelope, interpret_answer
 
     facts = {f: "x" for f in sq.TIER2_FIELDS}
-    facts["fein"] = build_fact_envelope(
-        "fein", interpret_answer("fein", "N/A"), "producer", "filled")
+    # 29 Oct 2026: N/A on a fact every business has is a gap - 3.6 is shown on
+    # the employee count, which can genuinely not apply.
+    facts["num_employees"] = build_fact_envelope(
+        "num_employees", interpret_answer("num_employees", "N/A"), "producer", "filled")
     del facts["years_in_business"]
 
     score, missing = sq.check_tier2(facts, flags={})
@@ -1177,10 +1179,13 @@ def test_tier2_every_field_not_applicable_scores_100_not_zero():
     """Nothing is owed, so nothing is missing - never a divide-by-zero or a 0."""
     from services.answer_semantics import build_fact_envelope, interpret_answer
 
-    facts = {
-        f: build_fact_envelope(f, interpret_answer(f, "N/A"), "producer", "filled")
-        for f in list(sq.TIER2_FIELDS) + ["sic_code"]
-    }
+    from services.fact_registry import always_exists
+    na = [f for f in list(sq.TIER2_FIELDS) + ["sic_code"] if not always_exists(f)]
+    facts = {f: build_fact_envelope(f, interpret_answer(f, "N/A"), "producer", "filled") for f in na}
+    # The facts every business has (29 Oct 2026) cannot be N/A; with them
+    # answered and the rest N/A nothing is owed.
+    facts.update({"fein": "12-3456789", "total_revenue": "1", "years_in_business": "3",
+                  "naics_code": "238210"})
     assert sq.check_tier2(facts, flags={}) == (100, [])
 
 

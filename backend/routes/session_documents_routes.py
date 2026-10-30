@@ -260,7 +260,7 @@ async def add_session_documents(
         if not sem_token:
             raise HTTPException(
                 429,
-                "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+                "Server busy - too many requests at once. Please retry in 30 seconds.",
                 headers={"Retry-After": "30"},
             )
         from services.job_queue import get_job_queue
@@ -272,14 +272,25 @@ async def add_session_documents(
         # A file that reads exactly like a document already in the package (or
         # an earlier file of this upload) is skipped before its extraction call.
         from services.extraction_pipeline import (
-            _display_name_from_path, document_text_key, extract_document,
+            _display_name_from_path, extract_document, stored_text_key,
         )
         from utils.progress_tracker import make_reporter
-        known = {document_text_key(d.get("text")) for d in (session.get("docs") or [])
+        known = {stored_text_key(d) for d in (session.get("docs") or [])
                  if isinstance(d, dict)} - {""}
         names = [_display_name_from_path(p) for p in all_paths]
         reporter = make_reporter(progress_token, current_user["id"], names)
         await reporter.begin()
+        # No ASG pre-submit here (bug hunt, 29 Oct 2026): an added file is checked
+        # against the package's documents only after OCR (`extract_document`'s
+        # duplicate test), and a pre-submit would pay for a file already in it.
+        # Added files are few; each reads its outside ACORD pages in its own turn,
+        # on a page budget of their own (`open_package_budget` - before, an added
+        # file read with no package cap at all).
+        try:
+            from services.acord_intake.transcriber_intake import open_package_budget
+            open_package_budget()
+        except Exception:                                      # noqa: BLE001
+            pass
         for i, path in enumerate(all_paths):
             doc = await extract_document(path, names[i], current_user["id"],
                                          reporter=reporter, index=i,
@@ -289,7 +300,7 @@ async def add_session_documents(
             if doc.get("duplicate"):
                 duplicates.append(doc.get("filename") or names[i])
                 continue
-            known.add(document_text_key(doc.get("text")))
+            known.add(stored_text_key(doc))
             if as_supporting:
                 doc["supporting_only"] = True
             if as_evidence:
@@ -548,3 +559,27 @@ async def add_offered_session_form(
     page.update({"added_form": payload.get("form"),
                  "form_ids": payload.get("selected_form_ids")})
     return JSONResponse(page)
+
+
+@router.get("/api/session/{session_id}/documents/{doc_id}/form-values")
+async def document_form_values(
+    session_id: str,
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Every box ACORD Transcriber read off this document's ACORD pages (29 Oct
+    2026, ASG_TRANSCRIBER.md "Keep everything"), grouped: `used` (a box the
+    reverse map turns into a fact, with what it feeds) and `read` (read from the
+    form - kept, shown, never a fact, never scored). The package's owner only;
+    the values are decrypted for this response alone and never logged."""
+    session = await _owned_session(session_id, current_user)
+    doc = next((d for d in (session.get("docs") or [])
+                if isinstance(d, dict) and str(d.get("doc_id")) == str(doc_id)), None)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    from services.acord_intake.transcriber_intake import form_values
+    values = form_values(doc, session.get("facts") if isinstance(session.get("facts"), dict) else None)
+    if values is None:
+        raise HTTPException(404, "No values read from a form are kept for this document")
+    return JSONResponse({"success": True, "doc_id": doc.get("doc_id"), "filename": doc.get("filename", ""),
+                         **values})

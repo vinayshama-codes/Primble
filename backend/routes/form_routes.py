@@ -1,4 +1,5 @@
 import asyncio
+import json
 import functools
 import logging
 import os
@@ -10,7 +11,7 @@ from fastapi import Request
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query, Form
 from fastapi.responses import JSONResponse, Response
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL, FREE_PACKAGE_LIMIT
@@ -244,7 +245,9 @@ async def _remember_pre_form_score(session_id: str, row: Optional[dict], pkg: An
     `package_sqs`, its history and the delta baseline stay untouched, and once
     `package_sqs` is saved the dashboard reads that first. Only the pre-form
     actions that change the package call this (upload, integrity resolve,
-    reclassify, confirm value); a page view never writes. Never raises."""
+    reclassify, confirm value), every answer (`audit_routes._pre_form_readiness`)
+    and the page load when the copy differs (30 Oct 2026: the dashboard must
+    always print the number the package page prints). Never raises."""
     if not isinstance(row, dict) or row.get("generated_forms"):
         return
     score = pkg.get("package_sqs_score") if isinstance(pkg, dict) else None
@@ -300,6 +303,11 @@ async def _pre_form_status(
         pkg = None
     if remember_score:
         await _remember_pre_form_score(session_id, row, pkg)
+    # What the dashboard now holds - for the invariant check below.
+    _dash = ((row or {}).get("pre_form_score") if not remember_score else
+             ({"package_sqs_score": int(round(float(pkg["package_sqs_score"])))}
+              if isinstance(pkg, dict) and isinstance(pkg.get("package_sqs_score"), (int, float))
+              else None))
     # Recommendations section (Choice Electric #22, 7 Oct 2026): each Best
     # Solutions row a person can answer carries the fix window it opens - the
     # same descriptor (and choices) a card on that fact offers. Adds a key to
@@ -320,13 +328,41 @@ async def _pre_form_status(
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
         kd = None
     # Every number on the screen adds up (15 Oct 2026): the cards' share of
-    # the caps their answers lift, and each key detail's points.
+    # the caps their answers lift, and each key detail's points. After forms
+    # too (29 Oct 2026): the plan is weighed on the stored, credit-bearing
+    # score, so it reads the dismissals behind its credits.
     try:
         from services.sqs_service import complete_screen_shares
-        pkg, kd = complete_screen_shares(row, session_id, str(current_user["id"]), pkg, kd)
+        _credit_rows = await _dismissal_rows_after_forms(session_id, row)
+        pkg, kd = complete_screen_shares(row, session_id, str(current_user["id"]), pkg, kd,
+                                         credit_rows=_credit_rows)
     except Exception as _ex:                                     # noqa: BLE001
         logger.warning(f"pre-form status: screen shares skipped [session={session_id}]: {_ex}")
+    # Runtime invariants (30 Oct 2026): log only, never blocks.
+    try:
+        from services.invariants import log_breaches
+        if isinstance(row, dict) and isinstance(pkg, dict):
+            log_breaches({**row, "facts": facts if facts is not None else row.get("facts"),
+                          "flags": flags if flags is not None else row.get("flags"),
+                          "_page": {"package_sqs": pkg, "saved_pre_form_score": _dash}},
+                         stage="pre_form" if not row.get("generated_forms") else "after_forms",
+                         session_id=session_id)
+    except Exception:                                            # noqa: BLE001
+        pass
     return PreFormStatus(pkg, kd, await _pre_form_dry_run(session_id, facts, flags, row))
+
+
+async def _dismissal_rows_after_forms(session_id: str, row: Optional[dict]) -> Optional[list]:
+    """The dismissal rows behind a stored score's credits - read only once forms
+    exist (before forms no credit is applied, so the plan needs none)."""
+    if not isinstance(row, dict) or not row.get("generated_forms"):
+        return None
+    try:
+        from services.audit_service import get_dismissed_recommendations
+        return await get_dismissed_recommendations(session_id)
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.warning(f"screen points: dismissals not read [session={session_id}]: {_ex}")
+        return None
 
 
 class PreFormStatus(tuple):
@@ -371,6 +407,7 @@ def _grouped_with_package_caps(
     pkg,
     cross_issues=None,
     facts=None,
+    pre_form=None,
 ):
     """Thin delegate - the implementation moved to `issue_registry` on
     2026-09-23 so `audit_routes` rebuilds this screen through the same door.
@@ -379,7 +416,7 @@ def _grouped_with_package_caps(
     from services.issue_registry import grouped_with_package_caps
     return grouped_with_package_caps(
         structured_issues, hard_stops, soft_stops, pkg,
-        cross_issues=cross_issues, facts=facts,
+        cross_issues=cross_issues, facts=facts, pre_form=pre_form,
     )
 
 
@@ -413,7 +450,26 @@ def _doc_summary_entry(d: dict, primary_filename: str = "", insured_status: Opti
         "low_confidence_tokens": d.get("low_confidence_tokens", []),
         "truncation_warning":    d.get("truncation_warning"),
         "insured_status":        insured_status,
+        # ASG Transcriber read this document's ACORD pages (29 Oct 2026): the
+        # Documents list tags it and its values are "please verify".
+        **_reader_fields(d),
     }
+
+
+def _reader_fields(d: dict) -> dict:
+    tr = ((d.get("acord") or {}).get("transcriber") or {}) if isinstance(d.get("acord"), dict) else {}
+    forms = [f for f in (tr.get("forms") or []) if isinstance(f, dict)]
+    # Every box Transcriber returned is kept, encrypted (29 Oct 2026): the
+    # Documents list offers "View values read from the form" when it is there.
+    kept = isinstance(tr.get("elabels_enc"), str) and tr["elabels_enc"].startswith("enc:")
+    if not forms:
+        return {"reader_values": True} if kept else {}
+    accs = [f.get("accuracy") for f in forms if isinstance(f.get("accuracy"), (int, float))]
+    return {"reader": "transcriber",
+            "reader_accuracy": (min(accs) if accs else None),
+            "reader_values": kept,
+            "reader_forms": [{"form_id": f.get("form_id"), "pages": f.get("pages"), "boxes_read": f.get("boxes_read")}
+                             for f in forms]}
 
 
 def _doc_summaries(docs, primary_filename: str = "", integrity: Optional[dict] = None,
@@ -483,6 +539,10 @@ async def _lite_shared_gap_fill(loop, session: dict, form_ids: list) -> dict:
     except Exception as ex:                                   # noqa: BLE001
         logger.error("combined_gap_fill: lite path failed, falling back per-form: %s", ex)
         return {}
+
+
+# Detached background tasks this module starts (see the upload route).
+_BG_TASKS: set = set()
 
 
 async def _bg_lite_generate(session_id: str) -> None:
@@ -605,7 +665,7 @@ async def upload_declaration(
         if not _sem_token:
             raise HTTPException(
                 429,
-                "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+                "Server busy - too many requests at once. Please retry in 30 seconds.",
                 headers={"Retry-After": "30"},
             )
 
@@ -705,7 +765,11 @@ async def upload_declaration(
         if (current_user.get("subscription_tier") == "essentials"
                 and recommendations
                 and not integrity.get("review_required")):
-            asyncio.ensure_future(_bg_lite_generate(sid))
+            # Held by reference: the loop keeps only a weak reference to a task,
+            # so an unreferenced one can be garbage-collected mid-run (27 Oct 2026).
+            _bg_task = asyncio.ensure_future(_bg_lite_generate(sid))
+            _BG_TASKS.add(_bg_task)
+            _bg_task.add_done_callback(_BG_TASKS.discard)
 
         truncation_warnings = [
             {"filename": d["filename"], "warning": d["truncation_warning"]}
@@ -731,7 +795,8 @@ async def upload_declaration(
                                              remember_score=True)
         _pkg_now, _key_now = _status_now
         _grouped_issues = _grouped_with_package_caps(
-            structured_issues, hard_stops, _final_soft_stops, _pkg_now, facts=merged_facts)
+            structured_issues, hard_stops, _final_soft_stops, _pkg_now, facts=merged_facts,
+            pre_form=True)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -985,6 +1050,7 @@ async def submission_integrity_resolve(
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
         _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
+        pre_form=True,
     )
     return JSONResponse({
         "success": True,
@@ -1147,6 +1213,7 @@ async def document_reclassify(
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
         _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
+        pre_form=True,
     )
 
     return JSONResponse({
@@ -1315,6 +1382,7 @@ async def underwriting_confirm_value(
     _grouped_issues = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
         _final_soft_stops, _pkg_now, facts=result.get("merged_facts") or {},
+        pre_form=True,
     )
     return JSONResponse({
         "success": True,
@@ -1933,6 +2001,13 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             session.get("facts") or {}, session.get("underwriting_confirmations") or {},
         )
 
+        # Runtime invariants (30 Oct 2026): log only, never blocks.
+        try:
+            from services.invariants import log_breaches
+            log_breaches({**session, "generated_forms": results, "package_sqs": package_sqs},
+                         stage="generation", session_id=req.session_id)
+        except Exception:                                        # noqa: BLE001
+            pass
         await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
 
         return JSONResponse({
@@ -1991,6 +2066,20 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     if not form_ids:
         raise HTTPException(400, "No recommended forms found in session.")
 
+    # An ARCHIVED package is read-only (services/package_archive.py), and this
+    # route runs on every visit to the Essentials score screen - so it serves
+    # the score stored at the last generation and writes nothing (review R3,
+    # 27 Oct 2026: the guard's 409 had left the read-only view with "Could not
+    # score submission"). Nothing stored = nothing to show: the archive's 409.
+    from services.package_archive import is_archived as _is_archived, archived_http_error
+    if _is_archived(session):
+        _stored = session.get("generated_forms") or {}
+        _order = [f for f in (session.get("selected_form_ids") or form_ids) if f in _stored]
+        _stored_forms = {f: _stored[f] for f in _order[:1] if isinstance(_stored[f], dict)}
+        if not _stored_forms:
+            raise archived_http_error()
+        return _lite_score_response(session, _stored_forms, session.get("package_sqs") or {})
+
     results = {}
     loop = asyncio.get_event_loop()
     # The ONE generation door - see `_bg_lite_generate`.
@@ -2045,6 +2134,14 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         from services.usage_service import count_session_usage
         await count_session_usage(str(current_user["id"]), session_id)
 
+    _pkg = (await get_processing_session(session_id)).get("package_sqs") or {}
+    return _lite_score_response(session, results, _pkg)
+
+
+def _lite_score_response(session: dict, results: dict, _pkg: dict) -> JSONResponse:
+    """The Essentials score screen's payload, from the generated forms and the
+    stored package score (fresh after a generation, or as stored on an
+    archived package)."""
     sqs_list  = [r["sqs"] for r in results.values() if r.get("sqs")]
     first_sqs = sqs_list[0] if sqs_list else {}
     # The submission's OWN score, never an average of the per-form scores.
@@ -2052,7 +2149,6 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     # agree - but it pasted an averaged number over the FIRST form's tier and
     # breakdown, which becomes silently wrong the moment that cap is lifted.
     # Reading the stored package score keeps every surface on one number.
-    _pkg = (await get_processing_session(session_id)).get("package_sqs") or {}
     if _pkg.get("package_sqs_score") is not None:
         _sqs_payload = {
             **first_sqs,
@@ -2436,7 +2532,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     if not _sem_token:
         raise HTTPException(
             429,
-            "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+            "Server busy - too many requests at once. Please retry in 30 seconds.",
             headers={"Retry-After": "30"},
         )
 
@@ -2558,6 +2654,30 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                             _box_withdrew.add(pdf_field)
                         break
                     val_str = _box_val
+                    # A NAME BOX TAKES A NAME (27 Oct 2026, Lane B item 3): the
+                    # person-answer door's own reading. "Same as above", "FIO",
+                    # "Owner" or "TBD" typed into a name box stays on this box
+                    # and never becomes the package's party name (every form
+                    # printing it would follow); an absence ("N/A", "none")
+                    # clears the name, as a typed "None" always has.
+                    if val_str and val_str not in ("null", "None"):
+                        try:
+                            from services.normalization import is_party_name_fact as _is_name_fact
+                            if _is_name_fact(fact_key):
+                                from services.answer_semantics import (
+                                    VALUE as _AS_VALUE, interpret_answer as _as_interpret,
+                                )
+                                _name_reading = _as_interpret(fact_key, val_str)
+                                if not _name_reading.accepted:
+                                    logger.info("update_pdf: %s on %s is no name (%s) - "
+                                                "the box keeps it, the fact does not",
+                                                pdf_field, form_id, _name_reading.reason)
+                                    break
+                                if _name_reading.intent != _AS_VALUE:
+                                    val_str = ""
+                        except Exception as _nx:                          # noqa: BLE001
+                            logger.warning("update_pdf: name check skipped for %s: %s",
+                                           pdf_field, _nx)
                     _touched_fact_keys.add(fact_key)
                     # E&O 5.9 (2026-08-26): a producer edit keeps a provenance
                     # ENVELOPE, never a bare string. The bare string destroyed
@@ -3180,6 +3300,7 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     # sent - so it is where the producer's decision list belongs. Empty list =
     # the section stays hidden.
     from services.client_answer_review import build_review_rows as _car_rows
+    from services.package_archive import archive_fields as _archive_fields
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "client_answer_review": _car_rows(proc_session),
                          "cross_issues": _cross,
@@ -3204,10 +3325,131 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                          "generation_state": gen_state,
                          "form_order": form_order,
                          "active_form_id": active_form_id,
+                         # 27 Oct 2026: an archived package opens read-only
+                         # (services/package_archive.py).
+                         **_archive_fields(proc_session),
                          # 5 Oct 2026: the editor's Data Consistency section
                          # (confirm-value-in-editor). A direct reopen of the
                          # editor never loaded the picker's state.
                          "underwriting_consistency": proc_session.get("underwriting_consistency") or {}})
+
+
+def screen_points_after_forms(row: dict, session_id: str, user_id: str,
+                              credit_rows: Optional[list] = None) -> dict:
+    """THE SIDE PANEL'S NUMBERS AFTER FORMS (owner, 29 Oct 2026: "the points
+    shown on items always add up to exactly 100 - score, after forms are
+    generated too"). The stored package score with the review page's one plan
+    on it (`sqs_service.complete_screen_shares`, weighed with the
+    post-generation stops and the score's own credits), the key details it
+    weighs, and the cards it weighs (`review_page_grouped_view(after_forms=True)`)
+    so each listed item opens its own fix window. Pure and synchronous - the
+    route runs it off the event loop. Never raises."""
+    from services.review_recommendations import with_fix_routes
+    from services.sqs_service import complete_screen_shares, review_page_grouped_view
+    facts = row.get("facts") or {}
+    flags = row.get("flags") or {}
+    _integ = row.get("integrity")
+    if isinstance(_integ, dict) and _integ.get("review_required"):
+        return {"package_sqs": None, "key_details": None, "grouped_issues": None}
+    try:
+        pkg = current_package_sqs(row, session_id, user_id)
+        pkg = with_fix_routes(pkg, facts)
+        kd = key_details(facts, flags)
+        pkg, kd = complete_screen_shares(row, session_id, user_id, pkg, kd, credit_rows=credit_rows)
+        grouped = (review_page_grouped_view(row, pkg, after_forms=bool(row.get("generated_forms")))
+                   if isinstance(pkg, dict) else None)
+        return {"package_sqs": pkg, "key_details": kd, "grouped_issues": grouped}
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.error(f"screen points unavailable [session={session_id}]: {_ex}", exc_info=True)
+        return {"package_sqs": None, "key_details": None, "grouped_issues": None}
+
+
+@router.get("/api/session/{session_id}/screen-points")
+async def get_screen_points(session_id: str, current_user: dict = Depends(get_current_user)):
+    """The editor's side panel asks for its numbers here once forms exist: every
+    post-generation reply carries the stored score without the plan (weighing
+    it takes seconds, and a box save must stay quick), so the panel reads it
+    after the score settles. Read-only; writes nothing."""
+    row = await get_processing_session(session_id)
+    if str(row.get("user_id") or "") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
+    credit_rows = await _dismissal_rows_after_forms(session_id, row)
+    out = await _screen_points_once(row, session_id, str(current_user["id"]), credit_rows)
+    return JSONResponse({"success": out.get("package_sqs") is not None, "session_id": session_id,
+                         "after_forms": bool(row.get("generated_forms")), **out})
+
+
+# The plan weighs for seconds (~6 s CPU on a five-form package) and the editor
+# asks again after every box save. Production review, 29 Oct 2026: no cache, no
+# coalescing and the shared default thread pool - ten quick saves queued a minute
+# of CPU for one user and starved every other request's `to_thread`. Now: the
+# answer is kept per session against a fingerprint of EVERYTHING it reads (the
+# whole stored row + the credit rows - any change misses), one run per session
+# at a time (a second request for the same state waits and reuses it), and at
+# most `_SCREEN_POINTS_WORKERS` plans run at once across the server.
+_SCREEN_POINTS_WORKERS = max(1, int(os.getenv("SCREEN_POINTS_WORKERS", "2") or 2))
+_SCREEN_POINTS_KEEP = 128
+_SCREEN_POINTS_CACHE: "Dict[str, Tuple[str, dict]]" = {}
+_SCREEN_POINTS_LOCKS: "Dict[str, asyncio.Lock]" = {}
+_SCREEN_POINTS_SEM: "Optional[asyncio.Semaphore]" = None
+
+
+def _screen_points_fingerprint(row: dict, user_id: str, credit_rows: Optional[list]) -> str:
+    import hashlib
+    body = json.dumps({"row": row, "user": user_id, "credits": credit_rows},
+                      sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()
+
+
+def _lock_is_idle(lock: "asyncio.Lock") -> bool:
+    """Nobody holds it and nobody waits for it. A released lock whose next
+    waiter has not run yet reads `locked() == False` with that waiter still
+    queued - dropping it then would let a third request build a fresh lock and
+    run beside the waiter, breaking the one-run-per-session guarantee."""
+    if lock.locked():
+        return False
+    # A woken waiter's future is already done but it has not taken the lock
+    # yet, so ANY queued future (done or not) keeps the lock.
+    return not getattr(lock, "_waiters", None)
+
+
+def _prune_screen_points_locks(keep_sid: str) -> None:
+    """Bound `_SCREEN_POINTS_LOCKS` (strict review, 29 Oct 2026): one lock per
+    session ever seen, never pruned, grew without limit. Past
+    `4 * _SCREEN_POINTS_KEEP` entries every IDLE lock but `keep_sid`'s is
+    dropped - a busy one stays, so single flight holds. Synchronous on
+    purpose: no await between the caller's `setdefault` and its acquire."""
+    if len(_SCREEN_POINTS_LOCKS) <= 4 * _SCREEN_POINTS_KEEP:
+        return
+    for sid in [k for k, v in _SCREEN_POINTS_LOCKS.items()
+                if k != keep_sid and _lock_is_idle(v)]:
+        _SCREEN_POINTS_LOCKS.pop(sid, None)
+
+
+async def _screen_points_once(row: dict, session_id: str, user_id: str,
+                              credit_rows: Optional[list]) -> dict:
+    global _SCREEN_POINTS_SEM
+    try:
+        key = await asyncio.to_thread(_screen_points_fingerprint, row, user_id, credit_rows)
+    except Exception:                                          # noqa: BLE001
+        key = ""
+    lock = _SCREEN_POINTS_LOCKS.setdefault(session_id, asyncio.Lock())
+    _prune_screen_points_locks(session_id)
+    async with lock:
+        hit = _SCREEN_POINTS_CACHE.get(session_id)
+        if key and hit and hit[0] == key:
+            return hit[1]
+        if _SCREEN_POINTS_SEM is None:
+            _SCREEN_POINTS_SEM = asyncio.Semaphore(_SCREEN_POINTS_WORKERS)
+        async with _SCREEN_POINTS_SEM:
+            out = await asyncio.to_thread(screen_points_after_forms, row, session_id, user_id, credit_rows)
+        if key and out.get("package_sqs") is not None:
+            _SCREEN_POINTS_CACHE.pop(session_id, None)
+            _SCREEN_POINTS_CACHE[session_id] = (key, out)
+            while len(_SCREEN_POINTS_CACHE) > _SCREEN_POINTS_KEEP:
+                _SCREEN_POINTS_CACHE.pop(next(iter(_SCREEN_POINTS_CACHE)))
+        return out
 
 
 @router.post("/api/session/{session_id}/active-form")
@@ -3238,6 +3480,14 @@ async def get_extraction_result(
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    # A Data Consistency assessment stored under older rules is re-assessed
+    # here, once, from the stored documents / facts / picks (29 Oct 2026) - so
+    # a deploy's rule change never shows up as "new" conflicts on a confirm.
+    try:
+        from services.underwriting_consistency import refresh_stale_assessment
+        proc_session = await refresh_stale_assessment(session_id, proc_session)
+    except Exception as _rx:                                     # noqa: BLE001
+        logger.warning(f"extraction-result: stale assessment check skipped [session={session_id}]: {_rx}")
 
     docs        = proc_session.get("docs", [])
     primary_doc = proc_session.get("primary_doc", "")
@@ -3252,6 +3502,7 @@ async def get_extraction_result(
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = proc_session.get("soft_stops", [])
     _cross_shown = proc_session.get("cross_issues_last") or []
+    _live_stops = False
     # Before forms the page draws the stops AS THEY STAND (24 Oct 2026) - the
     # same door the score and its plan read (`stops_now`), never the stored
     # display copy, which a reload of an older row would show without a card
@@ -3263,6 +3514,7 @@ async def get_extraction_result(
             hard_stops = list(_st_live.get("hard") or [])
             _final_soft_stops = list(_st_live.get("soft") or [])
             _cross_shown = list(_st_live.get("cross_issues") or [])
+            _live_stops = True
         except Exception as _sx:                                 # noqa: BLE001
             logger.warning(f"extraction-result: live stops not read [session={session_id}]: {_sx}")
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
@@ -3273,19 +3525,36 @@ async def get_extraction_result(
     # V1 H2: the score so far + key details. The row is already loaded; once
     # forms exist this returns the persisted, credit-bearing score. Scored
     # BEFORE the grouped view - see _grouped_with_package_caps.
+    # The page load also keeps the dashboard's copy equal to the number shown
+    # (owner, 30 Oct 2026: "at any point the package's score is x, the dashboard
+    # shows x"). A pre-form score can move with no write - the date rolls a
+    # term forward, a loss run ages past 90 days - and only the view sees it.
+    # Writes only when the copy differs, only the display key, never after forms.
     _status_now = await _pre_form_status(
         session_id, proc_session.get("facts") or {}, mflags, integrity,
-        current_user, session_row=proc_session,
+        current_user, session_row=proc_session, remember_score=True,
     )
     _pkg_now, _key_now = _status_now
+    from services.issue_registry import structured_as_they_stand, with_live_conflict_issues
+    _stored_structured = proc_session.get("structured_issues") or []
+    # Live stops: the stored cards as those stops see them (retired / added -
+    # `structured_as_they_stand`); stored stops: only the missing live cards.
     _grouped_issues = _grouped_with_package_caps(
-        proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
+        (structured_as_they_stand(_stored_structured, proc_session, hard_stops,
+                                  _final_soft_stops, _cross_shown) if _live_stops
+         else with_live_conflict_issues(_stored_structured, proc_session,
+                                        hard_stops, _final_soft_stops)),
+        hard_stops, _final_soft_stops,
         _pkg_now, cross_issues=_cross_shown,
         facts=proc_session.get("facts") or {},
+        pre_form=not proc_session.get("generated_forms"),
     )
+    from services.package_archive import archive_fields as _archive_fields
     return JSONResponse({
         "success":               True,
         "session_id":            session_id,
+        # 27 Oct 2026: an archived package opens read-only.
+        **_archive_fields(proc_session),
         "doc_summary":           doc_summary,
         "available_doc_types":   [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
         "primary_doc":           primary_doc,
@@ -3446,6 +3715,7 @@ async def list_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
     search: str = Query(None, max_length=100),
+    archived: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
     if (current_user.get("payment_status") or "ok") == "archived":
@@ -3454,14 +3724,18 @@ async def list_sessions(
     uid      = str(current_user["id"])
     offset   = (page - 1) * page_size
     kw       = (search or "").strip() or None
-    sessions = await list_sessions_for_user(uid, limit=page_size, offset=offset, search=kw)
-    total    = await count_sessions_for_user(uid, search=kw)
+    # `archived` (27 Oct 2026): the dashboard's Archived filter. The main list
+    # holds active packages only (services/package_archive.py).
+    sessions = await list_sessions_for_user(uid, limit=page_size, offset=offset, search=kw,
+                                            archived=archived)
+    total    = await count_sessions_for_user(uid, search=kw, archived=archived)
     return JSONResponse({
         "success":   True,
         "sessions":  sessions,
         "total":     total,
         "page":      page,
         "page_size": page_size,
+        "archived":  archived,
     })
 
 
@@ -3486,6 +3760,14 @@ async def delete_session(session_id: str, current_user: dict = Depends(get_curre
                 "DELETE FROM signature_requests WHERE session_id = $1 AND user_id = $2",
                 session_id, str(current_user["id"]),
             )
+            # The package's fact lineage goes with it (services/fact_history.py).
+            # Best-effort: a store not yet created never fails the delete.
+            try:
+                await conn.execute(
+                    "DELETE FROM fact_lineage WHERE session_id = $1", session_id
+                )
+            except Exception as ex:                            # noqa: BLE001
+                logger.warning("delete_session: lineage not deleted for %s: %s", session_id, ex)
     return JSONResponse({"success": True})
 
 

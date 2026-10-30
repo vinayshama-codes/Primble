@@ -26,3 +26,16 @@ export function withAnchorForm(ticks, recommendations, declined) {
 export function checkedFormsForReview(ticks, touched) {
   return touched ? [...(ticks || [])] : [];
 }
+
+// An uploaded, FILLED application form (27 Oct 2026, owner) is pre-ticked once,
+// on the first arrival at form selection; an untick the producer makes stays.
+// Certificates (ACORD 25 / 28) are never flagged by the backend.
+export function withUploadedForms(ticks, recommendations, touched) {
+  const set = ticks instanceof Set ? ticks : new Set(ticks || []);
+  if (touched) return set;
+  const uploaded = (recommendations || []).filter((r) => r && r.uploaded_application_form);
+  if (!uploaded.length) return set;
+  const next = new Set(set);
+  uploaded.forEach((r) => next.add(r.form_id));
+  return next;
+}

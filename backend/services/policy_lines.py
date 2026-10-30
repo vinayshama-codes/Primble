@@ -945,8 +945,10 @@ def carry_and_apply(merged: Any, flags: Optional[dict], docs: Any,
     no-op."""
     if not isinstance(merged, dict):
         return {}
-    if STORE_KEY not in merged and isinstance(prior_facts, dict) \
-            and isinstance(prior_facts.get(STORE_KEY), dict):
+    # The session's own store wins: the merge may hold one restored from a
+    # re-uploaded form's Primble record (27 Oct 2026), and an edit the producer
+    # made since is newer than that record.
+    if isinstance(prior_facts, dict) and isinstance(prior_facts.get(STORE_KEY), dict):
         merged[STORE_KEY] = copy.deepcopy(prior_facts[STORE_KEY])
     if not store_has_content(read_store(merged)):
         return {}
@@ -1152,6 +1154,98 @@ def _umbrella_layer_parts(facts: Any, recs: List[dict]) -> Dict[str, List[dict]]
     return out
 
 
+# ── A line with no limit FACT: its own declarations' limits (27 Oct 2026) ────
+# Z41 / Z28: ACORD 101's expiring-policy schedule printed Inland Marine, Crime
+# and EPL with no limit, because a line's limit was read from its limit FACTS
+# only and most lines have none (no `inland_marine_limit`, no `epl_limit`): the
+# EPL dec's "(A) Aggregate Limit of Liability: $1,000,000" reached the verified
+# declarations index and stopped there. A line family with NO limit fact of
+# its own (inland marine, EPL, D&O, liquor, ...) reads its limits off the
+# VERIFIED index (`dec_page_entries`): an entry whose own line canons
+# to the family, whose label names a limit and no premium / deductible /
+# retention, whose value is one amount - and never a label the family's
+# entries print with two different amounts (whose is it? C23's question).
+# The lines with limit facts (GL, auto, WC, umbrella the merge settles; crime
+# and cyber, which extraction reads as one fact) keep their facts only - a
+# stated "Included" stays a blank cell. Stored at the merge (`DEC_LINE_LIMITS_KEY`, beside the auto
+# liability reading) because production purges the index after generation.
+DEC_LINE_LIMITS_KEY = "_line_dec_limits"
+_DEC_LIMIT_LABEL_RE = re.compile(
+    r"\b(?:limits?|aggregate|each\s+(?:claim|occurrence|loss|accident)|"
+    r"per\s+(?:claim|occurrence|loss))\b", re.I)
+_DEC_NOT_A_LIMIT_RE = re.compile(
+    r"\b(?:premiums?|deductibles?|retentions?|s\.?i\.?r|self[\s-]*insured|rates?|charges?|"
+    r"fees?|tax(?:es)?|surcharges?|payroll|sales|receipts|exposures?|coinsurance|"
+    r"shared\s+with|sublimit)\b", re.I)
+_SETTLED_LIMIT_FAMILIES = frozenset({"general_liab", "auto", "workers_comp", UMBRELLA_FAMILY})
+
+
+def _dec_limit_label(label: str) -> str:
+    text = re.sub(r"^\s*(?:item|section|part)\s+[0-9ivx]+[a-z0-9.]*\s*[.:\-]?\s*", "",
+                  str(label or ""), flags=re.I)        # "Item 3." is the dec's numbering
+    text = re.sub(r"\(\s*[a-z0-9]\s*\)", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:limits?\s+of\s+(?:liability|insurance)|limits?|of\s+liability)\b",
+                  " ", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" -:;,.").lower()
+    return text or "limit"
+
+
+def dec_line_limits(facts: Any) -> Dict[str, List[dict]]:
+    """{line family: [{"label", "amount", "policy_number"}]} read off the
+    verified declarations index (see above); the stored reading once the index
+    is purged. Never raises."""
+    try:
+        entries = _fv(facts, "dec_page_entries")
+        if not isinstance(entries, list):
+            held = (facts or {}).get(DEC_LINE_LIMITS_KEY) if isinstance(facts, dict) else None
+            return held if isinstance(held, dict) else {}
+        from services.lob_canon import canon_line
+        seen: Dict[Tuple[str, str], set] = {}
+        found: Dict[str, List[dict]] = {}
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            fam = canon_line(str(e.get("line_of_business") or ""))
+            label = str(e.get("label") or "")
+            if (not fam or fam in _SETTLED_LIMIT_FAMILIES or not _DEC_LIMIT_LABEL_RE.search(label)
+                    or _DEC_NOT_A_LIMIT_RE.search(label)):
+                continue
+            amount = _amount_text(e.get("value"))
+            if not amount:
+                continue
+            key = (fam, _dec_limit_label(label))
+            seen.setdefault(key, set()).add(amount)
+            found.setdefault(fam, []).append({"label": key[1], "amount": amount,
+                                              "policy_number": _clean_text(e.get("policy_number"))})
+        out: Dict[str, List[dict]] = {}
+        for fam, parts in found.items():
+            kept: List[dict] = []
+            for p in parts:
+                if len(seen[(fam, p["label"])]) != 1:
+                    continue                  # one label, two amounts: whose is it?
+                if not any(k["label"] == p["label"] for k in kept):
+                    kept.append(p)
+            if kept:
+                out[fam] = kept
+        return out
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("policy_lines: declarations limits skipped - %s", exc)
+        return {}
+
+
+def _dec_parts(facts: Any, fam: str, rec: dict) -> List[dict]:
+    """A record's limits from its line's declarations entries - never an
+    entry printed under ANOTHER policy number than the record's."""
+    own = _clean_text(rec.get("policy_number")).lower()
+    out = []
+    for p in dec_line_limits(facts).get(fam) or []:
+        num = str(p.get("policy_number") or "").lower()
+        if own and num and re.sub(r"[^a-z0-9]", "", num) != re.sub(r"[^a-z0-9]", "", own):
+            continue
+        out.append({"label": p["label"], "amount": p["amount"]})
+    return out
+
+
 def record_limits(facts: Any, recs: List[dict]) -> Dict[str, List[dict]]:
     """{record id: [{"label", "amount"}]} - each policy's own limit, [] when
     unknown. See the block comment above. Never raises."""
@@ -1165,7 +1259,14 @@ def record_limits(facts: Any, recs: List[dict]) -> Dict[str, List[dict]]:
             if fam == UMBRELLA_FAMILY:
                 continue
             if len(members) != 1 or members[0].get("producer_added"):
-                continue                      # whose is the line's fact? nobody can say
+                # Whose is the line's fact? Nobody can say. A declarations
+                # entry is a DOCUMENT's: a line the producer added beside the
+                # one document policy leaves it that policy's.
+                doc_members = [m for m in members if not m.get("producer_added")]
+                if (len(doc_members) == 1 and fam not in _SETTLED_LIMIT_FAMILIES
+                        and fam not in _LINE_LIMIT_PARTS):
+                    out[str(doc_members[0].get("id"))] = _dec_parts(facts, fam, doc_members[0])
+                continue
             if fam == "auto":
                 parts = _auto_parts(facts)
             elif fam == "workers_comp":
@@ -1174,6 +1275,8 @@ def record_limits(facts: Any, recs: List[dict]) -> Dict[str, List[dict]]:
                 parts = _parts_from(facts, _LINE_LIMIT_PARTS[fam])
             else:
                 parts = []
+            if not parts and fam not in _SETTLED_LIMIT_FAMILIES and fam not in _LINE_LIMIT_PARTS:
+                parts = _dec_parts(facts, fam, members[0])
             out[str(members[0].get("id"))] = parts
         out.update(_umbrella_layer_parts(facts, recs))
         for r in recs:
@@ -1533,7 +1636,7 @@ def restamp_nonfillable_boxes(generated: dict, before: dict, after: dict,
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("policy_lines: non-fillable re-stamp unavailable - %s", exc)
         return []
-    people = ("producer", "client_arq")
+    from services.fact_state import PERSON_BOX_LABELS as people   # a person's box
     touched: List[str] = []
     for fid, form in (generated or {}).items():
         if not isinstance(form, dict):
@@ -1605,6 +1708,7 @@ def label_producer_boxes(generated: dict, states_before: Dict[str, dict],
     mine = set(values) if values is not None else producer_values(facts_after)
     if not mine:
         return []
+    from services.fact_state import typed_box
     touched: List[str] = []
     for fid, form in (generated or {}).items():
         if not isinstance(form, dict):
@@ -1617,7 +1721,7 @@ def label_producer_boxes(generated: dict, states_before: Dict[str, dict],
         for box, val in state.items():
             if _box_norm(val) == _box_norm(before.get(box)) or not str(val or "").strip():
                 continue
-            if conf.get(box) in ("producer", "client_arq"):
+            if typed_box(conf.get(box)):                     # a person's box
                 continue
             if _value_keys(val) & mine:
                 conf[box] = label

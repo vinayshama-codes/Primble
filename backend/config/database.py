@@ -70,12 +70,22 @@ async def create_pool() -> None:
 
 
 # ASYNC-SAFE
-async def close_pool() -> None:
+async def close_pool(timeout: float = 10.0) -> None:
+    """Close the pool, waiting at most `timeout` seconds for connections still
+    held. `Pool.close()` waits for EVERY connection to be released, with no
+    limit - a detached task (the after-forms document reading, a background
+    generation) still holding one kept shutdown waiting with it (27 Oct 2026).
+    Past the limit the remaining connections are terminated."""
     global _pool
     if _pool is not None:
-        await _pool.close()
-        _pool = None
-        logger.info("asyncpg pool closed")
+        import asyncio
+        pool, _pool = _pool, None
+        try:
+            await asyncio.wait_for(pool.close(), timeout=timeout)
+            logger.info("asyncpg pool closed")
+        except asyncio.TimeoutError:
+            logger.warning("asyncpg pool: connections still held after %.0fs - terminated", timeout)
+            pool.terminate()
 
 
 def get_pool() -> asyncpg.Pool:
@@ -389,6 +399,84 @@ async def init_db() -> None:
             )
         """)
 
+        # E&O fact lineage (Brent's V2 list, 27 Oct 2026; services/fact_history.py).
+        # Append-only: one row per change of one fact on one package, written by
+        # the two facts write doors in session_repository inside their own
+        # transaction. from_value / to_value / sources are Fernet ciphertext
+        # (utils.crypto) - the same PII class as processing_sessions.facts. The
+        # only later change to a row is the retention purge of its values
+        # (values_purged); rows go with their package.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS fact_lineage (
+                id             TEXT PRIMARY KEY,
+                session_id     TEXT NOT NULL,
+                user_id        TEXT,
+                fact_key       TEXT NOT NULL,
+                change_type    TEXT NOT NULL,
+                kind           TEXT NOT NULL,
+                from_value     TEXT,
+                to_value       TEXT,
+                from_source    TEXT,
+                to_source      TEXT,
+                confidence     TEXT,
+                evidence_state TEXT,
+                sources        TEXT,
+                actor_type     TEXT,
+                actor_id       TEXT,
+                action         TEXT,
+                write_id       TEXT,
+                ordinal        INTEGER DEFAULT 0,
+                values_purged  BOOLEAN DEFAULT FALSE,
+                created_at     TEXT NOT NULL
+            )
+        """)
+
+        # ASG Transcriber (29 Oct 2026, ASG_TRANSCRIBER.md): the per-file result
+        # cache (body field-encrypted) and the per-day page counter the client
+        # checks against TRANSCRIBER_DAILY_PAGE_CAP - usage is metered per page.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcriber_results (
+                content_hash TEXT NOT NULL,
+                env          TEXT NOT NULL,
+                request_id   TEXT,
+                form_numbers TEXT,
+                pages        INTEGER DEFAULT 0,
+                body         TEXT,
+                created_at   TEXT NOT NULL,
+                PRIMARY KEY (content_hash, env)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcriber_usage (
+                day      TEXT NOT NULL,
+                env      TEXT NOT NULL,
+                pages    INTEGER DEFAULT 0,
+                requests INTEGER DEFAULT 0,
+                PRIMARY KEY (day, env)
+            )
+        """)
+
+        # The client questionnaire's Form Assistant, one row per use (Brent's
+        # V2 list "ARQ Bot usage tracking"; services/arq_assistant_usage.py).
+        # Counts only - the client's message and the reply are never stored.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS arq_assistant_usage (
+                id                TEXT PRIMARY KEY,
+                arq_id            TEXT NOT NULL,
+                session_id        TEXT,
+                user_id           TEXT,
+                field_name        TEXT,
+                outcome           TEXT NOT NULL,
+                detail            TEXT,
+                model             TEXT,
+                prompt_tokens     INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                cached_tokens     INTEGER DEFAULT 0,
+                latency_ms        INTEGER DEFAULT 0,
+                created_at        TEXT NOT NULL
+            )
+        """)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS processed_webhook_events (
                 event_id     TEXT PRIMARY KEY,
@@ -396,6 +484,25 @@ async def init_db() -> None:
                 processed_at TEXT NOT NULL
             )
         """)
+
+        # The answers a person typed that the deterministic readers could not
+        # read (CLAUDE.md "GAP 2"; services/unread_answers.py). One counter per
+        # phrasing; the raw answer is never stored - only its SHAPE (digits,
+        # e-mails and IDs taken out), encrypted, keyed by a SHA-256 digest.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS answer_fallthroughs (
+                shape_hash  TEXT PRIMARY KEY,
+                fact_key    TEXT NOT NULL,
+                kind        TEXT NOT NULL,
+                shape_enc   TEXT NOT NULL,
+                seen_count  INTEGER NOT NULL DEFAULT 0,
+                first_seen  TEXT NOT NULL,
+                last_seen   TEXT NOT NULL
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_answer_fallthroughs_fact "
+            "ON answer_fallthroughs (fact_key, seen_count DESC)")
 
         for stmt in [
             "ALTER TABLE session_pdf_bytes ADD COLUMN IF NOT EXISTS s3_key TEXT",
@@ -449,6 +556,12 @@ async def init_db() -> None:
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_activity_user_created ON activity_events(user_id, created_at DESC)",
             # Receipt lookup is always "the receipt for this questionnaire".
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arq_receipts_arq ON arq_receipts(arq_id)",
+            # Lineage is read per package (the E&O record) and per fact (History).
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_lineage_session ON fact_lineage(session_id, created_at)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_lineage_fact ON fact_lineage(session_id, fact_key)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arq_assistant_usage_arq ON arq_assistant_usage(arq_id)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arq_assistant_usage_session ON arq_assistant_usage(session_id)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arq_assistant_usage_created ON arq_assistant_usage(created_at)",
         ]:
             try:
                 await conn.execute(idx_stmt)

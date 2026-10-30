@@ -35,7 +35,16 @@ THE MODEL (one door):
      plan lists every step it will take).
 
 Pure: reads the session ROW and the fresh package score, never writes, never
-calls a model. Before forms only - after forms the editor keeps its own numbers.
+calls a model.
+
+AFTER FORMS TOO (owner, 29 Oct 2026: "the points shown on items always add up
+to exactly 100 - score, after forms are generated too"). Once forms exist the
+stops are the post-generation ones (`stops_now(pre_form=False)`, scoped to the
+selected + generated forms, as `arq_service.recalculate_session_scores` scores
+them) and the number on screen is the stored, credit-bearing package score: a
+dismissal credit still in force is added on every copy and retires on the copy
+the moment its field is answered (`audit_service.credits_in_force`), exactly as
+the recalculation does. Before forms nothing changes.
 """
 
 from __future__ import annotations
@@ -77,7 +86,7 @@ _COLUMN_PROBES: Dict[str, str] = {
 }
 _COLUMN_NAME_PROBES: Dict[str, str] = {
     "name": "Probe Person", "description": _NEUTRAL_TEXT, "classification": _NEUTRAL_TEXT,
-    "location": "001", "line_of_business": "General Liability",
+    "location": "001", "line_of_business": "General Liability", "zip": "80202",
 }
 
 
@@ -159,6 +168,81 @@ def _accepts(fact: str, value: Any) -> bool:
         return True
 
 
+# DATES ARE PROBED AS A PERSON WOULD ANSWER THEM (27 Oct 2026, random-package
+# solver): every date box took "01/15/2027", so a card holding the term's two
+# dates answered itself with a term that ends the day it starts - the
+# backwards-term hard stop held 60 - and a business start date, a retro date or
+# a prior term read as a date still to come. The proposed term starts on the
+# first of the month two months out (or one year before a stated expiration
+# still to come) and runs one year; an umbrella term follows the proposed one;
+# the prior term ends where the proposed one starts; every other date is in the
+# past. Each probe still passes the fact's own answer check.
+_PAST_DATE_PROBE = "01/15/2015"
+
+
+def _date_probe(fact: str, facts: dict) -> Optional[str]:
+    if "date" not in str(fact or "").lower():
+        return None
+    from datetime import date
+    from services.normalization import normalize_date
+
+    def held(key: str):
+        iso = normalize_date(str(_fv(facts, key) or "")) if _fv(facts, key) else None
+        try:
+            return date.fromisoformat(iso) if iso else None
+        except ValueError:
+            return None
+
+    def years_on(d, n: int):
+        try:
+            return d.replace(year=d.year + n)
+        except ValueError:                                     # 29 Feb
+            return d.replace(year=d.year + n, day=28)
+
+    def text(d) -> str:
+        return d.strftime("%m/%d/%Y")
+
+    today = date.today()
+    first = date(today.year + (today.month + 1) // 12, (today.month + 1) % 12 + 1, 1)
+    eff, exp = held("effective_date"), held("expiration_date")
+    start = eff if eff and (not exp or eff < exp) else None
+    if fact == "effective_date":
+        # A renewal starts the day the prior term ends (30 Oct 2026, CH125: with
+        # the pair backwards, "a year before the expiration" was a past date).
+        p_end = held("prior_expiration_date")
+        if p_end and (p_end - today).days >= -30:
+            value = p_end
+        else:
+            value = years_on(exp, -1) if exp and exp > today and (not eff or eff < exp) else first
+    elif fact == "expiration_date":
+        # (strict review, 29 Oct 2026) One year on from an effective date that
+        # is long past is an ENDED term: the route refuses that save
+        # (`validators.term_save_refusal`), so the plan's step did nothing and
+        # its card's points sat on no item (an unreadable expiration "2027"
+        # beside a 03/15/2024 start: P2 short by 15). A person types an
+        # expiration still to come - the next term's.
+        value = years_on(eff or first, 1)
+        if value < today:
+            value = years_on(first, 1)
+    elif fact == "umbrella_effective_date":
+        value = start or first
+    elif fact == "umbrella_expiration_date":
+        u_eff = held("umbrella_effective_date")
+        value = years_on(u_eff, 1) if u_eff else (exp if start and exp else years_on(first, 1))
+    elif fact == "prior_expiration_date":
+        value = start or first
+    elif fact == "prior_effective_date":
+        p_exp = held("prior_expiration_date")
+        value = years_on(p_exp or start or first, -1)
+    elif fact == "builders_risk_completion_date":
+        value = years_on(start or first, 1)
+    elif fact == "wc_xmod_effective_date":
+        value = start or first
+    else:
+        return _PAST_DATE_PROBE if _accepts(fact, _PAST_DATE_PROBE) else None
+    return text(value) if _accepts(fact, text(value)) else None
+
+
 def _neutral_naics() -> str:
     """A valid NAICS code whose sector no industry table maps (no verdict)."""
     try:
@@ -172,11 +256,64 @@ def _neutral_naics() -> str:
     return "561110"
 
 
-def probe_value(fact: str, facts: Optional[dict] = None) -> str:
-    """The value a person's answer to `fact` is stood in by: a choice the fact
-    offers, a limit at the scorer's own threshold, a value of the shape its name
-    says, a revenue / payroll the package's own ratio check accepts, else the
-    scorer's own probe (`sqs_service._package_probe_answer`)."""
+# A box the documents print one value for is answered with that value (27 Oct
+# 2026): a person types the truth, and the truth is what the documents say - a
+# made-up applicant name or FEIN started a Data Consistency conflict the person's
+# real answer never would. Only a merged gap, only one value across the active
+# documents, never another insured's.
+def _documents_value(fact: str, facts: dict, session: Optional[dict]) -> Optional[str]:
+    if not session or _fv(facts, fact):
+        return None
+    seen: Dict[str, str] = {}
+    for doc in session.get("docs") or []:
+        if not isinstance(doc, dict) or doc.get("excluded") or doc.get("supporting_only"):
+            continue
+        value = _fv(doc.get("facts") or {}, fact)
+        if isinstance(value, (str, int, float)) and str(value).strip():
+            seen.setdefault(" ".join(str(value).lower().split()), str(value).strip())
+    if len(seen) != 1:
+        return None
+    value = next(iter(seen.values()))
+    return value if _accepts(fact, value) else None
+
+
+# A person whose package holds claims writes and answers as someone who had
+# claims (27 Oct 2026, random-package solver): the narrative window's first
+# loss phrase is "no reported losses", and writing it beside claims on file
+# raised the narrative / claims-answer warning, whose answer then conflicted
+# with the claims - round after round. "claims" when the package asserts one
+# (`loss_history_state.asserted_claims`), else None.
+def _claims_on_file(facts: dict) -> Optional[str]:
+    try:
+        from services.loss_history_state import asserted_claims
+        return "claims" if (asserted_claims(facts or {})[0] or 0) > 0 else None
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _payroll_within_revenue(payroll: float, revenue: Optional[float]) -> float:
+    """A sample payroll the package's own checks accept beside the stated one:
+    within 10% of it (`wc_state_payroll_total_mismatch` - 20% for
+    `wc_payroll_mismatch`) and no more than 85% of revenue
+    (`wc_payroll_vs_revenue`). When the stated figures leave no such value the
+    stated payroll is kept - the documents disagree, not the sample."""
+    if not revenue or revenue <= 0:
+        return payroll
+    cap = int(revenue * 0.85)
+    if payroll <= cap:
+        return payroll
+    return float(cap) if cap >= payroll * 0.9 else payroll
+
+
+def probe_value(fact: str, facts: Optional[dict] = None, session: Optional[dict] = None) -> str:
+    """The value a person's answer to `fact` is stood in by - what a producer
+    would really type (27 Oct 2026): a choice the fact offers, a limit at the
+    scorer's own threshold (also over a stated limit below it - the limit
+    applied for), the one value the documents print for it, a revenue /
+    payroll the package's own ratio check accepts, a date that keeps the term
+    whole, the fact's declared example (`fact_registry.example_answer`), a
+    value of the shape its name says, else the scorer's own probe
+    (`sqs_service._package_probe_answer`)."""
     from services import sqs_service as S
     facts = facts or {}
     low = str(fact or "").lower()
@@ -184,10 +321,12 @@ def probe_value(fact: str, facts: Optional[dict] = None) -> str:
     # gives (24 Oct 2026): the other one raises `legacy_loss_narrative_mismatch`.
     if fact == "loss_history_no_prior_losses_indicator":
         try:
-            from services.loss_history_state import claims_answer_for_narrative
+            from services.loss_history_state import claims_answer_for_narrative, claims_question_answers
             agreed = claims_answer_for_narrative(facts)
             if agreed:
                 return agreed
+            if _claims_on_file(facts):
+                return claims_question_answers()[1]
         except Exception:                                      # noqa: BLE001
             pass
     try:
@@ -198,8 +337,14 @@ def probe_value(fact: str, facts: Optional[dict] = None) -> str:
     except Exception:                                          # noqa: BLE001
         pass
     thresholds = getattr(S, "_THRESHOLD_PROBE_FACTS", {}) or {}
-    if fact in thresholds and not _fv(facts, fact):
-        return str(int(thresholds[fact]))
+    if fact in thresholds:
+        held = S._to_float(_fv(facts, fact))
+        if not held or held < thresholds[fact]:
+            return str(int(thresholds[fact]))
+        return str(_fv(facts, fact))                 # a limit that meets it is confirmed
+    printed = _documents_value(fact, facts, session)
+    if printed:
+        return printed
     if fact == "naics_code":
         return _neutral_naics()
     if fact == "sic_code":
@@ -209,9 +354,54 @@ def probe_value(fact: str, facts: Optional[dict] = None) -> str:
     if fact == "total_revenue":
         pay = S._to_float(_fv(facts, "total_payroll") or _fv(facts, "wc_payroll"))
         return str(int(pay * 1.25)) if pay and pay > 0 else "1000000"
+    if fact == "num_employees":
+        # A package that carries no workers comp stands in a head count its
+        # coverage agrees with (30 Oct 2026, rule G2): the sample "25" beside no
+        # WC policy raised "Employees are listed but no workers comp coverage is
+        # carried" - an item the sample made. A person with more employees and
+        # no WC still gets that question; the plan's own answer does not.
+        try:
+            flags_now = (session or {}).get("flags") or {}
+            if not S._wc_carried(flags_now):
+                return "5"
+        except Exception:                                      # noqa: BLE001
+            pass
     if fact in ("total_payroll", "wc_payroll"):
+        # The payroll the package already states is the person's answer (30 Oct
+        # 2026, rule G2): a total payroll typed beside a WC payroll / per-state
+        # payroll it disagrees with raised `wc_payroll_mismatch` /
+        # `wc_state_payroll_total_mismatch` - an item the sample made, not the
+        # package. The other payroll first, then the per-state total.
+        other = S._to_float(_fv(facts, "wc_payroll" if fact == "total_payroll" else "total_payroll"))
+        if not other or other <= 0:
+            by_state = _fv(facts, "wc_payroll_by_state")
+            vals = (list(by_state.values()) if isinstance(by_state, dict)
+                    else by_state if isinstance(by_state, list) else [])
+            other = sum((S._to_float(v.get("payroll") if isinstance(v, dict) else v) or 0)
+                        for v in vals)
+        rev_now = S._to_float(_fv(facts, "total_revenue"))
+        if other and other > 0:
+            fitted = _payroll_within_revenue(other, rev_now)
+            # A stated payroll the revenue cannot carry is the documents' own
+            # disagreement: the sample does not repeat it (a card asking to
+            # correct the payroll must be answerable).
+            # A WC payroll follows the stated total either way (the revenue box
+            # beside it on the ratio card carries the rest); a TOTAL payroll
+            # follows the WC payroll only where the revenue can carry it.
+            if fact == "wc_payroll" or not rev_now or fitted <= rev_now * 0.85:
+                return str(int(fitted))
         rev = S._to_float(_fv(facts, "total_revenue"))
         return str(int(rev * 0.5)) if rev and rev > 0 else "500000"
+    dated = _date_probe(fact, facts)
+    if dated:
+        return dated
+    try:
+        from services.fact_registry import example_answer
+        example = example_answer(fact)
+        if example:
+            return example
+    except Exception:                                          # noqa: BLE001
+        pass
     for needle, value in _SHAPE_PROBES:
         if needle in low and _accepts(fact, value):
             return value
@@ -234,33 +424,121 @@ def _column_probe(col: dict) -> str:
 class _Sim:
     """A copy of the session the steps are done on, one after another."""
 
-    def __init__(self, row: dict):
+    def __init__(self, row: dict, credit_rows: Optional[List[dict]] = None):
         self.session = dict(row or {})
         self.session["facts"] = dict((row or {}).get("facts") or {})
         self.session["flags"] = dict((row or {}).get("flags") or {})
         self.session["docs"] = [dict(d) if isinstance(d, dict) else d
                                 for d in ((row or {}).get("docs") or [])]
+        # The page's own facts, for the recommender's "did the answer move it?"
+        self._base_facts = dict((row or {}).get("facts") or {})
+        self._base_flags = dict((row or {}).get("flags") or {})
         self.suppressed: set = set()
+        # The boxes this pass has answered: a later item naming the same box
+        # leaves the person's answer as it is (27 Oct 2026).
+        self.answered: set = set()
+        # The plan's sample choice (`_best_sample`): boxes this step sampled
+        # that may take another answer, and a forced answer while retrying.
+        self.step_samples: List[Tuple[str, List[str]]] = []
+        self.forced: Dict[str, str] = {}
         self.form_ids = [r.get("form_id") for r in ((row or {}).get("recommendations") or [])
                          if isinstance(r, dict) and r.get("form_id")]
+        # After forms (29 Oct 2026): the recalculation's recipe - the stops
+        # scoped to the selected + generated forms, the forms' own scores
+        # passed through, and the dismissal credits still in force.
+        generated = (row or {}).get("generated_forms") or {}
+        self.pre_form = not generated
+        self.form_results: List[dict] = []
+        self.credit_rows: List[dict] = [r for r in (credit_rows or []) if isinstance(r, dict)]
+        if not self.pre_form:
+            selected = [str(f) for f in ((row or {}).get("selected_form_ids") or []) if f]
+            self.form_ids = sorted(set(selected) | {str(f) for f in generated})
+            self.form_results = [f.get("sqs") for f in generated.values()
+                                 if isinstance(f, dict) and isinstance(f.get("sqs"), dict)]
 
     # The displayed score as a FLOAT (the weighted sum before it is rounded
     # down, held at the cap) and the hold that binds it.
+    def _fingerprint(self) -> str:
+        import json
+        docs = [(d.get("doc_type"), d.get("excluded"), d.get("supporting_only"), d.get("doc_id"),
+                 d.get("filename")) if isinstance(d, dict) else None
+                for d in (self.session.get("docs") or [])]
+        return json.dumps([self.session.get("facts"), self.session.get("flags"), docs,
+                           sorted(self.suppressed), self.session.get("underwriting_confirmations")],
+                          sort_keys=True, default=str)
+
     def measure(self) -> Tuple[float, float, Optional[int], Optional[str]]:
+        # The same copy measured twice in a row is scored once (a sample answer
+        # tried by `_best_sample` and then kept is not scored again).
+        fp = self._fingerprint()
+        cached = getattr(self, "_measured", None)
+        if cached and cached[0] == fp:
+            self.last_pkg, self.last_stops = cached[2], cached[3]
+            return cached[1]
         from services import sqs_service as S
         from services.stops_now import stops_now
         facts, flags = self.session["facts"], self.session["flags"]
-        st = stops_now(self.session, self.form_ids, pre_form=True, facts=facts, flags=flags)
+        if self.pre_form:
+            self._refresh_recommended_forms()
+        st = stops_now(self.session, self.form_ids, pre_form=self.pre_form, facts=facts, flags=flags)
         # The scorer takes its stops from the one door, unfiltered.
         pkg = S._PACKAGE_SCORER(
-            facts=facts, flags=flags, form_results=[], cross_issues=st["cross_issues"],
+            facts=facts, flags=flags, form_results=self.form_results, cross_issues=st["cross_issues"],
             hard_stops=st["hard"], soft_stops=st["soft"], session_data=self.session,
             _probe=True, form_fill=False)
-        self.last_pkg = pkg
+        self.last_pkg, self.last_stops = pkg, st
         raw = weighted_float(pkg.get("pillars") or {})
+        # A dismissal credit is added to the raw score, then held at the cap
+        # (`sqs_service.final_score_with_credits`) - after forms only.
+        if self.credit_rows:
+            raw = min(100.0, raw + float(self._credits()))
         cap, reason = _released_cap(pkg, st, self.suppressed)
         shown = min(raw, float(cap)) if cap is not None else raw
-        return shown, raw, cap, reason
+        out = (shown, raw, cap, reason)
+        self._measured = (fp, out, pkg, st)
+        return out
+
+    def _refresh_recommended_forms(self) -> None:
+        """THE FORM RECOMMENDER RE-RUNS ON THE COPY LIKE IT DOES ON THE ROW
+        (strict review, 29 Oct 2026). Before forms, an answer the recommender
+        reads changes the recommended forms (`arq_service.
+        refreshed_pre_form_recommendations`, run by every answer door's
+        recalculation), and the stops are scoped to those forms. The copy kept
+        the page's list: "% subcontracted 25" added ACORD 186 and 126 for real,
+        their checks took a point, and the row read +2 where the save moved +1.
+        Same rule as the door: the recommender on the copy's facts against the
+        page's own facts; only a change replaces the page's list. Never raises."""
+        try:
+            import json
+            from services.arq_service import _recommended_forms_key
+            from services.form_service import active_document_text, match_forms_deterministic
+            facts, flags = self.session["facts"], self.session["flags"]
+            fp = json.dumps([facts, flags], sort_keys=True, default=str)
+            if getattr(self, "_recs_fp", None) == fp:
+                return
+            self._recs_fp = fp
+            if getattr(self, "_recs_base", None) is None:
+                self._recs_text = active_document_text(self.session)
+                self._recs_base = (_recommended_forms_key(match_forms_deterministic(
+                    self._base_facts, dict(self._base_flags), text=self._recs_text)),
+                    list(self.session.get("recommendations") or []), list(self.form_ids))
+            base_key, base_recs, base_ids = self._recs_base
+            now = match_forms_deterministic(facts, dict(flags), text=self._recs_text)
+            if _recommended_forms_key(now) == base_key:
+                self.session["recommendations"], self.form_ids = base_recs, list(base_ids)
+            else:
+                self.session["recommendations"] = now
+                self.form_ids = [r.get("form_id") for r in now if isinstance(r, dict) and r.get("form_id")]
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("review plan: recommended forms not refreshed: %s", exc)
+
+    def _credits(self) -> int:
+        """The dismissal credit still in force on this copy."""
+        try:
+            from services.audit_service import credits_in_force
+            return int(credits_in_force(self.credit_rows, self.session["facts"], quiet=True)[0] or 0)
+        except Exception:                                      # noqa: BLE001
+            return 0
 
     # ── the writes, as the page's doors make them ──
     def answer(self, fact: str, value: str) -> bool:
@@ -278,6 +556,7 @@ class _Sim:
                 and held.get("source") == envelope.get("source")):
             return False
         facts[canon] = envelope
+        self.answered.update({fact, canon})
         if canon == A.NO_LOSS_INDICATOR_FIELD:
             from services.sqs_service import _attested_true
             if _attested_true(value):
@@ -322,17 +601,71 @@ class _Sim:
                         r[c["key"]] = _column_probe(c)
         else:
             rows = [{c["key"]: _column_probe(c) for c in cols if c.get("key")}]
+        # A cell the identifier door calls impossible (`identifier_checks.
+        # cell_is_impossible` - a VIN not 17 characters, a US ZIP not 5 / 9
+        # digits) is what the person corrects in this window, so the probe
+        # corrects it too - generically, by the door's own readers (30 Oct
+        # 2026, live 8aa8f3ad: the plan could not clear the VIN warning and put
+        # its points on another item).
+        from services.identifier_checks import cell_is_impossible
+        for r in rows:
+            for c in cols:
+                if r.get(c.get("key")) not in (None, "") and cell_is_impossible(key, c.get("key"), r):
+                    r[c["key"]] = _column_probe(c)
+        # A PAYROLL cell the probe fills adds up to the payroll the package
+        # already states (30 Oct 2026, rule G2): a fixed sample beside a stated
+        # total payroll raised `wc_payroll_mismatch` / `wc_state_payroll_total_
+        # mismatch` - items the sample made, not the package. The cells the
+        # probe filled share what the stated total leaves after the cells a
+        # document or person already filled.
+        self._fit_payroll_cells(cols, rows, shown)
         clean, _report = SC.validate_rows(key, rows, shown=shown)
         # Cells every building already states (`confirm_columns`): the real
         # window SAVES the table anyway (frontend `tableIsSaved`), and only that
         # save carries them to the package (`derive_package_cope`) - an
         # unchanged table is still a save here (live c5dc03ec, 25 Oct 2026).
-        if not res.get("confirm_columns") and json.dumps(
-                [dict(r) for r in clean], sort_keys=True, default=str) == json.dumps(
-                [dict(r) for r in shown], sort_keys=True, default=str):
+        # The same holds for every table whose save DERIVES facts (28 Oct 2026
+        # review: a complete WC class table re-derives `wc_payroll_by_state`,
+        # which the multi-state check reads - an unchanged table was "nothing to
+        # do" here, so the plan listed the card at 0 and the solver stalled at
+        # 85, while the person's real save cleared it). So the save is tried on
+        # a copy: it counts when it moves ANY fact (the rows, the person's mark
+        # on them, a derived fact), and is then made for real.
+        trial = copy.deepcopy(facts)
+        A._write_schedule_rows(trial, key, clean, "producer")
+        if json.dumps(trial, sort_keys=True, default=str) == json.dumps(facts, sort_keys=True, default=str):
             return False
         A._write_schedule_rows(facts, key, clean, "producer")
-        return json.dumps(_fv(facts, key), sort_keys=True, default=str) != before
+        return True
+
+    def _fit_payroll_cells(self, cols: List[dict], rows: List[dict], shown: Any) -> None:
+        from services import sqs_service as S
+        pay_cols = [c.get("key") for c in cols if "payroll" in str(c.get("key") or "").lower()]
+        if not pay_cols or not rows:
+            return
+        facts = self.session["facts"]
+        target = S._to_float(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll"))
+        if not target or target <= 0:
+            return
+        _rev = S._to_float(_fv(facts, "total_revenue"))
+        target = _payroll_within_revenue(target, _rev)
+        if _rev and target > _rev * 0.85:
+            return              # the documents' own disagreement - not repeated
+        before = [dict(r) for r in (shown if isinstance(shown, list) else [])]
+        filled, stated = [], 0.0
+        for n, r in enumerate(rows):
+            for k in pay_cols:
+                was = before[n].get(k) if n < len(before) and isinstance(before[n], dict) else None
+                if was in (None, "") and r.get(k) not in (None, ""):
+                    filled.append((r, k))
+                elif r.get(k) not in (None, ""):
+                    stated += S._to_float(r.get(k)) or 0.0
+        left = target - stated
+        if not filled or left <= 0:
+            return
+        each = int(left // len(filled))
+        for i, (r, k) in enumerate(filled):
+            r[k] = str(each if i < len(filled) - 1 else int(left - each * (len(filled) - 1)))
 
     def narrative(self, gaps: List[dict]) -> bool:
         """The remarks a person writes in the narrative window, one sentence per
@@ -342,7 +675,7 @@ class _Sim:
         # prior losses: ..." beside "we have had claims" is its own warning.
         try:
             from services.loss_history_state import claims_answer_stance, text_claims_stance
-            answer = claims_answer_stance(self.session["facts"])
+            answer = claims_answer_stance(self.session["facts"]) or _claims_on_file(self.session["facts"])
         except Exception:                                      # noqa: BLE001
             answer, text_claims_stance = None, (lambda _t: None)
         lines = []
@@ -370,6 +703,17 @@ class _Sim:
             pass
         return True
 
+    def explain(self, code: str) -> bool:
+        """The card's code kept with the explanation (`audit_routes.resolve_issue`)."""
+        from services.issue_registry import explained_issue_codes
+        facts = self.session["facts"]
+        codes = explained_issue_codes(facts)
+        if not code or code in codes:
+            return False
+        facts["_explained_issue_codes"] = {"value": sorted(codes | {code}), "source": "producer",
+                                           "confidence": "producer"}
+        return True
+
     def mark(self, doc_index: int) -> bool:
         docs = self.session["docs"]
         if 0 <= doc_index < len(docs) and isinstance(docs[doc_index], dict) \
@@ -392,8 +736,33 @@ class _Sim:
                            ("loss_run_valuation_date", today.isoformat())):
             facts[key] = {"value": value, "source": "policy_doc_text", "confidence": "high"}
         facts.pop("loss_run_age_days", None)
-        run_facts = {k: {"value": _fv(facts, k), "source": "policy_doc_text"}
-                     for k in ("applicant_name", "fein") if _fv(facts, k)}
+        # The carrier's runs name the insured as the documents print it (rule
+        # G2, 30 Oct 2026): copying the merged value onto them - a placeholder
+        # FEIN "00-0000000", or a value no document prints, beside documents
+        # printing 93-3688205 - raised a FEIN conflict the upload made, not the
+        # package. A person's own (valid) value stands; else the one valid value
+        # the active documents print; else the package's valid value; else none.
+        run_facts = {}
+        for k in ("applicant_name", "fein"):
+            value = _fv(facts, k)
+            ok = bool(value) and _accepts(k, value)
+            try:
+                from services.fact_state import put_by_person
+                by_person = put_by_person(facts.get(k))
+            except Exception:                                  # noqa: BLE001
+                by_person = False
+            if not (ok and by_person):
+                printed = {" ".join(str(_fv((d or {}).get("facts") or {}, k)).lower().split()):
+                           str(_fv((d or {}).get("facts") or {}, k)).strip()
+                           for d in self.session.get("docs") or []
+                           if isinstance(d, dict) and not d.get("excluded")
+                           and not d.get("supporting_only")
+                           and str(_fv(d.get("facts") or {}, k) or "").strip()}
+                printed = {n: v for n, v in printed.items() if _accepts(k, v)}
+                value = (next(iter(printed.values())) if len(printed) == 1
+                         else value if ok else None)
+            if value:
+                run_facts[k] = {"value": value, "source": "policy_doc_text"}
         self.session["docs"] = list(self.session["docs"]) + [
             {"doc_type": "loss_run", "filename": "complete loss runs (probe)",
              "doc_id": "_probe_loss_runs", "facts": run_facts}]
@@ -471,14 +840,32 @@ def page_items(row: dict, pkg: dict, kd: Optional[dict], grouped: Optional[dict]
                           "resolution": {"mode": "field", "facts": [fact]}})
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("review plan: data consistency rows skipped: %s", exc)
-    # 4 + 5. Hard stops, then warnings - one item per rule code.
+    # 4 + 5. Hard stops, then warnings - one item per rule code AND fix. A
+    # catch-all code (`uncovered_soft_stop`, `uncovered_hard_stop`) draws several
+    # cards, each with its own window (28 Oct 2026 review: "Lines of business",
+    # "Policy term already expired", "Driver schedule" and "Split liability
+    # limits" were all `uncovered_soft_stop`; only the first was weighed, so the
+    # others' points showed nowhere - "15 pts no item adds" - and every one of
+    # those cards printed the first card's number). The first card of a code
+    # keeps the id `card:<code>`; a later one with a different fix is its own
+    # item, `card:<code>#<issue_id>`, and carries its `issue_id` for the page.
+    seen_cards: set = set()
     seen_codes: set = set()
     for card in rendered_cards(grouped):
         code = str(card.get("code") or "")
-        if not code or code in seen_codes:
+        if not code:
             continue
+        sig_keys = tuple(sorted(fix_keys(card.get("resolution"))))
+        sig = (code, sig_keys) if sig_keys else (code, str(card.get("message") or ""))
+        if sig in seen_cards:
+            continue
+        seen_cards.add(sig)
+        first_of_code = code not in seen_codes
         seen_codes.add(code)
-        items.append({"id": f"card:{code}", "kind": "card", "page": card["page"], "code": code,
+        iid = str(card.get("issue_id") or "")
+        items.append({"id": f"card:{code}" if first_of_code else f"card:{code}#{iid or len(items)}",
+                      "kind": "card", "page": card["page"], "code": code,
+                      "issue_id": card.get("issue_id"), "first_of_code": first_of_code,
                       "label": card.get("message") or code, "resolution": card.get("resolution"),
                       "message": card.get("message") or ""})
     # 6. Recommendations rows, in the order they are listed.
@@ -518,6 +905,205 @@ def page_items(row: dict, pkg: dict, kd: Optional[dict], grouped: Optional[dict]
     return items
 
 
+_TERM_KEYS = ("effective_date", "expiration_date")
+
+
+def _term_refused(stored: dict, sim: "_Sim", names: List[str]) -> bool:
+    """Would the route refuse this save of the proposed term (the dates the save
+    gives over the ones on file - `validators.term_save_refusal`)?"""
+    supplied = {f: _fv(sim.session["facts"], f) for f in names if f in _TERM_KEYS}
+    supplied = {k: str(v) for k, v in supplied.items() if v not in (None, "")}
+    if not supplied:
+        return False
+    try:
+        from utils.validators import term_save_refusal
+        return bool(term_save_refusal(stored, supplied))
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _verifies_figures(item: dict) -> bool:
+    """True for a card whose only ask is to verify the figures its window shows."""
+    if item.get("kind") != "card":
+        return False
+    try:
+        from services.issue_registry import VERIFY_FIGURE_CODES
+        return str(item.get("code") or "") in VERIFY_FIGURE_CODES
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+# THE SAMPLE ANSWER THAT RAISES NOTHING NEW (28 Oct 2026 review). The plan's
+# number for an item is what its sample answer moves; a sample that is true of
+# some businesses and raises a NEW item on this one (25 employees on a package
+# carrying no workers comp: "Employees are listed but no workers comp coverage
+# is carried", -8) left points no item on the page added. Where the fact has
+# other answers a person may truly give - its other choices, or a zero for a
+# count (`answer_semantics` kind "integer": no employees, no vehicles; never a
+# zero amount) - the plan does the step again with the first that raises
+# nothing new and scores no lower; else the step stands as first done. Only the
+# review page's own plan chooses (`choose_samples`), and only on a step that
+# raised something - a rare case, so the plan costs no more on the others.
+def _alternative_samples(fact: str) -> List[str]:
+    out: List[str] = []
+    try:
+        from services.answer_options import OTHER, options_for
+        out += [str(o) for o in (options_for(fact) or []) if o != OTHER]
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        from services.answer_semantics import _declared_kind, _registry_entry
+        if _declared_kind(fact, _registry_entry(fact)) == "integer":
+            out.append("0")
+    except Exception:                                          # noqa: BLE001
+        pass
+    return out
+
+
+_FIGURES_RE = None
+
+
+def _shape(text: Any) -> str:
+    """A sentence with its figures taken out: a stop that only restates a new
+    value ("WC payroll ($750,000) is ...") is the same item."""
+    global _FIGURES_RE
+    if _FIGURES_RE is None:
+        import re
+        _FIGURES_RE = re.compile(r"[\d$][\d$,./%-]*")
+    return _FIGURES_RE.sub("#", str(text or ""))
+
+
+def _raised(sim: "_Sim") -> set:
+    """What the copy holds against the score as it stands: every stop sentence
+    and every Recommendations row (by pillar and what it asks), figures aside."""
+    sim.measure()
+    st = getattr(sim, "last_stops", None) or {}
+    pkg = getattr(sim, "last_pkg", None) or {}
+    out = {("stop", _shape(m)) for m in (st.get("hard") or []) + (st.get("soft") or [])}
+    out |= {("stop", _shape(i.get("message"))) for i in (st.get("cross_issues") or []) if isinstance(i, dict)}
+    out |= {("row", str(r.get("pillar")), _shape(r.get("field") or r.get("action") or ""))
+            for r in (pkg.get("top_recommendations") or []) if isinstance(r, dict)}
+    out |= set(_loss_plan_rows(sim, pkg))
+    return out
+
+
+def _loss_plan_rows(sim: "_Sim", pkg: dict) -> Dict[tuple, str]:
+    """The Loss History plan's listed rows on the copy, {signature: label}
+    (seed 5024, 30 Oct 2026). The copy is scored as a probe, and a probe leaves
+    the plan's rows out (`calculate_package_sqs`), so a loss row a step raises -
+    the No Known Losses conflict once the runs' years bring claims into the
+    window - was invisible to the plan and never declared as that step's
+    follow-up. Read here with the scorer's own listing rule."""
+    from services import sqs_service as S
+    pillars = (pkg or {}).get("pillars") or {}
+    lh = pillars.get("loss_history_alignment")
+    lh = lh.get("score") if isinstance(lh, dict) else lh
+    if lh is None or (isinstance(lh, (int, float)) and lh >= 100):
+        return {}
+    try:
+        steps = S.loss_history_plan(sim.session["facts"], sim.session["flags"],
+                                    sim.session.get("docs") or [], pillars) or []
+    except Exception:                                          # noqa: BLE001
+        return {}
+    out: Dict[tuple, str] = {}
+    for st in steps:
+        if not isinstance(st, dict) or st.get("key") == "upload":
+            continue
+        if int(st.get("points") or 0) <= 0 and not (st.get("key") == "claims" and st.get("applied")):
+            continue
+        label = str(st.get("label") or "")
+        out[("row", "loss_history_alignment", _shape(st.get("fact") or label))] = label
+    return out
+
+
+def _best_sample(sim: "_Sim", fact: str) -> str:
+    """The sample answer typed for `fact`: the first (`probe_value`), unless the
+    plan is retrying the step with another one (`sim.forced`). The plan's own
+    reading records which sampled facts have other answers (`sim.step_samples`)."""
+    facts = sim.session["facts"]
+    forced = getattr(sim, "forced", None) or {}
+    if fact in forced:
+        return forced[fact]
+    first = probe_value(fact, facts, sim.session)
+    if getattr(sim, "choose_samples", False):
+        alts = [c for c in dict.fromkeys(str(c) for c in _alternative_samples(fact))
+                if c != first and _accepts(fact, c)][:3]
+        if alts:
+            sim.step_samples.append((fact, alts))
+    return first
+
+
+def _snap(sim: "_Sim") -> tuple:
+    return (copy.deepcopy(sim.session.get("facts")), copy.deepcopy(sim.session.get("flags")),
+            copy.copy(getattr(sim, "answered", set())))
+
+
+def _restore(sim: "_Sim", snap: tuple) -> None:
+    sim.session["facts"] = copy.deepcopy(snap[0])
+    if snap[1] is not None:
+        sim.session["flags"] = copy.deepcopy(snap[1])
+    sim.answered = copy.copy(snap[2])
+
+
+def _retry_with_other_samples(sim: "_Sim", item: dict, probes: Dict[str, str], full_years: int,
+                              snapshot: tuple, seen_raised: set, first_shown: float,
+                              first_raw: Optional[float] = None):
+    """The step raised something new: try the other answers its sampled boxes
+    may truly take, one box at a time; keep the first that raises nothing new
+    and scores no lower (else the step as first done). Returns the measure."""
+    tried = list(sim.step_samples)
+    for fact, alts in tried:
+        for alt in alts:
+            _restore(sim, snapshot)
+            sim.forced = {fact: alt}
+            sim.step_samples = []
+            try:
+                did = _apply(sim, item, probes, full_years)
+            finally:
+                sim.forced = {}
+            if not did:
+                continue
+            m = sim.measure()
+            # "No lower" on the RAW score too (29 Oct 2026, scoring contract):
+            # under a 60 / 85 hold every answer shows the same number, so an
+            # alternative that costs points (the umbrella "does not follow
+            # form", -1.2) looked as good as the first - and the plan ended
+            # under 100 with those points on no item.
+            if (m[0] >= first_shown - _EPS and (first_raw is None or m[1] >= first_raw - _EPS)
+                    and not (_raised(sim) - seen_raised)):
+                return m
+    _restore(sim, snapshot)
+    sim.step_samples = []
+    _apply(sim, item, probes, full_years)
+    return sim.measure()
+
+
+def _card_still_raised(sim: "_Sim", item: dict) -> bool:
+    """Does the card's own sentence still stand on the copy (the stops as they
+    would stand, `stops_now`)?"""
+    msg = str(item.get("message") or "")
+    if not msg:
+        return False
+    try:
+        from services.stops_now import stops_now
+        st = stops_now(sim.session, sim.form_ids, pre_form=getattr(sim, "pre_form", True),
+                       facts=sim.session["facts"], flags=sim.session["flags"])
+    except Exception:                                          # noqa: BLE001
+        return False
+    raised = set(st.get("hard") or []) | set(st.get("soft") or [])
+    raised |= {str(i.get("message")) for i in (st.get("cross_issues") or []) if isinstance(i, dict)}
+    return msg in raised
+
+
+def _row_still_raised(sim: "_Sim", item: dict) -> bool:
+    """Does the Recommendations row `item` still stand on the copy?"""
+    sig = _signature(item)
+    try:
+        return bool(sig) and sig in _raised(sim)
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def _apply(sim: _Sim, item: dict, probes: Dict[str, str], full_years: int) -> bool:
     """Do one step on the copy. True when the copy changed (False when it cannot
     be done here, or an item above already did exactly this)."""
@@ -536,6 +1122,7 @@ def _apply(sim: _Sim, item: dict, probes: Dict[str, str], full_years: int) -> bo
     mode = res.get("mode")
     if mode == "field":
         facts = [str(f) for f in (res.get("facts") or []) if f]
+        all_card_facts = list(facts)
         # A PERSON TYPES ONLY THE EMPTY BOXES (Z38 lane E, live 3e835b53): the
         # window shows a stated value in its box and a save leaves it as it is.
         # Probing every box overwrote the stated coinsurance (80% -> a probe the
@@ -550,12 +1137,80 @@ def _apply(sim: _Sim, item: dict, probes: Dict[str, str], full_years: int) -> bo
             # (A fact the plan has its own answer for - the Loss History plan's
             # truthful claims answer, the runs' years - is always that answer.)
             empty = [f for f in facts if f in probes or not _answered(_sf, f)]
-            facts = empty or facts
+            # ...and a box an item above already answered is the PERSON's
+            # answer now (27 Oct 2026, random-package solver): the umbrella
+            # card typed the auto limit $1,000,000, then the Recommendations
+            # row for the same box re-typed it with its own stand-in.
+            facts = empty or [f for f in facts if f not in sim.answered]
+            # A WRONG-VALUE card (a relationship: a term running backwards, an
+            # ended term, a limit that fails to attach) is corrected in the boxes
+            # that hold the wrong value; an empty box beside them is left alone
+            # (seed 5036, 30 Oct 2026: the backwards-term card typed an umbrella
+            # expiration and raised the umbrella / GL misalignment).
+            if item.get("kind") == "card" and not _verifies_figures(item):
+                from services.issue_registry import is_relationship_card
+                if is_relationship_card({"code": item.get("code"), "message": item.get("message")}):
+                    # (A box the plan has the true answer for - the Loss History
+                    # plan's claims answer - is that answer, and is the fix.)
+                    known = [f for f in all_card_facts if f in probes]
+                    stated = [f for f in all_card_facts if _answered(_sf, f)]
+                    if known or stated:
+                        facts = known or stated
         except Exception:                                      # noqa: BLE001
             pass
-        changed = False
-        for f in facts:
-            changed = sim.answer(f, probes.get(f) or probe_value(f, sim.session["facts"])) or changed
+        # A "verify this figure" card (`issue_registry.VERIFY_FIGURE_CODES`) is
+        # answered by CONFIRMING the figures its window shows - the window
+        # confirms the shown values when nothing is typed (`utils/fixWindow.js`),
+        # and that is the answer that stands the card down (28 Oct 2026 review:
+        # the plan typed stand-ins over the payroll AND the revenue, which raised
+        # the payroll-to-revenue checks the true figures never raise, so the
+        # page listed points no item added - 15 on one package).
+        verify = _verifies_figures(item)
+        all_facts = [str(f) for f in (res.get("facts") or []) if f]
+
+        def type_boxes(names: List[str]) -> bool:
+            did = False
+            for f in names:
+                shown = _fv(sim.session["facts"], f) if verify else None
+                if verify and isinstance(shown, (str, int, float)) and str(shown).strip() \
+                        and f not in probes and _accepts(f, str(shown)):
+                    value = str(shown)
+                elif f in probes:
+                    value = probes[f]
+                else:
+                    value = _best_sample(sim, f)
+                did = sim.answer(f, value) or did
+            return did
+
+        # THE WINDOW'S SAVE IS JUDGED LIKE THE ROUTE JUDGES IT (28 Oct 2026
+        # review, real doors): a save that leaves the proposed term backwards
+        # or ended is REFUSED (`validators.term_save_refusal`). The plan typed a
+        # proposed effective date beside a document's ended expiration, credited
+        # the points, and the real save refused it. A refused save types the
+        # window's other term date with it (the person moves both); when the
+        # window has none, nothing is saved and the step adds nothing here.
+        snapshot = _snap(sim)
+        changed = type_boxes(facts)
+        refused = _term_refused(snapshot[0], sim, facts)
+        if refused:
+            partners = [f for f in all_facts if f in _TERM_KEYS and f not in facts]
+            if partners:
+                changed = type_boxes(partners) or changed
+                refused = _term_refused(snapshot[0], sim, facts + partners)
+            if refused:
+                _restore(sim, snapshot)
+                return False
+            facts = facts + partners
+        # A CARD ABOUT A WRONG STATED VALUE that also lists an empty box (28 Oct
+        # 2026 review: the backwards-term card names the effective, expiration
+        # AND umbrella expiration dates - typing only the empty umbrella date
+        # left the term backwards, the card standing and its 85 counted
+        # nowhere). When typing the empty boxes leaves the card raised, the
+        # person corrects the stated ones too - as a person does when the save
+        # does not clear it.
+        rest = [f for f in all_facts if f not in facts and f not in sim.answered]
+        if kind == "card" and rest and _card_still_raised(sim, item):
+            changed = type_boxes(rest) or changed
         return changed
     if mode == "schedule" and res.get("schedule_key"):
         # The boxes ABOVE the table (a 2+ building COPE card's occupancy - the
@@ -568,15 +1223,42 @@ def _apply(sim: _Sim, item: dict, probes: Dict[str, str], full_years: int) -> bo
             _sf = sim.session["facts"]
             for f in [str(x) for x in (res.get("facts") or []) if x]:
                 if f in probes or not _answered(_sf, f):
-                    changed = sim.answer(f, probes.get(f) or probe_value(f, _sf)) or changed
+                    changed = sim.answer(f, probes.get(f) or probe_value(f, _sf, sim.session)) or changed
         except Exception:                                      # noqa: BLE001
             pass
-        return sim.table(str(res["schedule_key"]), res) or changed
+        changed = sim.table(str(res["schedule_key"]), res) or changed
+        # A ROW ABOUT A WRONG STATED VALUE (29 Oct 2026, scoring contract): a
+        # class-code mismatch whose codes and description are both on file is
+        # cleared by correcting a side, not by saving the table unchanged - the
+        # same rule as a card about a wrong value below. When the save leaves
+        # the row raised, the person corrects the boxes the window shows
+        # above the table (`also_facts`: the description / NAICS sector).
+        above = [str(x) for x in (res.get("facts") or []) if x and str(x) not in sim.answered]
+        if kind == "rec" and above and _row_still_raised(sim, item):
+            for f in above:
+                changed = sim.answer(f, probes.get(f) or _best_sample(sim, f)) or changed
+        return changed
     if mode == "narrative":
         gaps = res.get("gaps")
         if not isinstance(gaps, list):
             gaps = _narrative_gaps(sim)
-        return sim.narrative(gaps)
+        else:
+            # The window lists the topics as the page stands WHEN it is opened
+            # (every save re-reads the page): the answers above can add a topic
+            # the page-start list did not have (28 Oct 2026 review: growth and
+            # target markets, 89 left on the narrative after everything).
+            have = {str((g or {}).get("label") or "") for g in gaps if isinstance(g, dict)}
+            gaps = list(gaps) + [g for g in _narrative_gaps(sim)
+                                 if isinstance(g, dict) and str(g.get("label") or "") not in have]
+        changed = sim.narrative(gaps)
+        # A CARD answered by an explanation is recorded as explained, like the
+        # real door does (`audit_routes.resolve_issue` mode=narrative keeps the
+        # card's code in `_explained_issue_codes`, and a rule whose only fix is
+        # an explanation stops counting it) - 28 Oct 2026 review: the copy left
+        # the card standing, so its points showed nowhere.
+        if kind == "card" and item.get("code"):
+            changed = sim.explain(str(item["code"])) or changed
+        return changed
     if kind == "card" and item.get("message") and item["message"] not in sim.suppressed:
         # A card no box on the page can answer: what releasing its hold adds.
         sim.suppressed.add(item["message"])
@@ -592,8 +1274,14 @@ def _released_cap(pkg: dict, st: dict, suppressed: set) -> Tuple[Optional[int], 
     if not suppressed or cap is None:
         return cap, reason
     hard, soft = list(st.get("hard") or []), list(st.get("soft") or [])
+    # Only the cross-form issues that HOLD a score (27 Oct 2026, random-package
+    # solver): an advisory (UM/UIM not specified, ACORD 101 recommended) or a
+    # form choice holds nothing - the scorer leaves them out of both lists -
+    # and counting one here kept a released 60 at 85 in the copy.
+    from services.sqs_service import _CROSS_ISSUE_TYPES
     for i in st.get("cross_issues") or []:
-        if isinstance(i, dict) and i.get("message"):
+        if (isinstance(i, dict) and i.get("message") and i.get("type") in _CROSS_ISSUE_TYPES
+                and not i.get("form_choice")):
             (hard if i.get("type") == "hard_stop" else soft).append(i["message"])
     open_hard = [m for m in hard if m not in suppressed]
     open_soft = [m for m in soft if m not in suppressed]
@@ -602,6 +1290,332 @@ def _released_cap(pkg: dict, st: dict, suppressed: set) -> Tuple[Optional[int], 
     if cap is not None and int(cap) == 85 and soft and not open_soft and not open_hard:
         cap, reason = None, None
     return cap, reason
+
+
+def _holding_stops(sim: "_Sim") -> Tuple[set, set]:
+    """(hard, soft): the stop sentences holding the score on the copy as it
+    stands (shapes, figures aside) - the ones `_released_cap` counts."""
+    sim.measure()
+    st = getattr(sim, "last_stops", None) or {}
+    hard = {_shape(m) for m in (st.get("hard") or []) if m not in sim.suppressed}
+    soft = {_shape(m) for m in (st.get("soft") or []) if m not in sim.suppressed}
+    try:
+        from services.sqs_service import _CROSS_ISSUE_TYPES
+    except Exception:                                          # noqa: BLE001
+        _CROSS_ISSUE_TYPES = ()
+    for i in st.get("cross_issues") or []:
+        if (isinstance(i, dict) and i.get("message") and i.get("type") in _CROSS_ISSUE_TYPES
+                and not i.get("form_choice") and i["message"] not in sim.suppressed):
+            (hard if i.get("type") == "hard_stop" else soft).add(_shape(i["message"]))
+    return hard, soft
+
+
+def _largest_remainder(weights: List[float], total: int) -> List[int]:
+    """Whole numbers in proportion to `weights` adding up to exactly `total`."""
+    import math
+    n = len(weights)
+    if n == 0 or total <= 0:
+        return [0] * n
+    w = [max(0.0, float(x)) for x in weights]
+    s = sum(w)
+    if s <= _EPS:
+        w, s = [1.0] * n, float(n)
+    raw = [x * total / s for x in w]
+    out = [int(math.floor(r + 1e-9)) for r in raw]
+    order = sorted(range(n), key=lambda k: (-(raw[k] - out[k]), k))
+    for k in order[: total - sum(out)]:
+        out[k] += 1
+    return out
+
+
+def _share_group_releases(items: List[dict], total_points: int,
+                           hold_counts: Optional[Dict[str, int]] = None) -> None:
+    """CAP SHARES (owner, 29 Oct 2026: every item a person must solve to reach
+    100 shows a number, and they add up to exactly 100 - score).
+
+    Done in page order, a 60 / 85 hold gives its whole release to the LAST
+    item that held it and "Counts once <it> is fixed" on the others. Now:
+      1. each item keeps its own measured gain (what its answer moves);
+      2. what is released only when a group is done - a hold's release, the
+         gains it withheld - is paid back to the held items their own gain and
+         the rest split EVENLY across every item holding that hold;
+      3. an item a person must solve still at 0 takes a point from the pool it
+         is blocked behind (its group, else the largest number on the page) -
+         never an invented point: the total stays exactly what it was;
+      4. an item whose answer moves nothing and holds nothing is not a score
+         item (`score_item: False`; the page lists no number for it).
+    Whole points by largest remainder within the group, so totals stay exact.
+    Wording: `with_others` ("counts when all 6 warnings are fixed")."""
+    live = [it for it in items if not it.get("mirror_of")]
+    # 2. Pay back and share each release step's surplus.
+    f: Dict[str, float] = {}
+    unpaid: List[Tuple[dict, float]] = []
+    group_of: Dict[str, int] = {}
+    groups: List[dict] = []
+    for it in live:
+        own = float(it.get("_own") or 0.0)
+        gain = float(it.get("gain") or 0.0)
+        if it.get("held_by") is not None or (own > gain + _EPS and gain <= _EPS):
+            # (`get`: a holder listed BELOW the step that released its hold
+            # already carries its share - never wipe it.)
+            f[it["id"]] = f.get(it["id"], 0.0)
+            unpaid.append((it, own))
+            continue
+        kept = min(gain, own)
+        f[it["id"]] = f.get(it["id"], 0.0) + kept
+        surplus = gain - kept
+        if surplus <= _EPS:
+            continue
+        # The withheld gains come back to their items first.
+        g = {"members": [], "holders": [], "levels": set(it.get("_released") or [])}
+        while unpaid and surplus > _EPS:
+            x, owed = unpaid[0]
+            pay = min(owed, surplus)
+            f[x["id"]] += pay
+            surplus -= pay
+            g["members"].append(x)
+            if owed - pay > _EPS:
+                unpaid[0] = (x, owed - pay)
+            else:
+                unpaid.pop(0)
+        g["members"] += [x for x, _o in unpaid]     # still held: share the pool
+        g["members"].append(it)
+        lv = g["levels"] or {"soft"}
+        holders = [x for x in live if set(x.get("_cleared") or []) & lv]
+        if it not in holders:
+            holders.append(it)
+        g["holders"] = holders
+        if surplus > _EPS:
+            share = surplus / len(holders)
+            for h in holders:
+                f[h["id"]] = f.get(h["id"], 0.0) + share
+        for x in g["members"] + holders:
+            group_of.setdefault(x["id"], len(groups))
+        groups.append(g)
+    for x, owed in unpaid:      # never released here: nothing shared to it
+        f.setdefault(x["id"], 0.0)
+    if not groups:
+        return
+    # Groups that share an item are one pool: an item holding two holds (a
+    # hard stop whose answer also clears a warning) takes a share of BOTH
+    # releases, so both releases must be split in one place - else its second
+    # share stays with the other group's items and the split is not even.
+    parent = list(range(len(groups)))
+
+    def _root(k: int) -> int:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+    first_of: Dict[str, int] = {}
+    for gi, g in enumerate(groups):
+        for x in g["members"] + g["holders"]:
+            if x["id"] in first_of:
+                parent[_root(gi)] = _root(first_of[x["id"]])
+            else:
+                first_of[x["id"]] = gi
+    merged: Dict[int, dict] = {}
+    for gi, g in enumerate(groups):
+        m = merged.setdefault(_root(gi), {"holders": [], "levels": set()})
+        m["levels"] |= set(g["levels"] or {"soft"})
+        for h in g["holders"]:
+            if all(h is not y for y in m["holders"]):
+                m["holders"].append(h)
+    group_of = {iid: _root(gi) for iid, gi in first_of.items()}
+    groups = [merged.get(k) for k in range(len(groups))]
+    # Whole points per group: its pool (the numbers its members carry now)
+    # re-split by the floats above.
+    for gi, g in enumerate(groups):
+        if g is None:
+            continue
+        mem = [x for x in live if group_of.get(x["id"]) == gi]
+        pool = sum(int(x.get("points") or 0) for x in mem)
+        extra = [float(x.get("_follow") or 0) for x in mem]
+        base = [f.get(x["id"], 0.0) for x in mem]
+        new = _largest_remainder([b + e for b, e in zip(base, extra)], pool)
+        for x, n in zip(mem, new):
+            x["points"] = int(n)
+        nh = len(g["holders"])
+        kinds = g["levels"] or {"soft"}
+        word = ("hard stops" if kinds == {"hard"} else
+                "warnings" if kinds == {"soft"} else "hard stops and warnings")
+        # The holders are counted where the page draws them (end-user review,
+        # 29 Oct 2026): a Data Consistency pick is a row on that page, not a
+        # warning card, so "all 15 warnings" beside 2 warning cards and 13 picks
+        # sent the producer looking for 13 warnings that are not there.
+        _dc = sum(1 for h in g["holders"] if h.get("kind") == "dc")
+        if _dc and _dc == nh:
+            word = "Data Consistency picks"
+        elif _dc:
+            word = f"{word} and Data Consistency picks"
+        count = nh
+        for x in mem:
+            if len(mem) > 1:
+                x["with_others"] = (f"counts when all {count} {word} are fixed" if count > 1
+                                    else f"counts when the {word[:-1]} is fixed"
+                                    if word.endswith("s") and " and " not in word
+                                    else f"counts when the {word} are fixed")
+            x["held_by"] = None
+            x["cap_share"] = True
+            x["exact"] = False
+
+
+def _no_listed_zero(items: List[dict], up_index: Optional[int]) -> None:
+    """Rules 3 and 4 of `_share_group_releases`: a score item still at 0 takes
+    one point from the largest number in its group, else on the page (the
+    total never moves); an item that moves nothing, clears no hold and adds
+    nothing is `score_item: False`."""
+    live = [it for it in items if not it.get("mirror_of")]
+    for n, it in enumerate(items):
+        if it.get("mirror_of"):
+            continue
+        scored = (int(it.get("points") or 0) > 0 or float(it.get("_own") or 0) > _EPS
+                  or float(it.get("gain") or 0) > _EPS or bool(it.get("_cleared"))
+                  or float(it.get("_follow") or 0) > 0 or it.get("held_by") is not None)
+        it["score_item"] = bool(scored)
+    # A score item whole points cannot reach says "under 1 pt" (P1, owner 29
+    # Oct 2026). It no longer BORROWS a point from another item: a borrow
+    # broke P3 (each item keeps its own measured gain) whenever the holders
+    # of a hold outnumbered its release (11 warnings sharing 4 points).
+    for it in live:
+        if it["score_item"] and int(it.get("points") or 0) <= 0:
+            it["under"] = True
+            it["exact"] = False
+            if it.get("held_by") is not None:
+                it["with_others"] = f"counts when {it['held_by']} is fixed"
+                it["held_by"] = None
+
+
+def enforce_contract(items: List[dict], now: int, left: int = 0) -> Tuple[int, List[str]]:
+    """THE SCORING CONTRACT'S LAST CHECK ON THE PLAN (owner, 29 Oct 2026 -
+    SCORING_RULES.md P1 / P2 / P4 / P5). Run after every share is made, on the
+    items as the screens will print them; it REPAIRS a breach rather than show
+    it, logs `SCORING_CONTRACT_REPAIRED` naming the rule and the item ids (never
+    a value), and returns the rules it repaired (the plan's `contract_repaired`)
+    so the random-package proof fails on a repair the root code should never
+    have needed.
+
+      P4  a mirror adds nothing: its own points go to the item it mirrors (a
+          mirror of a mirror points at the first place; a mirror of nothing
+          is an item of its own); no number is negative.
+      P5  an item that is not a score item carries no number; one that does
+          carry points IS a score item.
+      P2  the items' points add up to exactly 100 - score: a surplus comes off
+          the largest numbers ("up to" from then on); a shortfall - or points
+          the plan could give to no item (`left`) - goes to the score items
+          whole points could not reach ("under 1 pt"), else the largest.
+      P1  a score item still at 0 below 100 says "under 1 pt" (`under`), never
+          only "counts once X is fixed"; at 100 nothing carries a number.
+    Returns (the points still on no item - 0 unless the page has no score item
+    at all, the repairs). Never raises."""
+    repairs: List[str] = []
+    try:
+        total = max(0, 100 - int(now))
+        by_id = {it.get("id"): it for it in items}
+
+        def root_of(it: dict) -> Optional[dict]:
+            seen = set()
+            cur = it
+            while cur.get("mirror_of") and cur.get("id") not in seen:
+                seen.add(cur.get("id"))
+                nxt = by_id.get(cur["mirror_of"])
+                if nxt is None:
+                    return None
+                cur = nxt
+            return None if cur.get("mirror_of") else cur
+
+        # P4 - negatives, then mirrors.
+        for it in items:
+            if int(it.get("points") or 0) < 0:
+                it["points"] = 0
+                repairs.append(f"P4 negative: {it.get('id')}")
+        for it in items:
+            if not it.get("mirror_of"):
+                continue
+            first = root_of(it)
+            if first is None or first is it:
+                it.pop("mirror_of", None)
+                repairs.append(f"P4 mirror of nothing: {it.get('id')}")
+                continue
+            if first.get("id") != it["mirror_of"]:
+                it["mirror_of"] = first.get("id")
+            own = int(it.get("points") or 0)
+            if own:
+                first["points"] = int(first.get("points") or 0) + own
+                first["exact"] = False
+                it["points"] = 0
+                repairs.append(f"P4 mirror counted twice: {it.get('id')}")
+            it["under"] = False
+        live = [it for it in items if not it.get("mirror_of")]
+        # P5 - a number makes a score item; no score item carries a fraction.
+        for it in live:
+            if int(it.get("points") or 0) > 0 and it.get("score_item") is False:
+                it["score_item"] = True
+                repairs.append(f"P5 number on a non-score item: {it.get('id')}")
+            if it.get("score_item") is False and it.get("under"):
+                it["under"] = False
+        # P2 - exactly 100 - score.
+        shown = sum(int(it.get("points") or 0) for it in live)
+        if total == 0:
+            for it in live:
+                if int(it.get("points") or 0) or it.get("under"):
+                    repairs.append(f"R4 a number at 100: {it.get('id')}")
+                it["points"], it["under"], it["score_item"] = 0, False, False
+                it.pop("with_others", None)
+            left = 0
+        elif shown > total:
+            took = []
+            for _n in range(shown - total):
+                donor = max((x for x in live if int(x.get("points") or 0) > 0),
+                            key=lambda x: (int(x["points"]), live.index(x)))
+                donor["points"] = int(donor["points"]) - 1
+                donor["exact"] = False
+                took.append(str(donor.get("id")))
+            repairs.append(f"P2 over by {shown - total}: {sorted(set(took))}")
+        short = total - sum(int(it.get("points") or 0) for it in live)
+        if total and short > 0:
+            scored = [x for x in live if x.get("score_item") is not False
+                      and (int(x.get("points") or 0) > 0 or x.get("under")
+                           or float(x.get("gain") or 0) > _EPS or float(x.get("_own") or 0) > _EPS
+                           or x.get("_cleared"))]
+            if scored:
+                gave = []
+                for k in range(short):
+                    pool = [x for x in scored if int(x.get("points") or 0) <= 0] or scored
+                    to = max(pool, key=lambda x: (float(x.get("gain") or 0) + float(x.get("_own") or 0),
+                                                  int(x.get("points") or 0), -live.index(x)))
+                    to["points"] = int(to.get("points") or 0) + 1
+                    to["exact"] = False
+                    to["under"] = False
+                    gave.append(str(to.get("id")))
+                left = 0
+                repairs.append(f"P2 short by {short}: {sorted(set(gave))}")
+            else:
+                left = short
+                if short:
+                    repairs.append(f"P2 {short} pts on no item")
+        # P1 - every score item below 100 shows a number or "under 1 pt".
+        if total:
+            for it in live:
+                if it.get("score_item") is False:
+                    continue
+                if int(it.get("points") or 0) > 0:
+                    it["under"] = False
+                    continue
+                if not it.get("under"):
+                    it["under"] = True
+                    it["exact"] = False
+                    repairs.append(f"P1 score item at 0: {it.get('id')}")
+                if it.get("held_by") is not None:
+                    it["with_others"] = f"counts when {it['held_by']} is fixed"
+                    it["held_by"] = None
+                    repairs.append(f"P1 only 'counts once': {it.get('id')}")
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("review plan: contract check failed: %s", exc)
+        return int(left or 0), repairs
+    if repairs:
+        logger.warning("SCORING_CONTRACT_REPAIRED %s", "; ".join(repairs))
+    return int(left or 0), repairs
 
 
 def _narrative_gaps(sim: _Sim) -> List[dict]:
@@ -646,9 +1660,13 @@ def _whole_points(shown_after: List[float], gains: List[float], start: int,
 
 
 def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
-                      grouped: Optional[dict] = None) -> Optional[dict]:
+                      grouped: Optional[dict] = None,
+                      credit_rows: Optional[List[dict]] = None,
+                      declare_alone: bool = True) -> Optional[dict]:
     """The page's items, weighed in page order. {"items": [...], "total": T,
-    "end": the score the plan ends at, "left": the points no item adds}."""
+    "end": the score the plan ends at, "left": the points no item adds}.
+    `credit_rows`: after forms, the dismissal rows behind the stored score's
+    credits (`audit_service.get_dismissed_recommendations`)."""
     if not isinstance(pkg, dict) or not isinstance(row, dict):
         return None
     now = pkg.get("package_sqs_score")
@@ -662,49 +1680,473 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
         full_years = int(loss_years_required(row.get("facts") or {}) or 5)
     except Exception:                                          # noqa: BLE001
         full_years = 5
-    sim = _Sim(row)
+    # (Before forms the copy is made exactly as it always was.)
+    sim = _Sim(row, credit_rows) if credit_rows else _Sim(row)
+    sim.choose_samples = True
     shown, raw, cap, reason = sim.measure()
     if _floor(shown) != int(now):
         logger.warning("review plan: simulated start %.3f is not the score %s", shown, now)
+    try:
+        _h0, _s0 = _holding_stops(sim)
+        hold_counts = {"hard": len(_h0), "soft": len(_s0)}
+    except Exception:                                          # noqa: BLE001
+        _h0, _s0 = set(), set()
+        hold_counts = {"hard": 0, "soft": 0}
+    hold_start = (_h0, _s0)
     gains: List[float] = []
     shown_after: List[float] = []
     applied_keys: List[Tuple[str, set]] = []
-    for it in items:
+    # What each step raises (a new stop or row): a follow-up's points belong to
+    # the step whose answer raised it (see below).
+    seen_raised = _raised(sim)
+    raised_by: Dict[tuple, int] = {}
+    last_did: Optional[int] = None
+    for idx, it in enumerate(items):
         first = next((iid for iid, keys in applied_keys if all_covered(it["keys"], keys)), None)
         if first:
             it["mirror_of"] = first
-        before_shown, before_raw, before_reason = shown, raw, reason
+        before_shown, before_raw, before_reason, before_cap = shown, raw, reason, cap
+        try:
+            hold_before = _holding_stops(sim)
+        except Exception:                                      # noqa: BLE001
+            hold_before = (set(), set())
         did = False
+        snapshot = _snap(sim)
+        sim.step_samples = []
         try:
             did = _apply(sim, it, probes, full_years)
         except Exception as exc:                               # noqa: BLE001
             logger.debug("review plan: step %s not simulated: %s", it.get("id"), exc)
         if did:
             shown, raw, cap, reason = sim.measure()
-        # A step never lowers the score on screen: what it would cost here is
-        # the package's, not the step's (it shows nothing for it).
+            last_did = idx
+            # A sample that raised a new item, where the box may truly take
+            # another answer: the step is done again with that one (`_best_sample`).
+            if sim.step_samples:
+                try:
+                    if _raised(sim) - seen_raised:
+                        shown, raw, cap, reason = _retry_with_other_samples(
+                            sim, it, probes, full_years, snapshot, seen_raised, shown, raw)
+                except Exception as exc:                       # noqa: BLE001
+                    logger.debug("review plan: other samples not tried for %s: %s", it.get("id"), exc)
+            try:
+                cur = _raised(sim)
+                for sig in cur - seen_raised:
+                    raised_by.setdefault(sig, idx)
+                seen_raised |= cur
+            except Exception:                                  # noqa: BLE001
+                pass
+        # A step that would lower the score on screen (rule G13, 30 Oct 2026,
+        # contract seed 5008: a business income limit typed before its period of
+        # restoration raised the 85 hold) DECLARES that cost - the page says so
+        # beside it, with what it raises - instead of hiding it. The numbers
+        # still never go negative: what it costs is the package's.
+        if did and _floor(shown) < _floor(before_shown):
+            it["cost"] = int(_floor(before_shown) - _floor(shown))
+            # TWO ROWS THAT MUST BE ANSWERED TOGETHER ARE ONE (30 Oct 2026): the
+            # dip comes from a check this answer raised whose boxes another
+            # listed row asks for (a business income limit raising "period of
+            # restoration missing"). The pair is joined into one window
+            # (`join_codependent_rows`) so no order dips the score.
+            try:
+                _joins = _codependent_rows(sim, it, items, raised_by, idx)
+                if _joins:
+                    it["joins"] = _joins
+            except Exception as exc:                           # noqa: BLE001
+                logger.debug("review plan: joins not read for %s: %s", it.get("id"), exc)
         shown = max(shown, before_shown)
         it["gain"] = shown - before_shown
+        # Cap shares (`_share_group_releases`): what the answer moves on its own,
+        # which holds it clears, which hold its step releases.
+        it["_own"] = max(0.0, raw - before_raw) if did else 0.0
+        it["_did"] = bool(did)
+        if did:
+            try:
+                hold_after = _holding_stops(sim)
+            except Exception:                                  # noqa: BLE001
+                hold_after = hold_before
+            it["_cleared"] = ([k for k, b, a in (("hard", hold_before[0], hold_after[0]),
+                                                  ("soft", hold_before[1], hold_after[1]))
+                               if b - a])
+        # A card whose own sentence held the score when the page was read holds
+        # it too, even when a step above it cleared the sentence first (the
+        # person reads it on its own page and is told what it is worth).
+        if it.get("kind") == "card" and it.get("message") and not it.get("mirror_of"):
+            _sh = _shape(it["message"])
+            for k, start in (("hard", hold_start[0]), ("soft", hold_start[1])):
+                if _sh in start and k not in (it.get("_cleared") or []):
+                    it["_cleared"] = list(it.get("_cleared") or []) + [k]
+        # Which hold this step releases - any step, not only a card: a key
+        # detail or a row whose answer lifts the last 60 / 85 shares it too.
+        rel = []
+        if before_cap is not None and int(before_cap) <= 60 and (cap is None or int(cap) > 60):
+            rel.append("hard")
+        if before_cap is not None and int(before_cap) <= 85 and cap is None:
+            rel.append("soft")
+        it["_released"] = rel
         it["held_by"] = (_hold_label(before_reason)
                          if did and it["gain"] <= _EPS and raw - before_raw > _EPS else None)
         gains.append(it["gain"])
         shown_after.append(shown)
         applied_keys.append((it["id"], set(it["keys"])))
+    # A Loss History row a step raised (the plan's copy never lists them - see
+    # `_loss_plan_rows`) is that step's declared follow-up (rule G2).
+    try:
+        _lr = _loss_plan_rows(sim, getattr(sim, "last_pkg", None) or {})
+        _listed = {_signature(x) for x in items}
+        for _sig, _idx in raised_by.items():
+            if _sig in _lr and _sig not in _listed and 0 <= _idx < len(items):
+                _ld = items[_idx].setdefault("leads_to", [])
+                if _lr[_sig][:120] not in _ld:
+                    _ld.append(_lr[_sig][:120])
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("review plan: loss follow-ups not read: %s", exc)
+    # EVERY ORDER, NOT ONLY THE PAGE'S (rule G2, 30 Oct 2026). The walk above
+    # credits a follow-up to the step that raised it in page order; a person who
+    # answers in another order meets it after a step that declared nothing (the
+    # 30 Oct sweep: GL codes before the operations, a payroll before its table,
+    # a loss-run upload before the FEIN pick). Each item is also done ALONE on
+    # the page as it stands, and what that raises - a stop, a row, a Loss History
+    # row - is declared on it. Names only; no number moves.
+    # (Names only, no number - so an intermediate plan the page rebuilds after
+    # joining / merging rows skips it; the final one runs it: `declare_alone`.)
+    if declare_alone:
+        try:
+            _declare_alone_follow_ups(row, items, probes, full_years, credit_rows)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("review plan: alone follow-ups not read: %s", exc)
     up_index = next((n for n, it in enumerate(items)
                      if it["kind"] == "doc" and it.get("step") == "upload"), None)
-    ints, under = _whole_points(shown_after, gains, int(now), up_index)
-    reached = max([int(now)] + [_floor(v) for v in shown_after])
+    if up_index is not None:
+        try:
+            _declare_upload_follow_ups(row, items, items[up_index], probes, full_years, credit_rows)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("review plan: upload follow-ups not read: %s", exc)
+    # FOLLOW-UPS (28 Oct 2026 review). A sample answer can raise an item the
+    # page does not show yet - a vehicle added to an empty schedule asks for
+    # garaging, radius and use; a count of employees on a package carrying no
+    # workers comp asks how they are covered. Their points were "points no item
+    # on this page can add yet" and the numbers fell short of 100 - score. The
+    # plan now reads the page as it would stand, does those items too, and
+    # gives their points to the step that raised them, marked "up to" and
+    # naming them (`leads_to`) - so the numbers add up to exactly 100 - score,
+    # and the raised item shows the rest of its own number once it appears.
+    follow: List[Tuple[int, float, float]] = []
+    if _floor(shown) < 100:
+        try:
+            follow = _follow_ups(sim, items, probes, full_years, raised_by, last_did, shown)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("review plan: follow-ups not simulated: %s", exc)
+            follow = []
+        if follow:
+            shown = follow[-1][2]
+    seq_shown = shown_after + [f[2] for f in follow]
+    seq_gain = gains + [f[1] for f in follow]
+    ints, under = _whole_points(seq_shown, seq_gain, int(now), up_index)
+    reached = max([int(now)] + [_floor(v) for v in seq_shown])
     left = 0 if up_index is not None else max(0, 100 - reached)
     by_id = {it["id"]: it for it in items}
     for it, n, small in zip(items, ints, under):
         it["points"] = int(n)
         it["under"] = bool(small)
         it["exact"] = not it.get("prose") and not it.get("hedged") and it.get("held_by") is None
+    for k, (raiser, _g, _s) in enumerate(follow):
+        extra = int(ints[len(items) + k])
+        it = items[raiser]
+        it["points"] = int(it.get("points") or 0) + extra
+        it["exact"] = False
+        it["_follow"] = float(it.get("_follow") or 0) + extra
+        if extra:
+            it["under"] = False
+    # ONE FIX, ONE NUMBER (P4): a mirror's step can still move the score - the
+    # first place typed only the empty boxes, the mirror's window the rest -
+    # and that is the same fix's worth. It is credited to the first place, so
+    # the mirror adds nothing to the total (29 Oct 2026, scoring contract).
+    for it in items:
+        first = by_id.get(it.get("mirror_of"))
+        while first is not None and first.get("mirror_of") in by_id:
+            first = by_id[first["mirror_of"]]
+        if first is None or first is it:
+            continue
+        if int(it.get("points") or 0) or float(it.get("gain") or 0) > _EPS:
+            first["points"] = int(first.get("points") or 0) + int(it.get("points") or 0)
+            first["gain"] = float(first.get("gain") or 0) + float(it.get("gain") or 0)
+            first["_own"] = float(first.get("_own") or 0) + float(it.get("_own") or 0)
+            first["_cleared"] = sorted(set(first.get("_cleared") or []) | set(it.get("_cleared") or []))
+            first["_released"] = sorted(set(first.get("_released") or []) | set(it.get("_released") or []))
+            first["exact"] = False
+            first["under"] = False
+            it["points"], it["gain"], it["_own"], it["under"] = 0, 0.0, 0.0, False
+        if it.get("mirror_of") != first.get("id"):
+            it["mirror_of"] = first.get("id")
+    try:
+        _share_group_releases(items, sum(int(x.get("points") or 0) for x in items), hold_counts)
+        _no_listed_zero(items, up_index)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("review plan: cap shares not applied: %s", exc)
+    left, repaired = enforce_contract(items, int(now), left)
     for it in items:
         if it.get("mirror_of") in by_id:
             it["mirror"] = int(by_id[it["mirror_of"]]["points"])
-    return {"items": [{k: v for k, v in it.items() if k not in ("resolution",)} for it in items],
-            "total": total, "end": round(shown, 4), "left": int(left)}
+    out = {"items": [{k: v for k, v in it.items() if k not in ("resolution",) and not k.startswith("_")}
+                     for it in items],
+           "total": total, "end": round(shown, 4), "left": int(left)}
+    if repaired:
+        out["contract_repaired"] = repaired
+    if not getattr(sim, "pre_form", True):
+        out["after_forms"] = True       # the editor's side panel reads it
+    # What `declare_follow_ups` needs, so the page's FINAL plan gets its any-order
+    # follow-ups without walking the page again (popped before it is sent).
+    if not declare_alone:
+        out["_ctx"] = (items, probes, full_years, credit_rows)
+    return out
+
+
+def declare_follow_ups(row: dict, plan: Optional[dict]) -> Optional[dict]:
+    """Rule G2 in any order on a built plan (`_declare_alone_follow_ups` over its
+    own items), copied onto the plan's items by id; drops the private context.
+    Names only - no number moves."""
+    if not isinstance(plan, dict):
+        return plan
+    ctx = plan.pop("_ctx", None)
+    if not ctx:
+        return plan
+    items, probes, full_years, credit_rows = ctx
+    try:
+        _declare_alone_follow_ups(row, items, probes, full_years, credit_rows)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("review plan: alone follow-ups not read: %s", exc)
+        return plan
+    leads = {it["id"]: it.get("leads_to") for it in items if it.get("leads_to")}
+    for it in plan.get("items") or []:
+        if isinstance(it, dict) and it.get("id") in leads:
+            it["leads_to"] = list(leads[it["id"]])
+    return plan
+
+
+def _declare_upload_follow_ups(row: dict, items: List[dict], up: dict, probes: Dict[str, str],
+                               full_years: int, credit_rows: Optional[List[dict]]) -> None:
+    """THE UPLOAD ROW'S FOLLOW-UPS (owner rule G2, 30 Oct 2026). Complete loss
+    runs arriving can raise what no answer on the page raises - "Do these loss
+    runs belong to this insured?" (the match is not strong), the claims answer
+    an attestation now contradicts, the prior carrier the runs make
+    applicable, the years they cover, a stop their figures trigger. Whatever
+    the person does first, those appear only once the runs are in, so the
+    upload row names them (`leads_to`): the upload done ALONE on the page as it
+    stands, then the Loss History plan and the stops read again. Display only -
+    the row's points are the plan's."""
+    from services import sqs_service as S
+    sim = _Sim(row, credit_rows) if credit_rows else _Sim(row)
+    start = _raised(sim)
+    if not _apply(sim, up, probes, full_years):
+        return
+    sim.measure()
+    pkg = getattr(sim, "last_pkg", None) or {}
+    st = getattr(sim, "last_stops", None) or {}
+    on_page = {str(it.get("label") or "")[:120] for it in items}
+    leads = up.setdefault("leads_to", [])
+
+    def add(label: Any) -> None:
+        text = str(label or "")[:120]
+        if text and text not in on_page and text not in leads:
+            leads.append(text)
+
+    facts, flags = sim.session["facts"], sim.session["flags"]
+    try:
+        steps = S.loss_history_plan(facts, flags, sim.session.get("docs") or [],
+                                    pkg.get("pillars") or {}) or []
+    except Exception:                                          # noqa: BLE001
+        steps = []
+    for s in steps:
+        if isinstance(s, dict) and s.get("key") != "upload" and (
+                int(s.get("points") or 0) > 0 or (s.get("key") in ("claims", "conflict") and s.get("applied"))):
+            add(s.get("label"))
+    raised = _raised(sim) - start
+    for msg in (st.get("hard") or []) + (st.get("soft") or []) + [
+            i.get("message") for i in (st.get("cross_issues") or []) if isinstance(i, dict)]:
+        if ("stop", _shape(msg)) in raised:
+            add(msg)
+    if not leads:
+        up.pop("leads_to", None)
+
+
+def _raised_labels(sim: "_Sim") -> Dict[tuple, str]:
+    """`_raised`'s signatures with the words a person reads for each."""
+    sim.measure()
+    st = getattr(sim, "last_stops", None) or {}
+    pkg = getattr(sim, "last_pkg", None) or {}
+    out: Dict[tuple, str] = {}
+    for m in (st.get("hard") or []) + (st.get("soft") or []):
+        out[("stop", _shape(m))] = str(m)
+    for i in st.get("cross_issues") or []:
+        if isinstance(i, dict) and i.get("message"):
+            out[("stop", _shape(i["message"]))] = str(i["message"])
+    for r in pkg.get("top_recommendations") or []:
+        if isinstance(r, dict):
+            out[("row", str(r.get("pillar")), _shape(r.get("field") or r.get("action") or ""))] = \
+                str(r.get("action") or r.get("field") or "")
+    out.update(_loss_plan_rows(sim, pkg))
+    return out
+
+
+def _declare_alone_follow_ups(row: dict, items: List[dict], probes: Dict[str, str],
+                              full_years: int, credit_rows: Optional[List[dict]] = None) -> None:
+    """Rule G2 in any order: each item done ALONE on the page as it stands; the
+    items the page would then list that it does not list now are declared on
+    it (`leads_to`), in the words that page shows (never a raw rule sentence -
+    those name forms, G14). A Loss History row the copy cannot list (probe
+    scoring leaves the plan's rows out) is read by `_loss_plan_rows`."""
+    from services import sqs_service as S
+
+    def fresh() -> "_Sim":
+        return _Sim(row, credit_rows) if credit_rows else _Sim(row)
+
+    def rule(x: dict) -> str:
+        if x.get("code"):
+            return "card:" + str(x["code"])
+        keys = sorted(str(k) for k in (x.get("keys") or []))
+        return f"{x.get('kind')}:" + (",".join(keys) or str(x.get("id")))
+
+    start_rules = {rule(x) for x in items}
+    listed_keys = {str(k) for x in items for k in (x.get("keys") or [])}
+    base = fresh()
+    base.measure()
+    start_loss = _loss_plan_rows(base, getattr(base, "last_pkg", None) or {})
+    start_raised = _raised(base)
+    by_id = {x["id"]: x for x in items}
+    # ONE copy, rolled back after each item (scored once per item, not twice).
+    sim = base
+    saved = (copy.deepcopy(sim.session), set(sim.suppressed), set(sim.answered),
+             list(sim.form_ids), getattr(sim, "_measured", None))
+
+    def rollback() -> None:
+        sim.session = copy.deepcopy(saved[0])
+        sim.suppressed, sim.answered = set(saved[1]), set(saved[2])
+        sim.form_ids, sim._measured = list(saved[3]), saved[4]
+
+    for it in items:
+        if it.get("mirror_of") or it.get("kind") == "dc":
+            continue
+        rollback()
+        try:
+            if not _apply(sim, it, probes, full_years):
+                continue
+            # Cheap first: an answer that raises no new stop, row or Loss History
+            # row has nothing to declare (most items) - the page is read only
+            # for the few that do.
+            if not (_raised(sim) - start_raised):
+                continue
+            pkg_now = getattr(sim, "last_pkg", None) or {}
+            facts, flags = sim.session["facts"], sim.session["flags"]
+            grouped_now = S.review_page_grouped_view(sim.session, pkg_now,
+                                                     after_forms=not getattr(sim, "pre_form", True))
+            fresh_items = page_items(sim.session, pkg_now, S.key_details(facts, flags), grouped_now)
+            loss_now = _loss_plan_rows(sim, pkg_now)
+        except Exception:                                      # noqa: BLE001
+            continue
+        new: List[str] = []
+        for x in fresh_items:
+            xk = [str(k) for k in (x.get("keys") or [])]
+            if rule(x) in start_rules:
+                continue
+            if x.get("kind") not in ("card", "dc") and xk and all(k in listed_keys for k in xk):
+                continue
+            new.append(str(x.get("label") or ""))
+        new += [lab for sig, lab in loss_now.items() if sig not in start_loss]
+        new = [n[:120] for n in new if n]
+        if not new:
+            continue
+        owner = it
+        while owner.get("mirror_of") in by_id:
+            owner = by_id[owner["mirror_of"]]
+        leads = owner.setdefault("leads_to", [])
+        for lab in new:
+            if lab not in leads:
+                leads.append(lab)
+
+
+def _signature(it: dict) -> Optional[tuple]:
+    """A page item as `_raised` names what it raises."""
+    if it.get("kind") == "card" and it.get("message"):
+        return ("stop", _shape(it["message"]))
+    if it.get("kind") == "rec":
+        return ("row", str(it.get("pillar")), _shape(it.get("field") or it.get("label") or ""))
+    return None
+
+
+def _gaps_of(it: dict) -> tuple:
+    res = it.get("resolution") if isinstance(it.get("resolution"), dict) else {}
+    return tuple(sorted(str((g or {}).get("label") or "") for g in (res.get("gaps") or [])
+                        if isinstance(g, dict)))
+
+
+def _follow_ups(sim: "_Sim", items: List[dict], probes: Dict[str, str], full_years: int,
+                raised_by: Dict[tuple, int], last_did: Optional[int],
+                shown: float) -> List[Tuple[int, float, float]]:
+    """[(the step that raised it, gain, shown after)] for every item the page
+    would list once the plan's steps are done, in up to three readings."""
+    from services import sqs_service as S
+    out: List[Tuple[int, float, float]] = []
+    done_keys: set = {k for it in items for k in (it.get("keys") or [])}
+    # (A narrative window whose topics changed is not "as it stood".)
+    done_gaps: Dict[tuple, set] = {}
+    for it in items:
+        done_gaps.setdefault(tuple(it.get("keys") or []), set()).add(_gaps_of(it))
+    for _reading in range(3):
+        sim.measure()
+        pkg_now = getattr(sim, "last_pkg", None) or {}
+        facts, flags = sim.session["facts"], sim.session["flags"]
+        kd_now = S.key_details(facts, flags)
+        grouped_now = S.review_page_grouped_view(sim.session, pkg_now,
+                                                 after_forms=not getattr(sim, "pre_form", True))
+        # Every item the page would list then (an item answered above is a
+        # no-op: its box is the person's answer now; `rec:<n>` ids are list
+        # positions, so they say nothing about which row was done).
+        fresh = page_items(sim.session, pkg_now, kd_now, grouped_now)
+        moved = False
+        for it in fresh:
+            # An item whose fix the pass already offered, standing as it stood
+            # then, is done (the person's answers are in): only a raised or a
+            # changed item is a follow-up. Keeps the reading cheap.
+            if (it["keys"] and all_covered(it["keys"], done_keys) and _signature(it) not in raised_by
+                    and _gaps_of(it) in done_gaps.get(tuple(it["keys"]), {_gaps_of(it)})):
+                continue
+            before = shown
+            if not _apply(sim, it, probes, full_years):
+                continue
+            shown = max(sim.measure()[0], before)
+            gain = shown - before
+            if gain <= _EPS:
+                # A raised item worth nothing yet (another hold still stands) is
+                # still the raising step's declared follow-up (rule G2, 30 Oct
+                # 2026): the page names it with that step, never as a surprise.
+                _r0 = raised_by.get(_signature(it) or ("", ""))
+                if _r0 is not None:
+                    _f0 = items[_r0].get("mirror_of")
+                    if _f0:
+                        _r0 = next((n for n, x in enumerate(items) if x["id"] == _f0), _r0)
+                    _lead = str(it.get("label") or "")[:120]
+                    _leads = items[_r0].setdefault("leads_to", [])
+                    if _lead and _lead not in _leads:
+                        _leads.append(_lead)
+                continue
+            raiser = raised_by.get(_signature(it) or ("", ""), last_did)
+            if raiser is None:
+                continue
+            first = items[raiser].get("mirror_of")
+            if first:
+                raiser = next((n for n, x in enumerate(items) if x["id"] == first), raiser)
+            leads = items[raiser].setdefault("leads_to", [])
+            label = str(it.get("label") or "")[:120]
+            if label and label not in leads:
+                leads.append(label)
+            out.append((raiser, gain, shown))
+            moved = True
+            if _floor(shown) >= 100:
+                return out
+        if not moved:
+            break
+    return out
 
 
 # ── Sub-point rows merge (owner, 24 Oct 2026) ────────────────────────────────
@@ -721,6 +2163,82 @@ def _mergeable(it: dict) -> bool:
             and not it.get("prose") and not it.get("hedged") and it.get("pillar")
             and _EPS < float(it.get("gain") or 0.0) < 1.0 - _EPS
             and all(str(k).startswith("fact:") for k in (it.get("keys") or [])) and it.get("keys"))
+
+
+def _codependent_rows(sim: "_Sim", it: dict, items: List[dict], raised_by: Dict[tuple, int],
+                      idx: int) -> List[int]:
+    """The listed Recommendations rows (their `row_index`) whose boxes are exactly
+    what a check this step raised asks for. Only a Recommendations row joins one
+    (rows merge into one window; a card or key detail keeps its declared cost)."""
+    if it.get("kind") != "rec" or it.get("row_index") is None:
+        return []
+    from services.issue_registry import _legacy_message_resolution, resolution_for
+    st = getattr(sim, "last_stops", None) or {}
+    new_shapes = {sig[1] for sig, n in raised_by.items() if n == idx and sig[0] == "stop"}
+    wanted: List[set] = []
+    for m in (st.get("hard") or []) + (st.get("soft") or []):
+        if _shape(m) in new_shapes:
+            res = _legacy_message_resolution(str(m)) or {}
+            if res.get("mode") == "field" and res.get("facts"):
+                wanted.append({str(f) for f in res["facts"]})
+    for i in st.get("cross_issues") or []:
+        if isinstance(i, dict) and _shape(i.get("message")) in new_shapes:
+            res = resolution_for(str(i.get("code") or "")) or {}
+            if res.get("mode") == "field" and res.get("facts"):
+                wanted.append({str(f) for f in res["facts"]})
+    own = {str(k)[5:] for k in (it.get("keys") or []) if str(k).startswith("fact:")}
+    out: List[int] = []
+    for need in wanted:
+        need = need - own
+        if not need:
+            continue
+        for y in items:
+            if y is it or y.get("kind") != "rec" or y.get("row_index") is None:
+                continue
+            ykeys = {str(k)[5:] for k in (y.get("keys") or []) if str(k).startswith("fact:")}
+            if ykeys and need <= ykeys and int(y["row_index"]) not in out:
+                out.append(int(y["row_index"]))
+    return out
+
+
+def join_codependent_rows(pkg: dict, plan: Optional[dict]) -> Optional[dict]:
+    """A copy of `pkg` whose co-dependent rows (`items[].joins`, see
+    `_codependent_rows`) are ONE row at the first one's place - every question in
+    one window, so answering in any order never dips the score - or None."""
+    if not isinstance(plan, dict) or not isinstance(pkg, dict):
+        return None
+    rows = pkg.get("top_recommendations")
+    if not isinstance(rows, list):
+        return None
+    drop: set = set()
+    out_rows = list(rows)
+    for it in plan.get("items") or []:
+        if not isinstance(it, dict) or not it.get("joins") or it.get("row_index") is None:
+            continue
+        x = int(it["row_index"])
+        idx = [x] + [int(j) for j in it["joins"] if 0 <= int(j) < len(rows) and int(j) != x and int(j) not in drop]
+        if x in drop or len(idx) < 2 or not all(isinstance(rows[i], dict) for i in idx):
+            continue
+        fields: List[str] = []
+        for i in idx:
+            for f in (rows[i].get("merged_fields") or [rows[i].get("field")]):
+                if f and str(f) not in fields:
+                    fields.append(str(f))
+        joined = dict(out_rows[x])
+        joined["action"] = MERGE_JOIN.join(
+            dict.fromkeys(str(rows[i].get("action") or rows[i].get("field") or "").strip() for i in idx))
+        joined["merged_fields"] = fields
+        joined["resolution"] = merged_resolution(fields, None)
+        joined["answer_mode"] = "field"
+        for k in ("points_available", "potential_gain"):
+            vals = [rows[i].get(k) for i in idx if isinstance(rows[i].get(k), (int, float))]
+            if vals:
+                joined[k] = sum(vals)
+        out_rows[x] = joined
+        drop.update(i for i in idx if i != x)
+    if not drop:
+        return None
+    return {**pkg, "top_recommendations": [r for n, r in enumerate(out_rows) if n not in drop]}
 
 
 def merged_resolution(fields: List[str], facts: Optional[dict] = None) -> dict:

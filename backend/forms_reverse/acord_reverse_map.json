@@ -1,0 +1,5765 @@
+{
+"forms": {
+"ACORD_101": {
+"boxes": {
+"AdditionalRemark_RemarkText_A": [
+{
+"fact": "additional_remarks_text",
+"part": "whole",
+"t": "fact"
+},
+{
+"fact": "qn_carrier_narrative",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"fact": "carrier_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_B": [
+{
+"fact": "additional_named_insureds#0",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_C": [
+{
+"fact": "additional_named_insureds#1",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_D": [
+{
+"fact": "additional_named_insureds#2",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"fact": "effective_date",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "0072d9cd3a9f358d"
+},
+"ACORD_125": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"BuildingOccupancy_OccupiedArea_A": [
+{
+"col": "occupied_area",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OccupiedArea_B": [
+{
+"col": "occupied_area",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OccupiedArea_C": [
+{
+"col": "occupied_area",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OccupiedArea_D": [
+{
+"col": "occupied_area",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OpenToPublicArea_A": [
+{
+"col": "open_to_public_area",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OpenToPublicArea_B": [
+{
+"col": "open_to_public_area",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OpenToPublicArea_C": [
+{
+"col": "open_to_public_area",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OpenToPublicArea_D": [
+{
+"col": "open_to_public_area",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OperationsDescription_A": [
+{
+"col": "operations_description",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OperationsDescription_B": [
+{
+"col": "operations_description",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OperationsDescription_C": [
+{
+"col": "operations_description",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"BuildingOccupancy_OperationsDescription_D": [
+{
+"col": "operations_description",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"BusinessInformation_FullTimeEmployeeCount_A": [
+{
+"col": "full_time_employees",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BusinessInformation_FullTimeEmployeeCount_B": [
+{
+"col": "full_time_employees",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BusinessInformation_FullTimeEmployeeCount_C": [
+{
+"col": "full_time_employees",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"BusinessInformation_FullTimeEmployeeCount_D": [
+{
+"col": "full_time_employees",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"BusinessInformation_PartTimeEmployeeCount_A": [
+{
+"col": "part_time_employees",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BusinessInformation_PartTimeEmployeeCount_B": [
+{
+"col": "part_time_employees",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BusinessInformation_PartTimeEmployeeCount_C": [
+{
+"col": "part_time_employees",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"BusinessInformation_PartTimeEmployeeCount_D": [
+{
+"col": "part_time_employees",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialPolicy_OperationsDescription_A": [
+{
+"fact": "operations_description",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialPolicy_RemarkText_A": [
+{
+"fact": "additional_remarks_text",
+"part": "whole",
+"t": "fact"
+},
+{
+"col": "claim_number",
+"list": "loss_history",
+"row": 3,
+"t": "cell"
+},
+{
+"col": "description",
+"list": "loss_history",
+"row": 3,
+"t": "cell"
+},
+{
+"col": "line_of_business",
+"list": "loss_history",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_AnnualRevenueAmount_A": [
+{
+"col": "annual_revenue",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_AnnualRevenueAmount_B": [
+{
+"col": "annual_revenue",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_AnnualRevenueAmount_C": [
+{
+"col": "annual_revenue",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_AnnualRevenueAmount_D": [
+{
+"col": "annual_revenue",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_A": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_B": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_C": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_D": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_A": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_B": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_C": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_D": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_D": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_B": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_C": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_D": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CountyName_A": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CountyName_B": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CountyName_C": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CountyName_D": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_C": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_D": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineTwo_A": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineTwo_B": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineTwo_C": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineTwo_D": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_B": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_C": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_D": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_RiskLocation_OtherDescription_A": [
+{
+"col": "other_city_limits_description",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_RiskLocation_OtherDescription_B": [
+{
+"col": "other_city_limits_description",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_RiskLocation_OtherDescription_C": [
+{
+"col": "other_city_limits_description",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_RiskLocation_OtherDescription_D": [
+{
+"col": "other_city_limits_description",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_A": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_B": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_C": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_D": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Insurer_FullName_A": [
+{
+"fact": "carrier_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"LossHistory_ClaimDate_A": [
+{
+"col": "claim_date",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_ClaimDate_B": [
+{
+"col": "claim_date",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_ClaimDate_C": [
+{
+"col": "claim_date",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"LossHistory_LineOfBusiness_A": [
+{
+"col": "line_of_business",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_LineOfBusiness_B": [
+{
+"col": "line_of_business",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_LineOfBusiness_C": [
+{
+"col": "line_of_business",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDate_A": [
+{
+"col": "date",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDate_B": [
+{
+"col": "date",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDate_C": [
+{
+"col": "date",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDescription_A": [
+{
+"col": "description",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDescription_B": [
+{
+"col": "description",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_OccurrenceDescription_C": [
+{
+"col": "description",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"LossHistory_PaidAmount_A": [
+{
+"col": "paid",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_PaidAmount_B": [
+{
+"col": "paid",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_PaidAmount_C": [
+{
+"col": "paid",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"LossHistory_ReservedAmount_A": [
+{
+"col": "reserved_amount",
+"list": "loss_history",
+"row": 0,
+"t": "cell"
+}
+],
+"LossHistory_ReservedAmount_B": [
+{
+"col": "reserved_amount",
+"list": "loss_history",
+"row": 1,
+"t": "cell"
+}
+],
+"LossHistory_ReservedAmount_C": [
+{
+"col": "reserved_amount",
+"list": "loss_history",
+"row": 2,
+"t": "cell"
+}
+],
+"NamedInsured_BusinessStartDate_A": [
+{
+"fact": "business_start_date",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_Contact_FullName_A": [
+{
+"fact": "contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_Contact_PrimaryEmailAddress_A": [
+{
+"fact": "contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_Contact_PrimaryPhoneNumber_A": [
+{
+"fact": "contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_B": [
+{
+"fact": "additional_named_insureds#0",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_C": [
+{
+"fact": "additional_named_insureds#1",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_LegalEntity_CorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Corporation"
+}
+],
+"NamedInsured_LegalEntity_IndividualIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Sole Proprietorship"
+}
+],
+"NamedInsured_LegalEntity_JointVentureIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Joint Venture"
+}
+],
+"NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Liability Company"
+}
+],
+"NamedInsured_LegalEntity_MemberManagerCount_A": [
+{
+"fact": "applicant_member_manager_count",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_LegalEntity_NotForProfitIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Non-Profit Corporation"
+}
+],
+"NamedInsured_LegalEntity_PartnershipIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Partnership"
+},
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Partnership"
+},
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Liability Partnership"
+}
+],
+"NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "S Corporation"
+}
+],
+"NamedInsured_LegalEntity_TrustIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Trust"
+}
+],
+"NamedInsured_MailingAddress_CityName_A": [
+{
+"fact": "mailing_address",
+"part": "city",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_LineOne_A": [
+{
+"fact": "mailing_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_PostalCode_A": [
+{
+"fact": "mailing_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"NamedInsured_NAICSCode_A": [
+{
+"fact": "naics_code",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_Primary_WebsiteAddress_A": [
+{
+"fact": "applicant_website",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_SICCode_A": [
+{
+"fact": "sic_code",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_TaxIdentifier_A": [
+{
+"fact": "fein",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"fact": "effective_date",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_ExpirationDate_A": [
+{
+"fact": "expiration_date",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_PaymentMethod_MethodDescription_A": [
+{
+"fact": "billing_plan",
+"part": "whole",
+"t": "fact"
+}
+],
+"PriorCoverage_OtherLine_EffectiveDate_A": [
+{
+"col": "effective",
+"list": "prior_coverage_by_line",
+"row": 3,
+"t": "cell"
+}
+],
+"PriorCoverage_OtherLine_ExpirationDate_A": [
+{
+"col": "expiration",
+"list": "prior_coverage_by_line",
+"row": 3,
+"t": "cell"
+}
+],
+"PriorCoverage_OtherLine_InsurerFullName_A": [
+{
+"col": "carrier",
+"list": "prior_coverage_by_line",
+"row": 3,
+"t": "cell"
+}
+],
+"PriorCoverage_OtherLine_LineOfBusinessCode_A": [
+{
+"col": "line",
+"list": "prior_coverage_by_line",
+"row": 3,
+"t": "cell"
+}
+],
+"PriorCoverage_OtherLine_PolicyNumberIdentifier_A": [
+{
+"col": "policy_no",
+"list": "prior_coverage_by_line",
+"row": 3,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_EmailAddress_A": [
+{
+"fact": "producer_contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_PhoneNumber_A": [
+{
+"fact": "producer_contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FaxNumber_A": [
+{
+"fact": "producer_fax",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_CityName_A": [
+{
+"fact": "producer_address",
+"part": "city",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_LineOne_A": [
+{
+"fact": "producer_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_PostalCode_A": [
+{
+"fact": "producer_address",
+"part": "zip",
+"t": "fact"
+}
+]
+},
+"schema_sha": "06f0bc8f5c76ddbd"
+},
+"ACORD_126": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Contractors_FullTimeEmployeeCount_A": [
+{
+"fact": "num_employees_full_time",
+"part": "whole",
+"t": "fact"
+}
+],
+"Contractors_PartTimeEmployeeCount_A": [
+{
+"fact": "num_employees_part_time",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_BodilyInjury_DeductibleAmount_A": [
+{
+"fact": "gl_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ClaimsMadeIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Claims-made"
+}
+],
+"GeneralLiability_CoverageIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Occurrence"
+},
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Claims-made"
+}
+],
+"GeneralLiability_EachOccurrence_LimitAmount_A": [
+{
+"fact": "gl_each_occurrence",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": [
+{
+"fact": "gl_fire_damage_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_GeneralAggregate_LimitAmount_A": [
+{
+"fact": "gl_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_Hazard_ClassCode_A": [
+{
+"col": "class_code",
+"list": "gl_class_code_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_ClassCode_B": [
+{
+"col": "class_code",
+"list": "gl_class_code_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_ClassCode_C": [
+{
+"col": "class_code",
+"list": "gl_class_code_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Classification_A": [
+{
+"col": "classification",
+"list": "gl_class_code_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Classification_B": [
+{
+"col": "classification",
+"list": "gl_class_code_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Classification_C": [
+{
+"col": "classification",
+"list": "gl_class_code_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Exposure_A": [
+{
+"col": "exposure_amount",
+"list": "gl_class_code_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Exposure_B": [
+{
+"col": "exposure_amount",
+"list": "gl_class_code_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_Exposure_C": [
+{
+"col": "exposure_amount",
+"list": "gl_class_code_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_PremiumBasisCode_A": [
+{
+"col": "premium_basis",
+"list": "gl_class_code_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_PremiumBasisCode_B": [
+{
+"col": "premium_basis",
+"list": "gl_class_code_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"GeneralLiability_Hazard_PremiumBasisCode_C": [
+{
+"col": "premium_basis",
+"list": "gl_class_code_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": [
+{
+"fact": "gl_medical_expense",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_OccurrenceIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Occurrence"
+}
+],
+"GeneralLiability_OtherDeductibleAmount_A": [
+{
+"fact": "gl_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": [
+{
+"fact": "gl_personal_advertising_injury",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": [
+{
+"fact": "gl_products_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_PropertyDamage_DeductibleAmount_A": [
+{
+"fact": "gl_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "e063ca7760afaa3e"
+},
+"ACORD_127": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Driver_BirthDate_A": [
+{
+"col": "dob",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_BirthDate_B": [
+{
+"col": "dob",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_BirthDate_C": [
+{
+"col": "dob",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_BirthDate_D": [
+{
+"col": "dob",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Driver_ExperienceYearCount_A": [
+{
+"col": "experience_years",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_ExperienceYearCount_B": [
+{
+"col": "experience_years",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_ExperienceYearCount_C": [
+{
+"col": "experience_years",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_ExperienceYearCount_D": [
+{
+"col": "experience_years",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Driver_GivenName_A": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_GivenName_B": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_GivenName_C": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_GivenName_D": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Driver_HiredDate_A": [
+{
+"col": "hire_date",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_HiredDate_B": [
+{
+"col": "hire_date",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_HiredDate_C": [
+{
+"col": "hire_date",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_HiredDate_D": [
+{
+"col": "hire_date",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Driver_LicenseNumberIdentifier_A": [
+{
+"col": "license_number",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_LicenseNumberIdentifier_B": [
+{
+"col": "license_number",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_LicenseNumberIdentifier_C": [
+{
+"col": "license_number",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_LicenseNumberIdentifier_D": [
+{
+"col": "license_number",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Driver_Vehicle_UsePercent_A": [
+{
+"col": "vehicle_use_percent",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_Vehicle_UsePercent_B": [
+{
+"col": "vehicle_use_percent",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_Vehicle_UsePercent_C": [
+{
+"col": "vehicle_use_percent",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Driver_Vehicle_UsePercent_D": [
+{
+"col": "vehicle_use_percent",
+"list": "auto_drivers",
+"row": 3,
+"t": "cell"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_BodyCode_A": [
+{
+"col": "body_type",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_BodyCode_B": [
+{
+"col": "body_type",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_BodyCode_C": [
+{
+"col": "body_type",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_BodyCode_D": [
+{
+"col": "body_type",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_Collision_DeductibleAmount_A": [
+{
+"fact": "auto_deductible_collision",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Collision_DeductibleAmount_B": [
+{
+"fact": "auto_deductible_collision",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Collision_DeductibleAmount_C": [
+{
+"fact": "auto_deductible_collision",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Collision_DeductibleAmount_D": [
+{
+"fact": "auto_deductible_collision",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_A": [
+{
+"fact": "auto_deductible_comp",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_B": [
+{
+"fact": "auto_deductible_comp",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_C": [
+{
+"fact": "auto_deductible_comp",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_D": [
+{
+"fact": "auto_deductible_comp",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_Coverage_LiabilityIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_Coverage_LiabilityIndicator_B": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_Coverage_LiabilityIndicator_C": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_Coverage_LiabilityIndicator_D": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_GrossVehicleWeight_A": [
+{
+"col": "gvw",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_GrossVehicleWeight_B": [
+{
+"col": "gvw",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_GrossVehicleWeight_C": [
+{
+"col": "gvw",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_GrossVehicleWeight_D": [
+{
+"col": "gvw",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_ManufacturersName_A": [
+{
+"col": "make",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_ManufacturersName_B": [
+{
+"col": "make",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_ManufacturersName_C": [
+{
+"col": "make",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_ManufacturersName_D": [
+{
+"col": "make",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_ModelName_A": [
+{
+"col": "model",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_ModelName_B": [
+{
+"col": "model",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_ModelName_C": [
+{
+"col": "model",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_ModelName_D": [
+{
+"col": "model",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_RateClassCode_A": [
+{
+"col": "class_code",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_RateClassCode_B": [
+{
+"col": "class_code",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_RateClassCode_C": [
+{
+"col": "class_code",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_RateClassCode_D": [
+{
+"col": "class_code",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_RatingTerritoryCode_A": [
+{
+"col": "territory",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_RatingTerritoryCode_B": [
+{
+"col": "territory",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_RatingTerritoryCode_C": [
+{
+"col": "territory",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_RatingTerritoryCode_D": [
+{
+"col": "territory",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+],
+"Vehicle_Use_CommercialIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Commercial - general business use, hauling own goods"
+}
+],
+"Vehicle_Use_CommercialIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Commercial - general business use, hauling own goods"
+}
+],
+"Vehicle_Use_CommercialIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Commercial - general business use, hauling own goods"
+}
+],
+"Vehicle_Use_CommercialIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Commercial - general business use, hauling own goods"
+}
+],
+"Vehicle_Use_FarmIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Farm - agricultural use"
+}
+],
+"Vehicle_Use_FarmIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Farm - agricultural use"
+}
+],
+"Vehicle_Use_FarmIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Farm - agricultural use"
+}
+],
+"Vehicle_Use_FarmIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Farm - agricultural use"
+}
+],
+"Vehicle_Use_ForHireIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "For hire - carrying goods or passengers for a fee"
+}
+],
+"Vehicle_Use_ForHireIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "For hire - carrying goods or passengers for a fee"
+}
+],
+"Vehicle_Use_ForHireIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "For hire - carrying goods or passengers for a fee"
+}
+],
+"Vehicle_Use_ForHireIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "For hire - carrying goods or passengers for a fee"
+}
+],
+"Vehicle_Use_PleasureIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Pleasure - personal use only, driving to and from work"
+}
+],
+"Vehicle_Use_PleasureIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Pleasure - personal use only, driving to and from work"
+}
+],
+"Vehicle_Use_PleasureIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Pleasure - personal use only, driving to and from work"
+}
+],
+"Vehicle_Use_PleasureIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Pleasure - personal use only, driving to and from work"
+}
+],
+"Vehicle_Use_RetailIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Retail - deliveries to customers"
+}
+],
+"Vehicle_Use_RetailIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Retail - deliveries to customers"
+}
+],
+"Vehicle_Use_RetailIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Retail - deliveries to customers"
+}
+],
+"Vehicle_Use_RetailIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Retail - deliveries to customers"
+}
+],
+"Vehicle_Use_ServiceIndicator_A": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Service - technicians or crews driving to job sites"
+}
+],
+"Vehicle_Use_ServiceIndicator_B": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Service - technicians or crews driving to job sites"
+}
+],
+"Vehicle_Use_ServiceIndicator_C": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Service - technicians or crews driving to job sites"
+}
+],
+"Vehicle_Use_ServiceIndicator_D": [
+{
+"fact": "auto_vehicle_use",
+"t": "tick",
+"value": "Service - technicians or crews driving to job sites"
+}
+],
+"Vehicle_VINIdentifier_A": [
+{
+"col": "vin",
+"list": "auto_vin_schedule",
+"row": 0,
+"t": "cell"
+}
+],
+"Vehicle_VINIdentifier_B": [
+{
+"col": "vin",
+"list": "auto_vin_schedule",
+"row": 1,
+"t": "cell"
+}
+],
+"Vehicle_VINIdentifier_C": [
+{
+"col": "vin",
+"list": "auto_vin_schedule",
+"row": 2,
+"t": "cell"
+}
+],
+"Vehicle_VINIdentifier_D": [
+{
+"col": "vin",
+"list": "auto_vin_schedule",
+"row": 3,
+"t": "cell"
+}
+]
+},
+"schema_sha": "b988ee07073012ce"
+},
+"ACORD_130": {
+"boxes": {
+"CommercialPolicy_OperationsDescription_A": [
+{
+"fact": "operations_description",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_B": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_C": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_A": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_B": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_C": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_C": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineTwo_A": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineTwo_B": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineTwo_C": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_B": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_C": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_InBusinessYearCount_A": [
+{
+"fact": "years_in_business",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_LegalEntity_CorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Corporation"
+}
+],
+"NamedInsured_LegalEntity_JointVentureIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Joint Venture"
+}
+],
+"NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Liability Company"
+}
+],
+"NamedInsured_LegalEntity_PartnershipIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Partnership"
+},
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Partnership"
+},
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Limited Liability Partnership"
+}
+],
+"NamedInsured_LegalEntity_SoleProprietorIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Sole Proprietorship"
+}
+],
+"NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "S Corporation"
+}
+],
+"NamedInsured_LegalEntity_TrustIndicator_A": [
+{
+"fact": "entity_type",
+"t": "tick",
+"value": "Trust"
+}
+],
+"NamedInsured_MailingAddress_CityName_A": [
+{
+"fact": "mailing_address",
+"part": "city",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_LineOne_A": [
+{
+"fact": "mailing_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_PostalCode_A": [
+{
+"fact": "mailing_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"NamedInsured_NAICSCode_A": [
+{
+"fact": "naics_code",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_Primary_WebsiteAddress_A": [
+{
+"fact": "applicant_website",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_SICCode_A": [
+{
+"fact": "sic_code",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_TaxIdentifier_A": [
+{
+"fact": "fein",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_ContactPerson_EmailAddress_A": [
+{
+"fact": "producer_contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_PhoneNumber_A": [
+{
+"fact": "producer_contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FaxNumber_A": [
+{
+"fact": "producer_fax",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_CityName_A": [
+{
+"fact": "producer_address",
+"part": "city",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_LineOne_A": [
+{
+"fact": "producer_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_PostalCode_A": [
+{
+"fact": "producer_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": [
+{
+"fact": "wc_el_disease_each_employee",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": [
+{
+"fact": "wc_el_disease_policy_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": [
+{
+"fact": "wc_el_each_accident",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensation_Individual_BirthDate_A": [
+{
+"col": "dob",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_BirthDate_B": [
+{
+"col": "dob",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_BirthDate_C": [
+{
+"col": "dob",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_BirthDate_D": [
+{
+"col": "dob",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_DutiesDescription_A": [
+{
+"col": "duties",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_DutiesDescription_B": [
+{
+"col": "duties",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_DutiesDescription_C": [
+{
+"col": "duties",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_DutiesDescription_D": [
+{
+"col": "duties",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_FullName_A": [
+{
+"col": "name",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_FullName_B": [
+{
+"col": "name",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_FullName_C": [
+{
+"col": "name",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_FullName_D": [
+{
+"col": "name",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_LocationProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_LocationProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_LocationProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_LocationProducerIdentifier_D": [
+{
+"col": "location_number",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_OwnershipPercent_A": [
+{
+"col": "ownership_pct",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_OwnershipPercent_B": [
+{
+"col": "ownership_pct",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_OwnershipPercent_C": [
+{
+"col": "ownership_pct",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_OwnershipPercent_D": [
+{
+"col": "ownership_pct",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RatingClassificationCode_A": [
+{
+"col": "class_code",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RatingClassificationCode_B": [
+{
+"col": "class_code",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RatingClassificationCode_C": [
+{
+"col": "class_code",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RatingClassificationCode_D": [
+{
+"col": "class_code",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RemunerationAmount_A": [
+{
+"col": "remuneration",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RemunerationAmount_B": [
+{
+"col": "remuneration",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RemunerationAmount_C": [
+{
+"col": "remuneration",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_RemunerationAmount_D": [
+{
+"col": "remuneration",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_TitleRelationshipCode_A": [
+{
+"col": "title",
+"list": "wc_officers",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_TitleRelationshipCode_B": [
+{
+"col": "title",
+"list": "wc_officers",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_TitleRelationshipCode_C": [
+{
+"col": "title",
+"list": "wc_officers",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_Individual_TitleRelationshipCode_D": [
+{
+"col": "title",
+"list": "wc_officers",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_ClassificationCode_A": [
+{
+"col": "code",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_ClassificationCode_B": [
+{
+"col": "code",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_ClassificationCode_C": [
+{
+"col": "code",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_ClassificationCode_D": [
+{
+"col": "code",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DescriptionCode_A": [
+{
+"col": "description_code",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DescriptionCode_B": [
+{
+"col": "description_code",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DescriptionCode_C": [
+{
+"col": "description_code",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DescriptionCode_D": [
+{
+"col": "description_code",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DutiesDescription_A": [
+{
+"col": "description",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DutiesDescription_B": [
+{
+"col": "description",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DutiesDescription_C": [
+{
+"col": "description",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_DutiesDescription_D": [
+{
+"col": "description",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_FullTimeEmployeeCount_A": [
+{
+"col": "full_time_employees",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_FullTimeEmployeeCount_B": [
+{
+"col": "full_time_employees",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_FullTimeEmployeeCount_C": [
+{
+"col": "full_time_employees",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_FullTimeEmployeeCount_D": [
+{
+"col": "full_time_employees",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_LocationProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_LocationProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_LocationProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_LocationProducerIdentifier_D": [
+{
+"col": "location_number",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_NAICSCode_A": [
+{
+"col": "naics_code",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_NAICSCode_B": [
+{
+"col": "naics_code",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_NAICSCode_C": [
+{
+"col": "naics_code",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_NAICSCode_D": [
+{
+"col": "naics_code",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_PartTimeEmployeeCount_A": [
+{
+"col": "part_time_employees",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_PartTimeEmployeeCount_B": [
+{
+"col": "part_time_employees",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_PartTimeEmployeeCount_C": [
+{
+"col": "part_time_employees",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_PartTimeEmployeeCount_D": [
+{
+"col": "part_time_employees",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_Rate_A": [
+{
+"col": "rate",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_Rate_B": [
+{
+"col": "rate",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_Rate_C": [
+{
+"col": "rate",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_Rate_D": [
+{
+"col": "rate",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_RemunerationAmount_A": [
+{
+"col": "payroll",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_RemunerationAmount_B": [
+{
+"col": "payroll",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_RemunerationAmount_C": [
+{
+"col": "payroll",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_RemunerationAmount_D": [
+{
+"col": "payroll",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_SICCode_A": [
+{
+"col": "sic_code",
+"list": "wc_class_codes",
+"row": 0,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_SICCode_B": [
+{
+"col": "sic_code",
+"list": "wc_class_codes",
+"row": 1,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_SICCode_C": [
+{
+"col": "sic_code",
+"list": "wc_class_codes",
+"row": 2,
+"t": "cell"
+}
+],
+"WorkersCompensation_RateClass_SICCode_D": [
+{
+"col": "sic_code",
+"list": "wc_class_codes",
+"row": 3,
+"t": "cell"
+}
+]
+},
+"schema_sha": "3fbca89250914cea"
+},
+"ACORD_131": {
+"boxes": {
+"BusinessInformation_AnnualGrossReceiptsAmount_A": [
+{
+"fact": "total_revenue",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_A": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_B": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_C": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_D": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_E": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_EmployeeCount_F": [
+{
+"fact": "num_employees",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_OperationsDescription_A": [
+{
+"fact": "operations_description",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_TotalPayrollAmount_A": [
+{
+"fact": "total_payroll",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialStructure_Location_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_D": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_B": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_C": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_CityName_D": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_C": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_D": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_B": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_C": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_PostalCode_D": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"ExcessUmbrella_Umbrella_AggregateAmount_A": [
+{
+"fact": "umbrella_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": [
+{
+"fact": "umbrella_sir",
+"part": "whole",
+"t": "fact"
+}
+],
+"ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": [
+{
+"fact": "umbrella_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ClaimsMadeIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Claims-made"
+}
+],
+"GeneralLiability_EachOccurrence_LimitAmount_A": [
+{
+"fact": "gl_each_occurrence",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": [
+{
+"fact": "gl_fire_damage_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_GeneralAggregate_LimitAmount_A": [
+{
+"fact": "gl_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": [
+{
+"fact": "gl_medical_expense",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_OccurrenceIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Occurrence"
+}
+],
+"GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": [
+{
+"fact": "gl_personal_advertising_injury",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": [
+{
+"fact": "gl_products_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"UnderlyingCoverage_Coverage_AnyAutoIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+}
+],
+"UnderlyingCoverage_Coverage_GeneralLiabilityClaimsMadeIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Claims-made"
+}
+],
+"UnderlyingCoverage_Coverage_GeneralLiabilityOccurrenceIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Occurrence"
+}
+],
+"UnderlyingPolicy_Automobile_InsurerFullName_A": [
+{
+"col": "carrier",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_Automobile_PolicyEffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_Automobile_PolicyExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_Automobile_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_EmployersLiability_InsurerFullName_A": [
+{
+"col": "carrier",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_EmployersLiability_PolicyEffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_EmployersLiability_PolicyExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_EmployersLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_GeneralLiability_InsurerFullName_A": [
+{
+"col": "carrier",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_GeneralLiability_PolicyEffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_GeneralLiability_PolicyExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"UnderlyingPolicy_GeneralLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Vehicle_CombinedSingleLimit_EachAccidentAmount_A": [
+{
+"fact": "auto_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": [
+{
+"fact": "wc_el_disease_each_employee",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": [
+{
+"fact": "wc_el_disease_policy_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": [
+{
+"fact": "wc_el_each_accident",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "dfb21f7b58bdd58e"
+},
+"ACORD_133": {
+"boxes": {
+"Driver_FullName_A": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 0,
+"t": "cell"
+}
+],
+"Driver_FullName_B": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 1,
+"t": "cell"
+}
+],
+"Driver_FullName_C": [
+{
+"col": "name",
+"list": "auto_drivers",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_B": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_C": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_D": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_B": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_C": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CountyName_D": [
+{
+"col": "address_county",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_C": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_D": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineTwo_A": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_B": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_C": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_D": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 3,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_C": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 2,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_B": [
+{
+"fact": "additional_named_insureds#0",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_EmailAddress_A": [
+{
+"fact": "producer_contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_PhoneNumber_A": [
+{
+"fact": "producer_contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FaxNumber_A": [
+{
+"fact": "producer_fax",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "cc60997696390bb2"
+},
+"ACORD_137_CA": {
+"boxes": {
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_BodilyInjury_PerPersonLimitAmount_A": [
+{
+"fact": "auto_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_BusinessAutoSymbol_EightIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 8 - Hired autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_FourIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 4 - Owned autos other than private passenger"
+}
+],
+"Vehicle_BusinessAutoSymbol_NineIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 9 - Non-owned autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_OneIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+}
+],
+"Vehicle_BusinessAutoSymbol_SevenIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_BusinessAutoSymbol_ThreeIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 3 - Owned private passenger autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_TwoIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+}
+],
+"Vehicle_HiredBorrowed_YesIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 8 - Hired autos only"
+}
+],
+"Vehicle_MedicalPayments_PerPersonLimitAmount_A": [
+{
+"fact": "auto_med_pay_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_NonOwned_YesIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 9 - Non-owned autos only"
+}
+],
+"Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_A": [
+{
+"fact": "auto_um_uim_limit",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "12884d80d937cafb"
+},
+"ACORD_137_CO": {
+"boxes": {
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_BodilyInjury_PerPersonLimitAmount_A": [
+{
+"fact": "auto_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_BusinessAutoSymbol_EightIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 8 - Hired autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_FourIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 4 - Owned autos other than private passenger"
+}
+],
+"Vehicle_BusinessAutoSymbol_NineIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 9 - Non-owned autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_OneIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+}
+],
+"Vehicle_BusinessAutoSymbol_SevenIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 7 - Specifically described autos"
+}
+],
+"Vehicle_BusinessAutoSymbol_ThreeIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 3 - Owned private passenger autos only"
+}
+],
+"Vehicle_BusinessAutoSymbol_TwoIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 2 - Owned autos only"
+}
+],
+"Vehicle_HiredBorrowed_YesIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 8 - Hired autos only"
+}
+],
+"Vehicle_MedicalPayments_PerPersonLimitAmount_A": [
+{
+"fact": "auto_med_pay_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_NonOwned_YesIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+},
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 9 - Non-owned autos only"
+}
+],
+"Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_A": [
+{
+"fact": "auto_um_uim_limit",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "0206f0e2016f15d9"
+},
+"ACORD_138_CA": {
+"boxes": {
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_coll_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_comp_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_PhysicalDamageCollision_LimitAmount_A": [
+{
+"fact": "auto_dealers_inventory_value",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_PhysicalDamageComprehensive_LimitAmount_A": [
+{
+"fact": "auto_dealers_inventory_value",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "6c44ce6fae2cb3b7"
+},
+"ACORD_138_CO": {
+"boxes": {
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_coll_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_comp_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_PhysicalDamageCollision_LimitAmount_A": [
+{
+"fact": "auto_dealers_inventory_value",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_PhysicalDamageComprehensive_LimitAmount_A": [
+{
+"fact": "auto_dealers_inventory_value",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount_A": [
+{
+"fact": "garage_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "3343952ed8ec16c7"
+},
+"ACORD_140": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"BuildingFireProtection_Alarm_SprinklerPercent_A": [
+{
+"col": "sprinkler",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingFireProtection_Alarm_SprinklerPercent_B": [
+{
+"col": "sprinkler",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BuildingFireProtection_HydrantDistanceFeetCount_A": [
+{
+"fact": "distance_to_hydrant",
+"part": "whole",
+"t": "fact"
+}
+],
+"BuildingFireProtection_ProtectionClassCode_A": [
+{
+"col": "protection_class",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingFireProtection_ProtectionClassCode_B": [
+{
+"col": "protection_class",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"BuildingImprovement_RoofingYear_A": [
+{
+"fact": "roof_year",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialProperty_Premises_DeductibleAmount_A": [
+{
+"fact": "property_deductible_aop",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialProperty_Premises_LimitAmount_A": [
+{
+"col": "building_value",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialProperty_Premises_LimitAmount_B": [
+{
+"col": "bpp_value",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialProperty_Premises_LimitAmount_G": [
+{
+"col": "building_value",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialProperty_Premises_LimitAmount_H": [
+{
+"col": "bpp_value",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_A": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Building_ProducerIdentifier_B": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_BuiltYear_A": [
+{
+"fact": "year_built",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_B": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_A": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Construction_BuildingArea_B": [
+{
+"col": "total_building_area",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Construction_ConstructionCode_A": [
+{
+"col": "construction_type",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Construction_ConstructionCode_B": [
+{
+"col": "construction_type",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Construction_RoofMaterialCode_A": [
+{
+"col": "roof_material",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Construction_RoofMaterialCode_B": [
+{
+"col": "roof_material",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "d98c93ffd3a0c14a"
+},
+"ACORD_141": {
+"boxes": {
+"CommercialStructure_Building_ProducerIdentifier_A": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Crime",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Crime",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Crime",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Crime",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "d520f0081783e656"
+},
+"ACORD_160": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"BuildingFireProtection_Alarm_SprinklerPercent_A": [
+{
+"col": "sprinkler",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingFireProtection_HydrantDistanceFeetCount_A": [
+{
+"fact": "distance_to_hydrant",
+"part": "whole",
+"t": "fact"
+}
+],
+"BuildingFireProtection_ProtectionClassCode_A": [
+{
+"col": "protection_class",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BuildingImprovement_RoofingYear_A": [
+{
+"fact": "roof_year",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_AnnualGrossReceiptsAmount_A": [
+{
+"fact": "total_revenue",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_OperationsDescription_A": [
+{
+"fact": "operations_description",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_TotalPayrollAmount_A": [
+{
+"fact": "total_payroll",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialPropertyCoverage_Earthquake_DeductibleAmount_A": [
+{
+"fact": "property_deductible_earthquake",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialProperty_Premises_DeductibleAmount_A": [
+{
+"fact": "property_deductible_aop",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialStructure_BuiltYear_A": [
+{
+"fact": "year_built",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_A": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"CommercialStructure_InsuredInterest_OtherDescription_B": [
+{
+"col": "other_interest_description",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Construction_ConstructionCode_A": [
+{
+"col": "construction_type",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Construction_RoofMaterialCode_A": [
+{
+"col": "roof_material",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_coll_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_LimitAmount_A": [
+{
+"fact": "garagekeeper_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_A": [
+{
+"fact": "garagekeeper_comp_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_BodilyInjury_DeductibleAmount_A": [
+{
+"fact": "gl_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_BodilyInjury_EachOccurrenceLimitAmount_A": [
+{
+"fact": "gl_each_occurrence",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_LiquorLiability_GeneralAggregateLimitAmount_A": [
+{
+"fact": "gl_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": [
+{
+"fact": "gl_medical_expense",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_OtherDeductibleAmount_A": [
+{
+"fact": "gl_deductible",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": [
+{
+"fact": "gl_personal_advertising_injury",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": [
+{
+"fact": "gl_products_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Cyber Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Cyber Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Location_Building_ProducerIdentifier_A": [
+{
+"col": "building_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_B": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_B": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_B": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 1,
+"t": "cell"
+}
+],
+"Location_ProducerIdentifier_A": [
+{
+"col": "location_number",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Cyber Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Cyber Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_AuthorizedRepresentative_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Property_Building_LimitAmount_A": [
+{
+"col": "building_value",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Property_PersonalProperty_LimitAmount_B": [
+{
+"col": "bpp_value",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+]
+},
+"schema_sha": "fd1052b7d33e8058"
+},
+"ACORD_186": {
+"boxes": {
+"BusinessInformation_AnnualGrossReceiptsAmount_A": [
+{
+"fact": "total_revenue",
+"part": "whole",
+"t": "fact"
+}
+],
+"BusinessInformation_FullTimeEmployeeCount_A": [
+{
+"col": "full_time_employees",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BusinessInformation_PartTimeEmployeeCount_A": [
+{
+"col": "part_time_employees",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"BusinessInformation_TotalPayrollAmount_A": [
+{
+"fact": "total_payroll",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "c833f2b0a3133590"
+},
+"ACORD_25": {
+"boxes": {
+"CertificateHolder_FullName_A": [
+{
+"fact": "certificate_holder",
+"part": "whole",
+"t": "fact"
+}
+],
+"CertificateHolder_MailingAddress_CityName_A": [
+{
+"fact": "certificate_holder_address",
+"part": "city",
+"t": "fact"
+}
+],
+"CertificateHolder_MailingAddress_LineOne_A": [
+{
+"fact": "certificate_holder_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"CertificateHolder_MailingAddress_PostalCode_A": [
+{
+"fact": "certificate_holder_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"CertificateOfLiabilityInsurance_ACORDForm_RemarkText_A": [
+{
+"fact": "operations_description",
+"part": "whole",
+"t": "fact"
+}
+],
+"ExcessUmbrella_Umbrella_AggregateAmount_A": [
+{
+"fact": "umbrella_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": [
+{
+"fact": "umbrella_sir",
+"part": "whole",
+"t": "fact"
+}
+],
+"ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": [
+{
+"fact": "umbrella_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ClaimsMadeIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Claims-made"
+}
+],
+"GeneralLiability_EachOccurrence_LimitAmount_A": [
+{
+"fact": "gl_each_occurrence",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": [
+{
+"fact": "gl_fire_damage_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_GeneralAggregate_LimitAmount_A": [
+{
+"fact": "gl_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": [
+{
+"fact": "gl_medical_expense",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_OccurrenceIndicator_A": [
+{
+"fact": "gl_form_type",
+"t": "tick",
+"value": "Occurrence"
+}
+],
+"GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": [
+{
+"fact": "gl_personal_advertising_injury",
+"part": "whole",
+"t": "fact"
+}
+],
+"GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": [
+{
+"fact": "gl_products_aggregate",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_FullName_B": [
+{
+"col": "carrier",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_FullName_C": [
+{
+"col": "carrier",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_FullName_D": [
+{
+"col": "carrier",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_FullName_E": [
+{
+"col": "carrier",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_FullName_F": [
+{
+"col": "carrier",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_B": [
+{
+"col": "naic",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_C": [
+{
+"col": "naic",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_D": [
+{
+"col": "naic",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_E": [
+{
+"col": "naic",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_F": [
+{
+"col": "naic",
+"line": "Inland Marine",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_CityName_A": [
+{
+"fact": "mailing_address",
+"part": "city",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_LineOne_A": [
+{
+"fact": "mailing_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_PostalCode_A": [
+{
+"fact": "mailing_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"Policy_AutomobileLiability_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_AutomobileLiability_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_AutomobileLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Business Auto",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_ExcessLiability_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_ExcessLiability_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_ExcessLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial Umbrella",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_GeneralLiability_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_GeneralLiability_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_GeneralLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial General Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_WorkersCompensationAndEmployersLiability_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_WorkersCompensationAndEmployersLiability_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_WorkersCompensationAndEmployersLiability_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Workers Compensation and Employers Liability",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_ContactPerson_EmailAddress_A": [
+{
+"fact": "producer_contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_PhoneNumber_A": [
+{
+"fact": "producer_contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FaxNumber_A": [
+{
+"fact": "producer_fax",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_CityName_A": [
+{
+"fact": "producer_address",
+"part": "city",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_LineOne_A": [
+{
+"fact": "producer_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_PostalCode_A": [
+{
+"fact": "producer_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"Vehicle_AnyAutoIndicator_A": [
+{
+"fact": "auto_covered_symbols",
+"t": "tick",
+"value": "Symbol 1 - Any auto"
+}
+],
+"Vehicle_CombinedSingleLimit_EachAccidentAmount_A": [
+{
+"fact": "auto_liability_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": [
+{
+"fact": "wc_el_disease_each_employee",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": [
+{
+"fact": "wc_el_disease_policy_limit",
+"part": "whole",
+"t": "fact"
+}
+],
+"WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": [
+{
+"fact": "wc_el_each_accident",
+"part": "whole",
+"t": "fact"
+}
+]
+},
+"schema_sha": "6eef12d56352f469"
+},
+"ACORD_28": {
+"boxes": {
+"AdditionalInterest_FullName_A": [
+{
+"fact": "loss_payee_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"CommercialPropertyCoverage_WindHail_DeductibleAmount_A": [
+{
+"fact": "property_deductible_wind",
+"part": "whole",
+"t": "fact"
+}
+],
+"Insurer_FullName_A": [
+{
+"col": "carrier",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Insurer_NAICCode_A": [
+{
+"col": "naic",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_CityName_A": [
+{
+"col": "address_city",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineOne_A": [
+{
+"col": "address_line1",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_LineTwo_A": [
+{
+"col": "address_line2",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"Location_PhysicalAddress_PostalCode_A": [
+{
+"col": "address_zip",
+"list": "property_locations",
+"row": 0,
+"t": "cell"
+}
+],
+"NamedInsured_FullName_A": [
+{
+"fact": "applicant_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_FullName_B": [
+{
+"fact": "additional_named_insureds#0",
+"part": "whole",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_CityName_A": [
+{
+"fact": "mailing_address",
+"part": "city",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_LineOne_A": [
+{
+"fact": "mailing_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"NamedInsured_MailingAddress_PostalCode_A": [
+{
+"fact": "mailing_address",
+"part": "zip",
+"t": "fact"
+}
+],
+"Policy_EffectiveDate_A": [
+{
+"col": "effective_date",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_ExpirationDate_A": [
+{
+"col": "expiration_date",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Policy_PolicyNumberIdentifier_A": [
+{
+"col": "policy_number",
+"line": "Commercial Property",
+"list": "coverage_lines",
+"row": null,
+"t": "cell"
+}
+],
+"Producer_ContactPerson_EmailAddress_A": [
+{
+"fact": "producer_contact_email",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_FullName_A": [
+{
+"fact": "producer_contact_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_ContactPerson_PhoneNumber_A": [
+{
+"fact": "producer_contact_phone",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FaxNumber_A": [
+{
+"fact": "producer_fax",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_FullName_A": [
+{
+"fact": "producer_name",
+"part": "whole",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_CityName_A": [
+{
+"fact": "producer_address",
+"part": "city",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_LineOne_A": [
+{
+"fact": "producer_address",
+"part": "line1",
+"t": "fact"
+}
+],
+"Producer_MailingAddress_PostalCode_A": [
+{
+"fact": "producer_address",
+"part": "zip",
+"t": "fact"
+}
+]
+},
+"schema_sha": "8ef4683907da1bfe"
+}
+},
+"version": 1
+}

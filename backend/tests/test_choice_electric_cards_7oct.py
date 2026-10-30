@@ -122,10 +122,17 @@ def test_no_per_building_fact_is_ever_one_package_box_on_two_buildings(code):
 def test_one_building_cards_stay_byte_identical(code):
     base = resolution_for(code)
     for rows in (None, [], [{"location_id": "L1", "construction_type": "FRAME"}]):
-        facts = {"occupancy_type": None}
+        facts = {"occupancy_type": None, "locations": ["100 Main St"]}
         if rows is not None:
             facts["property_locations"] = rows
         assert route_cope_resolution(code, base, facts) is base
+    # (28 Oct 2026) No premises anywhere: the Minimum Viable card also shows
+    # the premises address box the hard stop checks.
+    bare = route_cope_resolution(code, base, {"occupancy_type": None})
+    if code in ("minimum_viable_cope_missing", "legacy_minimum_viable_cope"):
+        assert bare["facts"] == ["locations"] + base["facts"] and bare.get("needs") == base.get("needs")
+    else:
+        assert bare is base
 
 
 def test_other_codes_and_modes_and_bad_input_pass_through():
@@ -159,7 +166,11 @@ def test_the_legacy_hard_stop_twin_routes_too():
     one["property_locations"] = one["property_locations"][:1]
     view1 = build_grouped_view(build_structured_from_sources(legacy_hard=[msg]), [msg], [], facts=one)
     res1 = [i for i in _items(view1) if "COPE" in i["message"]][0]["resolution"]
-    assert res1 == resolution_for("legacy_minimum_viable_cope")
+    # Its own card, offering only the box that needs fixing (Rule 1 / G1, 30 Oct
+    # 2026 - the TEST pinned the pre-G1 four-box window).
+    whole = resolution_for("legacy_minimum_viable_cope")
+    assert res1["facts"] == ["occupancy_type"]
+    assert {k: v for k, v in res1.items() if k != "facts"} == {k: v for k, v in whole.items() if k != "facts"}
 
 
 def test_answering_the_typed_fact_and_saving_the_table_clears_the_card():

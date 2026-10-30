@@ -1314,8 +1314,10 @@ def not_a_street_line(value: Any) -> bool:
 # package the producer answered year built 2001 and protection class 3 for the
 # premises, and gap fill carried them to building 2 - the first cut of these
 # rules refused them because no document prints them. A value equal to one a
-# person supplied (producer, client) is grounded by that person.
-_PERSON_SOURCES = frozenset({"producer", "client_arq", "client", "human"})
+# person supplied (producer, client) is grounded by that person. A person TYPED
+# it: the one door's vocabulary (`fact_state.PERSON_ENTRY_SOURCES`, 27 Oct 2026;
+# "client" / "human" are never written on a fact).
+from services.fact_state import PERSON_ENTRY_SOURCES as _PERSON_SOURCES  # noqa: E402
 
 
 def _norm_answer(v: Any) -> str:
@@ -2076,6 +2078,30 @@ _QUALIFIED_BOXES: Tuple[Tuple[re.Pattern, re.Pattern, int], ...] = (
     (re.compile(r"^GeneralLiability_(?:PropertyDamage|BodilyInjury)_Deductible", re.I),
      re.compile(r"\bproperty\s+damage\b|\bbodily\s+injury\b|\bP\.?D\.?\s+deductible|\bB\.?I\.?\s+deductible", re.I), 160),
 )
+
+
+# A hired physical damage PRIMARY / EXCESS tick (ACORD 137) states how that
+# coverage applies; the AI ticked "primary" with no document saying so (P15 X1).
+# Ticked only when a document puts the word beside "hired".
+_HIRED_PD_BASIS_RE = re.compile(r"^Vehicle_HiredPhysicalDamage_(Primary|Excess)Indicator_[A-N]$")
+_HIRED_PD_TERM_RE = re.compile(r"physical\s+damage|comprehensive|collision|specified\s+causes|\bcomp\b|\bcoll\b", re.I)
+
+
+def hired_pd_basis_not_stated(field: str, value: Any, evidence: str) -> bool:
+    m = _HIRED_PD_BASIS_RE.match(field or "")
+    if not m or not evidence or not _YES_NO_TOKEN_RE.fullmatch(str(value or "").strip()):
+        return False
+    if str(value).strip().lower() in ("n", "no", "off", "false", "0"):
+        return False
+    word = m.group(1).lower()
+    # The word must be said OF hired PHYSICAL DAMAGE, on one line: "HIRED AUTOS
+    # - LIABILITY - INSURED PROVIDING PRIMARY INSURANCE" (live 6c420291, 26 Oct)
+    # makes hired LIABILITY primary and says nothing of physical damage.
+    for line in re.split(r"[\n\r]+", evidence):
+        if (re.search(r"\bhired\b", line, re.I) and re.search(rf"\b{word}\b", line, re.I)
+                and _HIRED_PD_TERM_RE.search(line)):
+            return False
+    return True
 
 
 def is_qualified_box(field: str) -> bool:
@@ -3004,7 +3030,15 @@ def refuse_non_answers(mapped: dict, schema: dict, facts: dict, raw_text: str,
         ai = {f for f in gpt_filled_set
               if f in schema and isinstance(mapped.get(f), str) and mapped.get(f).strip()
               and not _skip_box(f, schema)}
+        # A checkbox is the evidence gate's - except this one, whose tick no
+        # gate reads against its own words (see `hired_pd_basis_not_stated`).
+        if ctx.raw_text:
+            for f in sorted(gpt_filled_set):
+                if f in schema and hired_pd_basis_not_stated(f, mapped.get(f), ctx.evidence):
+                    out[f] = f"{REASON_QUALIFIER_NOT_STATED}: hired physical damage is not stated as primary / excess"
         if not ai:
+            for f in out:
+                mapped[f] = None
             return out
         ctx.ai_fields = set(ai)
         ps = _ps()

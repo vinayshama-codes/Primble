@@ -1,0 +1,368 @@
+FORMAT 2
+
+SIDE 1
+
+SHADING
+
+LINES/BOXES
+17.50, 8.00,18.00, 8.00, 1
+12.00,40.00,12.00,80.00, 1
+10.00,40.00,12.00,40.00, 3
+ 7.00,65.00, 7.00,80.00, 1
+ 5.00,65.00, 7.00,65.00, 1
+ 5.00,40.00,10.00,40.00, 3
+ 7.00,40.00, 7.00,65.00, 1
+11.00, 0.00,13.00, 0.00, 3
+12.00, 0.00,12.00,40.00, 1
+11.00,20.00,12.00,20.00, 1
+ 5.00, 0.00, 5.00,80.00, 1
+ 8.00,75.50,10.00,75.50, 1
+ 7.00,63.00,10.00,63.00, 1
+ 8.00,73.50,10.00,73.50, 1
+ 9.00,73.50, 9.00,75.50, 1
+ 8.00,63.00, 8.00,80.00, 1
+10.00,63.00,10.00,80.00, 1
+10.00, 0.00,11.00, 0.00, 1
+11.00, 0.00,11.00,40.00, 1
+10.00, 0.00,10.00,63.00, 1
+10.00,22.50,11.00,22.50, 1
+ 5.00, 0.00,11.00, 0.00, 3
+11.00, 0.00,11.00,40.00, 1
+ 8.00,40.00, 8.00,63.00, 1
+ 9.00,57.50, 9.00,59.50, 1
+ 8.00,50.00,10.00,50.00, 1
+ 8.00,57.50,10.00,57.50, 1
+ 8.00,59.50,10.00,59.50, 1
+13.00, 0.00,13.00,40.00, 1
+59.00,39.50,59.00,80.00, 1
+58.00,39.50,59.00,39.50, 1
+56.00,39.50,58.00,39.50, 1
+57.00,39.50,57.00,41.50, 1
+57.00,53.00,57.00,55.00, 1
+58.00,39.50,58.00,80.00, 1
+56.00,41.50,58.00,41.50, 1
+56.00,53.00,58.00,53.00, 1
+56.00,55.00,58.00,55.00, 1
+56.00, 0.00,62.00, 0.00, 1
+62.00, 0.00,62.00,39.50, 1
+19.00,69.00,30.00,69.00, 1
+19.00,63.00,24.00,63.00, 1
+19.00,56.00,30.00,56.00, 1
+19.00,18.50,30.00,18.50, 1
+20.00, 0.00,20.00,80.00, 1
+37.00, 2.50,37.00,18.00, 1
+38.00,18.50,38.00,80.00, 3
+30.00,18.50,48.00,18.50, 1
+30.00,69.00,48.00,69.00, 1
+30.00,56.00,48.00,56.00, 1
+31.00,56.00,31.00,80.00, 1
+32.00,56.00,32.00,80.00, 1
+33.00,56.00,33.00,80.00, 1
+34.00,56.00,34.00,80.00, 1
+35.00,56.00,35.00,80.00, 1
+36.00,56.00,36.00,80.00, 1
+37.00,56.00,37.00,80.00, 1
+31.00, 2.00,38.00, 2.00, 1
+37.00, 0.00,37.00, 2.00, 1
+36.00, 0.00,36.00, 2.00, 1
+35.00, 0.00,35.00, 2.00, 1
+34.00, 0.00,34.00, 2.00, 1
+33.00, 0.00,33.00, 2.00, 1
+32.00, 0.00,32.00, 2.00, 1
+31.00, 0.00,31.00, 2.00, 1
+38.00, 0.00,38.00,18.50, 3
+30.00, 0.00,48.00, 0.00, 1
+41.00,18.50,41.00,80.00, 3
+39.00,18.50,39.00,20.50, 1
+39.00,30.50,39.00,32.50, 1
+38.00,20.50,39.00,20.50, 1
+38.00,30.50,39.00,30.50, 1
+38.00,32.50,39.00,32.50, 1
+38.00,58.00,41.00,58.00, 1
+40.00,56.00,40.00,69.00, 1
+39.00,56.00,39.00,69.00, 1
+39.00, 2.00,41.00, 2.00, 1
+40.90,11.00,40.90,18.00, 1
+40.00, 0.00,40.00, 2.00, 1
+39.90,11.00,39.90,18.00, 1
+39.00, 0.00,39.00, 2.00, 1
+41.00, 0.00,41.00,18.50, 3
+24.00,18.50,24.00,69.00, 3
+24.00,69.00,24.00,80.00, 3
+21.00,14.50,22.00,14.50, 1
+21.00,12.50,22.00,12.50, 1
+21.00, 8.50,22.00, 8.50, 1
+21.00, 6.50,22.00, 6.50, 1
+21.00, 2.00,24.00, 2.00, 1
+23.00, 0.00,23.00, 2.00, 1
+23.00, 2.50,23.00,18.00, 1
+23.00, 0.00,23.00, 2.00, 1
+22.00,12.50,22.00,14.50, 1
+22.00, 6.50,22.00, 8.50, 1
+22.00, 0.00,22.00, 2.00, 1
+21.00,12.50,21.00,14.50, 1
+21.00, 6.50,21.00, 8.50, 1
+21.00, 0.00,21.00, 2.00, 1
+24.00, 0.00,24.00,18.50, 3
+20.00, 0.00,30.00, 0.00, 1
+30.00,18.50,30.00,80.00, 3
+29.00,56.00,29.00,80.00, 1
+28.00,56.00,28.00,80.00, 1
+27.00,56.00,27.00,80.00, 1
+26.00,56.00,26.00,80.00, 1
+25.00,56.00,25.00,80.00, 1
+28.00, 2.50,28.00,18.00, 1
+26.00,14.50,27.00,14.50, 1
+26.00,12.50,27.00,12.50, 1
+26.00, 4.00,27.00, 4.00, 1
+25.00, 2.00,30.00, 2.00, 1
+29.00, 2.50,29.00,18.00, 1
+29.00, 0.00,29.00, 2.00, 1
+28.00, 0.00,28.00, 2.00, 1
+27.00,12.50,27.00,14.50, 1
+27.00, 0.00,27.00, 4.00, 1
+26.00,12.50,26.00,14.50, 1
+26.00, 0.00,26.00, 4.00, 1
+25.00, 0.00,25.00, 2.00, 1
+30.00, 0.00,30.00,18.50, 3
+45.00,18.50,45.00,80.00, 3
+42.00,56.00,42.00,80.00, 1
+43.00,56.00,43.00,80.00, 1
+44.00,56.00,44.00,80.00, 1
+42.00, 2.00,45.00, 2.00, 1
+44.00, 2.50,44.00,18.00, 1
+44.00, 0.00,44.00, 2.00, 1
+43.00, 0.00,43.00, 2.00, 1
+42.00, 0.00,42.00, 2.00, 1
+45.00, 0.00,45.00,18.50, 3
+52.00,18.50,52.00,80.00, 3
+48.00,18.50,52.00,18.50, 1
+48.00, 0.00,55.00, 0.00, 1
+52.00, 0.00,52.00,18.50, 3
+48.00,58.00,49.00,58.00, 1
+48.00,69.00,55.00,69.00, 1
+51.00,56.00,51.00,80.00, 1
+50.00,56.00,50.00,80.00, 1
+49.00,56.00,49.00,80.00, 1
+48.00,56.00,55.00,56.00, 1
+54.00,56.00,54.00,80.00, 1
+53.00,56.00,53.00,80.00, 1
+55.00, 0.00,55.00,80.00, 3
+48.00,18.50,48.00,80.00, 3
+46.00,56.00,46.00,80.00, 1
+47.00,56.00,47.00,80.00, 1
+46.00, 2.00,48.00, 2.00, 1
+47.00, 0.00,47.00, 2.00, 1
+46.00, 0.00,46.00, 2.00, 1
+48.00, 0.00,48.00,18.50, 3
+13.00, 0.00,18.00,40.00, 3
+12.00,40.00,18.00,80.00, 3
+10.50,40.00,11.50,42.00, 1
+ 4.00, 0.00,18.00,80.00, 4
+ 2.00,68.00, 4.00,80.00, 4
+59.00,39.50,62.00,80.00, 1
+56.00, 0.00,62.00,80.00, 4
+19.00, 0.00,55.00,80.00, 4
+56.00,64.50,57.00,66.50, 1
+
+FORM TEXT
+"590BU", 2.83,69.00,"C",10.00,"DATE (MM/DD/YYYY)"
+"590BU", 5.80, 0.50,"L", 0.00,"AGENCY"
+"590BU", 5.80,40.50,"L", 0.00,"COMPANY"
+"590BU", 5.80,65.50,"L", 0.00,"BINDER #"
+"590BU", 8.05,40.50,"C",10.00,"DATE"
+"590BU", 8.05,50.50,"C",13.00,"TIME"
+"590BU", 7.67,40.00,"C",20.00,"EFFECTIVE"
+"590BU", 7.67,65.00,"C",15.00,"EXPIRATION"
+"590BU", 8.09,63.00,"C",10.50,"DATE"
+"590BU", 8.09,73.50,"C", 6.50,"TIME"
+"590BU",10.63, 0.50,"L", 0.00,"PHONE"
+"590BU",10.63,23.00,"L", 0.00,"FAX"
+"590BU",11.09, 0.50,"L", 0.00,"(A/C, No, Ext):"
+"590BU",11.09,23.00,"L", 0.00,"(A/C, No):"
+"590BU",12.00, 0.50,"L", 0.00,"CODE:"
+"590BU",12.00,20.50,"L", 0.00,"SUB CODE:"
+"590BU",12.63, 0.50,"L", 0.00,"AGENCY"
+"590BU",12.80,40.50,"L", 0.00,"DESCRIPTION OF OPERATIONS / VEHICLES / PROPERTY (Including Location)"
+"590BU",13.09, 0.50,"L", 0.00,"CUSTOMER ID:"
+"590BU",13.80, 0.50,"L", 0.00,"INSURED AND MAILING ADDRESS"
+"590BU",20.00, 0.00,"C",18.00,"TYPE OF INSURANCE"
+"590BU",20.00,19.00,"C",36.50,"COVERAGE / FORMS"
+"590BU",20.00,56.00,"C", 7.00,"DEDUCTIBLE"
+"590BU",20.00,63.00,"C", 6.00,"COINS %"
+"590BU",20.00,69.00,"C",11.00,"AMOUNT"
+"590BU",20.79, 0.50,"L", 0.00,"PROPERTY"
+"590BU",24.76, 0.50,"L", 0.00,"GENERAL LIABILITY"
+"590BU",30.79, 0.50,"L", 0.00,"VEHICLE LIABILITY"
+"590BU",38.79, 0.50,"L", 0.00,"VEHICLE PHYSICAL DAMAGE"
+"590BU",41.84, 0.50,"L", 0.00,"GARAGE LIABILITY"
+"590BU",45.79, 0.50,"L", 0.00,"EXCESS LIABILITY"
+"590BU",49.76, 0.00,"C",18.50,"WORKER'S COMPENSATION"
+"590BU",50.34, 0.00,"C",18.50,"AND"
+"590BU",50.92, 0.00,"C",18.50,"EMPLOYER'S LIABILITY"
+"590BU",52.97, 0.50,"L", 0.00,"SPECIAL"
+"590BU",53.55, 0.50,"L", 0.00,"CONDITIONS /"
+"590BU",54.13, 0.50,"L", 0.00,"OTHER"
+"590BU",54.71, 0.50,"L", 0.00,"COVERAGES"
+"590BU",59.79,40.00,"L", 0.00,"AUTHORIZED REPRESENTATIVE"
+"600MU", 9.01,59.50,"C", 3.50,"AM"
+"600MU", 9.01,75.50,"C", 4.50,"12:01 AM"
+"600MU",10.01,59.50,"C", 3.50,"PM"
+"600MU",10.01,75.50,"C", 4.50,"NOON"
+"600MU",10.94,42.50,"L", 0.00,"THIS BINDER IS ISSUED TO EXTEND COVERAGE IN THE ABOVE NAMED COMPANY"
+"600MU",11.85,42.50,"L", 0.00,"PER EXPIRING POLICY #:"
+"600MU",21.01, 6.50,"L", 0.00,"CAUSES OF LOSS"
+"600MU",22.01, 2.50,"L", 0.00,"BASIC"
+"600MU",22.01, 9.00,"L", 0.00,"BROAD"
+"600MU",22.01,15.00,"L", 0.00,"SPEC"
+"600MU",25.00,56.50,"L", 0.00,"EACH OCCURRENCE"
+"600MU",25.00,69.50,"L", 0.00,"$"
+"600MU",25.60,56.50,"L", 0.00,"DAMAGE TO"
+"600MU",26.00, 3.00,"L", 0.00,"COMMERCIAL GENERAL LIABILITY"
+"600MU",26.00,69.50,"L", 0.00,"$"
+"600MU",26.10,56.50,"L", 0.00,"RENTED PREMISES"
+"600MU",27.00, 4.50,"L", 0.00,"CLAIMS MADE"
+"600MU",27.00,15.00,"L", 0.00,"OCCUR"
+"600MU",27.00,56.50,"L", 0.00,"MED EXP (Any one person)"
+"600MU",27.00,69.50,"L", 0.00,"$"
+"600MU",28.00,56.50,"L", 0.00,"PERSONAL & ADV INJURY"
+"600MU",28.00,69.50,"L", 0.00,"$"
+"600MU",29.00,56.50,"L", 0.00,"GENERAL AGGREGATE"
+"600MU",29.00,69.50,"L", 0.00,"$"
+"600MU",30.00,56.50,"L", 0.00,"PRODUCTS - COMP/OP AGG"
+"600MU",30.00,69.50,"L", 0.00,"$"
+"600MU",30.01,19.00,"L", 0.00,"RETRO DATE FOR CLAIMS MADE:"
+"600MU",31.01,56.50,"L", 0.00,"COMBINED SINGLE LIMIT"
+"600MU",31.01,69.50,"L", 0.00,"$"
+"600MU",32.01, 2.50,"L", 0.00,"ANY AUTO"
+"600MU",32.01,56.50,"L", 0.00,"BODILY INJURY (Per person)"
+"600MU",32.01,69.50,"L", 0.00,"$"
+"600MU",33.01, 2.50,"L", 0.00,"OWNED AUTOS ONLY"
+"600MU",33.01,56.50,"L", 0.00,"BODILY INJURY (Per accident)"
+"600MU",33.01,69.50,"L", 0.00,"$"
+"600MU",34.01, 2.50,"L", 0.00,"SCHEDULED AUTOS"
+"600MU",34.01,56.50,"L", 0.00,"PROPERTY DAMAGE"
+"600MU",34.01,69.50,"L", 0.00,"$"
+"600MU",35.01, 2.50,"L", 0.00,"HIRED AUTOS ONLY"
+"600MU",35.01,56.50,"L", 0.00,"MEDICAL PAYMENTS"
+"600MU",35.01,69.50,"L", 0.00,"$"
+"600MU",36.01, 2.50,"L", 0.00,"NON-OWNED AUTOS ONLY"
+"600MU",36.01,56.50,"L", 0.00,"PERSONAL INJURY PROT"
+"600MU",36.01,69.50,"L", 0.00,"$"
+"600MU",37.01,56.50,"L", 0.00,"UNINSURED MOTORIST"
+"600MU",37.01,69.50,"L", 0.00,"$"
+"600MU",38.01,69.50,"L", 0.00,"$"
+"600MU",39.01,11.00,"C", 7.50,"DED"
+"600MU",39.01,21.00,"L", 0.00,"ALL VEHICLES"
+"600MU",39.01,33.00,"L", 0.00,"SCHEDULED VEHICLES"
+"600MU",39.01,58.50,"L", 0.00,"ACTUAL CASH VALUE"
+"600MU",40.01, 2.50,"L", 0.00,"COLLISION:"
+"600MU",40.01,58.50,"L", 0.00,"STATED AMOUNT"
+"600MU",40.01,69.50,"L", 0.00,"$"
+"600MU",41.01, 2.50,"L", 0.00,"OTHER THAN COL:"
+"600MU",42.01,56.50,"L", 0.00,"AUTO ONLY - EA ACCIDENT"
+"600MU",42.01,69.50,"L", 0.00,"$"
+"600MU",43.01, 2.50,"L", 0.00,"ANY AUTO"
+"600MU",43.01,56.50,"L", 0.00,"OTHER THAN AUTO ONLY:"
+"600MU",44.01,61.32,"L", 0.00,"EACH ACCIDENT"
+"600MU",44.01,69.50,"L", 0.00,"$"
+"600MU",45.01,62.80,"L", 0.00,"AGGREGATE"
+"600MU",45.01,69.50,"L", 0.00,"$"
+"600MU",46.01,56.50,"L", 0.00,"EACH OCCURRENCE"
+"600MU",46.01,69.50,"L", 0.00,"$"
+"600MU",47.01, 2.50,"L", 0.00,"UMBRELLA FORM"
+"600MU",47.01,56.50,"L", 0.00,"AGGREGATE"
+"600MU",47.01,69.50,"L", 0.00,"$"
+"600MU",48.01, 2.50,"L", 0.00,"OTHER THAN UMBRELLA FORM"
+"600MU",48.01,19.00,"L", 0.00,"RETRO DATE FOR CLAIMS MADE:"
+"600MU",48.01,56.50,"L", 0.00,"SELF-INSURED RETENTION"
+"600MU",48.01,69.50,"L", 0.00,"$"
+"600MU",49.00,58.50,"L", 0.00,"PER STATUTE"
+"600MU",50.00,56.50,"L", 0.00,"E.L. EACH ACCIDENT"
+"600MU",50.00,69.50,"L", 0.00,"$"
+"600MU",51.00,56.50,"L", 0.00,"E.L. DISEASE - EA EMPLOYEE"
+"600MU",51.00,69.50,"L", 0.00,"$"
+"600MU",52.00,56.50,"L", 0.00,"E.L. DISEASE - POLICY LIMIT"
+"600MU",52.00,69.50,"L", 0.00,"$"
+"600MU",53.01,56.50,"L", 0.00,"FEES"
+"600MU",53.01,69.50,"L", 0.00,"$"
+"600MU",54.01,56.50,"L", 0.00,"TAXES"
+"600MU",54.01,69.50,"L", 0.00,"$"
+"600MU",55.01,56.50,"L", 0.00,"ESTIMATED TOTAL PREMIUM"
+"600MU",55.01,69.50,"L", 0.00,"$"
+"600MU",56.85,42.00,"L", 0.00,"ADDITIONAL INSURED"
+"600MU",56.85,55.50,"L", 0.00,"LOSS PAYEE"
+"600MU",56.85,67.00,"L", 0.00,"MORTGAGEE"
+"600MU",57.85,42.00,"L", 0.00,"LENDER'S LOSS PAYABLE"
+"600MU",58.85,40.00,"L", 0.00,"LOAN #:"
+"840BU", 4.98, 0.50,"C",79.00,"THIS BINDER IS A TEMPORARY INSURANCE CONTRACT, SUBJECT TO THE CONDITIONS SHOWN ON PAGE 2 OF THIS FORM."
+"840BU",19.01, 0.50,"L", 0.00,"COVERAGES"
+"840BU",19.01,66.08,"L", 0.00,"LIMITS"
+"840BU",56.01, 0.50,"L", 0.00,"NAME & ADDRESS"
+"840BU",62.92, 0.00,"C",80.00,"Page 1 of 2"
+"840BU",62.92,79.35-LNWIDTH("840BU","© 1993-2016 ACORD CORPORATION.  All rights reserved."),"L", 0.00,"© 1993-2016 ACORD CORPORATION.  All rights reserved."
+"840BU",63.92, 0.00,"C",80.00,"The ACORD name and logo are registered marks of ACORD"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 75 (2016/03)"
+"1400BU", 3.57,13.00,"C",54.00,"INSURANCE BINDER"
+
+SIDE 2
+
+SHADING
+
+LINES/BOXES
+ 3.00,55.00, 3.00,80.00, 2
+ 3.50, 0.00,63.00,80.00, 4
+
+FORM TEXT
+"800BU", 3.00,54.50-LNWIDTH("800BU","AGENCY CUSTOMER ID:"),"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU",63.92, 0.00,"C",80.00,"Page 2 of 2"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 75 (2016/03)"
+"910MU", 6.36, 2.50,"R",75.00,"This Company binds the kind(s) of insurance stipulated on page 1 of this form. The Insurance is subject to the terms, conditions and"
+"910MU", 7.22, 2.50,"L", 0.00,"limitations of the policy(ies) in current use by the Company."
+"910MU", 8.86, 2.50,"R",75.00,"This binder may be cancelled by the Insured by surrender of this binder or by written notice to the Company stating when cancellation"
+"910MU", 9.72, 2.50,"R",75.00,"will be effective. This binder may be cancelled by the Company by notice to the Insured in accordance with the policy conditions. This"
+"910MU",10.58, 2.50,"R",75.00,"binder is cancelled when replaced by a policy. If this binder is not replaced by a policy, the Company is entitled to charge a premium"
+"910MU",11.44, 2.50,"L", 0.00,"for the binder according to the Rules and Rates in use by the Company."
+"910MU",14.86, 2.50,"L", 0.00,"Binders are effective for no more than ninety (90) days."
+"910MU",17.86, 2.50,"R",75.00,"When this form is used to provide insurance in the amount of one million dollars ($1,000,000) or more, the title of the form is changed"
+"910MU",18.72, 2.50,"L", 0.00,"from \"Insurance Binder\" to \"Cover Note\"."
+"910MU",21.36, 2.50,"R",75.00,"With respect to binders issued to renters of residential premises, home owners, condo unit owners and mobile home owners, the"
+"910MU",22.22, 2.50,"R",75.00,"insurer has thirty (30) business days, commencing from the effective date of coverage, to evaluate the issuance of the insurance"
+"910MU",23.08, 2.50,"L", 0.00,"policy."
+"910MU",25.86, 2.50,"R",75.00,"The mortgagee or Obligee of any mortgage or other instrument given for the purpose of creating a lien on real property shall accept as"
+"910MU",26.72, 2.50,"R",75.00,"evidence of insurance a written binder issued by an authorized insurer or its agent if the binder includes or is accompanied by: the"
+"910MU",27.58, 2.50,"R",75.00,"name and address of the borrower; the name and address of the lender as loss payee; a description of the insured real property; a"
+"910MU",28.44, 2.50,"R",75.00,"provision that the binder may not be canceled within the term of the binder unless the lender and the insured borrower receive written"
+"910MU",29.30, 2.50,"R",75.00,"notice of the cancellation at least ten (10) days prior to the cancellation; except in the case of a renewal of a policy subsequent to the"
+"910MU",30.16, 2.50,"L", 0.00,"closing of the loan, a paid receipt of the full amount of the applicable premium, and the amount of insurance coverage."
+"910MU",31.36, 2.50,"C",75.00,"Chapter 21 Title 25 Paragraph 2119"
+"910MU",34.56, 2.50,"R",75.00,"Except for Auto Insurance coverage, no notice of cancellation or nonrenewal of a binder is required unless the duration of the binder"
+"910MU",35.42, 2.50,"R",75.00,"exceeds 60 days. For auto insurance, the insurer must give 5 days prior notice, unless the binder is replaced by a policy or another"
+"910MU",36.28, 2.50,"L", 0.00,"binder in the same company."
+"910MU",38.86, 2.50,"R",75.00,"The insurer has 45 business days, commencing from the effective date of coverage to confirm eligibility for coverage under the"
+"910MU",39.72, 2.50,"L", 0.00,"insurance policy."
+"910MU",42.36, 2.50,"L", 0.00,"The policy may be cancelled at any time at the request of the insured."
+"910MU",46.06, 2.50,"R",75.00,"No binder shall be valid beyond the issuance of the policy with respect to which it was given or beyond 90 days from its effective date,"
+"910MU",46.92, 2.50,"R",75.00,"whichever period is the shorter.  If the policy has not been issued, a binder may be extended or renewed beyond such 90 days with the"
+"910MU",47.78, 2.50,"L", 0.00,"written approval of the insurer."
+"910MU",50.36, 2.50,"R",75.00,"Any person who refuses to accept a binder which provides coverage of less than $1,000,000.00 when proof is required: (A) Shall be"
+"910MU",51.22, 2.50,"R",75.00,"fined not more than $500.00, and (B) is liable to the party presenting the binder as proof of insurance for actual damages sustained"
+"910MU",52.08, 2.50,"L", 0.00,"therefrom."
+"910MU",54.36, 2.50,"L", 0.00,"All policies shall expire at 12:01 a.m. standard time on the expiration date stated in the policy."
+"910MU",57.61, 2.50,"R",75.00,"Binders are effective for no more than ninety (90) days.  A binder extension or renewal beyond such 90 days would require the written"
+"910MU",58.47, 2.50,"L", 0.00,"approval by the Director of the Department of Consumer and Business Services."
+"910MU",61.50, 2.50,"R",75.00,"This binder is effective for only ninety (90) days.  Within thirty (30) days of receipt of this binder, you should request an insurance"
+"910MU",62.36, 2.50,"L", 0.00,"policy or certificate (if applicable) from your agent and/or insurance company."
+"1030BU",13.48, 0.00,"C",80.00,"Applicable in Arizona"
+"1030BU",16.48, 0.00,"C",80.00,"Applicable in California"
+"1030BU",19.98, 0.00,"C",80.00,"Applicable in Colorado"
+"1030BU",24.48, 0.00,"C",80.00,"Applicable in Delaware"
+"1030BU",32.98, 0.00,"C",80.00,"Applicable in Florida"
+"1030BU",37.48, 0.00,"C",80.00,"Applicable in Maryland"
+"1030BU",40.98, 0.00,"C",80.00,"Applicable in Michigan"
+"1030BU",44.48, 0.00,"C",80.00,"Applicable in Montana"
+"1030BU",48.98, 0.00,"C",80.00,"Applicable in Nevada"
+"1030BU",52.98, 0.00,"C",80.00,"Applicable in Oklahoma"
+"1030BU",56.23, 0.00,"C",80.00,"Applicable in Oregon"
+"1030BU",59.98, 0.00,"C",80.00,"Applicable in the Virgin Islands"
+"1380BU", 5.25, 0.00,"C",80.00,"CONDITIONS"

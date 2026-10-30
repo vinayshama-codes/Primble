@@ -188,7 +188,7 @@ def test_na_and_none_are_answers_not_gaps():
     PRODUCER path disagreed about the same word."""
     from services.arq_service import _clean_answer_ex
     for raw, fact in (("None", "prior_carrier"), ("none", "num_claims"),
-                      ("N/A", "fein"), ("n/a", "total_payroll")):
+                      ("N/A", "num_employees"), ("n/a", "total_payroll")):
         value, reason = _clean_answer_ex(raw, fact)
         assert value == raw, f"{raw!r} on {fact} discarded again (F15)"
         assert reason == "", (
@@ -196,6 +196,9 @@ def test_na_and_none_are_answers_not_gaps():
             f"_blocks_submit and refuses the whole submission")
         assert interpret_answer(fact, raw).value_state in (
             "explicit_no", "not_applicable"), fact
+    # 29 Oct 2026: on a fact every business has, "N/A" is no answer - dropped
+    # (the question stays open), never a review reason that blocks the submit.
+    assert _clean_answer_ex("N/A", "fein") == (None, "")
 
 
 def test_a_required_identity_fact_can_never_be_not_applicable():

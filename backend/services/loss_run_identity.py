@@ -83,6 +83,13 @@ def _text(v: Any) -> str:
     return str(v).strip() if v is not None else ""
 
 
+def _rows(value: Any) -> list:
+    """A row list as stored, else none (strict review, 29 Oct 2026: a string or
+    a dict in `coverage_lines` raised here and took the loss-run verdict with
+    it - iterating a dict's keys or a string's letters is no row)."""
+    return value if isinstance(value, list) else []
+
+
 def _package_identity(docs: List[dict], merged_facts: Optional[dict]) -> Dict[str, list]:
     """Every identity value the NON-loss-run documents evidence.
 
@@ -92,8 +99,10 @@ def _package_identity(docs: List[dict], merged_facts: Optional[dict]) -> Dict[st
     out: Dict[str, list] = {
         "dba": [], "fein": [], "policy": [], "address": [], "carrier": [],
     }
-    sources = [d.get("facts") or {} for d in docs
-               if not d.get("excluded") and d.get("doc_type") != "loss_run"]
+    sources = [d.get("facts") if isinstance(d.get("facts"), dict) else {}
+               for d in (docs if isinstance(docs, list) else [])
+               if isinstance(d, dict)
+               and not d.get("excluded") and d.get("doc_type") != "loss_run"]
     for f in sources:
         # prior_carrier / wc_prior_carrier belong in the carrier bucket (C2-C,
         # found live 2026-08-24): a loss run is normally ISSUED BY the prior
@@ -103,14 +112,18 @@ def _package_identity(docs: List[dict], merged_facts: Optional[dict]) -> Dict[st
         for key, bucket in (("dba_name", "dba"), ("fein", "fein"),
                             ("policy_number", "policy"), ("carrier_name", "carrier"),
                             ("prior_carrier", "carrier"), ("wc_prior_carrier", "carrier")):
+            if isinstance(f.get(key), dict) and f[key].get("echo_of") == "loss_run":
+                continue                  # the loss runs' own value printed back on our form (M3)
             v = _text(_fv(f, key))
             if v and v not in out[bucket]:
                 out[bucket].append(v)
         for key in ("mailing_address", "physical_address"):
+            if isinstance(f.get(key), dict) and f[key].get("echo_of") == "loss_run":
+                continue
             v = _text(_fv(f, key))
             if v and v not in out["address"]:
                 out["address"].append(v)
-        for ln in (_fv(f, "coverage_lines") or []):
+        for ln in _rows(_fv(f, "coverage_lines")):
             if isinstance(ln, dict):
                 for key, bucket in (("policy_number", "policy"), ("carrier", "carrier")):
                     v = _text(ln.get(key))
@@ -123,7 +136,7 @@ def _package_identity(docs: List[dict], merged_facts: Optional[dict]) -> Dict[st
             v = _text(_fv(merged_facts, _pc_key))
             if v and v not in out["carrier"]:
                 out["carrier"].append(v)
-        for ln in (_fv(merged_facts, "coverage_lines") or []):
+        for ln in _rows(_fv(merged_facts, "coverage_lines")):
             if isinstance(ln, dict):
                 for key, bucket in (("policy_number", "policy"), ("carrier", "carrier")):
                     v = _text(ln.get(key))
@@ -176,7 +189,7 @@ def match_loss_run_identity(
 
     ctx = build_context(merged_facts, docs)
     pkg = _package_identity(docs, merged_facts)
-    from services.loss_history_state import loss_run_ownership_answer
+    from services.loss_history_state import loss_run_ownership_answer, ownership_answer_covers
     ownership_confirmed = loss_run_ownership_answer(merged_facts) is True
 
     per_doc: List[dict] = []
@@ -254,7 +267,7 @@ def match_loss_run_identity(
         # matches under a different name, is the producer's to confirm. A "Yes"
         # makes it a person-confirmed strong match; a "No" changes nothing. A
         # run naming no insured, or another company, is never promoted.
-        if tier in (MODERATE, POSSIBLE) and ownership_confirmed and (
+        if tier in (MODERATE, POSSIBLE) and ownership_confirmed and ownership_answer_covers(merged_facts, d) and (
                 "name" in matched or "dba_name" in matched or fein_ok):
             tier = STRONG
             matched.append("person_confirmed")

@@ -95,6 +95,7 @@ _DOC_MAX_CHARS = _env_int("OCR_FORM_FIELDS_DOC_MAX_CHARS", 2_000_000, 10_000)
 _VALUE_MAX_CHARS = _env_int("OCR_FORM_FIELDS_VALUE_MAX_CHARS", 8_000, 200)
 # Bounds the scan itself (ACORD 160, the largest template, has 1,144 widgets).
 _MAX_WIDGETS = _env_int("OCR_FORM_FIELDS_MAX_WIDGETS", 20_000, 100)
+_RAW_MAX_CHARS = 64_000
 _LABEL_MAX = 120
 _PARENT_DEPTH = 32
 # A value this short ("Y", "N", "WA", "1") proves nothing by appearing in a page's
@@ -118,6 +119,11 @@ class FilledField:
     bbox: Optional[Tuple[float, float, float, float]]   # pdfplumber frame: x0, top, x1, bottom
     order: int                                  # discovery order, the tie-break
     drawn: bool = False                         # already in the page's own text layer, in its box
+    name: str = ""                              # the field's own (qualified) name - the ACORD box name
+    # A text field's value as typed (line breaks kept, not cut at _VALUE_MAX_CHARS,
+    # bounded at _RAW_MAX_CHARS) - the exact read of a filled ACORD form
+    # (`acord_intake`) reprints it box-to-box; `value` stays the one-line text.
+    raw: str = ""
 
     @property
     def line(self) -> str:
@@ -538,6 +544,7 @@ def _field_entry(group: dict, order: int) -> Optional[FilledField]:
         return None
     chosen = widgets[0]
     kind = "text"
+    raw = ""
     tooltip = None                                # decoded only for a box that holds a value
 
     if ft == "/Btn":
@@ -554,8 +561,17 @@ def _field_entry(group: dict, order: int) -> Optional[FilledField]:
         on = (on or "").strip()
         if not on or on == "Off":
             return None
-        tooltip = _pdf_text(_inherited(field, "/TU"))
         states = {s for w in widgets for s in _on_states(w[1])}
+        if states and on not in states:
+            # /V names no state the box can show ("/No" beside an "/1" box): the
+            # page shows what the widget's own /AS shows - unticked when every
+            # widget says Off (review, 27 Oct 2026: such a box read as ticked).
+            shown = [_name_text(w[1].get("/AS")) for w in widgets if w[1].get("/AS") is not None]
+            shown = [s for s in shown if s in states]
+            if not shown:
+                return None
+            on = shown[0]
+        tooltip = _pdf_text(_inherited(field, "/TU"))
         for w in widgets:
             st = w[1].get("/AS")
             if on in _on_states(w[1]) or (st is not None and _name_text(st) == on):
@@ -577,7 +593,9 @@ def _field_entry(group: dict, order: int) -> Optional[FilledField]:
         kind = "choice"
         value = _choice_display(field, value_obj) if value_obj is not None else ""
     elif ft == "/Tx" or (not ft and isinstance(value_obj, (pikepdf.String, pikepdf.Stream))):
-        value = _value_text(_pdf_text(value_obj))
+        typed = _pdf_text(value_obj)
+        value = _value_text(typed)
+        raw = (typed or "")[:_RAW_MAX_CHARS].replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
     else:
         return None
     if not value or value == "Off":
@@ -585,8 +603,9 @@ def _field_entry(group: dict, order: int) -> Optional[FilledField]:
     if tooltip is None:
         tooltip = _pdf_text(_inherited(field, "/TU"))
     page_idx, _w, _rect_, bbox = chosen
-    return FilledField(page_idx=page_idx, label=field_label(tooltip, _qualified_name(field)),
-                       value=value, kind=kind, bbox=bbox, order=order)
+    qname = _qualified_name(field)
+    return FilledField(page_idx=page_idx, label=field_label(tooltip, qname),
+                       value=value, kind=kind, bbox=bbox, order=order, name=qname, raw=raw)
 
 
 def _scan_widgets(pdf) -> Dict[object, dict]:
@@ -703,7 +722,8 @@ def _mark_drawn(pdf_path: str, by_page: Dict[int, List[FilledField]],
 
 
 def read_filled_fields(pdf_path: str,
-                       page_texts: Optional[Sequence[str]] = None) -> Dict[int, List[FilledField]]:
+                       page_texts: Optional[Sequence[str]] = None,
+                       require_acroform: bool = True) -> Dict[int, List[FilledField]]:
     """Every filled, visible form field, by 0-based page index, in the form's own order.
 
     {} for a PDF without an AcroForm, without filled fields, or on any error -
@@ -718,12 +738,17 @@ def read_filled_fields(pdf_path: str,
         return {}
     try:
         with pikepdf.open(pdf_path) as pdf:
-            acro = pdf.Root.get("/AcroForm")
-            if not isinstance(acro, pikepdf.Dictionary):
-                return {}
-            fields = acro.get("/Fields")
-            if not isinstance(fields, pikepdf.Array) or len(fields) == 0:
-                return {}
+            # `require_acroform=False` (the ACORD intake): the pages' own widgets
+            # are read even when the document-level /AcroForm is gone - a PDF
+            # combined by a tool that copies pages but not the form dictionary
+            # still SHOWS every typed value (review, 27 Oct 2026).
+            if require_acroform:
+                acro = pdf.Root.get("/AcroForm")
+                if not isinstance(acro, pikepdf.Dictionary):
+                    return {}
+                fields = acro.get("/Fields")
+                if not isinstance(fields, pikepdf.Array) or len(fields) == 0:
+                    return {}
             groups = _scan_widgets(pdf)
             by_page: Dict[int, List[FilledField]] = {}
             for order, group in enumerate(groups.values()):

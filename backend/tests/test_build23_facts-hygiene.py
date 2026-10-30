@@ -130,13 +130,17 @@ _ABSENCES = ["None reported", "Nil", "Nothing to report", "None known", "none at
              "(None)", "None at this time", "None known at this time"]
 
 
+from services.fact_registry import always_exists  # noqa: E402
+
+
 @pytest.mark.parametrize("value", _ABSENCES)
 def test_an_absence_is_refused_only_on_a_fact_that_cannot_be_absent(value):
     """Oracle independent of the door: FACT_REGISTRY's own `required` flag (the
     same declaration `interpret_answer`'s rule 2b reads). Every fact, both ways."""
     for key, entry in FACT_REGISTRY.items():
         got = AS.extracted_non_answer(key, value)
-        if entry.get("required"):
+        # 29 Oct 2026: a fact every business has refuses an absence too.
+        if entry.get("required") or always_exists(key):
             assert got == "absence_refused", (key, value, got)
         else:
             assert got is None, (key, value, got)

@@ -1,0 +1,224 @@
+﻿"eLabel Id","eLabel Name","eLabel counter","Placeholder","Section Name","Field Name","Description"
+"755","Form_Title","A","","TITLE
+ACORD 75 (2016/03)","Insurance Binder","The title of the form.  ACORD 75, Insurance Binder, addresses both Personal Lines and Commercial Lines risks, although most ACORD Personal Lines applications contain a ""built-in"" binder.
+
+Before issuing any binder, the following important considerations should be reviewed and considered carefully:
+
+*  A Binder (Cover Note is some states) is a temporary insurance contract which provides coverage in advance of the issuance of an insurance policy.
+*  The improper use of binders has become a major cause of producer’s Errors and Omissions claims.  It is imperative that only authorized people prepare them.  Preparation must be complete and accurate.
+*  All binders must conform to the state insurance code for the state in which the subject of insurance in located.
+*  The maximum and/or minimum term of a binder may be governed by state statute and/or company underwriting instructions.  *  At the end of the binder’s specified term, all coverage expires unless a new binder has been issued or the expired binder has been replaced with a policy .
+*  The language in the binder must be precise.  Do not use vague or all-encompassing terms which may imply coverages not intended, such as “All Risk.”  If possible, use the same language and terminology that will appear on policy.
+*  An agent may only issue binders which comply with the company’s underwriting instructions (per company manual, agency agreement, correspondence and/or company underwriter).  If the authority is not in writing, the agent should obtain written authority.  Most agency agreements contain stated “time frames” within which the company must be notified of any risk bound.
+*  Generally, a broker cannot bind insurance.  A broker may only exercise the authority extended by the company.  It is recommended that individual binders be issued for each company affording coverage.
+*  Most agency agreements dealing with surplus lines and specialty market contracts do not allow the agent or broker to bind coverage.  Authorization must be secured prior to binding.
+*  A binder provides coverage for a specified period.  In most jurisdictions, a premium must be charged for this period unless the binder is replaced by a policy.  A deposit should be obtained when issuing a binder.  A deposit premium may be required by some companies.
+*  Most companies prohibit issuing or extending binders where coverage has been refused or cancelled by any carrier."
+"1","Form_CompletionDate","A","","IDENTIFICATION SECTION","Date","Enter date: The date on which the form is completed.  (MM/DD/YYYY)"
+"2","Producer_FullName","A","","IDENTIFICATION SECTION","Agency","Enter text: The full name of the producer / agency."
+"3","Producer_MailingAddress_LineOne","A","","IDENTIFICATION SECTION","","Enter text: The mailing address line one of the producer / agency."
+"4","Producer_MailingAddress_LineTwo","A","","IDENTIFICATION SECTION","","Enter text: The mailing address line two of the producer / agency."
+"5","Producer_MailingAddress_CityName","A","","IDENTIFICATION SECTION","","Enter text: The mailing address city name of the producer / agency."
+"6","Producer_MailingAddress_StateOrProvinceCode","A","","IDENTIFICATION SECTION","","Enter code: The mailing address state or province code of the producer / agency."
+"7","Producer_MailingAddress_PostalCode","A","","IDENTIFICATION SECTION","","Enter code: The mailing address postal code of the producer / agency."
+"106","Producer_ContactPerson_PhoneNumber","A","","IDENTIFICATION SECTION","Phone No.","Enter number: The producer's contact person's phone number.  If applicable, include the area code and extension."
+"107","Producer_FaxNumber","A","","IDENTIFICATION SECTION","Fax No.","Enter number: The fax number of the producer / agency."
+"108","Insurer_ProducerIdentifier","A","","IDENTIFICATION SECTION","Code","Enter code: The identification code assigned to the producer (e.g., agency or brokerage firm) by the insurer."
+"109","Insurer_SubProducerIdentifier","A","","IDENTIFICATION SECTION","Subcode","Enter code: The identification code assigned by the insurer to the sub-producer (e.g., individual) within a producer's office (e.g., agency or brokerage)."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","Agency Customer ID","Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage)."
+"8","NamedInsured_FullName","A","","IDENTIFICATION SECTION","Insured","Enter text: The named insured(s) as it / they will appear on the policy declarations page."
+"9","NamedInsured_MailingAddress_LineOne","A","","IDENTIFICATION SECTION","","Enter text: The named insured's mailing address line one."
+"10","NamedInsured_MailingAddress_LineTwo","A","","IDENTIFICATION SECTION","","Enter text: The named insured's mailing address line two."
+"11","NamedInsured_MailingAddress_CityName","A","","IDENTIFICATION SECTION","","Enter text: The named insured's mailing address city name."
+"12","NamedInsured_MailingAddress_StateOrProvinceCode","A","","IDENTIFICATION SECTION","","Enter code: The named insured's mailing address state or province code."
+"13","NamedInsured_MailingAddress_PostalCode","A","","IDENTIFICATION SECTION","","Enter code: The named insured's mailing address postal code."
+"14","Insurer_FullName","A","","IDENTIFICATION SECTION","Name of Insurance Company","Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name."
+"5734","Binder_BinderIdentifier","A","","IDENTIFICATION SECTION","Binder #","Enter identifier: The number assigned to uniquely identify the binder."
+"341","Binder_EffectiveDate","A","","IDENTIFICATION SECTION","Effective Date","Enter date: The date on which the terms and conditions of the binder commenced. This date normally coincides with the effective date of the policy or of an endorsement to the policy."
+"342","Binder_EffectiveTime","A","","IDENTIFICATION SECTION","Effective Time","Enter time: The time of day on the effective date in which the terms and conditions of the binder will commence."
+"5732","Binder_MorningEffectiveTimeIndicator","A","","IDENTIFICATION SECTION","AM","Check the box (if applicable): Indicates the binder effective time is in the morning (AM)."
+"5733","Binder_AfternoonEffectiveTimeIndicator","A","","IDENTIFICATION SECTION","PM","Check the box (if applicable): Indicates the binder effective time is in the afternoon or evening (PM)."
+"343","Binder_ExpirationDate","A","","IDENTIFICATION SECTION","Expiration Date","Enter date: The date on which the terms and conditions of the policy will or have expired. Certain state laws limit the terms of a binder, so this date may not coincide with the policy expiration date."
+"344","Binder_MidnightExpirationTimeIndicator","A","","IDENTIFICATION SECTION","12:01 AM","Check the box (if applicable): Indicates the binder expires at 12:01 AM on the expiration date."
+"345","Binder_NoonExpirationTimeIndicator","A","","IDENTIFICATION SECTION","Noon","Check the box (if applicable): Indicates the binder expires at 12:00 noon on the expiration date."
+"5735","Binder_ExtensionIndicator","A","","IDENTIFICATION SECTION","This Binder is issued to extend coverage in the above named company per expiring policy # (Checkbox)","Check the box (if applicable): Indicates the binder is issued to extend coverage on a policy where renewal is not yet available."
+"5736","Binder_ExpiringPolicyNumberIdentifier","A","","IDENTIFICATION SECTION","Expiring Policy Number","Enter identifier: The policy number of the policy that is expiring."
+"5737","Binder_OperationsDescription","A","","IDENTIFICATION SECTION","Description Of Operations / Vehicle / Property (Including Location)","Enter text: The description of operations of the insured, vehicle information and usage, and, for property exposures, location information. Examples include: Machine Tool Die Casters; 91 Chevy H10 Pick Up Truck - VIN C12345P8991, used for delivery; Location 1 - 123 North Main St, Hartford, Ct. If the location is the same as the mailing address, and this address is properly descriptive, state ""same as mailing address,"" rather than repeat the address."
+"4422","Policy_PolicyType_BasicIndicator","A","","COVERAGES","Basic","Check the box (if applicable): Indicates the type of policy / perils insured is basic."
+"4423","Policy_PolicyType_BroadIndicator","A","","COVERAGES","Broad","Check the box (if applicable): Indicates the type of policy / perils insured is broad."
+"4424","Policy_PolicyType_SpecialIndicator","A","","COVERAGES","Spec","Check the box (if applicable): Indicates the type of policy / perils insured is special."
+"4425","Policy_PolicyType_OtherIndicator","A","","COVERAGES","Other Type of Insurance One","Check the box (if applicable): Indicates the type of policy / perils insured is other than those listed."
+"4426","Policy_PolicyType_OtherDescription","A","","COVERAGES","Other Type of Insurance Description One","Enter text: The description of the type of policy issued to the insured."
+"4425","Policy_PolicyType_OtherIndicator","B","","COVERAGES","Other Type of Insurance Two","Check the box (if applicable): Indicates the type of policy / perils insured is other than those listed."
+"4426","Policy_PolicyType_OtherDescription","B","","COVERAGES","Other Type of Insurance Description Two","Enter text: The description of the type of policy issued to the insured."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","A","","COVERAGES","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSIN -  Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+LBI - Loss of Business Income 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"5742","Binder_Property_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The subjects of insurance that are being covered and any necessary location information (e.g., Loc 1 Building Personal Property Dwelling)."
+"875","CommercialProperty_Premises_DeductibleAmount","A","","COVERAGES","Deductible","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"871","CommercialProperty_Premises_CoinsurancePercent","A","","COVERAGES","Co-insurance %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"870","CommercialProperty_Premises_LimitAmount","A","","COVERAGES","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","B","","COVERAGES","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSIN -  Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+LBI - Loss of Business Income 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"5742","Binder_Property_CoverageFormsDescription","B","","COVERAGES","Coverage / Forms","Enter text: The subjects of insurance that are being covered and any necessary location information (e.g., Loc 1 Building Personal Property Dwelling)."
+"875","CommercialProperty_Premises_DeductibleAmount","B","","COVERAGES","Deductible","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"871","CommercialProperty_Premises_CoinsurancePercent","B","","COVERAGES","Co-insurance %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"870","CommercialProperty_Premises_LimitAmount","B","","COVERAGES","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","C","","COVERAGES","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSIN -  Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+LBI - Loss of Business Income 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"5742","Binder_Property_CoverageFormsDescription","C","","COVERAGES","Coverage / Forms","Enter text: The subjects of insurance that are being covered and any necessary location information (e.g., Loc 1 Building Personal Property Dwelling)."
+"875","CommercialProperty_Premises_DeductibleAmount","C","","COVERAGES","Deductible","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"871","CommercialProperty_Premises_CoinsurancePercent","C","","COVERAGES","Co-insurance %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"870","CommercialProperty_Premises_LimitAmount","C","","COVERAGES","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","D","","COVERAGES","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSIN -  Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+LBI - Loss of Business Income 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"5742","Binder_Property_CoverageFormsDescription","D","","COVERAGES","Coverage / Forms","Enter text: The subjects of insurance that are being covered and any necessary location information (e.g., Loc 1 Building Personal Property Dwelling)."
+"875","CommercialProperty_Premises_DeductibleAmount","D","","COVERAGES","Deductible","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"871","CommercialProperty_Premises_CoinsurancePercent","D","","COVERAGES","Co-insurance %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"870","CommercialProperty_Premises_LimitAmount","D","","COVERAGES","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"16","GeneralLiability_CoverageIndicator","A","","COVERAGES","Commercial General Liability","Check the box (if applicable): Indicates the claims made or occurrence option applies for the general liability policy."
+"18","GeneralLiability_ClaimsMadeIndicator","A","","COVERAGES","Claims Made","Check the box (if applicable): Indicates the ""claims made"" option applies on the general liability policy."
+"19","GeneralLiability_OccurrenceIndicator","A","","COVERAGES","Occur","Check the box (if applicable): Indicates the general liability policy, occurrence basis applies."
+"20","GeneralLiability_OtherCoverageIndicator","A","","COVERAGES","Other General Liability Coverages One","Check the box (if applicable): Indicates other coverage not found on the form exists for the general liability policy."
+"21","GeneralLiability_OtherCoverageDescription","A","","COVERAGES","Other General Liability Coverages Description One","Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"20","GeneralLiability_OtherCoverageIndicator","B","","COVERAGES","Other General Liability Coverages Two","Check the box (if applicable): Indicates other coverage not found on the form exists for the general liability policy."
+"21","GeneralLiability_OtherCoverageDescription","B","","COVERAGES","Other General Liability Coverages Description Two","Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"20","GeneralLiability_OtherCoverageIndicator","C","","COVERAGES","Other General Liability Coverages Three","Check the box (if applicable): Indicates other coverage not found on the form exists for the general liability policy."
+"21","GeneralLiability_OtherCoverageDescription","C","","COVERAGES","Other General Liability Coverages Description Three","Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"5741","Binder_GeneralLiability_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The commercial lines classification code(s) and description of the class(es) for which the binder is being issued. Include any form numbers. For Personal Lines enter the policy form numbers."
+"850","GeneralLiability_ClaimsMade_ProposedRetroactiveDate","A","","COVERAGES","Retro Date For Claims Made","Enter date: The retroactive date you are requesting for the policy being applied for. This is the proposed earliest date for which an occurrence could ""trigger"" coverage under a Claims Made policy."
+"28","GeneralLiability_EachOccurrence_LimitAmount","A","","COVERAGES","Each Occurrence","Enter limit: The general liability, each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"29","GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount","A","","COVERAGES","Damage to Rented Premises","Enter limit: The general liability, damage to rented premises each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"30","GeneralLiability_MedicalExpense_EachPersonLimitAmount","A","","COVERAGES","Med Exp (any one person)","Enter limit: The general liability, medical expense each person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"31","GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount","A","","COVERAGES","Personal & Adv Injury","Enter limit: The general liability, personal and advertising injury limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"32","GeneralLiability_GeneralAggregate_LimitAmount","A","","COVERAGES","General Aggregate","Enter limit: The general liability, general aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"33","GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount","A","","COVERAGES","Products - Comp/Op Agg","Enter limit: The general liability, products and completed operations aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"41","Vehicle_AnyAutoIndicator","A","","COVERAGES","Any Auto","Check the box (if applicable): Indicates the commercial vehicle policy covers any auto."
+"42","Vehicle_AllOwnedAutosIndicator","A","","COVERAGES","All Owned Autos","Check the box (if applicable): Indicates the commercial vehicle policy covers owned autos only."
+"43","Vehicle_ScheduledAutosIndicator","A","","COVERAGES","Scheduled Autos","Check the box (if applicable): Indicates the vehicle policy covers scheduled autos."
+"44","Vehicle_HiredAutosIndicator","A","","COVERAGES","Hired Autos","Check the box (if applicable): Indicates the vehicle policy covers hired autos only."
+"45","Vehicle_NonOwnedAutosIndicator","A","","COVERAGES","Non-Owned Autos","Check the box (if applicable): Indicates the vehicle policy covers non-owned autos only."
+"720","Vehicle_BusinessAutoSymbol_OtherSymbolIndicator","A","","COVERAGES","Other Vehicle Liability One","Check the box (if applicable): Indicates that a symbol other than those listed should be used."
+"721","Vehicle_BusinessAutoSymbol_OtherSymbolCode","A","","COVERAGES","Other Vehicle Liability Symbol One","Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable."
+"720","Vehicle_BusinessAutoSymbol_OtherSymbolIndicator","B","","COVERAGES","Other Vehicle Liability Two","Check the box (if applicable): Indicates that a symbol other than those listed should be used."
+"721","Vehicle_BusinessAutoSymbol_OtherSymbolCode","B","","COVERAGES","Other Vehicle Liability Symbol Two","Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable."
+"5743","Binder_VehicleLiability_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The description of any policy form numbers associated with vehicle liability coverage."
+"51","Vehicle_CombinedSingleLimit_EachAccidentAmount","A","","COVERAGES","Combined Single Limit","Enter limit: The vehicle combined single limit liability each accident amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"52","Vehicle_BodilyInjury_PerPersonLimitAmount","A","","COVERAGES","Bodily Injury (per person)","Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"53","Vehicle_BodilyInjury_PerAccidentLimitAmount","A","","COVERAGES","Bodily Injury (per accident)","Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"54","Vehicle_PropertyDamage_PerAccidentLimitAmount","A","","COVERAGES","Property Damage","Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"203","Vehicle_MedicalPayments_PerPersonLimitAmount","A","","COVERAGES","Medical Payments","Enter limit: The medical payments per person limit."
+"3221","Vehicle_PIP_LimitAmount","A","","COVERAGES","Personal Injury","Enter limit: The personal injury protection (PIP) limit amount."
+"303","Vehicle_UninsuredMotorists_CombinedSingleLimitPerAccidentAmount","A","","COVERAGES","Uninsured Motorist","Enter limit: The uninsured motorists combined single limit per accident limit amount."
+"4817","Vehicle_OtherCoverage_CoverageDescription","A","","COVERAGES","Other Limit","Enter text: The description of the coverage."
+"217","Vehicle_OtherCoverage_LimitAmount","A","","COVERAGES","Other Limit Description","Enter limit: The limit amount of the other coverage."
+"4351","Vehicle_Collision_CoverageIndicator","A","","COVERAGES","Collision","Check the box (if applicable): Indicates the vehicle has collision coverage."
+"211","Vehicle_Collision_DeductibleAmount","A","","COVERAGES","Deductible","Enter deductible: The collision deductible amount."
+"4350","Vehicle_Comprehensive_CoverageIndicator","A","","COVERAGES","Other than Col","Check the box (if applicable): Indicates the vehicle has comprehensive or other than collision coverage."
+"210","Vehicle_Comprehensive_DeductibleAmount","A","","COVERAGES","Deductible","Enter deductible: The comprehensive or other than collision deductible amount."
+"5744","Vehicle_CollisionOption_AllVehiclesIndicator","A","","COVERAGES","All Vehicles","Check the box (if applicable): Indicates collision coverage applies to all vehicles."
+"5745","Vehicle_CollisionOption_ScheduledVehiclesIndicator","A","","COVERAGES","Scheduled Vehicles","Check the box (if applicable): Indicates collision coverage applies to scheduled vehicles only."
+"5748","Binder_VehiclePhysicalDamage_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The description of any policy form numbers associated with vehicle physical damage coverage."
+"681","Vehicle_Coverage_ValuationActualCashValueIndicator","A","","COVERAGES","Actual Cash Value","Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the actual cash value or market value."
+"683","Vehicle_Coverage_ValuationStatedAmountIndicator","A","","COVERAGES","Stated Amount","Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the stated amount."
+"5746","Vehicle_Coverage_ValuationOtherIndicator","A","","COVERAGES","Other Amount","Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is other than those listed."
+"5747","Vehicle_Coverage_ValuationOtherDescription","A","","COVERAGES","Other Amount Description","Enter text: The valuation method used in determining the value of the vehicle at the time of loss."
+"212","Vehicle_Collision_StatedLimitAmount","A","","COVERAGES","Amount","Enter limit: The limit associated with comprehensive and collision coverage is the actual cash value of the vehicle, unless an amount is stated here.  As used here,  the combined sum of the vehicle’s physical damage valuation."
+"57","GarageLiability_AnyAutoIndicator","A","","COVERAGES","Any Auto","Check the box (if applicable): Indicates the ""Any Auto"" option applies to the commercial garage liability policy."
+"3549","Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator","A","","COVERAGES","Other Garage Liability One","Check the box (if applicable): Indicates that a symbol other than those listed should be used."
+"3546","Vehicle_GarageAndDealersSymbol_OtherSymbolCode","A","","COVERAGES","Other Garage Liability Symbol One","Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable."
+"3549","Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator","B","","COVERAGES","Other Garage Liability Two","Check the box (if applicable): Indicates that a symbol other than those listed should be used."
+"3546","Vehicle_GarageAndDealersSymbol_OtherSymbolCode","B","","COVERAGES","Other Garage Liability Symbol Two","Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable."
+"5749","Binder_GarageLiability_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The description of any policy form numbers associated with garage liability coverage."
+"3506","Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount","A","","COVERAGES","Auto Only - Ea accident","Enter limit: The liability each accident limit for garage operations auto only.  For Dealers, use this field to enter the Policy Combined Single Limit."
+"5750","Binder_GarageLiability_OtherThanAutoOnlyDescription","A","","COVERAGES","Other than Auto Only:","Enter text: The description of the coverage for other than auto only."
+"3507","Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount","A","","COVERAGES","Other than Auto Only - Each Accident","Enter limit: The liability each accident limit for garage operations other than auto only."
+"3508","Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount","A","","COVERAGES","Other than Auto Only - Aggregate","Enter limit: The liability aggregate limit for garage operations other than auto only."
+"5751","Binder_ExcessUmbrella_UmbrellaIndicator","A","","COVERAGES","Umbrella Form","Check the box (if applicable): Indicates the information provided is for an umbrella policy."
+"5752","Binder_ExcessUmbrella_OtherPolicyTypeIndicator","A","","COVERAGES","Other than Umbrella Form","Check the box (if applicable): Indicates the information provided is for a policy type other than umbrella."
+"5753","Binder_ExcessUmbrella_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The description of any policy form numbers associated with excess or umbrella coverage.  If the policy is other than umbrella box is checked, an additional reference should be made in the Coverage / Forms section stating the kind of policy and to which coverages the policy applies (e.g., Excess - Auto section)."
+"1703","ExcessUmbrella_CurrentRetroactiveDate","A","","COVERAGES","Retro Date For Claims Made","Enter date: The current retroactive date should be shown if the Umbrella is over a Claims Made primary policy. If the current retroactive date is different from the proposed retroactive date, an explanation must be provided."
+"76","ExcessUmbrella_Umbrella_EachOccurrenceAmount","A","","COVERAGES","Each Occurrence","Enter limit: The excess or umbrella liability each occurrence limit.  As used here, enter the limits as governed by the policy."
+"77","ExcessUmbrella_Umbrella_AggregateAmount","A","","COVERAGES","Aggregate","Enter limit: The excess or umbrella liability aggregate limit should be listed as whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"72","ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount","A","","COVERAGES","Self-Insured Retention","Enter deductible: The excess or umbrella liability deductible or retention amount."
+"5754","Binder_WorkersCompensation_CoverageFormsDescription","A","","COVERAGES","Coverage / Forms","Enter text: The description of any policy form numbers associated with workers compensation coverage."
+"85","WorkersCompensationEmployersLiability_WorkersCompensationStatutoryLimitIndicator","A","","COVERAGES","Per Statute","Check the box (if applicable): Indicates that workers compensation coverage is per statute."
+"87","WorkersCompensationEmployersLiability_OtherCoverageDescription","A","","COVERAGES","Per Statute Description","Enter text: The description of other coverage (not the limit) on the workers compensation and employers liability policy. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"88","WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount","A","","COVERAGES","E.L. Each Accident","Enter limit: The workers compensation and employers liability policy, employers liability each accident limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"89","WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount","A","","COVERAGES","E.L. Disease Ea Employee","Enter limit: The workers compensation and employers liability policy, employers liability disease each employee limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"90","WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount","A","","COVERAGES","E.L. Disease Policy Limit","Enter limit: The workers compensation and employers liability policy, employers liability disease policy limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s)."
+"5755","Binder_SpecialConditionsDescription","A","","COVERAGES","Special Conditions / Other Coverages","Enter text: The description of any additional information pertinent to the bound policies.  Include any special endorsements that are not specified in other sections of the binder.  The area can also be used to add other coverages, refer to other binders, acknowledge receipt of deposit premium, or show fees, taxes and/or estimated premium"
+"5756","Policy_Payment_FeeAmount","A","","COVERAGES","Fees","Enter amount: The amount of fees associated with the policy."
+"5757","Policy_Payment_TaxAmount","A","","COVERAGES","Taxes","Enter amount: The amount of taxes associated with the policy."
+"298","Policy_Payment_EstimatedTotalAmount","A","","COVERAGES","Estimated Total Premium","Enter amount: The estimated total cost amount of the policy."
+"278","AdditionalInterest_FullName","A","","NAME AND ADDRESS","Name And Address","Enter text: The additional interest's full name."
+"279","AdditionalInterest_MailingAddress_LineOne","A","","NAME AND ADDRESS","","Enter text: The additional interest's mailing address line one."
+"280","AdditionalInterest_MailingAddress_LineTwo","A","","NAME AND ADDRESS","","Enter text: The additional interest's mailing address line two."
+"281","AdditionalInterest_MailingAddress_CityName","A","","NAME AND ADDRESS","","Enter text: The additional interest's mailing address city name."
+"282","AdditionalInterest_MailingAddress_StateOrProvinceCode","A","","NAME AND ADDRESS","","Enter code: The additional interest's mailing address state or province code."
+"283","AdditionalInterest_MailingAddress_PostalCode","A","","NAME AND ADDRESS","","Enter code: The additional interest's mailing address postal code."
+"265","AdditionalInterest_Interest_AdditionalInsuredIndicator","A","","NAME AND ADDRESS","Additional Insured","Check the box (if applicable): Indicates the additional interest type is an additional insured."
+"4509","AdditionalInterest_Interest_LendersLossPayableIndicator","A","","ADDITIONAL INTEREST","Lender’s Loss Payable One","Check the box (if applicable): Indicates the additional interest type is a lender's loss payable."
+"271","AdditionalInterest_Interest_LossPayeeIndicator","A","","NAME AND ADDRESS","Loss Payee","Check the box (if applicable): Indicates the additional interest type is a loss payee."
+"272","AdditionalInterest_Interest_MortgageeIndicator","A","","NAME AND ADDRESS","Mortgagee","Check the box (if applicable): Indicates the additional interest type is a mortgagee."
+"274","AdditionalInterest_Interest_OtherIndicator","A","","NAME AND ADDRESS","Other","Check the box (if applicable): Indicates the additional interest is other than those listed."
+"275","AdditionalInterest_Interest_OtherDescription","A","","NAME AND ADDRESS","Other Description","Enter text: The description of the other type of additional interest."
+"284","AdditionalInterest_AccountNumberIdentifier","A","","NAME AND ADDRESS","Loan #","Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured."
+"104","Producer_AuthorizedRepresentative_Signature","A","","NAME AND ADDRESS","Authorized Representative","Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states.  As used here, binders must be signed by authorized representatives of the issuing company."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","","Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage)."
+"105","Form_EditionIdentifier","A","","Edition","Date","The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM)."

@@ -1,10 +1,11 @@
 import asyncio
 import json
+import re
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from config.database import get_pool
 from fastapi import HTTPException
@@ -45,7 +46,64 @@ def _encrypt_facts(data: dict) -> dict:
     # idempotent: encrypt_field already checks for enc: prefix
     data = dict(data)
     data["facts"] = encrypt_field(serialized)
+    # The dashboard searches the CURRENT applicant name (27 Oct 2026): the
+    # facts blob is one ciphertext, so SQL can never read inside it. Each write
+    # keeps a small encrypted copy of the name beside it; the list decrypts it
+    # in the app (`_search_name`), never the whole blob.
+    if isinstance(facts, dict):
+        name = _applicant_name_of(facts)
+        if name:
+            data[SEARCH_NAME_KEY] = encrypt_field(name)
+        else:
+            data.pop(SEARCH_NAME_KEY, None)
     return data
+
+
+SEARCH_NAME_KEY = "search_name"
+
+
+def _applicant_name_of(facts: dict) -> str:
+    raw = facts.get("applicant_name")
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    return str(raw).strip() if isinstance(raw, (str, int, float)) and str(raw).strip() else ""
+
+
+def _search_name(cipher: Any) -> str:
+    """The decrypted search copy of the applicant name, or "" (none, legacy
+    plaintext kept as is, or a key mismatch - never raises)."""
+    if not cipher or not isinstance(cipher, str):
+        return ""
+    try:
+        return str(decrypt_field(cipher) or "").strip()
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
+def _fold_name(text: str) -> str:
+    return re.sub(r"[^0-9a-z]+", " ", str(text or "").casefold()).strip()
+
+
+def name_matches_search(search: str, *names: Any) -> bool:
+    """A keyword matches when it appears in any of `names`, ignoring case,
+    punctuation and spacing ("choice electric llc" finds "CHOICE ELECTRIC, LLC";
+    "oneil" finds "O'Neil"). A keyword with no letters or digits is matched
+    literally. Empty keyword = no filter."""
+    raw = str(search or "").strip().casefold()
+    if not raw:
+        return True
+    want = _fold_name(raw)
+    for name in names:
+        if not name:
+            continue
+        if not want:
+            if raw in str(name).casefold():
+                return True
+            continue
+        have = _fold_name(name)
+        if want in have or want.replace(" ", "") in have.replace(" ", ""):
+            return True
+    return False
 
 
 def _decrypt_facts(data: dict) -> dict:
@@ -215,6 +273,9 @@ async def new_processing_session(data: dict) -> str:
     sid  = str(uuid.uuid4())
     now  = datetime.now(timezone.utc).isoformat()
     await _save_pdf_bytes(sid, data.get("generated_forms", {}))
+    # Only the archive door sets a package's archive state.
+    from services.package_archive import without_archive_keys
+    data = without_archive_keys(data)
     clean = _session_to_db(_encrypt_facts(data))
     async with get_pool().acquire() as conn:
         await conn.execute(
@@ -222,6 +283,12 @@ async def new_processing_session(data: dict) -> str:
             " VALUES ($1,$2,$3,$4,$5)",
             sid, data.get("user_id", ""), clean, now, now,
         )
+        # E&O lineage: the first value of every fact, with its source document
+        # and page (services/fact_history.py - this door and the one below are
+        # the only facts writers). Never fails the create.
+        from services.fact_history import record_fact_changes
+        await record_fact_changes(conn, sid, data.get("user_id"), {}, data.get("facts"),
+                                  docs=data.get("docs"))
     logger.info(f"Processing session created: {sid}")
     return sid
 
@@ -287,6 +354,23 @@ async def upd_processing_session(
     # Phase 1: if there are new pdf_bytes, upload to S3/BYTEA before acquiring the
     # row lock so the DB transaction stays short and doesn't block other writers.
     if "generated_forms" in updates:
+        # The PDFs are written before the row lock, so an archived package's
+        # read-only rule is asked here too (the locked check below covers the row).
+        if any(isinstance(fd, dict) and fd.get("pdf_bytes") is not None
+               for fd in (updates.get("generated_forms") or {}).values()):
+            from services import package_archive as _pa
+            try:
+                _arch = await _pa.archived_state(sid)
+            except Exception:                                  # noqa: BLE001
+                _arch = None
+            if _arch:
+                _v = _pa.door_verdict({_pa.ARCHIVED_KEY: _arch}, updates, delete_facts)
+                if _v == _pa.REFUSE:
+                    raise _pa.archived_http_error()
+                if _v == _pa.DROP:
+                    logger.info("upd_processing_session: %s is archived - PDF write "
+                                "dropped (read-only)", sid)
+                    return
         await _save_pdf_bytes(sid, updates["generated_forms"])
 
     # Phase 2: short read-modify-write transaction.
@@ -309,6 +393,30 @@ async def upd_processing_session(
                     current = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
                     current = _decrypt_facts(current)
                     version = row["version"]
+
+                    # An archived package does not change (services/
+                    # package_archive.py): only a read's bookkeeping lands; any
+                    # other write inside a GET is dropped, outside one refused.
+                    from services import package_archive as _pa
+                    _verdict = _pa.door_verdict(current, updates, delete_facts)
+                    if _verdict == _pa.REFUSE:
+                        raise _pa.archived_http_error()
+                    if _verdict == _pa.DROP:
+                        logger.info("upd_processing_session: %s is archived - write of %s "
+                                    "dropped (read-only)", sid, sorted(updates))
+                        return
+                    updates = _pa.without_archive_keys(updates)
+
+                    # E&O lineage: the facts as they stood before this write -
+                    # None when they could not be read (no diff is trusted then).
+                    _existing_facts = current.get("facts")
+                    if isinstance(_existing_facts, dict):
+                        _facts_before = dict(_existing_facts)
+                    elif (_existing_facts is None
+                          and current.get(_FACTS_CIPHERTEXT_PRESERVED) is None):
+                        _facts_before = {}
+                    else:
+                        _facts_before = None
 
                     if "generated_forms" in updates:
                         existing_gen = current.get("generated_forms", {})
@@ -368,6 +476,15 @@ async def upd_processing_session(
                         " WHERE id=$4",
                         clean, now, version + 1, sid,
                     )
+                    # E&O lineage, in this transaction (a savepoint inside):
+                    # one row per fact whose value, source or confirmation
+                    # moved. A write that never touched facts is skipped.
+                    if ("facts" in updates or delete_facts) and _facts_before is not None:
+                        from services.fact_history import record_fact_changes
+                        _docs = updates.get("docs") if isinstance(updates.get("docs"), list) else None
+                        await record_fact_changes(conn, sid, current.get("user_id"),
+                                                  _facts_before, current.get("facts"),
+                                                  docs=_docs)
             return  # success
         except HTTPException:
             raise
@@ -452,46 +569,195 @@ def compute_session_status(data: dict) -> str:
     return "NOT_STARTED"
 
 
-# ASYNC-SAFE
-async def count_sessions_for_user(user_id: str, search: str = None) -> int:
-    """Total number of processing sessions for a user - drives dashboard paging.
-    Matches the COUNT(*) used by /api/sessions/stats total_packages.
-    With `search`, counts only packages whose applicant name matches (keyword
-    search); without it, identical to the original unfiltered count."""
+def _archived_clause(archived: bool) -> str:
+    """The dashboard's two lists (27 Oct 2026, services/package_archive.py):
+    the main list holds active packages, the Archived filter the archived ones."""
+    return (" AND (data->>'archived_at') IS NOT NULL" if archived
+            else " AND (data->>'archived_at') IS NULL")
+
+
+_LEGACY_NAME_CACHE: "dict" = {}
+_LEGACY_NAME_CACHE_MAX = 5000
+
+
+_MATCH_CACHE: dict = {}
+_MATCH_CACHE_TTL = 5.0
+
+
+async def _matching_session_ids(user_id: str, search: str, archived: bool) -> List[str]:
+    """One match per dashboard request: the page and its count ask the same
+    question back to back, so the answer is reused for a few seconds."""
+    import time
+    key = (str(user_id), str(search or "").strip().casefold(), bool(archived))
+    hit = _MATCH_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _MATCH_CACHE_TTL:
+        return list(hit[1])
+    ids = await _match_session_ids(user_id, search, archived)
+    if len(_MATCH_CACHE) > 500:
+        _MATCH_CACHE.clear()
+    _MATCH_CACHE[key] = (time.monotonic(), list(ids))
+    return ids
+
+
+async def _match_session_ids(user_id: str, search: str, archived: bool) -> List[str]:
+    """Ids of this user's packages whose displayed or current applicant name
+    matches `search`, newest first - the dashboard search (27 Oct 2026).
+
+    Reads only the small fields: the upload label and the encrypted search copy
+    of the name (`SEARCH_NAME_KEY`), decrypted here. A package saved before the
+    search copy existed (until the startup backfill reaches it) has its facts
+    fetched in small batches and decrypted once; its name is cached by
+    (id, updated_at) and its copy back-filled, so no later search pulls it."""
     async with get_pool().acquire() as conn:
-        if search:
-            row = await conn.fetchrow(
-                """
-                SELECT COUNT(*)::int AS n FROM processing_sessions
-                WHERE user_id = $1
-                  AND COALESCE(NULLIF(data->>'submission_label', ''),
-                               data->'facts'->'applicant_name'->>'value',
-                               data->'facts'->>'applicant_name') ILIKE '%' || $2 || '%'
-                """,
-                user_id, search,
+        rows = await conn.fetch(
+            "SELECT id::text AS id, updated_at, data->>'submission_label' AS label, "
+            "data->>'search_name' AS search_name "
+            "FROM processing_sessions WHERE user_id = $1" + _archived_clause(archived)
+            + " ORDER BY updated_at DESC",
+            user_id,
+        )
+    names: dict = {}
+    legacy = []
+    for r in rows:
+        name = _search_name(r["search_name"])
+        if not name and r["search_name"] is None:
+            cached = _LEGACY_NAME_CACHE.get((r["id"], str(r["updated_at"])))
+            if cached is None:
+                legacy.append(r)
+            name = cached or ""
+        names[r["id"]] = name
+    backfill: List[tuple] = []
+    for k in range(0, len(legacy), _LEGACY_FETCH_BATCH):
+        part = legacy[k:k + _LEGACY_FETCH_BATCH]
+        try:
+            async with get_pool().acquire() as conn:
+                got = await conn.fetch(
+                    "SELECT id::text AS id, data->'facts' AS facts FROM processing_sessions "
+                    "WHERE user_id = $1 AND id::text = ANY($2::text[])",
+                    user_id, [r["id"] for r in part],
+                )
+        except Exception as ex:                                    # noqa: BLE001
+            logger.warning("search: legacy names skipped: %s", ex)
+            break
+        facts_by_id = {g["id"]: g["facts"] for g in got}
+        for r in part:
+            name = ""
+            try:
+                raw = facts_by_id.get(r["id"])
+                raw = json.loads(raw) if isinstance(raw, str) else raw
+                facts = _decrypt_facts({"facts": raw}).get("facts") if raw is not None else None
+                name = _applicant_name_of(facts) if isinstance(facts, dict) else ""
+            except Exception:                                      # noqa: BLE001
+                name = ""
+            if len(_LEGACY_NAME_CACHE) >= _LEGACY_NAME_CACHE_MAX:
+                _LEGACY_NAME_CACHE.clear()
+            _LEGACY_NAME_CACHE[(r["id"], str(r["updated_at"]))] = name
+            names[r["id"]] = name
+            if name:
+                backfill.append((r["id"], encrypt_field(name)))
+    if backfill:
+        await _backfill_search_names(backfill)
+    return [r["id"] for r in rows if name_matches_search(search, r["label"], names.get(r["id"]))]
+
+
+_LEGACY_FETCH_BATCH = 20
+
+
+async def backfill_search_names(batch: int = 25, pause: float = 0.5) -> int:
+    """Startup job: give every package this server can decrypt its encrypted
+    search copy of the applicant name, a batch at a time, so the first dashboard
+    search after a deploy never has to decrypt whole fact sets. Rows another
+    environment's key wrote (unreadable here) or with no applicant name are
+    remembered and skipped. Returns how many were filled. Never raises."""
+    import asyncio
+    done, skipped = 0, set()
+    try:
+        while True:
+            async with get_pool().acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT id::text AS id, data->'facts' AS facts FROM processing_sessions "
+                    "WHERE data->>'search_name' IS NULL AND data ? 'facts' "
+                    "AND NOT (id::text = ANY($1::text[])) ORDER BY updated_at DESC LIMIT $2",
+                    list(skipped), batch,
+                )
+            if not rows:
+                return done
+            pairs = []
+            for r in rows:
+                try:
+                    raw = r["facts"]
+                    raw = json.loads(raw) if isinstance(raw, str) else raw
+                    facts = _decrypt_facts({"facts": raw}).get("facts")
+                    name = _applicant_name_of(facts) if isinstance(facts, dict) else ""
+                except Exception:                                  # noqa: BLE001
+                    name = ""
+                if name:
+                    pairs.append((r["id"], encrypt_field(name)))
+                else:
+                    skipped.add(r["id"])
+            if pairs:
+                await _backfill_search_names(pairs)
+                done += len(pairs)
+                # Each row is tried ONCE: a failed write must never loop.
+                skipped.update(pid for pid, _ in pairs)
+            await asyncio.sleep(pause)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("search-name startup backfill stopped after %d: %s", done, ex)
+        return done
+
+
+async def _backfill_search_names(pairs: List[tuple]) -> None:
+    """Give packages saved before the search copy existed their copy, so the
+    next search never decrypts their facts again. Written by the server that
+    just decrypted them, so the copy carries the same key as their facts (local
+    and Render use different keys). Only the one key; `updated_at` untouched;
+    never over a copy a write has set meanwhile. Best effort - never raises."""
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.executemany(
+                "UPDATE processing_sessions SET data = jsonb_set(data, '{search_name}', to_jsonb($2::text)) "
+                "WHERE id::text = $1 AND data->>'search_name' IS NULL",
+                pairs,
             )
-        else:
-            row = await conn.fetchrow(
-                "SELECT COUNT(*)::int AS n FROM processing_sessions WHERE user_id = $1",
-                user_id,
-            )
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("search-name backfill skipped: %s", ex)
+
+
+# ASYNC-SAFE
+async def count_sessions_for_user(user_id: str, search: str = None,
+                                  archived: bool = False) -> int:
+    """Total number of processing sessions for a user - drives dashboard paging.
+    With `search`, counts only packages whose applicant name matches (keyword
+    search). `archived` picks the list: active packages (default) or the
+    archived ones - the same split `list_sessions_for_user` draws."""
+    if search:
+        return len(await _matching_session_ids(user_id, search, archived))
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*)::int AS n FROM processing_sessions WHERE user_id = $1"
+            + _archived_clause(archived),
+            user_id,
+        )
     return int(row["n"]) if row and row["n"] is not None else 0
 
 
 # ASYNC-SAFE
-async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0, search: str = None) -> list:
+async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0, search: str = None,
+                                 archived: bool = False) -> list:
     # Optional keyword filter on the displayed applicant name. Server-side so it
-    # spans the whole account, not just the current page. Backward compatible:
-    # with no search, the query and params are identical to before.
-    search_clause = ""
+    # spans the whole account, not just the current page. `archived` picks the
+    # dashboard list (27 Oct 2026): active packages by default, else the
+    # Archived filter's.
+    search_clause = _archived_clause(archived)
     params = [user_id, limit, offset]
     if search:
-        search_clause = (
-            " AND COALESCE(NULLIF(data->>'submission_label', ''), "
-            "data->'facts'->'applicant_name'->>'value', "
-            "data->'facts'->>'applicant_name') ILIKE '%' || $4 || '%'"
-        )
-        params.append(search)
+        # Matched in the app (`_matching_session_ids`): the name sits inside
+        # encrypted facts, which an SQL ILIKE never sees.
+        ids = (await _matching_session_ids(user_id, search, archived))[offset:offset + limit]
+        if not ids:
+            return []
+        search_clause += " AND id::text = ANY($4::text[])"
+        params = [user_id, limit, 0, ids]
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -500,6 +766,8 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 created_at,
                 updated_at,
                 data->>'last_downloaded_at'                          AS last_downloaded_at,
+                data->>'archived_at'                                 AS archived_at,
+                data->>'search_name'                                 AS search_name,
                 COALESCE(
                     NULLIF(data->>'submission_label', ''),
                     data->'facts'->'applicant_name'->>'value',
@@ -513,8 +781,15 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 -- could disagree with the banner inside the same submission.
                 -- Before forms (14 Oct 2026, Orbin item 2) the score the pre-form
                 -- screen showed (`form_routes._remember_pre_form_score`).
-                COALESCE((data->'package_sqs'->>'package_sqs_score')::int,
-                         (data->'pre_form_score'->>'package_sqs_score')::int)
+                -- Before forms the pre-form copy comes FIRST (30 Oct 2026, live
+                -- 6875e80c): a pre-form recalculation also saves `package_sqs`,
+                -- and a later add / re-merge moved the page past it - the list
+                -- kept 94 while the page read 100.
+                CASE WHEN COALESCE(data->'generated_forms', '{}'::jsonb) IN ('{}'::jsonb, '[]'::jsonb, 'null'::jsonb)
+                     THEN COALESCE((data->'pre_form_score'->>'package_sqs_score')::int,
+                                   (data->'package_sqs'->>'package_sqs_score')::int)
+                     ELSE COALESCE((data->'package_sqs'->>'package_sqs_score')::int,
+                                   (data->'pre_form_score'->>'package_sqs_score')::int) END
                                                                      AS package_sqs_score,
                 -- "Quote Ready" needs NO open hard stop as well as the score
                 -- (Brent, 19 Oct 2026); read from the same score as above, and
@@ -523,7 +798,10 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 -- scoring). NULL on a score saved before then - the badge falls
                 -- back to 90+, which the 60 cap a hard stop holds makes the
                 -- same rule.
-                CASE WHEN (data->'package_sqs'->>'package_sqs_score') IS NOT NULL
+                CASE WHEN COALESCE(data->'generated_forms', '{}'::jsonb) IN ('{}'::jsonb, '[]'::jsonb, 'null'::jsonb)
+                          AND (data->'pre_form_score'->>'package_sqs_score') IS NOT NULL
+                     THEN data->'pre_form_score'->>'submission_ready'
+                     WHEN (data->'package_sqs'->>'package_sqs_score') IS NOT NULL
                      THEN CASE WHEN (data->'package_sqs'->>'open_hard_stops') IS NOT NULL
                                THEN (((data->'package_sqs'->>'package_sqs_score')::int >= 90)
                                      AND ((data->'package_sqs'->>'open_hard_stops')::int = 0))::text
@@ -580,7 +858,9 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
             "created_at":         row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
             "updated_at":         row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
             "last_downloaded_at": row["last_downloaded_at"],
-            "applicant":          row["applicant_name"] or "Unknown Applicant",
+            "archived_at":        dict(row).get("archived_at"),
+            "applicant":          (row["applicant_name"] or _search_name(row.get("search_name"))
+                                   or "Unknown Applicant"),
             "lines":              lines,
             "form_ids":           form_ids,
             "sqs":                sqs_scores,

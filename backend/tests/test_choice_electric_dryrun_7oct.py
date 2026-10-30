@@ -133,9 +133,14 @@ def test_building_two_cope_is_listed_before_the_forms_exist():
 
 def test_with_no_answers_both_buildings_list_year_roof_and_protection_class():
     out = _run(_facts(False), ["ACORD_140"])
-    cols = {it["route"]["row"]: it["route"]["columns"] for it in _items(out, "ACORD_140")}
+    items = _items(out, "ACORD_140")
+    cols = {it["route"]["row"]: it["route"]["columns"] for it in items if "row" in (it.get("route") or {})}
     assert cols == {0: ["year_built", "roof_material", "protection_class"],
                     1: ["year_built", "roof_material", "protection_class"]}
+    # Occupancy is stated nowhere (package or building rows) and the 140's own
+    # check reads it: its card is listed too (G18, 30 Oct 2026 - a deduction
+    # always has a card; the TEST predated that and listed table rows only).
+    assert [it["route"].get("facts") for it in items if "row" not in (it.get("route") or {})] == [["occupancy_type"]]
     assert out["blocking_count"] == 0     # 25 Oct 2026: listed, never a hard block
 
 
@@ -441,9 +446,18 @@ def _rows(n: int):
 @pytest.mark.parametrize("code", ["carrier_grade_cope_incomplete", "minimum_viable_cope_missing"])
 def test_one_building_cards_are_byte_identical(code):
     from services.issue_registry import resolution_for
-    for facts in ({}, {"property_locations": _rows(1)}, {"property_locations": []}):
+    # (28 Oct 2026: with NO premises anywhere the Minimum Viable card also shows
+    # the premises address box - `premises_cope._with_premises_box`; a stated
+    # address keeps the one-building card byte-identical.)
+    for facts in ({"locations": ["100 Main St"]}, {"property_locations": _rows(1)},
+                  {"property_locations": [], "locations": ["100 Main St"]}):
         item_res, cluster_res = _cope_view(facts, code)
         assert item_res == resolution_for(code) and cluster_res == resolution_for(code)
+    item_res, _ = _cope_view({"occupancy_type": None}, code)
+    if code == "minimum_viable_cope_missing":
+        assert item_res["facts"] == ["locations"] + resolution_for(code)["facts"]
+    else:
+        assert item_res == resolution_for(code)
 
 
 def test_two_buildings_route_the_carrier_grade_card_to_the_table():

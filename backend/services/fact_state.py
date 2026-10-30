@@ -73,6 +73,22 @@ _HUMAN_SOURCES = {
 # tests/test_build22_person-door.py).
 PERSON_ENTRY_SOURCES = frozenset({"producer", "client_arq"})   # a person typed it
 PERSON_CHOICE_SOURCES = frozenset({"user_confirmed"})          # a person picked it
+# Question 3 (27 Oct 2026): a person PUT the value - typed or picked - read off
+# the envelope's own `source` (`put_by_person`). Exactly `_HUMAN_SOURCES`' keys.
+PERSON_VALUE_SOURCES = PERSON_ENTRY_SOURCES | PERSON_CHOICE_SOURCES
+# A FORM BOX's label (the generated form's `confidence` map), not a fact's
+# source: a person typed this box - a producer's edit or answer, a client's
+# answer (`typed_box`). The same two words as PERSON_ENTRY_SOURCES, kept a
+# separate name because a box label and a fact source are different records
+# (a Data Consistency pick labels no box "user_confirmed").
+PERSON_BOX_LABELS = PERSON_ENTRY_SOURCES
+# A value READ OFF A FILLED ACORD FORM'S BOX (services/acord_intake, 27 Oct
+# 2026): what an uploaded form states. Not a person (a form a person filled
+# is still a document - the owner table, not the person door, decides it), and
+# not a model's guess: the rules that police an inferred value (a payroll period
+# the text never names, a vehicle use the text never labels) stand down for it.
+ACORD_BOX_SOURCE = "acord_form"
+FORM_BOX_SOURCES = frozenset({ACORD_BOX_SOURCE})
 _VERIFIED_SOURCES = frozenset({"dec_entry", "policy_doc_text"})
 _VERIFIED_CONFIDENCES = frozenset({"deterministic", "filled"})
 _DERIVED_SOURCES = frozenset({"derived"})
@@ -142,8 +158,9 @@ def derive_evidence_state(raw: Any) -> Tuple[str, Optional[str]]:
 # first; the rules that respect a person's answer (never silence, never
 # re-asked, never re-derived, never held against the documents) ask the second.
 # A rule that needs a third thing - the VALUE put there by a person's action,
-# typed or picked but not a confirmation of a document's value - is not either
-# of these and keeps its own test until it is decided (Z31-P open ends).
+# typed or picked but not a confirmation of a document's value - asks the
+# third question, `put_by_person` (27 Oct 2026, Z31-P open end 1). A FORM
+# BOX's label is a fourth record, `typed_box`.
 
 def _source_of(env: dict) -> str:
     return str(env.get("source") or "").strip().lower()
@@ -194,6 +211,41 @@ def confirmed_by_person(raw: Any) -> bool:
     which no writer produces, still counts).
     """
     return typed_by_person(raw) or derive_evidence_state(raw)[0] == USER_CONFIRMED
+
+
+def put_by_person(raw: Any) -> bool:
+    """Did a person PUT this value here - typed it, or picked it? (question 3)
+
+    Z31-P's open end (1): eight readers asked "is this a person's VALUE?"
+    with their own source sets - a value a person entered (``producer``,
+    ``client_arq``) or chose between the documents (a Data Consistency
+    ``user_confirmed``), but NOT a document's value a person merely vouched
+    for. That is neither `typed_by_person` (it counts the pick) nor
+    `confirmed_by_person` (which also counts the client's "this is correct"
+    in confirm-or-correct and the login account's producer details - there
+    the VALUE is still the document's / the account's). The rules that keep a
+    person's value against the documents' (the merge, the insured scope, the
+    umbrella layers, the stamper's party guards) ask this.
+
+    Read off the envelope's ``source`` only, never a confidence (see
+    `typed_by_person`); a bare value carries no provenance."""
+    _value, env = _unwrap(raw)
+    return bool(env) and _source_of(env) in PERSON_VALUE_SOURCES
+
+
+def is_person_value_source(source: Any) -> bool:
+    """`put_by_person` for a caller that already holds the ``source`` string
+    (a merge candidate, a schedule row's provenance)."""
+    return str(source or "").strip().lower() in PERSON_VALUE_SOURCES
+
+
+def typed_box(label: Any) -> bool:
+    """Did a PERSON type this FORM BOX? - its label in the generated form's
+    ``confidence`` map is a person's (`PERSON_BOX_LABELS`). The one test every
+    re-stamp, propagation and to-do reader asks before moving or flagging a box
+    (a person's box is never overwritten or re-labelled by a document's
+    value)."""
+    return str(label or "").strip().lower() in PERSON_BOX_LABELS
 
 
 # ── THE TWO STATES THAT USED TO HAVE NO WRITER (client 1.3) ─────────────────
@@ -279,6 +331,15 @@ def _owned_vehicle_fact_not_applicable(fact_key: str, facts: Optional[dict]) -> 
     `wc_xmod` when the documents or the producer say no mod applies (6.4).
     One door decides (`coverage_evidence.h1_fact_not_applicable`). Fail-closed:
     if the door cannot answer, the fact stays askable."""
+    # The Period of Restoration on an Actual Loss Sustained BI coverage (29 Oct
+    # 2026, Michelle review item 6): no period exists to state, so no question
+    # asks for it - the one door, `property_coverages.bi_actual_loss_sustained`.
+    if fact_key == "period_of_restoration":
+        try:
+            from services.property_coverages import bi_actual_loss_sustained
+            return bool(bi_actual_loss_sustained(facts))
+        except Exception:                                     # noqa: BLE001
+            return False
     try:
         from services.coverage_evidence import h1_fact_not_applicable
         return h1_fact_not_applicable(fact_key, facts)

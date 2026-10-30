@@ -2669,6 +2669,35 @@ body.app-header-collapsed .acord-modal-editor-root {
 .session-card:hover .session-delete-btn {
   opacity: 1;
 }
+/* Archive / Unarchive (27 Oct 2026) - shown with the delete button on hover;
+   an archived card keeps it visible, it is that card's only action. */
+.session-archive-btn {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0;
+}
+.session-archive-btn.is-archived,
+.session-archive-btn:focus-visible,
+.session-card:hover .session-archive-btn {
+  opacity: 1;
+}
+.session-archive-btn:hover {
+  border-color: #94a3b8;
+  color: #334155;
+}
+@media (hover: none) {
+  .session-archive-btn { opacity: 1; }
+}
 .session-delete-btn:hover {
   background: #dc2626;
   color: #fff;

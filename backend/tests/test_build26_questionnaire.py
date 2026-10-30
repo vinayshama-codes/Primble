@@ -47,6 +47,10 @@ def _producer(value):
     return {"value": value, "source": "producer", "confidence": "filled"}
 
 
+# A hand-built assessment is a CURRENT one (29 Oct 2026): an unversioned one is
+# re-assessed on read from the documents, which print neither of these values.
+from services.underwriting_consistency import ASSESSMENT_VERSION as _UW_VERSION  # noqa: E402
+
 _DOCS = [
     {"doc_id": "d1", "filename": "Package Dec.pdf", "doc_type": "dec_page",
      "text": ("[Document page 1]\nNamed Insured: Acme Electric LLC\nMailing address: 1 Main St, "
@@ -288,7 +292,7 @@ def test_all_sections_is_the_manual_addition():
 
 def _conflict_row():
     return _row(facts={"_uw_conflict_keys": ["total_revenue"]},
-                underwriting_consistency={"fields": [{
+                underwriting_consistency={"assessment_version": _UW_VERSION, "fields": [{
                     "fact_key": "total_revenue", "status": "conflict", "review_required": True,
                     "conflict_scope": [],
                     "values": [{"display": "$1,200,000", "sources": [{"filename": "Package Dec.pdf"}]},
@@ -835,7 +839,7 @@ def test_a_number_in_a_narrative_heading_must_be_stated_too():
 
 def _fein_conflict_row():
     return _row(facts={"_uw_conflict_keys": ["fein"], "fein": _doc_env("12-3456789")},
-                underwriting_consistency={"fields": [{
+                underwriting_consistency={"assessment_version": _UW_VERSION, "fields": [{
                     "fact_key": "fein", "status": "conflict", "review_required": True, "conflict_scope": [],
                     "values": [{"display": "12-3456789", "sources": [{"filename": "Package Dec.pdf"}]},
                                {"display": "98-7654321", "sources": [{"filename": "Application.pdf"}]}]}]})

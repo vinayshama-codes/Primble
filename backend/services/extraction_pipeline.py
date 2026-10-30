@@ -244,6 +244,15 @@ def document_text_key(text: Any) -> str:
     return hashlib.sha256(norm.encode("utf-8", "replace")).hexdigest() if norm else ""
 
 
+def stored_text_key(doc: Any) -> str:
+    """A STORED document's identity: the key of the text it was read as. Our own
+    re-uploaded forms keep no text (`intake.read_for_document`) but remember
+    the key, so the same form added twice is still one document."""
+    if not isinstance(doc, dict):
+        return ""
+    return str(doc.get("text_key") or "") or document_text_key(doc.get("text"))
+
+
 async def extract_document(
     path: str,
     display_name: str,
@@ -302,7 +311,53 @@ async def extract_document(
     # Document classification (Beta Report §4.2): content keywords + narrative
     # detection rules + filename signals. Returns the canonical type plus the
     # confidence/source/signals used (surfaced to the UI + audit).
-    classification = classify_document(text, filename=display_name)
+    # Filled ACORD forms are read by box name, not by the model (27 Oct 2026,
+    # services/acord_intake, ACORD_INTAKE.md). A document that is ALL fillable
+    # ACORD pages makes no extraction call; a mixed one sends only its other
+    # pages to the model. Recognition failure = today's path, unchanged.
+    acord = None
+    try:
+        # whose upload this is: a Primble record written by another account
+        # restores nothing (`primble_record.same_account`, 29 Oct 2026)
+        from services.acord_intake.primble_record import uploading_account
+        uploading_account(user_id)
+    except Exception:                                     # noqa: BLE001
+        pass
+    try:
+        from services.acord_intake import intake as _acord_intake
+        # Off the event loop: the reader is CPU-bound pdfplumber / pikepdf work -
+        # measured 8-22 s on a flattened 125 / a 59-page package - and inline it
+        # froze every other request on the server for that long (production
+        # review, 29 Oct 2026).
+        acord = await asyncio.to_thread(_acord_intake.read_for_document, path, text)
+    except Exception as _acx:                             # noqa: BLE001
+        logger.warning("acord intake skipped for %s: %s", display_name, _acx)
+        acord = None
+    # ASG Transcriber (29 Oct 2026, ASG_TRANSCRIBER.md): every recognised ACORD
+    # page of an OUTSIDE document - never one carrying our record - is read by
+    # Transcriber too, and folded into the one reading. Off, unconfigured, over
+    # a cap, or any failure: the reading above stands, exactly as today.
+    try:
+        from services.acord_intake import transcriber_intake as _ti
+        if _ti.load_config().usable:
+            _rec = (acord or {}).get("record") or {}
+            _has_record = bool(_rec.get("primble_record") or _rec.get("own_form") or _rec.get("primble_summary"))
+            if not _has_record and str(path).lower().endswith(".pdf"):
+                from services.acord_intake import primble_record as _pr
+                _has_record = await asyncio.to_thread(_pr.carries_record, path)
+            _gr = await _ti.read_document(path, _rec, has_primble_record=_has_record, ocr_text=text)
+            if _gr is not None:
+                acord = (await asyncio.to_thread(_acord_intake.read_for_document, path, text,
+                                                 transcriber=_gr)) or acord
+    except Exception as _tex:                             # noqa: BLE001
+        logger.warning("transcriber reading skipped for %s: %s", display_name, _tex)
+    classification = (acord["classification"] if acord and acord.get("classification")
+                      else classify_document(text, filename=display_name))
+    # ACORD pages we could not read by box (scanned, or a form we hold no
+    # template for) go down today's path FLAGGED: low type confidence is the one
+    # "Needs Verification" signal (Documents list, Confirm type, verified source).
+    if acord and not acord.get("classification") and (acord.get("record") or {}).get("needs_verification"):
+        classification = dict(classification, confidence="low")
     _stated = str(doc_type or "").strip()
     overridden = bool(_stated) and _stated != "unknown" and _stated in ALLOWED_DOC_TYPES
     if overridden:
@@ -316,9 +371,12 @@ async def extract_document(
             dtype, display_name, len(text), dtype,
         )
     await reporter.file_phase(index, "extracting", active=f"Extracting facts from {display_name}…")
-    raw       = await extract_facts_long(text, dtype, low_confidence_tokens=low_conf)
-    extracted = _validate_extraction_output(raw, dtype)
-
+    _llm_text = acord.get("other_text") if acord else text
+    if acord and not (_llm_text or "").strip():
+        extracted = {"facts": {}, "flags": {}}            # every page read by box name
+    else:
+        raw       = await extract_facts_long(_llm_text, dtype, low_confidence_tokens=low_conf)
+        extracted = _validate_extraction_output(raw, dtype)
     # Absence is not "No" (client 2026-08-17 item 3), applied PER DOCUMENT
     # against that document's OWN text. The cross-document conflict detector
     # compares each doc's facts, not the merged set, so dropping an
@@ -363,6 +421,13 @@ async def extract_document(
     except Exception as _edx:                             # noqa: BLE001
         logger.warning("endorsement-date check failed for %s: %s",
                        display_name, _edx)
+    # The ACORD box readings go on LAST: the three checks above police what the
+    # MODEL read off this document's text, and a filled form's box is the form's
+    # own statement (27 Oct 2026; the merge does the same - `acord_intake.
+    # merge_rules.lift_box_readings`).
+    if acord:
+        from services.acord_intake import intake as _acord_intake
+        _acord_intake.overlay_facts(extracted, acord)
 
     doc = {
         "doc_id":                uuid.uuid4().hex,
@@ -384,6 +449,22 @@ async def extract_document(
         "manual_confirmation_required": extracted.get("manual_confirmation_required") or [],
         "truncation_warning":    extracted.get("truncation_warning"),
     }
+    if acord:
+        doc["acord"] = acord["record"]
+        if acord.get("stored_text") is not None:
+            # Primble's own form: only its pages the boxes did not read stay
+            # text (`intake.read_for_document`) - our output is never evidence.
+            doc["text_key"] = document_text_key(text)
+            doc["text"] = acord["stored_text"]
+            doc["low_confidence_tokens"] = []
+        if (acord.get("record") or {}).get("primble_summary"):
+            # Primble's own SQS summary (27 Oct 2026): its words are our output -
+            # a narrative, the score, the open items - never evidence for a value
+            # (gap fill, the evidence gates and the text scans all read document
+            # text). Only its record is used; it is never the primary document.
+            doc["text"] = ""
+            doc["low_confidence_tokens"] = []
+            doc["supporting_only"] = True
     await reporter.file_phase(index, "extracted")
     return doc
 
@@ -413,6 +494,15 @@ async def run_extraction_pipeline(
     filenames = [_display_name_from_path(p) for p in file_paths]
     reporter = make_reporter(progress_token, user_id, filenames)
     await reporter.begin()
+
+    # ASG Transcriber: submit every outside ACORD file NOW so ASG reads them side by
+    # side while OCR and extraction run; each document collects its own result
+    # (29 Oct 2026). Off / unconfigured: nothing happens.
+    try:
+        from services.acord_intake.transcriber_intake import presubmit_package
+        await presubmit_package(list(file_paths))
+    except Exception as _psx:                              # noqa: BLE001
+        logger.info("transcriber pre-submit skipped: %s", _psx)
 
     for i, path in enumerate(file_paths):
         # The one per-document door (`extract_document`), shared with a
@@ -802,6 +892,24 @@ async def _finalize_pipeline(
             merged_facts[DEC_LIABILITY_READING_KEY] = dec_auto_liability_reading(merged_facts) or ""
     except Exception as _dlx:                                  # noqa: BLE001
         logger.warning("auto liability declarations reading skipped: %s", _dlx)
+    # ...and each line's declarations limits, for the same reason: the policies
+    # table and ACORD 101 read a line with no limit fact (IM, EPL) off the index
+    # (`policy_lines.dec_line_limits`, 27 Oct 2026). {} = none stated.
+    try:
+        from services.policy_lines import DEC_LINE_LIMITS_KEY, dec_line_limits
+        if isinstance(merged_facts.get("dec_page_entries"), (list, dict)):
+            merged_facts[DEC_LINE_LIMITS_KEY] = dec_line_limits(merged_facts)
+    except Exception as _dll:                                  # noqa: BLE001
+        logger.warning("line declarations limits skipped: %s", _dll)
+    # ...and which loss runs are Workers Compensation runs, with their own
+    # periods (Z44-A-R): ACORD 130's per-period loss totals are covered only by
+    # a WC run, never by the merged span of every line's runs. Re-stamps have no
+    # documents, so the reading is stored. [] = no WC run.
+    try:
+        from services.pdf_service import WC_LOSS_RUN_SPANS_KEY, wc_loss_run_spans
+        merged_facts[WC_LOSS_RUN_SPANS_KEY] = wc_loss_run_spans(active_docs)
+    except Exception as _wls:                                  # noqa: BLE001
+        logger.warning("WC loss-run coverage skipped: %s", _wls)
     # ...and the radius the auto declarations STATE (a distance or an ISO class,
     # 6 Oct 2026), for the same reason: the Auto Completeness item must read
     # the same answer before and after the index is purged.
@@ -1178,7 +1286,17 @@ async def _finalize_pipeline(
     # merged facts BEFORE tier checks, stops, recommendations, and form fill so
     # the confirmed value flows consistently into every relevant form and into
     # SQS scoring.
-    confirmations = confirmations or {}
+    confirmations = dict(confirmations or {})
+    # Primble's own forms re-uploaded: the Data Consistency picks the package
+    # that printed them made come back with them (`acord_intake.merge_rules.
+    # restored_confirmations`, 28 Oct 2026) - a pick a person made never asked
+    # again. A pick this package already holds wins.
+    try:
+        from services.acord_intake.merge_rules import restored_confirmations
+        for _ck, _cv in restored_confirmations(active_docs).items():
+            confirmations.setdefault(_ck, _cv)
+    except Exception as _rcx:                              # noqa: BLE001
+        logger.warning("restored Data Consistency picks skipped: %s", _rcx)
     # The coverage rows as the DOCUMENTS print them, kept beside the confirmed
     # ones: a confirmation made after forms exist is re-applied onto these,
     # never onto rows an earlier line-scoped answer already rewrote - which
@@ -1217,13 +1335,22 @@ async def _finalize_pipeline(
     # restored AFTER the merge judged page one, so judge it again with it:
     # a new market must never keep the current policy's premiums.
     try:
-        _sc = merged_facts.get("submission_carrier_name")
-        if isinstance(_sc, dict) and str(_sc.get("source") or "").lower() in (
-                "producer", "client_arq", "user_confirmed"):
+        from services.fact_state import put_by_person
+        if put_by_person(merged_facts.get("submission_carrier_name")):
             from services.extraction_service import _mark_page_one_current_policy
             _mark_page_one_current_policy(merged_facts, active_docs)
     except Exception as _pox:                                   # noqa: BLE001
         logger.warning("page-one re-check skipped: %s", _pox)
+    # A Business Income coverage on an Actual Loss Sustained basis has no
+    # Period of Restoration to state (Michelle review item 6, 29 Oct 2026) -
+    # read off the documents ONCE here, so every scorer asks the stored fact
+    # (`property_coverages.bi_actual_loss_sustained`) and never the dec index
+    # the purge deletes after generation.
+    try:
+        from services.property_coverages import derive_bi_actual_loss_sustained
+        derive_bi_actual_loss_sustained(merged_facts, active_docs)
+    except Exception as _alsx:                                  # noqa: BLE001
+        logger.warning("BI actual-loss-sustained reading skipped: %s", _alsx)
 
     # ── SCORE THE FACTS THIS RUN WILL STORE (6 Oct 2026, Choice Electric #18) ─
     # The facts write is ADDITIVE (`session_repository.resolve_facts_write`: an
@@ -1572,6 +1699,15 @@ async def _finalize_pipeline(
                 "hard_stop" if _blocking else "soft_warning", _uw_msg,
             ))
 
+    # Requested vs current coverage (Michelle review item 3, 29 Oct 2026): an
+    # information note per term the application asks to change - advisory,
+    # `structured_issues` only, never a stop (score-neutral).
+    try:
+        from services.issue_registry import requested_coverage_notes
+        structured_issues.extend(requested_coverage_notes(underwriting))
+    except Exception as _rqx:                                   # noqa: BLE001
+        logger.warning("requested-coverage notes skipped: %s", _rqx)
+
     # ── Cross-document source conflicts ─────────────────────────────────────
     # Surface field-level discrepancies between uploaded documents so the
     # broker can reconcile before submission rather than silently overwriting.
@@ -1817,6 +1953,12 @@ async def _finalize_pipeline(
     # (Not when the caller persists the row itself - it marks done after.)
     if persist or not session_id:
         await reporter.done(sid)
+    # Runtime invariants (30 Oct 2026): log only, never blocks.
+    try:
+        from services.invariants import log_breaches
+        log_breaches(session_payload, stage="merge", session_id=sid)
+    except Exception:                                          # noqa: BLE001
+        pass
     _unpersisted = ({"session_payload": session_payload,
                      "delete_facts": list(_named_deletes or [])}
                     if session_id and not persist else {})
@@ -2225,7 +2367,13 @@ async def confirm_underwriting_value(
     # Raises ValueError(code) on unknown field / empty / unparseable value.
     # docs=active_docs lets an auto-discovered (non-curated) field validate too
     # — see underwriting_consistency._resolve_reconcilable_cfg.
-    canonical = validate_confirmation(fact_key, value, docs=active_docs)
+    # A row-level pick (one cell of one schedule row, `services/row_rivals`)
+    # is checked against that row; every other key by the picker's own door.
+    from services.row_rivals import is_row_key, validate_row_confirmation
+    if is_row_key(fact_key):
+        canonical = validate_row_confirmation(fact_key, value, session.get("facts") or {})
+    else:
+        canonical = validate_confirmation(fact_key, value, docs=active_docs)
 
     confirmations = dict(session.get("underwriting_confirmations") or {})
 
@@ -2347,7 +2495,13 @@ async def confirm_underwriting_value_in_editor(
     # identity box (audit G7).
     if scope and (fact_key not in LINE_SCOPED_FACT_KEYS or not known_line_scope(scope)):
         raise ValueError("underwriting_invalid_scope")
-    canonical = validate_confirmation(fact_key, value, docs=active_docs)
+    # A row-level pick (one cell of one schedule row, `services/row_rivals`)
+    # is checked against that row; every other key by the picker's own door.
+    from services.row_rivals import is_row_key, validate_row_confirmation
+    if is_row_key(fact_key):
+        canonical = validate_row_confirmation(fact_key, value, session.get("facts") or {})
+    else:
+        canonical = validate_confirmation(fact_key, value, docs=active_docs)
 
     facts_before = _copy.deepcopy(session.get("facts") or {})
     facts = _copy.deepcopy(facts_before)

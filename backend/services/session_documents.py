@@ -359,7 +359,7 @@ def _label_moved_boxes(generated: dict, moved: Dict[str, List[str]], facts_after
         from services.form_instances import base_form_id, facts_for_form
         from services.pdf_service import (
             apply_acord125_missing_field_highlights, apply_acord126_missing_field_highlights,
-            apply_acord140_missing_field_highlights, apply_derived_value_labels,
+            apply_acord140_missing_field_highlights, apply_derived_value_labels, apply_transcriber_labels,
             apply_fact_state_confidence_labels,
         )
     except Exception as ex:                                    # noqa: BLE001
@@ -379,6 +379,7 @@ def _label_moved_boxes(generated: dict, moved: Dict[str, List[str]], facts_after
             if sub:
                 sub = apply_fact_state_confidence_labels(base, facts, state, sub)
                 sub = apply_derived_value_labels(base, facts, state, sub)
+                sub = apply_transcriber_labels(base, facts, state, sub)
                 conf.update(sub)
             for highlight in (apply_acord125_missing_field_highlights,
                               apply_acord126_missing_field_highlights,
@@ -836,16 +837,16 @@ async def add_documents(
     exactly like one the package now holds (two uploads of one file racing)
     is skipped - it would only vote twice in the merge; all of them skipped
     raises `AlreadyInPackage`."""
-    from services.extraction_pipeline import document_text_key
+    from services.extraction_pipeline import stored_text_key
     async with _Serialized(session_id):
         session = await get_processing_session(session_id)
         stored = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
-        held = {document_text_key(d.get("text")) for d in stored} - {""}
+        held = {stored_text_key(d) for d in stored} - {""}
         adding, skipped = [], []
         for d in new_docs or []:
             if not isinstance(d, dict):
                 continue
-            key = document_text_key(d.get("text"))
+            key = stored_text_key(d)
             if key and key in held:
                 skipped.append(str(d.get("filename") or ""))
                 continue
@@ -968,7 +969,7 @@ RECEIPTS_KEY = "document_fill_receipts"
 FILL_RUNNING, FILL_DONE, FILL_FAILED, FILL_OFF = "running", "done", "failed", "off"
 FILL_FAILED_TEXT = ("Reading the new document into your forms did not finish. Your forms keep "
                     "the values its facts gave them.")
-_PERSON_LABELS = frozenset({"producer", "client_arq"})
+from services.fact_state import PERSON_BOX_LABELS as _PERSON_LABELS   # noqa: E402 - the one door
 # The labels generation gives a gap-filled value (`map_facts_to_form`).
 _AI_LABELS = frozenset({"ai_verified", "low_confidence"})
 _TASKS: set = set()

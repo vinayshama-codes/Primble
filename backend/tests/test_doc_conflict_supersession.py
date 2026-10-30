@@ -122,7 +122,7 @@ def test_the_legacy_twin_is_hidden_when_the_picker_row_is_present():
     # Not merely absent from the cards - absent from the COUNTS, so the toast
     # and the next-step banner cannot announce a warning nothing renders.
     assert msgs == []
-    assert view["counts"] == {"hard_stops": 0, "warnings": 0}
+    assert view["counts"] == {"hard_stops": 0, "warnings": 0, "info": 0}
 
 
 def test_the_folded_address_spellings_stop_being_reprinted():

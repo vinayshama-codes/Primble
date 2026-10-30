@@ -108,6 +108,38 @@ def _credited_score(base: int, impact: int, cap: int) -> int:
 from services.audit_service import dismiss_earned_credit as _dismiss_earned_credit
 
 
+async def _flush_unread_answers() -> None:
+    """Persist the phrasings the answer readers could not read (GAP 2,
+    `services/unread_answers.py`). Never fails the request."""
+    try:
+        from services.unread_answers import flush_pending
+        await flush_pending()
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def _readable_facts(stored: Any) -> Optional[dict]:
+    """The facts dict a raw ``data->'facts'`` read holds, or None: an
+    encrypted blob ("enc:...", how every write stores it -
+    `session_repository._encrypt_facts`) is decrypted by the repository's own
+    door; a legacy JSON object string is parsed; a dict passes through."""
+    if isinstance(stored, dict):
+        return stored
+    if not isinstance(stored, str) or not stored.strip():
+        return None
+    try:
+        from repositories.session_repository import _decrypt_facts
+        out = (_decrypt_facts({"facts": stored}) or {}).get("facts")
+    except Exception:                                          # noqa: BLE001
+        out = None
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except Exception:                                      # noqa: BLE001
+            out = None
+    return out if isinstance(out, dict) else None
+
+
 async def _apply_dismiss_score_credit(
     session_id: str,
     rec_id: str,
@@ -206,11 +238,14 @@ async def _apply_dismiss_score_credit(
                 "SELECT data->'facts' FROM processing_sessions WHERE id = $1",
                 session_id,
             )
-            if isinstance(_sess_facts, str):
-                try:
-                    _sess_facts = json.loads(_sess_facts)
-                except Exception:
-                    _sess_facts = None
+            # FACTS ARE ENCRYPTED AT REST (27 Oct 2026, Lane B item 6): the
+            # column holds the string "enc:...", which the JSON read below
+            # could never parse, so the retirement check got NO facts - every
+            # credit stood, the ones whose field had since been answered too.
+            # A dismiss (or a reopen's re-sync) after a fill stacked the credit
+            # on the pillar until the next recalculation. Decrypted first, by
+            # the repository's own door; a legacy plain-JSON row reads as before.
+            _sess_facts = _readable_facts(_sess_facts)
             credits_total, _credit_rows = await active_score_credits(
                 session_id, facts=_sess_facts if isinstance(_sess_facts, dict) else None,
             )
@@ -578,7 +613,8 @@ def _registry_entry(field: str) -> Optional[dict]:
     return FACT_REGISTRY.get(canon) if canon else None
 
 
-def _validate_producer_answer(field: str, answer: str) -> tuple:
+def _validate_producer_answer(field: str, answer: str,
+                              facts: Optional[dict] = None) -> tuple:
     """Lightweight type validation for a producer-entered recommendation answer.
 
     Returns (ok, error_message). Monetary / percentage / date fields (detected by
@@ -634,7 +670,8 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
         from services.answer_semantics import (
             ABSENCE, NOT_APPLICABLE, interpret_answer,
         )
-        interp = interpret_answer(field, text)
+        # `facts`: an individual / sole proprietor may answer FEIN "None".
+        interp = interpret_answer(field, text, facts=facts)
         if not interp.accepted:
             return False, interp.message
         if interp.intent in (ABSENCE, NOT_APPLICABLE):
@@ -809,14 +846,15 @@ async def answer_recommendation(
                                  "validation_error": "That explanation is too long."})
         applied, _updated = await append_producer_narrative(req.session_id, _text)
     else:                                                     # MODE_FIELD
-        ok, err = _validate_producer_answer(req.field, req.answer)
+        ok, err = _validate_producer_answer(req.field, req.answer, _prev_facts)
+        await _flush_unread_answers()
         if not ok:
             return JSONResponse({"success": False, "validation_error": err})
         _term_err = _term_save_refusal(_prev_facts, req.field, req.answer)
         if _term_err:
             return JSONResponse({"success": False, "validation_error": _term_err})
         applied, _updated = await apply_producer_answer_to_session(
-            req.session_id, req.field, req.answer,
+            req.session_id, req.field, req.answer, form_id=req.form_id,
         )
 
     if not applied:
@@ -1206,12 +1244,14 @@ def _form_selection_view(sess: dict, cross_issues: list,
         # package was still held at 60. That is precisely the defect the
         # promote_codes work shipped to close, surviving on the one call site
         # that was not part of it.
+        from services.issue_registry import with_live_conflict_issues
         grouped = grouped_with_package_caps(
-            sess.get("structured_issues") or [],
+            with_live_conflict_issues(sess.get("structured_issues") or [], sess, hard, soft),
             hard, soft,
             package_sqs if package_sqs is not None else (sess.get("package_sqs") or {}),
             cross_issues=cross_issues,
             facts=sess.get("facts") or {},
+            pre_form=not sess.get("generated_forms"),
         )
     except Exception as _fgx:                                  # noqa: BLE001
         logger.error(f"form-selection grouped view failed (non-fatal): {_fgx}")
@@ -1292,11 +1332,17 @@ async def _pre_form_readiness(sess: dict, session_id: str,
                 session_id, sess.get("facts") or {}, sess.get("flags") or {}, sess)
             if dry is not None:
                 card["dry_run"] = dry
+            # The dashboard's copy of the pre-form score follows every answer
+            # (30 Oct 2026, live 6875e80c: the page read 100, the list kept 94).
+            # Every caller of this helper is a write.
+            from routes.form_routes import _remember_pre_form_score
+            await _remember_pre_form_score(session_id, sess, card["package_sqs"])
             return card
         from routes.form_routes import _pre_form_status
         status = await _pre_form_status(
             session_id, sess.get("facts") or {}, sess.get("flags") or {},
             sess.get("integrity") or {}, current_user, session_row=sess,
+            remember_score=True,
         )
         pkg, kd = status
         card = {"package_sqs": pkg, "key_details": kd}
@@ -1530,15 +1576,19 @@ async def preview_answer(req: PreviewAnswerRequest, current_user: dict = Depends
             from services.answer_preview import warm
             await _aio.to_thread(warm, session, req.session_id, str(current_user["id"]))
         return {"success": True, "follow_ups": []}
-    for f, v in pairs:
-        ok, _err = _validate_producer_answer(f, v)
-        if not ok:
-            return {"success": True, "follow_ups": []}
-    import asyncio as _aio
-    from services.answer_preview import preview_follow_ups
-    follow_ups = await _aio.to_thread(
-        preview_follow_ups, session, req.session_id, str(current_user["id"]), pairs,
-        req.shown_fields or [])
+    # A preview reads what is being typed, not an answer: its unread phrasings
+    # are not counted (the save that follows is - services/unread_answers.py).
+    from services.unread_answers import not_counted
+    with not_counted():
+        for f, v in pairs:
+            ok, _err = _validate_producer_answer(f, v, (session or {}).get("facts"))
+            if not ok:
+                return {"success": True, "follow_ups": []}
+        import asyncio as _aio
+        from services.answer_preview import preview_follow_ups
+        follow_ups = await _aio.to_thread(
+            preview_follow_ups, session, req.session_id, str(current_user["id"]), pairs,
+            req.shown_fields or [])
     return {"success": True, "follow_ups": follow_ups}
 
 
@@ -1583,6 +1633,8 @@ async def resolve_issue(
 
     mode = (req.mode or "").strip()
     applied = False
+    _schedule_refused: dict = {}          # cells stored blank (29 Oct 2026)
+    _schedule_refused_message = ""
     _log_field: str = ""
     _log_value: str = ""
     # UX-05: the summary of a form generated by mode=add_form, so the panel can
@@ -1617,7 +1669,8 @@ async def resolve_issue(
         value = (req.value or "").strip()
         if not field or not value:
             return JSONResponse({"success": False, "message": "Enter a value to apply."})
-        ok, err = _validate_producer_answer(field, value)
+        ok, err = _validate_producer_answer(field, value, _pre_facts)
+        await _flush_unread_answers()
         if not ok:
             return JSONResponse({"success": False, "validation_error": err})
         _term_err = _term_save_refusal(_pre_facts, field, value, req.same_save)
@@ -1699,6 +1752,8 @@ async def resolve_issue(
         if not ok:
             return JSONResponse({"success": False, "message": result.get("message", "Could not save schedule.")})
         applied = True
+        _schedule_refused = result.get("refused") or {}
+        _schedule_refused_message = result.get("refused_message") or ""
         # E&O 5.9/5.11: schedule saves were the one resolve mode with NO audit
         # row at all (found 2026-08-26). One row per save, summarized by row
         # count - per-cell rows for a 100-vehicle fleet would be noise, and the
@@ -1941,6 +1996,9 @@ async def resolve_issue(
         # True only when a fact the producer can still type is on THIS screen.
         "note_settle_here":         bool(_note_settle_here),
         "note_settle_facts":        _note_settle_here,
+        # Schedule mode: cells that are not their column's type, stored blank.
+        **({"refused": _schedule_refused,
+            "refused_message": _schedule_refused_message} if _schedule_refused else {}),
         # Pre-form only: `package_sqs` (the whole door payload) and
         # `key_details`. Absent on the editor and Clarity / Lite.
         **(_review_card or {}),
@@ -2314,11 +2372,14 @@ def _review_page_view(session: dict) -> Optional[dict]:
             pkg = current_package_sqs(session)
         except Exception:                                      # noqa: BLE001
             pkg = None
+    from services.issue_registry import with_live_conflict_issues
     return grouped_with_package_caps(
-        session.get("structured_issues") or [], session.get("hard_stops") or [],
-        session.get("soft_stops") or [], pkg,
+        with_live_conflict_issues(session.get("structured_issues") or [], session,
+                                  session.get("hard_stops"), session.get("soft_stops")),
+        session.get("hard_stops") or [], session.get("soft_stops") or [], pkg,
         cross_issues=session.get("cross_issues_last") or [],
         facts=session.get("facts") or {},
+        pre_form=not session.get("generated_forms"),
     )
 
 
@@ -2326,6 +2387,7 @@ def _review_page_view(session: dict) -> Optional[dict]:
 async def get_open_recs(
     session_id: str,
     current_user: dict = Depends(get_current_user),
+    form_id: Optional[str] = None,
 ):
     session = await _verify_session_owner(session_id, current_user)
     # include_acknowledged: EVERY still-unresolved item re-appears on the
@@ -2377,6 +2439,13 @@ async def get_open_recs(
                 r["attention_superseded"] = True
     except Exception as _ex:                              # noqa: BLE001
         logger.warning(f"attention marker skipped for session {session_id}: {_ex}")
+    # A one-form download reviews only what holds that form (owner, 30 Oct 2026).
+    if form_id:
+        try:
+            from services.needs_attention import rows_for_form
+            recs = rows_for_form(recs, form_id, (session or {}).get("generated_forms"))
+        except Exception as _fx:                              # noqa: BLE001
+            logger.warning(f"download review: one-form filter skipped for session {session_id}: {_fx}")
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
 
 

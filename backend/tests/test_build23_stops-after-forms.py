@@ -346,12 +346,18 @@ _BASE = {
     "loss_history_no_prior_losses_indicator": P("Yes"),
     "additional_remarks_text": P(_NARRATIVE),
 }
+# Hand-built assessments are CURRENT ones (29 Oct 2026): an unversioned one is
+# re-assessed on read from the documents, which print neither conflict.
+from services.underwriting_consistency import ASSESSMENT_VERSION as _UW_VERSION  # noqa: E402
+
 _REVENUE_CONFLICT = {
+    "assessment_version": _UW_VERSION,
     "review_required": True, "assessed_keys": ["total_revenue"],
     "fields": [{"fact_key": "total_revenue", "label": "Gross Sales / Annual Revenue",
                 "review_required": True,
                 "values": [{"display": "$2,500,000"}, {"display": "$3,000,000"}]}]}
 _NAME_CONFLICT = {
+    "assessment_version": _UW_VERSION,
     "review_required": True, "assessed_keys": ["applicant_name"],
     "fields": [{"fact_key": "applicant_name", "label": "Applicant / Named Insured",
                 "review_required": True,

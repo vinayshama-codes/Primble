@@ -197,6 +197,25 @@ WC_STATE_FUND_OPTIONS = _with_other(
     "No - private-carrier coverage is being requested for those states",
 )
 
+# Employees listed with no workers compensation policy in the package, and
+# vehicles listed with no auto policy (27 Oct 2026, owner: "the score must reach
+# 100 when the user answers everything"). Both deductions were "a coverage
+# decision, no box" - nothing on the page could answer them, so a package with
+# 6 employees and no WC policy (Orbin) stopped at 97. Any answer is the
+# producer's statement of the coverage; the question no longer stands open.
+WC_ARRANGEMENT_OPTIONS = _with_other(
+    "Workers compensation is carried - its policy is not in these documents",
+    "Employees are covered through a PEO or employee leasing company",
+    "Not required - the employees are exempt or excluded (owners / officers)",
+    "Not carried",
+)
+AUTO_ARRANGEMENT_OPTIONS = _with_other(
+    "Auto coverage is carried - its policy is not in these documents",
+    "The vehicles are personal vehicles, not used for the business",
+    "Hired and non-owned auto only - no owned business vehicles",
+    "Not carried",
+)
+
 # What a placement answer SAYS (21 Oct 2026 review, M1). The monopolistic hard
 # stop has this answer as its only input, and it read it by bare prefix
 # (`startswith("no")`), so free "Other" text - "North Dakota WSI", "Nothing -
@@ -400,6 +419,8 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "crime_coverage_decision":     (CRIME_DECISION_OPTIONS, False),
     "cyber_coverage_decision":     (CYBER_DECISION_OPTIONS, False),
     "wc_state_fund_acknowledged":  (WC_STATE_FUND_OPTIONS, False),
+    "workers_comp_arrangement":    (WC_ARRANGEMENT_OPTIONS, False),
+    "auto_coverage_arrangement":   (AUTO_ARRANGEMENT_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
     "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
     "auto_radius_of_operation":    (RADIUS_OF_OPERATION_OPTIONS, False),

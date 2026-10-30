@@ -60,7 +60,11 @@ def _rendered(grouped):
     """What the screen prints: each tier header sums cluster["count"]."""
     return {
         "hard_stops": sum(c["count"] for c in grouped["hard_stops"]),
-        "warnings": sum(c["count"] for cs in grouped["warnings"].values() for c in cs),
+        "warnings": sum(c["count"] for cs in grouped["warnings"].values() for c in cs
+                        if not c.get("score_neutral")),
+        # Advice-only cards are drawn in their tier but counted apart (29 Oct 2026).
+        "info": sum(c["count"] for cs in grouped["warnings"].values() for c in cs
+                    if c.get("score_neutral")),
     }
 
 
@@ -153,7 +157,7 @@ def test_counts_are_present_on_an_empty_view():
     the key must exist even with nothing to report - otherwise a clean package
     silently takes the legacy path."""
     grouped = build_grouped_view([], [], [])
-    assert grouped["counts"] == {"hard_stops": 0, "warnings": 0}
+    assert grouped["counts"] == {"hard_stops": 0, "warnings": 0, "info": 0}
 
 
 def test_hard_and_warning_counts_do_not_leak_into_each_other():
@@ -163,4 +167,4 @@ def test_hard_and_warning_counts_do_not_leak_into_each_other():
 
     grouped = build_grouped_view(structured, [hard_msg], [soft_msg])
 
-    assert grouped["counts"] == {"hard_stops": 1, "warnings": 1}
+    assert grouped["counts"] == {"hard_stops": 1, "warnings": 1, "info": 0}

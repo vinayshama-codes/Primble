@@ -486,7 +486,7 @@ def test_the_fold_reaches_no_other_table_and_no_other_section():
     structured = IR.build_structured_from_sources(legacy_soft=[GL_CODES, GL_EXPOSURE])
     view = IR.build_grouped_view(structured, [], [GL_CODES, GL_EXPOSURE],
                                  promote_codes=["legacy_gl_no_exposure_basis"])
-    assert view["counts"] == {"hard_stops": 1, "warnings": 1}
+    assert view["counts"] == {"hard_stops": 1, "warnings": 1, "info": 0}
     assert IR.review_item_table({"mode": "schedule", "schedule_key": GL, "columns": ["x"]}) is None
     assert IR.review_item_table({"mode": "schedule", "schedule_key": GL, "facts": ["x"]}) is None
     assert IR.review_item_table({"mode": "field", "facts": [GL]}) is None
@@ -799,7 +799,13 @@ def test_an_unknown_code_or_no_save_leaves_the_documents_reading():
     plain = {"operations_description": ROOFER, "gl_class_codes_by_location": ["9079"],
              GL: [_row(class_code="98677")]}               # the documents' rows, no person
     assert sq.person_gl_class_codes(plain) == []
-    assert _mismatch_items(plain)[0]["points"] == 15       # today's reading, unchanged
+    # BOTH homes are the documents' reading (27 Oct 2026, Lane B item 1 - the one
+    # GL door, `sqs_service.gl_class_codes`): this pinned the by-location home
+    # alone, the very blindness item 1 closes. 98677 is unmapped, so the vote
+    # has no verdict (`_codes_to_industry` rule 3) - no -15.
+    assert _mismatch_items(plain) == []
+    sched_only = {"operations_description": ROOFER, GL: [_row(class_code="9079")]}
+    assert _mismatch_items(sched_only)[0]["points"] == 15  # the schedule alone is read now
 
 
 def test_a_table_rewritten_after_the_save_is_no_longer_the_persons():
@@ -808,6 +814,11 @@ def test_a_table_rewritten_after_the_save_is_no_longer_the_persons():
     assert sq.person_gl_class_codes(facts) == ["98677"]
     facts[GL] = facts[GL] + [_row(class_code="91580")]     # a document re-merge wrote on it
     assert sq.person_gl_class_codes(facts) == []
+    # The documents' reading is both homes (Lane B item 1, 27 Oct 2026): 9079
+    # beside the unmapped 98677 / 91580 gives no verdict (rule 3) - this pinned
+    # the by-location home alone.
+    assert _mismatch_items(facts) == []
+    facts[GL] = [_row(class_code="9079")]                  # the rows now say restaurant too
     assert _mismatch_items(facts)[0]["points"] == 15
 
 

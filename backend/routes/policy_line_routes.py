@@ -110,7 +110,7 @@ async def _pre_form_response(session_id: str, result: dict, current_user: dict) 
     _pkg, _key = _status
     _grouped = _grouped_with_package_caps(
         result.get("structured_issues") or [], result.get("hard_stops") or [], _soft, _pkg,
-        facts=result.get("merged_facts") or {})
+        facts=result.get("merged_facts") or {}, pre_form=True)
     uw = result.get("underwriting_consistency") or {}
     return {
         "success": True,

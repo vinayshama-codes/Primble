@@ -23,7 +23,8 @@ import {
 import { itemsText } from "../../../utils/dryRun";
 import { formLabel } from "../../../utils/formInstances";
 import { positiveScoreWording } from "../../../utils/positiveWording";
-import { screenPoints } from "../../../utils/screenPoints";
+import { screenPoints, screenPointsText } from "../../../utils/screenPoints";
+import { planAfterForms } from "../../../utils/editorPlanList";
 import { lossCoverageChips, showLossCoverage } from "../../../utils/lossCoverage";
 import "./Recommendations.css";
 
@@ -92,7 +93,8 @@ function ScoreGroup({ items, onOpenFix, docRows = [], onAddDocuments, lossCovera
             ? "Set its document type to Loss runs in Documents to add these points."
             : "Upload a document to add these points."}</div>
         </div>
-        <span className="rec-pts">{`+${u.points} pts`}</span>
+        <span className="rec-pts">{screenPointsText({ points: Number(u.points) || 0, exact: true, under: u.under === true,
+          withOthers: u.with_others || null })}</span>
         {typeof onAddDocuments === "function" && (
           <button type="button" className="rec-link" onClick={() => goToDocuments(mark)} disabled={!!openingDocs}>
             {mark ? "Mark as Loss runs" : "Add documents"}
@@ -365,7 +367,9 @@ export default function Recommendations({
   const formsQuiet = formsExist ? rec.formsReady && rec.forms.count === 0 && offers.length === 0 : true;
   // What no box on this page can answer, with its points (15 Oct 2026): the
   // numbers on the page add up to 100 minus the score, this included.
-  const unanswerable = formsExist ? [] : (Array.isArray(screenUnanswerable)
+  // After forms the document rows count once the plan is the post-generation
+  // one (29 Oct 2026, utils/editorPlanList.js) - its numbers add up with them.
+  const unanswerable = formsExist && !planAfterForms(packageSqs) ? [] : (Array.isArray(screenUnanswerable)
     ? screenUnanswerable : screenPoints(packageSqs, groupedIssues, keyDetails).unanswerable);
   const allGood = rec.score.length === 0 && formsQuiet && !generating && unanswerable.length === 0;
 

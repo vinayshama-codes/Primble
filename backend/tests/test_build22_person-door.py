@@ -149,6 +149,12 @@ SHAPES = {
                                "extraction_service._backfill_empty_facts_from_entries"),
     "dec_entry_filled":       (lambda: {"value": "yes", "confidence": "filled", "source": "dec_entry"},
                                True, False, False, "is_renewal / payment_method writers"),
+    # 27 Oct 2026: a value read EXACTLY from an uploaded ACORD form's box - the
+    # document's statement, never a person's (services/acord_intake/read.py).
+    "acord_form_exact":       (lambda: {"value": "Choice Electric LLC", "confidence": "acord_exact",
+                                        "source": "acord_form", "acord_form": "ACORD_125",
+                                        "box": "NamedInsured_FullName_A", "page": 1},
+                               True, False, False, "acord_intake.read._env"),
     "document_text_filled":   (lambda: {"value": "$1,000,000", "confidence": "filled",
                                         "source": "document_text", "verified_in_text": True},
                                True, False, False, "umbrella underlying / billing_plan writers"),
@@ -582,7 +588,7 @@ def test_the_term_doors_ask_the_one_door():
 # ══ 4. Anti-rot ══════════════════════════════════════════════════════════════
 
 _NOT_A_PERSON = frozenset({"ai", "dec_entry", "document_text", "policy_doc_text",
-                           "document_amendment", "derived", "account"})
+                           "document_amendment", "derived", "account", "acord_form"})
 
 
 def _module_consts(tree):

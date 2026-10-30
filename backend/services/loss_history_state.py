@@ -107,6 +107,40 @@ LOSS_RUN_OWNERSHIP_OPTIONS = (
 )
 
 
+OWNERSHIP_DOCS_KEY = "for_documents"
+
+
+def _doc_key(d: Any) -> str:
+    return str((d or {}).get("doc_id") or (d or {}).get("filename") or "") if isinstance(d, dict) else ""
+
+
+def ownership_scope(docs: Any) -> List[str]:
+    """The loss runs a person's ownership answer is about: those in the package
+    (not excluded) when it was given, by document id (else file name)."""
+    return sorted({_doc_key(d) for d in (docs or []) if isinstance(d, dict) and not d.get("excluded")
+                   and str(d.get("doc_type") or "") == "loss_run" and _doc_key(d)})
+
+
+def ownership_answer_covers(facts: Any, doc: Any) -> bool:
+    """True when the recorded ownership answer was given for this loss run. An
+    answer stored before 26 Oct 2026 carries no list and keeps its old,
+    package-wide reach."""
+    held = (facts or {}).get(LOSS_RUN_OWNERSHIP_FIELD) if isinstance(facts, dict) else None
+    scope = held.get(OWNERSHIP_DOCS_KEY) if isinstance(held, dict) else None
+    if not isinstance(scope, list):
+        return True
+    return _doc_key(doc) in scope
+
+
+def ownership_question_open(facts: Any, docs: Any) -> bool:
+    """Is the ownership question still to ask? Unanswered, or answered before a
+    loss run now on file arrived (that run is not covered by the answer)."""
+    if loss_run_ownership_answer(facts) is None:
+        return True
+    return any(not ownership_answer_covers(facts, d) for d in (docs or [])
+               if isinstance(d, dict) and not d.get("excluded") and str(d.get("doc_type") or "") == "loss_run")
+
+
 def loss_run_ownership_answer(facts: Any) -> Optional[bool]:
     """The producer's ownership answer: True / False, or None when unanswered.
     Same no-inversion reading as `new_venture_answer` (a bare Yes / No keeps
@@ -398,13 +432,25 @@ _TOTAL_LINE_RE = re.compile(
     r"(?:for|of\s+(?:all|claims|losses))\b))", re.I)
 
 
+# A POLICY PERIOD in a date column ("2023-2024", "2023 / 24") is the year a
+# summary line totals, never the date a loss happened.
+_YEAR_RANGE_RE = re.compile(r"^\s*(?:19|20)\d{2}\s*[-/\u2013]\s*(?:(?:19|20)\d{2}|\d{2})\s*$")
+
+
 def _row_is_a_period_total(row: dict) -> bool:
     """A loss-run SUMMARY line, not a claim (live f575160b, 25 Oct 2026): "2025-2026 |
     All lines | 12 | 151700 | ... | 322650" - a policy year's claim COUNT and totals,
     extracted as one "claim" of $322,650 beside the 12 real claims. A row naming
-    all lines / a total, with no claim number and no loss date, is a total."""
-    if any(not _is_blank_fact(row.get(c)) for c in ("claim_number", "claim_date", "date", "loss_date")):
+    all lines / a total, with no claim number and no loss date, is a total. A date
+    column holding only a policy period is no loss date (27 Oct 2026: a re-read of
+    the same CSV put "2023-2024" in `date`, and the year's total printed on ACORD
+    125 as a claim)."""
+    if not _is_blank_fact(row.get("claim_number")):
         return False
+    for c in ("claim_date", "date", "loss_date"):
+        v = row.get(c)
+        if not _is_blank_fact(v) and not _YEAR_RANGE_RE.match(str(v.get("value") if isinstance(v, dict) else v)):
+            return False
     for col in ("line_of_business", "description", "line"):
         val = str(row.get(col) or "")
         if not val.strip():
@@ -667,8 +713,8 @@ def asserted_claims(facts: Any) -> tuple:
     return claims, incurred
 
 
-# Fact sources that mean a PERSON stated the value, not the extraction model.
-_HUMAN_SOURCES = frozenset({"producer", "client_arq", "user", "human", "client"})
+# (A private `_HUMAN_SOURCES` set lived here - defined, never read. Removed 27
+# Oct 2026; "did a person state this?" is `fact_state`'s one door.)
 
 
 def claims_are_corroborated(facts: Any, has_loss_run_doc: bool = False) -> bool:
@@ -1844,8 +1890,7 @@ def combine_loss_run_periods(facts: dict, docs) -> bool:
 
         _iso = loss_period_date
 
-        def _person(v):
-            return isinstance(v, dict) and str(v.get("source") or "") in ("producer", "client_arq", "client")
+        from services.fact_state import typed_by_person as _person   # the one door
 
         if not isinstance(facts, dict) or _person(facts.get("loss_run_period_start")) \
                 or _person(facts.get("loss_run_period_end")):
@@ -1877,6 +1922,36 @@ def combine_loss_run_periods(facts: dict, docs) -> bool:
         for key, day in (("loss_run_period_start", start), ("loss_run_period_end", end)):
             facts[key] = {"value": day.strftime("%m/%d/%Y"), "source": "derived",
                           "confidence": "deterministic", "value_state": "present"}
+        return True
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def latest_loss_run_valuation(facts: dict, docs) -> bool:
+    """The package's loss-run valuation date is the LATEST one among the included
+    loss runs (30 Oct 2026). Older periods' runs are valued long ago by nature; the
+    run covering the most recent period decides whether the history is current.
+    Before this the merge kept whichever document's date won the vote, so adding a
+    fresh run beside a 2024 one still read as stale. A person's typed date is kept.
+    True when it changed the fact. Never raises."""
+    try:
+        from services.fact_state import typed_by_person as _person   # the one door
+        if not isinstance(facts, dict) or _person(facts.get("loss_run_valuation_date")):
+            return False
+        best = None
+        for d in docs or []:
+            if not isinstance(d, dict) or d.get("excluded") or d.get("doc_type") != "loss_run":
+                continue
+            day = loss_period_date((d.get("facts") or {}).get("loss_run_valuation_date"))
+            if day and (best is None or day > best):
+                best = day
+        if best is None:
+            return False
+        cur = loss_period_date(facts.get("loss_run_valuation_date"))
+        if cur and cur >= best:
+            return False
+        facts["loss_run_valuation_date"] = {"value": best.strftime("%m/%d/%Y"), "source": "derived",
+                                            "confidence": "deterministic", "value_state": "present"}
         return True
     except Exception:                                          # noqa: BLE001
         return False

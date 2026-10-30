@@ -170,12 +170,10 @@ def _human_recorded_state(facts: Optional[dict], key: str) -> Optional[str]:
     state = env.get("value_state")
     if not state:
         return None
-    try:
-        from services.fact_state import _HUMAN_SOURCES
-        human = _HUMAN_SOURCES
-    except Exception:                                         # noqa: BLE001
-        human = {"producer", "client_arq", "client"}
-    return str(state) if str(env.get("source") or "").lower() in human else None
+    # A person's value: the one door (`fact_state.put_by_person`, 27 Oct 2026 -
+    # this read `_HUMAN_SOURCES` with a private fallback copy).
+    from services.fact_state import put_by_person
+    return str(state) if put_by_person(facts.get(key)) else None
 
 
 def _answered(facts: Optional[dict], key: str) -> bool:
@@ -1515,8 +1513,15 @@ def auto_completeness_gaps(facts: Optional[dict], flags: Optional[dict]) -> List
                                         or _recorded_state(facts, "auto_vin_schedule")
                                         in ("explicit_no", "not_applicable")),
         "auto_drivers":            _drivers_known(facts),
+        # A vehicle row's OWN garaging (city / ZIP, read off the dec's vehicle
+        # table or an ACORD 127's per-vehicle boxes) is garaging information
+        # (27 Oct 2026, the round trip charged it on a 127 printing all 17).
         "auto_garaging_addresses": bool(_rows(facts, "auto_garaging_addresses")
-                                        or _answered(facts, "auto_garaging_addresses")),
+                                        or _answered(facts, "auto_garaging_addresses")
+                                        or any(isinstance(r, dict) and (
+                                            str(r.get("garaging_city") or "").strip()
+                                            or str(r.get("garaging_zip") or "").strip())
+                                            for r in _rows(facts, "auto_vin_schedule"))),
         "auto_radius_of_operation": auto_radius_known(facts),
         "auto_vehicle_use":        _answered(facts, "auto_vehicle_use"),
     }

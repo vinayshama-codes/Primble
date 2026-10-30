@@ -1205,7 +1205,7 @@ def test_the_pre_form_response_carries_the_dry_run_and_passes_the_facts(monkeypa
         seen["status_facts"] = facts
         return status["value"]
 
-    def _grouped(_structured, _hard, _soft, pkg, cross_issues=None, facts=None):
+    def _grouped(_structured, _hard, _soft, pkg, cross_issues=None, facts=None, pre_form=None):
         seen["facts"], seen["pkg"] = facts, pkg
         return {"hard_stops": [], "warnings": []}
 

@@ -15,7 +15,7 @@
 // (`dc`); a card whose "Fix in Data Consistency" button leads there prints the
 // SAME number (`mirror` - the same to-do, counted once in the total).
 import { renderedCardRows, splitMissingDetails } from "./keyDetailCards.js";
-import { fixKeys, allCovered } from "./recommendations.js";
+import { fixKeys, allCovered, followUpText } from "./recommendations.js";
 import { issueFactKey } from "./dcFacts.js";
 
 const clean = (v) => String(v ?? "").trim();
@@ -23,6 +23,15 @@ const pointsOf = (v) => (Array.isArray(v) ? Number(v[0]) || 0 : Number(v) || 0);
 
 // The key a card is found by on the page: its rule code.
 export const cardKey = (it) => clean(it?.code);
+
+// A card's points (28 Oct 2026): one code can draw several cards, each with its
+// own fix (a catch-all code such as `uncovered_soft_stop`), so a card is found
+// by its issue id first, then by its code.
+export const cardPoints = (cards, it) => {
+  if (!cards || !it) return undefined;
+  const iid = clean(it.issue_id);
+  return (iid && cards.get(`issue:${iid}`)) || cards.get(cardKey(it));
+};
 
 // What each fact's own Recommendations row would open (its fix keys).
 function rowTargets(packageSqs) {
@@ -46,6 +55,15 @@ function rowTargets(packageSqs) {
 // already offers shows that item's number as `mirror` (never added twice); a step
 // a hold withholds says so (`held`), and a step under a point says that
 // (`under`). Older payloads keep the share-out below.
+// CAP SHARES (owner, 29 Oct 2026, services/review_plan._share_group_releases):
+// a share that lands only when a group is done says so - "+1 pts (counts when
+// all 6 warnings are fixed)". A mirror reads its first place's condition.
+export const withOthersOf = (it, first = null) => {
+  const w = (it && it.with_others) || (first && first.with_others) || "";
+  return String(w || "").trim() || null;
+};
+const withOthersText = (p) => (p && p.withOthers ? ` (${p.withOthers})` : "");
+
 function fromPlan(plan, packageSqs) {
   const items = plan.items.filter((it) => it && typeof it === "object");
   const byId = new Map(items.map((it) => [it.id, it]));
@@ -55,18 +73,24 @@ function fromPlan(plan, packageSqs) {
     return {
       points: (Number(it.points) || 0) + mirror, exact: it.exact !== false && !(first && first.exact === false),
       mirror, held: it.held_by ? String(it.held_by) : null, under: it.under === true, id: it.id,
+      withOthers: withOthersOf(it, first), scoreItem: it.score_item !== false || !!first,
+      leadsTo: Array.isArray(it.leads_to) ? it.leads_to : [], cost: Number(it.cost) || 0,
     };
   };
   const cards = new Map();
   const details = new Map();
   const dc = new Map();
   for (const it of items) {
-    if (it.kind === "card" && clean(it.code)) cards.set(clean(it.code), entry(it));
+    if (it.kind === "card" && clean(it.code)) {
+      const e = entry(it);
+      if (clean(it.issue_id)) cards.set(`issue:${clean(it.issue_id)}`, e);
+      if (!cards.has(clean(it.code))) cards.set(clean(it.code), e);
+    }
     else if (it.kind === "detail" && clean(it.label)) details.set(clean(it.label), entry(it));
     else if (it.kind === "dc" && clean(it.fact)) dc.set(clean(it.fact), entry(it));
   }
   const unanswerable = Array.isArray(packageSqs && packageSqs.screen_unanswerable)
-    ? packageSqs.screen_unanswerable.filter((u) => u && Number(u.points) > 0) : [];
+    ? packageSqs.screen_unanswerable.filter((u) => u && (Number(u.points) > 0 || u.under === true)) : [];
   return { cards, details, dc, unanswerable };
 }
 
@@ -186,11 +210,29 @@ export function screenPoints(packageSqs, groupedIssues, keyDetails, openConflict
   return { cards, details, dc, unanswerable };
 }
 
-// "+3 pts" / "up to +2 pts"; "under 1 pt" for a step that adds a fraction;
-// "Counts once <hold> is fixed" for one a hold withholds; nothing for a 0.
+// "+3 pts" / "up to +2 pts"; "under 1 pt" for a score item whole points
+// cannot reach (SCORING_RULES.md P1 - the plan's `under`, set by
+// review_plan.enforce_contract), with its condition when it shares a hold;
+// "Counts once <hold> is fixed" only on an old payload; nothing for a 0.
+export const underText = (p) => `under 1 pt${withOthersText(p)}`;
 export const screenPointsText = (p) => {
   if (!p) return "";
+  if (p.points > 0) return `${p.exact || p.withOthers ? "" : "up to "}+${p.points} pts${withOthersText(p)}${followUpText(p)}`;
+  if (p.under) return `${underText(p)}${followUpText(p)}`;
   if (p.held) return `Counts once ${p.held} is fixed`;
-  if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts`;
-  return p.under ? "under 1 pt" : "";
+  if (p.scoreItem === false) return "No effect on the score";
+  return "";
 };
+
+// A DISMISSED card that still fires keeps its points on the review page (strict
+// review, 29 Oct 2026). Before forms a dismissal never moves the score - the
+// card still holds what it held - so the plan still counts its number. The page
+// tucked it under "Resolved" with no number, and the numbers it printed added up
+// to less than 100 minus the score (P2), with nothing saying where the rest was.
+// The Resolved row now prints the plan's number for it ("Open again" fixes it).
+// "" for a fixed item, an item the server no longer sends, or no plan number.
+export const dismissedRowPointsText = (row, cards) => {
+  if (!row || row.status !== "dismissed" || row.live !== true) return "";
+  return screenPointsText(cardPoints(cards, row.item));
+};
+

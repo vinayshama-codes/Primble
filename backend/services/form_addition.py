@@ -259,6 +259,22 @@ async def add_form_to_session(
         _update.update(binding_update(session.get("facts"), [form_id]))
     except Exception as _bind_ex:                             # noqa: BLE001
         logger.warning("form_addition: form copy binding skipped: %s", _bind_ex)
+    # The forms already generated follow the new package (27 Oct 2026): a box
+    # that depends on which forms the package holds - ACORD 125's sections-
+    # attached ticks and its REMARKS (a long remark now prints once, on the
+    # added ACORD 101), ACORD 186's questions an added 126 owns - is re-stamped
+    # in place. In this same write; the route re-scores afterwards.
+    try:
+        from services.arq_service import restamp_for_package_change
+        _existing = {f: d for f, d in (session.get("generated_forms") or {}).items()
+                     if f != form_id}
+        _stamp_facts = {**(session.get("facts") or {}), **(session.get("flags") or {})}
+        for _fid in restamp_for_package_change(_existing, _stamp_facts, sorted(present),
+                                               sorted(present) + [form_id]):
+            _update["generated_forms"][_fid] = _existing[_fid]
+    except Exception as _pkg_ex:                              # noqa: BLE001
+        logger.warning("form_addition: the other forms were not re-stamped for the new "
+                       "package: %s", _pkg_ex)
     await upd_processing_session(session_id, _update)
 
     logger.info("form_addition: added %s to session=%s (package now %d forms)",

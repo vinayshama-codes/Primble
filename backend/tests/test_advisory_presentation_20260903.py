@@ -199,7 +199,9 @@ def test_retyping_the_loss_conflict_changes_no_count_and_no_cap():
 
 
 def test_a_score_neutral_item_is_still_counted_and_still_listed():
-    """Owner: keep them in the warnings list. The note explains, it never hides."""
+    """Owner: keep them in the warnings list. The note explains, it never hides.
+    Since 29 Oct 2026 (owner) it is counted as INFO, not as a warning - drawn,
+    and still counted (warnings + info = every warning-tier card)."""
     v = _view(make_issue("unmapped_coverage_line", "advisory", "Coverage part not recognised: X."))
-    assert v["counts"]["warnings"] == 1
+    assert v["counts"]["warnings"] == 0 and v["counts"]["info"] == 1
     assert "Coverage part placement" in _clusters(v)

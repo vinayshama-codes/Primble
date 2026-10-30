@@ -1,0 +1,774 @@
+FORMAT 2
+
+SIDE 1
+
+SHADING
+
+LINES/BOXES
+10.50, 0.00,10.50,31.50, 1
+12.50, 0.00,12.50,80.00, 1
+11.50, 0.00,14.50, 0.00, 1
+11.50, 0.00,11.50,31.50, 1
+13.50, 0.00,13.50,80.00, 1
+12.50, 0.00,12.50,31.50, 1
+17.50, 0.00,17.50,31.50, 1
+14.50, 0.00,17.50, 0.00, 1
+17.50, 0.00,17.50,31.50, 1
+15.50, 0.00,16.50, 0.00, 1
+16.50, 0.00,16.50,61.50, 1
+15.50, 0.00,15.50,80.00, 1
+14.50, 0.00,15.50, 0.00, 1
+14.50, 0.00,14.50,31.50, 1
+13.50, 0.00,13.50,31.50, 1
+13.50, 0.00,13.50,31.50, 1
+ 4.50, 0.00,13.50, 0.00, 1
+11.50,58.50,11.50,80.00, 1
+10.50,58.50,10.50,80.00, 1
+ 9.50,58.50, 9.50,80.00, 1
+ 8.50,31.50, 8.50,80.00, 1
+ 7.50,55.50, 8.50,55.50, 1
+ 7.50,31.50, 7.50,80.00, 1
+ 5.50,31.50, 5.50,80.00, 1
+ 6.50,31.50,12.50,31.50, 1
+15.50,61.50,18.50,61.50, 1
+16.50,61.50,16.50,80.00, 1
+ 6.50,31.50, 6.50,80.00, 1
+ 4.50,31.50, 6.50,31.50, 1
+18.50,31.50,18.50,80.00, 1
+16.50,31.50,18.50,31.50, 1
+16.50,47.50,18.50,47.50, 1
+15.50,43.50,15.50,80.00, 1
+ 8.50,58.50,12.50,58.50, 1
+54.50,20.50,62.50,20.50, 1
+54.50,29.50,62.50,29.50, 1
+54.50,37.50,62.50,37.50, 1
+54.50,41.50,62.50,41.50, 1
+54.50,58.50,62.50,58.50, 1
+54.50,62.50,62.50,62.50, 1
+54.50,69.00,62.50,69.00, 1
+54.50, 2.50,62.50, 2.50, 1
+56.50, 0.00,56.50,80.00, 1
+54.50, 6.50,62.50, 6.50, 1
+58.50, 0.00,58.50,80.00, 1
+60.50, 0.00,60.50,80.00, 1
+62.50, 0.00,62.50,80.00, 1
+54.50, 0.00,54.50,80.00, 1
+53.50, 0.00,53.50,80.00, 1
+53.50, 2.50,54.50, 2.50, 1
+53.50,69.00,54.50,69.00, 1
+53.50,62.50,54.50,62.50, 1
+53.50,58.50,54.50,58.50, 1
+53.50,41.50,54.50,41.50, 1
+53.50,20.50,54.50,20.50, 1
+53.50,29.50,54.50,29.50, 1
+53.50,37.50,54.50,37.50, 1
+53.50, 6.50,54.50, 6.50, 1
+44.00,53.00,46.00,53.00, 2
+44.00,26.00,46.00,26.00, 2
+47.00,42.00,51.00,42.00, 2
+47.00,26.50,51.00,26.50, 2
+47.00,80.00,51.00,80.00, 4
+47.00,54.50,51.00,54.50, 2
+47.00, 0.00,47.00,80.00, 4
+51.00, 0.00,51.00,80.00, 4
+47.00, 6.00,51.00, 6.00, 2
+50.00, 0.00,50.00,80.00, 2
+47.00, 0.00,51.00, 0.00, 4
+48.00, 0.00,48.00,80.00, 2
+49.00, 0.00,49.00,80.00, 2
+38.50,34.50,38.50,56.00, 1
+34.50,34.50,38.50,34.50, 1
+34.50,11.00,38.50,11.00, 1
+37.50,11.00,37.50,34.50, 1
+36.50,11.00,36.50,34.50, 1
+35.50,11.00,35.50,34.50, 1
+38.50,11.00,38.50,34.50, 1
+34.50, 0.00,40.50, 0.00, 1
+38.50, 0.00,38.50,11.00, 1
+32.50,12.00,34.50,12.00, 1
+34.50,16.00,34.50,49.50, 1
+32.50, 0.00,34.50, 0.00, 1
+34.50, 0.00,34.50,16.00, 1
+32.50,62.50,34.50,62.50, 1
+34.50,62.50,34.50,80.00, 1
+32.50,51.50,34.50,51.50, 1
+32.50,49.50,34.50,49.50, 1
+33.50,49.50,33.50,51.50, 1
+34.50,49.50,34.50,62.50, 1
+32.50,24.00,34.50,24.00, 1
+34.50,56.00,38.50,56.00, 1
+38.50,56.00,38.50,80.00, 1
+35.50,45.50,35.50,47.50, 1
+36.50,45.50,36.50,47.50, 1
+37.50,45.50,37.50,47.50, 1
+34.50,45.50,38.50,45.50, 1
+35.50,47.50,38.50,47.50, 1
+40.50,18.50,40.50,80.00, 1
+38.50,18.50,40.50,18.50, 1
+40.50, 0.00,40.50,18.50, 1
+35.50,72.50,38.50,72.50, 1
+35.50,70.50,38.50,70.50, 1
+37.50,70.50,37.50,72.50, 1
+36.50,70.50,36.50,72.50, 1
+35.50,70.50,35.50,72.50, 1
+35.50,61.50,35.50,63.50, 1
+36.50,61.50,36.50,63.50, 1
+37.50,61.50,37.50,63.50, 1
+34.50,61.50,38.50,61.50, 1
+35.50,63.50,38.50,63.50, 1
+25.50, 8.00,31.50, 8.00, 1
+25.50, 4.00,31.50, 4.00, 1
+27.50, 0.00,27.50,80.00, 1
+29.50, 0.00,29.50,80.00, 1
+31.50, 0.00,31.50,80.00, 1
+24.50, 8.00,25.50, 8.00, 1
+25.50, 0.00,25.50,80.00, 1
+24.50, 4.00,25.50, 4.00, 1
+23.50,26.50,23.50,80.00, 1
+20.50,26.50,20.50,28.50, 1
+21.50,26.50,21.50,28.50, 1
+19.50,26.50,23.50,26.50, 1
+20.50,28.50,22.50,28.50, 1
+22.50,26.50,22.50,28.50, 1
+19.50,12.50,20.50,12.50, 1
+19.50,10.50,20.50,10.50, 1
+19.50, 2.00,22.50, 2.00, 1
+22.50, 0.00,22.50, 2.00, 1
+21.50, 0.00,21.50, 2.00, 1
+20.50,10.50,20.50,12.50, 1
+20.50, 0.00,20.50, 2.00, 1
+19.50, 0.00,23.50, 0.00, 1
+23.50, 0.00,23.50,26.50, 1
+22.50,37.50,22.50,39.50, 1
+20.50,37.50,20.50,39.50, 1
+20.50,46.00,20.50,48.00, 1
+21.50,37.50,21.50,39.50, 1
+21.50,46.00,21.50,48.00, 1
+19.50,37.50,23.50,37.50, 1
+20.50,39.50,23.50,39.50, 1
+20.50,46.00,21.50,46.00, 1
+20.50,48.00,21.50,48.00, 1
+22.50,59.50,22.50,61.50, 1
+20.50,59.50,20.50,61.50, 1
+20.50,69.00,20.50,71.00, 1
+21.50,59.50,21.50,61.50, 1
+21.50,69.00,21.50,71.00, 1
+22.50,69.00,22.50,71.00, 1
+19.50,59.50,23.50,59.50, 1
+20.50,61.50,23.50,61.50, 1
+20.50,69.00,22.50,69.00, 1
+20.50,71.00,22.50,71.00, 1
+32.50,36.00,34.50,36.00, 1
+ 4.50, 0.00,18.50,31.50, 4
+13.50,68.50,14.50,70.50, 1
+14.50,61.50,15.50,63.50, 1
+13.50,61.50,14.50,63.50, 1
+14.50,52.00,15.50,54.00, 1
+13.50,52.00,14.50,54.00, 1
+14.50,42.50,15.50,44.50, 1
+13.50,42.50,14.50,44.50, 1
+14.50,31.50,15.50,33.50, 1
+13.50,31.50,14.50,33.50, 1
+ 4.50,31.50,18.50,80.00, 4
+ 2.50,68.00, 4.50,80.00, 4
+52.00, 0.00,62.50,80.00, 4
+44.00, 0.00,46.00,80.00, 4
+24.50, 0.00,31.50,80.00, 4
+19.50, 0.00,23.50,80.00, 4
+32.50, 0.00,43.00,80.00, 4
+
+FORM TEXT
+"500BU",54.52, 0.00,"C", 2.50,"STATE"
+"590BU", 3.34,69.00,"C",10.00,"DATE (MM/DD/YYYY)"
+"590BU", 5.43, 0.50,"L", 0.00,"AGENCY NAME AND ADDRESS"
+"590BU", 5.43,32.00,"L", 0.00,"COMPANY:"
+"590BU", 6.47,32.00,"L", 0.00,"UNDERWRITER:"
+"590BU", 7.47,32.00,"L", 0.00,"APPLICANT NAME:"
+"590BU", 8.47,32.00,"L", 0.00,"OFFICE PHONE:"
+"590BU", 8.47,56.00,"L", 0.00,"MOBILE PHONE:"
+"590BU", 9.34,32.00,"L", 0.00,"MAILING ADDRESS (including ZIP  + 4 or Canadian Postal Code)"
+"590BU", 9.47,59.00,"L", 0.00,"YRS IN BUS:"
+"590BU",10.47,59.00,"L", 0.00,"SIC:"
+"590BU",11.47, 0.50,"L", 0.00,"PRODUCER NAME:"
+"590BU",11.47,59.00,"L", 0.00,"NAICS:"
+"590BU",12.09,59.00,"L", 0.00,"WEBSITE"
+"590BU",12.17, 0.50,"L", 0.00,"CS REPRESENTATIVE"
+"590BU",12.63, 0.50,"L", 0.00,"NAME:"
+"590BU",12.59,59.00,"L", 0.00,"ADDRESS:"
+"590BU",13.17, 0.50,"L", 0.00,"OFFICE PHONE"
+"590BU",13.47,32.00,"L", 0.00,"E-MAIL ADDRESS:"
+"590BU",13.63, 0.50,"L", 0.00,"(A/C, No, Ext):"
+"590BU",14.17, 0.50,"L", 0.00,"MOBILE"
+"590BU",14.63, 0.50,"L", 0.00,"PHONE:"
+"590BU",15.17, 0.50,"L", 0.00,"FAX"
+"590BU",15.63, 0.50,"L", 0.00,"(A/C, No):"
+"590BU",16.13, 0.50,"L", 0.00,"E-MAIL"
+"590BU",16.17,32.00,"L", 0.00,"CREDIT"
+"590BU",16.50,62.00,"L", 0.00,"ID NUMBER:"
+"590BU",16.59, 0.50,"L", 0.00,"ADDRESS:"
+"590BU",16.63,32.00,"L", 0.00,"BUREAU NAME:"
+"590BU",17.17,62.00,"L", 0.00,"OTHER RATING BUREAU ID OR STATE"
+"590BU",17.30,32.00,"L", 0.00,"FEDERAL EMPLOYER ID NUMBER"
+"590BU",17.30,48.00,"L", 0.00,"NCCI RISK ID NUMBER"
+"590BU",17.50, 0.50,"L", 0.00,"CODE:"
+"590BU",17.50,16.00,"L", 0.00,"SUB CODE:"
+"590BU",17.63,62.00,"L", 0.00,"EMPLOYER REGISTRATION NUMBER"
+"590BU",18.47, 0.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"590BU",20.29,27.00,"L", 0.00,"BILLING PLAN"
+"590BU",20.29,38.00,"L", 0.00,"PAYMENT PLAN"
+"590BU",20.29,60.00,"L", 0.00,"AUDIT"
+"590BU",25.50, 8.50,"L", 0.00,"STREET, CITY, COUNTY, STATE, ZIP CODE"
+"590BU",33.34, 0.50,"C",11.00,"PROPOSED EFF DATE"
+"590BU",33.34,12.50,"C",10.00,"PROPOSED EXP DATE"
+"590BU",33.13,24.50,"C",11.00,"RATING EFFECTIVE DATE"
+"590BU",33.13,36.50,"C",12.50,"ANNIVERSARY RATING DATE"
+"590BU",33.29,63.00,"L", 0.00,"RETRO PLAN"
+"590BU",33.63,24.50,"C",11.00,"(if applicable)"
+"590BU",33.63,37.00,"C",11.50,"(if applicable)"
+"590BU",35.30, 0.00,"C",11.00,"PART 1 - WORKERS"
+"590BU",35.88, 0.00,"C",11.00,"COMPENSATION (States)"
+"590BU",35.30,35.00,"L", 0.00,"PART 3 - OTHER"
+"590BU",35.88,35.00,"L", 0.00,"STATES INS"
+"590BU",35.13,46.00,"L", 0.00,"DEDUCTIBLES"
+"590BU",35.30,56.00,"C", 5.50,"AMOUNT / %"
+"590BU",35.88,56.00,"C", 5.50,"(N / A in WI)"
+"590BU",35.29,62.00,"L", 0.00,"OTHER COVERAGES"
+"590BU",35.50,11.50,"L", 0.00,"PART 2 - EMPLOYER'S LIABILITY"
+"590BU",35.59,46.00,"L", 0.00,"(N / A in WI)"
+"590BU",39.29, 0.50,"L", 0.00,"DIVIDEND PLAN/SAFETY GROUP"
+"590BU",39.29,19.00,"L", 0.00,"ADDITIONAL COMPANY INFORMATION"
+"590BU",41.34, 0.50,"L", 0.00,"SPECIFY ADDITIONAL COVERAGES / ENDORSEMENTS (Attach ACORD 101, Additional Remarks Schedule, if more space is required)"
+"590BU",48.84, 0.50,"L", 0.00,"INSPECTION"
+"590BU",49.63, 0.50,"L", 0.00,"ACCTNG"
+"590BU",50.13, 0.50,"L", 0.00,"RECORD"
+"590BU",50.63, 0.50,"L", 0.00,"CLAIMS"
+"590BU",51.13, 0.50,"L", 0.00,"INFO"
+"590BU",52.80, 0.50,"L", 0.00,"PARTNERS, OFFICERS, RELATIVES ( Must be employed by business operations) TO BE INCLUDED OR EXCLUDED (Remuneration/Payroll to be included must be part of rating information section.)"
+"590BU",53.38, 0.50,"L", 0.00,"Exclusions in Missouri must meet the requirements of Section 287.090 RSMo."
+"590BU",54.17,29.50,"C", 8.00,"TITLE/"
+"590BU",54.17,37.50,"C", 4.00,"OWNER-"
+"590BU",54.50, 7.00,"C",13.00,"NAME"
+"590BU",54.50,20.50,"C", 9.00,"DATE OF BIRTH"
+"590BU",54.50,41.50,"C",17.00,"DUTIES"
+"590BU",54.50,58.50,"C", 4.00,"INC/EXC"
+"590BU",54.50,62.50,"C", 6.50,"CLASS CODE"
+"590BU",54.50,69.00,"C",11.00,"REMUNERATION/PAYROLL"
+"590BU",54.63,29.50,"C", 8.00,"RELATIONSHIP"
+"590BU",54.63,37.50,"C", 4.00,"SHIP %"
+"600MU",14.35,34.00,"L", 0.00,"SOLE PROPRIETOR"
+"600MU",14.35,45.00,"L", 0.00,"CORPORATION"
+"600MU",14.35,54.50,"L", 0.00,"LLC"
+"600MU",14.35,64.00,"L", 0.00,"TRUST"
+"600MU",14.14,71.00,"L", 0.00,"UNINCORPORATED"
+"600MU",14.64,71.00,"L", 0.00,"ASSOCIATION"
+"600MU",15.35,34.00,"L", 0.00,"PARTNERSHIP"
+"600MU",15.10,45.00,"L", 0.00,"SUBCHAPTER"
+"600MU",15.35,54.50,"L", 0.00,"JOINT VENTURE"
+"600MU",15.35,64.00,"L", 0.00,"OTHER:"
+"600MU",15.60,45.00,"L", 0.00,"\"S\" CORP"
+"600MU",20.51, 2.50,"L", 0.00,"QUOTE"
+"600MU",20.51,13.00,"L", 0.00,"ISSUE POLICY"
+"600MU",21.51, 2.50,"L", 0.00,"BOUND (Give date and/or attach copy)"
+"600MU",21.51,29.00,"L", 0.00,"AGENCY BILL"
+"600MU",21.51,40.00,"L", 0.00,"ANNUAL"
+"600MU",21.51,62.00,"L", 0.00,"AT EXPIRATION"
+"600MU",21.51,71.50,"L", 0.00,"MONTHLY"
+"600MU",22.51, 2.50,"L", 0.00,"ASSIGNED RISK (Attach ACORD 133)"
+"600MU",22.51,29.00,"L", 0.00,"DIRECT BILL"
+"600MU",22.51,40.00,"L", 0.00,"SEMI-ANNUAL"
+"600MU",22.51,62.00,"L", 0.00,"SEMI-ANNUAL"
+"600MU",23.51,40.00,"L", 0.00,"QUARTERLY"
+"600MU",23.51,48.00,"L", 0.00,"% DOWN:"
+"600MU",23.51,62.00,"L", 0.00,"QUARTERLY"
+"600MU",33.51,52.00,"L", 0.00,"PARTICIPATING"
+"600MU",34.51,52.00,"L", 0.00,"NON-PARTICIPATING"
+"600MU",36.17,73.00,"L", 0.00,"MANAGED"
+"600MU",36.51,11.50,"L", 0.00,"$"
+"600MU",36.51,23.50,"L", 0.00,"EACH ACCIDENT"
+"600MU",36.51,48.00,"L", 0.00,"MEDICAL"
+"600MU",36.51,64.00,"L", 0.00,"U.S.L. & H."
+"600MU",36.64,73.00,"L", 0.00,"CARE OPTION"
+"600MU",37.17,64.00,"L", 0.00,"VOLUNTARY"
+"600MU",37.51,11.50,"L", 0.00,"$"
+"600MU",37.51,23.50,"L", 0.00,"DISEASE-POLICY LIMIT"
+"600MU",37.51,48.00,"L", 0.00,"INDEMNITY"
+"600MU",37.64,64.00,"L", 0.00,"COMP"
+"600MU",38.51,11.50,"L", 0.00,"$"
+"600MU",38.51,23.50,"L", 0.00,"DISEASE-EACH EMPLOYEE"
+"600MU",38.51,64.00,"L", 0.00,"FOREIGN COV"
+"600BU",25.15, 4.50,"C", 3.00,"HIGHEST"
+"600BU",25.52, 0.50,"C", 3.00,"LOC #"
+"600BU",25.60, 4.50,"C", 3.00,"FLOOR"
+"600BU",44.85, 0.50,"L", 0.00,"TOTAL ESTIMATED ANNUAL PREMIUM ALL STATES"
+"600BU",44.85,26.50,"L", 0.00,"TOTAL MINIMUM PREMIUM ALL STATES"
+"600BU",44.85,53.50,"L", 0.00,"TOTAL DEPOSIT PREMIUM ALL STATES"
+"600BU",47.85, 0.50,"L", 0.00,"TYPE"
+"600BU",47.85, 6.50,"L", 0.00,"NAME"
+"600BU",47.85,27.00,"L", 0.00,"OFFICE PHONE"
+"600BU",47.85,42.50,"L", 0.00,"MOBILE PHONE"
+"600BU",47.85,55.00,"C", 3.13,"E-MAIL"
+"600BU",54.52, 3.00,"C", 3.00,"LOC #"
+"700BU",45.87, 0.50,"L", 0.00,"$"
+"700BU",45.87,26.50,"L", 0.00,"$"
+"700BU",45.87,53.50,"L", 0.00,"$"
+"840BU",19.51, 0.50,"L", 0.00,"STATUS OF SUBMISSION"
+"840BU",19.51,27.00,"L", 0.00,"BILLING / AUDIT INFORMATION"
+"840BU",24.51, 0.50,"L", 0.00,"LOCATIONS"
+"840BU",32.51, 0.50,"L", 0.00,"POLICY INFORMATION"
+"840BU",44.00, 0.50,"L", 0.00,"TOTAL ESTIMATED ANNUAL PREMIUM - ALL STATES"
+"840BU",47.00, 0.50,"L", 0.00,"CONTACT INFORMATION"
+"840BU",52.01, 0.50,"L", 0.00,"INDIVIDUALS INCLUDED / EXCLUDED"
+"840BU",63.42, 0.50,"L", 0.00,"ACORD 130 (2026/08)"
+"840BU",63.42, 3.00,"C",74.50,"Page 1 of 5"
+"840BU",63.42,79.50-LNWIDTH("840BU","© 1980-2026 ACORD CORPORATION.  All rights reserved."),"L", 0.00,"© 1980-2026 ACORD CORPORATION.  All rights reserved."
+"840BU",64.42, 2.50,"C",75.00,"The ACORD name and logo are registered marks of ACORD"
+"1400BU", 4.07,12.50,"C",55.00,"WORKERS COMPENSATION APPLICATION"
+
+SIDE 2
+
+SHADING
+
+LINES/BOXES
+ 3.00,55.00, 3.00,80.00, 2
+ 3.00,22.50, 3.00,25.50, 1
+ 3.00,16.00, 3.00,19.00, 1
+49.00, 0.00,49.00,80.00, 2
+39.00,39.50,48.00,39.50, 1
+51.00, 0.00,51.00,80.00, 4
+49.00,53.00,51.00,53.00, 1
+49.00,26.00,51.00,26.00, 1
+39.00, 0.00,51.00, 0.00, 4
+43.00,39.50,47.00,39.50, 1
+44.00,39.50,44.00,80.00, 1
+41.00,39.50,43.00,39.50, 1
+42.00,39.50,42.00,80.00, 1
+43.00,39.50,43.00,80.00, 1
+39.00,22.50,44.00,22.50, 1
+39.00,16.50,44.00,16.50, 1
+40.00, 0.00,40.00,80.00, 2
+41.00, 0.00,41.00,80.00, 1
+42.00, 0.00,42.00,39.50, 1
+43.00, 0.00,43.00,39.50, 1
+44.00,22.50,48.00,22.50, 1
+44.00,16.50,48.00,16.50, 1
+45.00, 0.00,45.00,80.00, 1
+44.00, 0.00,44.00,39.50, 1
+46.00, 0.00,46.00,80.00, 1
+47.00, 0.00,47.00,80.00, 1
+48.00, 0.00,48.00,80.00, 1
+40.00,39.50,41.00,39.50, 1
+47.00,39.50,48.00,39.50, 1
+39.00,57.00,48.00,57.00, 1
+39.00,63.00,48.00,63.00, 1
+39.00, 0.00,39.00,80.00, 4
+39.00,80.00,51.00,80.00, 4
+10.00, 0.00,10.00,80.00, 1
+ 8.00,71.50,38.00,71.50, 1
+ 8.00,64.00,38.00,64.00, 1
+ 8.00,46.00,38.00,46.00, 1
+ 8.00,38.00,38.00,38.00, 1
+ 8.00,15.00,38.00,15.00, 1
+ 8.00,11.00,38.00,11.00, 1
+ 8.00, 4.00,38.00, 4.00, 1
+ 9.00,42.00,38.00,42.00, 1
+12.00, 0.00,12.00,80.00, 1
+14.00, 0.00,14.00,80.00, 1
+16.00, 0.00,16.00,80.00, 1
+18.00, 0.00,18.00,80.00, 1
+20.00, 0.00,20.00,80.00, 1
+22.00, 0.00,22.00,80.00, 1
+24.00, 0.00,24.00,80.00, 1
+26.00, 0.00,26.00,80.00, 1
+28.00, 0.00,28.00,80.00, 1
+30.00, 0.00,30.00,80.00, 1
+32.00, 0.00,32.00,80.00, 1
+34.00, 0.00,34.00,80.00, 1
+36.00, 0.00,36.00,80.00, 1
+38.00, 0.00,38.00,80.00, 1
+ 8.00,54.50,38.00,54.50, 1
+ 8.00,50.50,38.00,50.50, 1
+52.00, 0.00,63.00,80.00, 4
+ 3.50, 0.00, 8.00,80.00, 4
+ 8.00, 0.00,38.00,80.00, 4
+
+FORM TEXT
+"590BU", 9.05,11.00,"C", 4.00,"DESCR"
+"590BU", 9.63,11.00,"C", 4.00,"CODE"
+"590BU", 8.84,38.50,"C", 7.00,"# EMPLOYEES"
+"590BU", 8.76,55.00,"C", 8.50,"ESTIMATED ANNUAL"
+"590BU", 9.34,55.00,"C", 8.50,"REMUNERATION/"
+"590BU", 9.92,55.00,"C", 8.50,"PAYROLL"
+"590BU", 8.76,72.00,"C", 8.00,"ESTIMATED"
+"590BU", 9.34,72.00,"C", 8.00,"ANNUAL MANUAL"
+"590BU", 9.92,72.00,"C", 8.00,"PREMIUM"
+"590BU", 9.34, 0.00,"C", 4.00,"LOC #"
+"590BU", 9.34, 4.00,"C", 7.00,"CLASS CODE"
+"590BU", 9.34,15.50,"C",22.00,"CATEGORIES, DUTIES, CLASSIFICATIONS"
+"590BU", 9.34,46.50,"C", 3.50,"SIC"
+"590BU", 9.34,51.00,"C", 3.00,"NAICS"
+"590BU", 9.34,65.00,"C", 5.50,"RATE"
+"590BU",40.05, 0.50,"L", 0.00,"STATE:"
+"590BU",39.98,16.50,"C", 6.00,"FACTOR"
+"590BU",40.05,23.00,"C",16.00,"FACTORED PREMIUM"
+"590BU",40.05,57.50,"C", 5.00,"FACTOR"
+"590BU",40.05,63.50,"C",16.00,"FACTORED PREMIUM"
+"600MU", 9.52,42.50,"C", 3.00,"PART"
+"600MU", 9.55,38.50,"C", 3.00,"FULL"
+"600MU",10.05,38.50,"C", 3.00,"TIME"
+"600MU",10.05,42.50,"C", 3.00,"TIME"
+"600MU",41.01, 0.50,"L", 0.00,"TOTAL"
+"600MU",41.01,23.00,"L", 0.00,"$"
+"600MU",41.01,63.50,"L", 0.00,"$"
+"600MU",42.05,40.00,"L", 0.00,"SCHEDULE RATING *"
+"600MU",42.01, 0.50,"L", 0.00,"INCREASED LIMITS"
+"600MU",42.01,23.00,"L", 0.00,"$"
+"600MU",42.01,63.50,"L", 0.00,"$"
+"600MU",43.05,40.00,"L", 0.00,"CCPAP"
+"600MU",43.01, 0.50,"L", 0.00,"DEDUCTIBLE *"
+"600MU",43.01,23.00,"L", 0.00,"$"
+"600MU",43.01,63.50,"L", 0.00,"$"
+"600MU",43.64, 0.50,"L", 0.00,"EXPERIENCE OR MERIT"
+"600MU",44.01,23.00,"L", 0.00,"$"
+"600MU",44.01,40.00,"L", 0.00,"STANDARD PREMIUM"
+"600MU",44.01,63.50,"L", 0.00,"$"
+"600MU",44.10, 0.50,"L", 0.00,"MODIFICATION"
+"600MU",45.05, 0.50,"L", 0.00,"TERRORISM"
+"600MU",45.01,23.00,"L", 0.00,"$"
+"600MU",45.01,40.00,"L", 0.00,"PREMIUM DISCOUNT"
+"600MU",45.01,63.50,"L", 0.00,"$"
+"600MU",46.05, 0.50,"L", 0.00,"CATASTROPHE"
+"600MU",46.01,23.00,"L", 0.00,"$"
+"600MU",46.01,40.00,"L", 0.00,"EXPENSE CONSTANT"
+"600MU",46.01,63.50,"L", 0.00,"$"
+"600MU",47.05,40.00,"L", 0.00,"TAXES / ASSESSMENTS *"
+"600MU",47.01, 0.50,"L", 0.00,"ASSIGNED RISK SURCHARGE *"
+"600MU",47.01,23.00,"L", 0.00,"$"
+"600MU",47.01,63.50,"L", 0.00,"$"
+"600MU",48.01, 0.50,"L", 0.00,"ARAP *"
+"600MU",48.01,23.00,"L", 0.00,"$"
+"600MU",48.01,63.50,"L", 0.00,"$"
+"600MU",48.85, 0.50,"L", 0.00,"*  N / A in Wisconsin"
+"600BU",49.85, 0.50,"L", 0.00,"TOTAL ESTIMATED ANNUAL PREMIUM"
+"600BU",49.85,26.50,"L", 0.00,"MINIMUM PREMIUM"
+"600BU",49.85,53.50,"L", 0.00,"DEPOSIT PREMIUM"
+"600BU",50.85, 0.50,"L", 0.00,"$"
+"600BU",50.85,26.50,"L", 0.00,"$"
+"600BU",50.85,53.50,"L", 0.00,"$"
+"700MU",41.03,17.00,"C", 5.00,"N / A"
+"700MU",45.03,17.00,"C", 5.00,"N / A"
+"700MU",46.03,17.00,"C", 5.00,"N / A"
+"700MU",46.03,57.50,"C", 5.00,"N / A"
+"700MU",47.03,57.50,"C", 5.00,"N / A"
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU",39.00, 0.50,"L", 0.00,"PREMIUM"
+"840BU",51.98, 0.50,"L", 0.00,"REMARKS (ACORD 101, Additional Remarks Schedule, may be attached if more space is required)"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 130 (2026/08)"
+"840BU",63.92, 3.00,"C",74.50,"Page 2 of 5"
+"900BU", 2.93, 0.00,"L", 0.00,"STATE RATING SHEET #"
+"900BU", 2.93,20.00,"L", 0.00,"OF"
+"900BU", 2.93,26.00,"L", 0.00,"SHEETS"
+"900BU", 4.68, 0.50,"C",79.00,"STATE RATING WORKSHEET"
+"900BU", 6.18, 0.50,"L", 0.00,"FOR  MULTIPLE STATES, ATTACH AN ADDITIONAL PAGE 2 OF THIS FORM"
+"900BU", 7.73, 0.50,"L", 0.00,"RATING INFORMATION - STATE:"
+
+SIDE 3
+
+SHADING
+
+LINES/BOXES
+53.50,77.00,63.50,77.00, 2
+55.50, 0.00,55.50,80.00, 1
+53.50, 0.00,53.50,80.00, 2
+49.50, 0.00,49.50,80.00, 1
+51.50, 0.00,51.50,80.00, 1
+53.50, 0.00,53.50,80.00, 1
+24.00,77.00,53.50,77.00, 2
+ 3.00,55.00, 3.00,80.00, 2
+37.50, 0.00,37.50,80.00, 1
+39.50, 0.00,39.50,80.00, 1
+43.50, 0.00,43.50,80.00, 1
+41.50, 0.00,41.50,80.00, 1
+45.50, 0.00,45.50,80.00, 1
+47.50, 0.00,47.50,80.00, 1
+49.50, 0.00,49.50,80.00, 1
+29.50, 0.00,29.50,80.00, 1
+31.50, 0.00,31.50,80.00, 1
+33.50, 0.00,33.50,80.00, 1
+35.50, 0.00,35.50,80.00, 1
+25.00, 0.00,25.00,80.00, 2
+27.00, 0.00,27.00,80.00, 1
+18.00, 0.00,18.00,80.00, 2
+ 4.50, 0.00, 4.50,80.00, 1
+ 3.50,58.50, 4.50,58.50, 1
+ 3.50,60.50, 4.50,60.50, 1
+ 4.50,33.50,15.50,33.50, 1
+ 4.50,45.50,15.50,45.50, 1
+ 4.50,51.50,15.50,51.50, 1
+ 4.50,57.50,15.50,57.50, 1
+ 4.50,68.50,15.50,68.50, 1
+ 4.50, 5.00,15.50, 5.00, 1
+ 5.50, 0.00, 5.50,80.00, 1
+ 7.50, 0.00, 7.50,80.00, 1
+ 6.50, 5.00, 6.50,33.50, 1
+ 9.50, 0.00, 9.50,80.00, 1
+ 8.50, 5.00, 8.50,33.50, 1
+11.50, 0.00,11.50,80.00, 1
+10.50, 5.00,10.50,33.50, 1
+13.50, 0.00,13.50,80.00, 1
+12.50, 5.00,12.50,33.50, 1
+15.50, 0.00,15.50,80.00, 1
+14.50, 5.00,14.50,33.50, 1
+57.50, 0.00,57.50,80.00, 2
+61.50, 0.00,61.50,80.00, 1
+59.50, 0.00,59.50,80.00, 1
+63.50, 0.00,63.50,80.00, 1
+61.50, 0.00,61.50,80.00, 1
+16.50, 0.00,23.00,80.00, 4
+ 3.50, 0.00,15.50,80.00, 4
+24.00, 0.00,63.50,80.00, 4
+
+FORM TEXT
+"590BU", 4.50, 0.50,"L", 0.00,"PROVIDE INFORMATION FOR THE PAST 5 YEARS AND USE THE REMARKS SECTION FOR LOSS DETAILS"
+"590BU", 5.50, 0.00,"C", 5.00,"YEAR"
+"590BU", 5.50, 5.00,"C",28.50,"CARRIER & POLICY NUMBER"
+"590BU", 5.50,33.50,"C",12.00,"ANNUAL PREMIUM"
+"590BU", 5.50,45.50,"C", 6.00,"MOD"
+"590BU", 5.50,51.50,"C", 6.00,"# CLAIMS"
+"590BU", 5.50,57.50,"C",11.00,"AMOUNT PAID"
+"590BU", 5.50,68.50,"C",11.50,"RESERVE"
+"590BU",24.84,77.50,"C", 2.00,"Y / N"
+"590BU",25.00, 0.50,"L", 0.00,"EXPLAIN ALL \"YES\" RESPONSES"
+"600MU", 4.51,61.00,"L", 0.00,"LOSS RUN ATTACHED"
+"600MU", 6.51, 5.50,"L", 0.00,"CO:"
+"600MU", 7.51, 5.50,"L", 0.00,"POL #:"
+"600MU", 8.51, 5.50,"L", 0.00,"CO:"
+"600MU", 9.51, 5.50,"L", 0.00,"POL #:"
+"600MU",10.51, 5.50,"L", 0.00,"CO:"
+"600MU",11.51, 5.50,"L", 0.00,"POL #:"
+"600MU",12.51, 5.50,"L", 0.00,"CO:"
+"600MU",13.51, 5.50,"L", 0.00,"POL #:"
+"600MU",14.51, 5.50,"L", 0.00,"CO:"
+"600MU",15.51, 5.50,"L", 0.00,"POL #:"
+"600BU",17.29, 0.50,"L", 0.00,"GIVE COMMENTS AND DESCRIPTIONS OF BUSINESS, OPERATIONS AND PRODUCTS: MANUFACTURING - RAW MATERIALS, PROCESSES, PRODUCT, EQUIPMENT; CONTRACTOR - TYPE"
+"600BU",17.90, 0.50,"L", 0.00,"OF WORK, SUB-CONTRACTS; MERCANTILE - MERCHANDISE, CUSTOMERS, DELIVERIES; SERVICE - TYPE, LOCATION; FARM - ACREAGE, ANIMALS, MACHINERY, SUB-CONTRACTS."
+"700MU",25.82, 0.50,"L", 0.00,"1."
+"700MU",25.87, 2.50,"L", 0.00,"DOES APPLICANT OWN, OPERATE OR LEASE AIRCRAFT / WATERCRAFT?"
+"700MU",27.82, 0.50,"L", 0.00,"2."
+"700MU",27.78, 2.50,"L", 0.00,"DO / HAVE PAST, PRESENT OR DISCONTINUED OPERATIONS INVOLVE(D) STORING, TREATING, DISCHARGING, APPLYING, DISPOSING, OR"
+"700MU",28.46, 2.50,"L", 0.00,"TRANSPORTING OF HAZARDOUS MATERIAL? (e.g. landfills, wastes, fuel tanks, etc)"
+"700MU",30.32, 0.50,"L", 0.00,"3."
+"700MU",30.37, 2.50,"L", 0.00,"ANY WORK PERFORMED UNDERGROUND OR ABOVE 15 FEET?"
+"700MU",32.37, 0.50,"L", 0.00,"4."
+"700MU",32.37, 2.50,"L", 0.00,"ANY WORK PERFORMED ON BARGES, VESSELS, DOCKS, BRIDGE OVER WATER?"
+"700MU",34.37, 0.50,"L", 0.00,"5."
+"700MU",34.37, 2.50,"L", 0.00,"IS APPLICANT ENGAGED IN ANY OTHER TYPE OF BUSINESS?"
+"700MU",36.37, 0.50,"L", 0.00,"6."
+"700MU",36.37, 2.50,"L", 0.00,"ARE SUB-CONTRACTORS USED? (If \"YES\", give % of work subcontracted)"
+"700MU",38.37, 0.50,"L", 0.00,"7."
+"700MU",38.37, 2.50,"L", 0.00,"ANY WORK SUBLET WITHOUT CERTIFICATES OF INSURANCE?  (If \"YES\", payroll for this work must be included in the State Rating Worksheet on Page 2)"
+"700MU",40.37, 0.50,"L", 0.00,"8."
+"700MU",40.37, 2.50,"L", 0.00,"IS A WRITTEN SAFETY PROGRAM IN OPERATION?"
+"700MU",42.37, 0.50,"L", 0.00,"9."
+"700MU",42.37, 2.50,"L", 0.00,"ANY GROUP TRANSPORTATION PROVIDED?"
+"700MU",44.37, 0.50,"L", 0.00,"10."
+"700MU",44.37, 2.50,"L", 0.00,"ANY EMPLOYEES UNDER 16 OR OVER 60 YEARS OF AGE?"
+"700MU",46.37, 0.50,"L", 0.00,"11."
+"700MU",46.37, 2.50,"L", 0.00,"ANY SEASONAL EMPLOYEES?"
+"700MU",48.37, 0.50,"L", 0.00,"12."
+"700MU",48.37, 2.50,"L", 0.00,"IS THERE ANY VOLUNTEER OR DONATED LABOR?  (If \"YES\", please specify)"
+"700MU",50.37, 0.50,"L", 0.00,"13."
+"700MU",50.37, 2.50,"L", 0.00,"ANY EMPLOYEES WITH PHYSICAL HANDICAPS?"
+"700MU",52.37, 0.50,"L", 0.00,"14."
+"700MU",52.37, 2.50,"L", 0.00,"DO EMPLOYEES TRAVEL OUT OF STATE?  (If \"YES\", indicate state(s) of travel and frequency)"
+"700MU",54.37, 0.50,"L", 0.00,"15."
+"700MU",54.37, 2.50,"L", 0.00,"ARE ATHLETIC TEAMS SPONSORED?"
+"700MU",56.37, 0.50,"L", 0.00,"16."
+"700MU",56.37, 2.50,"L", 0.00,"ARE PHYSICALS REQUIRED AFTER OFFERS OF EMPLOYMENT ARE MADE?"
+"700MU",58.37, 0.50,"L", 0.00,"17."
+"700MU",58.37, 2.50,"L", 0.00,"ANY OTHER INSURANCE WITH THIS INSURER?"
+"700MU",60.37, 0.50,"L", 0.00,"18."
+"700MU",60.37, 2.50,"L", 0.00,"ANY PRIOR COVERAGE DECLINED / CANCELLED / NON-RENEWED IN THE LAST THREE (3) YEARS?"
+"700BU",60.37,49.10,"L", 0.00,"(NOT APPLICABLE IN MISSOURI)"
+"700MU",62.37, 0.50,"L", 0.00,"19."
+"700MU",62.37, 2.50,"L", 0.00,"ARE EMPLOYEE HEALTH PLANS PROVIDED?"
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU", 3.51, 0.50,"L", 0.00,"PRIOR CARRIER INFORMATION / LOSS HISTORY"
+"840BU",16.51, 0.50,"L", 0.00,"NATURE OF BUSINESS / DESCRIPTION OF OPERATIONS"
+"840BU",23.83, 0.50,"L", 0.00,"GENERAL INFORMATION"
+"840BU",64.42, 0.50,"L", 0.00,"ACORD 130 (2026/08)"
+"840BU",64.42, 2.00,"C",75.50,"Page 3 of 5"
+
+SIDE 4
+
+SHADING
+
+LINES/BOXES
+17.50, 0.00,17.50,80.00, 2
+24.50,73.00,24.50,79.50, 2
+16.50, 0.00,16.50,80.00, 4
+16.50,80.00,63.50,80.00, 4
+25.00, 0.00,25.00,80.00, 2
+16.50, 2.00,17.50, 2.00, 2
+16.50, 0.00,63.50, 0.00, 4
+ 3.50,77.00,15.50,77.00, 2
+ 3.00,55.00, 3.00,80.00, 2
+13.00, 0.00,13.00,80.00, 1
+ 9.75,41.50, 9.75,45.00, 1
+11.00, 0.00,11.00,80.00, 1
+ 9.00, 0.00, 9.00,80.00, 1
+ 7.00, 0.00, 7.00,80.00, 1
+ 5.00, 0.00, 5.00,80.00, 1
+63.50, 0.00,63.50,80.00, 4
+ 3.50, 0.00,15.50,80.00, 4
+
+FORM TEXT
+"590BU", 4.55, 0.50,"L", 0.00,"EXPLAIN ALL \"YES\" RESPONSES"
+"590BU", 4.34,77.50,"C", 2.00,"Y / N"
+"600BU",24.04,72.50-LNWIDTH("600BU","(Applicant's"),"L", 0.00,"(Applicant's"
+"600BU",24.65,72.50-LNWIDTH("600BU","Initials):"),"L", 0.00,"Initials):"
+"680MU",18.19, 1.00,"R",78.00,"PERSONAL INFORMATION ABOUT YOU, INCLUDING INFORMATION FROM A CREDIT OR OTHER INVESTIGATIVE REPORT, MAY BE COLLECTED FROM PERSONS OTHER"
+"680MU",18.86, 1.00,"R",78.00,"THAN YOU IN CONNECTION WITH THIS APPLICATION FOR INSURANCE AND SUBSEQUENT AMENDMENTS AND RENEWALS.  SUCH INFORMATION AS WELL AS OTHER"
+"680MU",19.53, 1.00,"R",78.00,"PERSONAL AND PRIVILEGED INFORMATION COLLECTED BY US OR OUR AGENTS MAY IN CERTAIN CIRCUMSTANCES BE DISCLOSED TO THIRD PARTIES WITHOUT YOUR"
+"680MU",20.20, 1.00,"R",78.00,"AUTHORIZATION.  CREDIT SCORING INFORMATION MAY BE USED TO HELP DETERMINE EITHER YOUR ELIGIBILITY FOR INSURANCE OR THE PREMIUM YOU WILL BE"
+"680MU",20.87, 1.00,"R",78.00,"CHARGED.  WE MAY USE A THIRD PARTY IN CONNECTION WITH THE DEVELOPMENT OF YOUR SCORE.  YOU MAY HAVE THE RIGHT TO REVIEW YOUR PERSONAL"
+"680MU",21.54, 1.00,"R",78.00,"INFORMATION IN OUR FILES AND REQUEST CORRECTION OF ANY INACCURACIES. YOU MAY ALSO HAVE THE RIGHT TO REQUEST IN WRITING THAT WE CONSIDER"
+"680MU",22.21, 1.00,"R",78.00,"EXTRAORDINARY LIFE CIRCUMSTANCES IN CONNECTION WITH THE DEVELOPMENT OF YOUR CREDIT SCORE. THESE RIGHTS MAY BE LIMITED IN SOME STATES."
+"680MU",22.88, 1.00,"R",78.00,"PLEASE CONTACT YOUR AGENT OR BROKER TO LEARN HOW THESE RIGHTS MAY APPLY IN YOUR STATE OR FOR INSTRUCTIONS ON HOW TO SUBMIT A REQUEST TO"
+"680MU",23.55, 1.00,"L", 0.00,"US FOR A MORE DETAILED DESCRIPTION OF YOUR RIGHTS AND OUR PRACTICES REGARDING PERSONAL INFORMATION."
+"700MU", 5.87, 0.50,"L", 0.00,"20."
+"700MU", 5.87, 2.50,"L", 0.00,"DO ANY EMPLOYEES PERFORM WORK FOR OTHER BUSINESSES OR SUBSIDIARIES?"
+"700MU", 7.87, 0.50,"L", 0.00,"21."
+"700MU", 7.87, 2.50,"L", 0.00,"DO YOU LEASE EMPLOYEES TO OR FROM OTHER EMPLOYERS?"
+"700MU", 9.87, 0.50,"L", 0.00,"22."
+"700MU", 9.87, 2.50,"L", 0.00,"DO ANY EMPLOYEES PREDOMINANTLY WORK AT HOME?  If \"YES\", # of Employees:"
+"700MU",11.87, 0.50,"L", 0.00,"23."
+"700MU",11.87, 2.50,"L", 0.00,"ANY TAX LIENS OR BANKRUPTCY WITHIN THE LAST FIVE (5) YEARS?  (If \"YES\", please specify)"
+"700MU",13.80, 0.50,"L", 0.00,"24."
+"700MU",13.85, 2.50,"L", 0.00,"ANY UNDISPUTED AND UNPAID WORKERS COMPENSATION PREMIUM DUE FROM YOU OR ANY COMMONLY MANAGED OR OWNED ENTERPRISES?"
+"700MU",14.53, 2.50,"L", 0.00,"IF YES, EXPLAIN INCLUDING ENTITY NAME(S) AND POLICY NUMBER(S)."
+"700MU",17.37, 2.50,"L", 0.00,"Copy of the Notice of Information Practices (Privacy) has been given to the applicant. (Not required in all states, contact your agent or broker for your state's requirements.)"
+"700MU",24.53, 1.00,"L", 0.00,"(Not applicable in AZ, CA, CO, CT, DC, DE, IL, KS, MN, MT, ND, NY, OR, VA, or WV.  Specific ACORD 38s are available for applicants in these states.)"
+"750BU",50.79, 1.00,"R",71.82,"Applicable in NY: Applicable to all claim forms for insurance and all applications for commercial insurance and accident and health insurance:"
+"750MU",50.79,72.82,"R", 5.68," Any person"
+"750MU",51.53, 1.00,"R",77.50,"who knowingly and with intent to defraud any insurance company or other person files an application for insurance or statement of claim containing any materially"
+"750MU",52.26, 1.00,"R",77.50,"false information, or conceals for the purpose of misleading, information concerning any fact material thereto, commits a fraudulent insurance act, which is a crime,"
+"750MU",52.99, 1.00,"L", 0.00,"and shall also be subject to a civil penalty not to exceed five thousand dollars and the stated value of the claim for each such violation."
+"750BU",26.02, 1.00,"R", 8.71,"Applicable in AL:"
+"750MU",26.02,10.08,"R",68.92,"Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or who knowingly presents false information in an"
+"750MU",26.76, 1.00,"L", 0.00,"application for insurance is guilty of a crime and may be subject to restitution, fines, or confinement in prison, or any combination thereof."
+"750BU",27.91, 1.00,"R",19.06,"Applicable in AR, LA, MD, RI and WV:"
+"750MU",27.91,20.41,"R",58.59,"Any person who knowingly (or willfully)* presents a false or fraudulent claim for payment of a loss or benefit or knowingly (or"
+"750MU",28.65, 1.00,"R",78.00,"willfully)* presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison. *Applies in AR and MD"
+"750MU",29.38, 1.00,"L", 0.00,"Only."
+"750BU",30.43, 1.00,"R", 8.86,"Applicable in CO:"
+"750MU",30.43,10.58,"R",68.42,"It is unlawful to knowingly provide false, incomplete, or misleading facts or information to an insurance company for the purpose of defrauding or"
+"750MU",31.17, 1.00,"R",78.00,"attempting to defraud the company.  Penalties may include imprisonment, fines, denial of insurance and civil damages.  Any insurance company or agent of an"
+"750MU",31.90, 1.00,"R",78.00,"insurance company who knowingly provides false, incomplete, or misleading facts or information to a policyholder or claimant for the purpose of defrauding or"
+"750MU",32.63, 1.00,"R",78.00,"attempting to defraud the policyholder or claimant with regard to a settlement or award payable from insurance proceeds shall be reported to the Colorado Division of"
+"750MU",33.36, 1.00,"L", 0.00,"Insurance within the Department of Regulatory Agencies."
+"750BU",34.41, 1.00,"R", 8.90,"Applicable in DC:"
+"750MU",34.41,10.71,"R",68.29,"WARNING: It is a crime to provide false or misleading information to an insurer for the purpose of defrauding the insurer or any other person."
+"750MU",35.15, 1.00,"R",78.00,"Penalties include imprisonment and/or fines. In addition, an insurer may deny insurance benefits if false information materially related to a claim was provided by the"
+"750MU",35.88, 1.00,"L", 0.00,"applicant."
+"750BU",36.77, 1.00,"R",12.56,"Applicable in FL and OK:"
+"750MU",36.77,14.21,"R",64.29,"Any person who knowingly and with intent to injure, defraud, or deceive any insurer files a statement of claim or an application containing"
+"750MU",37.51, 1.00,"L", 0.00,"any false, incomplete, or misleading information is guilty of a felony (of the third degree)*. *Applies in FL Only."
+"750BU",38.81, 1.00,"R", 8.70,"Applicable in KS:"
+"750MU",38.81,10.36,"R",68.14,"A \"fraudulent insurance act\" means an act committed by any person who, knowingly and with intent to defraud, presents, causes to be presented"
+"750MU",39.55, 1.00,"R",77.50,"or prepares with knowledge or belief that it will be presented to or by an insurer, purported insurer, broker or any agent thereof, any written, electronic, electronic"
+"750MU",40.28, 1.00,"R",77.50,"impulse, facsimile, magnetic, oral, or telephonic communication or statement as part of, or in support of, an application for the issuance of, or the rating of an"
+"750MU",41.01, 1.00,"R",77.50,"insurance policy for personal or commercial insurance, or a claim for payment or other benefit pursuant to an insurance policy for commercial or personal insurance"
+"750MU",41.74, 1.00,"R",77.50,"that such person knows to contain materially false information concerning any fact material thereto; or conceals, for the purpose of misleading, information concerning"
+"750MU",42.47, 1.00,"L", 0.00,"any fact material thereto."
+"750BU",43.41, 1.00,"R",13.21,"Applicable in KY and PA:"
+"750MU",43.41,15.15,"R",63.35,"Any person who knowingly and with intent to defraud any insurance company or other person files an application for insurance or"
+"750MU",44.15, 1.00,"R",77.50,"statement of claim containing any materially false information or conceals for the purpose of misleading, information concerning any fact material thereto commits a"
+"750MU",44.88, 1.00,"L", 0.00,"fraudulent insurance act, which is a crime and subjects such person to criminal and civil penalties."
+"750BU",45.77, 1.00,"R",17.83,"Applicable in ME, TN, VA and WA:"
+"750MU",45.77,19.70,"R",58.80,"It is a crime to knowingly provide false, incomplete or misleading information to an insurance company for the purpose of"
+"750MU",46.51, 1.00,"L", 0.00,"defrauding the company.  Penalties (may)* include imprisonment, fines and denial of insurance benefits. *Applies in ME Only."
+"750BU",47.64, 1.00,"L", 0.00,"Applicable in NJ:"
+"750MU",47.64,10.12,"L", 0.00,"Any person who includes any false or misleading information on an application for an insurance policy is subject to criminal and civil penalties."
+"750BU",48.77, 1.00,"R", 9.04,"Applicable in NM:"
+"750MU",48.77,10.87,"R",67.63,"Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly presents false information in an"
+"750MU",49.51, 1.00,"L", 0.00,"application for insurance is guilty of a crime and may be subject to civil fines and criminal penalties."
+"750BU",54.02, 1.00,"R", 9.10,"Applicable in OH:"
+"750MU",54.02,11.06,"R",67.44,"Any person who, with intent to defraud or knowing that he is facilitating a fraud against an insurer, submits an application or files a claim"
+"750MU",54.76, 1.00,"L", 0.00,"containing a false or deceptive statement is guilty of insurance fraud."
+"750BU",55.77, 1.00,"R", 9.02,"Applicable in OR:"
+"750MU",55.77,10.88,"R",67.62,"Any person who knowingly and with intent to defraud or solicit another to defraud the insurer by submitting an application containing a false"
+"750MU",56.51, 1.00,"L", 0.00,"statement as to any material fact may be violating state law."
+"750BU",57.93, 1.00,"R", 8.65,"Applicable in PR:"
+"750MU",57.93, 9.95,"R",68.55,"Any person who knowingly and with the intention of defrauding presents false information in an insurance application, or presents, helps, or causes"
+"750MU",58.67, 1.00,"R",77.50,"the presentation of a fraudulent claim for the payment of a loss or any other benefit, or presents more than one claim for the same damage or loss, shall incur a felony"
+"750MU",59.40, 1.00,"R",77.50,"and, upon conviction, shall be sanctioned for each violation by a fine of not less than five thousand dollars ($5,000) and not more than ten thousand dollars ($10,000),"
+"750MU",60.13, 1.00,"R",77.50,"or a fixed term of imprisonment for three (3) years, or both penalties.  Should aggravating circumstances [be] present, the penalty thus established may be increased"
+"750MU",60.86, 1.00,"L", 0.00,"to a maximum of five (5) years, if extenuating circumstances are present, it may be reduced to a minimum of two (2) years."
+"750BU",61.91, 1.00,"R", 8.61,"Applicable in UT:"
+"750MU",61.91,10.25,"R",68.25," Any person who knowingly presents false or fraudulent underwriting information, files or causes to be filed a false or fraudulent claim for disability"
+"750MU",62.65, 1.00,"R",77.50,"compensation or medical benefits, or submits a false or fraudulent report or billing for health care fees or other professional services is guilty of a crime and may be"
+"750MU",63.38, 1.00,"L", 0.00,"subject to fines and confinement in state prison."
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU", 3.50, 0.50,"L", 0.00,"GENERAL INFORMATION (continued)"
+"840BU",16.50, 0.50,"L", 0.00,"FRAUD STATEMENTS"
+"840BU",64.42, 0.50,"L", 0.00,"ACORD 130 (2026/08)"
+"840BU",64.42, 2.50,"C",75.50,"Page 4 of 5"
+
+SIDE 5
+
+SHADING
+
+LINES/BOXES
+ 3.00,55.00, 3.00,80.00, 2
+63.00, 0.00,63.00,80.00, 4
+30.50,33.00,30.50,75.00, 2
+30.50, 0.00,30.50,80.00, 2
+30.50,38.00,32.50,38.00, 1
+32.50, 0.00,32.50,80.00, 4
+30.50,28.00,32.50,28.00, 2
+30.50,38.00,32.50,38.00, 2
+30.50,66.00,32.50,66.00, 2
+28.00, 0.00,28.00,80.00, 2
+28.00,36.00,28.00,42.50, 1
+14.50,27.50,14.50,54.50, 1
+26.00,27.50,26.00,54.50, 1
+15.00, 0.00,15.00,80.00, 1
+28.00, 0.00,32.50,80.00, 4
+32.50, 0.00,63.00,80.00, 4
+ 4.50, 0.00,27.00,80.00, 4
+
+FORM TEXT
+"590BU",31.29, 0.50,"L", 0.00,"APPLICANT'S SIGNATURE (Must be Officer, Owner or Partner)"
+"590BU",31.34,28.50,"L", 0.00,"DATE"
+"590BU",31.34,38.50,"L", 0.00,"PRODUCER'S SIGNATURE"
+"590BU",31.34,66.50,"C",13.00,"NATIONAL PRODUCER NUMBER"
+"700BU",14.37,27.00-LNWIDTH("700BU","(Applicant's Signature):"),"L", 0.00,"(Applicant's Signature):"
+"700BU",25.87,27.00-LNWIDTH("700BU","(Applicant's Signature):"),"L", 0.00,"(Applicant's Signature):"
+"800MU", 7.78, 1.00,"R",78.00,"I, the undersigned, attest that I am the above-named employer or duly authorized representative of the above-named employer, and that the information"
+"800MU", 8.55, 1.00,"R",78.00,"included in the application form or renewal information reflects the absence of employees and zero estimated payroll exposure for workers' compensation"
+"800MU", 9.32, 1.00,"L", 0.00,"insurance. I hereby attest to the following:"
+"800MU",10.36, 1.00,"R",77.50,"I attest that all information provided on this application is current, true, correct, accurate, and complete to the best of my knowledge and belief. I further attest"
+"800MU",11.13, 1.00,"R",77.50,"that I have no employees and an estimated exposure of zero. If I employ any employees during the policy period, I must provide within 60 days of the"
+"800MU",11.90, 1.00,"R",77.50,"employment written notification to my workers' compensation insurer of the employment, including estimated payroll and classification codes of my"
+"800MU",12.67, 1.00,"R",77.50,"employees. I understand that omissions or misrepresentations with intent to defraud on this application are a crime under Minnesota Statutes, section"
+"800MU",13.44, 1.00,"L", 0.00,"609.611."
+"800MU",17.78, 1.00,"R",78.00,"I, the undersigned, attest that I am the above-named employer or duly authorized representative of the above-named employer, and that the information"
+"800MU",18.55, 1.00,"R",78.00,"included in the application form or renewal information reflects the absence of employees and zero estimated payroll exposure for workers' compensation"
+"800MU",19.32, 1.00,"L", 0.00,"insurance. I hereby attest to the following:"
+"800MU",20.78, 1.00,"R",78.00,"I ATTEST THAT ALL INFORMATION PROVIDED IN THIS APPLICATION IS CURRENT, TRUE, ACCURATE, AND COMPLETE TO THE BEST OF MY"
+"800MU",21.55, 1.00,"R",78.00,"KNOWLEDGE AND BELIEF. I FURTHER ATTEST THAT I HAVE NO EMPLOYEES AND AN ESTIMATED EXPOSURE OF ZERO. IF I EMPLOY ANY"
+"800MU",22.32, 1.00,"R",78.00,"EMPLOYEES DURING THE POLICY PERIOD, I SHALL PROVIDE WRITTEN NOTICE TO MY WORKERS' COMPENSATION INSURER WITHIN 60 DAYS"
+"800MU",23.09, 1.00,"R",78.00,"AFTER THE EMPLOYMENT BEGINS, AND INCLUDE THE ESTIMATED PAYROLL AND CLASSIFICATION CODES FOR THOSE EMPLOYEES. I"
+"800MU",23.86, 1.00,"R",78.00,"UNDERSTAND THAT AN OMISSION OR MISREPRESENTATION MADE WITH INTENT TO DEFRAUD IN THIS APPLICATION CONSTITUTES A"
+"800MU",24.63, 1.00,"L", 0.00,"CRIMINAL ACTION."
+"800MU",28.88, 1.00,"R",78.00,"THE UNDERSIGNED IS AN AUTHORIZED REPRESENTATIVE OF THE APPLICANT AND REPRESENTS THAT REASONABLE INQUIRY HAS BEEN"
+"800MU",29.65, 1.00,"R",78.00,"MADE TO OBTAIN THE ANSWERS TO QUESTIONS ON THIS APPLICATION.  HE/SHE REPRESENTS THAT THE ANSWERS ARE TRUE, CORRECT"
+"800MU",30.42, 1.00,"L", 0.00,"AND COMPLETE TO THE BEST OF HIS/HER KNOWLEDGE."
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU",28.00, 0.50,"L", 0.00,"SIGNATURE"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 130 (2026/08)"
+"840BU",63.92, 2.50,"C",75.50,"Page 5 of 5"
+"900MI", 4.42,23.00,"L", 0.00,"(Complete the attestation(s) applicable to the state(s) of coverage.)"
+"900BU", 6.43, 0.00,"C",80.00,"MINNESOTA ZERO ESTIMATED EXPOSURE POLICY ATTESTATION FOR BUILDING CONSTRUCTION OR IMPROVEMENT SERVICES"
+"900BU",16.43, 1.00,"L", 0.00,"UTAH ZERO ESTIMATED EXPOSURE POLICY ATTESTATION"
+"1000BU", 4.46, 0.50,"L", 0.00,"STATE-SPECIFIC ATTESTATIONS"

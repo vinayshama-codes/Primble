@@ -89,7 +89,10 @@ def test_the_pillar_is_its_items_and_never_moved(seed):
         if not S._umbrella_has_underlying(facts):
             assert pillar == 0
             items = S.umbrella_gap_items(facts, flags)
-            assert [i["points"] for i in items] == [100] and items[0]["fact"]
+            # Rule G2 (30 Oct 2026): what the pillar charges once the underlying
+            # limit is stated is listed up front too (updated: pinned [100]).
+            assert sum(i["points"] for i in items) == 100 and items[0]["fact"]
+            assert all(i.get("fact") for i in items)
             continue
         assert pillar == _client_table(facts, flags)                  # no score moves
         items = S.umbrella_gap_items(facts, flags)

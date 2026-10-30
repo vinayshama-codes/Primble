@@ -31,6 +31,7 @@ Design notes
   rather than as a definitive hard conflict (Beta Report §5.2 carrier handling).
 """
 
+import functools
 import re
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
@@ -579,6 +580,7 @@ def _mark_runs(toks: List[str], test, width: int) -> List[Tuple[int, int]]:
     return runs
 
 
+@functools.lru_cache(maxsize=65536)
 def _no_identifier_reason(s: str) -> Optional[str]:
     """Why ``s`` holds no contract identifier, or None when one is left. ``s``
     carries a digit and is not itself form-shaped (the caller's earlier rules).
@@ -1120,7 +1122,52 @@ _PARTY_PLACEHOLDERS: FrozenSet[str] = frozenset({
     "to be determined", "to be announced", "to be advised", "to be confirmed",
     "to be named", "to be provided", "tbd", "tba", "tbc", "tbn",
     "sample", "specimen", "void", "voided", "sample only", "specimen only",
+    # A BACK-REFERENCE holds the place too (27 Oct 2026, Lane B item 3): a person
+    # answering a name question with "Same as above" / "See above" names nobody
+    # - the box it points at is not on this form, nor in the facts. Whole values
+    # only, like the rest ("Same Day Delivery LLC" is a name).
+    "see above", "as above", "same as above", "see below", "as below",
+    "same as below", "ditto", "same", "same as applicant", "same as the applicant",
+    "same as insured", "same as the insured", "same as named insured",
+    "same as the named insured",
 })
+
+
+def is_party_name_fact(field: Any) -> bool:
+    """Does this FACT hold the name of a party - a person or an organisation?
+
+    The one answer to "is this a name question?", read off the fact key's own
+    shape exactly as `_infer_field_category` reads it for normalisation (the
+    explicit NAME / CARRIER sets, any "..._name" key, the curated holder key)
+    - but NOT its loose "carrier anywhere in the key" branch, which also
+    catches a carrier's WEBSITE, narrative and market (`carrier_website`,
+    `qn_carrier_narrative`, `carrier_market`, `has_motor_carrier_coverage`).
+    A carrier fact is a name here only when the key ENDS naming the party
+    (`prior_carrier`, `wc_prior_carrier`, `..._insurer`). Used by the person-
+    answer door (`answer_semantics.interpret_answer`) and the editor write-back,
+    so a non-answer or a back-reference never becomes a party's name."""
+    f = str(field or "").strip().lower()
+    if not f:
+        return False
+    if f in NAME_FIELDS or f in CARRIER_FIELDS or f in _NAME_LIKE_KEYS:
+        return True
+    return f.endswith("_name") or f.endswith("_carrier") or f.endswith("_insurer")
+
+
+def is_placeholder_fein(value: Any) -> bool:
+    """True when a tax ID's nine digits are one digit repeated - "00-0000000",
+    "000000000", "11-1111111", "99-9999999". The IRS never issues one; a form
+    or a person types it to hold the place of a number they do not have (strict
+    review, 29 Oct 2026: an all-zero FEIN filled Tier 2 and printed on every
+    form). ONE rule for the answer door (`fact_registry._is_fein`,
+    `validators.validate_fein`) and the extraction merge
+    (`answer_semantics.extracted_non_answer`). Deliberately NOT "123456789":
+    no IRS rule makes it impossible, and the review plan's sample answer is
+    "12-3456789". Anything that is not nine digits is not judged here."""
+    if value is None or isinstance(value, bool):
+        return False
+    digits = re.sub(r"[\s\-]", "", str(value))
+    return len(digits) == 9 and digits.isdigit() and len(set(digits)) == 1
 
 
 def is_party_placeholder(value: Any) -> bool:
@@ -1695,14 +1742,72 @@ def entity_compact_key(value: Any) -> str:
     return compact
 
 
+# A CLIPPED last word (29 Oct 2026 strict review): OCR / a transcriber cut at
+# the box edge prints "Summit Peak Casualty Compai" for "Summit Peak Casualty
+# Company". Same entity when every other word is equal, in order, and the
+# shorter last word is a proper prefix (>= 4 letters) of the other's - or is
+# one once its own last letter (the half-letter at the cut) is dropped. Read
+# on the strict tokens AND on the plain lower-case words, because the strict
+# key canonicalises a legal form ("Corporation" -> "corp") that the clipped
+# printing ("Corpor") never reached. Two different names never pass: "ABC
+# Roofing" / "ABC Roofers Supply" (word count, not a prefix), "Summit Peak
+# Casualty" / "Summit Peak Insurance" (not a prefix). Equality only - never a
+# grouping key (`entity_compact_key` stays exact), never display.
+_CLIP_MIN_LETTERS = 4
+
+
+def _clipped_last_word(ta: List[str], tb: List[str]) -> bool:
+    if len(ta) != len(tb) or len(ta) < 2 or ta[:-1] != tb[:-1]:
+        return False
+    a, b = ta[-1], tb[-1]
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if short == long_ or not short.isalpha() or len(short) < _CLIP_MIN_LETTERS:
+        return False
+    if long_.startswith(short):
+        return True                          # "Corpor" / "Corporation"
+    # The cut letter itself misread ("Compai": "Compa" + a half-letter at the
+    # box edge): every letter but the last is the other word's start.
+    return (len(short) < len(long_) and len(short) - 1 >= _CLIP_MIN_LETTERS
+            and long_.startswith(short[:-1]))
+
+
+def _plain_words(value: Any) -> List[str]:
+    return re.findall(r"[a-z0-9&]+", deglue_entity_text(str(value or "")).lower())
+
+
+def fuller_entity_printing(a: Any, b: Any) -> Any:
+    """Of two printings `same_entity_name` calls one entity, the one to PRINT:
+    ``a`` unless ``b`` is ``a`` with its clipped last word whole ("Summit Peak
+    Casualty Compai" -> "Summit Peak Casualty Company"). Spelling variants
+    ("Co" / "Company", "&" / "and") keep ``a`` - the caller's choice stands."""
+    try:
+        ka, kb = strict_entity_key(a).split(), strict_entity_key(b).split()
+        pa, pb = _plain_words(a), _plain_words(b)
+        clipped = _clipped_last_word(ka, kb) or _clipped_last_word(pa, pb)
+        if clipped and len(" ".join(pb)) > len(" ".join(pa)):
+            return b
+    except Exception:                                         # noqa: BLE001
+        pass
+    return a
+
+
 def same_entity_name(a: Any, b: Any) -> bool:
     """True when two printings name ONE legal entity by spelling: equal strict
-    keys, or equal compact keys (the same name with its spaces lost)."""
+    keys, or equal compact keys (the same name with its spaces lost), or one
+    printing whose last word was clipped (`_clipped_last_word`)."""
     ka, kb = strict_entity_key(a), strict_entity_key(b)
     if ka and kb and ka == kb:
         return True
     ca, cb = entity_compact_key(a), entity_compact_key(b)
-    return bool(ca and cb and ca == cb)
+    if ca and cb and ca == cb:
+        return True
+    if not (ka and kb):
+        return False
+    try:
+        return (_clipped_last_word(ka.split(), kb.split())
+                or _clipped_last_word(_plain_words(a), _plain_words(b)))
+    except Exception:                                         # noqa: BLE001
+        return False
 
 
 # ── Public normalizers ────────────────────────────────────────────────────────
@@ -1768,6 +1873,17 @@ def normalize_date(value: Any) -> Optional[str]:
         return None
     s = str(value).strip()
     if not s:
+        return None
+    return _normalize_date_text(s)
+
+
+@functools.lru_cache(maxsize=65536)
+def _normalize_date_text(s: str) -> Optional[str]:
+    """`normalize_date` on a stripped string, cached: a pure function the scorer
+    and the review plan call tens of thousands of times per page (28 Oct: 27 of a
+    40 s pre-form load). Every format needs a digit, so a digit-less value is no
+    date without trying them."""
+    if not any(ch.isdigit() for ch in s):
         return None
     # Strip an ordinal suffix and a leading weekday/commas for the written forms.
     s = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", s, flags=re.IGNORECASE)
@@ -2032,7 +2148,20 @@ def _menu_items(line: str) -> Optional[List[Tuple[str, Optional[str], str]]]:
 
 def _entity_menus(text: Any) -> List[dict]:
     """Every entity-type MENU in ``text``: runs of menu-shaped lines with two
-    or more options. Each: {"families": set, "marked": set of ticked families}."""
+    or more options. Each: {"families": set, "marked": set of ticked families}.
+    Cached per text (a pure read; the review plan re-scores the same documents
+    dozens of times per page, 28 Oct) - every call gets its own sets."""
+    return [{"families": set(f), "marked": set(m)}
+            for f, m in _entity_menus_cached(str(text or ""))]
+
+
+@functools.lru_cache(maxsize=256)
+def _entity_menus_cached(text: str) -> Tuple[Tuple[frozenset, frozenset], ...]:
+    return tuple((frozenset(m["families"]), frozenset(m["marked"]))
+                 for m in _entity_menus_uncached(text))
+
+
+def _entity_menus_uncached(text: Any) -> List[dict]:
     menus: List[dict] = []
     run: List[List[Tuple[str, Optional[str], str]]] = []
 
@@ -2765,6 +2894,15 @@ def distinct_normalized(field: str, raw_values: List[Any]) -> Set[str]:
 #   * neither -> "account" (today's attestation).
 _NO_LOSS_POLICY_RE = re.compile(
     r"\b(?:19|20)\d{2}\s*[-/]\s*(?:19|20)?\d{2}\b|\b[A-Z]{2,}[A-Z0-9-]*\d{4,}", re.I)
+# A statement about ONE term in the words that follow it (Michelle review, 29
+# Oct 2026): a carrier loss run prints "NO LOSSES REPORTED FOR THIS POLICY TERM
+# AS OF THE VALUATION DATE" under each clean term, and the statement starts its
+# line, so the policy number above it is not in its clause. Read as an account
+# attestation it "conflicted" with the claims of the other terms and held Loss
+# History at 45 on an ordinary multi-year loss run.
+_NO_LOSS_THIS_TERM_RE = re.compile(
+    r"\b(?:this|that|the\s+above|each)\s+(?:policy\s+)?(?:term|period|policy\s+year|policy)\b",
+    re.I)
 _NO_LOSS_YEARS_RE = re.compile(
     r"\b(?:past|last|prior|previous)\s+(\d{1,2}|one|two|three|four|five|six|seven|ten)\s+years?\b",
     re.I)
@@ -2812,7 +2950,7 @@ def no_loss_statements(text: str) -> List[dict]:
                 raw = years_m.group(1).lower()
                 years = int(raw) if raw.isdigit() else _NUMBER_WORDS.get(raw)
             line = canon_line(clause)
-            if _NO_LOSS_POLICY_RE.search(clause):
+            if _NO_LOSS_POLICY_RE.search(clause) or _NO_LOSS_THIS_TERM_RE.search(after):
                 scope = "term"
             elif line:
                 scope = "line"

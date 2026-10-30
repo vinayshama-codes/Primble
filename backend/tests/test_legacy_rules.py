@@ -107,7 +107,7 @@ def _harvest_field_validation_messages() -> list[str]:
         "mailing_address": "",
         "contact_phone": "not-a-phone",
         "contact_email": "not-an-email",
-        "fein": "nope",
+        "fein": "12-34",   # digits, not nine (a word is not judged - 30 Oct)
         "effective_date": "not-a-date",
         "expiration_date": "not-a-date",
         "percent_subcontracted": "999",
@@ -306,8 +306,28 @@ def _hard_append_sites() -> list[tuple[str, int, str | None]]:
     return sites
 
 
+def _harvest_identifier_messages() -> list[str]:
+    """The identifier door's warnings (30 Oct 2026) - a message source of its
+    own, driven with a fixture that trips every rule in `WARNING_RULES`."""
+    from services.identifier_checks import WARNING_RULES, warning_messages
+
+    out = warning_messages({
+        "auto_vin_schedule": [{"vin": "1FTBR1C82PKA4182", "year": "2023"}],
+        "carrier_naic": "251861", "prior_carrier_naic": "2518611",
+        "contact_phone": "(103) 555-0148",
+        "property_locations": [{"address_line1": "1 Main St", "address_state": "CO", "address_zip": "8021"}],
+        "physical_address": "1 Main St, Denver, CO 8021",
+        "applicant_business_phone": "123-456-7890",
+        "umbrella_effective_date": "07/15/2026", "umbrella_expiration_date": "07/15/2025",
+    })
+    assert len(out) == len(WARNING_RULES), out
+    return out
+
+
 def _all_emittable_messages() -> list[str]:
     return (
+        _harvest_identifier_messages()
+        +
         _harvest_static_messages()
         + _harvest_field_validation_messages()
         + _harvest_standalone_validator_messages()
@@ -753,6 +773,9 @@ _NO_FIX_CAUSE: dict[str, tuple[str, ...]] = {
     # Review screen the card is rebuilt per package with a choice of line for
     # each part (issue_registry.unmapped_line_issue, 14 Oct 2026).
     "unmapped_coverage_line": (),
+    # Information only (Michelle review item 3, 29 Oct 2026): the application
+    # asks for another coverage term than the current policy - nothing to fix.
+    "requested_coverage_change": (),
     # ── Named, and left as `none` by a HUMAN decision (not by drift) ─────────
     # These fire on a value that is PRESENT and looks wrong for the risk, not on
     # an empty fact, so "type the value" is not obviously the fix. Listed here

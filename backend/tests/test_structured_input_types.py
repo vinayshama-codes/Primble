@@ -210,7 +210,7 @@ def test_not_sure_and_blank_still_yield_no_answer():
     #    NO review_reason - that empty string is what keeps them away from
     #    `_blocks_submit`, which used to refuse the WHOLE submission (422) when
     #    a client with no umbrella typed "nil" into a currency box.
-    for raw, field in (("n/a", "total_payroll"), ("N/A", "fein"),
+    for raw, field in (("n/a", "total_payroll"), ("N/A", "num_employees"),
                        ("None", "prior_carrier"), ("none", "num_claims"),
                        ("nil", "umbrella_limit")):
         value, reason = _clean_answer_ex(raw, field)

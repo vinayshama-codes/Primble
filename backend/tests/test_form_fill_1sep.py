@@ -2107,4 +2107,8 @@ def test_x1_the_widening_did_not_disturb_the_existing_pairs():
     from services.pdf_service import _question_explanation_pairs
     assert len(_question_explanation_pairs(_acord_schema("ACORD_125"))) == 30
     assert len(_question_explanation_pairs(_acord_schema("ACORD_126"))) == 37
-    assert len(_question_explanation_pairs(_acord_schema("ACORD_131"))) == 26
+    # 25, not 26 (27 Oct 2026, lane A): the 26th was the coincidental pair of
+    # the "named insured on the fire policy?" tick with the free-standing
+    # insured-liability OTHER description - a checkbox now pairs only with its
+    # own description (`_checkbox_owns_description`).
+    assert len(_question_explanation_pairs(_acord_schema("ACORD_131"))) == 25

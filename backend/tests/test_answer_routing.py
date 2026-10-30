@@ -520,10 +520,10 @@ def test_cap_hard_stops_ship_an_actionable_row():
     _eff = _exp - timedelta(days=365)
     term = "07/15/2026"
     scenarios = [
-        # Property without Minimum Viable COPE, on each form the COPE gate covers.
+        # Property without Minimum Viable COPE - a property line's stop, so it holds
+        # ACORD 140 only (30 Oct 2026: a line's stop holds that line's forms; 141 is
+        # Crime and 133 WC Assigned Risk, Z37).
         ("ACORD_140", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
-        ("ACORD_141", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
-        ("ACORD_133", {"applicant_name": "X", "effective_date": term}, {"has_property_coverage": True}),
         # An umbrella with no underlying at all.
         ("ACORD_131", {"applicant_name": "X", "umbrella_limit": "$5,000,000", "effective_date": term},
          {"has_umbrella": True}),

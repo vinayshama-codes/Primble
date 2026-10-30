@@ -1024,14 +1024,53 @@ async def active_score_credits(
     ceiling is applied later by sqs_service.final_score_with_credits.
     """
     try:
+        rows = await get_dismissed_recommendations(session_id)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.error(f"active_score_credits failed for {session_id}: {ex}")
+        return 0, []
+    return credits_in_force(rows, facts, session_id)
+
+
+def credits_in_force(rows: List[dict], facts: Optional[dict] = None,
+                     session_id: Optional[str] = None,
+                     quiet: bool = False) -> Tuple[int, List[dict]]:
+    """`active_score_credits` on dismissal rows already read (pure - no
+    database): the credit still in force on `facts`. The review plan after
+    forms (29 Oct 2026, `services/review_plan._Sim`) asks it of every copy it
+    scores, so an answer that fills a credited field retires the credit there
+    exactly as the recalculation does. `quiet` keeps that simulation out of
+    the log."""
+    _log = (lambda *a, **k: None) if quiet else logger.info
+    try:
         from services.extraction_service import _fv
     except Exception:                                          # pragma: no cover
         _fv = None
 
     def _filled(key: str) -> bool:
+        """Is the card's gap ANSWERED - the question the scorer asks?
+
+        ONE SOURCE OF POINTS PER FACT (27 Oct 2026, Lane B item 6, measured
+        through the real answer route): an answer of "None" / "N/A" stores an
+        EMPTY value with `value_state` explicit_no / not_applicable, which the
+        pillars credit as answered (Brent 24 Aug: an absence is an answer) -
+        but this read only the value, so the dismissal credit stayed on top:
+        `total_revenue` dismissed (+6), then answered "None", scored 72 where
+        the same answer without the dismissal scored 66. And a GL class-code
+        card (`gl_class_codes_by_location`) is answered through the GL window,
+        which writes `gl_class_code_schedule`: the scorer reads both homes
+        (`sqs_service.gl_class_codes_present`), so this does too."""
         if not key or not isinstance(facts, dict):
             return False
-        val = _fv(facts, key) if _fv else facts.get(key)
+        try:
+            from services.sqs_service import GL_CLASS_CODE_HOMES, gl_class_codes_present
+            if key in GL_CLASS_CODE_HOMES:
+                return gl_class_codes_present(facts)
+        except Exception:                                      # noqa: BLE001
+            pass
+        held = facts.get(key)
+        if isinstance(held, dict) and held.get("value_state") in ("explicit_no", "not_applicable"):
+            return True                    # an absence / N/A is an answer
+        val = _fv(facts, key) if _fv else held
         if isinstance(val, (list, dict)):
             return bool(val)
         return str(val).strip() not in ("", "None", "null")
@@ -1056,11 +1095,11 @@ async def active_score_credits(
         # individually - deduping them would silently merge unrelated asks.
         _best_by_field: dict = {}
         _fieldless: list = []
-        for row in await get_dismissed_recommendations(session_id):
+        for row in rows or []:
             if not dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
                 continue
             if _credit_retired_by_attested_not_applicable(row, facts):
-                logger.info(
+                _log(
                     "credit retired: session=%s rec=%s - No Known Losses "
                     "attested, Loss History is Not Applicable",
                     session_id, row.get("rec_id"),
@@ -1068,7 +1107,7 @@ async def active_score_credits(
                 continue
             field = row.get("field")
             if _filled(field):
-                logger.info(
+                _log(
                     "credit retired: session=%s rec=%s field=%s now filled",
                     session_id, row.get("rec_id"), field,
                 )
@@ -1079,7 +1118,7 @@ async def active_score_credits(
             prev = _best_by_field.get(field)
             if prev is None or int(row["score_impact"]) > int(prev["score_impact"]):
                 if prev is not None:
-                    logger.info(
+                    _log(
                         "credit de-duplicated: session=%s field=%s keeping rec=%s "
                         "(%s pts) over rec=%s (%s pts) - one improvement, one credit",
                         session_id, field, row.get("rec_id"), row.get("score_impact"),
@@ -1087,7 +1126,7 @@ async def active_score_credits(
                     )
                 _best_by_field[field] = row
             else:
-                logger.info(
+                _log(
                     "credit de-duplicated: session=%s field=%s dropping rec=%s "
                     "(%s pts) - already credited by rec=%s",
                     session_id, field, row.get("rec_id"), row.get("score_impact"),
@@ -1096,7 +1135,8 @@ async def active_score_credits(
         kept = list(_best_by_field.values()) + _fieldless
         total = sum(int(r["score_impact"]) for r in kept)
     except Exception as ex:
-        logger.error(f"active_score_credits failed for {session_id}: {ex}")
+        if not quiet:
+            logger.error(f"active_score_credits failed for {session_id}: {ex}")
         return 0, []
     return min(100, total), kept
 
@@ -1718,6 +1758,16 @@ def _flatten_fact(key: str, raw, facts: Optional[dict] = None) -> Optional[dict]
     return row
 
 
+def _lineage_export(rows: List[dict], actors: Optional[dict]) -> List[dict]:
+    """The FACT HISTORY rows of the E&O record (services/fact_history.py)."""
+    try:
+        from services.fact_history import export_rows
+        return export_rows(rows, actors)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"Audit export: fact lineage rows not built: {ex}")
+        return []
+
+
 # ASYNC-SAFE
 async def get_audit_trail_export(session_id: str) -> dict:
     """Full E&O record for one submission, for the producer to download.
@@ -1754,6 +1804,14 @@ async def get_audit_trail_export(session_id: str) -> dict:
     # F (client section 12): submission_integrity_audit's first reader. Two of
     # the client's "producer override" events were written here and never shown.
     integrity_overrides = await get_integrity_audit_log(session_id)
+    # Brent's V2 E&O lineage (27 Oct 2026): every value each fact has held, who
+    # or what put it there, from -> to, when (services/fact_history.py).
+    lineage_rows: List[dict] = []
+    try:
+        from services.fact_history import fact_history as _fact_history
+        lineage_rows = await _fact_history(session_id, limit=20000)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"Audit export: fact lineage unavailable for {session_id}: {ex}")
 
     # ── The chronological history (client section 12's Desired Outcome) ───────
     # ONE list, built from the append-only spine, with every actor resolved to a
@@ -1774,6 +1832,11 @@ async def get_audit_trail_export(session_id: str) -> dict:
                      + list(downloads) + list(integrity_overrides)):
             if isinstance(_row, dict) and _row.get("user_id"):
                 _actor_ids.add(str(_row["user_id"]))
+        try:
+            from services.fact_history import actor_ids_in as _lineage_actor_ids
+            _actor_ids |= _lineage_actor_ids(lineage_rows)
+        except Exception:                                      # noqa: BLE001
+            pass
         actors = await resolve_actors(_actor_ids)
         # Score snapshots have their own SCORE HISTORY section with their own
         # rendering; repeating them here would bury the human acts.
@@ -1916,6 +1979,9 @@ async def get_audit_trail_export(session_id: str) -> dict:
         "rejected_facts": rejected_facts,
         "client_receipts": client_receipts,
         "field_modifications": _with_actor(field_changes),
+        # Brent's V2 E&O lineage: one row per change of one fact, oldest first,
+        # values shown to the owner only (this export is owner-scoped).
+        "fact_lineage": _lineage_export(lineage_rows, actors),
         # The one chronological history (client section 12). `audit_events` is
         # kept alongside it so the existing EVENT LOG section and any consumer
         # written against the raw rows keeps working.

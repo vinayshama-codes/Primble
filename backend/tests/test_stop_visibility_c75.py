@@ -66,16 +66,16 @@ def test_the_demoted_stop_is_still_a_hard_stop_on_screen():
     _can, remaining, downgraded = classify_stops([_EXPIRED],
                                                  {"has_property_coverage": False})
     assert remaining == [_EXPIRED] and downgraded == []
-    assert build_grouped_view([], [_EXPIRED], [])["counts"] == {"hard_stops": 1, "warnings": 0}
+    assert build_grouped_view([], [_EXPIRED], [])["counts"] == {"hard_stops": 1, "warnings": 0, "info": 0}
     # The C75 rule itself, on a stop the proceed decision still demotes.
     _can, remaining, downgraded = classify_stops([_COPE], {"has_property_coverage": False})
     assert remaining == [] and len(downgraded) == 1, "precondition: it demotes"
     # What the screen used to be given:
     old = build_grouped_view([], remaining, downgraded)["counts"]
-    assert old == {"hard_stops": 0, "warnings": 1}
+    assert old == {"hard_stops": 0, "warnings": 1, "info": 0}
     # What it is given now - the same arrays the blocker list reads:
     new = build_grouped_view([], [_COPE], [])["counts"]
-    assert new == {"hard_stops": 1, "warnings": 0}
+    assert new == {"hard_stops": 1, "warnings": 0, "info": 0}
 
 
 def test_no_call_site_still_feeds_the_display_the_demoted_lists():
@@ -197,7 +197,7 @@ def test_the_umbrella_period_duplicate_collapses_to_one_row():
         cross_issues=[{"code": "umbrella_gl_expiration_misaligned",
                        "type": "hard_stop", "message": _UMB_CODED}],
     )["counts"]
-    assert counts == {"hard_stops": 1, "warnings": 0}, counts
+    assert counts == {"hard_stops": 1, "warnings": 0, "info": 0}, counts
 
 
 def test_the_legacy_twin_survives_when_the_coded_rule_did_not_fire():

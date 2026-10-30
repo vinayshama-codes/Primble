@@ -299,6 +299,11 @@ async def _answer(session_id: str, session: dict, q: qn.Question, req: Questionn
         if not text:
             return False, "Enter an answer - or mark it Unknown, Pending or Not applicable.", None
         refusal = qn.answer_refusal(q, text)
+        try:                    # unread phrasings kept, shape only (GAP 2)
+            from services.unread_answers import flush_pending as _flush_unread
+            await _flush_unread()
+        except Exception:                                      # noqa: BLE001
+            pass
         if refusal:
             return False, refusal, None
         reading = qn.reading_for(session, q.id) or {}

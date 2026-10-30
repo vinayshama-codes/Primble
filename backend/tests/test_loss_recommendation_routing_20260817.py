@@ -280,8 +280,9 @@ def test_meaningful_answers_are_understood_not_refused(field, answer, expected):
     # "How many claims?" -> "none" is a real answer (zero), not a type error.
     ("num_claims", "none"),
     ("loss_history_years", "no losses"),
-    # A sole proprietor legitimately has no EIN.
-    ("fein", "None"),
+    # 29 Oct 2026: "None" on the FEIN is refused (every business has one,
+    # `fact_registry.ALWAYS_EXISTS`); an employee count takes it.
+    ("num_employees", "None"),
 ])
 def test_an_absence_is_an_answer_not_a_type_error(field, answer):
     """Brent 2026-08-24: "we can't treat 'N/A' as '0'. These are not the

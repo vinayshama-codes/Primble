@@ -95,7 +95,7 @@ def test_the_counts_follow_so_the_toast_cannot_announce_a_hidden_row():
     row that is still counted is the 2026-08-12 defect in reverse."""
     issues = [make_issue(c, "soft_warning", m) for c, m in CLIENT_ROWS]
     view = build_grouped_view(issues, [], [m for _c, m in CLIENT_ROWS])
-    assert view["counts"] == {"hard_stops": 0, "warnings": 0}
+    assert view["counts"] == {"hard_stops": 0, "warnings": 0, "info": 0}
     assert _messages(view) == []
     assert view["important"] == []
 

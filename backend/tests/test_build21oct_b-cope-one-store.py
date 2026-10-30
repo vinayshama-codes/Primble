@@ -120,12 +120,19 @@ def _routed_through_the_view(code: str, facts: dict, severity: str = "hard_stop"
 def test_one_building_or_none_is_byte_identical(code):
     base = resolution_for(code)
     for rows in (None, [], _rows(1), ["not a row", None, 7] + _rows(1)):
-        facts = {"occupancy_type": None}
+        # (28 Oct 2026) A package naming NO premises at all - no address, no
+        # location row - is the one case the Minimum Viable card changes: it
+        # also shows the premises address box its hard stop checks
+        # (`premises_cope._with_premises_box`). A stated address keeps it.
+        facts = {"occupancy_type": None, "locations": ["100 Main St"]}
         if rows is not None:
             facts["property_locations"] = rows
         assert route_cope_resolution(code, base, facts) is base
         assert route_cope_resolution(code, base, {**facts, "property_locations":
                                                   {"value": rows, "source": "extracted"}}) is base
+        if not rows and code in ("minimum_viable_cope_missing", "legacy_minimum_viable_cope"):
+            bare = {k: v for k, v in facts.items() if k != "locations"}
+            assert route_cope_resolution(code, base, bare)["facts"] == ["locations"] + base["facts"]
     for fact in PER_BUILDING_COPE:
         assert per_building_fix(fact, _one()) is None
         assert per_building_fix(fact, {}) is None
@@ -223,7 +230,11 @@ def test_the_legacy_twin_from_its_sentence_routes_the_same_way():
     assert res["mode"] == "field" and res["facts"] == ["occupancy_type"]
     one = build_grouped_view(build_structured_from_sources(legacy_hard=[msg]), [msg], [], facts=_one())
     res1 = [i for _c, i in _view_items(one) if "COPE" in i["message"]][0]["resolution"]
-    assert res1 == resolution_for("legacy_minimum_viable_cope")      # one building: its own card
+    # One building: its own card, offering only the box that needs fixing
+    # (Rule 1 / G1, 30 Oct 2026 - the stated construction and values are not re-asked).
+    whole = resolution_for("legacy_minimum_viable_cope")
+    assert res1["facts"] == ["occupancy_type"]
+    assert {k: v for k, v in res1.items() if k != "facts"} == {k: v for k, v in whole.items() if k != "facts"}
 
 
 def test_only_the_missing_per_building_columns_are_asked():

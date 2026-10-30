@@ -191,10 +191,19 @@ def test_the_promotion_function_is_additive_in_isolation():
 
 # -- Acceptance criterion 2: satisfied means not Critical ---------------------
 
+def test_an_na_fein_is_not_a_satisfied_answer():
+    """29 Oct 2026: every business has a FEIN - a stored "N/A" answers nothing."""
+    facts = dict(LIVE_FACTS)
+    facts["fein"] = {"value": "N/A", "source": "client_arq"}
+    out = _decorate(["fein"], facts)
+    blank = dict(LIVE_FACTS)
+    blank.pop("fein", None)
+    assert out["fein"]["priority"] == _decorate(["fein"], blank)["fein"]["priority"]
+
+
 @pytest.mark.parametrize("value", [
     "12-3456789",                                       # an ordinary answer
     {"value": "84-2210987", "source": "client_arq"},    # a prior answer
-    {"value": "N/A", "source": "client_arq"},           # an answered ABSENCE
 ])
 def test_a_satisfied_fact_is_never_critical(value):
     facts = dict(LIVE_FACTS)

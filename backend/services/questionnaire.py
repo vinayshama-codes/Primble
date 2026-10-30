@@ -373,7 +373,7 @@ SECTIONS: Tuple[Section, ...] = (
            "long_text", group=_G5, insured=True),
         _q("G.6", "Any explicitly stated Business Income Period of Restoration terms or requested coverage "
                   "extensions; do not substitute Extended Period of Indemnity.", "period_of_restoration",
-           "choice"),
+           "choice", gate="period_of_restoration"),
         _q("G.7", "Vacancy, renovations, property in transit, offsite property and seasonal inventory "
                   "changes.", "qn_vacancy_renovation", "long_text", insured=True),
     )),
@@ -646,6 +646,14 @@ def _gate_open(gate: Optional[str], page: _Page) -> bool:
         return page.contractor()
     if gate == "general_liab_or_contractor":
         return "general_liab" in req or page.contractor()
+    if gate == "period_of_restoration":
+        # No Period of Restoration exists on an Actual Loss Sustained BI
+        # coverage (29 Oct 2026) - not asked; the property section gates the rest.
+        try:
+            from services.property_coverages import period_of_restoration_needed
+            return period_of_restoration_needed(page.facts)
+        except Exception:                                     # noqa: BLE001
+            return True
     if gate == "specialty_property":
         return ("inland_marine" in req
                 or _names_a_line(page.facts, ("builders risk", "builder's risk", "equipment breakdown"))
@@ -705,10 +713,11 @@ def display(value: Any) -> Optional[str]:
 def _fallback_display(fact: str, raw: Any) -> Optional[str]:
     v = _unwrap(raw)
     if fact == "is_renewal":
+        from services.fact_state import typed_by_person
         from services.normalization import yes_no_answer
         yn = yes_no_answer(v)
-        return "Renewal" if yn == "Y" else ("New business" if yn == "N" and isinstance(raw, dict)
-                                             and raw.get("source") in ("producer", "client_arq") else None)
+        return "Renewal" if yn == "Y" else ("New business" if yn == "N" and typed_by_person(raw)
+                                             else None)
     if fact == "submission_is_new_business":
         from services.normalization import yes_no_answer
         return "New business" if yes_no_answer(v) == "Y" else None

@@ -194,6 +194,9 @@ def test_the_post_form_recalculation_keeps_the_warning(monkeypatch):
     row["generated_forms"]["ACORD_140"] = {
         "mapped": {}, "confidence": {}, "schema": {}}
     row["selected_form_ids"] = ["ACORD_125", "ACORD_140"]
+    # A property package recommends the 140 (30 Oct 2026: after forms the
+    # PACKAGE checks are read on the recommended forms, like before forms).
+    row["recommendations"] = [{"form_id": "ACORD_125"}, {"form_id": "ACORD_140"}]
     # a current term: no expired-term field-level hard stop in the way
     from datetime import datetime, timedelta
     row["facts"]["effective_date"] = H._producer(H._mdY(datetime.now() - timedelta(days=30)))

@@ -145,7 +145,11 @@ def test_deferring_takes_a_form_choice_out_of_both_stop_lists():
     out = defer_form_choices([_ACORD25, _NARR101, _TYPED])
     hard, soft, adv = split_cross_form_issues(out)
     assert not _listed(_ACORD25["message"], soft) and not _listed(_ACORD25["message"], hard)
-    assert _listed(_NARR101["message"], soft) and _listed(_TYPED["message"], soft)
+    # REVERSED 30 Oct 2026 (owner): a card whose fix involves a form waits for the
+    # forms even when a narrative also answers it; the narrative itself is reached
+    # through its own recommendation before forms.
+    assert not _listed(_NARR101["message"], soft) and out[1]["form_choice"] is True
+    assert _listed(_TYPED["message"], soft)
     assert out[0]["form_choice"] is True and out[0]["type"] == "advisory"
     assert _ACORD25["type"] == "soft_warning"           # a copy - the caller's issue is untouched
 
@@ -301,12 +305,18 @@ def test_the_package_lists_the_owners_last_three_questions():
 
 
 def test_a_coverage_decision_is_a_row_without_a_box():
-    """41 employees and no workers comp line: no box answers that - a review row, never a
-    typed box the server would refuse."""
+    """41 employees and no workers comp line. Until 27 Oct 2026 no box answered that - a
+    review row only, so the score could never reach 100 (owner's rule: answering
+    everything on the pre-form screen reaches 100). Now the row asks how the employees
+    are covered (`workers_comp_arrangement`, a choice list) and the answer retires it."""
     items = S.exposure_deduction_items({"num_employees": _env("41")}, {}, [], [])
-    assert [(i["bucket"], i["fact"]) for i in items] == [("payroll_employee_information", None)]
+    assert [(i["bucket"], i["fact"]) for i in items] == [("payroll_employee_information",
+                                                         "workers_comp_arrangement")]
     rows = S._gap_rows("exposure_consistency", 92, items, 0.25)
-    assert rows[0]["field"] is None and rows[0]["closes_with"] == "review"
+    assert rows[0]["field"] == "workers_comp_arrangement" and rows[0]["closes_with"] == "type"
+    answered = {"num_employees": _env("41"),
+                "workers_comp_arrangement": {"value": "Not carried", "source": "producer"}}
+    assert S.exposure_deduction_items(answered, {}, [], []) == []
 
 
 def test_a_choice_list_question_is_probed_with_a_choice():

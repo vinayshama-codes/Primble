@@ -452,7 +452,9 @@ class TestCrossLineCodes:
             "Other Car territory and 6679 returns to the GL hazard grid")
 
     def test_no_witness_means_no_opinion(self):
-        mapped = {"Vehicle_RateClassCode_A": "91580"}
+        # Row A names its vehicle: a row with none prints nothing (27 Oct 2026,
+        # `_cells_of_rows_without_a_vehicle`) - not this test's question.
+        mapped = {"Vehicle_RateClassCode_A": "91580", "Vehicle_VINIdentifier_A": "1GCWGAFP7H1234567"}
         _enforce_post_fill_guards(mapped, _schema("ACORD_127"),
                                   {"_form_id": "ACORD_127"},
                                   gpt_filled_set=set(mapped))

@@ -46,6 +46,43 @@ async def _require_admin(current_user: dict = Depends(get_current_user)) -> dict
     raise HTTPException(403, "Admin access required")
 
 
+@router.get("/transcriber-usage")
+async def transcriber_usage_report(
+    days: int = Query(30, ge=1, le=365),
+    _: dict = Depends(_require_admin),
+):
+    """ASG Transcriber pages sent per day and environment (29 Oct 2026,
+    ASG_TRANSCRIBER.md): usage is metered per page under the ASG agreement.
+    Admin only. Counts and the current caps - never a document or a value."""
+    from repositories.transcriber_repository import usage_summary
+    from services.asg_transcriber import load_config
+    cfg = load_config()
+    out = await usage_summary(days=days)
+    out.update({"enabled": cfg.enabled, "env": cfg.env, "live": cfg.live,
+                "daily_page_cap": cfg.daily_page_cap, "max_pages_per_package": cfg.max_pages_per_package,
+                "send_fillable": cfg.send_fillable})
+    return out
+
+
+@router.get("/unread-answers")
+async def unread_answers_report(
+    limit: int = Query(50, ge=1, le=500),
+    fact: str = Query("", max_length=120),
+    _: dict = Depends(_require_admin),
+):
+    """The most common answers people typed that the deterministic readers
+    could not read, by fact (CLAUDE.md "GAP 2"; services/unread_answers.py).
+
+    Admin only. What it shows is each answer's SHAPE - digits, e-mails and IDs
+    taken out - never the answer itself, which is not stored. Read this before
+    concluding the free-text handling is complete: an empty list proves the
+    rules, a full one is the data for extending them."""
+    from services import unread_answers as ua
+    await ua.flush_pending()            # this process's latest, then the store
+    rows = await ua.top_unread(limit=limit, fact_key=fact.strip() or None)
+    return {"rows": rows, "by_fact": ua.by_fact(rows), "pending": ua.pending_count()}
+
+
 @router.get("/dlq-inspect")
 def dlq_inspect(
     limit: int = 10,

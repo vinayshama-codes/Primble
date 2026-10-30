@@ -405,9 +405,13 @@ def _classify_value(
     """
     sv = str(value).strip()
 
-    # A field that correctly holds the applicant's own name is fine, even if
-    # the applicant name happens to look carrier-ish.
-    if applicant_norm and is_insured_identity_field(field) and normalize_name(sv) == applicant_norm:
+    # The applicant's own name is never a carrier's, even when it happens to
+    # look carrier-ish ("Mutual Plumbing Company", "Farmers Mutual Grain
+    # Co-op"). This held for the insured identity boxes only, so the same name
+    # as a vehicle's owner or on an interest row was reported as "carrier-shaped
+    # data" (27 Oct 2026, Lane B item 4c) - an ordinary-looking applicant name
+    # in the same box was never reported. One rule for every owner box now.
+    if applicant_norm and normalize_name(sv) == applicant_norm:
         return None, None, None
 
     carrier_norm = normalize_carrier(sv)

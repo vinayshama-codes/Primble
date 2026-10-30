@@ -81,7 +81,9 @@ def test_an_unreadable_cell_leaves_the_fact_to_decide():
     assert _ticks(_facts("service", entries=[_dec("USE", "ZQX-9")]))["Vehicle_Use_ServiceIndicator_A"] == "Yes"
 
 
-@pytest.mark.parametrize("source", ["user_confirmed", "cross_form_conflict"])
+# "cross_form_conflict" left 27 Oct 2026 (Lane B item 2): it is a QUESTION's
+# source, never written on a fact; a person's value is `fact_state.put_by_person`.
+@pytest.mark.parametrize("source", ["user_confirmed"])
 def test_a_producers_confirmation_is_a_persons_answer(source):
     got = _ticks(_facts("commercial", source=source, entries=[_dec("USE", "SERVICE")]))
     assert got["Vehicle_Use_CommercialIndicator_A"] == "Yes"

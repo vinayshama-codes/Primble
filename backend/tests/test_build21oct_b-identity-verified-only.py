@@ -738,7 +738,13 @@ def test_every_production_caller_passes_its_documents_to_the_picker_stops(module
              and getattr(n.func, "id", getattr(n.func, "attr", None)) == "underwriting_conflict_stops"]
     assert calls, module
     for call in calls:
-        assert len(call.args) + len(call.keywords) == 3, ast.get_source_segment(src, call)
+        # The documents are the third argument (29 Oct 2026: stops_now also
+        # passes the session's confirmations as a fourth - a confirmed pick
+        # retires its stored conflict - so the arity is no longer exactly 3).
+        kws = {k.arg for k in call.keywords}
+        assert len(call.args) >= 3 or "docs" in kws, ast.get_source_segment(src, call)
+        if module == "stops_now":
+            assert len(call.args) >= 4 or "confirmations" in kws, ast.get_source_segment(src, call)
 
 
 # ── B8. After forms: an UNVERIFIED other-insured document still only suggests ─

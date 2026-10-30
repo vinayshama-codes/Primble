@@ -1101,6 +1101,135 @@ def hired_pd_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
     return out
 
 
+# ══ (h) A YES / NO ABOUT ONE POLICY stands on that policy's own text (P15-6) ══
+# 27 Oct 2026, run 805049a7 (part R): ACORD 126 "the general aggregate limit
+# applies per project" ticked Yes, its evidence the UMBRELLA's forms schedule
+# ("Aggregate Limits of Insurance (Per Project)"). Rules (a) / (a2) / (d) judge
+# amounts, dates, identifiers, descriptions and the claims-made tick; a Yes /
+# No box (every checkbox, every Y/N question) answered from another policy's
+# text went through, because the evidence gate checks only that the quote is
+# IN the documents, never in WHICH one. Here the AI's own evidence - its
+# grounding quote and its paired explanation - must be printed by a document
+# that speaks for the box's line (the same witnesses as (a), a reference-only
+# schedule dropped as in (a2)). Only questions about the POLICY
+# (`pdf_service._question_is_about_coverage`, read off ACORD's own question
+# text): a question about the applicant can be answered by any of the
+# insured's documents. Section forms only (the package forms have no line);
+# ACORD 131's boxes about the insured are every copy's. Evidence printed
+# nowhere is the gate's question, not this one; with no evidence nothing acts.
+REASON_ANSWER_OTHER_POLICY = "ANSWER_FROM_ANOTHER_POLICY"
+HELD_BACK_TEXT[REASON_ANSWER_OTHER_POLICY] = (
+    "The AI answered this from another policy's documents, so it was left blank.")
+_ANSWER_NOT_JUDGED_FORMS = frozenset({"ACORD_125", "ACORD_101", "ACORD_25"})
+# "Is there a formal, written safety and security policy in effect?" (126 /
+# 186), "Is there written policy regarding EFTs?" (141): the APPLICANT's own
+# written policy, not an insurance policy - every document may speak for it.
+_APPLICANTS_WRITTEN_POLICY_RE = re.compile(r"\bwritten\b[^?]{0,48}\bpolicy\b", re.I)
+_OTHER_COVERAGE_WORD_RE = re.compile(
+    r"\b(?:coverages?|insurance|insurers?|carriers?|endorsements?|underlying|limits?|"
+    r"deductibles?|premiums?|self[- ]insured|bonds?|claims[- ]made)\b", re.I)
+
+
+def _asks_about_the_applicants_own_policy(question: str) -> bool:
+    return bool(_APPLICANTS_WRITTEN_POLICY_RE.search(question or "")) \
+        and not _OTHER_COVERAGE_WORD_RE.search(question or "")
+
+
+# A question about the INSURED'S OWN PRACTICE OR HISTORY is not a term of this
+# policy (owner, 27 Oct 2026): "Do subcontractors carry coverages or limits
+# less than applicant?", "... allowed to work without providing you with a
+# certificate?", "Has any product ... been excluded ... from any previous
+# coverage?", "declined, cancelled or non-renewed", tail under a previous
+# policy, self-insured, unpaid premium, related entities. Its answer can sit in
+# any document - a prior policy, the narrative, another line's dec - so rule (h)
+# does not judge it by the line's own documents. Policy terms ("aggregate
+# applies per project", "not covered by this policy") are still judged.
+_APPLICANT_PRACTICE_OR_HISTORY_RE = re.compile(
+    r"\bsub-?contract|\bsublet|\bprevious\b|\bprior\b|\bdeclined\b|\bcancel+ed\b|"
+    r"\bnon-?renew|\btail\b|\bself[- ]?insured\b|\bvoluntary coverage\b|\bunpaid\b|"
+    r"\bcommon(?:ly)? (?:management|managed|owned)\b|\bother insurance with this company\b",
+    re.I)
+
+
+def _asks_about_the_applicants_practice_or_history(question: str) -> bool:
+    return bool(_APPLICANT_PRACTICE_OR_HISTORY_RE.search(question or ""))
+
+
+def foreign_evidence_answers(mapped: dict, schema: dict, facts: dict, form_id: Any,
+                             ai_fields: Iterable[str],
+                             grounding: Optional[dict] = None) -> Dict[str, str]:
+    """{field: reason} for every AI Yes / No answer about a policy whose only
+    evidence is another policy's text (rule (h)); a refused question's AI
+    explanation goes with it. Never raises."""
+    out: Dict[str, str] = {}
+    try:
+        base = _base(form_id)
+        docs = _documents(facts)
+        ai = set(ai_fields or ())
+        if (not docs or not ai or base in _NOT_JUDGED_FORMS or base in _ANSWER_NOT_JUDGED_FORMS
+                or not form_line(form_id)):
+            return out
+        from services.pdf_service import (
+            _is_yes_no_field, _question_explanation_pairs, _question_is_about_coverage,
+            _yes_no_question_text)
+        pairs = _question_explanation_pairs(schema or {})
+        grounding = grounding if isinstance(grounding, dict) else {}
+        for field in sorted(ai):
+            answer = str((mapped or {}).get(field) or "").strip()
+            if not answer or not isinstance((schema or {}).get(field), dict):
+                continue
+            if not _is_yes_no_field(field, schema) or not _question_is_about_coverage(field, schema):
+                continue
+            if _asks_about_the_applicants_own_policy(_yes_no_question_text(field, schema)):
+                continue
+            if _asks_about_the_applicants_practice_or_history(_yes_no_question_text(field, schema)):
+                continue
+            if _is_shared_131_box(form_id, field):
+                continue
+            exp = pairs.get(field)
+            texts = [grounding.get(field)]
+            if exp and exp in ai:
+                texts.append((mapped or {}).get(exp))
+            needles = [n for n in (_folded_text(t) for t in texts if str(t or "").strip())
+                       if len(n) >= 6]
+            if not needles:
+                continue                    # no evidence: the gate's question
+            # Z44-A-R (review, 27 Oct): ACORD 131's underlying-insurance boxes are
+            # ABOUT the underlying policies ("the underlying policy includes
+            # liquor / vendors liability" is the GL dec's to answer) - not judged,
+            # as rule (d) leaves the 131 alone. Elsewhere a document that speaks
+            # for the FORM's line speaks for its questions too: a box whose name
+            # reads as another line ("CrimeCoverage_OutsidePremisesOtherProperty"
+            # on the 141 canons to Property) is still the form's own policy's.
+            if base == "ACORD_131" and field.startswith("Underlying"):
+                continue
+            line = box_line(form_id, field)
+            witnesses: List[Doc] = []
+            for ln in dict.fromkeys(l for l in (line, form_line(form_id)) if l):
+                for d in _drop_reference_only(witness_documents(facts, form_id, ln, docs) or [],
+                                              ln, None, form_id):
+                    if d not in witnesses:
+                        witnesses.append(d)
+            if not witnesses:
+                continue
+            printed = [n for n in needles if any(n in _folded(d) for d in docs)]
+            if not printed:
+                continue                    # printed nowhere: another rule's question
+            if any(n in _folded(d) for n in printed for d in witnesses):
+                continue
+            out[field] = REASON_ANSWER_OTHER_POLICY
+            if exp and exp in ai and str((mapped or {}).get(exp) or "").strip():
+                out[exp] = REASON_ANSWER_OTHER_POLICY
+            logger.info("scoped_evidence %s form=%s field=%s value=%r line=%s printed_in=%s",
+                        REASON_ANSWER_OTHER_POLICY, form_id, field, answer[:10], line,
+                        [d.name for d in docs if any(n in _folded(d) for n in printed)][:3])
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("scoped_evidence: answer evidence check skipped (form=%s): %s",
+                       form_id, exc)
+        return {}
+    return out
+
+
 
 # ══ (g) A line the documents carry ONLY AS A PREMIUM (Z41, 25 Oct 2026) ══════
 # Run f575160b: the Package dec's coverage-part menu prints "CRIMEANDFIDELITY
@@ -1262,9 +1391,12 @@ _INSURED_BUSINESS_BOX_RE = re.compile(r"GrossReceipts|GrossSales|AnnualRevenue|A
 
 
 def out_of_scope_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
-                        ai_fields: Iterable[str]) -> Dict[str, str]:
+                        ai_fields: Iterable[str],
+                        grounding: Optional[dict] = None) -> Dict[str, str]:
     """The guard's one call: rules (b) then (a) over the AI values of one form.
-    {field: reason code}. Nothing without attached documents."""
+    {field: reason code}. Nothing without attached documents. `grounding`: the
+    AI's evidence quote per Yes / No box (rule (h)); without it (a re-stamp, a
+    replay) rule (h) reads the paired explanations only."""
     ai = set(ai_fields or ())
     if not ai or not _documents(facts):
         return {}
@@ -1284,6 +1416,8 @@ def out_of_scope_values(mapped: dict, schema: dict, facts: dict, form_id: Any,
     out.update(retention_values(mapped, schema, facts, form_id, rest))
     rest = rest - set(out)
     out.update(hired_pd_values(mapped, schema, facts, form_id, rest))
+    rest = rest - set(out)
+    out.update(foreign_evidence_answers(mapped, schema, facts, form_id, rest, grounding))
     return out
 
 

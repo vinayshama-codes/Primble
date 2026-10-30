@@ -562,3 +562,196 @@ this package (23 Oct #4, #5); 12 not done / partial (17 Oct #10, B2, 16-PDF requ
   line record is its own policy (`underwriting_consistency._OWN_POLICY_DOC_TYPES`); two values from one document still
   conflict. Replay on f3e4c225: fix on = no conflict (85 -> 100 after a re-read), fix off = the card returns. 70 Data
   Consistency test files green (6,484 passed). Extraction-dependent: any fresh upload (live too) could hit it. Needs deploy.
+- 26 Oct (offline, suite 20,438 / 1 / 19): Brent's download screen = three steps Hard Stops > Warnings > Cross-Form Validation, each
+  with Skip (`needsAttention.downloadSteps`, `needs_attention.review_issue_rows` marks `cross_form`); everything else stays in the
+  side panel; no screen when the three are empty. Known bugs: 140 $5,000 deductible = NOT a bug (schedule exceptions); loss-run
+  summary rows hidden from the loss table and kept on save (`schedule_capture._shown_row_indices`); 137 hired PD primary/excess tick
+  needs that word beside "hired" (`ai_answer_guards.hired_pd_basis_not_stated`); 127 trailer deductible = correct; garaging read per
+  vehicle from the dec's table (`extraction_service.read_vehicle_garaging`); per-vehicle physical damage from three layouts - named
+  columns, "AUTO n" election lines, banner tables (`read_vehicle_physical_damage`; comp/coll_covered + own deductible). Sweep of 45
+  stored packages: 17 changed, every reading matches its own document row.
+- 26 Oct night, localhost runs (Orbin 3c95c091 + fresh Choice Electric 6c420291): PASS #5 state (CO, not the carrier's
+  IA), Orbin #7/#8/#11/#15/#17, U4 two landlords, loss-run edge cases C1-C6, 127 garaging + physical damage, loss summary
+  rows. #4 untestable on renewal kits. Found + fixed: 137 hired PD "primary" taken from the LIABILITY line (now per line,
+  with a physical-damage term); building 2 missing from one reading (now read from the dec's Prem#/Bldg# blocks); the
+  ownership "Yes" lifted every loss run (now the runs on file when given; a later run is asked again). Old-period run's
+  +2 = Structural FEIN from that run (correct). Suite 20,447 / 1 / 19. Uncommitted.
+
+## OPEN LIST - 26 Oct 2026 night (own list + a sweep of every md file; claims checked in code)
+53 open, 20 closed-but-noted-open, 8 stale notes. Same list in memory `open-items-26oct`.
+
+**Status changes from the sweep:** CE #22 / CE #27 / 17 Oct #10 / Q1 - Brent's 26 Oct download-screen spec (3 steps +
+Skip, the rest in the side panel) is BUILT 26 Oct, awaiting a live look (was "waiting on Brent"). P15-1/2/3/4/7 done
+(Z31-W), P15-5 done 26 Oct; only P15-6 open. ACORD 141 / 160 recommender labels done (Z37).
+
+### 1. Ours to build now (no outside input)
+1. ACORD 126 per-project aggregate taken from the umbrella (P15-6; needs a live look).
+2. E&O fact lineage (Brent V2 #1). 3. Session archival / retention (V2). 4. ARQ bot usage tracking (V2).
+   - 2: BUILT 27 Oct (Lane C, `25sepChanges.md` Z44-C) - every fact change recorded at the two facts write doors
+     (encrypted from -> to, kind, who, action, document + page); History on the SQS evidence popover; FACT HISTORY in
+     the E&O download. Awaiting a live look.
+   - 3: BUILT 27 Oct (Z44-C) - Archive / Unarchive + Archived filter on the dashboard; an archived package is read-only
+     (409 on every write route, `ArchivedPackageGuard` + the write door); archive retention 730 days, auto-archive off
+     by default. Awaiting a live look.
+   - 4: BUILT 27 Oct (Z44-C) - one row per Form Assistant use (outcome, tokens, latency, question open; never the
+     client's text); "Form Assistant used N times" in Sent Questionnaires; admin summary route. Awaiting a live look.
+5. Quote-style test package with a blacked-out premium to prove 23 Oct #4.
+6. TestClient hang after an upload (test harness only).
+7. ACORD 130 loss totals per policy period (owned blank, no period alignment).
+8. ACORD 101 limits for Inland Marine / Crime / EPL (not in the line records).
+9. `cross_form_validator` GL readers read only `gl_class_codes_by_location` (GL window / schedule rows invisible to
+   codes-vs-ops, WC/GL alignment and the 101 need).
+10. The 8 "a person put this value" readers are not one door.
+11. ACORD 101 added after the 125 does not re-stamp the 125 (a long remark prints on both until regenerated).
+12. Z31-W open ends: 131 "named insured on fire policy" paired with the wrong OTHER description; 127 row A policy-level
+    USE ticks with no vehicle; a 130 rating date not re-judged when the proposed date is retyped after forms.
+13. Z30 / Z32 open ends: client-questionnaire 140 answers and an accepted held answer write one package value, not per
+    building; a person's "None at this time" accepted as the applicant name.
+14. Rare parsing leftovers: "c/o Grange Mutual" cell; pipe officer table running into the next table; applicant
+    "... Mutual ..."; "Home Office:" address; "USE: NA" policy-level use (owner to confirm).
+15. The per-form fallback (when `shared_gap_fill` fails) not re-checked for line scoping.
+16. The unread-answers log (`answer_semantics.unresolved_answers`) is in memory only and unwatched.
+17. Dismiss-then-fill credit stacking - never proven either way.
+18. CONTEXT_UTILISATION never A/B'd on a live run.
+19. `_COMPLETENESS_MARGIN` scale mismatch (fails toward asking; low).
+
+### 2. Tomorrow (27 Oct)
+20. Uploaded ACORD forms (Brent's Fri 30 Oct deadline; generic design in memory `acord-upload-intake-plan`).
+21. Login captcha (Cloudflare Turnstile keys from the owner).
+
+### 3. Owner's call
+22. "Lines applied for" control in the review. 23. A stated $0 premium reads "Missing / Requires Confirmation".
+24. "Add ACORD 186" after forms only in the editor. 25. "Included" vs "See schedule" raises a Data Consistency conflict.
+26. Attachment C: claim expense and "date first made" not read from loss runs.
+27. X6: applicant mailing city / ZIP from the garaging line when the decs redact the mailing address - blank or garaging?
+28. Drive Other Car prompt still points at drivers (fix = PROMPT_VERSION bump, re-reads every cached package).
+
+### 4. Waiting on Brent / ASG
+29. Transcriber. 30. Converter / AL3 input format. 31. Yelp + Smarty keys. 32. Next forms list. 33. Apple Pay.
+34. SMS provider. 35. Producer custom questions + carrier triage view. 36. Per-form scores (TBD).
+37. Do carriers accept the built-in applicant signature (and the cover prints no "signed" line)?
+38. ACORD 137 / 138 symbol grid rows B, E-H (only row A stamped). 39. Q29: WC rows vs stated payroll warning.
+40. ACORD 137 specified-causes deductible 1,000 (per-vehicle detail). 41. NAICS suggestion table - which trades.
+
+### 5. Owner's own
+42. `backend/sess.json` + `backend/run.json` (client PII) still tracked in git - `git rm --cached`, then scrub history
+    with the Vision key. 43. Commit + deploy the 26 Oct batch (suite 20,447 / 1 / 19). 44. Rotate the Google Vision key.
+45. Check Render settings (dev routes off, scheduler). 46. CE 5 Oct #1 blank-band screen check.
+47. Send Brent: claims-spreadsheet question, the 60 cap, ASG API access, Q5 simulated SQS, the 800+ form timeline, the
+    16 loss-run PDFs request, the unsent "decided, tell Brent" lists Z30-D, Z31-D, Z32-D, Z33, Z35-D, Z36-D.
+48. Michelle M1 (why Orbin #5 / #12 were declined); her account has no contact phone / agency address.
+49. Pre-production security: encryption coverage, audit-log coverage, staging. 50. Brent's paused Supabase "Project One".
+51. CE #6: which box takes a carrier website.
+52. CH125 kit: live retest + Test 1 grading never logged; NPN / licence account fields; audit gaps (Q4 inference,
+    loss-total incurred fallback, zero-claim "Check if none").
+
+### 6. Check after deploy
+53. Download screen in a browser (3 steps + Skip, no roof hard stops); a fresh generation for the 137 tick + building 2
+    fixes; the 8 localhost-only items on primble.ai.
+
+### Closed (were noted open)
+P15-1/2/3/4/7 (Z31-W); P15-5 / X1 (26 Oct); ACORD 141 / 160 labels (Z37); download-screen spec (26 Oct); round-trip
+reply (Brent's 26 Oct mail, now item 20); orphan `session_pdf_bytes` (retention cleanup); stale held answers
+(`release_superseded_holds`); "2%" deductibles (Z33-PERCENT); invented "# CLAIMS" (owned blank since 6 Oct); second
+officer title (Z38/Z39); 131 garagekeepers / watercraft / aircraft (C104); 137 hired PD deductible (Z41); "(000 OMITTED)"
+(`thousands_omitted`); ACORD 141 per-form crime facts; `cap_soft_stops` / `hidden_warnings` rendered; Z36 ask-later
+calls; CH125 LOB codes (Z37); out-of-scope rival dates; X2-X5 / X7 (top table of 25sepChanges.md); round-6 list
+(superseded by rounds 8-9, Z8, Z28/Z35, Z37 - not re-checked item by item).
+
+### 27 Oct 2026 - build of the "Ours to build now" group (in progress)
+- Item 5 / 23 Oct #4 PASS on localhost (bf2d372a, a new-business quote with the auto premium blacked out): ACORD 125
+  page one prints GL $4,200 + Property $3,100, the Quote tick, the receiving carrier, and the "Policy premium total is
+  partial" to-do (1 policy left out). Found + fixed on the way: a quote titled "Quotation" with a "Quote Number" was
+  classified as a NARRATIVE (quote keywords scored 2.0 < 3.0 and the narrative rule won), so page one withheld its
+  premiums; `DOC_TYPE_KEYWORDS["quote"]` now reads "quotation" / "quote number". 280 classifier tests green.
+- Item 6 (TestClient hang): not reproducible on current code (1-file and 7-file uploads tear down in < 1 s); the 26 Oct
+  hang matches the Mac-sleep pattern. Hardened anyway: `config.database.close_pool` gives up after 10 s and terminates
+  held connections; the essentials background generation task is held by reference; an AST test fails the build on any
+  detached task whose reference is thrown away. Watchdog harness: scratchpad live26/upload_watch.py.
+- Test packages created on the owner's account: 97164c2b, b98c5733 (hang probes), b7c83154, bf2d372a (quote).
+- Tests: `backend/tests/test_build_27oct_main.py` (7).
+- 27 Oct, all built + reviewed (25sepChanges.md Z44-A / Z44-B / Z44-C and their -R reviews; 10 reviewer defects fixed). Full
+  suite 20,957 / 1 (known) / 19. CONTEXT_UTILISATION A/B on two fresh Orbin uploads (1cc5cc22 at 0.75, 6a672b86 at 0.35): 282 s
+  vs 259 s, 200 vs 213 calls, 0 vs 0 invented keys, 259 boxes each, 22 differ (mostly run-to-run reading variance) - KEEP 0.75.
+- Live Choice Electric 6e58bd73 (fresh, 7 decs + 2 loss-run CSVs, 9 forms): 97 before and after forms, no hard stops / warnings;
+  the last 3 points = the loss-run ownership step (FEIN on the CSVs differs) -> answered -> 100. PASS live: state CO per coverage;
+  127 garaging per vehicle; ACORD 101 added after forms -> the 125 remark becomes "See the attached ACORD 101 ..."; the 101 lists
+  EPL "Limit $1,000,000 aggregate" (Inland Marine blank - its dec prints only a premium); fact history returns rows; archive ->
+  write 409 / read 200 -> unarchive. Not exercised: 130 per-period loss totals (the CSVs are all-lines yearly SUMMARIES, no WC
+  claim rows - blank is right) and the 126 per-project rule (no tick either way). Field QA "fail" boxes (32) = values the decs do
+  not print (premises address, square feet, part-time staff, LLC members) - Missing to-dos, correct.
+- New open item found by Lane B: dashboard search by applicant name filters encrypted facts in SQL, so it can never match.
+
+## OPEN LIST - 27 Oct 2026 night (replaces the 26 Oct list above for status)
+**Done (offline, uncommitted, suite 21,032 / 1 / 19):** all 19 "ours to build now" items (25sepChanges.md Z44-A/B/C, their
+reviews, Z45), the owner's five calls (archive kept as is; "All lines" runs kept; 130 anniversary tightened; rule (h)
+applicant questions narrowed; "TBD Construction" names accepted), dashboard search on the current (encrypted) name, a
+"Quotation" is a quote. Live Choice Electric 6e58bd73 = 100.
+
+**Next, one batch (owner, 27 Oct):** uploaded ACORD forms (Fri 30 Oct); login captcha (Turnstile keys); the seven owner
+calls - 22 "lines applied for" control (build); 23 a stated $0 premium prints (not Missing); 24 "Add ACORD 186" on the
+review page too; 25 "Included" vs "See schedule" is no conflict; 26 claim expense / date first made read when the columns
+exist; 27 a redacted mailing address stays blank + asked (never the garaging line); 28 Drive Other Car prompt left as is.
+
+**Waiting on Brent / ASG:** Transcriber, Converter / AL3, Yelp + Smarty keys, next forms list, Apple Pay, SMS, custom
+questions + carrier triage, per-form scores, the built-in signature, 137/138 symbol rows B / E-H, Q29, the 137
+specified-causes deductible, NAICS trades, archive behaviour.
+
+**Owner's own:** sess.json / run.json out of git + history scrub; commit + deploy; rotate the Vision key; Render settings
+(incl. the new SEARCH_NAME_BACKFILL, default on); CE 5 Oct #1; the Brent mail; Michelle M1 + her account; pre-production
+security; Supabase "Project One"; CE #6; CH125 retest.
+
+**After deploy:** download screen + a fresh generation on primble.ai; live looks for the 126 per-project rule, the 130
+period totals (a WC loss run with claim rows), archive and Form Assistant usage in the browser.
+
+### 27 Oct 2026 - uploaded ACORD forms (Brent's Friday deadline) - BUILT + REVIEWED offline, uncommitted
+- Design / log / review: `ACORD_INTAKE.md`. Fillable ACORD read by box name with 0 model calls; flattened via template
+  overlay (490 of 491 boxes identical to the fillable read, 0 false ticks); merged by the owner table; carried boxes;
+  encrypted Primble record on downloads (not on 25 / 28).
+- Live on localhost: round trip of Choice Electric's 10 forms 96ede04c (58, before the fixes); mixed 7 decs + 3 forms
+  76cdbea1 = 81, no hard stops, no false conflicts; flattened 10 forms f4532477 = 60 (no record -> occupancy asked).
+  Offline harness after all fixes: forms + record 82; forms + the 2 loss-run CSVs 90 Submission Ready.
+- Reviewer: 14 high + 9 medium defects found and fixed (scaled prints, a dec quoting "ACORD 125", ACORD 25 insurers by
+  position, section headers corrupting current policies, remarks leaking, redacted FEIN, forged / cross-insured
+  records, per-page copy split, prior rows setting flags, ...); re-review corrected two of my follow-ups.
+- Tell Brent / ask: the merge owner table; the file format producers' ACORDs arrive in; a forms-only re-upload has no
+  loss runs; answers no box holds come back only on Primble's own forms (record) and only on the same server.
+- Ask Brent (next mail): how many files per upload he wants - MAX_FILES_PER_UPLOAD was 10; raised to 20 on 27 Oct so a package can hold 7 decs + its filled ACORD forms in one upload.
+- Round trip, 27 Oct evening (ACORD_INTAKE.md "Round trip on the live harness"): forms + the 7 decs + the 2 loss runs
+  re-uploaded = **100 Submission Ready, zero clicks**; forms alone = 87 (loss runs, radius). 9 defect classes fixed.
+- **27 Oct night - reach 100 on ANY package (owner's rule):** random-package solver built (`25sepChanges.md` Z46);
+  6 classes fixed (WC / auto coverage questions, the page's stand-in answers, re-typed boxes, advisories held at 85,
+  "verify this figure" warnings, the loss-history loop); permanent test + safety-net decision pending.
+- **27 Oct night - Orbin round trip** (`ACORD_INTAKE.md` "Orbin round trip"): forms only 81, + cover 81, + decs and loss
+  runs 96 (A = 97). Fixed: GL P&AI limit read "6". Open: inland marine lost (forms only), a claim counted twice, one
+  premises read as two locations, the 125 occupancy description lost.
+- **28 Oct night - live round trips on Choice Electric, Orbin, CH125** (`ACORD_INTAKE.md`): pre-form 100 on all three;
+  forms + decs and cover + decs come back at the original score (Choice Electric 100 = 100; CH125 cover + decs 100,
+  forms + decs 100 after two Data Consistency picks); forms only / cover alone stop only at "upload loss runs".
+  Answers given after generation ride the record too. Fixed on the way: narrative reading, cover name / term,
+  buildings at one address, 131 symbol, AI boxes, driver names, interest name, loss runs vouching for themselves.
+- **Tell Brent:** the safety net (a deduction no item on the page can answer is not charged; logged, listed on the
+  cover) - scores rise only where it fires; and that a re-upload with the decs re-reads them, so a reading that
+  differs from the first can raise a Data Consistency pick.
+- **Tell Brent (next mail) - what a re-uploaded form brings back (Choice Electric round trip, 27 Oct):**
+  - Of the 26 answers given on the pre-form screen, 18 are printed in the forms' boxes and are read back from
+    the boxes alone (contacts, FEIN, mailing address, NAICS, SIC, operations, employees, revenue, years in
+    business, the remarks narrative, hydrant distance, wind deductible, and year built / roof year / protection
+    class / sprinkler through the ACORD 140's building rows). The 3 saved tables (drivers, GL class codes,
+    locations) are in the forms too.
+  - 8 have no box on any ACORD form in the package: fire department type, period of restoration, occupancy type,
+    earthquake and flood deductibles (those boxes exist only on ACORD 160), umbrella "follows form", "we have had
+    claims" (the form has only a "no losses" box) and "these loss runs belong to this insured".
+  - Where those 8 go: into an encrypted record hidden inside every form we download. When our own form is
+    uploaded again, the 8 come back on their own. Two limits:
+    - The record only works on Primble's own downloaded PDF, on the same server. A form downloaded from
+      primble.ai won't restore on localhost, and the reverse is true too. If someone re-saves or prints it
+      through another tool, the record is lost and those 8 must be answered again.
+    - The certificates (ACORD 25 and 28) never carry the record, on purpose, because they go to third parties.
+  - Loss runs are their own documents and no ACORD form carries them: a forms-only re-upload scores 87 (loss runs
+    about 12 points, the radius 1 point - the dec states "LOCAL" and the 127's radius box takes a number in miles).
+
+
+## 29 Oct - Brent's reply on the deadlines
+- Fri 30 Oct: extract ANY ACORD form in an uploaded package (Transcriber). Fri 6 Nov: generate / download ANY ACORD form (70-90% fill from the 125 + core forms). Templates to come through ASG. Tracker: `ASG_TRANSCRIBER.md`.
+- Owner on leave 6, 9, 11 Nov (Diwali).

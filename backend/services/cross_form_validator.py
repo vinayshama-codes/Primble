@@ -360,8 +360,13 @@ def _check_wc_payroll_reconciliation(
     # Spec §121: "WC payroll must reconcile with ACORD 125 revenue/operations".
     # If total_payroll is missing/zero, fall back to revenue-based sanity check:
     # WC payroll >85% of revenue is operationally implausible for most businesses.
-    if wc_pay and tot_rev and tot_rev > 0:
-        wc_to_rev_ratio = wc_pay / tot_rev
+    # Owner rule G2 (30 Oct 2026): on a WC submission with no WC payroll yet,
+    # the stated TOTAL payroll is the figure the WC rows will be held to, so its
+    # ratio is checked now - before, the warning appeared only once the class
+    # table was saved (a new item raised by a correct answer).
+    _ratio_pay = wc_pay or tot_pay
+    if _ratio_pay and tot_rev and tot_rev > 0:
+        wc_to_rev_ratio = _ratio_pay / tot_rev
         if wc_to_rev_ratio > 0.85:
             issues.append(_issue(
                 "soft_warning",
@@ -370,6 +375,10 @@ def _check_wc_payroll_reconciliation(
                     f"WC payroll (${wc_pay:,.0f}) is {wc_to_rev_ratio * 100:.0f}% of "
                     f"total revenue (${tot_rev:,.0f}) - unusually high. "
                     "Reconcile with operations or add ACORD 101 explanation."
+                ) if wc_pay else (
+                    f"Total payroll (${tot_pay:,.0f}) is {wc_to_rev_ratio * 100:.0f}% of "
+                    f"total revenue (${tot_rev:,.0f}) - unusually high for the WC "
+                    "payroll. Reconcile with operations or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
                 add_forms=["ACORD_101"],
@@ -415,10 +424,14 @@ def _check_gl_class_code_vs_operations(
     if "ACORD_126" not in triggered_ids:
         return issues
 
-    gl_codes = _fv(facts, "gl_class_codes_by_location")
+    # ONE DOOR for "does the package hold GL class codes?" (27 Oct 2026, Lane B
+    # item 1): both homes and a person's saved GL window. This read only
+    # `gl_class_codes_by_location`, so codes saved through the GL
+    # classification window (`gl_class_code_schedule`, Z31) were invisible.
+    from services.sqs_service import gl_class_codes_present
     ops_desc = _fv(facts, "operations_description")
 
-    if gl_codes and isinstance(gl_codes, list) and gl_codes and not ops_desc:
+    if gl_class_codes_present(facts) and not ops_desc:
         issues.append(_issue(
             "soft_warning",
             "gl_codes_no_operations",
@@ -844,8 +857,25 @@ def _check_property_bi_period_of_restoration(
 
     bi_limit = _fv(facts, "business_income_limit")
     bi_por   = _fv(facts, "period_of_restoration")
+    # A BI row the property schedule prints is a stated limit - the one door
+    # the Property pillar asks (`property_coverages.business_income_limit_stated`,
+    # 27 Oct 2026): the schedule's $1,000,000 / $25,000 per premises is no
+    # "no BI limit" warning, and its period of restoration is still asked.
+    if not bi_limit:
+        try:
+            from services.property_coverages import business_income_limit_stated
+            bi_limit = business_income_limit_stated(facts)
+        except Exception:                                      # noqa: BLE001
+            pass
+    # Actual Loss Sustained (29 Oct 2026, Michelle review item 6): no Period of
+    # Restoration exists to state - the one door, never a second reading.
+    try:
+        from services.property_coverages import period_of_restoration_needed
+        _por_needed = period_of_restoration_needed(facts)
+    except Exception:                                          # noqa: BLE001
+        _por_needed = True
 
-    if bi_limit and not bi_por:
+    if bi_limit and not bi_por and _por_needed:
         issues.append(_issue(
             "hard_stop",
             "bi_missing_period_of_restoration",
@@ -1488,7 +1518,11 @@ def _check_property_valuation_consistency(
 
     # Spec: valuation method missing on property submissions = SOFT BLOCK
     # (prompt user to select RCV or ACV). Only flag when property coverage exists.
-    if not val_method and (bldg_val or _to_float(_fv(facts, "property_bpp_value"))):
+    # Owner rule G2 (30 Oct 2026): property coverage on the package is enough -
+    # waiting for a stated value made this warning appear only after the value
+    # was answered (a new item raised by a correct answer).
+    if not val_method and (bldg_val or _to_float(_fv(facts, "property_bpp_value"))
+                           or flags.get("has_property_coverage")):
         issues.append(_issue(
             "soft_warning",
             "property_valuation_method_missing",
@@ -1624,25 +1658,47 @@ def _check_wc_gl_class_code_alignment(
     if "ACORD_130" not in triggered_ids or "ACORD_126" not in triggered_ids:
         return issues
 
-    wc_codes = _fv(facts, "wc_class_codes")
-    gl_codes = _fv(facts, "gl_class_codes_by_location")
+    # READ FROM THE DOORS, never from a stringified blob (27 Oct 2026, Lane B
+    # item 1). This read `gl_class_codes_by_location` alone - so a GL window's
+    # saved codes (`gl_class_code_schedule`) were invisible - and it searched
+    # `str(rows)` for substrings: a location's "Home office" read as clerical
+    # work, and "5403" (carpentry) matched inside a payroll of 540300 - the
+    # H1-F blob defect `sqs_service._class_code_tokens` exists to close.
+    # Now: the GL classification WORDS and CODES (`gl_classification_text` /
+    # `gl_class_codes`, both homes, a person's window first, GL's own rows),
+    # and the WC rows' code TOKENS and their own description words.
+    from services.sqs_service import (
+        _class_code_tokens, gl_class_codes, gl_classification_text,
+    )
+    wc_rows = _fv(facts, "wc_class_codes")
+    gl_codes = gl_class_codes(facts)
+    gl_words = gl_classification_text(facts)
 
-    if not wc_codes or not gl_codes:
+    if not wc_rows or not (gl_codes or gl_words):
         return issues
 
-    # Clerical/office GL class codes (NCCI range 8800-8999 = clerical/office)
-    # Manual labor WC class codes (NCCI ranges <5000 = manual/trade operations)
-    _CLERICAL_GL_KEYWORDS = ["clerical", "office", "admin", "8810", "8742", "8800", "8820"]
-    _HEAVY_WC_KEYWORDS    = ["roofing", "carpentry", "concrete", "ironwork", "blasting",
-                              "demolition", "excavation", "framing", "steelwork",
-                              "5160", "5183", "5190", "5213", "5221", "5403", "5403",
-                              "5479", "5537", "5645", "6003", "6005"]
+    # Clerical/office classifications (by their words; NCCI 8810 / 8742 / 8800 /
+    # 8820 are clerical WC codes, read as codes when a GL home carries them).
+    # Manual labor WC class codes (NCCI ranges <5000 = manual/trade operations).
+    _CLERICAL_WORDS = ("clerical", "office", "admin")
+    _CLERICAL_CODES = {"8810", "8742", "8800", "8820"}
+    _HEAVY_WORDS = ("roofing", "carpentry", "concrete", "ironwork", "blasting",
+                    "demolition", "excavation", "framing", "steelwork")
+    _HEAVY_WC_CODES = {"5160", "5183", "5190", "5213", "5221", "5403",
+                       "5479", "5537", "5645", "6003", "6005"}
 
-    gl_str = str(gl_codes).lower()
-    wc_str = str(wc_codes).lower()
+    wc_words = " ".join(
+        str(r.get(k) or "") for r in (wc_rows if isinstance(wc_rows, list) else [])
+        if isinstance(r, dict) for k in ("description", "classification", "duties")
+    ).lower()
 
-    gl_is_clerical  = any(kw in gl_str for kw in _CLERICAL_GL_KEYWORDS)
-    wc_is_heavy     = any(kw in wc_str for kw in _HEAVY_WC_KEYWORDS)
+    def _has_word(text: str, words) -> bool:
+        return any(re.search(rf"\b{w}", text) for w in words)
+
+    gl_is_clerical = (_has_word(gl_words, _CLERICAL_WORDS)
+                      or bool(_CLERICAL_CODES & set(gl_codes)))
+    wc_is_heavy = (_has_word(wc_words, _HEAVY_WORDS)
+                   or bool(_HEAVY_WC_CODES & _class_code_tokens(wc_rows)))
 
     if gl_is_clerical and wc_is_heavy:
         issues.append(_issue(
@@ -1898,17 +1954,14 @@ def _umbrella_dates_are_proposed(facts: Optional[dict]) -> bool:
     answer to the question the card asked. A rule no correct answer can satisfy
     is the defect, not the producer.
 
-    Provenance decides, read through `fact_state._HUMAN_SOURCES` so there is one
-    table of "who counts as a human" rather than a second copy here. Anything
-    extraction- or derivation-sourced keeps the previous behaviour byte for
-    byte, so nothing that worked before this moves.
+    Provenance decides, through the one door (`fact_state.put_by_person`, a
+    value a person typed or picked - 27 Oct 2026; this read `_HUMAN_SOURCES`
+    with a private fallback copy). Anything extraction- or derivation-sourced
+    keeps the previous behaviour byte for byte, so nothing that worked before
+    this moves.
     """
-    try:
-        from services.fact_state import _HUMAN_SOURCES
-        human = set(_HUMAN_SOURCES)
-    except Exception:                                         # noqa: BLE001
-        human = {"producer", "client_arq", "user_confirmed"}
-    return any(_fact_source(facts, k) in human
+    from services.fact_state import put_by_person
+    return any(put_by_person((facts or {}).get(k))
                for k in ("umbrella_effective_date", "umbrella_expiration_date"))
 
 
@@ -2107,10 +2160,10 @@ def _check_umbrella_auto_minimum_limits(
     if not _umbrella_in_scope(flags):
         return issues
 
-    umb_limit = _to_int(_fv(facts, "umbrella_limit"))
-    if not umb_limit:
-        return issues
-
+    # Owner rule G2 (30 Oct 2026): the umbrella's OWN limit no longer gates
+    # these checks - neither compares against it, and gating on it made the
+    # auto-limit warning appear only after the umbrella limit was answered (a
+    # new item raised by a correct answer). An umbrella in scope is enough.
     auto_limit = _to_int(_fv(facts, "auto_liability_limit"))
 
     # Client Q1 baseline: $1M Auto CSL underlying for umbrella attachment.
@@ -2283,6 +2336,47 @@ def _check_auto_optional_coverages(
 _OPS_OVERFLOW_CHAR_THRESHOLD = 300
 
 
+# The grid / page-1 / endorsement readings this advisory needs, per facts
+# (30 Oct 2026: 1.0 s a call on Choice Electric, and the review plan scores the
+# same facts many times a page read). Keyed by the facts' content; small LRU.
+_EXPIRING_PARTS_MEMO = None   # an OrderedDict once used (LRU of 64)
+
+
+def _expiring_policy_parts(facts: dict, with_125: bool, with_130: bool) -> tuple:
+    import hashlib
+    import json as _json
+    from collections import OrderedDict
+    global _EXPIRING_PARTS_MEMO
+    if _EXPIRING_PARTS_MEMO is None:
+        _EXPIRING_PARTS_MEMO = OrderedDict()
+    try:
+        key = (hashlib.sha1(_json.dumps(facts, sort_keys=True, default=str).encode()).hexdigest(),
+               with_125, with_130)
+    except Exception:                                          # noqa: BLE001
+        key = None
+    if key is not None and key in _EXPIRING_PARTS_MEMO:
+        _EXPIRING_PARTS_MEMO.move_to_end(key)
+        a, o, e = _EXPIRING_PARTS_MEMO[key]
+        return [dict(x) for x in a], [dict(x) for x in o], [dict(x) for x in e]
+    aside: List[dict] = []
+    overflow: List[dict] = []
+    endorsements: List[dict] = []
+    if with_125:
+        from services.pdf_service import other_lob_overflow, prior_grid_set_aside_rows
+        aside = list(prior_grid_set_aside_rows(facts) or [])
+        overflow = list(other_lob_overflow(facts) or [])
+    if with_130:
+        from services.wc_endorsements import schedule
+        endorsements = list(schedule(facts) or [])
+    if key is not None:
+        _EXPIRING_PARTS_MEMO[key] = ([dict(x) for x in aside if isinstance(x, dict)],
+                                     [dict(x) for x in overflow if isinstance(x, dict)],
+                                     [dict(x) for x in endorsements if isinstance(x, dict)])
+        while len(_EXPIRING_PARTS_MEMO) > 64:
+            _EXPIRING_PARTS_MEMO.popitem(last=False)
+    return aside, overflow, endorsements
+
+
 def _check_expiring_policies_need_acord101(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -2301,13 +2395,8 @@ def _check_expiring_policies_need_acord101(
     overflow: List[dict] = []
     endorsements: List[dict] = []
     try:
-        if "ACORD_125" in present:
-            from services.pdf_service import other_lob_overflow, prior_grid_set_aside_rows
-            aside = prior_grid_set_aside_rows(facts)
-            overflow = other_lob_overflow(facts)
-        if "ACORD_130" in present:
-            from services.wc_endorsements import schedule
-            endorsements = schedule(facts)
+        aside, overflow, endorsements = _expiring_policy_parts(
+            facts, "ACORD_125" in present, "ACORD_130" in present)
     except Exception as exc:                                  # noqa: BLE001
         logger.debug("expiring-policies rule skipped (%s)", exc)
         return []
@@ -2364,8 +2453,10 @@ def _check_acord101_triggers(
     needs_101 = False
     reason_parts: List[str] = []
 
-    # GL class code / operations mismatch
-    gl_codes = _fv(facts, "gl_class_codes_by_location")
+    # GL class code / operations mismatch - the one GL door (both homes and a
+    # person's GL window, 27 Oct 2026; this read `gl_class_codes_by_location`
+    # alone).
+    from services.sqs_service import gl_class_codes_present
     ops_desc = _fv(facts, "operations_description") or ""
     # WORDS, not characters. `len(ops_desc) < 30` asked for an ACORD 101
     # narrative from "Tree trimming and removal" (25 chars - a complete trade
@@ -2375,7 +2466,7 @@ def _check_acord101_triggers(
     # BOTH directions. A named trade takes very few characters and several
     # words; a bare "Bakery" or "Roofing" is still one word and still needs the
     # narrative. Advisory only - this costs no score either way (verified).
-    if gl_codes and isinstance(gl_codes, list) and gl_codes and len(ops_desc.split()) < 4:
+    if gl_class_codes_present(facts) and len(str(ops_desc).split()) < 4:
         needs_101 = True
         reason_parts.append("GL class codes present but operations description is insufficient")
 
@@ -2411,6 +2502,14 @@ def _check_acord101_triggers(
 
     # Claims history present with no explanation
     num_claims = _to_int(_fv(facts, "num_claims"))
+    # The count the producer reads is the package's (end-user review, 29 Oct
+    # 2026): the card said "3 prior claims" - an outside ACORD 125's count -
+    # beside a Loss History table of the loss runs' 9. One door, the larger.
+    try:
+        from services.loss_history_state import asserted_claims
+        num_claims = max(num_claims or 0, int(asserted_claims(facts)[0] or 0)) or num_claims
+    except Exception:                                         # noqa: BLE001
+        pass
     if num_claims and num_claims > 2:
         needs_101 = True
         reason_parts.append(f"{num_claims} prior claims - narrative explanation required")
@@ -2524,6 +2623,14 @@ def _check_property_deductible_structure(
     # Check for AOP deductible (minimum requirement)
     aop_ded = _fv(facts, "property_deductible_aop")
     if not aop_ded:
+        # A property SCHEDULE printing a deductible on its coverage rows states
+        # the AOP deductible per coverage (27 Oct 2026, the ACORD round trip).
+        try:
+            from services.property_coverages import schedule_states_deductible
+            aop_ded = schedule_states_deductible(facts)
+        except Exception:                                      # noqa: BLE001
+            pass
+    if not aop_ded:
         issues.append(_issue(
             "soft_warning",
             "property_aop_deductible_missing",
@@ -2615,10 +2722,13 @@ def _check_property_coinsurance_enforcement(
     if "ACORD_140" not in triggered_ids and "ACORD_160" not in triggered_ids:
         return issues
 
-    # Check if insured values are present (hard requirement for coinsurance check)
+    # Insured values present? Since 30 Oct 2026 (owner rule G2) this no longer
+    # GATES the check: a property package with no values stated yet still needs
+    # its coinsurance (or agreed value) - gating on the values made the warning
+    # appear only once a value was answered, a new item raised by a correct
+    # answer. Listed up front now; the wording says which case it is (the
+    # values-present sentence is unchanged, so stored statuses keep their id).
     has_values = bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value"))
-    if not has_values:
-        return issues
 
     # Check coinsurance percentage
     coinsurance_pct = _fv(facts, "coinsurance_percentage")
@@ -2630,8 +2740,11 @@ def _check_property_coinsurance_enforcement(
         issues.append(_issue(
             "soft_warning",
             "property_coinsurance_missing",
-            "Property values present but coinsurance percentage or agreed value endorsement not specified. "
-            "Define coinsurance % or confirm agreed value endorsement is in place.",
+            ("Property values present but coinsurance percentage or agreed value endorsement not specified. "
+             "Define coinsurance % or confirm agreed value endorsement is in place.")
+            if has_values else
+            ("Property coverage is requested but coinsurance percentage or agreed value endorsement is not "
+             "specified. Define coinsurance % or confirm agreed value endorsement is in place."),
             ["ACORD_140", "ACORD_160"],
         ))
     elif coinsurance_pct:
@@ -2765,7 +2878,12 @@ def _check_identity_address_distinction(
         if _a
     )
 
-    if mailing and not physical and has_property_or_multi and not _schedule_has_address:
+    # Owner rule G2 (30 Oct 2026): the physical address is required by the
+    # EXPOSURE, not by the mailing address being known - gating on `mailing`
+    # made this warning appear only after the mailing address was answered (a
+    # new item raised by a correct answer). Listed up front now; the
+    # mailing-captured sentence is unchanged so stored statuses keep their id.
+    if not physical and has_property_or_multi and not _schedule_has_address:
         issues.append(_issue(
             "soft_warning",
             "physical_vs_mailing_address_unclear",
@@ -2773,6 +2891,10 @@ def _check_identity_address_distinction(
                 "Mailing address is captured but physical operating address is "
                 "missing. For property or multi-location submissions, the physical "
                 "and mailing addresses must be explicitly distinguished."
+            ) if mailing else (
+                "Physical operating address is missing. For property or "
+                "multi-location submissions, the physical and mailing addresses "
+                "must be explicitly distinguished."
             ),
             ["ACORD_125"],
         ))
@@ -2941,6 +3063,31 @@ def _check_carrier_grade_cope_quality(
     return issues
 
 
+_LOCATION_ADDRESS_KEYS = frozenset({
+    "address", "address_line1", "address_line2", "address_city", "address_state",
+    "address_zip", "address_county", "city", "state", "zip", "county",
+    "location_id", "location_number", "loc_number", "premises_number"})
+
+
+def _street_key(loc: dict) -> str:
+    line1 = loc.get("address_line1") or str(loc.get("address") or "").split(",")[0]
+    return re.sub(r"[^a-z0-9]", "", str(line1 or "").lower())
+
+
+def _address_only_echo(loc: dict, others: List[dict]) -> bool:
+    """True when `loc` states nothing but an address and another row at the
+    SAME street states building detail - one premises printed twice."""
+    if any(v not in (None, "", [], {}) for k, v in loc.items()
+           if k not in _LOCATION_ADDRESS_KEYS):
+        return False
+    street = _street_key(loc)
+    if not street:
+        return False
+    return any(_street_key(o) == street and any(
+        v not in (None, "", [], {}) for k, v in o.items() if k not in _LOCATION_ADDRESS_KEYS)
+        for o in others if isinstance(o, dict))
+
+
 def _check_per_location_cope_completeness(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -2970,6 +3117,15 @@ def _check_per_location_cope_completeness(
         return bool(loc.get("construction_type") and (loc.get("building_value") or loc.get("bpp_value")))
 
     dict_locs = [loc for loc in locs if isinstance(loc, dict)]
+    # AN ADDRESS ALONE IS NOT ANOTHER INSURED LOCATION (Michelle review, 29 Oct
+    # 2026): the mailing address echoed into the table as a row holding nothing
+    # but its address, at the same street as a documented building, read "1 of 4
+    # insured locations are missing COPE" on a package with two premises and
+    # three buildings - all with COPE. Such a row is that premises printed again.
+    dict_locs = [loc for loc in dict_locs
+                 if not _address_only_echo(loc, [o for o in dict_locs if o is not loc])]
+    if len(dict_locs) < 2:
+        return issues
     incomplete = [loc for loc in dict_locs if not _has_cope(loc)]
 
     if incomplete and len(incomplete) < len(dict_locs):
@@ -3084,6 +3240,88 @@ def _check_certificate_requested_but_missing(
     return issues
 
 
+def _current_term_end(facts: dict):
+    """(raw, date) the CURRENT policies end - positive evidence only: the
+    expiring term the merge routed out of the current documents
+    (`prior_expiration_date` with `routed_from` "current_term"), else ONE
+    expiration date every current coverage line shares. None otherwise."""
+    held = facts.get("prior_expiration_date")
+    if isinstance(held, dict) and held.get("routed_from") == "current_term":
+        d = _iso_date(held.get("value"))
+        if d:
+            return held.get("value"), d
+    pkg_eff = _iso_date(_fv(facts, "effective_date"))
+    ends = {}
+    for row in (_fv(facts, "coverage_lines") or []):
+        if not isinstance(row, dict) or row.get("_set_aside"):
+            continue
+        eff, exp = _iso_date(row.get("effective_date")), _iso_date(row.get("expiration_date"))
+        if eff and exp and pkg_eff and eff < pkg_eff:
+            ends.setdefault(exp, row.get("expiration_date"))
+    if len(ends) == 1:
+        d, raw = next(iter(ends.items()))
+        return raw, d
+    return None
+
+
+def _check_proposed_term_coverage_gap(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """A proposed effective date that starts AFTER the current policies end
+    leaves the insured uninsured in between (Michelle review, 29 Oct 2026; the
+    live kit: current programme to 12/01/2026, the outside ACORD 125 asking for
+    01/01/2027 - nothing on the screen said so). A warning, never a hard stop
+    (Brent's five kinds); a person's confirmed effective date stands it down
+    (`issue_registry.VERIFY_FIGURE_CODES`), and moving the date to meet the
+    current expiration clears it. An overlap (a mid-term rewrite) is not a gap."""
+    from datetime import timedelta
+    eff_raw = _fv(facts, "effective_date")
+    eff = _iso_date(eff_raw)
+    end = _current_term_end(facts)
+    if not eff or not end:
+        return []
+    end_raw, end_d = end
+    gap = (eff - end_d).days
+    if gap <= 1:
+        return []
+    if gap > 366:
+        # A term that ended more than a year before is history, not the current
+        # programme - nothing here can say what covered the time between.
+        return []
+    return [_issue(
+        "soft_warning",
+        "proposed_term_coverage_gap",
+        (f"The proposed effective date ({eff_raw}) is {gap} days after the current "
+         f"policies expire ({end_raw}) - {gap} days with no coverage. Confirm the "
+         f"proposed effective date, or change it to {end_raw}."),
+        ["ACORD_125"],
+    )]
+
+
+def _check_location_revenue_over_total(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """One premises' revenue above the business's total revenue (item 8,
+    Michelle, 29 Oct 2026; the kit: $9,200,000 at premises A of an outside ACORD
+    125 beside the declarations' $8,450,000). A part cannot exceed its whole: a
+    warning, never a hard stop; a person's confirmed total stands it down
+    (`issue_registry.VERIFY_FIGURE_CODES`). The reading is
+    `row_rivals.location_revenue_over_total`."""
+    from services.row_rivals import location_revenue_over_total
+    hit = location_revenue_over_total(facts)
+    if not hit:
+        return []
+    where, part, whole = hit
+    return [_issue(
+        "soft_warning",
+        "location_revenue_over_total",
+        (f"The revenue stated for {where} ({part}) is more than the business's total "
+         f"revenue ({whole}) - one location cannot earn more than the whole business. "
+         f"Confirm the business's total revenue, or correct the location's revenue."),
+        ["ACORD_125"],
+    )]
+
+
 _RULE_FUNCTIONS = [
     _check_acord125_always_present,
     _check_identity_address_distinction,
@@ -3121,6 +3359,8 @@ _RULE_FUNCTIONS = [
     _check_crime_silent_exposure,
     _check_cyber_silent_exposure,
     _check_expiring_policies_need_acord101,
+    _check_proposed_term_coverage_gap,     # Michelle review, 29 Oct 2026
+    _check_location_revenue_over_total,    # item 8, 29 Oct 2026
     _check_acord101_triggers,   # must run last
 ]
 
@@ -3177,6 +3417,13 @@ def run_cross_form_validation(
                           if not (i.get("code") in _explained and explains_away(i.get("code")))]
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("cross_form_validator: explained filter skipped: %s", exc)
+    # ...and a card that only asks to verify figures, once a person verified
+    # them (27 Oct 2026, issue_registry.figures_verified).
+    try:
+        from services.issue_registry import figures_verified
+        all_issues = [i for i in all_issues if not figures_verified(i.get("code"), facts)]
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("cross_form_validator: verified-figure filter skipped: %s", exc)
     return all_issues
 
 
@@ -3234,11 +3481,28 @@ def is_form_choice(issue: Any) -> bool:
             and str(res.get("mode") or "none") == "none")
 
 
-def defer_form_choices(issues: List[dict]) -> List[dict]:
-    """Before forms: each form-choice issue as an advisory marked
-    `form_choice` (a copy); every other issue unchanged."""
-    return [dict(i, type="advisory", form_choice=True) if is_form_choice(i) else i
-            for i in (issues or [])]
+def defer_form_choices(issues: List[dict], pre_form: bool = False) -> List[dict]:
+    """PACKAGE checks vs FORM checks (owner, 30 Oct 2026). Every FORM-scope issue
+    (`issue_registry.issue_scope` - its fix adds or chooses a form, or it reads
+    the form itself) becomes an advisory marked `form_choice` (a copy, its own
+    severity kept in `deferred_type`): never a package stop, before forms or
+    after; after forms it holds only the forms it names (`sqs_service.
+    _form_open_warning`). A PACKAGE-scope issue stays a stop even when its
+    resolution offers `add_forms`; with `pre_form` its copy reads without form
+    numbers and offers its data fix only (`issue_registry.pre_form_issue`)."""
+    from services.issue_registry import issue_scope, pre_form_issue
+    out = []
+    for i in issues or []:
+        if not isinstance(i, dict):
+            out.append(i)
+        elif issue_scope(i) == "form":
+            out.append(dict(i, type="advisory", form_choice=True,
+                            deferred_type=i.get("deferred_type") or i.get("type")))
+        elif pre_form:
+            out.append(pre_form_issue(i))
+        else:
+            out.append(i)
+    return out
 
 
 def split_cross_form_issues(
@@ -3270,7 +3534,7 @@ def split_cross_form_issues(
         # naming a document would be a guess, not a fact. The remediation is
         # intentionally generic (these are coverage/limit rules, not identity
         # conflicts with a dedicated picker like check_doc_consistency's).
-        if forms:
+        if forms and not issue.get("stored_message"):
             pretty = ", ".join(f.replace("ACORD_", "ACORD ") for f in forms)
             msg = f"{msg} (Affects: {pretty}. Fix: Review the coverage/limit details for the affected form(s).)"
         if itype == "hard_stop":

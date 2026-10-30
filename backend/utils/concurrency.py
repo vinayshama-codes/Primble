@@ -140,7 +140,7 @@ async def heavy_semaphore():
     if not token:
         raise HTTPException(
             status_code=429,
-            detail="Server busy — too many concurrent requests. Please retry in 30 seconds.",
+            detail="Server busy - too many requests at once. Please retry in 30 seconds.",
             headers={"Retry-After": "30"},
         )
     try:

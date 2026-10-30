@@ -1,0 +1,651 @@
+﻿"eLabel Id","eLabel Name","eLabel counter","Placeholder","Section Name","Field Name","Description"
+"755","Form_Title","A","","TITLE
+ACORD 140 (2016/03)","Property Section","The title of the form. ACORD 140, Property Section, has been designed to handle the basic underwriting and rating needs for commercial property exposures.
+
+The Property Section accommodates two locations, with coverage and rating information recorded separately for each location.
+
+This form was designed to be used in conjunction with ACORD 125, Commercial Insurance Application, Applicant Information Section.  Much of the information for the Identification Section should match the data found within the Applicant Information Section of ACORD 125.  Nevertheless, it is still important to complete it.   Many companies separate the applications by line of business for rating purposes.  Not completing this portion of the application makes it difficult to keep track of the full account."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","Agency Customer ID","Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage)."
+"1","Form_CompletionDate","A","","IDENTIFICATION SECTION","Date","Enter date: The date on which the form is completed.  (MM/DD/YYYY)"
+"2","Producer_FullName","A","","IDENTIFICATION SECTION","Agency","Enter text: The full name of the producer."
+"158","Policy_PolicyNumberIdentifier","A","","IDENTIFICATION SECTION","Policy Number","Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number."
+"306","Policy_EffectiveDate","A","","IDENTIFICATION SECTION","Effective Date","Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY)"
+"14","Insurer_FullName","A","","IDENTIFICATION SECTION","Carrier","Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name."
+"15","Insurer_NAICCode","A","","IDENTIFICATION SECTION","NAIC Code","Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC)."
+"8","NamedInsured_FullName","A","","IDENTIFICATION SECTION","Named Insured(s)","Enter text: The named insured(s) as it / they will appear on the policy declarations page."
+"17117","CommercialProperty_Summary_BlanketNumberIdentifier","A","","BLANKET SUMMARY","Blkt #","Enter number: The identifying number for the blanket."
+"17118","CommercialProperty_Summary_BlanketLimitAmount","A","","BLANKET SUMMARY","Amount","Enter limit: The maximum amount of coverage provided for the blanket."
+"17119","CommercialCoverage_Summary_BlanketTypeDescription","A","","BLANKET SUMMARY","Type","Enter text: The subject(s) of insurance covered by this blanket.  Examples include Building, Contents, or Combined Building and Contents."
+"17117","CommercialProperty_Summary_BlanketNumberIdentifier","B","","BLANKET SUMMARY","Blkt #","Enter number: The identifying number for the blanket."
+"17118","CommercialProperty_Summary_BlanketLimitAmount","B","","BLANKET SUMMARY","Amount","Enter limit: The maximum amount of coverage provided for the blanket."
+"17119","CommercialCoverage_Summary_BlanketTypeDescription","B","","BLANKET SUMMARY","Type","Enter text: The subject(s) of insurance covered by this blanket.  Examples include Building, Contents, or Combined Building and Contents."
+"17117","CommercialProperty_Summary_BlanketNumberIdentifier","C","","BLANKET SUMMARY","Blkt #","Enter number: The identifying number for the blanket."
+"17118","CommercialProperty_Summary_BlanketLimitAmount","C","","BLANKET SUMMARY","Amount","Enter limit: The maximum amount of coverage provided for the blanket."
+"17119","CommercialCoverage_Summary_BlanketTypeDescription","C","","BLANKET SUMMARY","Type","Enter text: The subject(s) of insurance covered by this blanket.  Examples include Building, Contents, or Combined Building and Contents."
+"17117","CommercialProperty_Summary_BlanketNumberIdentifier","D","","BLANKET SUMMARY","Blkt #","Enter number: The identifying number for the blanket."
+"17118","CommercialProperty_Summary_BlanketLimitAmount","D","","BLANKET SUMMARY","Amount","Enter limit: The maximum amount of coverage provided for the blanket."
+"17119","CommercialCoverage_Summary_BlanketTypeDescription","D","","BLANKET SUMMARY","Type","Enter text: The subject(s) of insurance covered by this blanket.  Examples include Building, Contents, or Combined Building and Contents."
+"545","CommercialStructure_Location_ProducerIdentifier","A","","PREMISES INFORMATION","Premises #","Enter number: The location number for the premises."
+"548","CommercialStructure_PhysicalAddress_LineOne","A","","PREMISES INFORMATION","Street Address","Enter text: The first address line of the commercial structure."
+"546","CommercialStructure_Building_ProducerIdentifier","A","","PREMISES INFORMATION","Building #","Enter number: The building number for the premises.  Used when more than one building exists at an individual location."
+"868","CommercialStructure_Building_SublocationDescription","A","","PREMISES INFORMATION","Building Description","Enter text: This describes the particular sublocation in a manner sufficient to distinguish it from other sublocations at a given location.  An example might be ""3 story blue structure on the left of the main building""."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","A","","PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","A","","PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","A","","PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","A","","PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","A","","PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","A","","PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","A","","PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","A","","PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","A","","PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","A","","PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","B","","PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","B","","PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","B","","PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","B","","PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","B","","PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","B","","PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","B","","PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","B","","PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","B","","PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","B","","PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","C","","PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","C","","PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","C","","PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","C","","PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","C","","PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","C","","PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","C","","PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","C","","PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","C","","PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","C","","PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","D","","PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","D","","PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","D","","PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","D","","PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","D","","PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","D","","PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","D","","PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","D","","PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","D","","PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","D","","PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","E","","PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","E","","PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","E","","PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","E","","PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","E","","PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","E","","PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","E","","PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","E","","PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","E","","PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","E","","PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"878","CommercialProperty_Attachment_BusinessIncomeExtraExpenseIndicator","A","","PREMISES INFORMATION","Additional Information - Business Income / Extra Expense","Check the box (if applicable): Indicates ACORD 810, Business Income / Extra Expense / Rental Value, supplement is attached for this location."
+"879","CommercialProperty_Attachment_ValueReportingIndicator","A","","PREMISES INFORMATION","Additional Information -Value Reporting Information","Check the box (if applicable): Indicates ACORD 811, Value Reporting Information, supplement is attached for this location."
+"880","CommercialProperty_Spoilage_YesNoCode","A","","PREMISES INFORMATION","Spoilage Coverage Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if spoilage coverage applies."
+"881","CommercialProperty_Spoilage_PropertyDescription","A","","PREMISES INFORMATION","Description of Property Covered","Enter text: The description of property to be covered for spoilage."
+"882","CommercialProperty_Spoilage_LimitAmount","A","","PREMISES INFORMATION","Limit","Enter limit: The limit applicable to the spoilage coverage."
+"883","CommercialProperty_Spoilage_DeductibleAmount","A","","PREMISES INFORMATION","Deductible","Enter deductible: The deductible applicable to the spoilage coverage."
+"884","CommercialProperty_Spoilage_RefrigeratorMaintenanceCode","A","","PREMISES INFORMATION","Refrigeration Maintenance Agreement Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if there is a refrigerator maintenance agreement."
+"12531","CommercialProperty_Premises_BreakdownOrContaminationIndicator","A","","PREMISES INFORMATION","Breakdown or Contamination (checkbox)","Check the box (if applicable): Indicates that breakdown or contamination coverage exists."
+"12530","CommercialProperty_Premises_PowerOutageIndicator","A","","PREMISES INFORMATION","Power Outage (checkbox)","Check the box (if applicable): Indicates power outage coverage exists."
+"12532","CommercialProperty_Premises_SellingPriceIndicator","A","","PREMISES INFORMATION","Selling Price (checkbox)","Check the box (if applicable): Indicates selling price coverage exists on refrigerant equipment."
+"12533","CommercialProperty_Premises_OtherIndicator","A","","PREMISES INFORMATION","Blank (checkbox)","Check the box (if applicable): Indicates other refrigerant equipment coverage exists."
+"885","CommercialProperty_Premises_OptionsDescription","A","","PREMISES INFORMATION","Options Description","Enter text: The description of optional coverages that apply."
+"11183","CommercialPropertyCoverage_SinkHoleCollapse_YesIndicator","A","","PREMISES INFORMATION","Accept Coverage","Check the box (if applicable): Indicates that sink hole coverage is accepted."
+"11184","CommercialPropertyCoverage_SinkHoleCollapse_NoIndicator","A","","PREMISES INFORMATION","Reject Coverage","Check the box (if applicable): Indicates that sink hole coverage is rejected."
+"11185","CommercialPropertyCoverage_SinkHoleCollapse_LimitAmount","A","","PREMISES INFORMATION","Limit","Enter limit: The limit applicable to the sink hole coverage."
+"17120","CommercialPropertyCoverage_MineSubsidence_YesIndicator","A","","PREMISES INFORMATION","Accept Coverage","Check the box (if applicable): Indicates that mine subsidence coverage is accepted."
+"17121","CommercialPropertyCoverage_MineSubsidenceOption_NoIndicator","A","","PREMISES INFORMATION","Reject Coverage","Check the box (if applicable): Indicates that mine subsidence coverage is rejected."
+"8550","CommercialPropertyCoverage_MineSubsidence_LimitAmount","A","","PREMISES INFORMATION","Limit","Enter limit: The total limit amount for mine subsidence coverage."
+"10208","BuildingFeatures_HistoricalPropertyIndicator","A","","PREMISES INFORMATION","Property Has Been Designated an Historical Landmark (checkbox)","Check the box (if applicable): Indicates the property has been designated an historical landmark."
+"887","Construction_OpenSidesCount","A","","PREMISES INFORMATION","# Of Open Sides on Structure","Enter number: The number of open sides on a structure."
+"886","CommercialProperty_Premises_RemarkText","A","","PREMISES INFORMATION","Remarks","Enter text: The remarks associated with a specific location or sublocation."
+"888","Construction_ConstructionCode","A","","PREMISES INFORMATION","Construction Type","Enter code: The primary construction type of the premises. Common construction classifications are:
+* Frame
+* Joisted Masonry
+* Non-Combustible
+* Masonry Non-Combustible
+* Modified Fire Resistive
+* Fire Resistive"
+"889","BuildingFireProtection_HydrantDistanceFeetCount","A","","PREMISES INFORMATION","Distance to Hydrant","Enter number: The distance in feet from the nearest hydrant that supports the protection class used."
+"890","BuildingFireProtection_FireStationDistanceMileCount","A","","PREMISES INFORMATION","Distance to Fire Station","Enter number: The distance in miles from the nearest fire station that supports the protection class used."
+"891","BuildingFireProtection_FireDistrictName","A","","PREMISES INFORMATION","Fire District","Enter text: The property's fire district name."
+"892","BuildingFireProtection_FireDistrictCode","A","","PREMISES INFORMATION","Code Number","Enter code: The property's fire district code number which can be found in the individual states manual pages."
+"893","BuildingFireProtection_ProtectionClassCode","A","","PREMISES INFORMATION","Prot Cl","Enter code: The fire rating protection class for this location.  Note: some structures may be located too far from the nearest hydrant, or too far from the nearest fire station, for the protection class of the community to apply."
+"894","Construction_StoreyCount","A","","PREMISES INFORMATION","# Stories","Enter number: The number of stories or floors for this building not including any basement."
+"895","Construction_BasementCount","A","","PREMISES INFORMATION","# Basm'ts","Enter number: The number of basements for this building."
+"562","CommercialStructure_BuiltYear","A","","PREMISES INFORMATION","Yr Built","Enter year: The year the building at each location was originally constructed. Specify in the Remarks section any significant additions or renovations and the year they were completed."
+"896","Construction_BuildingArea","A","","PREMISES INFORMATION","Total Area","Enter number: The number of square feet of the building at this location for which insurance is being requested."
+"897","BuildingImprovement_WiringIndicator","A","","PREMISES INFORMATION","Building Improvements Wiring","Check the box (if applicable): Indicates if any wiring improvements have been made since the original construction."
+"898","BuildingImprovement_WiringYear","A","","PREMISES INFORMATION","Building Improvements Wiring Year","Enter year: The year the wiring improvements took place."
+"899","BuildingImprovement_RoofingIndicator","A","","PREMISES INFORMATION","Building Improvements Roofing","Check the box (if applicable): Indicates if any roofing improvements have been made since the original construction."
+"900","BuildingImprovement_RoofingYear","A","","PREMISES INFORMATION","Building Improvements Roofing Year","Enter year: The year the roofing improvements took place."
+"901","BuildingImprovement_PlumbingIndicator","A","","PREMISES INFORMATION","Building Improvements Plumbing","Check the box (if applicable): Indicates if any plumbing improvements have been made since the original construction."
+"902","BuildingImprovement_PlumbingYear","A","","PREMISES INFORMATION","Building Improvements Plumbing Year","Enter year: The year the plumbing improvements took place."
+"903","BuildingImprovement_HeatingIndicator","A","","PREMISES INFORMATION","Building Improvements Heating","Check the box (if applicable): Indicates if any heating improvements have been made since the original construction."
+"904","BuildingImprovement_HeatingYear","A","","PREMISES INFORMATION","Building Improvements Heating Year","Enter year: The year the heating improvements took place."
+"905","BuildingImprovement_OtherIndicator","A","","PREMISES INFORMATION","Building Improvements Other","Check the box (if applicable): Indicates if any other improvements have been made since the original construction."
+"906","BuildingImprovement_OtherDescription","A","","PREMISES INFORMATION","Building Improvements Other Description","Enter text: The description of other improvements that have been made to the structure."
+"907","BuildingImprovement_OtherYear","A","","PREMISES INFORMATION","Building Improvements Other Year","Enter year: The year the other improvements took place."
+"908","Construction_BuildingCodeEffectivenessGradeCode","A","","PREMISES INFORMATION","Bldg Code Grade","Enter code: The industry code used to collect the building code effectiveness grade code. The source of this code list is public protection classification or individual insurer rating manuals."
+"909","CommercialStructure_TaxCode","A","","PREMISES INFORMATION","Tax Code","Enter code: The city, county or state tax code, if applicable."
+"910","Construction_RoofMaterialCode","A","","PREMISES INFORMATION","Roof Type","Enter code: The material used to construct the roof.  Examples include:
+  * Composition (fiberglass, asphalt, etc.)
+  * Metal
+  * Poured
+  * Slate
+  * Tile
+  * Wood Shake
+(Please note this list is not all inclusive)"
+"911","BuildingOccupancy_OtherOccupanciesDescription","A","","PREMISES INFORMATION","Other Occupancies","Enter text: The description of any other occupancies located in the building not operated by the insured and not listed in the Description of Operations section on the ACORD 125.  If no other occupancy, enter None."
+"912","CommercialStructure_WindClass_ResistiveIndicator","A","","PREMISES INFORMATION","Wind Class Resistive","Check the box (if applicable): Indicates the wind class is resistive."
+"913","CommercialStructure_WindClass_SemiResistiveIndicator","A","","PREMISES INFORMATION","Wind Class Semi Resistive","Check the box (if applicable): Indicates the wind class is semi-resistive."
+"914","CommercialStructure_WindClass_OtherIndicator","A","","PREMISES INFORMATION","Wind Class Other","Check the box (if applicable): Indicates the wind class is other than those listed."
+"915","CommercialStructure_WindClass_OtherDescription","A","","PREMISES INFORMATION","Wind Class Other","Enter text: The description of the other wind class."
+"10197","BuildingFeatures_SolidFuelHeaterIndicator","A","","PREMISES INFORMATION","Heating Source incl Woodburning Stove or Fireplace Insert (checkbox)","Check the box (if applicable): Indicates the presence of a solid fuel heater such as a wood burning stove or fireplace insert."
+"10198","BuildingFeatures_SolidFuelHeaterInstallationDate","A","","PREMISES INFORMATION","Date Installed","Enter date: The installation date of the solid fuel heater."
+"10199","BuildingFeatures_SolidFuelHeaterManufacturerName","A","","PREMISES INFORMATION","Manufacturer","Enter text: The manufacturer of the solid fuel heater."
+"12534","CommercialStructure_PrimaryHeat_BoilerIndicator","A","","PREMISES INFORMATION","Primary Heat Boiler (checkbox)","Check the box (if applicable): Indicates if a boiler is the primary heating on the premises."
+"917","CommercialStructure_HeatingBoilerInsuredElsewhereCode","A","","PREMISES INFORMATION","If Boiler, is insurance placed elsewhere? Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if the heating boiler is insured elsewhere."
+"12536","CommercialStructure_PrimaryHeat_SolidFuelIndicator","A","","PREMISES INFORMATION","Primary Heat Solid Fuel (checkbox)","Check the box (if applicable): Indicates if solid fuel is the primary heating on the premises."
+"12538","CommercialStructure_PrimaryHeat_OtherIndicator","A","","PREMISES INFORMATION","Primary Heat Other (checkbox)","Check the box (if applicable): Indicates primary heating source is other than those listed."
+"12539","CommercialStructure_PrimaryHeat_OtherDescription","A","","PREMISES INFORMATION","Primary Heat Other Description","Enter text: If applicable, describe the other primary heat source."
+"12535","CommercialStructure_SecondaryHeat_BoilerIndicator","A","","PREMISES INFORMATION","Secondary Heat Boiler (checkbox)","Check the box (if applicable): Indicates if a boiler is the secondary heating on the premises."
+"917","CommercialStructure_HeatingBoilerInsuredElsewhereCode","B","","PREMISES INFORMATION","If Boiler, is insurance placed elsewhere? Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if the heating boiler is insured elsewhere."
+"12537","CommercialStructure_SecondaryHeat_SolidFuelIndicator","A","","PREMISES INFORMATION","Secondary Heat Solid Fuel (checkbox)","Check the box (if applicable): Indicates if solid fuel is the secondary heating on the premises."
+"12540","CommercialStructure_SecondaryHeat_OtherIndicator","A","","PREMISES INFORMATION","Secondary Heat Other (checkbox)","Check the box (if applicable): Indicates secondary heating source is other than those listed."
+"12541","CommercialStructure_SecondaryHeat_OtherDescription","A","","PREMISES INFORMATION","Secondary Heat Other Description","Enter text: If applicable, describe the other secondary heat source."
+"918","BuildingExposure_RightDescription","A","","PREMISES INFORMATION","Right Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the right of the insured premises."
+"919","BuildingExposure_RightDistance","A","","PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure on the right of the insured premises in linear feet."
+"920","BuildingExposure_LeftDescription","A","","PREMISES INFORMATION","Left Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the left of the insured premises."
+"921","BuildingExposure_LeftDistance","A","","PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure on the left of the insured premises in linear feet."
+"922","BuildingExposure_FrontDescription","A","","PREMISES INFORMATION","Front Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the front of the insured premises."
+"923","BuildingExposure_FrontDistance","A","","PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure in the front of the insured premises in linear feet."
+"924","BuildingExposure_RearDescription","A","","PREMISES INFORMATION","Rear Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the rear of the insured premises."
+"925","BuildingExposure_RearDistance","A","","PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure in the rear of the insured premises in linear feet."
+"926","Alarm_Burglar_AlarmDescription","A","","PREMISES INFORMATION","Burglar Alarm Type","Enter text: The description of any burglar alarm protecting the building or contents. Descriptive terms such as safe, premises, perimeter, or ultrasonic may be suitable."
+"927","Alarm_Burglar_CertificateIdentifier","A","","PREMISES INFORMATION","Certificate Number","Enter identifier: The Underwriters Laboratories or other testing organization Certificate Number, if applicable. Attach a copy of the certificate to the application."
+"928","Alarm_Burglar_CertificateExpirationDate","A","","PREMISES INFORMATION","Expiration Date","Enter date: The expiration date of the certificate.  (MM/DD/YYYY)"
+"929","Alarm_Burglar_CentralStationIndicator","A","","PREMISES INFORMATION","Central Station","Check the box (if applicable): Indicates the burglar alarm rings at an alarm company."
+"930","Alarm_Burglar_WithKeysIndicator","A","","PREMISES INFORMATION","With Keys","Check the box (if applicable): Indicates the alarm company, located off the insured's premises, has keys to the applicant's property."
+"1053","Alarm_Burglar_LocalGongIndicator","A","","PREMISES INFORMATION","Local Gong","Check the box (if applicable): Indicates the burglar alarm sounds or appears outside the premises."
+"931","Alarm_Burglar_InstalledAndServicedByName","A","","PREMISES INFORMATION","Burglar Alarm Installed and Serviced by","Enter text: The name of the alarm company that installed and services the alarm.  Alarm companies often install, maintain, and service the system in addition to providing Central Station facilities."
+"932","Alarm_Burglar_ProtectionExtentCode","A","","PREMISES INFORMATION","Extent","Enter code: The designated extent of protection as described in the Underwriters Laboratories (UL) standard."
+"933","Alarm_Burglar_GradeCode","A","","PREMISES INFORMATION","Grade","Enter code: The alarm system grade as described in the Underwriters Laboratories (UL) standard (i.e., AA, A, BB, B, CC and C) which indicates the time required to respond to a signal from the alarm system."
+"934","BuildingSecurity_GuardWatchmenCount","A","","PREMISES INFORMATION","# Guards / Watchmen","Enter number: The number of guards and or watchmen employed or contracted for by the insured."
+"935","BuildingSecurity_GuardWatchmenClockHourlyIndicator","A","","PREMISES INFORMATION","Clock Hourly","Check the box (if applicable): Indicates the guard / watchman is required to make hourly rounds using a special time recording device or in connection with the central station service.  If other than hourly, indicate the time interval in the Other box."
+"936","BuildingSecurity_GuardWatchmenOtherIndicator","A","","PREMISES INFORMATION","Other","Check the box (if applicable): Indicates the guard / watchman is required to make some other type of rounds."
+"937","BuildingSecurity_GuardWatchmenOtherDescription","A","","PREMISES INFORMATION","Other Description","Enter text: The description of the rounds the guards / watchmen are required to make."
+"938","BuildingFireProtection_Alarm_ProtectionDescription","A","","PREMISES INFORMATION","Premises Fire Protection","Enter text: The description of the type of fire protection for the premises (e.g. sprinklers, standpipes, chemical systems)."
+"939","BuildingFireProtection_Alarm_SprinklerPercent","A","","PREMISES INFORMATION","% Sprnk","Enter percentage: The percentage of the structure area covered by the sprinkler system."
+"940","BuildingFireProtection_Alarm_ManufacturerName","A","","PREMISES INFORMATION","Fire Alarm Manufacturer","Enter text: The name of the manufacturer of the alarm, and if it is UL listed."
+"941","BuildingFireProtection_Alarm_CentralStationIndicator","A","","PREMISES INFORMATION","Central Station","Check the box (if applicable): Indicates the fire alarm rings at an alarm company, police department or fire department."
+"942","BuildingFireProtection_Alarm_LocalGongIndicator","A","","PREMISES INFORMATION","Local Gong","Check the box (if applicable): Indicates the fire alarm rings on an audible gong located outside of the building."
+"867","GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator","A","","ADDITIONAL INTEREST","ACORD 45 attached for additional names","Check the box (if applicable): Indicates that further additional interests appear on the attached ACORD 45."
+"4509","AdditionalInterest_Interest_LendersLossPayableIndicator","A","","ADDITIONAL INTEREST","Lender’s Loss Payable","Check the box (if applicable): Indicates the additional interest type is a lender's loss payable."
+"271","AdditionalInterest_Interest_LossPayeeIndicator","A","","ADDITIONAL INTEREST","Loss Payee","Check the box (if applicable): Indicates the additional interest type is a loss payee."
+"272","AdditionalInterest_Interest_MortgageeIndicator","A","","ADDITIONAL INTEREST","Mortgagee","Check the box (if applicable): Indicates the additional interest type is a mortgagee."
+"274","AdditionalInterest_Interest_OtherIndicator","A","","ADDITIONAL INTEREST","Other","Check the box (if applicable): Indicates the additional interest is other than those listed."
+"275","AdditionalInterest_Interest_OtherDescription","A","","ADDITIONAL INTEREST","Other Description","Enter text: The description of the other type of additional interest."
+"264","AdditionalInterest_InterestRank","A","","ADDITIONAL INTEREST","Rank","Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item."
+"774","AdditionalInterest_CertificateRequiredIndicator","A","","ADDITIONAL INTEREST","Certificate","Check the box (if applicable): Indicates if the additional interest requires a Certificate of Insurance."
+"278","AdditionalInterest_FullName","A","","ADDITIONAL INTEREST","Name and Address","Enter text: The additional interest's full name."
+"279","AdditionalInterest_MailingAddress_LineOne","A","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address line one."
+"280","AdditionalInterest_MailingAddress_LineTwo","A","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address line two."
+"281","AdditionalInterest_MailingAddress_CityName","A","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address city name."
+"282","AdditionalInterest_MailingAddress_StateOrProvinceCode","A","","ADDITIONAL INTEREST","","Enter code: The additional interest's mailing address state or province code."
+"283","AdditionalInterest_MailingAddress_PostalCode","A","","ADDITIONAL INTEREST","","Enter code: The additional interest's mailing address postal code."
+"2968","AdditionalInterest_MailingAddress_CountryCode","A","","ADDITIONAL INTEREST","","Enter code: The additional interest's country code."
+"284","AdditionalInterest_AccountNumberIdentifier","A","","ADDITIONAL INTEREST","Reference / Loan #","Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured."
+"260","AdditionalInterest_Item_LocationProducerIdentifier","A","","ADDITIONAL INTEREST","Location","Enter number: The producer assigned number of the location which has an additional interest."
+"259","AdditionalInterest_Item_BuildingProducerIdentifier","A","","ADDITIONAL INTEREST","Building","Enter number: The producer assigned number of the building which has an additional interest."
+"263","AdditionalInterest_Item_OtherItemDescription","A","","ADDITIONAL INTEREST","Item Class","Enter text: The description of the item which has an additional interest."
+"261","AdditionalInterest_Item_ScheduledItemProducerIdentifier","A","","ADDITIONAL INTEREST","Item","Enter number: The producer assigned number of the scheduled item which has an additional interest."
+"775","AdditionalInterest_ItemDescription","A","","ADDITIONAL INTEREST","Item Description","Enter text: The description of the item of interest if needed to further clarify.  For a vehicle, list the make, model and VIN number.  For a scheduled item, list the description, such as three carat diamond in six point setting."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","Agency Customer ID","Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage)."
+"545","CommercialStructure_Location_ProducerIdentifier","B","","ADDITIONAL PREMISES INFORMATION","Premises #","Enter number: The location number for the premises."
+"548","CommercialStructure_PhysicalAddress_LineOne","B","","ADDITIONAL PREMISES INFORMATION","Street Address","Enter text: The first address line of the commercial structure."
+"546","CommercialStructure_Building_ProducerIdentifier","B","","ADDITIONAL PREMISES INFORMATION","Building #","Enter number: The building number for the premises.  Used when more than one building exists at an individual location."
+"868","CommercialStructure_Building_SublocationDescription","B","","ADDITIONAL PREMISES INFORMATION","Building Description","Enter text: This describes the particular sublocation in a manner sufficient to distinguish it from other sublocations at a given location.  An example might be ""3 story blue structure on the left of the main building""."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","G","","ADDITIONAL PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","G","","ADDITIONAL PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","G","","ADDITIONAL PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","G","","ADDITIONAL PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","G","","ADDITIONAL PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","G","","ADDITIONAL PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","G","","ADDITIONAL PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","G","","ADDITIONAL PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","G","","ADDITIONAL PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","G","","ADDITIONAL PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","H","","ADDITIONAL PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","H","","ADDITIONAL PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","H","","ADDITIONAL PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","H","","ADDITIONAL PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","H","","ADDITIONAL PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","H","","ADDITIONAL PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","H","","ADDITIONAL PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","H","","ADDITIONAL PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","H","","ADDITIONAL PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","H","","ADDITIONAL PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","I","","ADDITIONAL PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","I","","ADDITIONAL PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","I","","ADDITIONAL PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","I","","ADDITIONAL PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","I","","ADDITIONAL PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","I","","ADDITIONAL PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","I","","ADDITIONAL PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","I","","ADDITIONAL PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","I","","ADDITIONAL PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","I","","ADDITIONAL PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","J","","ADDITIONAL PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","J","","ADDITIONAL PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","J","","ADDITIONAL PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","J","","ADDITIONAL PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","J","","ADDITIONAL PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","J","","ADDITIONAL PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","J","","ADDITIONAL PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","J","","ADDITIONAL PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","J","","ADDITIONAL PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","J","","ADDITIONAL PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"869","CommercialProperty_Premises_SubjectOfInsuranceCode","K","","ADDITIONAL PREMISES INFORMATION","Subject of Insurance","Enter code: The code designating all unit at risk / coverages that are to be insured at this particular location number / building number combination.
+
+Examples:
+
+B - Building
+BUSEE - Business Income without Extra Expense
+BUSIN - Business Income with Extra Expense
+BUSER - Business Income with Extra Expense and Rental Value  
+BUSRN - Business Income with Rental Value without Extra Expense
+BPP - Business Personal Property 
+EE - Extra Expense 
+FF - Furniture & Fixtures 
+MACEQ - Machinery, Equipment 
+PP - Personal Property 
+POTOP - Property of Others 
+STK - Stock"
+"870","CommercialProperty_Premises_LimitAmount","K","","ADDITIONAL PREMISES INFORMATION","Amount","Enter limit: The maximum amount of coverage provided for this subject of insurance or premium-bearing option."
+"871","CommercialProperty_Premises_CoinsurancePercent","K","","ADDITIONAL PREMISES INFORMATION","Coins %","Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage."
+"872","CommercialProperty_Premises_ValuationCode","K","","ADDITIONAL PREMISES INFORMATION","Valuation","Enter code: Indicate the method which will be used to determine the amount paid on a claim.  If other valuation basis applies, provide necessary information.
+
+Example valuation methods are:
+
+A -  Actual Cash Value
+R  - Replacement Cost
+V -  Agreed Amount
+M - Market Value"
+"873","CommercialProperty_Premises_CauseOfLossCode","K","","ADDITIONAL PREMISES INFORMATION","Causes of Loss","Enter code: The causes of loss the subject of insurance is to be covered for.  Examples:
+  * Basic
+  * Broad
+  * Special excluding theft
+  * Earthquake"
+"874","CommercialProperty_Premises_InflationGuardPercent","K","","ADDITIONAL PREMISES INFORMATION","Inflation Guard %","Enter percentage: The inflation guard percentage gives an automatic increase in the amount of coverage based on a percentage over time.  List both the percentage amount and the period of time during which it applies (e.g., 4% per year)."
+"875","CommercialProperty_Premises_DeductibleAmount","K","","ADDITIONAL PREMISES INFORMATION","Deductible(s)","Enter deductible: The deductible amount that is to apply to this subject of insurance."
+"8266","CommercialProperty_Premises_DeductibleTypeCode","K","","ADDITIONAL PREMISES INFORMATION","Ded Type","Enter code: The code indicating the type of deductible that is to apply to this subject of insurance.  Examples are percent, dollars and number of days.  ""Number of days"" is used to describe the waiting period (deductible) for business income."
+"876","CommercialProperty_Premises_BlanketNumber","K","","ADDITIONAL PREMISES INFORMATION","Blkt #","Enter number: The identifying number for the blanket under which this subject of insurance is rated.  Leave blank if the subject of insurance is not included under a blanket."
+"877","CommercialProperty_Premises_FormsAndConditions","K","","ADDITIONAL PREMISES INFORMATION","Forms and Conditions to Apply","Enter text: The form numbers and special conditions that apply to this subject of insurance.  Also indicate here if coverage is blanket or average rated."
+"878","CommercialProperty_Attachment_BusinessIncomeExtraExpenseIndicator","B","","ADDITIONAL PREMISES INFORMATION","Additional Information - Business Income/Extra Expense.","Check the box (if applicable): Indicates ACORD 810, Business Income / Extra Expense / Rental Value, supplement is attached for this location."
+"879","CommercialProperty_Attachment_ValueReportingIndicator","B","","ADDITIONAL PREMISES INFORMATION","Value Reporting Information","Check the box (if applicable): Indicates ACORD 811, Value Reporting Information, supplement is attached for this location."
+"880","CommercialProperty_Spoilage_YesNoCode","B","","ADDITIONAL PREMISES INFORMATION","Spoilage Coverage Yes","Enter Y for a “Yes” response. Input N for “No” response. Indicates if spoilage coverage applies."
+"881","CommercialProperty_Spoilage_PropertyDescription","B","","ADDITIONAL PREMISES INFORMATION","Description of Property Covered","Enter text: The description of property to be covered for spoilage."
+"882","CommercialProperty_Spoilage_LimitAmount","B","","ADDITIONAL PREMISES INFORMATION","Limit","Enter limit: The limit applicable to the spoilage coverage."
+"883","CommercialProperty_Spoilage_DeductibleAmount","B","","ADDITIONAL PREMISES INFORMATION","Deductible","Enter deductible: The deductible applicable to the spoilage coverage."
+"884","CommercialProperty_Spoilage_RefrigeratorMaintenanceCode","B","","ADDITIONAL PREMISES INFORMATION","Refrigeration Maintenance Agreement Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if there is a refrigerator maintenance agreement."
+"12531","CommercialProperty_Premises_BreakdownOrContaminationIndicator","B","","ADDITIONAL PREMISES INFORMATION","Breakdown or Contamination (checkbox)","Check the box (if applicable): Indicates that breakdown or contamination coverage exists."
+"12530","CommercialProperty_Premises_PowerOutageIndicator","B","","ADDITIONAL PREMISES INFORMATION","Power Outage (checkbox)","Check the box (if applicable): Indicates power outage coverage exists."
+"12532","CommercialProperty_Premises_SellingPriceIndicator","B","","ADDITIONAL PREMISES INFORMATION","Selling Price (checkbox)","Check the box (if applicable): Indicates selling price coverage exists on refrigerant equipment."
+"12533","CommercialProperty_Premises_OtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Blank (checkbox)","Check the box (if applicable): Indicates other refrigerant equipment coverage exists."
+"885","CommercialProperty_Premises_OptionsDescription","B","","ADDITIONAL PREMISES INFORMATION","Options Description","Enter text: The description of optional coverages that apply."
+"11183","CommercialPropertyCoverage_SinkHoleCollapse_YesIndicator","B","","ADDITIONAL PREMISES INFORMATION","Accept Coverage","Check the box (if applicable): Indicates that sink hole coverage is accepted."
+"11184","CommercialPropertyCoverage_SinkHoleCollapse_NoIndicator","B","","ADDITIONAL PREMISES INFORMATION","Reject Coverage","Check the box (if applicable): Indicates that sink hole coverage is rejected."
+"11185","CommercialPropertyCoverage_SinkHoleCollapse_LimitAmount","B","","ADDITIONAL PREMISES INFORMATION","Limit","Enter limit: The limit applicable to the sink hole coverage."
+"17120","CommercialPropertyCoverage_MineSubsidence_YesIndicator","B","","ADDITIONAL PREMISES INFORMATION","Accept Coverage","Check the box (if applicable): Indicates that mine subsidence coverage is accepted."
+"17121","CommercialPropertyCoverage_MineSubsidenceOption_NoIndicator","B","","ADDITIONAL PREMISES INFORMATION","Reject Coverage","Check the box (if applicable): Indicates that mine subsidence coverage is rejected."
+"8550","CommercialPropertyCoverage_MineSubsidence_LimitAmount","B","","ADDITIONAL PREMISES INFORMATION","Limit","Enter limit: The total limit amount for mine subsidence coverage."
+"10208","BuildingFeatures_HistoricalPropertyIndicator","B","","ADDITIONAL PREMISES INFORMATION","Property Has Been Designated an Historical Landmark (checkbox)","Check the box (if applicable): Indicates the property has been designated an historical landmark."
+"887","Construction_OpenSidesCount","B","","ADDITIONAL PREMISES INFORMATION","# Of Open Sides on Structure","Enter number: The number of open sides on a structure."
+"886","CommercialProperty_Premises_RemarkText","C","","ADDITIONAL PREMISES INFORMATION","Remarks","Enter text: The remarks associated with a specific location or sublocation."
+"888","Construction_ConstructionCode","B","","ADDITIONAL PREMISES INFORMATION","Construction Type","Enter code: The primary construction type of the premises. Common construction classifications are:
+* Frame
+* Joisted Masonry
+* Non-Combustible
+* Masonry Non-Combustible
+* Modified Fire Resistive
+* Fire Resistive"
+"889","BuildingFireProtection_HydrantDistanceFeetCount","B","","ADDITIONAL PREMISES INFORMATION","Distance to Hydrant","Enter number: The distance in feet from the nearest hydrant that supports the protection class used."
+"890","BuildingFireProtection_FireStationDistanceMileCount","B","","ADDITIONAL PREMISES INFORMATION","Distance to Fire Station","Enter number: The distance in miles from the nearest fire station that supports the protection class used."
+"891","BuildingFireProtection_FireDistrictName","B","","ADDITIONAL PREMISES INFORMATION","Fire District","Enter text: The property's fire district name."
+"892","BuildingFireProtection_FireDistrictCode","B","","ADDITIONAL PREMISES INFORMATION","Code Number","Enter code: The property's fire district code number which can be found in the individual states manual pages."
+"893","BuildingFireProtection_ProtectionClassCode","B","","ADDITIONAL PREMISES INFORMATION","Prot Cl","Enter code: The fire rating protection class for this location.  Note: some structures may be located too far from the nearest hydrant, or too far from the nearest fire station, for the protection class of the community to apply."
+"894","Construction_StoreyCount","B","","ADDITIONAL PREMISES INFORMATION","# Stories","Enter number: The number of stories or floors for this building not including any basement."
+"895","Construction_BasementCount","B","","ADDITIONAL PREMISES INFORMATION","# Basm'ts","Enter number: The number of basements for this building."
+"562","CommercialStructure_BuiltYear","B","","ADDITIONAL PREMISES INFORMATION","Yr Built","Enter year: The year the building at each location was originally constructed. Specify in the Remarks section any significant additions or renovations and the year they were completed."
+"896","Construction_BuildingArea","B","","ADDITIONAL PREMISES INFORMATION","Total Area","Enter number: The number of square feet of the building at this location for which insurance is being requested."
+"897","BuildingImprovement_WiringIndicator","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Wiring","Check the box (if applicable): Indicates if any wiring improvements have been made since the original construction."
+"898","BuildingImprovement_WiringYear","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Wiring Year","Enter year: The year the wiring improvements took place."
+"899","BuildingImprovement_RoofingIndicator","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Roofing","Check the box (if applicable): Indicates if any roofing improvements have been made since the original construction."
+"900","BuildingImprovement_RoofingYear","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Roofing Year","Enter year: The year the roofing improvements took place."
+"901","BuildingImprovement_PlumbingIndicator","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Plumbing","Check the box (if applicable): Indicates if any plumbing improvements have been made since the original construction."
+"902","BuildingImprovement_PlumbingYear","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Plumbing Year","Enter year: The year the plumbing improvements took place."
+"903","BuildingImprovement_HeatingIndicator","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Heating","Check the box (if applicable): Indicates if any heating improvements have been made since the original construction."
+"904","BuildingImprovement_HeatingYear","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Heating Year","Enter year: The year the heating improvements took place."
+"905","BuildingImprovement_OtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Other","Check the box (if applicable): Indicates if any other improvements have been made since the original construction."
+"906","BuildingImprovement_OtherDescription","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Other Description","Enter text: The description of other improvements that have been made to the structure."
+"907","BuildingImprovement_OtherYear","B","","ADDITIONAL PREMISES INFORMATION","Building Improvements Other Year","Enter year: The year the other improvements took place."
+"908","Construction_BuildingCodeEffectivenessGradeCode","B","","ADDITIONAL PREMISES INFORMATION","Bldg Code Grade","Enter code: The industry code used to collect the building code effectiveness grade code. The source of this code list is public protection classification or individual insurer rating manuals."
+"909","CommercialStructure_TaxCode","B","","ADDITIONAL PREMISES INFORMATION","Tax Code","Enter code: The city, county or state tax code, if applicable."
+"910","Construction_RoofMaterialCode","B","","ADDITIONAL PREMISES INFORMATION","Roof Type","Enter code: The material used to construct the roof.  Examples include:
+  * Composition (fiberglass, asphalt, etc.)
+  * Metal
+  * Poured
+  * Slate
+  * Tile
+  * Wood Shake
+(Please note this list is not all inclusive)"
+"911","BuildingOccupancy_OtherOccupanciesDescription","B","","ADDITIONAL PREMISES INFORMATION","Other Occupancies","Enter text: The description of any other occupancies located in the building not operated by the insured and not listed in the Description of Operations section on the ACORD 125.  If no other occupancy, enter None."
+"912","CommercialStructure_WindClass_ResistiveIndicator","B","","ADDITIONAL PREMISES INFORMATION","Wind Class Resistive","Check the box (if applicable): Indicates the wind class is resistive."
+"913","CommercialStructure_WindClass_SemiResistiveIndicator","B","","ADDITIONAL PREMISES INFORMATION","Wind Class Semi Resistive","Check the box (if applicable): Indicates the wind class is semi-resistive."
+"914","CommercialStructure_WindClass_OtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Wind Class Other","Check the box (if applicable): Indicates the wind class is other than those listed."
+"915","CommercialStructure_WindClass_OtherDescription","B","","ADDITIONAL PREMISES INFORMATION","Wind Class Other","Enter text: The description of the other wind class."
+"10197","BuildingFeatures_SolidFuelHeaterIndicator","B","","ADDITIONAL PREMISES INFORMATION","Heating Source incl Woodburning Stove or Fireplace Insert (checkbox)","Check the box (if applicable): Indicates the presence of a solid fuel heater such as a wood burning stove or fireplace insert."
+"10198","BuildingFeatures_SolidFuelHeaterInstallationDate","B","","ADDITIONAL PREMISES INFORMATION","Date Installed","Enter date: The installation date of the solid fuel heater."
+"10199","BuildingFeatures_SolidFuelHeaterManufacturerName","B","","ADDITIONAL PREMISES INFORMATION","Manufacturer","Enter text: The manufacturer of the solid fuel heater."
+"12534","CommercialStructure_PrimaryHeat_BoilerIndicator","B","","ADDITIONAL PREMISES INFORMATION","Primary Heat Boiler (checkbox)","Check the box (if applicable): Indicates if a boiler is the primary heating on the premises."
+"917","CommercialStructure_HeatingBoilerInsuredElsewhereCode","C","","ADDITIONAL PREMISES INFORMATION","If Boiler, is insurance placed elsewhere? Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if the heating boiler is insured elsewhere."
+"12536","CommercialStructure_PrimaryHeat_SolidFuelIndicator","B","","ADDITIONAL PREMISES INFORMATION","Primary Heat Solid Fuel (checkbox)","Check the box (if applicable): Indicates if solid fuel is the primary heating on the premises."
+"12538","CommercialStructure_PrimaryHeat_OtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Primary Heat Other (checkbox)","Check the box (if applicable): Indicates primary heating source is other than those listed."
+"12539","CommercialStructure_PrimaryHeat_OtherDescription","B","","ADDITIONAL PREMISES INFORMATION","Primary Heat Other Description","Enter text: If applicable, describe the other primary heat source."
+"12535","CommercialStructure_SecondaryHeat_BoilerIndicator","B","","ADDITIONAL PREMISES INFORMATION","Secondary Heat Boiler (checkbox)","Check the box (if applicable): Indicates if a boiler is the secondary heating on the premises."
+"917","CommercialStructure_HeatingBoilerInsuredElsewhereCode","D","","ADDITIONAL PREMISES INFORMATION","If Boiler, is insurance placed elsewhere? Y / N","Enter Y for a “Yes” response. Input N for “No” response. Indicates if the heating boiler is insured elsewhere."
+"12537","CommercialStructure_SecondaryHeat_SolidFuelIndicator","B","","ADDITIONAL PREMISES INFORMATION","Secondary Heat Solid Fuel (checkbox)","Check the box (if applicable): Indicates if solid fuel is the secondary heating on the premises."
+"12540","CommercialStructure_SecondaryHeat_OtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Secondary Heat Other (checkbox)","Check the box (if applicable): Indicates secondary heating source is other than those listed."
+"12541","CommercialStructure_SecondaryHeat_OtherDescription","B","","ADDITIONAL PREMISES INFORMATION","Secondary Heat Other Description","Enter text: If applicable, describe the other secondary heat source."
+"918","BuildingExposure_RightDescription","B","","ADDITIONAL PREMISES INFORMATION","Right Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the right of the insured premises."
+"919","BuildingExposure_RightDistance","B","","ADDITIONAL PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure on the right of the insured premises in linear feet."
+"920","BuildingExposure_LeftDescription","B","","ADDITIONAL PREMISES INFORMATION","Left Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the left of the insured premises."
+"921","BuildingExposure_LeftDistance","B","","ADDITIONAL PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure on the left of the insured premises in linear feet."
+"922","BuildingExposure_FrontDescription","B","","ADDITIONAL PREMISES INFORMATION","Front Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the front of the insured premises."
+"923","BuildingExposure_FrontDistance","B","","ADDITIONAL PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure in the front of the insured premises in linear feet."
+"924","BuildingExposure_RearDescription","B","","ADDITIONAL PREMISES INFORMATION","Rear Exposure and Distance","Enter text: The description of the buildings, structures, activities conducted, or use of the adjacent property to the rear of the insured premises."
+"925","BuildingExposure_RearDistance","B","","ADDITIONAL PREMISES INFORMATION","","Enter number: The distance to the adjacent exposure in the rear of the insured premises in linear feet."
+"926","Alarm_Burglar_AlarmDescription","B","","ADDITIONAL PREMISES INFORMATION","Burglar Alarm Type","Enter text: The description of any burglar alarm protecting the building or contents. Descriptive terms such as safe, premises, perimeter, or ultrasonic may be suitable."
+"927","Alarm_Burglar_CertificateIdentifier","B","","ADDITIONAL PREMISES INFORMATION","Certificate Number","Enter identifier: The Underwriters Laboratories or other testing organization Certificate Number, if applicable. Attach a copy of the certificate to the application."
+"928","Alarm_Burglar_CertificateExpirationDate","B","","ADDITIONAL PREMISES INFORMATION","Expiration Date","Enter date: The expiration date of the certificate.  (MM/DD/YYYY)"
+"929","Alarm_Burglar_CentralStationIndicator","B","","ADDITIONAL PREMISES INFORMATION","Central Station","Check the box (if applicable): Indicates the burglar alarm rings at an alarm company."
+"930","Alarm_Burglar_WithKeysIndicator","B","","ADDITIONAL PREMISES INFORMATION","With Keys","Check the box (if applicable): Indicates the alarm company, located off the insured's premises, has keys to the applicant's property."
+"12543","Burglar_LocalGongIndicator","B","","ADDITIONAL PREMISES INFORMATION","Local Gong","Check the box (if applicable): Indicates the burglar alarm rings on audible gong located outside the building."
+"931","Alarm_Burglar_InstalledAndServicedByName","B","","ADDITIONAL PREMISES INFORMATION","Burglar Alarm Installed and Serviced by","Enter text: The name of the alarm company that installed and services the alarm.  Alarm companies often install, maintain, and service the system in addition to providing Central Station facilities."
+"932","Alarm_Burglar_ProtectionExtentCode","B","","ADDITIONAL PREMISES INFORMATION","Extent","Enter code: The designated extent of protection as described in the Underwriters Laboratories (UL) standard."
+"933","Alarm_Burglar_GradeCode","B","","ADDITIONAL PREMISES INFORMATION","Grade","Enter code: The alarm system grade as described in the Underwriters Laboratories (UL) standard (i.e., AA, A, BB, B, CC and C) which indicates the time required to respond to a signal from the alarm system."
+"934","BuildingSecurity_GuardWatchmenCount","B","","ADDITIONAL PREMISES INFORMATION","# Guards / Watchmen","Enter number: The number of guards and or watchmen employed or contracted for by the insured."
+"935","BuildingSecurity_GuardWatchmenClockHourlyIndicator","B","","ADDITIONAL PREMISES INFORMATION","Clock Hourly","Check the box (if applicable): Indicates the guard / watchman is required to make hourly rounds using a special time recording device or in connection with the central station service.  If other than hourly, indicate the time interval in the Other box."
+"936","BuildingSecurity_GuardWatchmenOtherIndicator","B","","ADDITIONAL PREMISES INFORMATION","Other","Check the box (if applicable): Indicates the guard / watchman is required to make some other type of rounds."
+"937","BuildingSecurity_GuardWatchmenOtherDescription","B","","ADDITIONAL PREMISES INFORMATION","Other Description","Enter text: The description of the rounds the guards / watchmen are required to make."
+"938","BuildingFireProtection_Alarm_ProtectionDescription","B","","ADDITIONAL PREMISES INFORMATION","Premises Fire Protection","Enter text: The description of the type of fire protection for the premises (e.g. sprinklers, standpipes, chemical systems)."
+"939","BuildingFireProtection_Alarm_SprinklerPercent","B","","ADDITIONAL PREMISES INFORMATION","% Sprnk","Enter percentage: The percentage of the structure area covered by the sprinkler system."
+"940","BuildingFireProtection_Alarm_ManufacturerName","B","","ADDITIONAL PREMISES INFORMATION","Fire Alarm Manufacturer","Enter text: The name of the manufacturer of the alarm, and if it is UL listed."
+"941","BuildingFireProtection_Alarm_CentralStationIndicator","B","","ADDITIONAL PREMISES INFORMATION","Central Station","Check the box (if applicable): Indicates the fire alarm rings at an alarm company, police department or fire department."
+"942","BuildingFireProtection_Alarm_LocalGongIndicator","B","","ADDITIONAL PREMISES INFORMATION","Local Gong","Check the box (if applicable): Indicates the fire alarm rings on an audible gong located outside of the building."
+"867","GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator","B","","ADDITIONAL INTEREST","ACORD 45 attached for additional names","Check the box (if applicable): Indicates that further additional interests appear on the attached ACORD 45."
+"4509","AdditionalInterest_Interest_LendersLossPayableIndicator","B","","ADDITIONAL INTEREST","Lender’s Loss Payable","Check the box (if applicable): Indicates the additional interest type is a lender's loss payable."
+"271","AdditionalInterest_Interest_LossPayeeIndicator","B","","ADDITIONAL INTEREST","Interest Loss Payee","Check the box (if applicable): Indicates the additional interest type is a loss payee."
+"272","AdditionalInterest_Interest_MortgageeIndicator","B","","ADDITIONAL INTEREST","Interest Mortgagee","Check the box (if applicable): Indicates the additional interest type is a mortgagee."
+"274","AdditionalInterest_Interest_OtherIndicator","B","","ADDITIONAL INTEREST","Interest Other","Check the box (if applicable): Indicates the additional interest is other than those listed."
+"275","AdditionalInterest_Interest_OtherDescription","B","","ADDITIONAL INTEREST","Interest Other Description","Enter text: The description of the other type of additional interest."
+"264","AdditionalInterest_InterestRank","B","","ADDITIONAL INTEREST","Rank","Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item."
+"774","AdditionalInterest_CertificateRequiredIndicator","B","","ADDITIONAL INTEREST","Certificate","Check the box (if applicable): Indicates if the additional interest requires a Certificate of Insurance."
+"278","AdditionalInterest_FullName","B","","ADDITIONAL INTEREST","Name and Address","Enter text: The additional interest's full name."
+"279","AdditionalInterest_MailingAddress_LineOne","B","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address line one."
+"280","AdditionalInterest_MailingAddress_LineTwo","B","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address line two."
+"281","AdditionalInterest_MailingAddress_CityName","B","","ADDITIONAL INTEREST","","Enter text: The additional interest's mailing address city name."
+"282","AdditionalInterest_MailingAddress_StateOrProvinceCode","B","","ADDITIONAL INTEREST","","Enter code: The additional interest's mailing address state or province code."
+"283","AdditionalInterest_MailingAddress_PostalCode","B","","ADDITIONAL INTEREST","","Enter code: The additional interest's mailing address postal code."
+"2968","AdditionalInterest_MailingAddress_CountryCode","B","","ADDITIONAL INTEREST","","Enter code: The additional interest's country code."
+"284","AdditionalInterest_AccountNumberIdentifier","B","","ADDITIONAL INTEREST","Reference / Loan #","Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured."
+"260","AdditionalInterest_Item_LocationProducerIdentifier","B","","ADDITIONAL INTEREST","Location","Enter number: The producer assigned number of the location which has an additional interest."
+"259","AdditionalInterest_Item_BuildingProducerIdentifier","B","","ADDITIONAL INTEREST","Building","Enter number: The producer assigned number of the building which has an additional interest."
+"263","AdditionalInterest_Item_OtherItemDescription","B","","ADDITIONAL INTEREST","Item Class","Enter text: The description of the item which has an additional interest."
+"261","AdditionalInterest_Item_ScheduledItemProducerIdentifier","B","","ADDITIONAL INTEREST","Item","Enter number: The producer assigned number of the scheduled item which has an additional interest."
+"775","AdditionalInterest_ItemDescription","B","","ADDITIONAL INTEREST","Item Description","Enter text: The description of the item of interest if needed to further clarify.  For a vehicle, list the make, model and VIN number.  For a scheduled item, list the description, such as three carat diamond in six point setting."
+"17251","CommercialPropertyLineOfBusiness_RemarkText","A","","REMARKS","Remarks","Enter text: The remarks associated the commercial property line of business."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","Agency Customer ID","Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage)."
+"104","Producer_AuthorizedRepresentative_Signature","A","","SIGNATURE","Producer's Signature","Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states."
+"583","Producer_AuthorizedRepresentative_FullName","A","","SIGNATURE","Producer's Name","Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form."
+"584","Producer_StateLicenseIdentifier","A","","SIGNATURE","State Producer License No.","Enter identifier: The State License Number of the producer."
+"226","NamedInsured_Signature","A","","SIGNATURE","Applicant's Signature","Sign here: Accommodates the signature of the applicant or named insured."
+"227","NamedInsured_SignatureDate","A","","SIGNATURE","Date","Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY)"
+"228","Producer_NationalIdentifier","A","","SIGNATURE","National Producer Number","Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number."
+"105","Form_EditionIdentifier","A","","Edition","Date","The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM)."

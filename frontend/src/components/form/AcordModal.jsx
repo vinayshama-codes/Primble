@@ -1,6 +1,9 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
-import { screenPoints, screenPointsText, cardKey } from "../../utils/screenPoints";
+import FormValuesLink from "./review/FormValuesLink";
+import { screenPoints, screenPointsText, cardPoints } from "../../utils/screenPoints";
+import { editorPlanRows, patchPackageScore, planAfterForms, planScoreKey } from "../../utils/editorPlanList";
+import { withDownloadPlanPoints } from "../../utils/downloadPlanPoints";
 import { issueFactKey, openConflictFacts } from "../../utils/dcFacts";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor, deductionText, deductionColor, sqsGradeFromScore, shortFormLabel, lineLabel, scoreSoFar, sourceLabel, submissionReady } from "../../utils/formatters";
@@ -8,8 +11,8 @@ import { formLabel, fileStem, baseFormId } from "../../utils/formInstances";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
-import NeedsAttentionPanel, { DownloadReviewList } from "./NeedsAttentionPanel";
-import { downloadReviewCounts, downloadReviewHeadline, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
+import NeedsAttentionPanel, { DownloadStep, DownloadStepsList } from "./NeedsAttentionPanel";
+import { downloadSteps, fetchNeedsAttention, withoutSupersededRecs } from "../../utils/needsAttention";
 import { confirmFieldUpdates } from "../../utils/confirmValues";
 import { formsReady } from "../../utils/scoreWithForms";
 import useAttentionList from "./review/useAttentionList";
@@ -37,7 +40,7 @@ import {
   KD_PAGE, keyDetailIssueId, isKeyDetailId, keyDetailFixState,
 } from "../../utils/resolvedIssues";
 import { positiveScoreWording } from "../../utils/positiveWording";
-import { ANCHOR_FORM_ID, withAnchorForm, checkedFormsForReview } from "../../utils/formSelection";
+import { ANCHOR_FORM_ID, withAnchorForm, withUploadedForms, checkedFormsForReview } from "../../utils/formSelection";
 import ReviewRailLayout from "./review/ReviewRailLayout";
 import QuestionnairePage from "./review/QuestionnairePage";
 import useQuestionnaire from "./review/useQuestionnaire";
@@ -266,7 +269,7 @@ function buildProvenance(group, key, pkg) {
     const lbl = pkg.evidence_labels?.[key];
     if (!lbl) return null;
     const p = EVIDENCE_PROV[lbl] || {};
-    return { title: key.replace(/_/g, " "), direction: lbl === "confirmed_by_user" ? "increased" : "reduced", source: key.replace(/_/g, " "), confidence: EVIDENCE_LABEL_DISPLAY[lbl] || lbl, rule: p.rule, remediation: p.remediation };
+    return { title: key.replace(/_/g, " "), direction: lbl === "confirmed_by_user" ? "increased" : "reduced", source: key.replace(/_/g, " "), confidence: EVIDENCE_LABEL_DISPLAY[lbl] || lbl, rule: p.rule, remediation: p.remediation, factKey: key };
   }
   if (group === "loss_history") {
     const st = pkg.loss_history_state;
@@ -288,7 +291,39 @@ function buildProvenance(group, key, pkg) {
 // iOS / Android / desktop. Closes on the "X", on Escape, on scroll/resize, and on
 // any pointer-down outside the popover AND outside a provenance trigger (so a click
 // on another chip switches straight to that chip's card instead of just closing).
-function ProvenancePopover({ data, pos, onClose }) {
+// One fact's recorded changes (Brent's V2 E&O lineage, 27 Oct 2026) - the
+// newest few, loaded on demand from GET /api/fact-history.
+function FactHistoryRows({ sessionId, factKey }) {
+  const [rows, setRows] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setRows(null); setFailed(false);
+    fetch(`${API_BASE}/api/fact-history/${sessionId}?fact_key=${encodeURIComponent(factKey)}`, { credentials: "include" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live) { if (d?.success) setRows(d.history || []); else setFailed(true); } })
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [sessionId, factKey]);
+  if (failed) return <div style={{ fontSize: 9, color: "#94a3b8" }}>History unavailable.</div>;
+  if (rows === null) return <div style={{ fontSize: 9, color: "#94a3b8" }}>Loading…</div>;
+  if (!rows.length) return <div style={{ fontSize: 9, color: "#94a3b8" }}>No changes recorded yet.</div>;
+  const when = iso => { try { return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {rows.slice(-6).reverse().map((h, i) => (
+        <div key={i} style={{ fontSize: 9, lineHeight: 1.4, color: "#334155" }}>
+          <div><strong>{h.values_purged ? "(value removed)" : (h.to_display || "(blank)")}</strong>{h.from_display && !h.values_purged ? <span style={{ color: "#94a3b8" }}> was {h.from_display}</span> : null}</div>
+          <div style={{ color: "#64748b" }}>{h.kind_label} - {h.who} - {when(h.at)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProvenancePopover({ data, pos, onClose, sessionId }) {
+  const [showHistory, setShowHistory] = useState(false);
+  useEffect(() => { setShowHistory(false); }, [data?.factKey]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     const onScroll = () => onClose();
@@ -333,6 +368,17 @@ function ProvenancePopover({ data, pos, onClose }) {
           </div>
         ))}
       </div>
+      {data.factKey && sessionId && (
+        <div style={{ marginTop: 6, borderTop: "1px solid #f1f5f9", paddingTop: 5 }}>
+          <span role="button" tabIndex={0}
+            onClick={() => setShowHistory(v => !v)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowHistory(v => !v); } }}
+            style={{ cursor: "pointer", fontSize: 9, fontWeight: 700, color: "#E61B84", userSelect: "none" }}>
+            {showHistory ? "Hide history" : "History"}
+          </span>
+          {showHistory && <div style={{ marginTop: 4 }}><FactHistoryRows sessionId={sessionId} factKey={data.factKey} /></div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -667,7 +713,10 @@ const DISMISS_REASON_OPTIONS = [
 function packageIssueCounts(data) {
   const c = data && data.grouped_issues && data.grouped_issues.counts;
   if (c && typeof c.hard_stops === "number" && typeof c.warnings === "number") {
-    return { hardStopCount: c.hard_stops, warningCount: c.warnings };
+    // `info` (29 Oct 2026): advice-only cards drawn in the Warnings section -
+    // never a warning in the toast or banner, but the section still shows them.
+    return { hardStopCount: c.hard_stops, warningCount: c.warnings,
+             infoCount: typeof c.info === "number" ? c.info : 0 };
   }
   return {
     hardStopCount: ((data && data.hard_stops) || []).length,
@@ -1437,6 +1486,8 @@ function SchedulePreload({ sessionId }) {
       if (!res.ok || !data.success) throw new Error(data.detail || "Could not save.");
       setRows(sched.schedule_key, data.rows || []);
       setSavedKey(sched.schedule_key);
+      // Cells that are not their column's type are stored blank (29 Oct 2026).
+      if (data.refused_message) setErr(data.refused_message);
     } catch (ex) {
       setErr(ex?.message || "Could not save that schedule.");
     } finally {
@@ -2001,6 +2052,11 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{arq.client_name ? `${arq.client_name} (${arq.email})` : arq.email}</div>
                   <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>{fmtDate(arq.created_at)}{arq.submitted_at && ` - Submitted ${fmtDate(arq.submitted_at)}`}</div>
+                  {arq.assistant_uses > 0 && (
+                    <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
+                      Form Assistant used {arq.assistant_uses} time{arq.assistant_uses !== 1 ? "s" : ""}
+                    </div>
+                  )}
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, flexShrink: 0 }}>{sc.label}</span>
               </div>
@@ -2171,7 +2227,7 @@ function RemediationDiffBand({ diff, compact = false }) {
 }
 
 // ── Side panel recommendation row - own local state avoids shared-state race ──
-function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedule, initialValue = "" }) {
+function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedule, initialValue = "", hidePoints = false }) {
   // A card may SUGGEST one of its own options (`suggested_answer`, backend
   // services/premises_interest) - the choice opens pre-selected so the producer
   // confirms it in one click, and `suggestion_evidence` says why. Only an option
@@ -2268,7 +2324,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, onOpenSchedul
           {isObj && !result && typeof rec.suggestion_evidence === "string" && rec.suggestion_evidence && (
             <div style={{ fontSize: 10, color: "#64748b", marginTop: 2, lineHeight: 1.45 }}>{rec.suggestion_evidence}</div>
           )}
-          {impact > 0 && <div title={rec.impact_scope === "package" ? "What answering this adds to the Total Package Score - the same on every form" : undefined} style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
+          {impact > 0 && !hidePoints && <div title={rec.impact_scope === "package" ? "What answering this adds to the Total Package Score - the same on every form" : undefined} style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
         </div>
         <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Answered" : "Open"}</span>
       </div>
@@ -2402,10 +2458,14 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
   // display is deliberately UNIFIED with the ordinary Hard Stops box - same title,
   // same box, same "Download Anyway" label - so this doesn't read as a new/
   // different feature to the producer.
-  // The list is the one both download screens draw (`DownloadReviewList`): the
-  // items to fix one by one, the rest as one line per group with its count and
-  // Show (owner, 14 Oct 2026). The headline counts the listed fix-items only.
-  const counts = downloadReviewCounts(openRecs, attention);
+  // Both download screens draw `downloadSteps` (Brent, 26 Oct 2026).
+  // Brent, 26 Oct 2026: only what can stop the package, one step at a time -
+  // Hard Stops > Warnings > Cross-Form Validation, each with Skip.
+  const steps = downloadSteps(openRecs, attention);
+  const [stepIdx, setStepIdx] = useState(0);
+  const idx = Math.min(stepIdx, Math.max(steps.length - 1, 0));
+  const step = steps[idx];
+  const isLast = idx >= steps.length - 1;
   const reasonRequired = hasHardBlock && !overrideReason.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -2413,19 +2473,22 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
         <div style={{ flexShrink: 0 }}>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-            <div style={{ fontSize: 12, color: "#64748b" }}>{downloadReviewHeadline(counts)}</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>
+              {steps.length ? `Step ${idx + 1} of ${steps.length} - ${step.title}` : "All clear - nothing stops this package"}
+            </div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
-          <DownloadReviewList openRecs={openRecs} attention={attention} />
-          {narrative && (
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: counts.toFix > 0 ? 10 : 0 }}>
+          <DownloadStep step={step} />
+          {narrative && isLast && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: steps.length ? 10 : 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>SQS Analysis Summary</div>
               <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.75, margin: 0 }}>{narrative.replace(/\n+/g, " ").trim()}</p>
             </div>
           )}
         </div>
         <div style={{ flexShrink: 0 }}>
+          {isLast && (steps.length > 0 || hasHardBlock) && (
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 5 }}>
               Override Note <span style={{ color: "#94a3b8", fontWeight: 400 }}>(recommended for E&O record)</span>
@@ -2440,20 +2503,30 @@ function DownloadPreflightModal({ openRecs, attention, narrative, overrideReason
               onBlur={e => e.target.style.borderColor = "#e2e8f0"}
             />
           </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onCancel} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               Cancel
             </button>
+            {!isLast ? (
+              <button
+                onClick={() => setStepIdx(idx + 1)}
+                data-testid="download-step-skip"
+                style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: "#E61B84", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                Skip to {steps[idx + 1].title}
+              </button>
+            ) : (
             <button
               onClick={onProceed}
               disabled={loading}
               style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: !loading ? "#E61B84" : "#e2e8f0", color: !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-              {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : "Download Anyway"}
+              {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : (steps.length ? "Download Anyway" : "Download")}
             </button>
+            )}
           </div>
-          {reasonRequired && (
+          {reasonRequired && isLast && (
             <div style={{ fontSize: 11, color: "#991b1b", marginTop: 8 }}>
-              Add a note above before proceeding - required for the items in Hard Stops.
+              Add a note above before downloading - required for the items in Hard Stops.
             </div>
           )}
         </div>
@@ -2549,6 +2622,10 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const [search, setSearch]       = useState("");
   const [query, setQuery]         = useState("");
   const [searching, setSearching] = useState(false);
+  // Archived filter (27 Oct 2026): the main list holds active packages; an
+  // archived package is read-only until it is unarchived.
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiving, setArchiving]       = useState(null);
 
   const fetchStats = async () => {
     try {
@@ -2566,7 +2643,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
     if (overlay) setLoading(true); else setSearching(true);
     setLoadError(null);
     try {
-      const qs   = query ? `&search=${encodeURIComponent(query)}` : "";
+      const qs   = (query ? `&search=${encodeURIComponent(query)}` : "") + (showArchived ? "&archived=1" : "");
       const res  = await fetch(`${API_BASE}/api/sessions?page=${pg}&page_size=${PAGE_SIZE}${qs}`, { credentials: "include" });
       const data = res.ok ? await res.json() : null;
       if (data?.success) { setSessions(data.sessions || []); setTotal(data.total ?? 0); }
@@ -2593,7 +2670,25 @@ function DashboardStep({ token, onResume, onNewPackage }) {
     if (firstQueryRun.current) { firstQueryRun.current = false; return; }
     if (page !== 1) setPage(1);
     else fetchSessions(1, { overlay: false });
-  }, [query]); // eslint-disable-line
+  }, [query, showArchived]); // eslint-disable-line
+
+  // Archive / Unarchive from a package card. An archived package leaves the
+  // main list; an unarchived one leaves the Archived list.
+  const handleArchiveToggle = async (sid, archive) => {
+    setArchiving(sid);
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sid}/${archive ? "archive" : "unarchive"}`, { method: "POST", credentials: "include" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setLoadError(data?.detail || (archive ? "Could not archive the package." : "Could not unarchive the package.")); return; }
+    } catch {
+      setLoadError("Network error. Please try again.");
+      return;
+    } finally {
+      setArchiving(null);
+    }
+    if (sessions.length === 1 && page > 1) setPage(p => p - 1);
+    else fetchSessions(page, { overlay: false });
+  };
 
   const handleDelete = async sid => {
     setDeleteTarget(null);
@@ -2730,6 +2825,20 @@ function DashboardStep({ token, onResume, onNewPackage }) {
             ))}
           </div>
 
+          {/* ── Active / Archived (27 Oct 2026) ── */}
+          <div role="tablist" aria-label="Which packages" style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            {[["Active", false], ["Archived", true]].map(([label, val]) => (
+              <button key={label} role="tab" aria-selected={showArchived === val}
+                onClick={() => { if (showArchived !== val) setShowArchived(val); }}
+                style={{ fontSize: 12, fontWeight: 700, padding: "5px 14px", borderRadius: 20, cursor: "pointer",
+                  border: `1.5px solid ${showArchived === val ? "#E61B84" : "#e0e0e0"}`,
+                  background: showArchived === val ? "rgba(230,0,122,0.08)" : "#fff",
+                  color: showArchived === val ? "#E61B84" : "#6a6a6a" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* ── Keyword search (server-side, coexists with pagination) ── */}
           {(sessions.length > 0 || query) && (
             <div className="db-search-wrap">
@@ -2755,6 +2864,11 @@ function DashboardStep({ token, onResume, onNewPackage }) {
               <div className="db-no-results">
                 <p className="db-no-results-title">No packages match "{query}"</p>
                 <button className="db-no-results-btn" onClick={() => setSearch("")}>Clear search</button>
+              </div>
+            ) : showArchived ? (
+              <div className="db-no-results">
+                <p className="db-no-results-title">No archived packages</p>
+                <button className="db-no-results-btn" onClick={() => setShowArchived(false)}>Back to active packages</button>
               </div>
             ) : (
             <div className="db-empty-state">
@@ -2822,6 +2936,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
                             <span style={{ fontSize: 11, color: "#94a3b8" }}>Created {fmtDate(s.created_at)}</span>
                             <span style={{ fontSize: 10.5, fontWeight: 700, color: meta.color, background: meta.bg, borderRadius: 20, padding: "2px 9px" }}>{meta.label}</span>
+                            {s.archived_at && (
+                              <span title={`Archived ${fmtDate(s.archived_at)} - read-only until unarchived`} style={{ fontSize: 10.5, fontWeight: 700, color: "#475569", background: "rgba(100,116,139,0.14)", borderRadius: 20, padding: "2px 9px" }}>Archived</span>
+                            )}
                             {rd && (
                               <span style={{ fontSize: 10.5, fontWeight: 700, color: rd.ready ? "#047857" : "#b45309", background: rd.ready ? "rgba(16,185,129,0.14)" : "rgba(245,158,11,0.14)", borderRadius: 20, padding: "2px 9px" }}>{rd.label}</span>
                             )}
@@ -2848,7 +2965,17 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
 
-                        <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session" style={{ position: "absolute", top: 10, right: 10 }}>✕</button>
+                        <button
+                          className={`session-archive-btn${s.archived_at ? " is-archived" : ""}`}
+                          onClick={e => { e.stopPropagation(); handleArchiveToggle(s.session_id, !s.archived_at); }}
+                          disabled={archiving === s.session_id}
+                          title={s.archived_at ? "Make this package editable again" : "Move this package out of the main list"}
+                          style={{ position: "absolute", top: 10, right: s.archived_at ? 10 : 44, cursor: archiving === s.session_id ? "wait" : "pointer" }}>
+                          {archiving === s.session_id ? "Saving…" : (s.archived_at ? "Unarchive" : "Archive")}
+                        </button>
+                        {!s.archived_at && (
+                          <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session" style={{ position: "absolute", top: 10, right: 10 }}>✕</button>
+                        )}
                       </div>
                     </div>
                   );
@@ -2940,6 +3067,9 @@ const AcordModal = forwardRef(function AcordModal({
   const [processingStage, setProcessingStage] = useState("");
   const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
   const [showUploadOverlay, setShowUploadOverlay] = useState(false);
+  // The open package is archived (27 Oct 2026): read-only until unarchived.
+  const [archivedAt, setArchivedAt] = useState(null);
+  const [unarchiving, setUnarchiving] = useState(false);
   // Figure 1: token that keys the live per-file upload progress side-channel.
   const [uploadProgressToken, setUploadProgressToken] = useState(null);
   const [resumingUpload, setResumingUpload] = useState(false);
@@ -3309,6 +3439,9 @@ const AcordModal = forwardRef(function AcordModal({
   const [reopeningRecId, setReopeningRecId] = useState(null);
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
+  // The review plan read for the download screens when the editor had none yet
+  // (GET /api/session/{id}/screen-points - cached server-side), 29 Oct 2026.
+  const [preflightPlanSqs, setPreflightPlanSqs] = useState(null);
   const [preflightHardBlock, setPreflightHardBlock] = useState(false);
   const [preflightOverrideReason, setPreflightOverrideReason] = useState("");
   const [preflightCallback, setPreflightCallback] = useState(null);
@@ -3866,9 +3999,9 @@ const AcordModal = forwardRef(function AcordModal({
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms), __severity: reviewSeverity(ctx.tone) })} />}
-          {(canResolve || inDataConsistency) && !formsGenerated && screenPointsText(screenPts.cards.get(cardKey(it))) && (
+          {(canResolve || inDataConsistency) && (!formsGenerated || planAfterForms(packageSqs)) && screenPointsText(cardPoints(screenPts.cards, it)) && (
             <span style={{ fontSize: 10, fontWeight: 700, color: "#be185d", whiteSpace: "nowrap" }}>
-              {screenPointsText(screenPts.cards.get(cardKey(it)))}
+              {screenPointsText(cardPoints(screenPts.cards, it))}
             </span>
           )}
           {addable.map((fid) => (
@@ -3991,7 +4124,7 @@ const AcordModal = forwardRef(function AcordModal({
     setPackageSqs(null);
     setDismissedRecs(new Set()); setDismissedRecDetails(new Map()); setShowDownloadPreflight(false);
     setPreflightRecs([]); setPreflightHardBlock(false); setPreflightOverrideReason(""); setPreflightCallback(null);
-    setPreflightAttention(null);
+    setPreflightAttention(null); setPreflightPlanSqs(null);
     setSqsNarrative("");
   };
 
@@ -4040,6 +4173,7 @@ const AcordModal = forwardRef(function AcordModal({
     fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(async data => {
+        setArchivedAt(data?.archived_at || null);
         const isEssentials = user?.subscription_tier === "essentials";
         if (isEssentials && data?.session_id) {
           setSessionId(sid); setStep("lite");
@@ -4133,7 +4267,7 @@ const AcordModal = forwardRef(function AcordModal({
   // edits are saved first; a failed save stops the download.
   const handleDownloadOneNoSummary = async formId => {
     if (!(await saveViewerEdits())) return;
-    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOneNoSummary(formId, draftOpts)));
+    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOneNoSummary(formId, draftOpts), formId));
   };
 
   const gatedDownload = action => {
@@ -5547,8 +5681,9 @@ const AcordModal = forwardRef(function AcordModal({
   // they unticked it - the list keeps its match-percentage order.
   useLayoutEffect(() => {
     if (step !== "form_selection") return;
-    setCheckedFormIds(prev => withAnchorForm(prev, recommendations, declined125));
-  }, [step, recommendations, declined125]);
+    setCheckedFormIds(prev => withUploadedForms(withAnchorForm(prev, recommendations, declined125),
+                                                recommendations, formTicksTouched));
+  }, [step, recommendations, declined125, formTicksTouched]);
   const missingStateAutoForms = checkedFormIds.has("ACORD_127")
     ? stateAutoCompanions().filter(id => !checkedFormIds.has(id))
     : [];
@@ -5600,7 +5735,7 @@ const AcordModal = forwardRef(function AcordModal({
     soft_stops: softStops,
   });
   const hasHardStops = reviewIssueCounts.hardStopCount > 0;
-  const hasWarnings  = reviewIssueCounts.warningCount  > 0;
+  const hasWarnings  = (reviewIssueCounts.warningCount + (reviewIssueCounts.infoCount || 0)) > 0;
   // Orbin item 3 (1 Oct 2026): a missing key detail that has its own Warnings /
   // Hard Stops card is listed on the card only - both layouts read this.
   const keyDetails = withKeyDetailCards(keyDetailsRaw, groupedIssues);
@@ -5608,6 +5743,88 @@ const AcordModal = forwardRef(function AcordModal({
   const screenPts = useMemo(
     () => screenPoints(packageSqs, groupedIssues, keyDetails, openConflictFacts(underwriting)),
     [packageSqs, groupedIssues, keyDetails, underwriting]);
+
+  // THE SIDE PANEL'S NUMBERS AFTER FORMS (owner, 29 Oct 2026: "the points shown
+  // on items always add up to exactly 100 - score, after forms too"). Every
+  // post-generation reply carries the stored score without the review plan -
+  // weighing it takes seconds and a box save must stay quick - so once the score
+  // settles the panel asks for it (GET /api/session/{id}/screen-points) and
+  // lists the plan's items with its numbers (utils/editorPlanList.js). One try
+  // per score; a newer score on screen drops an older reply.
+  const [planScreen, setPlanScreen] = useState(null);
+  // True while the plan for the score on screen is being read: the rows'
+  // older numbers (which do not add up) are not shown meanwhile.
+  const [planLoading, setPlanLoading] = useState(false);
+  const planTriedRef = useRef("");
+  const planSeqRef = useRef(0);
+  useEffect(() => {
+    if (!sessionId || !formsGenerated || !packageSqs || packageSqs.review_plan
+        || packageSqs.package_sqs_score == null) {
+      setPlanLoading(false);
+      return undefined;
+    }
+    const key = `${sessionId}|${planScoreKey(packageSqs)}`;
+    if (planTriedRef.current === key) return undefined;
+    const seq = ++planSeqRef.current;
+    const ctrl = new AbortController();
+    setPlanLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/session/${sessionId}/screen-points`, { credentials: "include", signal: ctrl.signal });
+        const d = res.ok ? await res.json() : null;
+        planTriedRef.current = key;          // one try per score (an abort retries)
+        if (seq !== planSeqRef.current) return;
+        setPlanLoading(false);
+        const next = d && d.success ? d.package_sqs : null;
+        if (!next || !planAfterForms(next)) return;
+        setPackageSqs((prev) => (prev && !prev.review_plan
+          && prev.package_sqs_score === next.package_sqs_score
+          && (prev.timestamp ?? null) === (next.timestamp ?? null) ? next : prev));
+        // The key details and cards this plan was weighed on, tied to it.
+        setPlanScreen({ plan: next.review_plan, key_details: d.key_details || null, grouped_issues: d.grouped_issues || null });
+      } catch (e) {
+        // Aborted (a newer score is on its way) - or offline: the panel then
+        // keeps the numbers it has.
+        if (e?.name !== "AbortError" && seq === planSeqRef.current) {
+          planTriedRef.current = key;
+          setPlanLoading(false);
+        }
+      }
+    }, 300);
+    return () => { clearTimeout(timer); ctrl.abort(); };
+  }, [sessionId, formsGenerated, packageSqs]);
+  // A plan the review page's own load brought (extraction-result) is read with
+  // that page's key details and cards.
+  const editorPlan = useMemo(() => {
+    if (!formsGenerated) return null;
+    const own = planScreen && packageSqs && planScreen.plan === packageSqs.review_plan;
+    return editorPlanRows(packageSqs, own ? planScreen.key_details : keyDetails,
+      own ? planScreen.grouped_issues : groupedIssues);
+  }, [formsGenerated, packageSqs, planScreen, keyDetails, groupedIssues]);
+  // THE DOWNLOAD SCREENS' NUMBERS (29 Oct 2026): each row the plan lists shows
+  // the plan's number - the side panel's - and no other (utils/downloadPlanPoints.js).
+  // The editor's plan when it has one; else the one read for the download, if it
+  // was weighed on the score on screen.
+  const downloadPlanSqs = planAfterForms(packageSqs) ? packageSqs
+    : (preflightPlanSqs && packageSqs && planScoreKey(preflightPlanSqs) === planScoreKey(packageSqs)
+      ? preflightPlanSqs : null);
+  const downloadRecs = useMemo(() => {
+    const recs = preflightRecs || [];
+    return withDownloadPlanPoints(recs, downloadSteps(recs, preflightAttention).flatMap((st) => st.rows), downloadPlanSqs);
+  }, [preflightRecs, preflightAttention, downloadPlanSqs]);
+  // One plan row's fix window - the same doors the review page's items use.
+  const openEditorPlanRow = (r) => {
+    if (!r) return;
+    if (r.kind === "detail" && r.item) { openKeyDetailFix(r.item); return; }
+    if (r.kind === "card" && r.issue?.resolution) { openResolution(r.issue); return; }
+    if (r.kind === "rec" && r.scoreItem) { openScoreFix(r.scoreItem); return; }
+    if (r.kind === "dc") {
+      const el = document.getElementById(`dc-field-${r.fact}`) || document.getElementById("editor-data-consistency");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (r.kind === "doc") goBackToReview("documents");
+  };
 
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
   // A 60 cap that has no entry in the package Hard Stops list. The COPE,
@@ -5666,7 +5883,24 @@ const AcordModal = forwardRef(function AcordModal({
   const handleNewPackage = async () => {
     if (freeExhausted) { onShowUpgrade(); return; }
     if (!(await saveViewerEdits())) return;          // item 10
+    setArchivedAt(null);
     resetToUpload();
+  };
+
+  // Unarchive the open package from its read-only banner.
+  const handleUnarchiveOpen = async () => {
+    if (!sessionId) return;
+    setUnarchiving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/unarchive`, { method: "POST", credentials: "include" });
+      const data = await res.json().catch(() => null);
+      if (res.ok) setArchivedAt(null);
+      else setError(data?.detail || "Could not unarchive the package.");
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setUnarchiving(false);
+    }
   };
 
   const BillingBtnSpinner = () => (
@@ -5764,11 +5998,10 @@ const AcordModal = forwardRef(function AcordModal({
       } else if (data.new_package_sqs_score != null) {
         setPackageSqs(prev => {
           if (!prev) return prev;
-          return {
-            ...prev,
+          return patchPackageScore(prev, {
             package_sqs_score: data.new_package_sqs_score,
             tier: data.new_package_tier ?? prev.tier,
-          };
+          });
         });
       }
       // DID THE ANSWER ACTUALLY CLOSE THE GAP? The server decides, and it says so
@@ -5892,11 +6125,10 @@ const AcordModal = forwardRef(function AcordModal({
         });
       }
       if (data.new_package_sqs_score != null) {
-        setPackageSqs(prev => prev ? {
-          ...prev,
+        setPackageSqs(prev => prev ? patchPackageScore(prev, {
           package_sqs_score: data.new_package_sqs_score,
           tier: data.new_package_tier ?? prev.tier,
-        } : prev);
+        }) : prev);
       }
 
       if (data.reopened) {
@@ -5984,7 +6216,7 @@ const AcordModal = forwardRef(function AcordModal({
       // in the red HARD STOPS block ("Caps ... at 60") beside a score of 84.
       setPackageSqs(data.editor_package_sqs);
     } else if (data.new_package_sqs_score != null) {
-      setPackageSqs(prev => prev ? { ...prev, package_sqs_score: data.new_package_sqs_score, tier: data.new_package_tier ?? prev.tier } : prev);
+      setPackageSqs(prev => prev ? patchPackageScore(prev, { package_sqs_score: data.new_package_sqs_score, tier: data.new_package_tier ?? prev.tier }) : prev);
     }
     if (data.key_details !== undefined) setKeyDetails(data.key_details || null);
     if (data.dry_run !== undefined) setDryRun(data.dry_run || null);
@@ -6574,8 +6806,7 @@ const AcordModal = forwardRef(function AcordModal({
           // left `credits` at 0 and the trace stale. Reported live, 2026-08-26.
           const credited = data.credits_total ?? prev.credits_applied ?? 0;
           const prevTrace = prev.score_trace;
-          return {
-            ...prev,
+          return patchPackageScore(prev, {
             package_sqs_score: data.new_package_sqs_score,
             tier: data.new_package_tier ?? prev.tier,
             credits_applied: credited,
@@ -6593,7 +6824,7 @@ const AcordModal = forwardRef(function AcordModal({
                 },
               },
             } : {}),
-          };
+          });
         });
       }
       // Refresh the dismissed panel from the DB so it survives a reload - but
@@ -6610,20 +6841,35 @@ const AcordModal = forwardRef(function AcordModal({
     }
   };
 
-  const _runPreflightThenDownload = async (downloadFn) => {
+  const _runPreflightThenDownload = async (downloadFn, onlyFormId = null) => {
     setDownloadPreflightLoading(true);
+    // The download screens print the review plan's numbers (the side panel's).
+    // No plan on screen yet: read it once, without holding the screen up - the
+    // numbers appear when it lands (utils/downloadPlanPoints.js).
+    if (sessionId && !planAfterForms(packageSqs)) {
+      // Tied to the patch epoch it was asked at: an answer given while it is
+      // on its way makes it stale (utils/editorPlanList.planScoreKey).
+      const epoch = Number(packageSqs?._plan_epoch) || 0;
+      fetch(`${API_BASE}/api/session/${sessionId}/screen-points`, { credentials: "include" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((d) => { if (d && d.success && planAfterForms(d.package_sqs)) setPreflightPlanSqs({ ...d.package_sqs, _plan_epoch: epoch }); })
+        .catch(() => {});
+    }
     try {
       const [recsRes, narrativeRes, attentionRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/api/audit/open/${sessionId}`, { credentials: "include" }),
+        // One form downloaded: only what holds that form (owner, 30 Oct 2026).
+        fetch(`${API_BASE}/api/audit/open/${sessionId}${onlyFormId ? `?form_id=${encodeURIComponent(onlyFormId)}` : ""}`, { credentials: "include" }),
         fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { credentials: "include" }),
         fetchNeedsAttention(sessionId),
       ]);
       const recsData = recsRes.status === "fulfilled" && recsRes.value.ok ? await recsRes.value.json() : null;
       // The live needs-attention list names every form and box (Orbin 22 Sep
       // item 19d); the stored rows it supersedes are hidden only when it loaded.
-      const attention = attentionRes.status === "fulfilled" ? attentionRes.value : null;
+      const _att = attentionRes.status === "fulfilled" ? attentionRes.value : null;
+      const attention = (_att && onlyFormId)
+        ? { ..._att, forms: (_att.forms || []).filter((f) => f?.form_id === onlyFormId) }
+        : _att;
       setPreflightAttention(attention);
-      const attentionTotal = (attention?.counts?.total || 0) + (attention?.document_suggestions?.length || 0);
       const openRecs = withoutSupersededRecs(recsData?.open_recommendations || [], attention);
       const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
       if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
@@ -6641,7 +6887,9 @@ const AcordModal = forwardRef(function AcordModal({
       const hasHardBlock = openRecs.some(r => (r.rec_id || "").includes("hardblock_"))
         || (attention?.forms || []).some(f => (f?.rows || []).some(r => r?.blocks_download));
       setPreflightHardBlock(hasHardBlock);
-      if (openRecs.length === 0 && attentionTotal === 0) { downloadFn({}); return; }
+      // Brent, 26 Oct 2026: the screen opens only for what can stop the package
+      // (`downloadSteps`) or a box the download gate holds.
+      if (!downloadSteps(openRecs, attention).length && !hasHardBlock) { downloadFn({}); return; }
       setPreflightOverrideReason("");
       setPreflightCallback(() => downloadFn);
       setShowDownloadPreflight(true);
@@ -6678,7 +6926,7 @@ const AcordModal = forwardRef(function AcordModal({
 
   const handleDownloadOne = async formId => {
     if (!(await saveViewerEdits())) return;          // item 10
-    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOne(formId, draftOpts)));
+    gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOne(formId, draftOpts), formId));
   };
   const handleDownloadAll = async () => {
     if (!(await saveViewerEdits())) return;          // item 10
@@ -7008,6 +7256,24 @@ const AcordModal = forwardRef(function AcordModal({
         lines.push("  (no modifications recorded)");
       }
       lines.push("");
+      // Brent's V2 E&O lineage (27 Oct 2026): every value each fact has held -
+      // from what to what, how it got there, who, when, the evidence.
+      lines.push("FACT HISTORY (EVERY VALUE CHANGE)");
+      if (d.fact_lineage?.length) {
+        for (const h of d.fact_lineage) {
+          const was = h.values_purged ? "(value removed by retention)" : (h.from ? `"${h.from}"` : "(blank)");
+          const now = h.values_purged ? "(value removed by retention)" : (h.to ? `"${h.to}"` : "(blank)");
+          lines.push(`  - ${h.at}  ${h.fact}: ${was} -> ${now}`);
+          lines.push(`    How: ${h.how || h.kind || "-"}  |  By: ${h.who || "-"}  |  Action: ${h.action || "-"}`);
+          const ev = Array.isArray(h.evidence) && h.evidence.length ? `  |  Evidence: ${h.evidence.map(_auditEvidence).filter(Boolean).join("; ")}` : "";
+          if (h.confidence || h.source || ev) {
+            lines.push(`    ${h.confidence ? `Confidence: ${h.confidence}` : ""}${h.source ? `${h.confidence ? "  |  " : ""}Source: ${_auditSource(h.source)}` : ""}${ev}`);
+          }
+        }
+      } else {
+        lines.push("  (no fact history recorded - packages created before 27 Oct 2026 start their history at their next change)");
+      }
+      lines.push("");
       lines.push("VALUES SEEN AND REFUSED");
       if (d.rejected_facts?.length) {
         for (const rj of d.rejected_facts) {
@@ -7243,7 +7509,7 @@ const AcordModal = forwardRef(function AcordModal({
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal
-          openRecs={preflightRecs}
+          openRecs={downloadRecs}
           attention={preflightAttention}
           narrative={sqsNarrative}
           overrideReason={preflightOverrideReason}
@@ -7509,6 +7775,16 @@ const AcordModal = forwardRef(function AcordModal({
         )}
 
         {!(step === "review" && reviewRail) && renderStatusBanners()}
+
+        {archivedAt && step !== "dashboard" && (
+          <div role="status" style={{ margin: "10px 16px 0", padding: "9px 14px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#f8fafc", color: "#334155", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span>This package is archived and read-only. Unarchive it to make changes.</span>
+            <button onClick={handleUnarchiveOpen} disabled={unarchiving}
+              style={{ fontSize: 12, fontWeight: 700, color: "#E61B84", background: "#fff", border: "1.5px solid #E61B84", borderRadius: 8, padding: "5px 12px", cursor: unarchiving ? "wait" : "pointer", opacity: unarchiving ? 0.6 : 1 }}>
+              {unarchiving ? "Unarchiving…" : "Unarchive"}
+            </button>
+          </div>
+        )}
 
         {step === "dashboard" && <DashboardStep token={token} onResume={handleResumeSession} onNewPackage={handleNewPackage} />}
 
@@ -8403,6 +8679,15 @@ const AcordModal = forwardRef(function AcordModal({
                       <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
                       {typeTag && <span title={typeTag.title} style={{ fontSize: 10, color: typeTag.color, fontWeight: 700 }} data-testid="doc-type-tag">{typeTag.label}</span>}
                       {insuredTag && <span title={insuredTag.title} style={INSURED_TAG_STYLE} data-testid="doc-insured-tag">{insuredTag.label}</span>}
+                      {d.reader === "transcriber" && (
+                        // An outside ACORD form read by ASG's Transcriber (29 Oct 2026,
+                        // ASG_TRANSCRIBER.md): its values are "please verify", like AI values.
+                        <span title="ACORD Solutions Group's Transcriber read this form's boxes. Its values are marked for verification."
+                              style={{ fontSize: 10, color: "#0f766e", fontWeight: 700 }} data-testid="doc-reader-tag">
+                          Read by ACORD Transcriber{d.reader_accuracy != null ? ` - ${Math.round(d.reader_accuracy)}%` : ""}
+                        </span>
+                      )}
+                      <FormValuesLink sessionId={sessionId} doc={d} />
                       <span className="doc-filename" style={{ flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</span>
                       {lossRunDocNote(packageSqs?.loss_coverage, d.doc_id) && (
                         <span style={{ fontSize: 10, color: "#475569", fontWeight: 600 }} data-testid="doc-loss-years">{lossRunDocNote(packageSqs?.loss_coverage, d.doc_id)}</span>
@@ -8611,7 +8896,8 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                           {isConflict && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", textTransform: "uppercase" }}>Values differ - confirm</span>}
-                          {isConflict && !formsGenerated && screenPointsText(screenPts.dc.get(f.fact_key)) && (
+                          {isConflict && f.row_level && <span style={{ fontSize: 10.5, color: "#64748b" }}>One schedule row - your pick changes only this value on this row.</span>}
+                          {isConflict && (!formsGenerated || planAfterForms(packageSqs)) && screenPointsText(screenPts.dc.get(f.fact_key)) && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#be185d", whiteSpace: "nowrap" }}>
                               {screenPointsText(screenPts.dc.get(f.fact_key))}
                             </span>
@@ -8777,7 +9063,7 @@ const AcordModal = forwardRef(function AcordModal({
                     <div className="stops-title">
                       Warnings
                       <span className="stops-title-meta">Fulfill to increase your Submission Quality Score (SQS)™</span>
-                      {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat())}
+                      {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat().filter((c) => !c.score_neutral))}
                     </div>
                     {/* No "Important" preview (client, 22 Sep, item 3): it
                         repeated the top clusters of the tiers below and read as
@@ -8986,7 +9272,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   </span>
                                 )}
                               </div>
-                              {rec.is_source_document && (
+                              {rec.is_source_document && !rec.uploaded_application_form && (
                                 <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>
                                   Source document detected - generate a clean copy only if you need one.
                                 </div>
@@ -9817,7 +10103,7 @@ const AcordModal = forwardRef(function AcordModal({
                             data to show. Escapes the sidebar overflow (position: fixed). */}
                         {provCard && (() => {
                           const data = buildProvenance(provCard.group, provCard.key, packageSqs);
-                          return data ? <ProvenancePopover data={data} pos={provCard.pos} onClose={closeProv} /> : null;
+                          return data ? <ProvenancePopover data={data} pos={provCard.pos} onClose={closeProv} sessionId={sessionId} /> : null;
                         })()}
                       </CollapsibleSection>
                     )}
@@ -9844,6 +10130,22 @@ const AcordModal = forwardRef(function AcordModal({
                             <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.45 }}>• {positiveScoreWording(r.message)}</div>
                             {r.item && itemResolveAndStatus(r.item, activeFormId ? [activeFormId] : [])}
                           </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* What holds THIS form at 85 (owner, 30 Oct 2026): its own
+                        required box or a cross-form check naming it. The server
+                        sends it as `cap_soft_stops`; the box itself is in the
+                        Needs attention list below. */}
+                    {formCapSplit.open.length === 0 && Array.isArray(activeSqs?.cap_soft_stops)
+                      && activeSqs.cap_soft_stops.length > 0 && (
+                      <div data-form-warning-hold style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>
+                          WARNINGS
+                          <span style={{ fontWeight: 600, color: "#92400e", marginLeft: 6 }}>Fulfill to increase this form's Submission Quality Score (SQS)™</span>
+                        </div>
+                        {activeSqs.cap_soft_stops.map((m, i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#78350f", lineHeight: 1.45, padding: "2px 0" }}>• {positiveScoreWording(m)}</div>
                         ))}
                       </div>
                     )}
@@ -9877,6 +10179,7 @@ const AcordModal = forwardRef(function AcordModal({
                         active recommendation cards. Each sub-part hides itself when empty. ── */}
                     {(activeKeyIssues.length > 0
                       || packageSqs?.top_recommendations?.length > 0
+                      || editorPlan?.rows?.length > 0 || editorPlan?.left > 0
                       || activeSqs.risk_drivers?.length > 0
                       || activeSqs.recommendations?.length > 0) && (
                       <CollapsibleSection resetKey={activeFormId} title="Recommendations" tooltip="Prioritized issues and suggested fixes to raise the score.">
@@ -9889,8 +10192,53 @@ const AcordModal = forwardRef(function AcordModal({
                           </div>
                         )}
 
+                        {/* Best Solutions AFTER FORMS, FROM THE REVIEW PLAN (owner, 29 Oct
+                            2026): every item the plan weighs - the key details, the
+                            cards, the score rows, a Data Consistency pick, a document -
+                            in its order, each with the plan's number. They add up to
+                            exactly 100 minus the score, as on the review page. */}
+                        {editorPlan && (editorPlan.rows.length > 0 || editorPlan.left > 0) && (
+                          <div data-testid="editor-plan-list" style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions <span style={{ textTransform: "none", fontWeight: 500, color: "#64748b", letterSpacing: 0 }}>- for the package score, the same on every form</span></div>
+                            {editorPlan.total > 0 && (
+                              <div style={{ fontSize: 10.5, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 9px", marginBottom: 8 }}>
+                                <strong>{editorPlan.total} {editorPlan.total === 1 ? "point" : "points"}</strong> remaining to 100 - the points below add up to it.
+                              </div>
+                            )}
+                            {editorPlan.rows.map((r, i) => {
+                              const canOpen = (r.kind === "detail" && !!r.item?.resolution) || (r.kind === "card" && !!r.issue?.resolution)
+                                || (r.kind === "rec" && !!r.scoreItem?.resolution) || r.kind === "dc" || r.kind === "doc";
+                              return (
+                                <div key={r.id || i} data-plan-id={r.id} style={{ padding: "4px 0", borderBottom: i < editorPlan.rows.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16, flexShrink: 0 }}>{i + 1}</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      {r.title && <div style={{ fontSize: 11, fontWeight: 700, color: "#000" }}>{r.title}</div>}
+                                      <div style={{ fontSize: 11, color: "#334155", marginTop: r.title ? 2 : 0 }}>{positiveScoreWording(r.label)}</div>
+                                    </div>
+                                    {r.text && (
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: r.points?.held ? "#92400e" : "#E61B84", whiteSpace: r.points?.held ? "normal" : "nowrap", maxWidth: 110, textAlign: "right" }}>{r.text}</span>
+                                    )}
+                                  </div>
+                                  {canOpen && (
+                                    <button type="button" onClick={() => openEditorPlanRow(r)}
+                                      style={{ marginLeft: 22, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                                      {r.kind === "dc" ? "Confirm in Data Consistency" : r.kind === "doc" ? "Open Documents" : "Open to fix"}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {editorPlan.left > 0 && (
+                              <div style={{ fontSize: 10, color: "#475569", marginTop: 6 }}>
+                                {editorPlan.left} {editorPlan.left === 1 ? "pt is" : "pts are"} not tied to an item here yet. Open the review page to see what is still missing.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Best Solutions (renamed from Top Recommendations) - numbered list */}
-                        {packageSqs?.top_recommendations?.length > 0 && (
+                        {!editorPlan && packageSqs?.top_recommendations?.length > 0 && (
                           <div style={{ marginBottom: 8 }}>
                             {/* NO PERCENTAGE ON THESE ROWS (owner, 1 Oct 2026: "it is
                                 confusing users"). Each row's % was the PACKAGE pillar
@@ -9898,7 +10246,7 @@ const AcordModal = forwardRef(function AcordModal({
                                 bars, which differ - and next to "+N pts", which is
                                 what the producer can act on. The points stay; the
                                 pillar scores stay on the pillar rows above. */}
-                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions</div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions <span style={{ textTransform: "none", fontWeight: 500, color: "#64748b", letterSpacing: 0 }}>- for the package score, the same on every form</span></div>
                             {/* HOW FAR IS THIS FROM 100, AND WHERE DOES IT SIT.
                                 Until 2026-09-23 nothing in the product answered
                                 either question. A package could show zero open
@@ -9909,9 +10257,12 @@ const AcordModal = forwardRef(function AcordModal({
                                 theirs to type. Warnings measure rule violations;
                                 the score measures evidence. This is the only
                                 line that joins them. */}
-                            {typeof packageSqs.points_remaining === "number" && packageSqs.points_remaining > 0 && (
+                            {planLoading && (
+                              <div style={{ fontSize: 10.5, color: "#64748b", marginBottom: 6 }}>Working out the points...</div>
+                            )}
+                            {!planLoading && typeof packageSqs.points_remaining === "number" && packageSqs.points_remaining > 0 && (
                               <div style={{ fontSize: 10.5, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 9px", marginBottom: 8 }}>
-                                <strong>{packageSqs.points_remaining} points</strong> remaining to 100 - every gap worth points is listed below.
+                                <strong>{packageSqs.points_remaining} {packageSqs.points_remaining === 1 ? "point" : "points"}</strong> remaining to 100 - every gap worth points is listed below.
                               </div>
                             )}
                             {packageSqs.top_recommendations.map((r, i) => {
@@ -9932,7 +10283,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                     <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                                     <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: "#000" }}>{pillarLabel}</span>
-                                    {typeof r.points_available === "number" && r.points_available > 0 && (
+                                    {!planLoading && typeof r.points_available === "number" && r.points_available > 0 && (
                                       <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", whiteSpace: "nowrap" }}>+{r.points_available} pts</span>
                                     )}
                                   </div>
@@ -9943,7 +10294,7 @@ const AcordModal = forwardRef(function AcordModal({
                                       pillar's whole gap; the answer it asks for can be
                                       worth less ("No known losses" takes Loss History
                                       out: +7 of 11.2). Said only when they differ. */}
-                                  {typeof r.answer_gain === "number" && r.answer_gain > 0
+                                  {!planLoading && typeof r.answer_gain === "number" && r.answer_gain > 0
                                     && Math.round(r.answer_gain) !== Math.round(r.points_available || 0) && (
                                     <div style={{ fontSize: 10, color: "#475569", marginLeft: 22, marginTop: 2 }}>
                                       {r.answer_gain_is_exact === true
@@ -9972,9 +10323,9 @@ const AcordModal = forwardRef(function AcordModal({
                         )}
 
                         {/* Best Solutions fallback (per-form risk drivers when no package top-recs) */}
-                        {activeSqs.risk_drivers?.length > 0 && !packageSqs?.top_recommendations?.length && (
+                        {activeSqs.risk_drivers?.length > 0 && !packageSqs?.top_recommendations?.length && !editorPlan?.rows?.length && (
                           <div style={{ marginBottom: 8 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions</div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions <span style={{ textTransform: "none", fontWeight: 500, color: "#64748b", letterSpacing: 0 }}>- for the package score, the same on every form</span></div>
                             {activeSqs.risk_drivers.map((d, i) => (
                               <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f1f5f9" : "none" }}>
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
@@ -9992,6 +10343,9 @@ const AcordModal = forwardRef(function AcordModal({
                                 key={typeof rec === "object" && rec !== null ? rec.rec_id : `legacy_${i}`}
                                 rec={rec}
                                 index={i}
+                                // The plan's list above carries the numbers (29 Oct 2026):
+                                // a card's own "+N pts" would count its answer twice.
+                                hidePoints={!!editorPlan || planLoading}
                                 sqsScore={activeSqs.sqs_score}
                                 onDismiss={handleDismissRec}
                                 onAnswer={handleAnswerRec}
@@ -10011,6 +10365,17 @@ const AcordModal = forwardRef(function AcordModal({
                     {(crossIssues.length > 0 || crossFormGhosts.length > 0) && (
                       <CollapsibleSection resetKey={activeFormId} title="Cross-Form Validation" tooltip="Checks that data agrees across the different ACORD forms.">
                         {(() => {
+                          // Owner, 30 Oct 2026: each form's panel lists the checks
+                          // that NAME this form (a check that names no form is the
+                          // package's and shows on every form) - the same rule that
+                          // holds a form's own score at 85.
+                          const _activeBase = baseFormId(activeFormId || "");
+                          const forThisForm = (iss) => !activeFormId || !Array.isArray(iss?.forms)
+                            || iss.forms.length === 0 || iss.forms.some((f) => baseFormId(f) === _activeBase);
+                          const crossIssuesHere = crossIssues.filter(forThisForm);
+                          const clustersHere = (cl) => (cl || [])
+                            .map((c) => ({ ...c, items: (c.items || []).filter(forThisForm) }))
+                            .filter((c) => c.items.length > 0);
                           // One validation row. Shared by the grouped path and the
                           // flat fallback so the two can never drift apart.
                           const row = (iss, key, divider) => {
@@ -10103,24 +10468,24 @@ const AcordModal = forwardRef(function AcordModal({
                           if (!crossGrouped) {
                             // Fallback: the flat list this panel always rendered, used
                             // only if the server could not group them.
-                            mainContent = crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
+                            mainContent = crossIssuesHere.map((iss, i) => row(iss, i, i < crossIssuesHere.length - 1));
                           } else {
                             // Sequenced: blocking clusters first, then Required /
                             // Recommended / Binder follow-up. Deduplicated: repeats of
                             // one underlying problem collapse into a single cluster
                             // instead of N separately numbered lines.
                             const sections = [
-                              { key: "hard", label: "Blocking - fix first", clusters: crossGrouped.hard_stops || [], color: "#b91c1c" },
+                              { key: "hard", label: "Blocking - fix first", clusters: clustersHere(crossGrouped.hard_stops), color: "#b91c1c" },
                               ...["required", "recommended", "binder_followup"].map(t => ({
                                 key: t,
                                 label: (crossGrouped.tier_labels || {})[t] || t,
-                                clusters: (crossGrouped.warnings || {})[t] || [],
+                                clusters: clustersHere((crossGrouped.warnings || {})[t]),
                                 color: "#64748b",
                               })),
                             ].filter(s => s.clusters.length > 0);
 
                             mainContent = sections.length === 0
-                              ? crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1))
+                              ? crossIssuesHere.map((iss, i) => row(iss, i, i < crossIssuesHere.length - 1))
                               : sections.map(sec => (
                                   <div key={sec.key} style={{ marginTop: 8 }}>
                                     <div style={{ fontSize: 9.5, fontWeight: 700, color: sec.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
@@ -10142,7 +10507,9 @@ const AcordModal = forwardRef(function AcordModal({
 
                           return (
                             <>
-                              {mainContent}
+                              {crossIssuesHere.length === 0
+                                ? <div style={{ fontSize: 11, color: "#64748b", padding: "2px 0" }}>No open cross-form checks for this form.</div>
+                                : mainContent}
                               {/* A closed dropdown (owner, 12 Oct 2026): the resolved
                                   history stays one click away instead of pushing the
                                   open items down. Closed again on every form switch. */}
@@ -10505,13 +10872,12 @@ const AcordModal = forwardRef(function AcordModal({
             {/* Post-download checklist: a successful download does not mean the package
                 is clean. Surface unresolved issues + next actions so nothing is assumed. */}
             {(() => {
-              const recs     = preflightRecs || [];
+              const recs     = downloadRecs;
               // The same list, split and counted the same way, as the review
-              // before the download (`DownloadReviewList` / `downloadReviewCounts`,
-              // owner 14 Oct 2026): the items to fix one by one, hard stops first,
-              // then one line per group with its count and Show.
-              const counts   = downloadReviewCounts(recs, preflightAttention);
-              const hasIssues = counts.total > 0;
+              // before the download (`downloadSteps`, Brent 26 Oct 2026).
+              const openSteps = downloadSteps(recs, preflightAttention);
+              const toFix    = openSteps.reduce((n, st) => n + st.rows.length, 0);
+              const hasIssues = toFix > 0;
               const score = packageSqs?.package_sqs_score;
               const nextAction = (sqsNarrative || "").replace(/\n+/g, " ").trim();
               return (
@@ -10536,9 +10902,9 @@ const AcordModal = forwardRef(function AcordModal({
                   {hasIssues && (
                     <>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                        {counts.toFix > 0 ? `To fix before sending (${counts.toFix})` : "Nothing to fix - still listed"}
+                        {`To fix before sending (${toFix})`}
                       </div>
-                      <DownloadReviewList openRecs={recs} attention={preflightAttention} />
+                      <DownloadStepsList openRecs={recs} attention={preflightAttention} />
                       {nextAction && (
                         <div style={{ marginTop: 14, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
                           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Recommended next action</div>

@@ -19,7 +19,33 @@ from services.cover_service import generate_ai_cover_narrative, build_cover_page
 from services.pdf_service import apply_draft_watermark
 # A signed form downloads with the producer's signature on the producer's boxes
 # only, never the applicant's line (1 Oct 2026).
-from services.signature_boxes import regenerate_pdf_for_form
+from services.signature_boxes import regenerate_pdf_for_form as _regenerate_for_form
+
+
+def regenerate_pdf_for_form(proc_session, form_id, force=False, user_signature=None):
+    """A downloaded form: the rendered PDF plus the encrypted Primble record
+    (`acord_intake.primble_record`, 27 Oct 2026) - attached HERE, where a PDF
+    leaves the system, never in the render / cache door (its bytes stay stable
+    for the cache, the editor and signing)."""
+    pdf_bytes = _regenerate_for_form(proc_session, form_id, force, user_signature)
+    try:
+        from services.acord_intake.primble_record import attach
+        return attach(pdf_bytes, proc_session, form_id)
+    except Exception:                                          # noqa: BLE001
+        return pdf_bytes
+
+
+def _cover_with_record(cover_pdf, proc_session):
+    """The SQS summary (cover page) with the package's encrypted Primble record
+    (27 Oct 2026, owner): the same answers, tables and Policies-table edits the
+    forms carry, so the cover re-uploaded beside the declarations alone
+    restores them. Hidden in the PDF's document information; nothing is printed.
+    Unchanged on any failure."""
+    try:
+        from services.acord_intake.primble_record import SUMMARY_FORM, attach
+        return attach(cover_pdf, proc_session, SUMMARY_FORM)
+    except Exception:                                          # noqa: BLE001
+        return cover_pdf
 from services.field_qa import check_hard_block
 # Download file names: a form's second copy is "ACORD_131_Excess" (7 Oct 2026).
 from services.form_instances import file_stem
@@ -297,6 +323,14 @@ def _split_open_recs(open_recs: list, unscored_ids=frozenset(), live_points=None
         else:
             soft.append((f"{msg} (+{imp} pts)" if exact else f"{msg} (up to +{imp} pts)")
                         if imp else msg)
+    # The safety net's items (27 Oct 2026, `sqs_service.charge_only_answerable`):
+    # not charged because the page could not ask them - the underwriter still
+    # sees each one.
+    for item in (package_sqs or {}).get("not_scored") or []:
+        label = str((item or {}).get("label") or "").strip() if isinstance(item, dict) else ""
+        line = f"Not scored - could not be asked on screen: {label}"
+        if label and line not in soft:
+            soft.append(line)
     return _critical_lines(hard_rows, package_sqs), soft
 
 
@@ -463,6 +497,7 @@ async def download_pdf(
                 hard_stops, soft_stops, file_manifest, package_checksum,
                 package_sqs=_pkg_now),
         )
+        cover_pdf = _cover_with_record(cover_pdf, proc_session)
 
         def _build_zip():
             buf = io.BytesIO()
@@ -673,6 +708,7 @@ async def download_all(
     else:
         logger.debug(f"cover narrative cache hit {_ck[:8]}")
     cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum, package_sqs=_pkg_now)
+    cover_pdf = _cover_with_record(cover_pdf, proc_session)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -938,6 +974,9 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
         user=fresh,
         hard_stops=_shown_hard, soft_stops=_shown_soft,
     )
+    # The record goes on BEFORE the checksum below: the checksum proves the
+    # bytes delivered, and these are them.
+    cover_pdf = _cover_with_record(cover_pdf, proc_session)
 
     # The cover sheet IS the delivered file for this tier - there is no separate
     # filled-form PDF to hash, and it cannot contain a hash of its own final bytes

@@ -1,0 +1,404 @@
+FORMAT 3
+
+SIDE 1
+
+SHADING
+
+LINES/BOXES
+15.00, 0.00,21.00, 0.00, 4
+15.00,40.00,21.00,40.00, 4
+21.00, 0.00,21.00,80.00, 4
+ 4.00,80.00,21.00,80.00, 4
+ 4.00,40.00, 4.00,80.00, 4
+ 6.00,40.00, 6.00,80.00, 2
+22.00,40.00,26.00,40.00, 2
+28.00, 0.00,28.00,80.00, 4
+26.00, 0.00,28.00, 0.00, 1
+27.00,40.00,27.00,80.00, 2
+22.00, 0.00,22.00,80.00, 4
+28.00,38.00,28.00,80.00, 2
+24.00,27.50,26.00,27.50, 2
+24.00,11.50,26.00,11.50, 2
+24.00, 0.00,24.00,40.00, 2
+26.00, 0.00,26.00,80.00, 2
+22.00,40.00,34.00,40.00, 2
+22.00,80.00,34.00,80.00, 4
+34.00, 0.00,34.00,80.00, 4
+22.00, 0.00,34.00, 0.00, 4
+32.00, 0.00,34.00, 0.00, 1
+33.00,40.00,33.00,80.00, 2
+34.00,38.00,34.00,80.00, 2
+30.00,27.50,32.00,27.50, 2
+30.00,11.50,32.00,11.50, 2
+30.00, 0.00,30.00,40.00, 2
+32.00, 0.00,32.00,80.00, 2
+11.00, 0.00,12.00, 0.00, 1
+12.00, 0.00,12.00,40.00, 1
+14.00, 0.00,14.00,80.00, 2
+13.00,20.00,14.00,20.00, 2
+ 9.00, 0.00, 9.00,80.00, 2
+10.00, 0.00,10.00,40.00, 1
+ 9.00, 0.00,11.00, 0.00, 1
+10.00, 0.00,10.00,31.50, 2
+11.00, 0.00,11.00,80.00, 2
+13.00, 0.00,13.00,40.00, 2
+12.00, 0.00,12.00,31.50, 2
+46.00, 0.00,46.00,80.00, 2
+60.00, 0.00,60.00,80.00, 4
+62.00, 0.00,62.00,80.00, 1
+60.00,40.00,62.00,40.00, 2
+45.00, 0.00,45.00,49.50, 2
+44.00, 0.00,44.00,49.50, 2
+47.00, 0.00,47.00,80.00, 2
+44.00,49.50,46.00,49.50, 1
+44.00,49.50,44.00,80.00, 1
+42.00,49.50,44.00,49.50, 1
+42.00,49.50,46.00,49.50, 2
+42.00, 0.00,46.00, 0.00, 1
+49.00,59.50,49.00,80.00, 2
+47.00,59.50,49.00,59.50, 2
+48.00,29.00,48.00,58.50, 2
+49.00, 0.00,49.00,59.50, 2
+47.00, 0.00,49.00, 0.00, 1
+48.00, 4.50,48.00, 6.50, 2
+48.00,11.50,48.00,13.50, 2
+48.00,19.50,48.00,21.50, 2
+48.00,26.50,48.00,28.50, 2
+47.00, 4.50,49.00, 4.50, 2
+47.00, 6.50,49.00, 6.50, 2
+47.00,11.50,49.00,11.50, 2
+47.00,13.50,49.00,13.50, 2
+47.00,19.50,49.00,19.50, 2
+47.00,21.50,49.00,21.50, 2
+47.00,26.50,48.00,26.50, 2
+47.00,28.50,48.00,28.50, 2
+12.00,40.00,12.00,80.00, 2
+12.00,73.00,14.00,73.00, 2
+16.00,40.00,16.00,80.00, 2
+14.00,40.00,16.00,40.00, 2
+11.00,40.00,15.00,40.00, 2
+17.00,40.00,17.00,80.00, 2
+19.00,40.00,19.00,80.00, 2
+17.00,73.00,19.00,73.00, 2
+21.00,40.00,21.00,80.00, 2
+19.00,40.00,21.00,40.00, 2
+ 8.00,40.00,10.00,40.00, 2
+ 7.00,40.00, 7.00,80.00, 2
+ 7.00,73.00, 9.00,73.00, 2
+ 9.00,40.00,11.00,40.00, 2
+ 6.00,40.00, 6.00,80.00, 2
+ 4.00,40.00, 6.00,40.00, 2
+ 5.00,76.00, 5.00,78.00, 2
+ 4.00,61.00, 6.00,61.00, 2
+ 4.00,76.00, 6.00,76.00, 2
+ 4.00,78.00, 6.00,78.00, 2
+ 5.00,70.00, 6.00,70.00, 2
+ 7.00,40.00, 9.00,40.00, 2
+35.00,40.00,41.00,40.00, 2
+37.00, 0.00,41.00, 0.00, 1
+40.00,40.00,40.00,80.00, 2
+41.00,38.00,41.00,80.00, 2
+37.00, 0.00,37.00,40.00, 2
+39.00, 0.00,39.00,80.00, 2
+41.00, 0.00,41.00,18.50, 1
+ 9.00,64.50,11.00,64.50, 2
+26.25, 6.50,26.75, 7.50, 2
+26.25,15.00,26.75,16.00, 2
+26.25,11.00,26.75,12.00, 2
+26.00, 0.00,28.00,20.00, 2
+26.25,26.50,26.75,27.50, 2
+26.25,35.00,26.75,36.00, 2
+26.25,31.00,26.75,32.00, 2
+26.00,20.00,28.00,40.00, 2
+22.00, 0.00,28.00,80.00, 4
+32.25, 6.50,32.75, 7.50, 2
+32.25,15.00,32.75,16.00, 2
+32.25,11.00,32.75,12.00, 2
+32.00, 0.00,34.00,20.00, 2
+32.25,26.50,32.75,27.50, 2
+32.25,35.00,32.75,36.00, 2
+32.25,31.00,32.75,32.00, 2
+32.00,20.00,34.00,40.00, 2
+ 4.00, 0.00,15.00,40.00, 4
+42.00, 0.00,62.00,80.00, 4
+ 2.00,68.00, 4.00,80.00, 4
+37.25, 6.50,37.75, 7.50, 2
+37.25,15.00,37.75,16.00, 2
+37.25,11.00,37.75,12.00, 2
+37.00, 0.00,39.00,20.00, 2
+37.25,26.50,37.75,27.50, 2
+37.25,35.00,37.75,36.00, 2
+37.25,31.00,37.75,32.00, 2
+37.00,20.00,39.00,40.00, 2
+34.00,12.00,35.00,14.00, 2
+35.00, 0.00,41.00,80.00, 4
+
+FORM TEXT
+"590BU", 2.84,69.00,"C",10.00,"DATE (MM/DD/YYYY)"
+"590BU", 4.80, 0.50,"L", 0.00,"AGENCY"
+"590BU", 4.80,40.50,"L", 0.00,"INSURED LOCATION CODE"
+"590BU", 4.80,61.00,"C",15.00,"DATE OF LOSS AND TIME"
+"590BU", 6.84,40.50,"C",39.00,"PROPERTY / HOME POLICY"
+"590BU", 7.84,40.50,"L", 0.00,"CARRIER"
+"590BU", 7.84,73.50,"L", 0.00,"NAIC CODE"
+"590BU", 9.84,65.00,"L", 0.00,"LINE OF BUSINESS"
+"590BU", 9.67, 0.50,"L", 0.00,"CONTACT"
+"590BU", 9.80,40.50,"L", 0.00,"POLICY NUMBER"
+"590BU",10.13, 0.50,"L", 0.00,"NAME:"
+"590BU",10.67, 0.50,"L", 0.00,"PHONE"
+"590BU",11.13, 0.50,"L", 0.00,"(A/C, No, Ext):"
+"590BU",11.84,40.50,"C",39.00,"FLOOD POLICY"
+"590BU",11.67, 0.50,"L", 0.00,"FAX"
+"590BU",12.13, 0.50,"L", 0.00,"(A/C, No):"
+"590BU",12.63, 0.50,"L", 0.00,"E-MAIL"
+"590BU",12.84,40.50,"L", 0.00,"CARRIER"
+"590BU",12.84,73.50,"L", 0.00,"NAIC CODE"
+"590BU",13.09, 0.50,"L", 0.00,"ADDRESS:"
+"590BU",14.00, 0.50,"L", 0.00,"CODE:"
+"590BU",14.00,20.50,"L", 0.00,"SUBCODE:"
+"590BU",15.05, 0.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"590BU",14.80,40.50,"L", 0.00,"POLICY NUMBER"
+"590BU",16.84,40.50,"C",39.00,"WIND POLICY"
+"590BU",17.84,40.50,"L", 0.00,"CARRIER"
+"590BU",17.84,73.50,"L", 0.00,"NAIC CODE"
+"590BU",19.80,40.50,"L", 0.00,"POLICY NUMBER"
+"590BU",22.84, 0.50,"L", 0.00,"NAME OF INSURED (First, Middle, Last)"
+"590BU",22.84,40.50,"L", 0.00,"INSURED'S MAILING ADDRESS"
+"590BU",24.84, 0.50,"C",10.50,"DATE OF BIRTH"
+"590BU",24.84,12.00,"C",15.00,"FEIN (if applicable)"
+"590BU",24.72,29.00,"C", 9.50,"MARITAL STATUS /"
+"590BU",25.13,28.00,"C",11.50,"CIVIL UNION (if applicable)"
+"590BU",26.63, 0.50,"L", 0.00,"PRIMARY"
+"590BU",26.63,20.50,"L", 0.00,"SECONDARY"
+"590BU",27.05,40.50,"L", 0.00,"PRIMARY E-MAIL ADDRESS:"
+"590BU",27.09, 0.50,"L", 0.00,"PHONE #"
+"590BU",27.09,20.50,"L", 0.00,"PHONE #"
+"590BU",28.05,40.50,"L", 0.00,"SECONDARY E-MAIL ADDRESS:"
+"590BU",28.84, 0.50,"L", 0.00,"NAME OF SPOUSE (First, Middle, Last) (if applicable)"
+"590BU",28.84,40.50,"L", 0.00,"SPOUSE'S MAILING ADDRESS (if applicable)"
+"590BU",30.84, 0.50,"C",10.50,"DATE OF BIRTH"
+"590BU",30.84,12.00,"C",15.00,"FEIN (if applicable)"
+"590BU",30.72,29.00,"C", 9.50,"MARITAL STATUS /"
+"590BU",31.13,28.00,"C",11.50,"CIVIL UNION (if applicable)"
+"590BU",32.63, 0.50,"L", 0.00,"PRIMARY"
+"590BU",32.63,20.50,"L", 0.00,"SECONDARY"
+"590BU",33.05,40.50,"L", 0.00,"PRIMARY E-MAIL ADDRESS:"
+"590BU",33.09, 0.50,"L", 0.00,"PHONE #"
+"590BU",33.09,20.50,"L", 0.00,"PHONE #"
+"590BU",34.05,40.50,"L", 0.00,"SECONDARY E-MAIL ADDRESS:"
+"590BU",35.84, 0.50,"L", 0.00,"NAME OF CONTACT (First, Middle, Last)"
+"590BU",35.84,40.50,"L", 0.00,"CONTACT'S MAILING ADDRESS"
+"590BU",37.63, 0.50,"L", 0.00,"PRIMARY"
+"590BU",37.63,20.50,"L", 0.00,"SECONDARY"
+"590BU",38.09, 0.50,"L", 0.00,"PHONE #"
+"590BU",38.09,20.50,"L", 0.00,"PHONE #"
+"590BU",40.05,40.50,"L", 0.00,"PRIMARY E-MAIL ADDRESS:"
+"590BU",39.79, 0.50,"L", 0.00,"WHEN TO CONTACT"
+"590BU",41.05,40.50,"L", 0.00,"SECONDARY E-MAIL ADDRESS:"
+"590BU",42.84, 0.50,"L", 0.00,"LOCATION OF LOSS"
+"590BU",42.79,50.00,"L", 0.00,"POLICE OR FIRE DEPARTMENT CONTACTED"
+"590BU",43.84, 0.50,"L", 0.00,"STREET:"
+"590BU",44.84, 0.50,"L", 0.00,"CITY, STATE, ZIP:"
+"590BU",44.79,50.00,"L", 0.00,"REPORT NUMBER"
+"590BU",45.84, 0.50,"L", 0.00,"COUNTRY:"
+"590BU",46.84, 0.50,"L", 0.00,"DESCRIBE LOCATION OF LOSS IF NOT AT SPECIFIC STREET ADDRESS:"
+"590BU",48.05, 0.00,"C", 4.50,"KIND OF"
+"590BU",48.63, 0.00,"C", 4.50,"LOSS"
+"590BU",47.79,60.00,"L", 0.00,"PROBABLE AMOUNT ENTIRE LOSS"
+"590BU",49.79, 0.50,"L", 0.00,"DESCRIPTION OF LOSS & DAMAGE (ACORD 101, Additional Remarks Schedule, may be attached if more space is required)"
+"590BU",60.84,40.50,"L", 0.00,"REPORTED TO"
+"590BU",60.79, 0.50,"L", 0.00,"REPORTED BY"
+"600MU", 5.01,78.00,"C", 2.00,"AM"
+"600MU", 6.01,78.00,"C", 2.00,"PM"
+"600MU",35.01,14.50,"L", 0.00,"CONTACT INSURED"
+"600MU",48.01, 7.00,"L", 0.00,"FIRE"
+"600MU",48.01,14.00,"L", 0.00,"LIGHTNING"
+"600MU",48.01,22.00,"L", 0.00,"FLOOD"
+"600MU",49.01, 7.00,"L", 0.00,"THEFT"
+"600MU",49.01,14.00,"L", 0.00,"HAIL"
+"600MU",49.01,22.00,"L", 0.00,"WIND"
+"600BU",26.85, 8.00,"L", 0.00,"HOME"
+"600BU",26.85,12.50,"L", 0.00,"BUS"
+"600BU",26.85,16.50,"L", 0.00,"CELL"
+"600BU",26.85,28.00,"L", 0.00,"HOME"
+"600BU",26.85,32.50,"L", 0.00,"BUS"
+"600BU",26.85,36.50,"L", 0.00,"CELL"
+"600BU",32.85, 8.00,"L", 0.00,"HOME"
+"600BU",32.85,12.50,"L", 0.00,"BUS"
+"600BU",32.85,16.50,"L", 0.00,"CELL"
+"600BU",32.85,28.00,"L", 0.00,"HOME"
+"600BU",32.85,32.50,"L", 0.00,"BUS"
+"600BU",32.85,36.50,"L", 0.00,"CELL"
+"600BU",37.85, 8.00,"L", 0.00,"HOME"
+"600BU",37.85,12.50,"L", 0.00,"BUS"
+"600BU",37.85,16.50,"L", 0.00,"CELL"
+"600BU",37.85,28.00,"L", 0.00,"HOME"
+"600BU",37.85,32.50,"L", 0.00,"BUS"
+"600BU",37.85,36.50,"L", 0.00,"CELL"
+"840BU",21.98, 0.50,"L", 0.00,"INSURED"
+"840BU",35.01, 0.50,"L", 0.00,"CONTACT"
+"840BU",42.01, 0.50,"L", 0.00,"LOSS"
+"840BU",62.92, 0.00,"C",80.00,"Page 1 of 3"
+"840BU",62.92, 0.50,"L", 0.00,"ACORD 1 (2019/07)"
+"840BU",62.92,79.35-LNWIDTH("840BU","© 1988-2019 ACORD CORPORATION.  All rights reserved."),"L", 0.00,"© 1988-2019 ACORD CORPORATION.  All rights reserved."
+"840BU",63.92, 0.00,"C",80.00,"The ACORD name and logo are registered marks of ACORD"
+"1400BU", 3.57,10.50,"C",57.00,"PROPERTY LOSS NOTICE"
+
+GRAPHICS
+ 1.50, 0.00, 3.94, 9.50,"ACORD_Logo_Black_3 -- new logo use this_be0da45c.tif"
+
+SIDE 2
+
+SHADING
+
+LINES/BOXES
+ 3.00,55.00, 3.00,80.00, 2
+ 4.50, 0.00,16.00,80.00, 4
+16.00, 0.00,63.00,80.00, 4
+
+FORM TEXT
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU", 4.42, 0.50,"L", 0.00,"REMARKS (ACORD 101, Additional Remarks Schedule, may be attached if more space is required)"
+"840BU",63.92, 0.00,"C",80.00,"Page 2 of 3"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 1 (2019/07)"
+"900BU",17.08, 1.00,"R",13.82,"Applicable in Alabama:"
+"900MU",17.08,14.82,"R",63.68,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or who knowingly"
+"900MU",17.95, 1.00,"R",77.50,"presents false information in an application for insurance is guilty of a crime and may be subject to restitution, fines, or confinement in"
+"900MU",18.80, 1.00,"L", 0.00,"prison, or any combination thereof."
+"900BU",20.01, 1.00,"R",13.15,"Applicable in Alaska:"
+"900MU",20.01,14.15,"R",64.35,"  A person who knowingly and with intent to injure, defraud, or deceive an insurance company files a claim"
+"900MU",20.88, 1.00,"L", 0.00,"containing false, incomplete, or misleading information may be prosecuted under state law."
+"900BU",22.26, 1.00,"R",13.14,"Applicable in Arizona:"
+"900MU",22.26,14.14,"R",64.36,"  For your protection Arizona law requires the following statement to appear on this form. Any person who knowingly"
+"900MU",23.13, 1.00,"L", 0.00,"presents a false or fraudulent claim for payment of a loss is subject to criminal and civil penalties."
+"900BU",24.51, 1.00,"R",14.44,"Applicable in Arkansas:"
+"900MU",24.51,15.44,"R",63.06,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU",25.38, 1.00,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison."
+"900BU",27.26, 1.00,"R",14.65,"Applicable in California:"
+"900MU",27.26,15.65,"R",62.85,"  For your protection California law requires the following to appear on this form.  Any person who knowingly"
+"900MU",28.13, 1.00,"L", 0.00,"presents false or fraudulent claim for the payment of a loss is guilty of a crime and may be subject to fines and confinement in state prison."
+"900BU",29.81, 1.00,"R",14.11,"Applicable in Colorado:"
+"900MU",29.81,15.11,"R",63.39,"  It is unlawful to knowingly provide false, incomplete, or misleading facts or information to an insurance company"
+"900MU",30.68, 1.00,"R",77.50,"for the purpose of defrauding or attempting to defraud the company. Penalties may include imprisonment, fines, denial of insurance and"
+"900MU",31.53, 1.00,"R",77.50,"civil damages.  Any insurance company or agent of an insurance company who knowingly provides false, incomplete, or misleading facts"
+"900MU",32.38, 1.00,"R",77.50,"or information to a policyholder or claimant for the purpose of defrauding or attempting to defraud the policyholder or claimant with regard"
+"900MU",33.23, 1.00,"R",77.50,"to a settlement or award payable from insurance proceeds shall be reported to the Colorado Division of Insurance within the Department of"
+"900MU",34.08, 1.00,"L", 0.00,"Regulatory Agencies."
+"900BU",35.51, 1.00,"R",14.26,"Applicable in Delaware:"
+"900MU",35.51,15.26,"R",63.24,"  Any person who knowingly, and with intent to injure, defraud or deceive any insurer, files a statement of claim"
+"900MU",36.38, 1.00,"L", 0.00,"containing any false, incomplete or misleading information is guilty of a felony."
+"900BU",37.83, 1.00,"R",23.00,"Applicable in the District of Columbia:"
+"900MU",37.83,24.00,"R",54.50,"  WARNING: It is a crime to provide false or misleading information to an insurer for the purpose"
+"900MU",38.70, 1.00,"R",77.50,"of defrauding the insurer or any other person.  Penalties include imprisonment and/or fines. In addition, an insurer may deny insurance"
+"900MU",39.55, 1.00,"L", 0.00,"benefits if false information materially related to a claim was provided by the applicant."
+"900BU",41.01, 1.00,"R",13.07,"Applicable in Florida:"
+"900MU",41.01,14.07,"R",64.43,"  Any person who knowingly and with intent to injure, defraud, or deceive any insurer files a statement of claim"
+"900MU",41.88, 1.00,"L", 0.00,"containing any false, incomplete, or misleading information is guilty of a felony of the third degree."
+"900BU",43.01, 1.00,"R",12.46,"Applicable in Idaho:"
+"900MU",43.01,13.46,"R",65.04,"  Any person who knowingly, and with intent to defraud or deceive any insurance company, files a statement"
+"900MU",43.88, 1.00,"L", 0.00,"containing any false, incomplete or misleading information is guilty of a felony."
+"900BU",45.26, 1.00,"R",13.30,"Applicable in Indiana:"
+"900MU",45.26,14.30,"R",64.20,"  A person who knowingly and with intent to defraud an insurer files a statement of claim containing any false,"
+"900MU",46.13, 1.00,"L", 0.00,"incomplete, or misleading information commits a felony."
+"900BU",47.38, 1.00,"R",13.51,"Applicable in Kansas:"
+"900MU",47.38,14.51,"R",63.49,"  Any person who, knowingly and with intent to defraud, presents, causes to be presented or prepares with"
+"900MU",48.25, 1.00,"R",77.00,"knowledge or belief that it will be presented to or by an insurer, purported insurer, broker or any agent thereof, any written, electronic,"
+"900MU",49.10, 1.00,"R",77.00,"electronic impulse, facsimile, magnetic, oral, or telephonic communication or statement as part of, or in support of, an application for the"
+"900MU",49.95, 1.00,"R",77.00,"issuance of, or the rating of an insurance policy for personal or commercial insurance, or a claim for payment or other benefit pursuant to"
+"900MU",50.80, 1.00,"R",77.00,"an insurance policy for commercial or personal insurance which such person knows to contain materially false information concerning any"
+"900MU",51.65, 1.00,"R",77.00,"fact material thereto; or conceals, for the purpose of misleading, information concerning any fact material thereto commits a fraudulent"
+"900MU",52.50, 1.00,"L", 0.00,"insurance act."
+"900BU",53.58, 1.00,"R",14.26,"Applicable in Kentucky:"
+"900MU",53.58,15.26,"R",63.24,"  Any person who knowingly and with intent to defraud any insurance company or other person files a statement"
+"900MU",54.45, 1.00,"R",77.50,"of claim containing any materially false information or conceals, for the purpose of misleading, information concerning any fact material"
+"900MU",55.30, 1.00,"L", 0.00,"thereto commits a fraudulent insurance act, which is a crime."
+"900BU",56.51, 1.00,"R",14.66,"Applicable in Louisiana:"
+"900MU",56.51,15.66,"R",62.84,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU",57.38, 1.00,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison."
+"900BU",58.76, 1.00,"R",12.49,"Applicable in Maine:"
+"900MU",58.76,13.49,"R",65.01,"  It is a crime to knowingly provide false, incomplete or misleading information to an insurance company for the"
+"900MU",59.63, 1.00,"L", 0.00,"purpose of defrauding the company.  Penalties may include imprisonment, fines or denial of insurance benefits."
+"900BU",60.83, 1.00,"R",14.23,"Applicable in Maryland:"
+"900MU",60.83,15.23,"R",62.77,"  Any person who knowingly or willfully presents a false or fraudulent claim for payment of a loss or benefit or"
+"900MU",61.70, 1.00,"R",77.00,"who knowingly or willfully presents false information in an application for insurance is guilty of a crime and may be subject to fines and"
+"900MU",62.55, 1.00,"L", 0.00,"confinement in prison."
+
+GRAPHICS
+
+SIDE 3
+
+SHADING
+
+LINES/BOXES
+ 3.00,55.00, 3.00,80.00, 2
+ 3.50, 0.00,63.00,80.00, 4
+
+FORM TEXT
+"800BU", 3.00,41.50,"L", 0.00,"AGENCY CUSTOMER ID:"
+"840BU",63.92, 0.00,"C",80.00,"Page 3 of 3"
+"840BU",63.92, 0.50,"L", 0.00,"ACORD 1 (2019/07)"
+"900BU", 4.76, 1.50,"R",14.23,"Applicable in Michigan:"
+"900MU", 4.76,15.73,"R",62.77,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU", 5.63, 1.50,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison."
+"900BU", 7.51, 1.50,"R",15.05,"Applicable in Minnesota:"
+"900MU", 7.51,16.55,"R",61.45,"  A person who files a claim with intent to defraud or helps commit a fraud against an insurer is guilty of a"
+"900MU", 8.38, 1.50,"L", 0.00,"crime."
+"900BU", 9.76, 1.50,"R",13.18,"Applicable in Nevada:"
+"900MU", 9.76,14.68,"R",63.82,"  Pursuant to NRS 686A.291, any person who knowingly and willfully files a statement of claim that contains any"
+"900MU",10.63, 1.50,"L", 0.00,"false, incomplete or misleading information concerning a material fact is guilty of a category D felony."
+"900BU",12.08, 1.50,"R",18.13,"Applicable in New Hampshire:"
+"900MU",12.08,19.63,"R",58.87,"  Any person who, with a purpose to injure, defraud or deceive any insurance company, files a statement"
+"900MU",12.95, 1.50,"R",77.00,"of claim containing any false, incomplete or misleading information is subject to prosecution and punishment for insurance fraud as"
+"900MU",13.80, 1.50,"L", 0.00,"provided in RSA 638:20."
+"900BU",15.51, 1.50,"R",15.46,"Applicable in New Jersey:"
+"900MU",15.51,16.96,"R",61.54,"  Any person who knowingly files a statement of claim containing any false or misleading information is subject"
+"900MU",16.38, 1.50,"L", 0.00,"to criminal and civil penalties."
+"900BU",18.16, 1.50,"R",15.19,"Applicable in New York:"
+"900MU",18.16,16.69,"R",62.31,"  Any person who knowingly and with intent to defraud any insurance company or other person files an"
+"900MU",19.03, 1.50,"R",77.50,"application for insurance or statement of claim containing any materially false information, or conceals for the purpose of misleading,"
+"900MU",19.88, 1.50,"R",77.50,"information concerning any fact material thereto, commits a fraudulent insurance act, which is a crime, and shall also be subject to a civil"
+"900MU",20.73, 1.50,"L", 0.00,"penalty not to exceed five thousand dollars and the stated value of the claim for each such violation."
+"900BU",22.51, 1.50,"R",15.87,"Applicable in New Mexico:"
+"900MU",22.51,17.37,"R",61.13,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU",23.38, 1.50,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to civil fines and criminal penalties."
+"900BU",25.51, 1.50,"R",11.77,"Applicable in Ohio:"
+"900MU",25.51,13.27,"R",65.23,"  Any person who, with intent to defraud or knowing that he is facilitating a fraud against an insurer, submits an"
+"900MU",26.38, 1.50,"L", 0.00,"application or files a claim containing a false or deceptive statement is guilty of insurance fraud."
+"900BU",28.51, 1.50,"R",14.81,"Applicable in Oklahoma:"
+"900MU",28.51,16.31,"R",62.19,"  WARNING: Any person who knowingly, and with intent to injure, defraud or deceive any insurer, makes any"
+"900MU",29.38, 1.50,"L", 0.00,"claim for the proceeds of an insurance policy containing any false, incomplete or misleading information is guilty of a felony."
+"900BU",31.51, 1.50,"R",13.28,"Applicable in Oregon:"
+"900MU",31.51,14.78,"R",63.72," Any person who knowingly and with intent to defraud or solicit another to defraud the insurer by submitting an"
+"900MU",32.38, 1.50,"L", 0.00,"application containing a false statement as to any material fact may be violating state law."
+"900BU",34.41, 1.50,"R",16.86,"Applicable in Pennsylvania:"
+"900MU",34.41,18.36,"R",60.14,"  Any person who knowingly and with intent to defraud any insurance company or other person files an"
+"900MU",35.28, 1.50,"R",77.00,"application for insurance or statement of claim containing any materially false information or conceals for the purpose of misleading,"
+"900MU",36.13, 1.50,"R",77.00,"information concerning any fact material thereto commits a fraudulent insurance act, which is a crime and subjects such person to criminal"
+"900MU",36.98, 1.50,"L", 0.00,"and civil penalties."
+"900BU",38.81, 1.50,"R",16.08,"Applicable in Puerto Rico:"
+"900MU",38.81,17.58,"R",61.42," Any person who knowingly and with the intention of defrauding presents false information in an insurance"
+"900MU",39.68, 1.50,"R",77.50,"application, or presents, helps, or causes the presentation of a fraudulent claim for the payment of a loss or any other benefit, or presents"
+"900MU",40.53, 1.50,"R",77.50,"more than one claim for the same damage or loss, shall incur a felony and, upon conviction, shall be sanctioned for each violation by a fine"
+"900MU",41.38, 1.50,"R",77.50,"of not less than five thousand dollars ($5,000) and not more than ten thousand dollars ($10,000), or a fixed term of imprisonment for three"
+"900MU",42.23, 1.50,"R",77.50,"(3) years, or both penalties. Should aggravating circumstances be present, the penalty thus established may be increased to a maximum of"
+"900MU",43.08, 1.50,"L", 0.00,"five (5) years, if extenuating circumstances are present, it may be reduced to a minimum of two (2) years."
+"900BU",45.01, 1.50,"R",16.45,"Applicable in Rhode Island:"
+"900MU",45.01,17.95,"R",60.55,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU",45.88, 1.50,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison."
+"900BU",47.51, 1.50,"R",15.10,"Applicable in Tennessee:"
+"900MU",47.51,16.60,"R",61.90,"  It is a crime to knowingly provide false, incomplete or misleading information to an insurance company for the"
+"900MU",48.38, 1.50,"L", 0.00,"purpose of defrauding the company. Penalties include imprisonment, fines and denial of insurance benefits."
+"900BU",50.51, 1.50,"R",12.31,"Applicable in Texas:"
+"900MU",50.51,13.81,"R",64.69,"  Any person who knowingly presents a false or fraudulent claim for the payment of a loss is guilty of a crime and"
+"900MU",51.38, 1.50,"L", 0.00,"may be subject to fines and confinement in state prison."
+"900BU",53.01, 1.50,"R",13.38,"Applicable in Virginia:"
+"900MU",53.01,14.88,"R",63.62,"  It is a crime to knowingly provide false, incomplete or misleading information to an insurance company for the"
+"900MU",53.88, 1.50,"L", 0.00,"purpose of defrauding the company. Penalties include imprisonment, fines and denial of insurance benefits."
+"900BU",56.01, 1.50,"R",15.93,"Applicable in Washington:"
+"900MU",56.01,17.42,"R",61.08,"  It is a crime to knowingly provide false, incomplete or misleading information to an insurance company for"
+"900MU",56.88, 1.50,"L", 0.00,"the purpose of defrauding the company. Penalties include imprisonment, fines and denial of insurance benefits."
+"900BU",58.38, 1.50,"R",16.51,"Applicable in West Virginia:"
+"900MU",58.38,18.01,"R",60.49,"  Any person who knowingly presents a false or fraudulent claim for payment of a loss or benefit or knowingly"
+"900MU",59.25, 1.50,"L", 0.00,"presents false information in an application for insurance is guilty of a crime and may be subject to fines and confinement in prison."
+
+GRAPHICS

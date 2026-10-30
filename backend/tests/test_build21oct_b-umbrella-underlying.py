@@ -516,7 +516,12 @@ def test_the_no_underlying_row_asks_for_a_box_that_lifts_the_pillar():
     ]
     for flags, box, answer in cases:
         rows = sq.umbrella_gap_items(_f(), flags)
-        assert [(r["fact"], r["points"]) for r in rows] == [(box, 100)], flags
+        # Rule G2 (30 Oct 2026): the items the pillar will charge once the limit
+        # is stated are listed up front too; the first row is the underlying box
+        # and the rows add up to the pillar's 100. (Updated: pinned one row.)
+        assert rows[0]["fact"] == box and rows[0]["points"] > 0, flags
+        assert sum(r["points"] for r in rows) == 100, flags
+        assert box not in {r["fact"] for r in rows[1:]}, flags
         assert "employers liability" in rows[0]["label"]
         assert sq._calculate_umbrella_adequacy(_f(**{box: answer}), flags) > 0
         assert NONE_STOP not in _umb_hard(_f(**{box: answer}), flags)

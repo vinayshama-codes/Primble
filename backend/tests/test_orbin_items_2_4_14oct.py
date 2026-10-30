@@ -77,12 +77,14 @@ def test_the_pre_form_score_is_saved_for_the_dashboard(monkeypatch):
     assert "ELSE data->'pre_form_score'->>'submission_ready' END" in repo
 
 
-def test_only_the_pre_form_actions_write_it_never_a_page_view():
+def test_the_pre_form_actions_and_the_page_view_keep_it_current():
+    # REVERSED 30 Oct 2026 (owner: "at any point the package's score is x, the
+    # dashboard shows x"): the page load also refreshes the copy when it differs.
     src = (ROOT / "backend/routes/form_routes.py").read_text()
-    assert src.count("remember_score=True") == 4
+    assert src.count("remember_score=True") == 5
     view = src[src.index('@router.get("/api/session/{session_id}/extraction-result")'):]
-    view = view[:view.index("@router.")] if "@router." in view else view
-    assert "remember_score=True" not in view
+    view = view[:view.index("@router.", 1)] if "@router." in view[1:] else view
+    assert "remember_score=True" in view
     repo = (ROOT / "backend/repositories/session_repository.py").read_text()
     assert "(data->'pre_form_score'->>'package_sqs_score')::int" in repo
     assert "COALESCE((data->'package_sqs'->>'package_sqs_score')::int," in repo

@@ -137,7 +137,7 @@ def test_after_generation_the_cope_twin_shows_once_and_both_stops_are_hard():
     hard_rows = _rows(view, "hard")
     codes = sorted(r["code"] for r in hard_rows)
     assert codes == ["bi_missing_period_of_restoration", "minimum_viable_cope_missing"], codes
-    assert view["counts"] == {"hard_stops": 2, "warnings": 2}
+    assert view["counts"] == {"hard_stops": 2, "warnings": 2, "info": 0}
     # the COPE problem once - never the legacy sentence beside its twin
     assert not any(r["message"].startswith("Property Minimum Viable COPE incomplete")
                    for r in _rows(view))
@@ -172,7 +172,7 @@ def test_old_lists_keep_the_hard_legacy_row_and_hide_the_demoted_twin():
                               cross_issues=[_cross("minimum_viable_cope_missing", CODED)])
     assert [r["code"] for r in _rows(view, "hard")] == ["legacy_minimum_viable_cope"]
     assert not any(r["code"] == "minimum_viable_cope_missing" for r in _rows(view))
-    assert view["counts"] == {"hard_stops": 1, "warnings": 0}
+    assert view["counts"] == {"hard_stops": 1, "warnings": 0, "info": 0}
 
 
 def test_a_gate_cap_reads_as_the_hard_stop_it_is():
@@ -183,7 +183,7 @@ def test_a_gate_cap_reads_as_the_hard_stop_it_is():
     pkg = {"cap_applied": 60, "cap_reason": BI, "cap_hard_stops": [BI], "cap_hard_stop_codes": []}
     view = grouped_with_package_caps(structured, [], [], pkg)
     assert [r["code"] for r in _rows(view, "hard")] == ["bi_missing_period_of_restoration"]
-    assert view["counts"] == {"hard_stops": 1, "warnings": 0}
+    assert view["counts"] == {"hard_stops": 1, "warnings": 0, "info": 0}
 
 
 @pytest.mark.parametrize("legacy_sev,coded_sev,kept,kept_sev", [

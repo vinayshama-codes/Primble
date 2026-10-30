@@ -221,7 +221,9 @@ async def get_current_user(
         try:
             cached = await _auth_redis.get(f"auth:{token_hash}")
             if cached:
-                return json.loads(cached)
+                cached_user = json.loads(cached)
+                _note_request_user(cached_user)
+                return cached_user
         except Exception as ex:
             logger.warning(f"auth_service: Redis get failed: {ex}")
 
@@ -264,7 +266,18 @@ async def get_current_user(
         except Exception as ex:
             logger.warning(f"auth_service: Redis set failed: {ex}")
 
+    _note_request_user(user)
     return user
+
+
+def _note_request_user(user: dict) -> None:
+    """The E&O lineage's "who" (services/fact_history.py): this request's
+    signed-in user. Never fails authentication."""
+    try:
+        from services.fact_history import note_user
+        note_user(user)
+    except Exception:                                          # noqa: BLE001
+        pass
 
 
 # ASYNC-SAFE

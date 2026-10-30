@@ -1,0 +1,45 @@
+﻿"eLabel Id","eLabel Name","eLabel counter","Placeholder","Section Name","Field Name","Description"
+"755","Form_Title","A","","TITLE
+ACORD 37 (2008/01)","STATEMENT OF NO LOSS","The title of the form. ACORD 37, Statement of No Loss is used when: 
+
+* A policy issued by your agency has been cancelled, or has lapsed, because premium for the policy was not paid in time;
+
+* The former insured desires to pay the delinquent premium and reinstate insurance without a lapse in coverage; and
+
+* Your contract with the insuring company, or the company's rules, permit policy reinstatement. (You may have to contact your company before
+proceeding.)
+
+By signing this form, the former insured certifies that there were no losses, or circumstances that might give rise to a claim under the policy, during the period coverage had lapsed.
+
+This form is also a receipt for the premium payment you collect at the time the form is signed. The form is NOT an insurance binder."
+"2","Producer_FullName","A","","IDENTIFICATION SECTION","Agency","Enter text: The full name of the producer/agency."
+"3","Producer_MailingAddress_LineOne","A","","IDENTIFICATION SECTION","","Enter text: The mailing address line one of the producer/agency."
+"4","Producer_MailingAddress_LineTwo","A","","IDENTIFICATION SECTION","","Enter text: The mailing address line two of the producer/agency."
+"5","Producer_MailingAddress_CityName","A","","IDENTIFICATION SECTION","","Enter text: The mailing address city name of the producer/agency."
+"6","Producer_MailingAddress_StateOrProvinceCode","A","","IDENTIFICATION SECTION","","Enter code: The mailing address state or province code of the producer/agency."
+"7","Producer_MailingAddress_PostalCode","A","","IDENTIFICATION SECTION","","Enter code: The mailing address postal code of the producer/agency."
+"139","Producer_ContactPerson_FullName","A","","IDENTIFICATION SECTION","Contact Name","Enter text: The name of the individual at the producer's establishment that is the primary contact."
+"106","Producer_ContactPerson_PhoneNumber","A","","IDENTIFICATION SECTION","Phone (A/C, No, Ext)","Enter number: The producer's contact person's phone number.  If applicable, include the area code and extension."
+"107","Producer_FaxNumber","A","","IDENTIFICATION SECTION","FAX","Enter number: The fax number of the producer/agency."
+"140","Producer_ContactPerson_EmailAddress","A","","IDENTIFICATION SECTION","E-Mail Address","Enter text: The producer's contact person e-mail address."
+"108","Insurer_ProducerIdentifier","A","","IDENTIFICATION SECTION","Code","Enter code: The identification code assigned to the producer (e.g. agency or brokerage firm) by the insurer."
+"109","Insurer_SubProducerIdentifier","A","","IDENTIFICATION SECTION","Subcode","Enter code: The identification code assigned by the insurer to the sub-producer (e.g. person) within a producer's office (e.g. agency or brokerage)."
+"110","Producer_CustomerIdentifier","A","","IDENTIFICATION SECTION","Agency Customer ID","Enter identifier: The customer's identification number assigned by the producer (e.g. agency or brokerage)."
+"8","NamedInsured_FullName","A","","IDENTIFICATION SECTION","Named Insured","Enter text: The named insured(s) as it/they will appear on the policy declarations page."
+"8","NamedInsured_FullName","B","","IDENTIFICATION SECTION","","Enter text: The named insured(s) as it/they will appear on the policy declarations page."
+"8","NamedInsured_FullName","C","","IDENTIFICATION SECTION","","Enter text: The named insured(s) as it/they will appear on the policy declarations page."
+"8","NamedInsured_FullName","D","","IDENTIFICATION SECTION","","Enter text: The named insured(s) as it/they will appear on the policy declarations page."
+"14","Insurer_FullName","A","","IDENTIFICATION SECTION","Carrier","Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name."
+"15","Insurer_NAICCode","A","","IDENTIFICATION SECTION","NAIC Code","Enter code: The identification code assigned to the insurer by the NAIC."
+"158","Policy_PolicyNumberIdentifier","A","","IDENTIFICATION SECTION","Policy # ","Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number."
+"491","Insurer_Underwriter_FullName","A","","IDENTIFICATION SECTION","Approved By","Enter text: The company underwriter (or other company staff person) that this form should be directed to."
+"2725","CancelNonRenew_CancelNonRenewDate","A","","IDENTIFICATION SECTION","Cancellation Date","Enter date: The effective date of the cancellation or non renewal."
+"227","NamedInsured_SignatureDate","A","","IDENTIFICATION SECTION","Date Signed ","Enter date: The date the form was signed by the named insured."
+"3297","NamedInsured_SignatureTime","A","","IDENTIFICATION SECTION","Time Signed ","Enter time: The time the form was signed by the named insured."
+"226","NamedInsured_Signature","A","","IDENTIFICATION SECTION","Applicant's Signature","Sign here: Accommodates the signature of the applicant or named insured."
+"299","Policy_Payment_DepositAmount","A","","RECEIPT","Amount Received","Enter amount: The amount of the premium received as a deposit."
+"583","Producer_AuthorizedRepresentative_FullName","A","","RECEIPT","Producer","Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form."
+"4386","Form_Witness_Signature","A","","RECEIPT","Witness","Sign here: The signature of the witness to the form."
+"4387","Form_Witness_SignatureDate","A","","RECEIPT","Date","Enter date: The date the witness signed the form."
+"4388","Form_Witness_SignatureTime","A","","RECEIPT","Time","Enter time: The time the witness signed the form."
+"105","Form_EditionIdentifier","A","","Edition","Date","The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM)."

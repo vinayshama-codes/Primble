@@ -282,8 +282,9 @@ console.log(JSON.stringify({
 def test_the_modal_ticks_125_on_form_selection_and_keeps_the_order():
     modal = _MODAL.read_text(encoding="utf-8")
     effect = modal[modal.index("  useLayoutEffect(() => {\n    if (step !== \"form_selection\") return;"):]
-    effect = effect[:effect.index("}, [step, recommendations, declined125]);")]
-    assert "setCheckedFormIds(prev => withAnchorForm(prev, recommendations, declined125));" in effect
+    effect = effect[:effect.index("}, [step, recommendations, declined125, formTicksTouched]);")]
+    # 27 Oct 2026: uploaded application forms are pre-ticked once, beside the 125.
+    assert "setCheckedFormIds(prev => withUploadedForms(withAnchorForm(prev, recommendations, declined125)," in effect
     # Every reset of the ticks also forgets the untick and the "touched" mark.
     assert modal.count("setCheckedFormIds(new Set())") == 1          # only inside resetFormTicks
     assert "const resetFormTicks = () => { setCheckedFormIds(new Set()); setDeclined125(false); setFormTicksTouched(false); };" in modal

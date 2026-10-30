@@ -218,8 +218,10 @@ def _na(key):
 
 
 def test_not_applicable_leaves_the_tier2_denominator():
+    # 29 Oct 2026: N/A on a fact every business has (FEIN, revenue, NAICS,
+    # years) is refused - 3.6 is shown on one that can genuinely not apply.
     facts = {f: "x" for f in sq.TIER2_FIELDS}
-    facts["fein"] = _na("fein")
+    facts["num_employees"] = _na("num_employees")
     del facts["years_in_business"]
     score, _ = sq.check_tier2(facts, {})
     assert score == 80, "100 - 100/5, not 100 - 100/6"
@@ -234,8 +236,8 @@ def test_a_human_recorded_state_survives_the_derivation():
     `not_stated` and 3.6 was unreachable for any human answer.
     """
     from services.fact_state import is_not_applicable, value_state_of
-    facts = {"total_revenue": _na("total_revenue")}
-    assert is_not_applicable(facts, "total_revenue") is True
+    facts = {"num_employees": _na("num_employees")}
+    assert is_not_applicable(facts, "num_employees") is True
 
     absent = {"prior_carrier": build_fact_envelope(
         "prior_carrier", interpret_answer("prior_carrier", "None"),

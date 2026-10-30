@@ -111,7 +111,7 @@ def test_it_does_not_reach_the_important_band_any_more():
     )
     assert "Specific Wording" not in printed
     # ...and the real conflict that shared the package is still on screen.
-    assert "Num Employees" in printed
+    assert "Employee Count" in printed
 
 
 # ── 2. Nothing genuine was removed ─────────────────────────────────────────

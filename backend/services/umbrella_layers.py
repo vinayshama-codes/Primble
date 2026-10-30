@@ -84,6 +84,12 @@ INSTANCE_STEM = "excess"
 # The private keys this module writes. Both are skipped by every fact loop
 # (leading "_") and left out of the gap-fill facts block.
 DOCS_KEY = "_umbrella_layer_docs"     # {document: {layer fact: value}} on a tower
+# A PERSON'S answer for ONE copy's layer (30 Oct 2026, Choice Electric live
+# 6823e106): an upper layer read only its own documents, so a follow-form the
+# excess policy does not print could be answered nowhere - the excess 131 sat at
+# 98 with nothing to fix. {copy key: {layer fact: envelope}}; the plain 131 keeps
+# the package fact (key "" is never stored here).
+ANSWERS_KEY = "_umbrella_layer_answers"
 MARKER_KEY = "_umbrella_layer"        # on a VIEW only - never persisted
 BINDINGS_KEY = "_umbrella_layer_bindings"   # {copy key: its layer's identity}, at generation
 
@@ -103,9 +109,9 @@ LAYER_FACTS: Tuple[str, ...] = (
 )
 LAYER_LIST_FACTS: Tuple[str, ...] = ("underlying_policies",)
 
-# A person's answer or a picker confirmation is never taken off a view.
-_PERSON_SOURCES = frozenset({"producer", "client_arq", "user", "human", "client",
-                             "user_confirmed", "cross_form_conflict"})
+# A person's answer or a picker confirmation is never taken off a view - the one
+# door's third question (`fact_state.put_by_person`, 27 Oct 2026; this module
+# kept its own set, with sources no code writes on a fact).
 
 
 # ── small readers ─────────────────────────────────────────────────────────────
@@ -125,7 +131,8 @@ def _has(v: Any) -> bool:
 
 
 def _person_sourced(held: Any) -> bool:
-    return isinstance(held, dict) and str(held.get("source") or "").lower() in _PERSON_SOURCES
+    from services.fact_state import put_by_person
+    return put_by_person(held)
 
 
 def _amount(v: Any) -> Optional[float]:
@@ -706,6 +713,11 @@ def _layer_value(facts: dict, slots: List[dict], index: int, key: str, fact: str
     plain = key == ""
     if plain and _person_sourced(held):
         return held
+    if not plain:
+        answered = ((_val(facts.get(ANSWERS_KEY)) or {}).get(key) or {}).get(fact) \
+            if isinstance(_val(facts.get(ANSWERS_KEY)) or {}, dict) else None
+        if answered is not None:
+            return answered
     stated = _producer_value(slots[index], fact)
     if stated is not None:
         return stated
@@ -1141,6 +1153,24 @@ def record_layer_evidence(mf: dict, docs: Any) -> List[str]:
                 held = dfacts.get(k)
                 if _has(_val(held)):
                     got[k] = copy.deepcopy(held)
+            # A document whose umbrella-family rows are ONE layer and which
+            # states that layer's limit / term only on its row - the re-uploaded
+            # excess ACORD 131 keeps its $4,000,000 on the Excess Liability row so
+            # it never votes against the umbrella's $5,000,000 (`acord_intake.
+            # read._excess_layer`) - gives the row's values as its own evidence.
+            # The ONE umbrella-family row stating a limit is the document's own
+            # layer: the excess 131 also lists the umbrella under it as an
+            # underlying policy, with no limit of its own.
+            fam = [r for r in rows if isinstance(r, dict) and _row_layer(r) and _has(r.get("limit"))] \
+                if isinstance(rows, list) else []
+            if len(fam) == 1:
+                # A filled ACORD form's row is a box reading; any other
+                # document's row is what the model read off it.
+                src = "acord_form" if (d.get("acord") or {}).get("forms") else "ai"
+                for k, col in (("umbrella_limit", "limit"), ("umbrella_effective_date", "effective_date"),
+                               ("umbrella_expiration_date", "expiration_date")):
+                    if k not in got and _has(fam[0].get(col)):
+                        got[k] = {"value": fam[0][col], "source": src, "from_row": True}
             store[name] = got
         if store:
             mf[DOCS_KEY] = store
@@ -1203,3 +1233,28 @@ fi.register_overlay(
     binder=bind_layers,
     binding_keys=(BINDINGS_KEY,),
 )
+
+
+def layer_answer_key(form_id: Any, fact: Any) -> Optional[str]:
+    """The copy key an answer to `fact` on form `form_id` belongs to: a layer's own
+    copy of ACORD 131 ("ACORD_131__excess" -> "excess") answering a fact the layer
+    states about itself (`LAYER_FACTS`). None otherwise - the package fact."""
+    try:
+        from services.form_instances import base_form_id, instance_key
+    except Exception:                                          # noqa: BLE001
+        return None
+    if base_form_id(str(form_id or "")) != "ACORD_131" or str(fact or "") not in LAYER_FACTS:
+        return None
+    key = instance_key(str(form_id or ""))
+    return str(key) if key else None
+
+
+def write_layer_answer(facts: dict, key: str, fact: str, envelope: Any) -> dict:
+    """`facts` with a person's answer for copy `key`'s layer stored (a new dict)."""
+    out = dict(facts or {})
+    store = dict(_val(out.get(ANSWERS_KEY)) or {})
+    layer = dict(store.get(key) or {})
+    layer[fact] = envelope
+    store[key] = layer
+    out[ANSWERS_KEY] = store
+    return out

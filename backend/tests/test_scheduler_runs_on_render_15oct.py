@@ -251,6 +251,13 @@ def test_retention_deletes_a_packages_pdfs_and_signing_requests_with_it(monkeypa
 
     pdf, sig, pkg = at("session_pdf_bytes"), at("signature_requests"), at("processing_sessions")
     assert pdf < pkg and sig < pkg, "the package must still exist while its PDFs are found"
+    # "Due" is one predicate since 27 Oct 2026 (archival, tests/test_lane_c_27oct.py):
+    # an active package untouched past SESSION_RETENTION_DAYS ($1), an archived
+    # one past its archive retention ($2). The PDFs and signing requests are
+    # still found through it while the package exists.
+    from services.package_archive import EXPIRED_PACKAGE_IDS_SQL
+    due = " ".join(EXPIRED_PACKAGE_IDS_SQL.split())
+    assert "(data->>'archived_at') IS NULL AND updated_at < $1" in due
     for i, alias in ((pdf, "b"), (sig, "s")):
-        assert "IN (SELECT id FROM processing_sessions WHERE updated_at < $1)" in conn.sql[i]
+        assert f"IN ({due})" in conn.sql[i]
         assert f"NOT EXISTS (SELECT 1 FROM processing_sessions p WHERE p.id = {alias}.session_id)" in conn.sql[i]

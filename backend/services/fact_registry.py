@@ -36,17 +36,35 @@ def _is_date(v: str) -> bool:
     ))
 
 
+def _beyond_float_digits(v: str) -> bool:
+    """More than 15 significant digits in one number - past what a float
+    holds exactly, so a 30-digit typing would be stored as noise (strict
+    review, 29 Oct 2026). The display rule's own reader, shared."""
+    try:
+        from services.display_canonicalizer import too_many_digits
+        return too_many_digits(v)
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 def _is_currency(v: str) -> bool:
-    """$1,000,000 or 1000000 or 1,000,000.00 etc."""
+    """$1,000,000 or 1000000 or 1,000,000.00 etc. - at most 15 significant
+    digits."""
     return bool(re.match(
         r'^\$?[\d,]+(?:\.\d{1,2})?$', v.strip().replace(" ", "")
-    ))
+    )) and not _beyond_float_digits(v)
 
 
 def _is_fein(v: str) -> bool:
     """XX-XXXXXXX (9 digits, with or without hyphen)."""
     clean = v.strip().replace("-", "")
-    return clean.isdigit() and len(clean) == 9
+    if not (clean.isdigit() and len(clean) == 9):
+        return False
+    # One digit nine times ("00-0000000") holds a FEIN's place, never is one.
+    # The function's IDENTITY is unchanged (the merge, the type sweep and the
+    # stamper key on it), only what it accepts.
+    from services.normalization import is_placeholder_fein
+    return not is_placeholder_fein(clean)
 
 
 def _is_email(v: str) -> bool:
@@ -159,6 +177,53 @@ def answer_check(entry: Optional[dict]):
     return e.get("answer_validate") or e.get("validate")
 
 
+# ── Facts every operating business HAS (strict review, 29 Oct 2026) ──────────
+# "N/A" / "None" typed for one of these is never an answer: every business has
+# a tax ID, an annual revenue, an industry classification and a start date. C3
+# 3.6 (Not Applicable leaves the Tier 2 denominator) is for facts that can
+# genuinely not apply; on these it let one word score HIGHER than the real
+# value (a smaller denominator, and an "N/A" NAICS escaped the class-code
+# mismatch check). The answer door refuses the absence (`answer_semantics.
+# interpret_answer`) and the scorer never credits a stored one
+# (`answer_semantics.answered_for`). The value is the label the refusal names.
+# Employee counts are NOT here: a business can have no employees ("0" / "None").
+ALWAYS_EXISTS: dict[str, str] = {
+    "fein": "a federal tax ID (FEIN)",
+    "total_revenue": "an annual revenue",
+    "naics_code": "a NAICS industry code",
+    "sic_code": "a SIC industry code",
+    "years_in_business": "a number of years in business",
+    "business_start_date": "a business start date",
+}
+
+
+def fein_may_be_absent(facts: Any) -> bool:
+    """True when the applicant is an individual / sole proprietorship
+    (`normalization.entity_family` of `entity_type`): such an applicant may
+    file under the owner's SSN and have no EIN at all - an SSN is never stored
+    here - so "None" / "N/A" is its honest FEIN answer, scored Not Applicable
+    (29 Oct 2026). Any other entity, or no entity type on file: False."""
+    if not isinstance(facts, dict):
+        return False
+    try:
+        from services.normalization import ENTITY_FAMILY_INDIVIDUAL, entity_family
+        raw = facts.get("entity_type")
+        val = raw.get("value") if isinstance(raw, dict) else raw
+        return entity_family(val) == ENTITY_FAMILY_INDIVIDUAL
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def always_exists(fact_key: Any, facts: Any = None) -> str:
+    """The label of a fact every operating business has (`ALWAYS_EXISTS`),
+    else "". With ``facts``: an individual / sole proprietor's FEIN is not one
+    (`fein_may_be_absent`)."""
+    key = str(fact_key or "").strip()
+    if key == "fein" and fein_may_be_absent(facts):
+        return ""
+    return ALWAYS_EXISTS.get(key, "")
+
+
 def _descriptive_amount(text: str, format_hint: str) -> bool:
     """True when a non-numeric answer is a legitimate convention, not garbage.
 
@@ -219,7 +284,7 @@ def _is_percent(v: str) -> bool:
 
 def _is_positive_int(v: str) -> bool:
     clean = v.strip().replace(",", "")
-    return clean.isdigit() and int(clean) >= 0
+    return clean.isdigit() and int(clean) >= 0 and not _beyond_float_digits(clean)
 
 
 def _is_valuation(v: str) -> bool:
@@ -453,6 +518,19 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": 1, "required": False,
         "validate":    _is_email,
         "format_hint": "Valid email address (name@domain.com)",
+    },
+    # The applicant ORGANISATION's main phone - ACORD 125 "BUSINESS PHONE #"
+    # (`pdf_service._APPLICANT_ROW_A_FACTS`), never a contact person's line
+    # (`contact_phone`). Extracted since the H-series; registered 29 Oct 2026
+    # (item 8) so an outside ACORD's reading is judged as a phone and compared
+    # with the declarations'. Not asked (tier None): the documents state it.
+    "applicant_business_phone": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the business's main phone number?",
+        "tier": None, "required": False,
+        "validate":    _is_phone,
+        "answer_validate": _is_full_phone,
+        "format_hint": "Phone number with area code (10 digits); an extension is fine",
     },
     "applicant_website": {
         "forms":       {"ACORD_125"},
@@ -948,6 +1026,20 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    lambda v: bool(str(v or "").strip()),
         "format_hint": "Requested / Declined / Already carried / Not applicable",
+    },
+    "workers_comp_arrangement": {
+        "forms":       set(),
+        "question":    "The documents list employees but no workers compensation policy. How are the employees covered?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Carried (policy not uploaded) / PEO or leasing company / Not required / Not carried",
+    },
+    "auto_coverage_arrangement": {
+        "forms":       set(),
+        "question":    "The documents list vehicles but no auto policy. How are the vehicles covered?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(str(v or "").strip()),
+        "format_hint": "Carried (policy not uploaded) / Personal vehicles / Hired and non-owned only / Not carried",
     },
     "wc_state_fund_acknowledged": {
         "forms":       {"ACORD_130"},
@@ -2123,3 +2215,108 @@ def validate_schedule_rows(list_key: str, rows) -> list[dict]:
             if not ok:
                 issues.append({"row_index": idx, "sub_key": sub_key, "issue": "invalid", "value": str(val)})
     return issues
+
+
+# ── The answer a producer would type (27 Oct 2026) ───────────────────────────
+# For each fact whose format hint names no example ("e.g. ..."). The review
+# page's plan stands a person's answer in with it (`review_plan.probe_value`)
+# to say what each item adds, and the reach-100 test answers random packages
+# with it. A generic stand-in ("Yes", "50") typed a contact named "Yes", a $50
+# umbrella limit and a 50% coinsurance - raising the very warnings the page
+# could then not clear, and promising points the real answer would not give.
+# Every fact a person can answer has one: `example_answer` reads this, then
+# the hint's own example; `test_reach_100_every_package` fails on a fact with
+# neither that is not a choice list, a date or a yes / no question.
+EXAMPLE_ANSWERS: dict[str, str] = {
+    # names and identifiers
+    "applicant_name": "Probe Contracting",
+    "dba_name": "Probe Services",
+    "contact_name": "Pat Probe",
+    "contact_title": "Owner",
+    "producer_name": "Probe Insurance Agency",
+    "producer_contact_name": "Sam Agent",
+    "carrier_name": "Probe Mutual Insurance Company",
+    "submission_carrier_name": "Probe Mutual Insurance Company",
+    "prior_carrier": "Probe Mutual Insurance Company",
+    "wc_prior_carrier": "Probe Mutual Insurance Company",
+    "carrier_naic": "12345",
+    "prior_carrier_naic": "12345",
+    "policy_number": "PRB-100001",
+    "prior_policy_number": "PRB-100000",
+    "contractor_license_number": "LIC-12345",
+    "certificate_holder": "Probe Property Owner",
+    "landlord_name": "Probe Property Owner",
+    "loss_payee_name": "Probe Bank",
+    "mortgagee_name": "Probe Bank",
+    "builders_risk_owner_name": "Probe Property Owner",
+    "builders_risk_contractor_name": "Probe Builders",
+    # descriptions (neutral: names no industry, so no class-code check reads
+    # a verdict into it that the person's real words would not)
+    "account_description": "Answered by the producer.",
+    "certificate_description_of_operations": "Answered by the producer.",
+    "wc_description_of_operations": "Answered by the producer.",
+    "contractor_type": "General contractor",
+    "contractor_high_hazard_ops": "No",
+    "builders_risk_construction_type": "Frame",
+    "builders_risk_insured_interest": "Owner",
+    "auto_liability_structure": "CSL",
+    "auto_physical_damage_valuation": "Actual Cash Value",
+    "deductible_basis": "Per Occurrence",
+    # amounts
+    "auto_dealers_inventory_value": "$500,000",
+    "auto_deductible_collision": "$1,000",
+    "auto_deductible_comp": "$1,000",
+    "auto_med_pay_limit": "$5,000",
+    "bop_deductible": "$1,000",
+    "bop_liability_limit": "$1,000,000",
+    "bop_property_limit": "$500,000",
+    "crime_deductible": "$5,000",
+    "cyber_retention": "$10,000",
+    "extra_expense_limit": "$25,000",
+    "garage_deductible": "$1,000",
+    "garage_liability_limit": "$1,000,000",
+    "garagekeeper_coll_deductible": "$1,000",
+    "garagekeeper_comp_deductible": "$1,000",
+    "garagekeeper_liability_limit": "$100,000",
+    "inland_marine_transit_limit": "$100,000",
+    "property_deductible_flood": "$25,000",
+    "umbrella_attachment_point": "$1,000,000",
+    "umbrella_sir": "$10,000",
+    "employers_liability_limits": "$1,000,000",
+    # counts and measures
+    "crime_employee_count": "10",
+    "crime_locations_count": "1",
+    "cyber_pii_records_count": "1000",
+    "loss_run_age_days": "30",
+    "distance_to_hydrant": "500",
+    "fire_protection_class": "3",
+}
+for _key, _example in EXAMPLE_ANSWERS.items():
+    if _key in FACT_REGISTRY:
+        FACT_REGISTRY[_key].setdefault("example", _example)
+
+_HINT_EXAMPLE_RE = re.compile(r"e\.g\.\s*([^)]*)", re.IGNORECASE)
+
+
+def example_answer(key: str) -> Optional[str]:
+    """The answer a producer would type for `key` - its declared example, else
+    the first example its format hint names ("Percentage (e.g. 80 or 90)" ->
+    "80") - when the fact's own person-answer check accepts it; else None."""
+    entry = FACT_REGISTRY.get(key)
+    if not isinstance(entry, dict):
+        return None
+    candidates = [entry.get("example")]
+    match = _HINT_EXAMPLE_RE.search(str(entry.get("format_hint") or ""))
+    if match:
+        first = re.split(r"\s+or\s+|,\s+(?=[A-Za-z'\"$])", match.group(1).strip())[0]
+        candidates.append(first.strip().strip("'\"").strip())
+    check = answer_check(entry)
+    for value in candidates:
+        if not value:
+            continue
+        try:
+            if not callable(check) or check(value):
+                return str(value)
+        except Exception:                                      # noqa: BLE001
+            continue
+    return None

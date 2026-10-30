@@ -40,3 +40,6 @@ frontend/dist/
 
 # Local server / run logs - can contain request URLs with API keys (25 Oct 2026)
 *.log
+
+# ASG confidential API documentation (29 Oct 2026) - never commit
+ASG_DOCUMENTATION/

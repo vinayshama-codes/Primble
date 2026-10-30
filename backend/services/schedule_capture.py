@@ -788,6 +788,18 @@ def is_valid_vin(raw: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 _YEAR_RE = re.compile(r"^(19|20)\d{2}$")
+# ONE year rule for every table (29 Oct 2026). The advisory check
+# (`validate_cell`, and its frontend twin `scheduleImport.js`) and the hard
+# refusal (`hard_cell_refusal`) read these and say the same sentence: the rule
+# is 1900-2099. A year below 1900 but from 1800 on (a historic building) is
+# KEPT with that message; anything not four digits, past 2099 or before 1800
+# is refused - never a range the message does not name.
+YEAR_MIN, YEAR_MAX = 1900, 2099
+YEAR_HARD_MIN = 1800
+
+
+def year_rule_message(label: str) -> str:
+    return f"{label} must be between {YEAR_MIN} and {YEAR_MAX}"
 _DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{2}-\d{2}$")
 _STATE_RE = re.compile(r"^[A-Za-z]{2}$")
 _NUMERIC_RE = re.compile(r"^\d+(\.\d+)?$")
@@ -861,7 +873,7 @@ def validate_cell(col: dict, value: str) -> str:
         if not _YEAR_RE.match(val):
             # Must state the rule `_YEAR_RE` actually enforces (1900-2099).
             # "4-digit year" rejected 2122 while calling it not-four-digits.
-            return f"{col['label']} must be between 1900 and 2099"
+            return year_rule_message(col["label"])
     elif ctype == "date":
         if not _DATE_RE.match(val):
             return f"{col['label']} must be MM/DD/YYYY"
@@ -881,6 +893,81 @@ def validate_cell(col: dict, value: str) -> str:
         # "GL 91580" - never a word ("Electrical"), which no rater can read.
         if not _CODE_DIGITS_RE.search(val):
             return f"{col['label']} must be the class code's number"
+    return ""
+
+
+# ── A CELL THAT CANNOT BE ITS COLUMN'S TYPE IS NOT STORED (29 Oct 2026) ─────
+# `validate_cell` is advisory: a partly known fleet is still captured. The strict
+# review saved a 40-character VIN, year 99999, loss date 13/45/2022 and paid
+# "abc" - values no form can print and every reader downstream must then guess
+# about. `hard_cell_refusal` names the cells that are not their type AT ALL;
+# `validate_rows` stores them blank and returns them per cell under "refused"
+# (the advisory messages stay in "errors"). What stays advisory: an empty
+# required cell, a VIN SHORTER than 17 (pre-1981 / a truncated printing) or with
+# I / O / Q, a real date not in MM/DD/YYYY, a decimal in a count, a 1800s year
+# (a historic building), words in a percent cell, "None" in an amount.
+_HARD_VIN_RE = re.compile(r"^[A-Z0-9]{1,17}$")
+_HARD_AMOUNT_RE = re.compile(
+    r"^\(?-?\d+(?:\.\d+)?\)?(?:k|m|mm|million|thousand)?$", re.I)
+_ZERO_WORDS = frozenset({"none", "nil", "zero"})
+MAX_SIGNIFICANT_DIGITS = 15
+
+
+def _too_many_digits(text: str) -> bool:
+    """More than 15 significant digits: past what a float holds exactly, so a
+    30-digit typing would be stored as binary noise (item 4, 29 Oct 2026)."""
+    digits = re.sub(r"\D", "", text.split(".")[0]).lstrip("0")
+    return len(digits) > MAX_SIGNIFICANT_DIGITS
+
+
+def _year_bounds() -> Tuple[int, int]:
+    """The years a table cell may hold at all - the stated rule's ceiling
+    (`YEAR_MAX`) and the historic-building floor (`YEAR_HARD_MIN`)."""
+    return YEAR_HARD_MIN, YEAR_MAX
+
+
+def hard_cell_refusal(col: dict, value: str) -> str:
+    """Why ``value`` can never be this column's type (the cell is then stored
+    blank), else "". Empty is never refused here."""
+    val = (value or "").strip()
+    if not val:
+        return ""
+    try:
+        # A whole-cell statement of absence ("NOT PROVIDED", "N/A", "Unknown")
+        # is no malformed value: it is what the row SAYS (the claims checks read
+        # a loss run's "NOT PROVIDED" first-made date), and stays advisory.
+        from services.answer_semantics import is_placeholder_text
+        if is_placeholder_text(val):
+            return ""
+    except Exception:                                         # noqa: BLE001
+        pass
+    ctype = col.get("type", "text")
+    label = col.get("label") or col.get("key") or "This cell"
+    if ctype == "vin":
+        if not _HARD_VIN_RE.match(normalize_vin(val)):
+            return "VIN must be at most 17 letters / numbers - not saved"
+    elif ctype == "year":
+        lo, hi = _year_bounds()
+        if not (re.fullmatch(r"\d{4}", val) and lo <= int(val) <= hi):
+            return f"{year_rule_message(label)} - not saved"
+    elif ctype == "date":
+        try:
+            from services.normalization import normalize_date
+            ok = normalize_date(val) is not None
+        except Exception:                                     # noqa: BLE001
+            ok = True
+        if not ok:
+            return f"{label} is not a real date (MM/DD/YYYY) - not saved"
+    elif ctype in ("currency", "percent", "number"):
+        stripped = re.sub(r"[\s$,%]", "", val)
+        if stripped.lower() in _ZERO_WORDS:
+            return ""                    # "None" is an answer (advisory only)
+        if ctype != "percent" and not _HARD_AMOUNT_RE.match(stripped):
+            # A percent cell ("Sprinkler %": "Full", "Yes") stays advisory -
+            # only a money / count cell must be a number.
+            return f"{label} must be a number - not saved"
+        if _too_many_digits(stripped):
+            return f"{label} has more than {MAX_SIGNIFICANT_DIGITS} digits - not saved"
     return ""
 
 
@@ -944,7 +1031,12 @@ def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tup
         "row_count":  int,
         "overflow":   int,                    # rows beyond ROW_CAPACITY
         "truncated":  bool,                   # rows dropped by MAX_ROWS
+        "refused":    {row_index: {col_key: message}},  # stored blank
     }
+
+    A cell that cannot be its column's type (`hard_cell_refusal`) is stored
+    BLANK and listed under "refused" (29 Oct 2026) - unless it is exactly the
+    value the table showed (a document's printing the person did not type).
     """
     defn = SCHEDULE_DEFS.get(list_key)
     if defn is None:
@@ -968,7 +1060,8 @@ def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tup
     seen: Dict[str, int] = {}
     duplicates: List[int] = []
     _col_keys = [c["key"] for c in columns]
-    _shown_by_id, _shown_bare = _as_shown(shown) if defn.get("follow_up") else ({}, [])
+    _shown_by_id, _shown_bare = _as_shown(shown)
+    refused: Dict[int, Dict[str, str]] = {}
 
     def _shown_row(raw_row: dict) -> Optional[dict]:
         rid = _clean_cell(raw_row.get(ROW_ID_KEY))
@@ -992,14 +1085,26 @@ def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tup
         # never a cell left as the table showed it (`shown`, above).
         _follow = bool(defn.get("follow_up")) and _is_marked(raw_row.get(FOLLOW_UP_KEY))
         _was = _shown_row(raw_row) if (_shown_by_id or _shown_bare) else None
+        row_refused: Dict[str, str] = {}
         for col in columns:
             val = _clean_cell(raw_row.get(col["key"]))
             if col["type"] == "vin" and val:
                 val = normalize_vin(val)
+            _as_shown_cell = (_was is not None
+                              and _clean_cell(_was.get(col["key"])) == val)
             if (defn.get("follow_up") and val and _is_non_answer(col, val)
-                    and not (_was is not None and _clean_cell(_was.get(col["key"])) == val)):
+                    and not _as_shown_cell):
                 val = ""
                 _follow = True
+            if val and not _as_shown_cell:
+                _hard = hard_cell_refusal(col, val)
+                if _hard:
+                    row_refused[col["key"]] = _hard
+                    # The cell's message is the rule the typed value broke,
+                    # never "<label> is required" for a blank WE made.
+                    row[col["key"]] = ""
+                    row_errors[col["key"]] = validate_cell(col, val) or _hard
+                    continue
             row[col["key"]] = val
             msg = validate_cell(col, val)
             if msg:
@@ -1015,7 +1120,11 @@ def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tup
         # than reported as N required-field errors (trailing blank rows are a
         # normal artifact of both the table UI and spreadsheet exports).
         if not any(row.values()) and not _rid:
+            if row_refused:
+                refused[idx] = row_refused     # nothing else typed: no row kept
             continue
+        if row_refused:
+            refused[idx] = row_refused
         if _rid:
             row[ROW_ID_KEY] = _rid
         if _follow:
@@ -1038,7 +1147,24 @@ def validate_rows(list_key: str, rows: Any, shown: Optional[list] = None) -> Tup
         "row_count":  len(clean_rows),
         "overflow":   max(0, len(clean_rows) - capacity_for(list_key)),
         "truncated":  truncated,
+        # Keyed by the row's position in what was SENT (the table's own row
+        # order), not the kept rows - a row whose only cell was refused is
+        # not kept at all.
+        "refused":    {str(k): v for k, v in refused.items()},
     }
+
+
+def refusal_message(report: Optional[dict]) -> str:
+    """One sentence naming the first refused cell and how many more, else ""."""
+    ref = (report or {}).get("refused") or {}
+    cells = [(int(i), m) for i, row in ref.items() for m in (row or {}).values()]
+    if not cells:
+        return ""
+    cells.sort(key=lambda c: c[0])
+    i, msg = cells[0]
+    more = len(cells) - 1
+    return (f"Row {i + 1}: {msg}" + (f" (and {more} more cell{'s' if more != 1 else ''})"
+                                     if more else ""))
 
 
 def rows_for_facts(list_key: str, rows: List[dict]) -> List[Any]:
@@ -1394,7 +1520,18 @@ def _shown_row_indices(list_key: str, rows: Any, facts: Optional[dict]) -> Optio
     prints: a Workers Compensation class a combined package files under GL
     ("do not substitute WC class codes for GL codes") and the carrier's
     policy-level line ("Location 000 / Fungi Or Bacteria Exclusion") are not
-    classifications to confirm. Every other table shows every row."""
+    classifications to confirm. The loss table (26 Oct 2026) hides a loss
+    run's policy-year SUMMARY line ("2025-2026 | All lines | 12 claims |
+    $322,650") - a count and totals, not a claim; the scorer and the ACORD 125
+    already skip it (`loss_history_state._row_is_a_period_total`). Every other
+    table shows every row."""
+    if list_key == "loss_history" and isinstance(rows, list):
+        try:
+            from services.loss_history_state import _row_is_a_period_total
+        except Exception:                                     # noqa: BLE001
+            return None
+        return [i for i, r in enumerate(rows)
+                if not (isinstance(r, dict) and _row_is_a_period_total(r))]
     if list_key != "gl_class_code_schedule" or not isinstance(rows, list):
         return None
     try:
@@ -1543,6 +1680,8 @@ GL_REFUSED_CODE_MESSAGE = ("This is another line's class code in these documents
                            "the General Liability class code.")
 _HIDDEN_ROW_MESSAGE = ("This row reads as the policy's own line, not a classification - "
                        "add its GL class code or rating basis.")
+_LOSS_TOTAL_ROW_MESSAGE = ("This row reads as a loss-run total, not a claim - add the claim's "
+                           "loss date or claim number.")
 
 
 def refused_rows(list_key: str, rows: Any, facts: Optional[dict]) -> Dict[str, Dict[str, str]]:
@@ -1563,6 +1702,9 @@ def refused_rows(list_key: str, rows: Any, facts: Optional[dict]) -> Dict[str, D
     if shown is None:
         return {}
     keep = set(shown)
+    if list_key == "loss_history":
+        return {str(i): {"row": _LOSS_TOTAL_ROW_MESSAGE} for i, r in enumerate(rows)
+                if i not in keep and isinstance(r, dict)}
     refused_codes = set(_gl_refused_codes(facts))
     out: Dict[str, Dict[str, str]] = {}
     for i, r in enumerate(rows):

@@ -1471,7 +1471,9 @@ def test_the_gate_strips_only_an_INFERRED_period():
     gate(ai, docs)
     assert not (ai.get("wc_payroll_period") or {}).get("value"), "an inference must be dropped"
 
-    for src in ("producer", "client_arq", "client", "derived"):
+    # "client" left 27 Oct 2026: no code writes it on a fact (Z31-P); a
+    # person's sources are the one door's (`fact_state.PERSON_ENTRY_SOURCES`).
+    for src in ("producer", "client_arq", "derived"):
         kept = {"wc_payroll": "$210,000", "dec_page_entries": entries,
                 "wc_payroll_period": _period_env("annual", src)}
         gate(kept, docs)

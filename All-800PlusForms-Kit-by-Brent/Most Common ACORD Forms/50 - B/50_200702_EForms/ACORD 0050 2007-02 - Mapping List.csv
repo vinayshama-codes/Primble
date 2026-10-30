@@ -1,0 +1,81 @@
+﻿"eLabel Id","eLabel Name","eLabel counter","Placeholder","Section Name","Field Name","Description"
+"755","Form_Title","A","","TITLE
+ACORD 50 (2007/02)","INSURANCE IDENTIFICATION CARD","The title of the form. ACORD 50, Insurance Identification Card, is accepted in the majority of states that require the insured to carry/produce upon demand proof of insurance.
+
+The states where ACORD 50 is not acceptable are:
+ - Arkansas
+ - California
+ - Delaware
+ - Florida
+ - Georgia
+ - Hawaii
+ - Iowa
+ - Kentucky
+ - Louisiana
+ - Michigan
+ - Mississippi
+ - Missouri
+ - New Jersey
+ - Nevada
+ - New York *
+ - Oklahoma
+ - Pennsylvania
+ - Texas
+ - West Virginia
+
+* Effective 1/1/02, the New York ID card must be issued by means of an encrypted bar coded software program available only from insurance companies.  ACORD does not provide the ID card."
+"17268","NamedInsured_StateOrProvinceName","A","","INSURANCE IDENTIFICATION CARD","State","Enter text: The full name of the state as determined by the carrier."
+"4484","AutomobileIdentificationCard_RemarkText","A","","INSURANCE IDENTIFICATION CARD","Remarks One","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"809","Policy_BroadLineOfBusiness_CommercialIndicator","A","","INSURANCE IDENTIFICATION CARD","Check box - Commercial One","Check the box (if applicable): Indicates the policy is a commercial lines policy."
+"810","Policy_BroadLineOfBusiness_PersonalIndicator","A","","INSURANCE IDENTIFICATION CARD","Check box - Personal One","Check the box (if applicable): Indicates the policy is a personal lines policy."
+"15","Insurer_NAICCode","A","","INSURANCE IDENTIFICATION CARD","Company Number One","Enter code: The identification code assigned to the insurer by the NAIC."
+"14","Insurer_FullName","A","","INSURANCE IDENTIFICATION CARD","Company One","Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name."
+"158","Policy_PolicyNumberIdentifier","A","","INSURANCE IDENTIFICATION CARD","Policy Number One","Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number."
+"306","Policy_EffectiveDate","A","","INSURANCE IDENTIFICATION CARD","Effective Date One","Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence."
+"162","Policy_ExpirationDate","A","","INSURANCE IDENTIFICATION CARD","Expiration Date One","Enter date: The date on which the terms and conditions of the policy will expire."
+"147","Vehicle_ModelYear","A","","INSURANCE IDENTIFICATION CARD","Year One","Enter year: The model year of the vehicle."
+"169","Vehicle_ManufacturersName","A","","INSURANCE IDENTIFICATION CARD","Make One","Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy)."
+"170","Vehicle_ModelName","A","","INSURANCE IDENTIFICATION CARD","Model One","Enter text: The manufacturer's model name for the vehicle."
+"173","Vehicle_VINIdentifier","A","","INSURANCE IDENTIFICATION CARD","Vehicle Identification Number One","Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer."
+"2","Producer_FullName","A","","INSURANCE IDENTIFICATION CARD","Agency/Company Issuing Card One","Enter text: The full name of the producer / agency."
+"3","Producer_MailingAddress_LineOne","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address line one of the producer / agency."
+"4","Producer_MailingAddress_LineTwo","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address line two of the producer / agency."
+"5","Producer_MailingAddress_CityName","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address city name of the producer / agency."
+"6","Producer_MailingAddress_StateOrProvinceCode","A","","INSURANCE IDENTIFICATION CARD","","Enter code: The mailing address state or province code of the producer / agency."
+"7","Producer_MailingAddress_PostalCode","A","","INSURANCE IDENTIFICATION CARD","","Enter code: The mailing address postal code of the producer / agency."
+"8","NamedInsured_FullName","A","","INSURANCE IDENTIFICATION CARD","Insured One","Enter text: The named insured(s) as it / they will appear on the policy declarations page."
+"9","NamedInsured_MailingAddress_LineOne","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address line one."
+"10","NamedInsured_MailingAddress_LineTwo","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address line two."
+"11","NamedInsured_MailingAddress_CityName","A","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address city name."
+"12","NamedInsured_MailingAddress_StateOrProvinceCode","A","","INSURANCE IDENTIFICATION CARD","","Enter code: The named insured's mailing address state or province code."
+"13","NamedInsured_MailingAddress_PostalCode","A","","INSURANCE IDENTIFICATION CARD","","Enter code: The named insured's mailing address postal code."
+"4484","AutomobileIdentificationCard_RemarkText","B","","INSURANCE IDENTIFICATION CARD","Remarks Two","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"4484","AutomobileIdentificationCard_RemarkText","C","","INSURANCE IDENTIFICATION CARD","Remarks Three","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"17268","NamedInsured_StateOrProvinceName","B","","INSURANCE IDENTIFICATION CARD","State","Enter text: The full name of the state as determined by the carrier."
+"4484","AutomobileIdentificationCard_RemarkText","D","","INSURANCE IDENTIFICATION CARD","Remarks One","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"809","Policy_BroadLineOfBusiness_CommercialIndicator","B","","INSURANCE IDENTIFICATION CARD","Check box - Commercial One","Check the box (if applicable): Indicates the policy is a commercial lines policy."
+"810","Policy_BroadLineOfBusiness_PersonalIndicator","B","","INSURANCE IDENTIFICATION CARD","Check box - Personal One","Check the box (if applicable): Indicates the policy is a personal lines policy."
+"15","Insurer_NAICCode","B","","INSURANCE IDENTIFICATION CARD","Company Number One","Enter code: The identification code assigned to the insurer by the NAIC."
+"14","Insurer_FullName","B","","INSURANCE IDENTIFICATION CARD","Company One","Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name."
+"158","Policy_PolicyNumberIdentifier","B","","INSURANCE IDENTIFICATION CARD","Policy Number One","Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number."
+"306","Policy_EffectiveDate","B","","INSURANCE IDENTIFICATION CARD","Effective Date One","Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence."
+"162","Policy_ExpirationDate","B","","INSURANCE IDENTIFICATION CARD","Expiration Date One","Enter date: The date on which the terms and conditions of the policy will expire."
+"147","Vehicle_ModelYear","B","","INSURANCE IDENTIFICATION CARD","Year One","Enter year: The model year of the vehicle."
+"169","Vehicle_ManufacturersName","B","","INSURANCE IDENTIFICATION CARD","Make One","Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy)."
+"170","Vehicle_ModelName","B","","INSURANCE IDENTIFICATION CARD","Model One","Enter text: The manufacturer's model name for the vehicle."
+"173","Vehicle_VINIdentifier","B","","INSURANCE IDENTIFICATION CARD","Vehicle Identification Number One","Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer."
+"2","Producer_FullName","B","","INSURANCE IDENTIFICATION CARD","Agency/Company Issuing Card One","Enter text: The full name of the producer / agency."
+"3","Producer_MailingAddress_LineOne","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address line one of the producer / agency."
+"4","Producer_MailingAddress_LineTwo","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address line two of the producer / agency."
+"5","Producer_MailingAddress_CityName","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The mailing address city name of the producer / agency."
+"6","Producer_MailingAddress_StateOrProvinceCode","B","","INSURANCE IDENTIFICATION CARD","","Enter code: The mailing address state or province code of the producer / agency."
+"7","Producer_MailingAddress_PostalCode","B","","INSURANCE IDENTIFICATION CARD","","Enter code: The mailing address postal code of the producer / agency."
+"8","NamedInsured_FullName","B","","INSURANCE IDENTIFICATION CARD","Insured One","Enter text: The named insured(s) as it / they will appear on the policy declarations page."
+"9","NamedInsured_MailingAddress_LineOne","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address line one."
+"10","NamedInsured_MailingAddress_LineTwo","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address line two."
+"11","NamedInsured_MailingAddress_CityName","B","","INSURANCE IDENTIFICATION CARD","","Enter text: The named insured's mailing address city name."
+"12","NamedInsured_MailingAddress_StateOrProvinceCode","B","","INSURANCE IDENTIFICATION CARD","","Enter code: The named insured's mailing address state or province code."
+"13","NamedInsured_MailingAddress_PostalCode","B","","INSURANCE IDENTIFICATION CARD","","Enter code: The named insured's mailing address postal code."
+"4484","AutomobileIdentificationCard_RemarkText","E","","INSURANCE IDENTIFICATION CARD","Remarks Two","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"4484","AutomobileIdentificationCard_RemarkText","F","","INSURANCE IDENTIFICATION CARD","Remarks Three","Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states."
+"105","Form_EditionIdentifier","A","","Edition","Date","The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM)."

@@ -62,7 +62,7 @@ CORS_ALLOW_ORIGIN_REGEX = (
 )
 
 MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
-MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
+MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "20"))
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
@@ -329,6 +329,12 @@ if not os.getenv("OPENAI_API_KEY"):
     logger.warning("OPENAI_API_KEY not set — all LLM calls will fail.")
 
 
+# A list a caller sets around `groq_chat` to receive the token counts of the
+# calls it makes (services/arq_assistant_usage.py). Default None = nobody asked.
+import contextvars as _contextvars                                   # noqa: E402
+LLM_USAGE_SINK: _contextvars.ContextVar = _contextvars.ContextVar("llm_usage_sink", default=None)
+
+
 # ASYNC-SAFE
 async def groq_chat(
     model: str,
@@ -437,6 +443,14 @@ async def _openai_chat(
                         _pt, _cached, int(getattr(_u, "completion_tokens", 0) or 0),
                         (100 * _cached // _pt) if _pt else 0,
                     )
+                    # A caller that set LLM_USAGE_SINK (the Form Assistant's
+                    # usage record) gets the same counts - no extra call.
+                    _sink = LLM_USAGE_SINK.get()
+                    if isinstance(_sink, list):
+                        _sink.append({
+                            "prompt_tokens": _pt, "cached_tokens": _cached,
+                            "completion_tokens": int(getattr(_u, "completion_tokens", 0) or 0),
+                        })
             except Exception:                                  # pragma: no cover
                 pass
             return (r.choices[0].message.content or "").strip()

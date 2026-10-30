@@ -262,7 +262,12 @@ def test_every_blocker_is_said_somewhere(fid):
         if sqs["cap_applied"] is not None:
             assert sqs["sqs_score"] == min(sqs["raw_sqs_score"], sqs["cap_applied"])
 
-        assert sqs["ready_blockers"] == list(dict.fromkeys(hard + sqs["cap_hard_stops"])), (
+        # Only this form's stops hold it (`stops_for_form`, 30 Oct 2026): a stop
+        # whose subject is another form ("ACORD 125 minimum field missing")
+        # holds the package and that form, never this one.
+        from services.sqs_service import stops_for_form
+        assert sqs["ready_blockers"] == list(dict.fromkeys(stops_for_form(hard, fid)
+                                                           + sqs["cap_hard_stops"])), (
             f"{fid} blocked by something the Hard Stops list does not show")
         assert not set(sqs["ready_blockers"]) & set(soft)
         assert sqs["open_hard_stops"] == len(sqs["ready_blockers"])

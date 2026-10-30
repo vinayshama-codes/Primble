@@ -1,0 +1,2236 @@
+%PDF-1.4
+%ÿğ°
+1 0 obj 
+<< /AcroForm << /DR << /Font << /F2 2 0 R >> >> /Fields [ 3 0 R 4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R 27 0 R 28 0 R 29 0 R 30 0 R 31 0 R 32 0 R 33 0 R 34 0 R 35 0 R 36 0 R 37 0 R 38 0 R 39 0 R 40 0 R 41 0 R 42 0 R 43 0 R 44 0 R 45 0 R 46 0 R 47 0 R 48 0 R 49 0 R 50 0 R 51 0 R 52 0 R 53 0 R 54 0 R 55 0 R 56 0 R 57 0 R 58 0 R 59 0 R 60 0 R 61 0 R 62 0 R 63 0 R 64 0 R 65 0 R 66 0 R 67 0 R 68 0 R 69 0 R 70 0 R 71 0 R 72 0 R 73 0 R 74 0 R 75 0 R 76 0 R 77 0 R 78 0 R 79 0 R 80 0 R 81 0 R 82 0 R 83 0 R 84 0 R 85 0 R 86 0 R 87 0 R 88 0 R 89 0 R 90 0 R 91 0 R 92 0 R 93 0 R 94 0 R 95 0 R 96 0 R 97 0 R 98 0 R 99 0 R 100 0 R 101 0 R 102 0 R 103 0 R 104 0 R 105 0 R 106 0 R 107 0 R 108 0 R 109 0 R 110 0 R 111 0 R 112 0 R 113 0 R 114 0 R 115 0 R 116 0 R 117 0 R 118 0 R 119 0 R 120 0 R 121 0 R 122 0 R 123 0 R 124 0 R 125 0 R 126 0 R 127 0 R 128 0 R 129 0 R 130 0 R 131 0 R 132 0 R 133 0 R 134 0 R 135 0 R 136 0 R 137 0 R 138 0 R 139 0 R 140 0 R 141 0 R 142 0 R 143 0 R 144 0 R 145 0 R 146 0 R 147 0 R 148 0 R 149 0 R 150 0 R 151 0 R 152 0 R 153 0 R 154 0 R 155 0 R 156 0 R 157 0 R 158 0 R 159 0 R 160 0 R 161 0 R 162 0 R 163 0 R 164 0 R 165 0 R 166 0 R 167 0 R 168 0 R 169 0 R 170 0 R 171 0 R 172 0 R 173 0 R 174 0 R 175 0 R 176 0 R 177 0 R 178 0 R 179 0 R 180 0 R 181 0 R 182 0 R 183 0 R 184 0 R 185 0 R 186 0 R 187 0 R 188 0 R 189 0 R 190 0 R 191 0 R 192 0 R 193 0 R 194 0 R 195 0 R 196 0 R 197 0 R 198 0 R 199 0 R 200 0 R 201 0 R 202 0 R 203 0 R 204 0 R 205 0 R 206 0 R 207 0 R 208 0 R 209 0 R 210 0 R 211 0 R 212 0 R 213 0 R 214 0 R 215 0 R 216 0 R 217 0 R 218 0 R 219 0 R 220 0 R 221 0 R 222 0 R 223 0 R 224 0 R 225 0 R 226 0 R 227 0 R 228 0 R 229 0 R 230 0 R 231 0 R 232 0 R 233 0 R 234 0 R 235 0 R 236 0 R 237 0 R 238 0 R 239 0 R 240 0 R 241 0 R 242 0 R 243 0 R 244 0 R 245 0 R 246 0 R 247 0 R 248 0 R 249 0 R 250 0 R 251 0 R 252 0 R 253 0 R 254 0 R 255 0 R 256 0 R 257 0 R ] >> /OpenAction << /JS (function DateV\(event\) {  var regEx = /^\\d{1,2}\\/\\d{1,2}\\/\\d{4}$/; if \(event.value!=null && event.value.length>0 && !regEx.test\(event.value\)\) { event.rc = false; app.alert\("The date must be of the format MM/DD/YYYY."\); } };function YesNoK\(event\) { if \(event.change.length>0\) { event.change = event.change.toUpperCase\(\); if \(event.change!="Y" && event.change!="N"\) event.change = ""; } };\nfunction YesNoV\(event\) { if \(event.value!=null\) event.value = event.value.toUpperCase\(\); if \(event.value!="Y" && event.value!="N" && event.value!=""\) event.rc = false; };\n) /S /JavaScript /Type /Action >> /Pages 258 0 R /Type /Catalog >>
+endobj
+259 0 obj 
+<< /Author (ACORD Corporation) /CreationDate (D:20250407154726-04'00') /Creator (Silverlake Software LLC - Forms Dev Environment) /ModDate (D:20250407154726-04'00') /Producer (Silverlake Software LLC - Form Designer - v1.4.24135) /Title (ACORD 0126 2025-03 Acroform) >>
+endobj
+2 0 obj 
+<< /BaseFont /Arial /Encoding /WinAnsiEncoding /FirstChar 0 /FontDescriptor << /Ascent 905.27 /CapHeight 716.31 /Descent -211.91 /Flags 32 /FontBBox [ -45.90 -168.46 1000.00 938.48 ] /FontName /Arial /ItalicAngle 0.00 /StemV 0.00 /Type /FontDescriptor >> /LastChar 255 /Subtype /Type1 /Type /Font /Widths [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 277.83 277.83 354.98 556.15 556.15 889.16 666.99 190.92 333.01 333.01 389.16 583.98 277.83 333.01 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 277.83 277.83 583.98 583.98 583.98 556.15 1015.14 666.99 666.99 722.17 722.17 666.99 610.84 777.83 722.17 277.83 500.00 666.99 556.15 833.01 722.17 777.83 666.99 777.83 722.17 666.99 610.84 722.17 666.99 943.85 666.99 666.99 610.84 277.83 277.83 277.83 469.24 556.15 333.01 556.15 556.15 500.00 556.15 556.15 277.83 556.15 556.15 222.17 222.17 500.00 222.17 833.01 556.15 556.15 556.15 556.15 333.01 500.00 277.83 556.15 500.00 722.17 500.00 500.00 500.00 333.98 259.77 333.98 583.98 0 556.15 0 222.17 556.15 333.01 1000.00 556.15 556.15 333.01 1000.00 666.99 333.01 1000.00 0 610.84 0 0 222.17 222.17 333.01 333.01 350.10 556.15 1000.00 333.01 1000.00 500.00 333.01 943.85 0 500.00 666.99 277.83 333.01 556.15 556.15 556.15 556.15 259.77 556.15 333.01 736.82 370.12 556.15 583.98 333.01 736.82 552.25 399.90 548.83 333.01 333.01 333.01 576.17 537.11 333.01 333.01 333.01 365.23 556.15 833.98 833.98 833.98 610.84 666.99 666.99 666.99 666.99 666.99 666.99 1000.00 722.17 666.99 666.99 666.99 666.99 277.83 277.83 277.83 277.83 722.17 722.17 777.83 777.83 777.83 777.83 777.83 583.98 777.83 722.17 722.17 722.17 722.17 666.99 666.99 610.84 556.15 556.15 556.15 556.15 556.15 556.15 889.16 500.00 556.15 556.15 556.15 556.15 277.83 277.83 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 548.83 610.84 556.15 556.15 556.15 556.15 500.00 556.15 500.00 ] >>
+endobj
+3 0 obj 
+<< /DV (ACORD 0126 2025-03 Acroform) /F 2 /Ff 1 /FT /Tx /P 260 0 R /Rect [ 0 1 0 1 ] /Subtype /Widget /T (Form_EditionIdentifier_A) /TU (The edition identifier of the form including the form number and edition \(the date is typically formatted YYYY/MM\).) /Type /Annot /V (ACORD 0126 2025-03 Acroform) >>
+endobj
+4 0 obj 
+<< /DA (/F2 8 Tf 0 g) /Ff 8388608 /FT /Tx /Kids [ 261 0 R 262 0 R 263 0 R 264 0 R ] /T (Producer_CustomerIdentifier_A) /TU (Enter identifier: The customer's identification number assigned by the producer \(e.g., agency or brokerage\). ) >>
+endobj
+5 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 260 0 R /Q 1 /Rect [ 511 726 590 738 ] /Subtype /Widget /T (Form_CompletionDate_A) /TU (Enter date: The date on which the form is completed.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+6 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 22 702 302 714 ] /Subtype /Widget /T (Producer_FullName_A) /TU (Enter text: The full name of the producer. ) /Type /Annot >>
+endobj
+7 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 22 678 245 690 ] /Subtype /Widget /T (Policy_PolicyNumberIdentifier_A) /TU (Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ) /Type /Annot >>
+endobj
+8 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 260 0 R /Q 1 /Rect [ 252 678 302 690 ] /Subtype /Widget /T (Policy_EffectiveDate_A) /TU (Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+9 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 310 702 536 714 ] /Subtype /Widget /T (Insurer_FullName_A) /TU (Enter text: The insurer's full legal company name\(s\) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ) /Type /Annot >>
+endobj
+10 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 544 702 590 714 ] /Subtype /Widget /T (Insurer_NAICCode_A) /TU (Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners \(NAIC\). ) /Type /Annot >>
+endobj
+11 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 310 678 590 690 ] /Subtype /Widget /T (NamedInsured_FullName_A) /TU (Enter text: The named insured\(s\) as it / they will appear on the policy declarations page. ) /Type /Annot >>
+endobj
+12 0 obj 
+<< /AP << /D << /1 265 0 R /Off 266 0 R >> /N << /1 267 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 624 32 636 ] /Subtype /Widget /T (GeneralLiability_CoverageIndicator_A) /TU (Check the box \(if applicable\): Indicates the claims made or occurrence option applies for the general liability policy. ) /Type /Annot >>
+endobj
+13 0 obj 
+<< /AP << /D << /1 268 0 R /Off 269 0 R >> /N << /1 270 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 32 612 47 624 ] /Subtype /Widget /T (GeneralLiability_ClaimsMadeIndicator_A) /TU (Check the box \(if applicable\): Indicates the "claims made" option applies on the general liability policy. ) /Type /Annot >>
+endobj
+14 0 obj 
+<< /AP << /D << /1 271 0 R /Off 272 0 R >> /N << /1 273 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 122 612 137 624 ] /Subtype /Widget /T (GeneralLiability_OccurrenceIndicator_A) /TU (Check the box \(if applicable\): Indicates the general liability policy, occurrence basis applies. ) /Type /Annot >>
+endobj
+15 0 obj 
+<< /AP << /D << /1 274 0 R /Off 275 0 R >> /N << /1 276 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 600 32 612 ] /Subtype /Widget /T (GeneralLiability_OwnersAndContractorsProtectiveIndicator_A) /TU (Check the box \(if applicable\): Indicates the owners and contractors protective option applies for the general liability policy. ) /Type /Annot >>
+endobj
+16 0 obj 
+<< /AP << /D << /1 277 0 R /Off 278 0 R >> /N << /1 279 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 588 32 600 ] /Subtype /Widget /T (GeneralLiability_OtherCoverageIndicator_A) /TU (Check the box \(if applicable\): Indicates other coverage not found on the form exists for the general liability policy. ) /Type /Annot >>
+endobj
+17 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 36 588 227 600 ] /Subtype /Widget /T (GeneralLiability_OtherCoverageDescription_A) /TU (Enter text: The description of other coverage \(not the limit\) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+18 0 obj 
+<< /AP << /D << /1 280 0 R /Off 281 0 R >> /N << /1 282 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 564 32 576 ] /Subtype /Widget /T (GeneralLiability_PropertyDamage_DeductibleIndicator_A) /TU (Check the box \(if applicable\): Indicates if a property damage deductible is requested. ) /Type /Annot >>
+endobj
+19 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 119 564 169 576 ] /Subtype /Widget /T (GeneralLiability_PropertyDamage_DeductibleAmount_A) /TU (Enter deductible: The deductible applicable to the Property Damage coverage. ) /Type /Annot >>
+endobj
+20 0 obj 
+<< /AP << /D << /1 283 0 R /Off 284 0 R >> /N << /1 285 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 552 32 564 ] /Subtype /Widget /T (GeneralLiability_BodilyInjury_DeductibleIndicator_A) /TU (Check the box \(if applicable\): Indicates if a bodily injury deductible is requested. ) /Type /Annot >>
+endobj
+21 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 119 552 169 564 ] /Subtype /Widget /T (GeneralLiability_BodilyInjury_DeductibleAmount_A) /TU (Enter deductible: The deductible applicable to the Bodily Injury coverage. ) /Type /Annot >>
+endobj
+22 0 obj 
+<< /AP << /D << /1 286 0 R /Off 287 0 R >> /N << /1 288 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 18 540 32 552 ] /Subtype /Widget /T (GeneralLiability_OtherDeductibleIndicator_A) /TU (Check the box \(if applicable\): Indicates that a deductible is requested on the coverage other than Property Damage or Bodily Injury. ) /Type /Annot >>
+endobj
+23 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 40 540 112 552 ] /Subtype /Widget /T (GeneralLiability_OtherDeductibleDescription_A) /TU (Enter text: The type of deductible being requested other than property damage and bodily injury. ) /Type /Annot >>
+endobj
+24 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 119 540 169 552 ] /Subtype /Widget /T (GeneralLiability_OtherDeductibleAmount_A) /TU (Enter deductible: The deductible applicable to the Other Coverage. ) /Type /Annot >>
+endobj
+25 0 obj 
+<< /AP << /D << /1 289 0 R /Off 290 0 R >> /N << /1 291 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 173 552 187 564 ] /Subtype /Widget /T (GeneralLiability_DeductiblePerClaimIndicator_A) /TU (Check the box \(if applicable\): Indicates that a per claim deductible applies to individual claims even if the claims are all related to the same occurrence or event. ) /Type /Annot >>
+endobj
+26 0 obj 
+<< /AP << /D << /1 292 0 R /Off 293 0 R >> /N << /1 294 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 173 540 187 552 ] /Subtype /Widget /T (GeneralLiability_DeductiblePerOccurrenceIndicator_A) /TU (Check the box \(if applicable\): Indicates that a per occurrence deductible applies once to each occurrence no matter how many individual claims result from the occurrence or event. ) /Type /Annot >>
+endobj
+27 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 624 490 636 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAmount_A) /TU (Enter limit: The general liability, general aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+28 0 obj 
+<< /AP << /D << /1 295 0 R /Off 296 0 R >> /N << /1 297 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 302 612 317 624 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAppliesPerPolicyIndicator_A) /TU (Check the box \(if applicable\): Indicates the general liability policy, general aggregate limit applies per policy. ) /Type /Annot >>
+endobj
+29 0 obj 
+<< /AP << /D << /1 298 0 R /Off 299 0 R >> /N << /1 300 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 302 600 317 612 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator_A) /TU (Check the box \(if applicable\): Indicates the general liability policy, general aggregate limit applies per project. ) /Type /Annot >>
+endobj
+30 0 obj 
+<< /AP << /D << /1 301 0 R /Off 302 0 R >> /N << /1 303 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 353 612 367 624 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAppliesPerLocationIndicator_A) /TU (Check the box \(if applicable\): Indicates the general liability policy, general aggregate limit applies per location. ) /Type /Annot >>
+endobj
+31 0 obj 
+<< /AP << /D << /1 304 0 R /Off 305 0 R >> /N << /1 306 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 353 600 367 612 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAppliesToOtherIndicator_A) /TU (Check the box \(if applicable\): Indicates the general liability policy, general aggregate limit applies to option is other than those listed on the form. ) /Type /Annot >>
+endobj
+32 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 400 600 490 612 ] /Subtype /Widget /T (GeneralLiability_GeneralAggregate_LimitAppliesToCode_A) /TU (Enter text: The description of the other option to which the general liability policy, general aggregate limit applies. ) /Type /Annot >>
+endobj
+33 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 588 490 600 ] /Subtype /Widget /T (GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A) /TU (Enter limit: The general liability, products and completed operations aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+34 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 576 490 588 ] /Subtype /Widget /T (GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A) /TU (Enter limit: The general liability, personal and advertising injury limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+35 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 564 490 576 ] /Subtype /Widget /T (GeneralLiability_EachOccurrence_LimitAmount_A) /TU (Enter limit: The general liability, each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+36 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 552 490 564 ] /Subtype /Widget /T (GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A) /TU (Enter limit: The general liability, damage to rented premises each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+37 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 540 490 552 ] /Subtype /Widget /T (GeneralLiability_MedicalExpense_EachPersonLimitAmount_A) /TU (Enter limit: The general liability, medical expense each person limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+38 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 528 490 540 ] /Subtype /Widget /T (GeneralLiability_EmployeeBenefits_LimitAmount_A) /TU (Enter limit: The general liability employee benefits limit amount. ) /Type /Annot >>
+endobj
+39 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 234 516 396 528 ] /Subtype /Widget /T (GeneralLiability_OtherCoverageLimitDescription_A) /TU (Enter text: The description of other coverage \(not the limit\) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+40 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 410 516 490 528 ] /Subtype /Widget /T (GeneralLiability_OtherCoverageLimitAmount_A) /TU (Enter limit: The general liability, other coverage limit amount.  Any questions about appropriate limits or applicable policy coverage\(s\) should be answered by the issuing insurer\(s\). ) /Type /Annot >>
+endobj
+41 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 497 600 590 612 ] /Subtype /Widget /T (GeneralLiability_PremisesOperations_PremiumAmount_A) /TU (Enter amount: The premium for premises/operations coverage. ) /Type /Annot >>
+endobj
+42 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 497 576 590 588 ] /Subtype /Widget /T (GeneralLiability_Products_PremiumAmount_A) /TU (Enter amount: The premium for products coverage. ) /Type /Annot >>
+endobj
+43 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 497 552 590 564 ] /Subtype /Widget /T (GeneralLiability_OtherCoveragePremiumAmount_A) /TU (Enter amount: The premium for other general liability coverage. ) /Type /Annot >>
+endobj
+44 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 497 528 590 540 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A) /TU (Enter amount: The total premium amount for the commercial general liability line of business. ) /Type /Annot >>
+endobj
+45 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 260 0 R /Rect [ 22 480 590 504 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_RemarkText_A) /TU (Enter text: The remarks associated with the general liability line of business.  Use this section to provide any additional information required for underwriting or rating.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ) /Type /Annot >>
+endobj
+46 0 obj 
+<< /AP << /D << /1 307 0 R /Off 308 0 R >> /N << /1 309 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 101 456 115 468 ] /Subtype /Widget /T (GeneralLiability_UninsuredUnderinsuredMotorists_CoverageAvailableIndicator_A) /TU (Check the box \(if applicable\): Indicates if uninsured/underinsured motorist coverage is to be provided under the policy. ) /Type /Annot >>
+endobj
+47 0 obj 
+<< /AP << /D << /1 310 0 R /Off 311 0 R >> /N << /1 312 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 137 456 151 468 ] /Subtype /Widget /T (GeneralLiability_UninsuredUnderinsuredMotorists_CoverageAvailableNoIndicator_A) /TU (Check the box \(if applicable\): Indicates that  uninsured/underinsured motorist coverage is not  to be provided under the policy. ) /Type /Annot >>
+endobj
+48 0 obj 
+<< /AP << /D << /1 313 0 R /Off 314 0 R >> /N << /1 315 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 367 456 382 468 ] /Subtype /Widget /T (GeneralLiability_MedicalPayments_CoverageAvailableIndicator_A) /TU (Check the box \(if applicable\): Indicates that medical payment coverage is to be provided under the policy. ) /Type /Annot >>
+endobj
+49 0 obj 
+<< /AP << /D << /1 316 0 R /Off 317 0 R >> /N << /1 318 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 260 0 R /Rect [ 403 456 418 468 ] /Subtype /Widget /T (GeneralLiability_MedicalPayments_CoverageAvailableNoIndicator_A) /TU (Check the box \(if applicable\): Indicates that medical payment coverage is not to be provided under the policy. ) /Type /Annot >>
+endobj
+50 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Q 1 /Rect [ 22 408 50 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_LocationProducerIdentifier_A) /TU (Enter number: The producer assigned identifier for the location number of the risk's location as it appears on the Applicant Information Section of ACORD 125.  All classifications should be grouped by location number. ) /Type /Annot >>
+endobj
+51 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 58 408 83 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_HazardProducerIdentifier_A) /TU (Enter number: A unique \(within location\) number distinguishing this unit-at-risk from the others. ) /Type /Annot >>
+endobj
+52 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 90 408 137 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_ClassCode_A) /TU (Enter code: The general liability class code that corresponds to the classification description shown in the previous field. ) /Type /Annot >>
+endobj
+53 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 144 408 187 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremiumBasisCode_A) /TU (Enter code: An industry code designating the rating basis of the exposure amount. ) /Type /Annot >>
+endobj
+54 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 194 408 288 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_Exposure_A) /TU (Enter amount: The amount of the exposure used for this class code in calculating the premium.  The contents of this data element depends on the rating basis used.  The full amount of exposure is contained. ) /Type /Annot >>
+endobj
+55 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 295 408 324 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_TerritoryCode_A) /TU (Enter code: The rating territory code based on location from the appropriate state exception page. ) /Type /Annot >>
+endobj
+56 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 331 408 389 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsRate_A) /TU (Enter rate: The separate Premises Operations manual rate applicable to the classification. ) /Type /Annot >>
+endobj
+57 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Q 1 /Rect [ 396 408 457 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsRate_A) /TU (Enter rate: The separate Products rate applicable to the classification. ) /Type /Annot >>
+endobj
+58 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 464 408 522 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsPremiumAmount_A) /TU (Enter amount: The premium associated with the premises operations coverage. ) /Type /Annot >>
+endobj
+59 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 529 408 590 420 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsPremiumAmount_A) /TU (Enter amount: The premium associated with the products coverage. ) /Type /Annot >>
+endobj
+60 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 260 0 R /Rect [ 22 372 590 396 ] /Subtype /Widget /T (GeneralLiability_Hazard_Classification_A) /TU (Enter text: The classification of the applicant's liability exposures by location, using the ISO Classification Table or other industry organization rules.  Enter the appropriate class description from the table in this field. ) /Type /Annot >>
+endobj
+61 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Q 1 /Rect [ 22 336 50 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_LocationProducerIdentifier_B) /TU (Enter number: The producer assigned identifier for the location number of the risk's location as it appears on the Applicant Information Section of ACORD 125.  All classifications should be grouped by location number. ) /Type /Annot >>
+endobj
+62 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 58 336 83 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_HazardProducerIdentifier_B) /TU (Enter number: A unique \(within location\) number distinguishing this unit-at-risk from the others. ) /Type /Annot >>
+endobj
+63 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 90 336 137 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_ClassCode_B) /TU (Enter code: The general liability class code that corresponds to the classification description shown in the previous field. ) /Type /Annot >>
+endobj
+64 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 144 336 187 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremiumBasisCode_B) /TU (Enter code: An industry code designating the rating basis of the exposure amount. ) /Type /Annot >>
+endobj
+65 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 194 336 288 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_Exposure_B) /TU (Enter amount: The amount of the exposure used for this class code in calculating the premium.  The contents of this data element depends on the rating basis used.  The full amount of exposure is contained. ) /Type /Annot >>
+endobj
+66 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 295 336 324 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_TerritoryCode_B) /TU (Enter code: The rating territory code based on location from the appropriate state exception page. ) /Type /Annot >>
+endobj
+67 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 331 336 389 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsRate_B) /TU (Enter rate: The separate Premises Operations manual rate applicable to the classification. ) /Type /Annot >>
+endobj
+68 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 396 336 457 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsRate_B) /TU (Enter rate: The separate Products rate applicable to the classification. ) /Type /Annot >>
+endobj
+69 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 464 336 522 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsPremiumAmount_B) /TU (Enter amount: The premium associated with the premises operations coverage. ) /Type /Annot >>
+endobj
+70 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 529 336 590 348 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsPremiumAmount_B) /TU (Enter amount: The premium associated with the products coverage. ) /Type /Annot >>
+endobj
+71 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 22 300 590 324 ] /Subtype /Widget /T (GeneralLiability_Hazard_Classification_B) /TU (Enter text: The classification of the applicant's liability exposures by location, using the ISO Classification Table or other industry organization rules.  Enter the appropriate class description from the table in this field. ) /Type /Annot >>
+endobj
+72 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Q 1 /Rect [ 22 264 50 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_LocationProducerIdentifier_C) /TU (Enter number: The producer assigned identifier for the location number of the risk's location as it appears on the Applicant Information Section of ACORD 125.  All classifications should be grouped by location number. ) /Type /Annot >>
+endobj
+73 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 58 264 83 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_HazardProducerIdentifier_C) /TU (Enter number: A unique \(within location\) number distinguishing this unit-at-risk from the others. ) /Type /Annot >>
+endobj
+74 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 90 264 137 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_ClassCode_C) /TU (Enter code: The general liability class code that corresponds to the classification description shown in the previous field. ) /Type /Annot >>
+endobj
+75 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 144 264 187 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremiumBasisCode_C) /TU (Enter code: An industry code designating the rating basis of the exposure amount. ) /Type /Annot >>
+endobj
+76 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 194 264 288 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_Exposure_C) /TU (Enter amount: The amount of the exposure used for this class code in calculating the premium.  The contents of this data element depends on the rating basis used.  The full amount of exposure is contained. ) /Type /Annot >>
+endobj
+77 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 295 264 324 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_TerritoryCode_C) /TU (Enter code: The rating territory code based on location from the appropriate state exception page. ) /Type /Annot >>
+endobj
+78 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 331 264 389 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsRate_C) /TU (Enter rate: The separate Premises Operations manual rate applicable to the classification. ) /Type /Annot >>
+endobj
+79 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 396 264 457 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsRate_C) /TU (Enter rate: The separate Products rate applicable to the classification. ) /Type /Annot >>
+endobj
+80 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 464 264 522 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_PremisesOperationsPremiumAmount_C) /TU (Enter amount: The premium associated with the premises operations coverage. ) /Type /Annot >>
+endobj
+81 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 529 264 590 276 ] /Subtype /Widget /T (GeneralLiability_Hazard_ProductsPremiumAmount_C) /TU (Enter amount: The premium associated with the products coverage. ) /Type /Annot >>
+endobj
+82 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 22 228 590 252 ] /Subtype /Widget /T (GeneralLiability_Hazard_Classification_C) /TU (Enter text: The classification of the applicant's liability exposures by location, using the ISO Classification Table or other industry organization rules.  Enter the appropriate class description from the table in this field. ) /Type /Annot >>
+endobj
+83 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 260 0 R /Q 1 /Rect [ 155 168 223 180 ] /Subtype /Widget /T (GeneralLiability_ClaimsMade_ProposedRetroactiveDate_A) /TU (Enter date: The retroactive date you are requesting for the policy being applied for. This is the proposed earliest date for which an occurrence could "trigger" coverage under a Claims Made policy. ) /Type /Annot >>
+endobj
+84 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 260 0 R /Q 1 /Rect [ 259 156 328 168 ] /Subtype /Widget /T (GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate_A) /TU (Enter date: The retroactive date shown on the applicant's first Claims Made policy.  If this is the first such policy, the date will be the same as the proposed retroactive date shown on the preceding field. If this is a renewal, it is the effective date of the first policy issued in the sequence of uninterrupted Claims Made policies. ) /Type /Annot >>
+endobj
+85 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 260 0 R /Q 1 /Rect [ 576 144 590 156 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAHCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Has any product, work, accident or location been excluded, uninsured or self-insured from any previous coverage?". ) /Type /Annot >>
+endobj
+86 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 260 0 R /Rect [ 22 120 569 144 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_AnyProductWorkAccidentLocationExcludedUninsuredPreviousCoverageExplanation_A) /TU (Enter text: An explanation of any work, accident or location that has been excluded, uninsured or self-insured from any previous coverage. ) /Type /Annot >>
+endobj
+87 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 260 0 R /Q 1 /Rect [ 576 108 590 120 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAICode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Was tail coverage purchased under any previous policy?". ) /Type /Annot >>
+endobj
+88 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 260 0 R /Rect [ 22 84 569 108 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_TailCoveragePurchasedPreviousPolicyExplanation_A) /TU (Enter text: An explanation if tail was coverage purchased under any previous policy. ) /Type /Annot >>
+endobj
+89 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 137 60 284 72 ] /Subtype /Widget /T (GeneralLiability_EmployeeBenefits_PerClaimDeductibleAmount_A) /TU (Enter deductible: The deductible per claim applicable to Employee Benefits Liability coverage. ) /Type /Annot >>
+endobj
+90 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 137 48 284 60 ] /Subtype /Widget /T (GeneralLiability_EmployeeBenefits_EmployeeCount_A) /TU (Enter number: The total number of employees. ) /Type /Annot >>
+endobj
+91 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 260 0 R /Rect [ 547 60 590 72 ] /Subtype /Widget /T (GeneralLiability_EmployeeBenefits_EmployeeCoveredCount_A) /TU (Enter number: The total number of employees covered by employee benefits plans. ) /Type /Annot >>
+endobj
+92 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 260 0 R /Q 1 /Rect [ 382 48 590 60 ] /Subtype /Widget /T (GeneralLiability_EmployeeBenefits_RetroactiveDate_A) /TU (Enter date: The retroactive date that is the earliest date for which an occurrence could "trigger" coverage under Employee Benefits coverage.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+93 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 726 590 738 ] /Subtype /Widget /T (Contractors_Question_AABCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does applicant draw plans, designs or specifications for others?". ) /Type /Annot >>
+endobj
+94 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 702 569 726 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ApplicantDrawPlansForOthersExplanation_A) /TU (Enter text: An explanation of any plans, designs or specifications drawn for others. ) /Type /Annot >>
+endobj
+95 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 690 590 702 ] /Subtype /Widget /T (Contractors_Question_AAICode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Do any operations include blasting or utilize, or store explosive material?". ) /Type /Annot >>
+endobj
+96 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 666 569 690 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_OperationsIncludeBlastingExplanation_A) /TU (Enter text: An explanation of  any operations that  include blasting or utilize , store explosive material. ) /Type /Annot >>
+endobj
+97 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 654 590 666 ] /Subtype /Widget /T (Contractors_Question_AACCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does any operation involve excavation, tunneling, underground work or earth moving?". ) /Type /Annot >>
+endobj
+98 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 630 569 654 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_OperationsIncludeEvacuationExplanation_A) /TU (Enter text: An explanation of  any operations which include evacuation, tunneling, underground work or earth moving. ) /Type /Annot >>
+endobj
+99 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 618 590 630 ] /Subtype /Widget /T (Contractors_Question_ABBCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Do subcontractors carry coverages or limits less than applicant?". ) /Type /Annot >>
+endobj
+100 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 594 569 618 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_SubcontractorsCarryLowerLimitsExplanation_A) /TU (Enter text: An explanation of any of your subcontractors who carry coverages or limits less than yours. ) /Type /Annot >>
+endobj
+101 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 582 590 594 ] /Subtype /Widget /T (Contractors_Question_AADCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Are subcontractors allowed to work without providing you with a certificate of insurance?". ) /Type /Annot >>
+endobj
+102 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 558 569 582 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_SubcontractorsWorksWithoutCertificatesOfInsuranceExplanation_A) /TU (Enter text: An explanation of any subcontractors allowed to work without providing you with Certificates of Insurance. ) /Type /Annot >>
+endobj
+103 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 546 590 558 ] /Subtype /Widget /T (Contractors_Question_AAECode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does applicant lease equipment to others with or without operators?". ) /Type /Annot >>
+endobj
+104 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 522 569 546 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ApplicantLeaseEquipmentToOthersExplanation_A) /TU (Enter text: An explanation of any  applicant who leases equipment to others with or without operators. ) /Type /Annot >>
+endobj
+105 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 263 510 328 522 ] /Subtype /Widget /T (Contractors_SubcontractorsPaidAmount_A) /TU (Enter amount: The total dollar amount for work that the contractor pays to subcontractors. ) /Type /Annot >>
+endobj
+106 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 392 510 421 522 ] /Subtype /Widget /T (Contractors_WorkSubcontractedPercent_A) /TU (Enter percentage: The percentage of the work described by the applicant as subcontracted out. ) /Type /Annot >>
+endobj
+107 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 468 510 508 522 ] /Subtype /Widget /T (Contractors_FullTimeEmployeeCount_A) /TU (Enter number: The number of individuals employed full time by the applicant. ) /Type /Annot >>
+endobj
+108 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 554 510 590 522 ] /Subtype /Widget /T (Contractors_PartTimeEmployeeCount_A) /TU (Enter number: The number of individuals employed part time by the applicant. ) /Type /Annot >>
+endobj
+109 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 486 590 510 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_TypeOfWorkSubcontractedDescription_A) /TU (Enter text: Describe the type of work and percentage subcontracted. ) /Type /Annot >>
+endobj
+110 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 22 444 119 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_ProductName_A) /TU (Enter text: The name used to identify the product manufactured or sold or service provided by the applicant. ) /Type /Annot >>
+endobj
+111 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 126 444 198 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_AnnualGrossSalesAmount_A) /TU (Enter amount: The whole dollar estimate of the annual sales receipts realized by this product or service. ) /Type /Annot >>
+endobj
+112 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 205 444 277 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_UnitCount_A) /TU (Enter number: The number of units of this product manufactured and/or sold each year. ) /Type /Annot >>
+endobj
+113 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 284 444 313 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_InMarketMonthCount_A) /TU (Enter number: The number of months the product or service has been marketed to the public. ) /Type /Annot >>
+endobj
+114 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 320 444 349 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_ExpectedLifeMonthCount_A) /TU (Enter number: The anticipated number of months of useful life of the product or service. ) /Type /Annot >>
+endobj
+115 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 356 444 472 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_IntendedUse_A) /TU (Enter text: The intended use of the product. ) /Type /Annot >>
+endobj
+116 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 479 444 590 456 ] /Subtype /Widget /T (ProductAndCompletedOperations_PrincipalComponents_A) /TU (Enter text: The principal components of the product. ) /Type /Annot >>
+endobj
+117 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 22 420 119 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_ProductName_B) /TU (Enter text: The name used to identify the product manufactured or sold or service provided by the applicant. ) /Type /Annot >>
+endobj
+118 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 126 420 198 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_AnnualGrossSalesAmount_B) /TU (Enter amount: The whole dollar estimate of the annual sales receipts realized by this product or service. ) /Type /Annot >>
+endobj
+119 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 205 420 277 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_UnitCount_B) /TU (Enter number: The number of units of this product manufactured and/or sold each year. ) /Type /Annot >>
+endobj
+120 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 284 420 313 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_InMarketMonthCount_B) /TU (Enter number: The number of months the product or service has been marketed to the public. ) /Type /Annot >>
+endobj
+121 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 320 420 349 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_ExpectedLifeMonthCount_B) /TU (Enter number: The anticipated number of months of useful life of the product or service. ) /Type /Annot >>
+endobj
+122 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 356 420 472 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_IntendedUse_B) /TU (Enter text: The intended use of the product. ) /Type /Annot >>
+endobj
+123 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 479 420 590 432 ] /Subtype /Widget /T (ProductAndCompletedOperations_PrincipalComponents_B) /TU (Enter text: The principal components of the product. ) /Type /Annot >>
+endobj
+124 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 22 396 119 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_ProductName_C) /TU (Enter text: The name used to identify the product manufactured or sold or service provided by the applicant. ) /Type /Annot >>
+endobj
+125 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 126 396 198 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_AnnualGrossSalesAmount_C) /TU (Enter amount: The whole dollar estimate of the annual sales receipts realized by this product or service. ) /Type /Annot >>
+endobj
+126 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 205 396 277 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_UnitCount_C) /TU (Enter number: The number of units of this product manufactured and/or sold each year. ) /Type /Annot >>
+endobj
+127 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 284 396 313 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_InMarketMonthCount_C) /TU (Enter number: The number of months the product or service has been marketed to the public. ) /Type /Annot >>
+endobj
+128 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 320 396 349 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_ExpectedLifeMonthCount_C) /TU (Enter number: The anticipated number of months of useful life of the product or service. ) /Type /Annot >>
+endobj
+129 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 356 396 472 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_IntendedUse_C) /TU (Enter text: The intended use of the product. ) /Type /Annot >>
+endobj
+130 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 319 0 R /Rect [ 479 396 590 408 ] /Subtype /Widget /T (ProductAndCompletedOperations_PrincipalComponents_C) /TU (Enter text: The principal components of the product. ) /Type /Annot >>
+endobj
+131 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 366 590 378 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAJCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does applicant install, service or demonstrate products?". ) /Type /Annot >>
+endobj
+132 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 342 569 366 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ApplicantInstallServiceProductsExplanation_A) /TU (Enter text: An explanation of any installation, service or product demonstration applicant would perform. ) /Type /Annot >>
+endobj
+133 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 330 590 342 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABACode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Foreign products, sold, distributed, used as components?". ) /Type /Annot >>
+endobj
+134 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 318 590 330 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABBCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Research and development conducted or new products planned?". ) /Type /Annot >>
+endobj
+135 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 294 569 318 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ResearchDevelopmentConductedNewProductsPlannedExplanation_A) /TU (Enter text: An explanation of any research and development conducted on new products planned. ) /Type /Annot >>
+endobj
+136 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 282 590 294 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABCCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Guarantees, warrantees, hold harmless agreements?". ) /Type /Annot >>
+endobj
+137 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 258 569 282 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_GuaranteesWarrantiesHoldHarmlessExplanation_A) /TU (Enter text: An explanation of any guarantees, warranties, hold harmless agreements. ) /Type /Annot >>
+endobj
+138 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 246 590 258 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABDCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Products related to aircraft/space industry?". ) /Type /Annot >>
+endobj
+139 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 222 569 246 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ProductsRelatedToAircraftIndustryExplanation_A) /TU (Enter text: An explanation products related to aircraft/space industry. ) /Type /Annot >>
+endobj
+140 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 210 590 222 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABECode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Products recalled, discontinued, changed?". ) /Type /Annot >>
+endobj
+141 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 186 569 210 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ProductsRecalledDiscontinuedExplanation_A) /TU (Enter text: An explanation products recalled, discontinued, changed. ) /Type /Annot >>
+endobj
+142 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 174 590 186 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABFCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Products of others sold or repackaged under applicant label?". ) /Type /Annot >>
+endobj
+143 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 150 569 174 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ProductsOfOthersSoldUnderApplicantLabelExplanation_A) /TU (Enter text: An explanation of products of others sold or repackaged under applicant's label. ) /Type /Annot >>
+endobj
+144 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 138 590 150 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABGCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Products under label of others?". ) /Type /Annot >>
+endobj
+145 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 114 569 138 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ProductsUnderLabelOfOthersExplanation_A) /TU (Enter text: An explanation of products under label of others. ) /Type /Annot >>
+endobj
+146 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 102 590 114 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABHCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Vendors coverage required?". ) /Type /Annot >>
+endobj
+147 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 78 569 102 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_VendorCoverageRequiredExplanation_A) /TU (Enter text: An explanation any vendor's coverage required. ) /Type /Annot >>
+endobj
+148 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 319 0 R /Q 1 /Rect [ 576 66 590 78 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABICode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does any named insured sell to other named insured?". ) /Type /Annot >>
+endobj
+149 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 319 0 R /Rect [ 22 36 569 66 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_NamedInsuredSellToOtherNamedInsuredExplanation_R) /TU (Enter text: An explanation of any named insured who sells to any other named insured. ) /Type /Annot >>
+endobj
+150 0 obj 
+<< /AP << /D << /1 320 0 R /Off 321 0 R >> /N << /1 322 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 245 744 259 756 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator_A) /TU (Check the box \(if applicable\): Indicates that further additional interests appear on the attached ACORD 45. ) /Type /Annot >>
+endobj
+151 0 obj 
+<< /AP << /D << /1 324 0 R /Off 325 0 R >> /N << /1 326 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 720 32 732 ] /Subtype /Widget /T (AdditionalInterest_Interest_AdditionalInsuredIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is an additional insured. ) /Type /Annot >>
+endobj
+152 0 obj 
+<< /AP << /D << /1 327 0 R /Off 328 0 R >> /N << /1 329 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 708 32 720 ] /Subtype /Widget /T (AdditionalInterest_Interest_EmployeeAsLessorIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is an employee as lessor. ) /Type /Annot >>
+endobj
+153 0 obj 
+<< /AP << /D << /1 330 0 R /Off 331 0 R >> /N << /1 332 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 696 32 708 ] /Subtype /Widget /T (AdditionalInterest_Interest_LendersLossPayableIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is a lender's loss payable. ) /Type /Annot >>
+endobj
+154 0 obj 
+<< /AP << /D << /1 333 0 R /Off 334 0 R >> /N << /1 335 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 684 32 696 ] /Subtype /Widget /T (AdditionalInterest_Interest_LienholderIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is a lien holder. ) /Type /Annot >>
+endobj
+155 0 obj 
+<< /AP << /D << /1 336 0 R /Off 337 0 R >> /N << /1 338 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 672 32 684 ] /Subtype /Widget /T (AdditionalInterest_Interest_LossPayeeIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is a loss payee. ) /Type /Annot >>
+endobj
+156 0 obj 
+<< /AP << /D << /1 339 0 R /Off 340 0 R >> /N << /1 341 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 660 32 672 ] /Subtype /Widget /T (AdditionalInterest_Interest_MortgageeIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest type is a mortgagee. ) /Type /Annot >>
+endobj
+157 0 obj 
+<< /AP << /D << /1 342 0 R /Off 343 0 R >> /N << /1 344 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 18 648 32 660 ] /Subtype /Widget /T (AdditionalInterest_Interest_OtherIndicator_A) /TU (Check the box \(if applicable\): Indicates the additional interest is other than those listed. ) /Type /Annot >>
+endobj
+158 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 36 648 119 660 ] /Subtype /Widget /T (AdditionalInterest_Interest_OtherDescription_A) /TU (Enter text: The description of the other type of additional interest. ) /Type /Annot >>
+endobj
+159 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 216 732 234 744 ] /Subtype /Widget /T (AdditionalInterest_InterestRank_A) /TU (Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item. ) /Type /Annot >>
+endobj
+160 0 obj 
+<< /AP << /D << /1 345 0 R /Off 346 0 R >> /N << /1 347 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 277 732 292 744 ] /Subtype /Widget /T (AdditionalInterest_CertificateRequiredIndicator_A) /TU (Check the box \(if applicable\): Indicates if the additional interest requires a Certificate of Insurance. ) /Type /Annot >>
+endobj
+161 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 126 708 446 720 ] /Subtype /Widget /T (AdditionalInterest_FullName_A) /TU (Enter text: The additional interest's full name. ) /Type /Annot >>
+endobj
+162 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 126 696 446 708 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_LineOne_A) /TU (Enter text: The additional interest's mailing address line one. ) /Type /Annot >>
+endobj
+163 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 126 684 446 696 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_LineTwo_A) /TU (Enter text: The additional interest's mailing address line two. ) /Type /Annot >>
+endobj
+164 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 126 672 356 684 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_CityName_A) /TU (Enter text: The additional interest's mailing address city name. ) /Type /Annot >>
+endobj
+165 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 356 672 374 684 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_StateOrProvinceCode_A) /TU (Enter code: The additional interest's mailing address state or province code. ) /Type /Annot >>
+endobj
+166 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 374 672 421 684 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_PostalCode_A) /TU (Enter code: The additional interest's mailing address postal code. ) /Type /Annot >>
+endobj
+167 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 421 672 446 684 ] /Subtype /Widget /T (AdditionalInterest_MailingAddress_CountryCode_A) /TU (Enter code: The additional interest's country code. ) /Type /Annot >>
+endobj
+168 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 198 648 281 660 ] /Subtype /Widget /T (AdditionalInterest_AccountNumberIdentifier_A) /TU (Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured. ) /Type /Annot >>
+endobj
+169 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 490 720 518 732 ] /Subtype /Widget /T (AdditionalInterest_Item_LocationProducerIdentifier_A) /TU (Enter number: The producer assigned number of the location which has an additional interest. ) /Type /Annot >>
+endobj
+170 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 558 720 590 732 ] /Subtype /Widget /T (AdditionalInterest_Item_BuildingProducerIdentifier_A) /TU (Enter number: The producer assigned number of the building which has an additional interest. ) /Type /Annot >>
+endobj
+171 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 482 708 518 720 ] /Subtype /Widget /T (AdditionalInterest_Item_ScheduledItemClassCode_A) /TU (Enter code: The description of the property class of the scheduled item \(i.e. Jewelry, Furs, Contractors Equipment, etc.\). ) /Type /Annot >>
+endobj
+172 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 547 708 590 720 ] /Subtype /Widget /T (AdditionalInterest_Item_ScheduledItemProducerIdentifier_A) /TU (Enter number: The producer assigned number of the scheduled item which has an additional interest. ) /Type /Annot >>
+endobj
+173 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 454 684 590 696 ] /Subtype /Widget /T (AdditionalInterest_ItemDescription_A) /TU (Enter text: The description of the item of interest if needed to further clarify.  For a vehicle, list the make, model and VIN number.  For a scheduled item, list the description, such as three carat diamond in six point setting. ) /Type /Annot >>
+endobj
+174 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 612 590 624 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ABJCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any medical facilities provided or medical professionals employed or contracted?". ) /Type /Annot >>
+endobj
+175 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 588 569 612 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_AnyMedicalFacilitiesProvidedMedicalProfessionalsEmployedExplanation_A) /TU (Enter text: An explanation of any medical facilities provided or medical professionals employed or contracted. ) /Type /Annot >>
+endobj
+176 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 576 590 588 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACACode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any exposure to radioactive/nuclear materials?". ) /Type /Annot >>
+endobj
+177 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 552 569 576 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_AnyExposureRadioactiveMaterialsExplanation_A) /TU (Enter text: An explanation of any exposure to radioactive/nuclear materials ) /Type /Annot >>
+endobj
+178 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 540 590 552 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACJCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Do/have past, present or discontinued operations involve\(d\) storing, treating, discharging, applying, disposing, or transporting of hazardous material?". ) /Type /Annot >>
+endobj
+179 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 504 569 528 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_OperationsInvolveStoringDisposingTransportingHazardousMaterialExplanation_A) /TU (Enter text: An explanation any operations that involve storing, treating, discharging, applying, disposing or transporting hazardous material. ) /Type /Annot >>
+endobj
+180 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 492 590 504 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACBCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any operations sold, acquired or discontinued in the last specified number of years?". ) /Type /Annot >>
+endobj
+181 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 456 569 492 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_AnyListedOperationsSoldAcquiredLastFiveYearsExplanation_A) /TU (Enter text: An explanation of any listed operations sold, acquired, or discontinued in the last five \(5\) years. ) /Type /Annot >>
+endobj
+182 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 444 590 456 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACCCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Do you rent or loan equipment to others?". ) /Type /Annot >>
+endobj
+183 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 40 420 328 432 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_MachineryOrEquipmentLoanedRentedOthersExplanation_A) /TU (Enter text: An explanation of  any machinery or equipment that is loaned or rented to others. ) /Type /Annot >>
+endobj
+184 0 obj 
+<< /AP << /D << /1 348 0 R /Off 349 0 R >> /N << /1 350 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 331 420 346 432 ] /Subtype /Widget /T (CommercialInlandMarineProperty_PropertySubClass_SmallToolsIndicator_A) /TU (Check the box \(if applicable\): Indicates the subclass / grouping of property into which the item falls is small tools. ) /Type /Annot >>
+endobj
+185 0 obj 
+<< /AP << /D << /1 351 0 R /Off 352 0 R >> /N << /1 353 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 396 420 410 432 ] /Subtype /Widget /T (CommercialInlandMarineProperty_PropertySubClass_LargeEquipmentIndicator_A) /TU (Check the box \(if applicable\): Indicates the subclass / grouping of property into which the item falls is large equipment. ) /Type /Annot >>
+endobj
+186 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 508 420 522 432 ] /Subtype /Widget /T (PropertyItem_ItemDetail_InstructionGivenCode_A) /TU (Enter Y for a Yes response. Input N for No response. Indicates whether instruction is given on how to use the item when it is rented or loaned to others. ) /Type /Annot >>
+endobj
+187 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 40 408 328 420 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_MachineryOrEquipmentLoanedRentedOthersExplanation_B) /TU (Enter text: An explanation of  any machinery or equipment that is loaned or rented to others. ) /Type /Annot >>
+endobj
+188 0 obj 
+<< /AP << /D << /1 354 0 R /Off 355 0 R >> /N << /1 356 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 331 408 346 420 ] /Subtype /Widget /T (CommercialInlandMarineProperty_PropertySubClass_SmallToolsIndicator_B) /TU (Check the box \(if applicable\): Indicates the subclass / grouping of property into which the item falls is small tools. ) /Type /Annot >>
+endobj
+189 0 obj 
+<< /AP << /D << /1 357 0 R /Off 358 0 R >> /N << /1 359 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 396 408 410 420 ] /Subtype /Widget /T (CommercialInlandMarineProperty_PropertySubClass_LargeEquipmentIndicator_B) /TU (Check the box \(if applicable\): Indicates the subclass / grouping of property into which the item falls is large equipment. ) /Type /Annot >>
+endobj
+190 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 508 408 522 420 ] /Subtype /Widget /T (PropertyItem_ItemDetail_InstructionGivenCode_B) /TU (Enter Y for a Yes response. Input N for No response. Indicates whether instruction is given on how to use the item when it is rented or loaned to others. ) /Type /Annot >>
+endobj
+191 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 396 590 408 ] /Subtype /Widget /T (Contractors_Question_AAHCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any watercraft, docks, floats owned, hired or leased?". ) /Type /Annot >>
+endobj
+192 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 372 569 396 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_WatercraftDocksFloatsOwnedHiredLeasedExplanation_A) /TU (Enter text: An explanation of any watercraft, docks, floats owned, hired, or leased. ) /Type /Annot >>
+endobj
+193 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 360 590 372 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACDCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any parking facilities owned/rented?". ) /Type /Annot >>
+endobj
+194 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 336 569 360 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_AnyParkingFacilitiesOwnedRentedExplanation_A) /TU (Enter text: An explanation of any parking facilities owned/ rented. ) /Type /Annot >>
+endobj
+195 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 324 590 336 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_KAGCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Is a fee charged for parking?". ) /Type /Annot >>
+endobj
+196 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 300 569 324 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_FeeChargedForParkingExplanation_A) /TU (Enter text: An explanation of any fee charged for parking. ) /Type /Annot >>
+endobj
+197 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 288 590 300 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACECode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Recreation facilities provided?". ) /Type /Annot >>
+endobj
+198 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 264 569 288 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_RecreationalFacilitiesProvidedExplanation_A) /TU (Enter text: An explanation of  any recreational facilities provided. ) /Type /Annot >>
+endobj
+199 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 252 590 264 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_KAACode_A) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, " Are there any lodging operations including apartments?" ) /Type /Annot >>
+endobj
+200 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 40 228 72 240 ] /Subtype /Widget /T (BuildingOccupancy_ApartmentCount_A) /TU (Enter number: The number of separate living units in structure. ) /Type /Annot >>
+endobj
+201 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 79 228 122 240 ] /Subtype /Widget /T (BuildingOccupancy_ApartmentArea_A) /TU (Enter number: The area, in square feet, of the building used as apartments. ) /Type /Annot >>
+endobj
+202 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 151 228 551 240 ] /Subtype /Widget /T (GeneralLiability_Otherlodgingoperationsdescription_A) /TU (Enter text: The description of other lodging operations. ) /Type /Annot >>
+endobj
+203 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 216 590 228 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_KAHCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Is there a swimming pool on the premises?". ) /Type /Annot >>
+endobj
+204 0 obj 
+<< /AP << /D << /1 360 0 R /Off 361 0 R >> /N << /1 362 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 36 204 50 216 ] /Subtype /Widget /T (SwimmingPool_ApprovedFenceIndicator_A) /TU (Check the box \(if applicable\): Indicates the swimming pool is surrounded by a fence that is an approved height. ) /Type /Annot >>
+endobj
+205 0 obj 
+<< /AP << /D << /1 363 0 R /Off 364 0 R >> /N << /1 365 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 115 204 130 216 ] /Subtype /Widget /T (SwimmingPool_LimitedAccessIndicator_A) /TU (Check the box \(if applicable\): Indicates there is limited access to the swimming pool. ) /Type /Annot >>
+endobj
+206 0 obj 
+<< /AP << /D << /1 366 0 R /Off 367 0 R >> /N << /1 368 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 191 204 205 216 ] /Subtype /Widget /T (SwimmingPool_DivingBoardIndicator_A) /TU (Check the box \(if applicable\): Indicates the swimming pool has a diving board. ) /Type /Annot >>
+endobj
+207 0 obj 
+<< /AP << /D << /1 369 0 R /Off 370 0 R >> /N << /1 371 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 259 204 274 216 ] /Subtype /Widget /T (SwimmingPool_SlideIndicator_A) /TU (Check the box \(if applicable\): Indicates the swimming pool has a slide. ) /Type /Annot >>
+endobj
+208 0 obj 
+<< /AP << /D << /1 372 0 R /Off 373 0 R >> /N << /1 374 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 302 204 317 216 ] /Subtype /Widget /T (SwimmingPool_AboveGroundIndicator_A) /TU (Check the box \(if applicable\): Indicates the swimming pool is above ground. ) /Type /Annot >>
+endobj
+209 0 obj 
+<< /AP << /D << /1 375 0 R /Off 376 0 R >> /N << /1 377 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 374 204 389 216 ] /Subtype /Widget /T (SwimmingPool_InGroundIndicator_A) /TU (Check the box \(if applicable\): Indicates the swimming pool is in the ground. ) /Type /Annot >>
+endobj
+210 0 obj 
+<< /AP << /D << /1 378 0 R /Off 379 0 R >> /N << /1 380 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 436 204 450 216 ] /Subtype /Widget /T (SwimmingPool_LifeGuardIndicator_A) /TU (Check the box \(if applicable\): Indicates there is life guard for the swimming pool. ) /Type /Annot >>
+endobj
+211 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 192 590 204 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACFCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Are social events sponsored?". ) /Type /Annot >>
+endobj
+212 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 168 569 192 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_SportingOrSocialEventsSponsoredExplanation_A) /TU (Enter text: An explanation of any social events sponsored. ) /Type /Annot >>
+endobj
+213 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 156 590 168 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_KABCode_A) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, "Are athletic teams sponsored?" ) /Type /Annot >>
+endobj
+214 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 40 126 137 138 ] /Subtype /Widget /T (AthleticTeam_SportDescription_A) /TU (Enter text: The description of the type of sport in which the sponsored athletic team is involved. ) /Type /Annot >>
+endobj
+215 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 153 126 167 138 ] /Subtype /Widget /T (AthleticTeam_ContactSportCode_A) /TU (Enter Y for a Yes response. Input N for No response. Indicates if the sponsored athletic team is involved in a contact sport. ) /Type /Annot >>
+endobj
+216 0 obj 
+<< /AP << /D << /1 381 0 R /Off 382 0 R >> /N << /1 383 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 180 126 194 138 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_TwelveAndUnderIndicator_A) /TU (Check the box \(if applicable\): Indicates the sport participants are 12 years old or under. ) /Type /Annot >>
+endobj
+217 0 obj 
+<< /AP << /D << /1 384 0 R /Off 385 0 R >> /N << /1 386 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 241 138 256 150 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_ThirteenThroughEighteenIndicator_A) /TU (Check the box \(if applicable\): Indicates the sport participants are 13 through 18 years old. ) /Type /Annot >>
+endobj
+218 0 obj 
+<< /AP << /D << /1 387 0 R /Off 388 0 R >> /N << /1 389 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 241 126 256 138 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_OverEighteenIndicator_A) /TU (Check the box \(if applicable\): Indicates the sport participants are over 18 years old. ) /Type /Annot >>
+endobj
+219 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 122 114 288 126 ] /Subtype /Widget /T (AthleticTeam_SponsorshipExtentDescription_A) /TU (Enter text: The description of the extent of sponsorship the named insured provides for the athletic team. ) /Type /Annot >>
+endobj
+220 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 302 126 400 138 ] /Subtype /Widget /T (AthleticTeam_SportDescription_B) /TU (Enter text: The description of the type of sport in which the sponsored athletic team is involved. ) /Type /Annot >>
+endobj
+221 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 416 126 430 138 ] /Subtype /Widget /T (AthleticTeam_ContactSportCode_B) /TU (Enter Y for a Yes response. Input N for No response. Indicates if the sponsored athletic team is involved in a contact sport. ) /Type /Annot >>
+endobj
+222 0 obj 
+<< /AP << /D << /1 390 0 R /Off 391 0 R >> /N << /1 392 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 443 126 457 138 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_TwelveAndUnderIndicator_B) /TU (Check the box \(if applicable\): Indicates the sport participants are 12 years old or under. ) /Type /Annot >>
+endobj
+223 0 obj 
+<< /AP << /D << /1 393 0 R /Off 394 0 R >> /N << /1 395 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 504 138 518 150 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_ThirteenThroughEighteenIndicator_B) /TU (Check the box \(if applicable\): Indicates the sport participants are 13 through 18 years old. ) /Type /Annot >>
+endobj
+224 0 obj 
+<< /AP << /D << /1 396 0 R /Off 397 0 R >> /N << /1 398 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 323 0 R /Rect [ 504 126 518 138 ] /Subtype /Widget /T (AthleticTeam_AgeGroup_OverEighteenIndicator_B) /TU (Check the box \(if applicable\): Indicates the sport participants are over 18 years old. ) /Type /Annot >>
+endobj
+225 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 323 0 R /Rect [ 385 114 551 126 ] /Subtype /Widget /T (AthleticTeam_SponsorshipExtentDescription_B) /TU (Enter text: The description of the extent of sponsorship the named insured provides for the athletic team. ) /Type /Annot >>
+endobj
+226 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 102 590 114 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACGCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any structural alterations contemplated?". ) /Type /Annot >>
+endobj
+227 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 78 569 102 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_StructuralAlterationsContemplatedExplanation_A) /TU (Enter text: An explanation of any structural alterations contemplated. ) /Type /Annot >>
+endobj
+228 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 323 0 R /Q 1 /Rect [ 576 66 590 78 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_ACHCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Any demolition exposure contemplated?". ) /Type /Annot >>
+endobj
+229 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 323 0 R /Rect [ 22 36 569 66 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_DemolitionExposureContemplatedExplanation_A) /TU (Enter text: An explanation of any demolition exposure contemplated. ) /Type /Annot >>
+endobj
+230 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 726 590 738 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AABCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Has applicant been active in or is currently active in joint ventures?". ) /Type /Annot >>
+endobj
+231 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 702 569 726 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_ApplicantActiveJointVenturesExplanation_A) /TU (Enter text: An explanation of any joint ventures in which the applicant may be currently active. ) /Type /Annot >>
+endobj
+232 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 690 590 702 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AACCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Do you lease employees to or from other employers?". ) /Type /Annot >>
+endobj
+233 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 399 0 R /Rect [ 40 654 202 666 ] /Subtype /Widget /T (AdditionalInterest_FullName_B) /TU (Enter text: The additional interest's full name. As used here, this is the company to whom employees are leased.) /Type /Annot >>
+endobj
+234 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 241 654 256 666 ] /Subtype /Widget /T (AdditionalInterest_WorkersCompensationCarriedCode_A) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, "Is workers compensation coverage carried?". ) /Type /Annot >>
+endobj
+235 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 399 0 R /Rect [ 40 642 202 654 ] /Subtype /Widget /T (AdditionalInterest_FullName_C) /TU (Enter text: The additional interest's full name. As used here, this is the company to whom employees are leased.) /Type /Annot >>
+endobj
+236 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 241 642 256 654 ] /Subtype /Widget /T (AdditionalInterest_WorkersCompensationCarriedCode_B) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, "Is workers compensation coverage carried?". ) /Type /Annot >>
+endobj
+237 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 399 0 R /Rect [ 302 654 464 666 ] /Subtype /Widget /T (AdditionalInterest_FullName_D) /TU (Enter text: The additional interest's full name. As used here, this is the company from whom employees are leased.) /Type /Annot >>
+endobj
+238 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 504 654 518 666 ] /Subtype /Widget /T (AdditionalInterest_WorkersCompensationCarriedCode_C) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, "Is workers compensation coverage carried?". ) /Type /Annot >>
+endobj
+239 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 399 0 R /Rect [ 302 642 464 654 ] /Subtype /Widget /T (AdditionalInterest_FullName_E) /TU (Enter text: The additional interest's full name. As used here, this is the company from whom employees are leased.) /Type /Annot >>
+endobj
+240 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 504 642 518 654 ] /Subtype /Widget /T (AdditionalInterest_WorkersCompensationCarriedCode_D) /TU (Enter Y for a Yes response. Input N for No response. Indicates the response to the question, "Is workers compensation coverage carried?". ) /Type /Annot >>
+endobj
+241 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 630 590 642 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AADCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Is there a labor interchange with any other business or subsidiaries?". ) /Type /Annot >>
+endobj
+242 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 606 569 630 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_LabourInterchangeOtherBusinessSubsidiariesExplanation_A) /TU (Enter text: An explanation of any labor interchange with any other business or subsidiaries. ) /Type /Annot >>
+endobj
+243 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 594 590 606 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAECode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Are day care facilities operated or controlled?". ) /Type /Annot >>
+endobj
+244 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 570 569 594 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_DayCareFacilitiesOperatedExplanation_A) /TU (Enter text: An explanation of any daycare facilities operated or controlled. ) /Type /Annot >>
+endobj
+245 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 558 590 570 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAFCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Have any crimes occurred or been attempted on your premises within the last specified number of years?". ) /Type /Annot >>
+endobj
+246 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 534 569 558 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_CrimesOccurredOrAttemptedLastThreeYearsExplanation_A) /TU (Enter text: An explanation of any crimes that  occurred or been attempted on your premises within the last three \(3\) years ) /Type /Annot >>
+endobj
+247 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 522 590 534 ] /Subtype /Widget /T (Contractors_Question_AAGCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Is there a formal, written safety and security policy in effect?". ) /Type /Annot >>
+endobj
+248 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 498 569 522 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_FormalSafetySecurityPolicyInEffectExplanation_A) /TU (Enter text: An explanation of any formal, written safety and security policy in effect. ) /Type /Annot >>
+endobj
+249 0 obj 
+<< /AA << /K << /JS (YesNoK\(event\);) /S /JavaScript /Type /Action >> /V << /JS (YesNoV\(event\);) /S /Javascript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 1 /P 399 0 R /Q 1 /Rect [ 576 486 590 498 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_Question_AAGCode_A) /TU (Enter Y for a Yes response. Input N for No response. The response to the question, "Does the business' promotional literature make any representation about the safety or security of the premises?". ) /Type /Annot >>
+endobj
+250 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 462 569 486 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_BusinessPromotionalLiteratureSafetyRepresentationsExplanation_A) /TU (Enter text: An explanation of any business promotional literature that makes any representations about the safety or security of the premises. ) /Type /Annot >>
+endobj
+251 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 399 0 R /Rect [ 22 432 590 450 ] /Subtype /Widget /T (GeneralLiabilityLineOfBusiness_RemarkText_B) /TU (Enter text: The remarks associated with the general liability line of business.  Use this section to provide any additional information required for underwriting or rating.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ) /Type /Annot >>
+endobj
+252 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 400 0 R /Rect [ 22 432 252 444 ] /Subtype /Widget /T (Producer_AuthorizedRepresentative_Signature_A) /TU (Sign here: Accommodates the signature of the authorized representative \(e.g., producer, agent, broker, etc.\) of the company\(ies\) listed on the document.  This is required in most states. ) /Type /Annot >>
+endobj
+253 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 400 0 R /Rect [ 259 432 490 444 ] /Subtype /Widget /T (Producer_AuthorizedRepresentative_FullName_A) /TU (Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ) /Type /Annot >>
+endobj
+254 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 400 0 R /Rect [ 497 432 590 444 ] /Subtype /Widget /T (Producer_StateLicenseIdentifier_A) /TU (Enter identifier: The State License Number of the producer. ) /Type /Annot >>
+endobj
+255 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 400 0 R /Rect [ 22 408 418 420 ] /Subtype /Widget /T (NamedInsured_Signature_A) /TU (Sign here: Accommodates the signature of the applicant or named insured. ) /Type /Annot >>
+endobj
+256 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 400 0 R /Q 1 /Rect [ 425 408 490 420 ] /Subtype /Widget /T (NamedInsured_SignatureDate_A) /TU (Enter date: The date the form was signed by the applicant or named insured.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+257 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 400 0 R /Rect [ 497 408 590 420 ] /Subtype /Widget /T (Producer_NationalIdentifier_A) /TU (Enter identifier: The National Producer Number \(NPN\) as defined in the National Insurance Producer Registry \(NIPR\).  Note: The NPN is not the same as the producer state license number. ) /Type /Annot >>
+endobj
+258 0 obj 
+<< /Count 5 /Kids [ 260 0 R 319 0 R 323 0 R 399 0 R 400 0 R ] /Type /Pages >>
+endobj
+260 0 obj 
+<< /Annots 401 0 R /Contents 402 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 258 0 R /Resources << /Font << /F1 403 0 R /F2 2 0 R >> /ProcSet [ /PDF /Text /ImageB ] /XObject << /Img1 404 0 R >> >> /Type /Page >>
+endobj
+261 0 obj 
+<< /F 4 /P 260 0 R /Parent 4 0 R /Rect [ 414 756 594 768 ] /Subtype /Widget /Type /Annot >>
+endobj
+262 0 obj 
+<< /F 4 /P 319 0 R /Parent 4 0 R /Rect [ 414 756 594 768 ] /Subtype /Widget /Type /Annot >>
+endobj
+263 0 obj 
+<< /F 4 /P 323 0 R /Parent 4 0 R /Rect [ 414 756 594 768 ] /Subtype /Widget /Type /Annot >>
+endobj
+264 0 obj 
+<< /F 4 /P 399 0 R /Parent 4 0 R /Rect [ 414 756 594 768 ] /Subtype /Widget /Type /Annot >>
+endobj
+265 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+266 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+267 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+268 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+269 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+270 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+271 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+272 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+273 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+274 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+275 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+276 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+277 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+278 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+279 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+280 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+281 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+282 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+283 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+284 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+285 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+286 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+287 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+288 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+289 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+290 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+291 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+292 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+293 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+294 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+295 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+296 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+297 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+298 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+299 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+300 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+301 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+302 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+303 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+304 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+305 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+306 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+307 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+308 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+309 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+310 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+311 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+312 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+313 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+314 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+315 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+316 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+317 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+318 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+319 0 obj 
+<< /Annots 405 0 R /Contents 406 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 258 0 R /Resources << /Font << /F1 403 0 R /F2 2 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+320 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+321 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+322 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+323 0 obj 
+<< /Annots 407 0 R /Contents 408 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 258 0 R /Resources << /Font << /F1 403 0 R /F2 2 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+324 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+325 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+326 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+327 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+328 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+329 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+330 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+331 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+332 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+333 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+334 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+335 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+336 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+337 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+338 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+339 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+340 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+341 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+342 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+343 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+344 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+345 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+346 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+347 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+348 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+349 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+350 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+351 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+352 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+353 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+354 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+355 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+356 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+357 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+358 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+359 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+360 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+361 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+362 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+363 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+364 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+365 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+366 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+367 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+368 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+369 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+370 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+371 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+372 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+373 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+374 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+375 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+376 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+377 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+378 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+379 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+380 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+381 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+382 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+383 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+384 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+385 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+386 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+387 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+388 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+389 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+390 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+391 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+392 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+393 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+394 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+395 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+396 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+397 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+398 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+399 0 obj 
+<< /Annots 409 0 R /Contents 410 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 258 0 R /Resources << /Font << /F1 403 0 R /F2 2 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+400 0 obj 
+<< /Annots 411 0 R /Contents 412 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 258 0 R /Resources << /Font << /F1 403 0 R /F2 2 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+401 0 obj 
+[ 3 0 R 261 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R 27 0 R 28 0 R 29 0 R 30 0 R 31 0 R 32 0 R 33 0 R 34 0 R 35 0 R 36 0 R 37 0 R 38 0 R 39 0 R 40 0 R 41 0 R 42 0 R 43 0 R 44 0 R 45 0 R 46 0 R 47 0 R 48 0 R 49 0 R 50 0 R 51 0 R 52 0 R 53 0 R 54 0 R 55 0 R 56 0 R 57 0 R 58 0 R 59 0 R 60 0 R 61 0 R 62 0 R 63 0 R 64 0 R 65 0 R 66 0 R 67 0 R 68 0 R 69 0 R 70 0 R 71 0 R 72 0 R 73 0 R 74 0 R 75 0 R 76 0 R 77 0 R 78 0 R 79 0 R 80 0 R 81 0 R 82 0 R 83 0 R 84 0 R 85 0 R 86 0 R 87 0 R 88 0 R 89 0 R 90 0 R 91 0 R 92 0 R ]
+endobj
+402 0 obj 
+<< /Filter [ /FlateDecode ] /Length 3491 >>
+stream
+xœ¥\[sÛ6~÷Œÿ&Ûéº3¾ ¯yÙ¡%:aV"U’Jê¿¨6“xkK®ä$ÛıGû/÷xÃIËN:|ç‚“NÎ)#“óÉDş§õëíãñ#¨YünL&ÅOøØÈş€Ÿn{éáø(DÜ(—,®¥’K%Õez|tqE‰e[6I?‹Ùå÷¨“ÿLï@GNR`râ½óÃé5™®’4Zø1	fo!é¿üT¨À&vÁß´Ì®
+Õ’c"*î9*Ğ	=7á{¶cHÎhñ§\ÿêÊŸ¦ÁGŸÌ¼Ôïˆf3Ê NÇ r©a6°ZK±¦ÙÄ’5é×Ù0yÉÂmèÌÎ]VêzÁ”L£YC]Äô¦#xØÓËmO½8üX³_Ds×D¬]‘i¶6Õ<#±$O·_*Tµ[Û5…®Ëh€›„«ÅeScä¨ÍŠm5§Âİ–K`ä…)¹ WAœ¤$ôşŒa²ŠıYg©`ã<j[–n\“K¡m»NyøgÂevYÃ††tiB&M(Võ¢1øz¡D¾u£ôƒšRAzÎ„¿ç„Ä~G^íéo»ÛÅ¸™5·3øÀ.Ùq`W‰®ˆ¿XÎ£kßOÀ#?ú`Gry]}H.ıĞ¿
+Ò„,ç^˜t¯·ô7e×5^õmZœŠÑÒ’
+-®¥FCQ¡Œ‡¯ÎU£µ9 õD8EîåO}ÇBBØ¯¼%ö;óg+8âË¹O–°ïéÜ
+¤r[côêëv¬’0ËĞm™»«¸ÕÜ±k	 V\ex—Á<Hû®TûF±ÖRåó	/ 3«°W‰LXî„º.&Ì$Ş4ŠgàÉñ2Š½4ˆB°ª÷ğ@v÷_¾>ïAÂ>Û}ÏîÎU°PvÛVo·@™EnNr‰~óK/7³t ìêSçNÉ.ıš	7ëÇŒ¬7wäaûeKÖ»”ır¿ÎvÙy\ïşØ“íçò»0ìRE\B.YØ7–31K¼\Äùk Ü¿w˜L·½4pû]>‘f†ËOkÄûä%$õ‚y‰K Òd¹Š§ï½ jÎà~xá5YÆşÇ Z@Qæ#îeµÈY‹À]pò›xJ>Eñ?OÁêÓ`æ‡ğ{“y4-<Ş‰ÿÛt¾‚{{
+:‰@”)ñçWgò÷«8Z´••[RÔE‚œ	mz¼w¿$!ñæsòæÚOŞ@ˆH–Q˜ø‰æ¨¸ğ\`ØH8³š+*	èBMQ+ÿTu“KzIÚ°CÇÅÊ[®×ˆ;pÔñuf!¹H£âhS?WË³€å„,¼™_¤&,Q}\¢ÚÀôúõÆêL90à×Ë(¿@=éÄAúkQ”Z­hg›"mØğæÄÿÏÓÃú~CÖ€Ôo®³ı›¨Ÿ¶›}¶o‚k'ŠĞnqÑ0Ò@9n¹]@%³ –8ùâ¼oN‹‹ÙìâşÁd¬L­,&®ëa”Vù<e¥!,J›ÉíD\çi´€jxsé(øÔ¼£€&ÓqzsgVpçf#¯Í˜Eş6k8¯ñÿÌ®îœV’W ¾™ŸLã`9¤’c›çåj¢T°ì¥6İrC¦‰P£ÅSc;Ìây¹…Ë^«E/>1Î®é%A¯òÌÌå:ùqØ5ÄHòJ:÷M¸WW®há‚ëC0GRAjë$UKª(YP TÕBeë©lŒ
+óKÓÉó¦_×†„å!¶›™:±re@ªIœh]¦Hß{ÿj^¦ÖYèñ=@W{rIì´"²º¢¨ö RÈ%¦=@ŒÊÖRIxvµ
+R‹cfïÛ"xØfu ´B£›“ôæ¥ïÕnÊÄi–-Ì•LVÀ{JÎŠb+ÿc;Ùœhê”—o–ä· ~Şl RB&¸ÒSHz.àãQ¬[šÊÂğæd
+œÓ(õòT8‘úşT²Î?éãM¹ªvİÁ»9ñr­cßké›üJ®ÆquZÑV*/íÒ»#ÈN[úÂ‡½ŒQ#s&ù&À÷]%	I¼¹Ÿ´yÉ¨f6êHGyÁ¾ƒD}FD„  /ÑEì«„jI½µÜ1tw½Z@%ÃÌ›±yPáŠ’¥wÿ³2,âÃ"/’GÃ V;°Î#Æ’h…Ö¦j9n·\Í0J™Éô½?[Íı¼IÀìÅ³„@WÖÔŒÒS’Ü~Íî¾=dyùü~ıßõîn
+õ_äw¨·ŸŸ×ù2¹ÿL·PsïŸÖ·¹Ï;~»‡Ò+îö0i©œÃ›‘B‚L0J‰÷ÊXïrî7ÚÕáó2}ç©È'é@.'¡H®O¢å´RÒdŒ$ÍsÒUëõU&¸¶˜æÔEÖÂŸAB9ÏabW]÷'vî+N©qÁ]Up¿½ÃäHwoNöºò"pé‚¬‚Å8ƒ	vn‹,yDK=o8Fáüª]ò)H¦¿‚ğ-!$¸{†gÑ§0okäßğVPW°7üzéç…åÇ`Vuf 6‹†L·°4hé·RñKßâ
+zöQÉ%$Sr™Šb¢[&n§Á±:â§n¨—×İ€6ó™”nfN0EÎóVu5æŠ6.ö5TÅ¤ÉFW<ö2yÌ²{v>ô
+]DœÉÚ^%İ^éŸ=ÒFl®uÓdû¶o®€¦y°€\³¸p·,ÛçØôñÖca>T#nR;J*¤v”T®
+ÉìQ#±†‘xu&²õá½{ûïZé„—á62znXí„ˆüxµXÎı¼wá§N^(£™è²ªkÜ’(…†Ô01’<…Â«XÉsQ¾Í¬Æ87D¢ë{Ó÷$šNWqì‡ÓqZ-+L¸lj-r ”N¹Š,/¼9É ÷!ÛÛÛo»]¶¹ÍúSJNûùÊî-£9”ä~˜ä}4oóÙn2ò”íöÛÍHæF»°5oL½9™Àl“z CáŞ=œÔ9œÔ>œÔ:œtÜ;&Jj¶qÉ&j˜êË@…5k=Òú‘TÈƒ‚¤BŠIe½yµ¥ÉKNİg™d!ÎŞà ñ”cGQÄ¥~í˜ËÀTËv
+wÖR1=ë†È×“»ê‹¶HoÉ+ÉmŒm"¡ä.F>ªæ¦27ãÈ	I4¾¨S/3îıdÛD¯=ğÚQ»9$E¨«TúÄ¢{_0çR¯¢¡B…$1†ô$½·ZKjwÉaäŠkƒ"425hõø#Ú¹ ¶ñBm ÇyX%ÖEˆ-Š”¯ÅkÜ8òÑ²ë4Ü5±w{D Á(­S
+§mRB>áˆ¤è2šEµ‹¥im¬¼İ‘ùP”ùHœS-Íß˜ã
+xí;ÔCšGä¥Ë"ÑSæ¤Z$vÊKˆ½aXZª6 ’x+%aƒ[–ª³Û¡«;¸§æ´ödZâEpÔ©¶y.}_càE>õAeŒ8vÕ<¦°h}6ø{SÉ‰HZÅÏÖyß)ş{YÁ…iìMÓ(ÿnOZıaİ©4á÷vÍ”£šÃpIaZ4TK£¾ÑÑv¥º*’`ÉÕ¤{«ŞÓÑzP7éZ“û"ÀÄàDg®ÈÀª†bršO1¥q05z8»ˆbâ‡³(Nü²M|srµİ‘¯ysşb³İœml²;²şö¼%·ÛïÙnı%Û‹Æ>yşš‘õÓÓÃıíú÷‡ŒìŸ×Ï¹ü¶¿ßdû=ñrš$»}¾ßnNÅåvÏÈ‰´s5r"gu:»oŒq‹,Ê4-([8a°XFqšO4Ÿ‘àsk°è~On¿f·äo›bUÓõ‚”y=Ù—ª“ß³‡íSøÁ¿ëÜs±ú¬µ&·ëûÇıÙãú*ò-,ş…Ì@ªjVCmC¾ódë»bVçi·ı~¿!Ålb®dÉšÜ®wÙçoM!e¦'³şú/ŒÉ§Z"ŠÑ¨e£nRÑmñ„³l¥0Só¼_C{Wk®ŸSÓQ•¨Ëo•^?ŠÑ `éZEvß~[¬&ø¡° ·‹–ıC/ùB%	¤B«¥—QnĞW¾ŒŠñ)æ6>%FZäı#rEb…©ù™RiÄJ›F?‘…¶ßÇNd1wx"«=j¤ê+—†®æ¸4£ç¸p¥ç¸Dìbôà±¸ö b	±4h	1ÅĞ¿Â¢„ªf³T¹ÕÔÏ€\9ÉrÇM²U/şˆL{¤L$Ì=ŒªI…ÉÈI…j
+IÙÄÒŞ†Úzëa¨jÚ'—(¨¬¬oÇñ'z	ù¯±r5P‚ZyÄı”3-/2Y5fƒl^,!&£m\E,¦'ÂæÓİö’Ö™Edác"K34 Cwre e*£düPEÊ•‘"²0ãU‘…¿0² úVK
+ËÈ‚kü’È‚*UPõ+İqZË(ÀÇE<çÃxŞƒÌüÈ,Q’€’LíWK¶“"ßË"r^ÕRÏÌ¬¾—Í†ÒY‰Ì£­Ü‚EL²\zl‘p<òlô·²r¯ZÈ¬$ÒO7§û¨Á´İ¶ƒb C¦ÜöB¤l pÈÜÓ>8÷üBAy7êÿ0£à&ÿFç¤¼Ïùÿhà"xüBÉl{|ôëñÑÿ„1»å
+endstream
+endobj
+403 0 obj 
+<< /BaseFont /Arial,Bold /Encoding /WinAnsiEncoding /FirstChar 0 /FontDescriptor << /Ascent 905.27 /CapHeight 715.82 /Descent -211.91 /Flags 32 /FontBBox [ -45.90 -175.78 1000.00 938.48 ] /FontName /Arial,Bold /ItalicAngle 0.00 /StemV 0.00 /Type /FontDescriptor >> /LastChar 255 /Subtype /Type1 /Type /Font /Widths [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 277.83 333.01 474.12 556.15 556.15 889.16 722.17 237.79 333.01 333.01 389.16 583.98 277.83 333.01 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 333.01 333.01 583.98 583.98 583.98 610.84 975.10 722.17 722.17 722.17 722.17 666.99 610.84 777.83 722.17 277.83 556.15 722.17 610.84 833.01 722.17 777.83 666.99 777.83 722.17 666.99 610.84 722.17 666.99 943.85 666.99 666.99 610.84 333.01 277.83 333.01 583.98 556.15 333.01 556.15 610.84 556.15 610.84 556.15 333.01 610.84 610.84 277.83 277.83 556.15 277.83 889.16 610.84 610.84 610.84 610.84 389.16 556.15 333.01 610.84 556.15 777.83 556.15 556.15 500.00 389.16 279.79 389.16 583.98 0 556.15 0 277.83 556.15 500.00 1000.00 556.15 556.15 333.01 1000.00 666.99 333.01 1000.00 0 610.84 0 0 277.83 277.83 500.00 500.00 350.10 556.15 1000.00 333.01 1000.00 556.15 333.01 943.85 0 500.00 666.99 277.83 333.01 556.15 556.15 556.15 556.15 279.79 556.15 333.01 736.82 370.12 556.15 583.98 333.01 736.82 552.25 399.90 548.83 333.01 333.01 333.01 576.17 556.15 333.01 333.01 333.01 365.23 556.15 833.98 833.98 833.98 610.84 722.17 722.17 722.17 722.17 722.17 722.17 1000.00 722.17 666.99 666.99 666.99 666.99 277.83 277.83 277.83 277.83 722.17 722.17 777.83 777.83 777.83 777.83 777.83 583.98 777.83 722.17 722.17 722.17 722.17 666.99 666.99 610.84 556.15 556.15 556.15 556.15 556.15 556.15 889.16 556.15 556.15 556.15 556.15 556.15 277.83 277.83 277.83 277.83 610.84 610.84 610.84 610.84 610.84 610.84 610.84 548.83 610.84 610.84 610.84 610.84 610.84 556.15 610.84 556.15 ] >>
+endobj
+404 0 obj 
+<< /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter [ /FlateDecode ] /Height 122 /Length 3206 /Subtype /Image /Type /XObject /Width 285 >>
+stream
+xœí›{\VEÇGÊ4µÜMyçœ÷Ex¹ºxA±R„ 5]o}JóB¦¹Z+ú)•5¯õ1ÁŒÌM…Òt7HóVšXi˜Zkê–dRj$‚’( ïì3/š¼œyæ¬ıc?;ß„yyæœŸ3Ï\ÎÀ˜B¡P(
+…B¡P(
+…B¡P(
+…B¡P(
+…B¡P(ÿÇT—~º´ª±µÊ6'ö°SªûE>´î§ÿÆsı~œHJJÚÚèZç6N‰ÒÇ«]ôŒœ
+«õjş­Ñà˜1³WlZ;ox'vYş‹¼FVR}şºğµ¦­xÖqóìó{‹úMKÉ¹*4^0Ì´9ª2{7!´õ‰•Š5i¾T×i~qK.¾×OwÌ¼(«“D´š)­"ªã&dâöêzn›§+ß=Qê—;x­­¼Ú5ªR¢†{ì3­¹Í—z;Ò>9u¾¬ğ›-s¢í4bMÍ…$»s£¤’øEïHş¹ÑuÜ´]tİ«ø‰ìĞáÃÏ&ãqV»«Œ6}±_É­kdÔ+†Ñtå‡Üå	-ê‚È—±İ©mÔQ÷ç÷oËX»%· §Xå:7˜&àc‹¿höuŞÍH›9ÈænîÄ›âuÒ3<X±01ª¹»bóy•u^kò²“.‡²'ñ8]áÿœÛÃ¡v.PMş¼İc¨V¬»—7k—uÀÕ”öç©©hyoT:¤djï1ıAù5{ÇZ({QÏ×Á©-¡Ğk-Ú¯Sj,®Ú;ù.şœÜ¿¾”ŸªoeIh˜CàûikB–J^«—óà}-{º¡i&Zq˜7}şÍÑô^ó÷œ…¡_[´y¼í¨¿Î
+Bœß!5â …Ã¸:hßAÄ*R½ùs®ä?çff'e<Â±(,‘`6™ êRK±¹å:¡­öåf„¼…T,éâí8ÆØÁ®4"ÃcUoy€ÚmS]%áşHßŠÃØ<ŞSËæpqû9‘ÿÿ>?¹³³Øâi¨Äå-^pwŸ]˜K=\	à(è6u›†XŠÚkö±Êq´«`àèO½GºŠƒÃ/ë"â°ñP>iO&cëo'uC¥rÎÓÏMÙú­€.Ù;‚a¨ÏæpmÎXpl@y¸ƒneùìéµBûvÛpvÒş°Ğˆ‰S
+ÉÀGÏD¶Ôi’íş	à&ŒğÏ*Bn5_«~æEÈ]'Mİ¸âzûÔÖ-íDÇ±õ4GdÃÄaÏ€áq<qØ6ş&g%œO®§‹­™oâËªÚƒ÷‡f^ækí«wë±•¸‹«3}–õ,TœÁğª8œ™8ìEp(s FÃ0qgâ‰„øÊz† ™bâ#"_M?8âè[-sªò¥ÏhTœ_Àğ´8š©8µQ¦ÿÑ%Íx:æğ”ü¾Ô—UÂøi‹Qº'²Ô¿»¤ßp{Ócü®¨8ì„Œ[LÅa_Ár-Bê±´.s"L»_J/–»ÙK3éö>¾Ef~ÛÚŸÔŞ4–ãâøıqØ(pÉ•Ø]Áué˜)Ùëi´N°½ÄÖ2zvû‹sÅ'ÌëœÕ´é½¢ŒåÒƒ,à,ˆÃÇÊ‰}W½åOÉ³eÁ¾çÇäí	ùnzÌ9Ô‚ç?ı%­ÜPŒŠSqm-'À‚8|¬4—œ–¿9’uYÊ\t“SÕßSô	»•3­\0ˆn1£âìÃ{âPVÄY>ï ÖŸn½9‡¤¾ŒÅr§t¾Aè0v½ægÅ³ÖïA-äqC1*ÎS°_FÎ¬ˆs|&¡Ö7Ò1ºYo<ÔUØgô3iND	İ<ÍŸXòÔÍ',ÆP*[!cËz+âğ”Õ³Õúzf$HÉä[4ÒW`cÖœ€­´´Ÿ¯|Îü••ö1öC)&ÎãP‡D²$NoBn,Ülm°Ûä)y)¼ß6kNÀ|vÍâyÈç4Ëæ0”"âd@ñ,’%q’ô†õÓ1RrLI–
+‘>3kNÀÈî,Ôûkk¾?Ó]šf(‹³vGĞc}Kâ¼ˆO1§½ê§cOÉØyKãfÍ	èÏüm–ÎŠ šJ…"q
+†Ba~>`Iœà$Xtrf{¦c¤dÁ"¬Í	ˆJ`~>V«ï³ NÕ4…²Şçñ@––gŠÕBKn\ ò”ŒdÛÍÌä½†²vN«Îµq6C!Ñ_É_]49†U‘6+eûdKâ|N©BË;‚Ã?’§"‘ø¹š$Ä÷e~Æ$‹@s"½…¢Ï,aËå_-‰³§OÃtÌ”ÜúÒohNÀ¨n,@³ØåJèŞ ¶Â–ëÑ$btz¾Y$ËÃJøã[Ò0s¡£ĞåS1ıX8µ8ÍåÑãT7”Şønµie<_ÕZHï–ÄYNëE†ÆtÌ”)”‘ö›?•iIOmº5ß—íïÒv†R„Ì×&sÍ#Yg18í”_i+Ş¯ó”|X),ÌŸÊ@)Íâ¶6—÷ïÑ×y·¡ÔCœ«÷Ão›M#Yg
+8”¿%HÇ’'
+#Ïš>”€=çKÍ?£5í’õpãşÍs*/ò¼øûäœ^°qeC(o±6C Œ«–Æ#şäÍ¥ûRœÙÚ1ÆŠç:ŞÇ9ËPÜ`“w!w›İx±":Â=‚òã‚ÙñéÂX÷l73—Ÿ¡™ÚLú¹ÏşaIÔ¸•l¸|~i2N­ˆs|Dw”Š.Œ5,¿ãÄuì4¸kg³OŒ¢Q¾)vc?7¬ù’Ëd+kEœ¿á7…K­	éŸ-†OÙÂq4ê¢ÊĞ	ö<m©_‚/ÍK0–Ä¹cßë#i,+â„ÒJ0Öü¶¿Ë4FdpùCş’lgpâ´ô™šÙZguô;@÷ÆgÁ]„´=-fAşIğQAy$!¡h¥'ivAdxÁÚÃÈ=,°*Ê·@êt©½X×Q`ìÊwzÒM– -ˆ3\‹¿@÷œ/ÁºLd(n)ù¦ºÎrª-+ë,ı6=ÂæÈÿ˜f	,¢#‹DrÒÅ¬ˆ³<¢å±¾Qô«ád0â‰/B˜1Äf/*ñÿ7î1ËÛWİá>‘I$‹ß¡Z…‡3§ºŞ•·’gVşeS˜îJÛù
+”ÊHÛ½®’.zæğŒÍ~œMÕ¿Ù„'eÁ±dâğyçAyº$sxJ
+ä;µVÇdmb”…ÒñìÊ:Px{«¢'*fY4MXW|Lz´%!sX{fâl »]4z:ÊÒ1RrSq³#!¦ÿBÁÇlB,C(ôÖMN{’á‘./Ğm®²}:ò9`ÿÇÔ Í™ˆóvSxEÑ‡ò}ÒtÌá)Yt¦”.\ƒXÅ--ISì‚]uí|šU$;ô!»ë-ôj¿œà ¶L˜YÑÈ©öif:”c×ì¤â¸–ÂdGŞ™ÆÊÓ1R²S¼¢=a›­æëê™`kûúHƒ(}ª˜•-	£zÏÉkvå}şÑ[ÓzûPÍ»×0bõ8ìŠ
+&NM4~P çû`ôz]dºĞÌ|¡»ß)†óF” ó|Àïnû•„Kmö¡{®²“©ıCİWüµ A4,v"}=-D?ÿd‡íó´XœÂd~}‡x^I5IÇ’#¶ŠîıWß,5XÙİyiŒ|”ëÔü©#vVÖá§lY:¾³¦Ån†^˜ ÿ¯…_AÙ©#PøµçÜ†¡·ñçŒ_Nt…˜¥c¤d/lyîÊhã–çÎ—ä)8_pbïºY±î&o_&ıàb¢æP÷w!zhÂ:ßÕïv¦ñ²õ!.{LD	€×Y”ZŸEs¦¬ÛX{¯BvÁ{LÓ1‡§äÔZœÜR°—o:IºÛ¹ÆÉaš>øÍ/Í/äOX¾ml;ÚK¾í’ˆÃE¶4’?	MGïßÁ he’9=Ñ±i(^Ö¹A“w/±ú9ôüâNõ‹0ò¡A= µŸ]ë¿LœJş‚;:ˆ8·GÏE'`aÊ|ÁnËÀÙÅ))òkº“î÷µö-­â§®kÜÅíòóGÄvï;xV¶éMAÆ¶§¤¤ Æ+RR#×ñdIZÆÎü›ù*©P(
+…B¡P(
+…B¡P(
+…B¡P(
+…B¡P(
+…âŠÿ £—¬[
+endstream
+endobj
+405 0 obj 
+[ 262 0 R 93 0 R 94 0 R 95 0 R 96 0 R 97 0 R 98 0 R 99 0 R 100 0 R 101 0 R 102 0 R 103 0 R 104 0 R 105 0 R 106 0 R 107 0 R 108 0 R 109 0 R 110 0 R 111 0 R 112 0 R 113 0 R 114 0 R 115 0 R 116 0 R 117 0 R 118 0 R 119 0 R 120 0 R 121 0 R 122 0 R 123 0 R 124 0 R 125 0 R 126 0 R 127 0 R 128 0 R 129 0 R 130 0 R 131 0 R 132 0 R 133 0 R 134 0 R 135 0 R 136 0 R 137 0 R 138 0 R 139 0 R 140 0 R 141 0 R 142 0 R 143 0 R 144 0 R 145 0 R 146 0 R 147 0 R 148 0 R 149 0 R ]
+endobj
+406 0 obj 
+<< /Filter [ /FlateDecode ] /Length 1904 >>
+stream
+xœ¥YmoÜ6ş ÿAè6 ’‹-Ù²¯_
+ÅÖ]´úì«l'ËĞ/A—î]$ö÷GÙ–_Åë-Ú9†Ÿ‡Eò¼•O‰·ò<ûßä×OŸ\V§'ŸDÍ'ÕçÓÊboz„RnÕo§'ç êßÓ“×û»ßï	%ŸIø†THX€’ŸOOX6kpæ5OX<0OĞ
+ÖSÑ—Ó“rØšóÚ­9Ú¿óãÆØ¶fíÖb+óä–$uY;©‰JßÎL¢§¡5Z:QÀB‡	z?îVà#Ì‹± )òJ‹¤*t9ìl×Ö+¿…Ğu»Ãa¶‹Tj'IY‰ÍæíQ‹0Ï·‹œûÔ¬òÙ]Z…Ñ÷›Ñ/26Ã[ÅÌš±©³ì 4r±a)-ëKËªLZÒ¯3%Ä.ô)6ä¦Ğï­áG.Jî=hI¿Ê”“¨cöGpJIU w>Q?
+¬‹íN‰µ!:Õb­ù‚#-qL«-µXˆîÕ‹–ZE÷êEÔuôF´ÆİŸÅÁØ¿]¤¥²L´º”¤º‚ŸÛ½´ş&“šû>?ÛAØ&8³¿bİú|EHZÈ’ˆı>S‰È+’IQJ"?Ôj¿“ğ;x´€İuInTuE
+İ<‹º"Å^jaâæİÜİ!ÊÊz*{»“ğ¥³;I°dÒ4 å-Ğ€
+-Ç´áDdYq#›°mXµĞöº¸V©Ê·ä¶¨[à‚$RWj,UT^ÖZä‰Äà/‘ôğ9
+Â‚ú|¸Eâ~ĞøÙ€Ñs
+¡5Ü/Å58s‘ ÎÔNU%DBYBà‰¼ÑC½¼´¸‡¹Æ`†ËD`%Şq0ƒ	Ìîf-L‘ßvÁ©Š¼G%YBLÿ’ˆëæ³3RÕy.3pğ©óTê­.àÙ0 áš¹";‚|‹àv@°xCG.ë$!ŠÛqE»pGcÜ6MĞƒ¸/3QV&–X]©Lı*Í+Ú²ÏŠR]K²ƒ¸ÖJdŞ¥é=ŞÅ£xùQx¹7Ætu€¿L[©7dŸ‰¼<#5ÕÖ¼”{™´‡¶ádµéÉ}Ôâø ì©‰—0'Oì…í¶Cş÷úô|K.H~ğRîXiÃÌºSo|+Tn²yu+ËWDËr4 s_oÈİ—/äñîù…ÀûãÓıóıWx}¼º{ùóáëóÇ7GsÔ»şo<eĞV¨ ºySÚ¾<İîÔ®Î`M¬ÈUPjy¿ı«õPÍú«¨ã2{Z'İ. çíö™„ësthæåıšwk-Ë+Z†]˜V/rhq\‹ãZ×b¨–ÏcL«9´<ŠjYÑ·âİ|sY<8çb·÷$-µYãœ"‡ä`ÓÁºe²íû•W²{JêR®²7•,XÏ‡Sèur¦6‡µy­
+´•ñ ‡Pºj´É
+Îïš"ûï„~/«ƒú×dÉ±PENºõD…¿@uïÛ
+:W‡½á{œ-¼1˜!ò¼ÏÂUuE) ¼8Ø
+‘	‹ñZ%ö»óÃó±#ªçÙuÆ—õÚü »Î¸C‹ãZ×b¸CµæÙuÆZ³ƒì:ãhõÊğ’×¡4g×E|€¿ÔêE-kq\‹áZÕš³ë"Ş¡5c×E¼C+œH\Ä/•æìºˆw4Ö3v]Ä;´8®Åq-†k1TkÎ®‹x‡ÖŒ]ñhAÏğ.À¡Ô0ƒV?-œ•=ß*ÙwŒlZ0Á÷ŒO¿ıóéåÙ|6.	üÛ·ãQU"¹‚Æ²2…V­å¹ÔEroP¦gâRfğ¼:‡>Şd•¬Ü×Sê¾¡d%¦CñK„:ŠGïÂ&½åCï2o^T^VÀù)¥¾VIÓ¥rÄC›^Ib¯»wGzè¤Côı¡C4Í„Æ¨_”E–B»¤`uYC‘rf*¥”ˆrT½#à{õ¹ˆ3r÷òr÷é"’B§$öC¬I Îßq£Ê'ü±¡Ç7a	-:D”€¦=•×2+ÚiURäš©é5ÉåÍ€Õô†¹L‘¶â	”¢Y×ÑJ¸‡éàñKÑøuXg%Çì×-•!¦Bd[1(e{ Í»2ïWäJè]3[-å®	7>~\|´qva%Ç¨çÂe†}ƒãµÌDÕÎø„Ò‰›ê¢Ü‹Ä”Äi¡‹AÂ'>:ñpğ`%ÇE½?:¿ši<LjÇ˜È²=¼fš§òÚü–\‰|;	r|ŸÀ5(Œ&Û@ÑßÍ~M¦0GJËs î½Øš¦ÊÎÆ“c“Æ1.ñ{ÒG/W‡¬ãÓHté°ÍJ—±‹ÊÉÌ•®[*ã	•-YE­Ø
+Å€VŞèØø¸«*Æ\×e­‚kè ›9q7!†øP+fÒá‹ĞÅıŒåDtäe|81Ù¡·ê®Ùü–äbÛLìáYJ¨oì÷SÙØ%³é•zôÓ+[©wÓ+ôkÕéwÊë®h/PÊ‚¯©GÃ¯Òÿ 
+â™
+endstream
+endobj
+407 0 obj 
+[ 263 0 R 150 0 R 151 0 R 152 0 R 153 0 R 154 0 R 155 0 R 156 0 R 157 0 R 158 0 R 159 0 R 160 0 R 161 0 R 162 0 R 163 0 R 164 0 R 165 0 R 166 0 R 167 0 R 168 0 R 169 0 R 170 0 R 171 0 R 172 0 R 173 0 R 174 0 R 175 0 R 176 0 R 177 0 R 178 0 R 179 0 R 180 0 R 181 0 R 182 0 R 183 0 R 184 0 R 185 0 R 186 0 R 187 0 R 188 0 R 189 0 R 190 0 R 191 0 R 192 0 R 193 0 R 194 0 R 195 0 R 196 0 R 197 0 R 198 0 R 199 0 R 200 0 R 201 0 R 202 0 R 203 0 R 204 0 R 205 0 R 206 0 R 207 0 R 208 0 R 209 0 R 210 0 R 211 0 R 212 0 R 213 0 R 214 0 R 215 0 R 216 0 R 217 0 R 218 0 R 219 0 R 220 0 R 221 0 R 222 0 R 223 0 R 224 0 R 225 0 R 226 0 R 227 0 R 228 0 R 229 0 R ]
+endobj
+408 0 obj 
+<< /Filter [ /FlateDecode ] /Length 2709 >>
+stream
+xœ¥Z[oÛ¸~ÿ@ìç´@âˆ¤®ûR(èT–¼’œÖy1Z§íÙlÚmrPì¿ßÑ…%µíCí˜œáÌğ›‡´V”keYò¿ÑŸïş<=aä?§'Üvš\n5Ÿğ»]~ƒÏ`<tzR\V§'kJ\wåz¤º>.óÚyÔ¯?«÷§'°'0y^‰,Ú“hWVùF$‰{Iªÿˆj`æ54Ìxà¬‹0æÖ5¯s`f·Ì¶‡GÂÉç;âL=˜ÏZai¯ëôè‡˜ªGKÅÛ•G§’C6¦½¬h«=µœn·¥ö 1§­Ä…X‹, ÈIó0#¿ş6‘œşTr{*9—Y´›7ÈĞZ´AÜ$q-ºp¯$™†¶ëwë}=¦êÅdš©¦Må²1‹0{@CÑÒvgÈ#QTÉ:‰ÂJLì[&S	qªAƒZìYh8F*ÌJ’áB@©jÓ•Ó¹@n	³˜„q\ˆ²œu&tÒPOÁ¦Û™,Œò"&¶COO‡wïÉİç¯äğşı§§OŸ÷äáğçñAe]*4Ä	ºb^'L'U’gaJ’¬Ÿ)+peWI!¢d›ˆ¬š‰ÍÛEœ IR‰Í,Æ¸'É­ ÁX–åBzÇÁ—Ÿ€“{ÎœÒÌ6
+Î™5}0¼•‹’X”Q‘lk/±k©¡\Š¹KÒ8É®Y g‘æ°• Ä,»&ujÅà½BIFå²İæR&ÃZfÃZšÿJ*Ø•Â¨<3•g¤BbEÏĞÖ¨ln7JHKQl%d[-Ä­¸ße˜Í6Í÷âRIRˆIy1‹•‡yh
+~§±XÄÂÁXlò¢º‚²C,áàª_¢´,É6Ü/báZŠÛ¹+ËGâY¹+D<ÇK†F4µIÀOóšÌ3f5£SHİ'$B|Aht‡4º?H×Hãi$mÌÑë 4ˆ/0âôyLÖÌÜæ¼/RiS7è	‹+AÄï»d»e+Yuğ9Ü™ËŸÚlwÉlæ¹ßÁ»Ÿ=Ë[· ¨n«ùV[ Ü„iJª<OK³Ü668ˆãóNâaåÁS£#7¨IUçC0o­Š]Tû.¹JnDFn_ì/²Û—Ót¶ó4]ú!=|÷×©ú¡¥ğs¾~3Ûè|ç6N ¬ncWãsİïú!]õ~H7Øı‘ûb¬ÀCö[êj¿$_c	€l³eÚöÚHÂ}]j9„ï²¿â\Í.Üã´Ï.PuÇÊ8'û|%qV‘¼hO–½°e$¯®EQ¾Bv¿_¡Ë9ê
+ƒ'9«Åf˜î«¹:¨ÙÛq•½“FÅ§Û¥Øl…í&O›DKÄÛm^'Zå0¡$CCüÊ4SäÌÊCı©<ƒÉ¨j3£*ş@J{ÒZ“6êì
+(Â~S'—K”	LÊø‹”ñQeì) 4Ëi}"gºıœ·‹Q½¹ÔYºŒ#çµ-¶ò9d&ÈÀ8a4íßÍBÔSNò,Qn¡X4x70J/‡¨*}oÙMéFçsp?›ÍÍn“‡m”H:!E›uJÈwÚy¯¦Ï®· ŞVM@Y°Ke|yl§ıªéJˆ†»AyN¡–¯dæ´Rä7¢ ÔŸK\=ªª!ËwÊÉù3¸oÏ‰@ùÙe£Sˆiïç»Ê’“ó}%mK¡áÀB®Š|·³Ü=ğEï€3YêiÔ9hşÛYºÓKXxši©~è¯§Œşœ×7Àø!¯§²pF¤wÆ~=özÙ„]æõıìç½b6GœOÓhø(RfÿD˜èêŠ”úİ8şœ®ÏÄFe^ùÑØÒsøÑØBİÙğ6[¦[[¨Ã:¶pÉâ{C‹Ÿİ/ø–M+]ÊG•.“²CAV×©¨’ˆT"Ü”u£zÈXŞªl•ò†ê[$Ôõ D‚RàQ—#õT­F™G	TwÎ”®…êº˜ãã!İß©Şp‘#È)	)qé!„DÁxÈxŒíÅÔCei²ĞîÂBë›˜t-“$kpŸÍò`.Âƒ60jvî‚Æ6Ô³%›¾õ>xPœÜ$Ù¹ÌŸÑˆRª³¡+Ï‘fÙ$p a.†ê¤«¿¤ÿÓõ)æ'›=ÖçL1˜-^’úğ	nKÊ7ÉfS«½Íó”Àm[ˆMRŠòô}<¾ûƒîïÉÓÇÃ9|ùrÿ·–û<ó5<©ŞÆ§³èÔ¢‡¢¢â9é)Õ©£ã‰áí¶ DÅd]_ÊÎ“SÑ D™&±@ Ğmâ2 ôå²Ùt	^†d|ÇìSKîÕJ±‰Y#ç•Fjï½.EÛ!i_ÕpÌ·ò|=k¬u†ÜwC4Ğ‘3’È²ıvŞ íw¿ükEÖO|TešFCH«òªîl+)%œˆï¥w—	Ï½¦UfXû×zİ©ÉäI Y´?$ WfÖsDL¿½0Iô ê!)šQ®ö“rt¹²=‚’dQº«o@ÁaQÕ½¶6’%wä—½(9#‡‡ÇoÇ¯ĞäîóııçoŸ>Ü¾ÔŞ|´gÆë8†Üù"ÙZUD	O–)[#14pL[Ôw*×A›Ú…¿£<RÚËW"Es=¶Î‹M8¾›™I¿İ‘#Ï´¥™ìÑ~Ëc`°"ğ¯8RÓA\‡QR7EIêñÕTœ);7µ$ÓŸézhDÈS’nÄØ;eh
+Ó•÷Fét÷İ!U‡‡‰®ë[ÈIyA Ú¯ãÍ¹~m&G¬EòpK•G^#Oíwİòêfäo2_ÔÍnó† ö`<„ô¥‘èŒ‡"Ûh Ä0p®¶€»2Óíğ&¬Dáº:#q½.ÏÈ:ÍÃª³Ã¹NàÔĞ´ıEX¢§ mM{(ºbÒî×T‚\™§°Fı¾«—9«×‰“²î¹$ÙÖ…š:ËŠ¬(‹o_8·/É^„£»Cï_³±¿È^¶C=Èñ%Íö†Ô’¤òHç×!¿5Îê’´ì®QFzâşMŞˆÛ1([Vyø<#U6êo5]í@ÍPß¥{ùó6/›¯ú‹LZÛvii·IUfÍ±»IFkrşù®$›(p¢|Ûp\}X‘ûÃÃû»O÷÷gäÛáñéŸwÿ?By}xø¾ŸŞaí®fis<³ñÌ6V×öÂõGqY–¬‡e¥Så¤ã$£
+`w‘í"À~Ñ[À>¹5ÆCÏİôŒKŞ]=Ñ^Äˆ“²’;jHÉaøm¶æAHIº3ÍŒqèem¶9kÛÆ—>ù¥¦G¯¯|Ëi9ŒútajO.Èì2i76~+_
+½İ¦!Dúb¹©˜ ı60Ûí‹uıüƒ_ ¼¾ùz|<>À×/Ç¯‡úMâ£	¿¿Î¿şÄÒõ:ÀKëLúÃ!¤Ÿİá"ucïß%‘OˆÂËT9¤MV—Ï±úÕ}½û+Õ}M¾VAKz­?¨äjóQ`}f1çÂâª‰ÿeÛ
+endstream
+endobj
+409 0 obj 
+[ 264 0 R 230 0 R 231 0 R 232 0 R 233 0 R 234 0 R 235 0 R 236 0 R 237 0 R 238 0 R 239 0 R 240 0 R 241 0 R 242 0 R 243 0 R 244 0 R 245 0 R 246 0 R 247 0 R 248 0 R 249 0 R 250 0 R 251 0 R ]
+endobj
+410 0 obj 
+<< /Filter [ /FlateDecode ] /Length 2859 >>
+stream
+xœ­Y]s›H}OUşC×¼l2¥Q€æKÙ‡-,áDcI¨@vVU~ÁRË&A —ÿıŞÛ4HdvËjºû~œ{î¹XÊ
+‘†’TüWûu³ÿN!Âêˆ¡©ÿ	ß«øó~êJm)|ÿÎ»èHÊ—ŒÆ®r‰Vwİ¬Ş¿ût+“ü»Õ—•ÑPƒçô‘Š?WÛ÷ïòE8äÃ7Ç½³]ï#Y}ÿÎ^µ iÚĞ¤p ¥ÍÆÎ|i/<k5u—N¡#Øæj†Rœò‡2”iqÌƒíZ_l2¶\wjOÈã‡õ§ÅãÇKG*šˆ›.™å‘2šÊœÙ–g“[×™Ÿ©§BëN…ÖHE¹ÔLE¹D»Ê».ì2~eW¹Ô¼‹J]STÚ…0Ù»®*—® LÑÿa²©ÿ“õŸF¥M€Á7f`+ç^Ešè*ÓĞDW¹Ô–qz-ã65ÁÕ½‰v3ŠB4sHi•â SæÊËN×ò¨L²vîI{¾œ9kÛö LÄqy5gõÕv‹%×ûÏyªwÉfqW´dcx{9·\3Kß”ÌZWÏVª:jÛT©WğË?J¤Š‘%²>$ä«åk¹œMÇÖbEnl{A¬ñjú`“éã2õÈøŞuíÅj¶®¬üéLáñøúŞµ«ª®ËÎ:5»5»6Q]*6™g›Š¥*_Š%EêÜe66QAP:•ºì+–êl¤ëCİÈ»‚®ùs²YÀS*Y `1^C°½•3N'Ÿ›ğkdVSª™•G"³&d2‡p¶‰EfÖ¦r±²İñWkTómºúJ¬ÅZ@şæŞ›.lÏÃŒ{÷7Şt2µ€Šº[AäybåÎÄJİ‰•š=Í0ò˜*Í]b‰vÃáD 84YGlR[úà¨¾tÑ©³@¨5„wæOµVæògAê&Ö»ˆk<MWâ,¡[¬ M@®ÆÎbå:³™=9ÏÔ¹ÃWK£À«qn"5ô®Ğct=·Ñµç–{çA³²Æ;!²$ˆµİYG~H\¶÷“)ñ6/l{Ù€ìı7òÄˆŸe>~G‚ÙÇ	#éÁß0¤$aƒ„m«­¯Æ'JÃ—"ãM,”UÙÜT A6KW¢µ.U¢¦Š¨A‘CöfP‹·;çÊ"¸‰£,ˆuÏ‹£ÕÑPÎ	D5%-çUS=²&ŸH‹9m/,“M£¢¨ÀœıßåÌf·f3òÛÚö~#@ìKgáÙ˜ãÛ8!~’ƒŸf>–²>XâcÆÓÎ¤Éu¥Ë—C©Ğ‘†–*Š^1XVsƒ—ş3#*‰wDëA”j­ªB(
+ÚÄ±9U–,h{ÿ"KĞ¦’…‡%Ì­;›ó¦k/!>Ğÿx¡‡Ş8÷+~ŠgİÚ«5gRZç?ßòØ1Ÿz¬JÍ¿Tµ³ÇÖ÷t†V£‹à*r½ƒp´Îäø³ œ´““—KTÄÕ}{kWnªİ€P;»‡ªv¹©¶Ôc››zÕME4J˜sP=ä9»Ó9ì˜+N°¹ —çKN¹”n™IŞGÁaÌîÌò ®mC½ĞÇdm[nW®Õ–a{T_ºØ¢Îƒ õ"%ªU•‡$Äª7ı²àèî€e³ƒœÉ®+·ÖËw$˜PtE‡h)’¢}’hûZÉùÌ'zI_ÊP>X‡Clü§IDngÄ¶Ä¹ûLH“NGÊ²¦ãx×qfôF€ŞÒ8"¯/1ùÅ¯Aô¾ñ³_ƒì®Ê³>}?&Ğã¶l—øÇí 9rË6,ø	Î	¢Ö²B–Ÿ¤™Ÿ±=gĞÙ„~°‡—L-¼¯ÀXª¢Zıˆøy Š	¶?ˆÀX~÷ÎS0-ˆ6ñş²ŒqëöA2‹Ñ.Nöù^hÃÏÇ ÌŞĞ0ŸìXÃà·ì…Á¿ Ù‚gÏ	c’ßyäÁ§<ìN¾{dQ1dåñB÷Ô³8v®¤Ï4µ¡¢uœ5ÍĞ—cú¯»cˆ9:%ğÄ?ƒ-»™¿ÉRü®"8
+Î3êG \p33<1ê‘E˜´2‹òĞ€;“Cœ2Œ¼ÀÚ€7°2ü.k<ân`±%Õ•a&PgKá<ö‡$ #Ô€¾ˆ¥Ò( …×œœ@Lo‚ŸAØÇ|M-Ah–½õ÷Ğ‘ST®àkáA?â[ãW/2‘£´’úXDY)t%·ü<¹äß^âp%—ñõÁt‘bò72Õy&g’„=ûPXx{7¨qbèfFîGÊ²,¬¦¼â‰ÿ×Ó.‰÷•˜Ct7ŒmS’¾ ¬Y°CœdŒÛ€öã0NümL&€ŠCÎNËĞj¨Q|rÂ~’	2ëc½b–I CCH1—=C?‹“7bL6€ä>DB%ª-mT¾a=#«e”®Ğt3°¢ı$‚Ê÷->¢ä3¶AÈØÀ”~)—”‡c‡!1ÏæáÀ|È7F
+èqö™t6¡ªÓ>A©e+WËW\¼V0ùw0uANÎĞ?aoà ”mkuøÄü3ßîı@¢9•À÷ßŠ®®ÇizŞ06I°çlÒÇS§…òP<"ÆÄôøôÂ–pÚÊ*ğ—}îWŞEIÎp½ÀBO)¦å…u° ÊµÜÈ¹™Od1wÊoÿöpMOŒç±{ºÒİ5‚
+ChTá´ÕØ[RzÊ‰ÈG`Såè9TÎ:%N{bÛœ=zY—ÛV“9#;Ş=Œu¡E¼èã‡\MI}=Ğ"pR“,óIÉ"ËRåâV¦™Œ¯IÃÀ×íg}³ÜÅtñå3ÉµKğ©&X.¨·Š4A±y±[áŠx²O­JJ%ìº;²¶v8+ØV”H›
+ÁÌ|B8cš†ĞQˆ/^ª¶#@§T…„@gŠ/Èë£GÔ¬½¤›Œ% ‡ é	ƒ”wÀ‚÷^ı´ş–<½ñ 	tGY5ç“‘–OFªx‘üUò	«ÏJç6êŠr’÷ú¨cs{@V‹y°rR²®‘’
+˜)íG7ÖC$÷Ã_UÚõHFKM uQ×Ü¦±… O]Á<tm:¸ ÙMØ=\À¹½ñ— ¾ì"K’R‘trëDt·ç+·}y5íÔ 8uüÃm!cı.]_­ÿbÄíS‘#ù4/Š–Ôİ=à—–ÁùlÜ­t³?¡ğá(Xh£Ç¬=Ì7©tÂ¬D›Ã¿*©âĞ¡
+óğê„At!û oõUÑVfÀìëK°y©V*fIô<ĞğGXÑÇá‰ Š¡‡†Z‡T¥x› FA8SÔT/kjEô´÷Ç;ïêH/£AgÕ0;èÚA©VdãSé1êKñ5Ğzş:fXã‡à¹!Ûr%Ü§¯¨ZEŠSÑW¾4ñ!›PõkQ‹'ØSN]oc‘aåWOIü#CùÍ±ïü«×$€©Ú'I›êg¤¿#RxW4¤b²7
+ö7)@*ÿÎsÄ2¼ †ÃOâ\uxá7!”QQ»µjÅ>
+S"A£yMjè*ÉİhhF.OÒô˜~¾«ßÛY1Ë|äğF'ğÏ8£Ÿ½|ÈÇò\KshaCH¸',Ù`–Ïrü¦ø>1`¡Ÿ!‹hxÖè‡ùm½|è	SÅßuwuËª6ŸîÈ¹¢Ê	ˆg{Á”—)²iı»²\‘[¦^*Æ‚€Wø—­êA¥"ûÌ„<
+endstream
+endobj
+411 0 obj 
+[ 252 0 R 253 0 R 254 0 R 255 0 R 256 0 R 257 0 R ]
+endobj
+412 0 obj 
+<< /Filter [ /FlateDecode ] /Length 1972 >>
+stream
+xœ½YYoÛF~7àÿ°ê 
+Ãk)*o²ÍÔJJ•è)üBS«h[*;ú÷Ù]^:6(
+Ä:ö˜ıæ›™oGŒ®&Ñ5]¯_z_£äòÂ$//ì	¶«‹wwñı¥²9_^¬Ô.CÍØç7ÙİM×ÁåÅ»‹±`f¬	Õ¨NLÓÁ·`}yñ0Ú$ #W‹ğ+#”dBßàÏË/hØÍ#¶aÛâ0jSa­XšiH+ş4˜Íıé=Y,ç·7Ş’øŸ®½ekRR`=?Á»ö¦:éMˆ\7Ö']3©òxµdW<gkÂSò!Îr¾ßà0Kqp4SÎë8WÁ°ì†-&«Š†ŸWd5ûØyXzÃ1ØíMuÒÁ¢gl¦ì³Iä%‘ñZµŞBØå:Úº+½½ŞkÉSsE{\é®Ü=],îg7S?x…¬‰c¾š8gÜn>YpÇÈMÃ©Ãl4Ğá“sfúÉ#W‹˜…#‹œ§åQÚ5PO„üÀÁï§?¥@uŞ­E[„À«ç¯<âÏô,ÉÙÜS›lÛTOuÑ›„ºše):¥íÉ¸I[+	î<òàßzKLï–ÌVdê“éCp7_Îş€¥·Xz+Ïg¿{dşà–&}`ugÍ
+&§|Ÿ®@˜®ï=2ó{˜-¿»éŠ\{O>Mo=ÌÉü:˜Î|4v˜Ä'±ëNj“:‡ıÕg Ö~{ğV(†+2G›è…Dˆƒ!wŞ»À>*\QV¦KÀµ|ğFäf¾\z7Òµ›ù§Å½È¸úÎAàˆww]©=İµÜãêıÕŸ¾÷nñ´ãnoUÃıKd¢ê`
+8o‰a:P¦nÒwºÕMşÆ=°F•¢9¸Ljk»]Ì£ğ)f¨áş—÷¤3Rf$ŒcÅ!OÈ&Ë“_aaQåa1¦k±"”{J¥rI”%	Ë#Æ‡«£ˆ¯YZŠ/[Æåvvİî`×ÕuÚX~Ö¥dñ´	2M÷dÇò"KÉË6#¥ÙO¿Æ{ï…—[À_"^àbÍ6yX°§õ
+\İáx•[–×æ6<f¬í’s@_–¿\ùõnÕÀC›¨
+.Ê°d	"ƒvBF(ÊÒ2ä)àXCÀ™M`Œ¡ 2""H f*€NvU¾Ë`!XLxêº[£î>¹'oÎØ„Q9Ä×q[ò-UÈ5@<;ge6iÃK`¦«ıë$PT L<‚¨à¢(ç	‰P[‘‡q‘‘'FŠêéO‰ Á*şÌcˆJ
+É¶'i&†Ù·ˆAß²áÏæÛ¬*ÀÈGÆnÍšHGÖY‡y!€ "6kòÆ• Çš"",üE/Ï<‹­§ÔàèhÇĞ;BN‡×o¯:ãaA‡U™%ÙF†Ô”eÛc¼Oc"ƒ«jãÔì0>VŒÿwÕxR©r¢ÂY`½³iXÛíe`jcÕ@Hh½ƒŸXÊ6Xÿ-qÃj¥ÈÖLUÆ¨ä¸–…Ú÷ò OÇCS(M<_$‚(„nPĞ${ÔI›$ü¢3L*
+^”œóÄğ­ÈÀ07Ä³U£±æ¨”’$;ø=SHha*S’ *	îs¶Ëò².løÛ€,­YQæU$²ü©'M>Â±eVÂø3S%Jâğ…0L$òmˆF«Cf¨Âƒ3Óh?°Ölæe¾½C“P
+ÇUóéïô‰Û–µi©Kí‡t›êoOxk›}Şá£RéaşWšì¶Y·h†¥ÑÓ¢üñ=!¯Qâº69g¬¯¥<âj-´¬Ö€Ş–x¯Âáß	Éë…~‡u³Çx¶äˆŸ£SZƒ•¨+&GE·L'~œCø¤“¶G5Û†¿Gç|ù=:¡w­s¶~ ßÃ\‘êÒ•„zsLĞ	ÃO{dJ¨”¢Ú¥~ ©Ôµ»İEMjç*Po¯¦°ÅÒ¹"ˆÒã=6B*›a«Ø‚J3(;®£K›f¹‡Å8@KpÆÖwã yÅX(ñT„£3;Ğh˜(/CDÖËïNFÃ.kŠh}=Xªë#Gğ«%ŞòÒ«*Q\·r:¬Áö´•±4Ü×²ÒŸJ÷ªaQ-€8 ñ3ÉrÔ»Kzˆ¼Rj4åi7}jG&¬sS!’‘Òq™
+[ ‹³TÄdDªl¹ºääRì¶hB]>’Q¬	0ÄS!È¨âpÂ—!~Ø–Şú1Q±8­şW?Ñ‘®ëoDáQ-mG'wºÜ2’=ß†/ DË“]Î!EE¸$m9c°~q“=bÛSvü#ö”/–MÛ¼r¬º	¬õ‘ Œ¡kúú5ŸeÙF<ªŠr¹@²UJÈK¾¾ËmUh@ 6y±TùCs|F¶–7j~ãI%\>^ÑÖ¾âƒé4ñ0š'ÒìĞ[æÄ¼‘¥œ­«¨AÚ¦P•/>Õ¨A*h{ÔsƒJ}7&v£/o¦+OƒVŞ>	ÂÇ[3?ğ|ùàüş¹÷>äú~êÿÚqğ˜Ö±ôŞ!¼Yr&¸ıä.¯;
+endstream
+endobj
+xref
+0 413
+0000000000 65535 f
+0000000017 00000 n
+0000003002 00000 n
+0000004942 00000 n
+0000005266 00000 n
+0000005525 00000 n
+0000005850 00000 n
+0000006060 00000 n
+0000006495 00000 n
+0000006878 00000 n
+0000007284 00000 n
+0000007577 00000 n
+0000007843 00000 n
+0000008221 00000 n
+0000008588 00000 n
+0000008947 00000 n
+0000009355 00000 n
+0000009737 00000 n
+0000010149 00000 n
+0000010511 00000 n
+0000010788 00000 n
+0000011146 00000 n
+0000011419 00000 n
+0000011817 00000 n
+0000012108 00000 n
+0000012365 00000 n
+0000012801 00000 n
+0000013256 00000 n
+0000013644 00000 n
+0000014049 00000 n
+0000014456 00000 n
+0000014865 00000 n
+0000015306 00000 n
+0000015630 00000 n
+0000016067 00000 n
+0000016481 00000 n
+0000016865 00000 n
+0000017299 00000 n
+0000017705 00000 n
+0000017969 00000 n
+0000018387 00000 n
+0000018768 00000 n
+0000019029 00000 n
+0000019269 00000 n
+0000019528 00000 n
+0000019823 00000 n
+0000020272 00000 n
+0000020693 00000 n
+0000021124 00000 n
+0000021516 00000 n
+0000021914 00000 n
+0000022337 00000 n
+0000022635 00000 n
+0000022944 00000 n
+0000023218 00000 n
+0000023608 00000 n
+0000023896 00000 n
+0000024185 00000 n
+0000024451 00000 n
+0000024734 00000 n
+0000024996 00000 n
+0000025412 00000 n
+0000025835 00000 n
+0000026133 00000 n
+0000026442 00000 n
+0000026716 00000 n
+0000027106 00000 n
+0000027394 00000 n
+0000027683 00000 n
+0000027944 00000 n
+0000028227 00000 n
+0000028489 00000 n
+0000028905 00000 n
+0000029328 00000 n
+0000029626 00000 n
+0000029935 00000 n
+0000030209 00000 n
+0000030599 00000 n
+0000030887 00000 n
+0000031176 00000 n
+0000031437 00000 n
+0000031720 00000 n
+0000031982 00000 n
+0000032398 00000 n
+0000032885 00000 n
+0000033518 00000 n
+0000034067 00000 n
+0000034462 00000 n
+0000034953 00000 n
+0000035265 00000 n
+0000035568 00000 n
+0000035810 00000 n
+0000036094 00000 n
+0000036537 00000 n
+0000037019 00000 n
+0000037324 00000 n
+0000037817 00000 n
+0000038143 00000 n
+0000038644 00000 n
+0000038981 00000 n
+0000039463 00000 n
+0000039791 00000 n
+0000040299 00000 n
+0000040661 00000 n
+0000041147 00000 n
+0000041475 00000 n
+0000041755 00000 n
+0000042038 00000 n
+0000042301 00000 n
+0000042564 00000 n
+0000042849 00000 n
+0000043151 00000 n
+0000043462 00000 n
+0000043740 00000 n
+0000044032 00000 n
+0000044326 00000 n
+0000044565 00000 n
+0000044820 00000 n
+0000045122 00000 n
+0000045433 00000 n
+0000045711 00000 n
+0000046003 00000 n
+0000046297 00000 n
+0000046536 00000 n
+0000046791 00000 n
+0000047093 00000 n
+0000047404 00000 n
+0000047682 00000 n
+0000047974 00000 n
+0000048268 00000 n
+0000048507 00000 n
+0000048762 00000 n
+0000049256 00000 n
+0000049587 00000 n
+0000050081 00000 n
+0000050578 00000 n
+0000050912 00000 n
+0000051399 00000 n
+0000051709 00000 n
+0000052191 00000 n
+0000052490 00000 n
+0000052969 00000 n
+0000053260 00000 n
+0000053758 00000 n
+0000054084 00000 n
+0000054553 00000 n
+0000054835 00000 n
+0000055299 00000 n
+0000055573 00000 n
+0000056060 00000 n
+0000056373 00000 n
+0000056777 00000 n
+0000057152 00000 n
+0000057526 00000 n
+0000057904 00000 n
+0000058264 00000 n
+0000058622 00000 n
+0000058979 00000 n
+0000059339 00000 n
+0000059605 00000 n
+0000059915 00000 n
+0000060294 00000 n
+0000060523 00000 n
+0000060781 00000 n
+0000061039 00000 n
+0000061299 00000 n
+0000061583 00000 n
+0000061847 00000 n
+0000062097 00000 n
+0000062430 00000 n
+0000062726 00000 n
+0000063022 00000 n
+0000063346 00000 n
+0000063653 00000 n
+0000064070 00000 n
+0000064588 00000 n
+0000064949 00000 n
+0000065433 00000 n
+0000065734 00000 n
+0000066325 00000 n
+0000066724 00000 n
+0000067246 00000 n
+0000067598 00000 n
+0000068076 00000 n
+0000068402 00000 n
+0000068815 00000 n
+0000069236 00000 n
+0000069738 00000 n
+0000070064 00000 n
+0000070477 00000 n
+0000070898 00000 n
+0000071400 00000 n
+0000071872 00000 n
+0000072188 00000 n
+0000072662 00000 n
+0000072955 00000 n
+0000073422 00000 n
+0000073695 00000 n
+0000074164 00000 n
+0000074457 00000 n
+0000074959 00000 n
+0000075206 00000 n
+0000075465 00000 n
+0000075725 00000 n
+0000076204 00000 n
+0000076576 00000 n
+0000076925 00000 n
+0000077264 00000 n
+0000077590 00000 n
+0000077926 00000 n
+0000078260 00000 n
+0000078602 00000 n
+0000079068 00000 n
+0000079352 00000 n
+0000079828 00000 n
+0000080108 00000 n
+0000080567 00000 n
+0000080930 00000 n
+0000081304 00000 n
+0000081661 00000 n
+0000081962 00000 n
+0000082243 00000 n
+0000082702 00000 n
+0000083065 00000 n
+0000083439 00000 n
+0000083796 00000 n
+0000084097 00000 n
+0000084575 00000 n
+0000084872 00000 n
+0000085345 00000 n
+0000085635 00000 n
+0000086143 00000 n
+0000086462 00000 n
+0000086950 00000 n
+0000087241 00000 n
+0000087732 00000 n
+0000088023 00000 n
+0000088514 00000 n
+0000088808 00000 n
+0000089299 00000 n
+0000089593 00000 n
+0000090084 00000 n
+0000090591 00000 n
+0000090920 00000 n
+0000091405 00000 n
+0000091701 00000 n
+0000092241 00000 n
+0000092599 00000 n
+0000093082 00000 n
+0000093398 00000 n
+0000093947 00000 n
+0000094334 00000 n
+0000094784 00000 n
+0000095170 00000 n
+0000095479 00000 n
+0000095723 00000 n
+0000095970 00000 n
+0000096327 00000 n
+0000096696 00000 n
+0000002711 00000 n
+0000096795 00000 n
+0000097047 00000 n
+0000097160 00000 n
+0000097273 00000 n
+0000097386 00000 n
+0000097499 00000 n
+0000097724 00000 n
+0000097923 00000 n
+0000098126 00000 n
+0000098351 00000 n
+0000098550 00000 n
+0000098753 00000 n
+0000098978 00000 n
+0000099177 00000 n
+0000099380 00000 n
+0000099605 00000 n
+0000099804 00000 n
+0000100007 00000 n
+0000100232 00000 n
+0000100431 00000 n
+0000100634 00000 n
+0000100859 00000 n
+0000101058 00000 n
+0000101261 00000 n
+0000101486 00000 n
+0000101685 00000 n
+0000101888 00000 n
+0000102113 00000 n
+0000102312 00000 n
+0000102515 00000 n
+0000102740 00000 n
+0000102939 00000 n
+0000103142 00000 n
+0000103367 00000 n
+0000103566 00000 n
+0000103769 00000 n
+0000103994 00000 n
+0000104193 00000 n
+0000104396 00000 n
+0000104621 00000 n
+0000104820 00000 n
+0000105023 00000 n
+0000105248 00000 n
+0000105447 00000 n
+0000105650 00000 n
+0000105875 00000 n
+0000106074 00000 n
+0000106277 00000 n
+0000106502 00000 n
+0000106701 00000 n
+0000106904 00000 n
+0000107129 00000 n
+0000107328 00000 n
+0000107531 00000 n
+0000107756 00000 n
+0000107955 00000 n
+0000108158 00000 n
+0000108383 00000 n
+0000108582 00000 n
+0000108785 00000 n
+0000109008 00000 n
+0000109233 00000 n
+0000109432 00000 n
+0000109635 00000 n
+0000109858 00000 n
+0000110083 00000 n
+0000110282 00000 n
+0000110485 00000 n
+0000110710 00000 n
+0000110909 00000 n
+0000111112 00000 n
+0000111337 00000 n
+0000111536 00000 n
+0000111739 00000 n
+0000111964 00000 n
+0000112163 00000 n
+0000112366 00000 n
+0000112591 00000 n
+0000112790 00000 n
+0000112993 00000 n
+0000113218 00000 n
+0000113417 00000 n
+0000113620 00000 n
+0000113845 00000 n
+0000114044 00000 n
+0000114247 00000 n
+0000114472 00000 n
+0000114671 00000 n
+0000114874 00000 n
+0000115099 00000 n
+0000115298 00000 n
+0000115501 00000 n
+0000115726 00000 n
+0000115925 00000 n
+0000116128 00000 n
+0000116353 00000 n
+0000116552 00000 n
+0000116755 00000 n
+0000116980 00000 n
+0000117179 00000 n
+0000117382 00000 n
+0000117607 00000 n
+0000117806 00000 n
+0000118009 00000 n
+0000118234 00000 n
+0000118433 00000 n
+0000118636 00000 n
+0000118861 00000 n
+0000119060 00000 n
+0000119263 00000 n
+0000119488 00000 n
+0000119687 00000 n
+0000119890 00000 n
+0000120115 00000 n
+0000120314 00000 n
+0000120517 00000 n
+0000120742 00000 n
+0000120941 00000 n
+0000121144 00000 n
+0000121369 00000 n
+0000121568 00000 n
+0000121771 00000 n
+0000121996 00000 n
+0000122195 00000 n
+0000122398 00000 n
+0000122623 00000 n
+0000122822 00000 n
+0000123025 00000 n
+0000123250 00000 n
+0000123449 00000 n
+0000123652 00000 n
+0000123877 00000 n
+0000124076 00000 n
+0000124279 00000 n
+0000124504 00000 n
+0000124703 00000 n
+0000124906 00000 n
+0000125131 00000 n
+0000125330 00000 n
+0000125533 00000 n
+0000125756 00000 n
+0000125979 00000 n
+0000126629 00000 n
+0000130206 00000 n
+0000132157 00000 n
+0000135547 00000 n
+0000136029 00000 n
+0000138019 00000 n
+0000138692 00000 n
+0000141487 00000 n
+0000141696 00000 n
+0000144641 00000 n
+0000144714 00000 n
+trailer
+<< /Info 259 0 R /Root 1 0 R /Size 413 >>
+startxref
+146772
+%%EOF

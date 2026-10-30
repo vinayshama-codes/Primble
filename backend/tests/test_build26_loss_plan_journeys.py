@@ -121,7 +121,11 @@ def _base_facts(age):
               "prior_carrier": {"value": "AMERISURE INSURANCE COMPANY", "source": "derived",
                                 "derivation": {"rule": "carrier_of_the_expiring_policies"}}})
     if age is None:
-        f["years_in_business"] = {"value": None, "value_state": "not_applicable", "source": "producer"}
+        # Age unknown. A person's typed N/A is no answer for years in business
+        # since the 29 Oct strict review (`fact_registry.ALWAYS_EXISTS`); the
+        # system's own "not applicable" still leaves the denominator (TEST
+        # outdated, updated by the 29 Oct end-user review).
+        f["years_in_business"] = {"value": None, "value_state": "not_applicable", "source": "derived"}
     else:
         f["years_in_business"] = _env(str(age))
     return f
@@ -587,7 +591,7 @@ def test_the_page_lists_loss_history_in_plan_order_and_its_numbers_add_up(tmp_pa
     assert o["seq"] == steps, o                                               # the plan's order
     assert all(t.endswith(" pts") for t in o["texts"])
     if state == "claims file, conflict":
-        assert o["card"] == ""                                                # the conflict's 0 shows no number
+        assert o["card"] in ("", "No effect on the score")                    # 29 Oct: a 0 says it is not scored
 
 
 @_needs_node

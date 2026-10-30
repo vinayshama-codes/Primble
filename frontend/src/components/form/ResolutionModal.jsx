@@ -45,6 +45,19 @@ function humanizeFact(key) {
     .join(' ');
 }
 
+// The table's rows with each refused cell blanked, as the server stored them
+// (`refused` is keyed by the row's position in what was sent).
+function withRowsAsStored(rows, refused) {
+  if (!Array.isArray(rows) || !refused) return rows;
+  return rows.map((r, i) => {
+    const cells = refused[String(i)];
+    if (!cells) return r;
+    const next = { ...r };
+    Object.keys(cells).forEach((k) => { next[k] = ''; });
+    return next;
+  });
+}
+
 export default function ResolutionModal({ issue, sessionId, onApplied, onSetStatus, onClose, onOpenFollowUp, onAddDocuments, onFollowUpSaved }) {
   const resolution = issue?.resolution || {};
   const mode = resolution.mode || 'none';
@@ -505,6 +518,17 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         ? await post({ mode: 'schedule', schedule_key: resolution.schedule_key, rows })
         : typedOne;
       if (!data?.success) { setErr(data?.message || 'Could not save the schedule.'); setBusy(false); return; }
+      // Saved, but cells that cannot be their column's type were stored blank
+      // (29 Oct 2026): the window stays open on the refusal and the rows as
+      // stored; closing it applies the refresh like any other saved write.
+      if (data?.refused_message && savedTable) {
+        applied.current = data;
+        rowsTouched.current = false;
+        setRows(withRowsAsStored(rows, data.refused));
+        setErr(data.refused_message);
+        setBusy(false);
+        return;
+      }
       // Saved, and the window closes - also on "Save progress" (owner, 13 Oct
       // 2026). What is still missing was named above the button before the
       // click; an unfinished item stays in its list with "Open to fix" (the

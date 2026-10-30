@@ -158,7 +158,13 @@ def test_the_pre_form_screen_share_of_a_lone_narrative_is_100_minus_the_score():
     row = out["top_recommendations"][0]
     assert row["answer_gain_is_exact"] is False
     left = sum(r["points"] for r in out["screen_unanswerable"])
-    assert row["answer_gain"] + left == 100 - score
+    # SCORING_RULES.md P2 (29 Oct 2026): the items carry exactly 100 - score -
+    # points no item adds are a breach the plan's guard repairs onto the
+    # page's score items (`review_plan.enforce_contract`). TEST updated: it
+    # pinned the row alone plus the "no item can add yet" row.
+    plan = out["review_plan"]
+    shown = sum(int(i.get("points") or 0) for i in plan["items"] if not i.get("mirror_of"))
+    assert shown + left == 100 - score and row["answer_gain"] >= 1
     assert out["screen_total"] == 100 - score
 
 

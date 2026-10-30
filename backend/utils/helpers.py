@@ -362,7 +362,11 @@ def _parse_address(addr: str) -> dict:
     if _st is not None and not _is_us_state_word(_st):
         _tail = parts[-1].split() if parts else []
         _words = [t for t in _tail if not _BARE_ZIP_PART_RE.match(t)]
-        if _BARE_ZIP_PART_RE.match(str(_st)) and not result.get("zip"):
+        # A state slot of digits only is a postal code, of any country: a US ZIP
+        # ("Street, Denver, 80216") or India's six-digit PIN ("..., Noida,
+        # 201301" - the ACORD round trip, 27 Oct 2026, printed it in the STATE box).
+        if (_BARE_ZIP_PART_RE.match(str(_st)) or re.fullmatch(r"\d{4,10}", str(_st))) \
+                and not result.get("zip"):
             result.pop("state", None)
             result["zip"] = str(_st)                          # "Street, Denver, 80216"
         elif (_tail and _BARE_ZIP_PART_RE.match(_tail[-1]) and _words and len(_words) <= 4

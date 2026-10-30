@@ -31,6 +31,7 @@ How each unverified item is checked is in part R ("How to verify the rest") and 
 part X's.
 
 ### OPEN ISSUES FOUND IN OUR RUNS - NOT IN BRENT'S 27 (kept here so none is lost; detail in parts S, T, T2)
+**STATUS 26 Oct 2026 (md sweep):** X1 DONE 26 Oct (= P15-5); X2 / X7 DONE Z18 C; X3 DONE Z31-W (= P15-7); X4 / X5 DONE Z37 (umbrella follow-form by layer, per-vehicle USE); X8 DONE part X. **Only X6 is open - owner's call** (blank vs the garaging address).
 | # | Issue | Where | Next step |
 |---|---|---|---|
 | X1 | 137 "hired physical damage: primary" ticked with no document stating the basis | 137_CO | rule: a basis tick needs "primary" beside the coverage |
@@ -4400,6 +4401,8 @@ Final suite 20,415 passed / 1 failed (known) / 19 skipped. Brent item-by-item st
 
 ### P15. PARKED - ours to fix later, no Brent answer needed (owner, 15 Oct 2026)
 
+**STATUS 26 Oct 2026 (md sweep, checked in code):** P15-1, 2, 3, 4 and 7 DONE in Z31-W (21 Oct: `rating_date_outside_the_term`, `strip_document_item_label` / `_label_picks_out_the_box`, `AI_PRODUCT_IS_THE_BUSINESS_DESCRIPTION`, `AI_GARAGING_WITHOUT_A_VEHICLE`, `_in_layout_order`). P15-5 DONE 26 Oct (`ai_answer_guards.hired_pd_basis_not_stated` - the basis word must sit beside "hired" on a physical-damage line; live-checked on the Choice Electric run 6c420291). **Only P15-6 (126 per-project aggregate from the umbrella) is still open - it needs a live look.**
+
 Wrong values found in our own runs, NOT on Brent's 27 or Michelle's 22. Owner: "keep these and we will fix later on".
 All seven are AI / gap-fill values (no rule printed them). Read the source part before starting each one.
 
@@ -7538,3 +7541,941 @@ numbers and dismissal credits.
   is a pre-ticked questionnaire question asking only for the signature; the Y/N highlight is removed (owner).
 - **Not touched (on purpose):** 5 and 12 (need Michelle), item 2's forms-first wording, item 18's client half (owner
   declined), the location-table edit that wipes LOC # / county / revenue (logged), and the question 4 policy order.
+
+### Z44-C. Lane C (27 Oct): V2 - fact lineage, ARQ bot usage, archival
+
+Brent's V2 list, three items, built offline (uncommitted). OPEN LIST 26 Oct night, section 1, items 2-4.
+
+**1. E&O fact lineage** (`services/fact_history.py`). Append-only, one row per change of one fact: fact key, from -> to,
+change type (set / changed / removed / confirmed / source_changed), kind (ai / document / derived / producer / client /
+confirmed / system), the source label, confidence, evidence state, the source document + page for a value read from a
+document (`fact_lineage.sources_for_fact`, computed once at write time), who (actor type + user id / questionnaire id /
+system), the triggering action (route template, shown in words via `ACTION_LABELS`), timestamp.
+- **The doors.** Every facts value is written by `session_repository.new_processing_session` (first extraction) or
+  `upd_processing_session` (re-merge, producer fix, client questionnaire, editor write-back, Data Consistency confirm,
+  table save, document add / exclude, the `delete_facts` retractions). Both call `record_fact_changes` with the facts
+  before and after, on the same connection, inside the write's transaction, in a SAVEPOINT (a lineage failure never
+  fails the write - measured on real Postgres with the table renamed away). No call sites were sprinkled.
+- **Anti-rot:** `test_no_facts_write_bypasses_the_lineage_doors` AST-walks every backend SQL string that writes
+  `processing_sessions`; an unlisted writer fails the build (11 listed, each with its reason).
+- **No change, no row:** compared on (value, source, person-confirmed); an envelope annotation is not a change. Not
+  tracked: underscore machinery (except `_producer_policy_lines`, a person's edits), `dec_page_entries`, bare booleans.
+- **Who:** `RequestContextMiddleware` (pure ASGI, innermost) + `auth_service.get_current_user` notes the user;
+  `arq_routes.submit_arq` notes the questionnaire (client); no request = system. `fact_history.acting(...)` overrides.
+- **PII:** from / to / sources are Fernet ciphertext (`utils.crypto`); a value over 20,000 chars is stored as a digest +
+  head. Read back: `GET /api/fact-history/{session_id}?fact_key=` (owner only; unknown fact = empty list, bad key = 400).
+- **E&O record:** `get_audit_trail_export` returns `fact_lineage`; the download prints FACT HISTORY (EVERY VALUE CHANGE).
+  UI: a "History" link on the SQS panel's evidence provenance popover (the one existing per-fact detail).
+- Packages created before today start their history at their next change (no backfill - deliberate).
+
+**2. ARQ bot (Form Assistant) usage** (`services/arq_assistant_usage.py`). One row per `POST /api/arq/chat/{token}`:
+questionnaire, package, owner, the question open (only when it IS one of the questionnaire's field ids), outcome
+(answered / refused / error, `detail`: out_of_scope / link_expired / already_submitted / empty_reply / llm_error), model,
+prompt / completion / cached tokens, latency. NEVER the client's message or the reply. No extra model call: the counts
+come back through `config.settings.LLM_USAGE_SINK` (a contextvar the OpenAI wrapper fills when set). The decline
+("refused, out_of_scope") is a deterministic first-sentence pattern - an approximate count. A rate-limited request
+(429 before the link is read) is not recorded. Producer: `assistant_uses` per row of `GET /api/arq/list/{session_id}`,
+`assistant_usage` on `/api/arq/status/{arq_id}`, "Form Assistant used N times" in Sent Questionnaires;
+`GET /api/sessions/{session_id}/assistant-usage`. Admin: `GET /api/admin/arq-assistant-usage?days=&top=` (ADMIN_EMAILS /
+admin_users) - totals, by day, by outcome, top fields, top packages.
+
+**3. Archival / retention** (`services/package_archive.py`). State on the row: `data.archived_at` / `archived_by` /
+`archive_reason` (no column). `POST /api/sessions/{id}/archive` / `/unarchive` (owner only, idempotent, audit event;
+archive refused while a generation or an added document's AI reading runs; unarchive sets `updated_at` = now so the next
+sweep never deletes a package just brought back). Dashboard: Active / Archived filter (`GET /api/sessions?archived=1`),
+Archive / Unarchive on each card, archived cards have no Delete; an opened archived package shows a read-only banner
+with Unarchive; the client's questionnaire link reads "closed".
+- **Read-only, one rule, two layers:** `ArchivedPackageGuard` (ASGI, inside CORS) refuses every POST / PUT / PATCH /
+  DELETE naming an archived package - path `{session_id}`, a questionnaire / signing `{token}`, `{arq_id}`, or the JSON
+  body's `session_id` - with 409 `{"detail", "code": "package_archived"}`. `NOT_A_PACKAGE_CHANGE` = preview, active
+  form, download note, the client's Form Assistant, the archive door. Backstop in `upd_processing_session`
+  (`door_verdict`): only a read's bookkeeping (`last_downloaded_at`, `package_counted_at`, `active_form_id`) lands; any
+  other write inside a GET is dropped (the read still works), outside one refused (409) - PDF bytes are checked before
+  they are saved. The archive keys are stripped from every other write.
+- **Anti-rot:** `test_every_write_route_is_placed_by_the_guard` walks every write route `main.app` mounts (83: 43
+  exempt, 40 guarded); `test_every_write_route_refuses_an_archived_package_with_a_409` sends each of the 40 a request.
+- **Retention** (`run_retention_cleanup`, opt-in `SCHEDULER_CLEANUP_JOBS`): ONE due predicate
+  (`EXPIRED_PACKAGE_IDS_SQL`) for the package, its PDFs, signing requests and lineage - active and untouched past
+  `SESSION_RETENTION_DAYS` (180), or archived past `ARCHIVED_SESSION_RETENTION_DAYS` (730, floored at the active days,
+  counted from `archived_at`; an unreadable `archived_at` is never due). `PACKAGE_AUTO_ARCHIVE_DAYS` (0 = off) archives
+  idle packages first, only those still inside the active window. `ARQ_ASSISTANT_USAGE_RETENTION_DAYS` (365).
+  Facts retention now also blanks lineage values of a tombstoned package (`PURGE_VALUES_SQL`). Package delete and
+  account delete take the lineage (and, for the account, the usage rows).
+- **Pre-existing defect fixed on the way:** `run_facts_retention` passed the tombstone as JSON TEXT, which the pool's
+  jsonb codec encoded again - stored as a JSON string, so `->>'purged'` never matched (re-tombstoned nightly, and no SQL
+  could find a purged package). Now passed as a dict; the purge SQL also finds the old string shape.
+
+**Schema** (`init_db` only, additive, idempotent): tables `fact_lineage`, `arq_assistant_usage`; 5 indexes.
+**Env vars:** `ARCHIVED_SESSION_RETENTION_DAYS` (730), `PACKAGE_AUTO_ARCHIVE_DAYS` (0),
+`ARQ_ASSISTANT_USAGE_RETENTION_DAYS` (365); `SESSION_RETENTION_DAYS` now floored at 1.
+**Deliberately not done:** no lineage backfill of old packages; no lineage of form BOXES (`field_source_audit` keeps
+those) or of underscore sidecars; the worker's writes say "system" (production runs the sync route); facts retention
+still purges an archived free / essentials package's facts by its own clock (owner's call - see below); dashboard stats
+still count archived packages; the client's message is never stored.
+**Owner calls:** (1) should an archived package's facts outlive the 180-day free / essentials facts purge? (2) a
+default for `PACKAGE_AUTO_ARCHIVE_DAYS`? (3) should Delete be allowed on an archived package (refused today)?
+**Tests:** `tests/test_lane_c_27oct.py` (83: real doors against an in-memory store, real routes via TestClient, the real
+`main.app` middleware stack). Updated: `test_scheduler_runs_on_render_15oct.py` (pinned the old due predicate - the TEST
+was outdated by the archive rule), `test_dec_index_purge.py` (fact_history names `dec_page_entries` only to skip it).
+Covering files re-run (~3,480 tests): green except two in one long batch - `test_dec_index_purge` (fixed, above) and
+`test_c3_sqs_integrity::test_the_dismiss_credit_response_survives_its_own_logging`, a source-reading test that passes
+alone (it read `audit_routes.py` while another lane was editing it). Full suite NOT run (shared tree).
+Real-SQL check on a throwaway local Postgres (scratchpad, port 55432):
+28 of 28 - DDL twice, lineage + page, ciphertext at rest, archive split / refusal / download, retention boundaries
+(archived 400 days idle kept, archived 731 days deleted with lineage, active 400 days deleted, garbage `archived_at`
+kept), auto-archive window, unarchive clock, facts purge (both tombstone shapes), usage counts / admin summary.
+Frontend build clean.
+
+### Z44-A. Lane A (27 Oct): seven open ends closed as classes (P15-6, 130 loss periods, 101 limits, add-form re-stamp, Z31-W, per-building client holds, the per-form fallback)
+Offline, uncommitted. Tests: `backend/tests/test_lane_a_27oct.py` (76, real schemas, live f575160b shapes). Covering files
+(112 files, ~7,500 tests) run in 3 shards: every failure triaged - see the end of this entry.
+
+**1. P15-6 - a Yes / No about ONE POLICY answered from another policy's text.**
+- Root cause: rules (a) / (a2) / (d) judge amounts, dates, identifiers, descriptions and the claims-made tick; every other
+  Yes / No box (all `/Btn` ticks, every Y/N question) passed the evidence gate on a quote that is IN the documents, never
+  checked for WHICH document. The 126 "aggregate applies per project" stood on the UMBRELLA's forms schedule.
+- Fix: `scoped_evidence.foreign_evidence_answers` (rule (h), reason `ANSWER_FROM_ANOTHER_POLICY`), last in
+  `out_of_scope_values`, which now takes the AI's `grounding` (`map_facts_to_form` passes `gpt_question_grounding`). An
+  AI Yes / No whose question is about the policy (`pdf_service._question_is_about_coverage`, the gate's own door) needs
+  its evidence - the grounding quote and its paired AI explanation - printed by a document that speaks for the box's line
+  (`witness_documents` + `_drop_reference_only`, as (a2)); a refused question takes its AI explanation. Section forms
+  only (125 / 101 / 25 and the frozen 160 / 138 not judged); ACORD 131's insured boxes skipped; evidence printed nowhere
+  is the gate's question. "A written ... policy" questions (126 / 186 safety policy, 141 EFT policy) are the
+  applicant's own document, not judged.
+- Not done: a reference-only document (an umbrella listing GL as underlying) still speaks when no GL document is in the
+  package - the existing (a2) rule. **Needs a live run**: stored answers carry no quotes; on the f575 / e66 replays rule
+  (h) fired on nothing (every Y/N move there is the replay's missing-quote artifact, kind `unanswered`).
+
+**2. ACORD 130 loss totals per policy period.**
+- Root cause: the boxes are per-period WC totals beside the prior-coverage rows; Z41 made them owned blanks because the
+  period is the row's printed YEAR (`PriorCoverage_EffectiveYear_<row>`, an AI value) - known only after the fill.
+- Fix: `pdf_service.wc_period_loss_values` (+ `_wc_terms`, `_wc_period_for_year`), written after every guard in
+  `map_facts_to_form` (label `filled`, like 125 TOTAL LOSSES). Period = the WC term that began that year (a term record),
+  else the WC anniversary when no record overlaps; the runs must cover it (`loss_run_period_start` .. end / valuation)
+  and carry WC at all; only WC claims by date of loss; a claim of no line or an undated WC claim that could fall in the
+  period, or a loss run's TOTAL row the detail rows do not add up to ("2023-2024 | All lines | 1 | 4200"), leaves the row
+  blank; an open claim with no reserve leaves the reserve blank; a package policy's claims are never WC. Re-stamp doors:
+  `arq_service._refresh_wc_period_totals` from `_restamp_changed_boxes` and a loss-table save
+  (`_restamp_schedule_into_forms`); a person's box stays; any other value with no total behind it goes blank (pre-Z41
+  forms held the old claim rows there).
+- Measured: f575 row A (year 2021) 12 / $12,000 -> 0 / $0 (the 2021-2024 run prints "2021-2022 | All lines | 0");
+  e66 row A (2025) blank -> 2 / $28,200 / $8,200 (SIM-WC-001 + 002); rows with no year blank.
+- Not done: coverage is the MERGED loss-run span - two runs covering different lines (a WC run to 2024, a GL-only run for
+  2025) would print a 2025 zero; a person's retyped prior YEAR in the editor does not refresh the row (no fact write-back).
+
+**3. ACORD 101 / policies table limits for lines with no limit fact.**
+- Root cause: `policy_lines.record_limits` read only limit FACTS; IM, EPL, D&O, EBL, liquor have none, so the EPL dec's
+  "(A) Aggregate Limit of Liability: $1,000,000" stopped at the verified index.
+- Fix: `policy_lines.dec_line_limits` / `_dec_parts`: a family with no limit fact reads the verified `dec_page_entries` -
+  entry line canons to the family, label names a limit and no premium / deductible / retention / sublimit, one amount,
+  never a label printed with two amounts, never an entry under another policy number. GL / auto / WC / umbrella / crime /
+  cyber keep their facts only (C23). Survives the purge: stored at the merge beside the auto liability reading
+  (`extraction_pipeline`, `DEC_LINE_LIMITS_KEY` = `_line_dec_limits`, in `_GAP_FILL_FACTS_EXCLUDE` - prompt byte-identical,
+  improving-ll.md C112). A producer-added line beside the one document policy leaves it its dec limits.
+- f575: EPL "$1,000,000 aggregate" on the table and the 101; IM and Crime stay blank - the package prints them ONLY as
+  premiums (correct, not a gap).
+
+**4. A form added after generation re-stamps the forms already generated.**
+- Root cause: `form_addition.add_form_to_session` generated the one form and touched nothing else, so every box whose
+  answer depends on the package's form set kept the old answer.
+- Fix: `arq_service.restamp_for_package_change(generated, facts, old_ids, new_ids)` from the add-form door, in the same
+  write: the re-stamp door every fact change uses with only `_package_form_ids` moving (125 REMARKS -> the 101 pointer,
+  125 sections-attached ticks, 101 blocks...), plus an AI value in a box an owner now claims blank (`_owned_blank_claim`,
+  e.g. the 186 starred questions once a 126 is added). A person's box never moves. No remove-form path exists after
+  generation (select-forms-bulk refuses once forms exist), so there is no reverse to wire.
+
+**5. Z31-W open ends.**
+- (a) `_question_explanation_pairs` paired a checkbox with any following description by position. Now a checkbox pairs
+  only with its OWN description (`_checkbox_owns_description`: the box's name with "Indicator" spelled as the
+  description), primary and fourth-fallback rules. All 17 schemas: 67 checkbox pairs -> 66 (only the 131 "named insured on
+  fire policy" / insured-liability OTHER description pair gone). Changed test: `test_form_fill_1sep.py::
+  test_x1_the_widening_did_not_disturb_the_existing_pairs` 131 count 26 -> 25 - the TEST pinned the coincidental pair.
+- (b) `_cells_of_rows_without_a_vehicle` in `_enforce_post_fill_guards` (stamp and every re-stamp): a vehicle row whose
+  VIN / year / make / model are all empty, at a position the vehicle schedule does not reach, carries no value in ANY
+  per-vehicle column (a Vehicle_* box printed on every row the naming cells print on - the 127 "modified equipment"
+  question table, rows A-B, is not one), whatever the source. Only USE ticks printed there today. Changed test:
+  `test_form_improvement_11sep.py::test_no_witness_means_no_opinion` - its fixture had a class code on a vehicle-less
+  row A; given a VIN (the TEST's fixture was caught by the new rule, its own question unchanged).
+- (c) `pdf_service.ai_values_a_fact_change_refuses` (+ `arq_service._rejudge_ai_boxes` / `_record_rejudged`): after a
+  fact change every form's AI values are re-run through the fact-reading AI guards (`refuse_non_answers` - the rating
+  date -, `drop_role_mismatches`, `_refuse_misplaced_ai_values`, `_drop_unstated_prior_mods`) on the form as printed
+  before and after, same (absent) text both times; only a newly refused value is blanked and joins `guard_blanks`. In
+  `_restamp_changed_boxes` (answers, confirm-in-editor, undo, policy lines, document remerge) and `propagate_fact_edits`
+  (the EDITED form included - its print before the edit is rebuilt from the facts before). Cost measured on f575 (11
+  forms, loaded machine): ~1 s of a ~16-23 s re-stamp.
+
+**6. A held client answer about one building of several.**
+- Root cause: the client questionnaire already splits COPE questions per building (Z33) and writes "@locN" answers to
+  the row; but `client_answer_review.resolve_client_answer` sent an accepted hold to the producer door as a PACKAGE fact,
+  and an old / one-building-at-sending package-level COPE answer on a 2+ building package was written as one package value.
+- Fix: accept of "<fact>@locN" -> `_apply_building_answer` (row check `premises_interest.row_is_still`, `write_building_answer`
+  as the producer's, `_restamp_building_row(label=)` that building's boxes only, `derive_package_cope`); a moved row is
+  refused and the hold kept. A package COPE fact on 2+ buildings is never one value: the client apply HOLDS it (kind
+  `per_building`, `arq_service._per_building_hold_reason` = the producer doors' `per_building_redirect`) and the accept
+  refuses with "enter this for each building in the location table". Building format holds now carry the row keys.
+- Not done: a per-building hold the producer then enters in the table is not auto-released (Keep document value dismisses it).
+
+**7. The per-form fallback.**
+- Root cause: `process_single_form` with no shared answers ran `map_facts_to_form`'s own whole-document, unscoped gap fill.
+- Fix: it asks `shared_gap_fill(session, [form_id])` (the one line-scoped door, absent sections not asked); nothing back
+  = deterministic only. The AST pin (`test_client_retest_24sep`) stays green. improving-ll.md C112.
+
+**Covering tests:** 112 files. Re-run alone, 10 of 23 shard failures passed (load / concurrent-edit flakes). Of the 13
+real: 9 in `test_choice_electric_policies_table_7oct` (7, six of them cyber "not one amount") / `_policies_7oct` /
+`test_brent_19oct_expiring_policies` and the 127 fence test - the TESTS pinned EPL's blank limit or a vehicle-less row (updated, or the code narrowed: crime / cyber keep
+their facts, a producer-added line keeps the document policy's dec limits); 3 not this lane's code (other lanes' files):
+`test_build22_gl-window` x2 (`sqs_service` GL mismatch items) and `test_h1_coverage_gap_closure::test_the_gate_strips_
+only_an_INFERRED_period` (`extraction_service._gate_inferred_payroll_period`).
+
+### Z44-B. Lane B (27 Oct): one GL door, one person door, name answers, parsing leftovers, unread-answer log, credit stacking, DC confidence
+Offline, uncommitted. Tests: `backend/tests/test_lane_b_27oct.py` (192, adversarial first). Note for the Z44-A entry
+above: the 3 failures it names (`test_build22_gl-window` x2, `test_h1_coverage_gap_closure::
+test_the_gate_strips_only_an_INFERRED_period`) were this lane's, and are resolved below (TEST was wrong in each).
+
+1. **GL class codes - one door.** Root cause: `cross_form_validator` (codes vs operations, WC/GL alignment, the ACORD
+   101 trigger) and `sqs_service._is_ops_class_code_mismatch` read `gl_class_codes_by_location` alone, so codes in
+   `gl_class_code_schedule` (the GL window, Z31; the declarations' class table) were invisible; the WC/GL alignment
+   also searched `str(rows)` (a payroll 540300 voted as class 5403, a location's "Home office" as clerical work).
+   Fix: all four ask `sqs_service.gl_class_codes_present` / `gl_class_codes`, and the new
+   `gl_classification_text` (the GL rows' WORDS, location cells and digits out); WC codes read as tokens
+   (`_class_code_tokens`). Anti-rot: `test_no_new_direct_reader_of_a_gl_home_outside_the_register` harvests every
+   value read of either GL home; each remaining one is registered with the different question it answers.
+   NOT done (owner's call): `sqs_service.cross_validate` and `form_service.match_forms_deterministic` read the
+   by-location home too - both feed the FORM RECOMMENDER (ACORD 101 escalation), owner rule 8 Oct. WC has one
+   home (`wc_class_codes`); no second home found. `cover_service._gl_classifications` (the lite cover prompt's
+   "as the declarations print them") left as is - changing it changes an LLM prompt's input.
+   D6: 0 of 12 (the panel's codes are in the by-location home). Direction on other packages: a package whose codes
+   live only in the schedule can now get the -15 / the GL warnings (down); a by-location home beside unmapped
+   schedule codes gives no verdict (rule 3, up).
+   Changed tests: `test_build22_gl-window` x2 pinned the one-home reading - TEST wrong (it pinned the defect).
+2. **"A person put this value" - one door.** Root cause: Z31-P's open end - ~8 readers kept private source sets
+   (with "client", "human", "user", "manual", "cross_form_conflict", which no code writes on a fact) and ~15 form-box
+   label checks repeated `("producer", "client_arq")`. Fix in `fact_state`: third question `put_by_person` (typed or
+   picked in DC, not a confirm-or-correct of a document's value, not the account) + `is_person_value_source`;
+   `PERSON_VALUE_SOURCES`; box labels `PERSON_BOX_LABELS` / `typed_box`. Routed: put - `insured_scope._is_human`,
+   `cross_form_validator._umbrella_dates_are_proposed`, `coverage_evidence._human_recorded_state`, the pipeline's
+   receiving-carrier re-check, `umbrella_layers._person_sourced`, `extraction_service._PERSON_FACT_SOURCES`,
+   `pdf_service._PERSON_SOURCES`; typed - `issue_registry._is_human_supplied` (+ its twin in
+   `recalculate_session_scores`), `arq_service._answer_provenance`, `questionnaire._fallback_display`,
+   `loss_history_state` period check, `ai_answer_guards._PERSON_SOURCES`, `pdf_service._NO_LOSS_HUMAN_SOURCES`,
+   `_drop_agency_as_prior_carrier`, `fill_claim_rows_from_spreadsheet`; box labels - 7 sites in `arq_service`,
+   `policy_lines` x2, `needs_attention` x2, `session_documents`. Dead `loss_history_state._HUMAN_SOURCES` removed.
+   Kept separate, named: `pdf_service._TYPED_VALUE_SOURCES` (casing counts the account) and
+   `extraction_service._PERIOD_NAMED_SOURCES` (our derivation names a period) - both now built from the door.
+   `_drop_agency_as_prior_carrier` routed to TYPED (not put) to keep its answer identical. Anti-rot: no set / tuple
+   literal of person sources outside `fact_state`. No answer moves on any shape the code writes.
+   Changed tests (TEST wrong - pinned sources no writer produces): `test_inferred_value_gates_20260903` ("client",
+   "human"), `test_h1_coverage_gap_closure` ("client"), `test_live_run9_fixes_15sep` ("cross_form_conflict").
+3. **A name question is answered by a name.** Root causes: (a) the required-fact gate (`interpret_answer` 2b) read
+   only a WHOLE-answer absence token while step 4 reads "None at this time" / "None currently" as an absence, so
+   the applicant's legal name (and the effective date, mailing address, lines of business) stored "there is none";
+   (b) no name check on first-party names - "Same as above", "FIO", "Owner" were stored as the name.
+   Fix: one `_reads_as_absence` for both steps; step 6c0 refuses `is_party_placeholder` / `is_party_role_label`
+   whole values on every `normalization.is_party_name_fact` (new, from the key's shape; carrier website / narrative
+   excluded); back-references added to `_PARTY_PLACEHOLDERS`. Doors: producer card + resolve-issue (via
+   `_validate_producer_answer`), DC confirm (`validate_confirmation`), client questionnaire (HELD,
+   `_answer_check_refusal`, `NAME_REFUSAL_REASONS`), editor write-back (`form_routes.update_pdf`: a non-name stays on
+   the box, never the fact; an absence clears the name), the account agency name. NOT done (owner's call): an
+   absence on an optional Tier 1 name ("None" for contact / producer name) still counts as answered - Tier 1's
+   deliberate rule.
+4. **Rare parsing leftovers** (each reproduced on a realistic shape first). (a) the 25 Oct c/o fix held on one line;
+   a "C/O <insurer>" in ANOTHER column of the line above was missed - `insured_scope._care_of_party`. (b) an officer
+   pipe table running into a same-width table whose header has no NAME word ("CONTACT | ROLE | PHONE", "NAMED
+   INSURED | ENTITY | FEIN") gave officers its titles - `extraction_service._starts_another_table`. (c) an applicant
+   whose own name reads carrier-shaped ("Mutual Plumbing Company", "Farmers Mutual Grain Co-op") was refused as an
+   insurer on its own interest / owner boxes (`pdf_service._insurer_in_a_party_box`,
+   `field_mapping_integrity._classify_value`) and read as its declarations' page-header insurer
+   (`_page_header_insurers`, `_contract_carriers_from_page_headers`) - one door `insured_scope.
+   is_the_insureds_own_name`. (d) "Home Office:" under the insured's own name / "Named Insured:" line with a carrier
+   letterhead two lines up was dropped as the carrier's - `_names_the_insured`. (e) the vehicle block reader kept its
+   own non-answer words: "USE: N.A." became policy use "N", "USE: NOT APPL" "Not Appl" - it now reads every cell
+   through `pdf_service._use_cell_reading` (`_use_cell_meaning`), which also takes `is_placeholder_text` ("UNK").
+5. **Unread answers persisted** (`services/unread_answers.py`, table `answer_fallthroughs` in `init_db`, admin
+   `GET /api/admin/unread-answers`). Decision: the RAW answer is never stored (it can be anything - a payroll, a
+   name, a phone); its SHAPE is (digits "#", e-mails "<email>", letter-digit IDs "<id>", lower-case, 80 chars),
+   encrypted at rest (`encrypt_field`), counted in one row per fact + kind + shape keyed by SHA-256. The reader only
+   NOTES (sync - it may not schedule a task); the person doors flush (answer, resolve-issue, client submit / apply,
+   narrative questionnaire); the follow-up preview is not counted (`not_counted`). No user-facing screen.
+6. **Dismiss-then-fill stacked.** Measured through the real answer route: `total_revenue` dismissed (+6) then
+   answered "None" scored 72 where the same answer without the dismissal scored 66 - `active_score_credits._filled`
+   read only the value, and an absence stores "" with `value_state`. Second defect: the dismiss route (and the
+   reopen re-sync through it) read `data->'facts'`, which is the encrypted string, so NO credit ever retired there.
+   Fix: `_filled` counts explicit_no / not_applicable and the GL homes through `gl_class_codes_present`;
+   `audit_routes._readable_facts` decrypts. Reverse (fill then dismiss) and reopen: same predicate, tested. A real
+   value already retired the credit (unchanged). D6: no panel package has a dismissal - 0 of 12.
+7. **DC HIGH confidence.** `_value_completeness` = structural + proxy (`_completeness_parts`); HIGH now also needs a
+   STRUCTURAL lead of `_COMPLETENESS_MARGIN` (a ZIP+4 / ZIP / state / street number, a full FEIN), so word count or
+   length can reach only medium (no pre-selection). Nothing becomes more confident. Rankings unchanged.
+   ANALYSIS (no change) - Drive Other Car: the extraction prompt still files a DOC named individual (and its
+   territory) under `auto_drivers`; `named_individuals.separate_named_individuals` moves them after `merge_facts` in
+   the pipeline before every consumer. Still depending on the prompt's pointing: the auto territory fence witness
+   (works from either home - `_schedule_code_witnesses` derives the line from the key name); the per-document facts
+   (never separated); `session_documents`' two merge re-runs (`merge_only_keys`, the index rebuild), which bypass the
+   separation - no live defect found. Recommendation: leave the prompt (a PROMPT_VERSION bump re-reads every package).
+Named, not fixed (outside this lane): `session_repository` search filters `data->'facts'->'applicant_name'` in SQL -
+facts are encrypted, so the name search cannot match an encrypted row.
+
+### Z44-C-R. Review of Lane C (27 Oct)
+
+Adversarial pass over Z44-C (fact lineage, Form Assistant usage, archival). Hostile inputs, a 20,000-case diff fuzz, the
+real `main.app` middleware stack, and the throwaway Postgres (port 55432, never the shared DB). Four defects confirmed and
+fixed; the rest refuted. Tests: `tests/test_lane_c_review_27oct.py` (11, each failed before its fix).
+
+**Confirmed and fixed**
+- **R1 (medium) - the archive guard did not read every body FastAPI reads as JSON.** It buffered a body only for
+  `Content-Type: application/json` WITH a `Content-Length`. FastAPI also parses a body with NO content type, any
+  `application/*+json`, and a chunked body. Those requests reached their handler on an archived package. Behind
+  `/api/audit/dismiss` sits the dismiss credit's raw `jsonb_set`, which no write door backstops. Fix:
+  `package_archive.is_json_content_type` copies FastAPI's own rule, and `_buffer_body(receive, limit)` reads up to the
+  2 MB cap whether or not a length is declared. A longer body is not judged: the bytes already read are replayed and
+  the rest streams through unchanged (pinned byte for byte). Tests: no content type, `+json`, chunked, replay, an
+  active package still reaches its handler.
+- **R2 (medium) - the nightly questionnaire reminder e-mailed the client of an ARCHIVED package**, whose link then reads
+  "closed". The manual Remind is guarded; `scheduler_service.run_arq_auto_reminders` is not a request. Its query now
+  leaves out any arq whose package is archived (`NOT EXISTS ... archived_at IS NOT NULL`). On the throwaway Postgres
+  the archived package's arq was mailed before the fix and is not after; once unarchived it is mailed again.
+  (`arq_service.send_arq_reminder` would be the deeper door, but it is Lane A's file.)
+- **R3 (medium) - an Essentials producer could not open an archived package.** The lite screen POSTs
+  `/api/lite/generate-internal/{id}` on every visit. The guard refused it, so the read-only view showed "Could not
+  score submission". On an archived package the route now serves the score stored at the last generation and writes
+  nothing (no gap fill, no `upd_processing_session`, no usage count). With nothing stored it gives the archive 409.
+  The response is built by one helper (`form_routes._lite_score_response`) for both paths. The route moved to
+  `NOT_A_PACKAGE_CHANGE`. `test_every_write_route_refuses_an_archived_package_with_a_409` pinned `checked >= 40`;
+  the TEST was outdated by this deliberate exemption and now reads 39.
+- **R4 (low, performance) - document attribution ran on the event loop inside the write's row lock.** Measured: about
+  0.3 s for 264 facts over 720k characters of documents, growing with document size (2.5 s for 313 facts over 1.8M).
+  `record_fact_changes` now runs `build_rows` in `asyncio.to_thread` when documents are attached. The actor is read
+  first, on the request's own context. Writes without documents stay inline.
+
+**Measured, no change**
+- Diff + rows per `upd_processing_session`: real package (64 facts) no-op 2.2 ms, one change 3.9 ms. Pathological
+  package (3,064 facts, a 400-row vehicle list, a 1,000-row loss list) no-op 74 ms, one change 77 ms. The full first
+  write of that package takes 325 ms and caps at 2,000 rows (`_MAX_ROWS_PER_WRITE`).
+- Fuzz (20,000 random envelope / list / dict / bool / None fact sets): a JSON round trip never diffs, and every row
+  decrypts. Change types are always in the vocabulary.
+
+**Refuted**
+- A facts write that bypasses the doors: the only raw writers are bookkeeping / score / archive / retention / delete,
+  and all are listed in the AST test. No variable table names, no other `jsonb_set` on facts.
+- Shallow-copy aliasing of the "before" facts: the merge builds a new dict, and `delete_facts` pops from it, not from
+  the copy.
+- The `_encrypt_facts` mutation: it copies.
+- A lineage failure undoing the write: the savepoint holds (Lane C's real-PG measurement, and re-run green).
+- A Form Assistant sink leaking across requests: it is a contextvar, set per request and reset in `finally`. No
+  response cache exists. A retried call appends once, on the success. A missing `usage` gives zeros. The client's
+  words are never stored.
+- History endpoint scoping: another owner gets 403 and an unknown package 404.
+- Facts retention re-purging: run twice on Postgres, the second run purges 0. An old string tombstone is re-written
+  once as an object (harmless) and its lineage is still found.
+- Archive during generation: refused while a run is live. A later run's write is refused by the door, which is the
+  intent.
+- Unarchive then an immediate sweep: `updated_at` = now, so the package is kept.
+- Frontend: `vite build` clean (scratch out dir). No em-dashes in the added UI text.
+
+**Left for the owner** (beyond Z44-C's three calls)
+- PDF bytes are saved before the row lock. If an archive lands between the pre-check and the lock, one PDF can still
+  be overwritten while the row write is refused. Narrow; it needs a lock-ordered PDF write to close.
+- A JSON body over 2 MB on a body-named route is not judged by the guard; the write door is the backstop.
+- An archived package's `count-usage` / narrative-draft POSTs get a 409. Both are silent or user-triggered; nothing
+  breaks.
+
+Tests run: `test_lane_c_review_27oct.py` 11/11, `test_lane_c_27oct.py` 83/83, and the 61 test files that touch the
+session doors, the scheduler, the archive or the lite route: 4,084 passed, 0 failed.
+
+### Z44-A-R. Review of Lane A (27 Oct)
+Adversarial review of the seven Z44-A fixes, offline, uncommitted. Tests: `backend/tests/test_lane_a_review_27oct.py`
+(11, each written failing first). Related files re-run green: the lane's own + 11 scoped-evidence / misplaced-guard
+files + the dec-index purge and prompt-prefix files. Read-only probes on stored f575160b / e66d68d7 / 6c420291 (no writes).
+
+**R1 CONFIRMED, fixed - rule (h) refused correct answers whose box NAME reads as another line (high: a correct Yes
+blanked).** `box_line` canons the box's own name, so ACORD 141's `CrimeCoverage_OutsidePremisesOtherProperty_*`
+ticks read as Property (the crime dec - the box's own policy - was no witness), 126's `AdditionalInterest_
+WorkersCompensationCarriedCode_*` as WC, and on ACORD 131 every `UnderlyingCoverage_*` indicator ("the underlying
+policy includes liquor / vendors / CCC / pollution liability") read only the UMBRELLA's documents - the underlying GL
+dec that prints "CG 00 33 LIQUOR LIABILITY COVERAGE FORM" could never answer it. Measured over the real schemas: 18
+judged boxes on 126 / 131 / 141 had a box line different from the form's line, plus the 131's 22 underlying
+indicators with no line in their name. Fix (`scoped_evidence.foreign_evidence_answers`): a document that speaks for
+the FORM's line speaks for its questions too (witnesses = box line UNION form line); ACORD 131's `Underlying*` boxes
+are not judged by (h), as rule (d) already leaves the 131 alone (its underlying sections are about other policies by
+design). P15-6 (126 per-project from the umbrella) still refused - pinned.
+
+**R2 CONFIRMED, fixed - 5c re-judge blanked a correct AI value for want of documents (medium).** The re-stamp doors'
+fact views carry no `scoped_evidence` documents, so `_refuse_misplaced_ai_values`' percent rule - whose escape is "the
+documents print that dollar amount" - read "not printed" after a percent fact changed: answering coinsurance 100%
+after forms blanked a "$100" deductible the dec prints (generation, with the documents, keeps it). Fix: the rule takes
+`documents_required`; the re-judge passes it, and with no documents attached it gives no verdict. Generation and its
+existing tests (`test_z41_lane2`, `test_z42_review_c`) unchanged. A fuzz of nine typical fact changes (dates,
+coinsurance, year built, employees, revenue, X-mod, % subcontracted, name, umbrella limit) over every AI box of the
+three stored packages' 33 forms: 0 refusals after the fix (the text rules of `refuse_non_answers` already stand down on
+empty text).
+
+**R3 CONFIRMED, fixed (lead's call: a wrong value, blank-over-wrong) - ACORD 130 period totals covered by another
+line's loss run.** The Z44-A open end: `wc_period_loss_values` judged coverage by the MERGED `loss_run_period_start` /
+`_end`, the span of every run, so a WC run to 2024 beside a GL-only run for 2025 printed "0 claims" for the 2025 WC
+period. Fix: `pdf_service.wc_loss_run_spans(docs)` - the own experience period of each ACTIVE document that is a WC
+loss run (its own loss rows name WC, or state "All lines" / "All coverages" - an account run; or its own coverage
+rows are WC) - stored at the merge (`extraction_pipeline._finalize_pipeline`, beside `_line_dec_limits`, key
+`WC_LOSS_RUN_SPANS_KEY` = `_wc_loss_run_spans`, in `_GAP_FILL_FACTS_EXCLUDE` - prompt byte-identical) because the
+re-stamp doors have no documents. A period is covered only when one WC span covers it. No stored spans (a package
+merged before this change) = blank until its next re-merge (the safe direction). Measured on the stored rows' own
+documents: f575 row A (2021) 0 / $0 / $0 and e66 row A (2025) 2 / $28,200 / $8,200 - unchanged (both are "All lines"
+account runs); 6c420291 row A (2025) blank (no WC claim in its runs - unchanged). Changed test:
+`test_lane_a_27oct._facts130` now carries the WC run's span, and the "no period" case pops the span - the TEST fixture
+encoded the merged-span rule this replaces. Tests R3 x5 in the review file.
+
+**Refuted / held (each probed):**
+- (h) a combined package PDF (one document, GL + umbrella rows) speaks for both - no false refusal; a person's tick is
+  never in the AI set; an applicant question / the applicant's own written policy not judged; no grounding = no verdict.
+- (2) 130 periods: boundary claims (`eff <= date < exp`), an undated other-line claim (ignored), an undated WC claim or
+  an unlined claim in the period (blank), an "Open" typed in the table (`open_code` "OPEN"), two WC terms beginning in
+  one year (blank), a person's box (kept) - all hold.
+- (3) dec limits: two amounts in one value, "Included", "See schedule", "$1,000,000 (shared with D&O)", a deductible
+  or retention label, another policy's number - all give no limit (`parse_money` is strict; labels gated).
+  `_line_dec_limits` stays out of the gap-fill facts block.
+- (4) add-form: no forms -> NOT_GENERATED_YET, twice -> ALREADY_PRESENT; only boxes whose answer moves with the
+  package move; person boxes skipped; owned-blank clear only on AI labels.
+- (5a) 66 checkbox pairs, each its own description. (5b) VIN-only / year-only rows are vehicles; rows the schedule
+  lists are never judged; the re-stamp applies the guard only to PLANNED moves, so a person's typed cell in a
+  vehicle-less row is never blanked.
+- (6) 1 building -> package write; moved row -> refused, hold kept; a pre-22 Oct hold with no row keys is written at
+  its position (`row_is_still` True by design); the accept re-scores through the existing recalculation.
+- (7) the fallback: raise / {} -> deterministic only; on the normal path no second LLM call (every asked form gets an
+  entry from `combined_gap_fill`; a form with no gaps re-computes gaps only).
+- Whole-file rewrites: `pdf_service.py` against HEAD shows only Lane A's additions and Lane B's `fact_state`
+  vocabulary swaps (9 lines); every function named in Z43 - Z44 (`_ACORD140_GATE_HARD_FIELDS`, `_resolve_vehicle_
+  deductible_cell`, `_resolve_vehicle_garaging_cell`, `hired_pd_basis_not_stated`, `read_premises_buildings`, ... 59
+  names) is present; the three test files carry only their one-line pin changes.
+
+**For the owner (judgement calls, not changed):**
+- 130: a period with no term record is assumed to start on the CURRENT WC anniversary. A prior carrier with a
+  different anniversary (a mid-year rewrite) would be totalled over the wrong window. Blanking those rows would undo
+  f575's row A. (The merged-span item is now R3, fixed.)
+- (h) `_question_is_about_coverage` reads "coverage / limits / insurance" anywhere in the question, so 126 "Do
+  subcontractors carry coverages or limits less than applicant?" and "Has any ... been excluded ... from any previous
+  coverage?" are judged as policy terms. Evidence printed only by the umbrella dec is then refused. That is defensible,
+  but these questions are about the insured's practices and history, not the GL policy's terms.
+- Add-form: when the add-form shared pass returns nothing for the form, `process_single_form` asks the door once more
+  (error path only, at most one extra scoped pass).
+
+### Z44-B-R. Review of Lane B (27 Oct)
+Adversarial pass over the seven Z44-B fixes, offline, uncommitted. Tests: `backend/tests/test_lane_b_review_27oct.py`
+(131, each case written failing first). Related files re-run green: every test file that reads `interpret_answer` /
+the name doors / `validate_confirmation` (29 files, 4,443 passed), the officer-table files (17 files, 1,347 passed),
+the insured-scope files (9 files, 678 passed), Lane B's own 192. Read-only probe on 5 stored packages (f575160b,
+bcfd175b, e66d68d7, 6c420291, ff2ba3e5): `drop_office_addresses` HEAD vs now, 0 of 71 documents differ.
+
+**R1 CONFIRMED, fixed - a company name opening with an absence word was no name (high: a typed name cleared).**
+"No Limits Roofing LLC", "Nothing Bundt Cakes", "Zero Gravity Inc", "Never Again Ltd", "None Such LLC": the short-answer
+absence rule reads an absence token in the first two words. Lane B made the required gate read the same rule, so the
+APPLICANT's legal name was refused ("cannot be marked not applicable"); on the DBA, contacts, carriers, holders and the
+landlord it was stored as "there is none" - and the editor write-back (`form_routes.update_pdf`) turned that ABSENCE
+into a cleared fact, so a producer typing the DBA "Nothing Bundt Cakes" emptied it. The account's agency name read the
+same way ("Nothing But Insurance" left the producer block blank). Fix, `answer_semantics` 3c / 0d, two structural
+conditions on a name fact only (`is_party_name_fact`): a closing legal-form designator ("... LLC / Inc / Co / Ltd")
+makes the answer an organisation's name, judged only by the name checks (6c0 / 6c, now one nested `_name_refusal`);
+otherwise the short absence fires only when every other word is an absence qualifier or a word of the fact key ("None
+at this time", "No DBA", "no prior carrier"). Non-name facts read exactly as before (pinned).
+**R2 CONFIRMED, fixed - a subtotal row ended the officer table (medium: officers lost their titles).**
+`_starts_another_table` (4b) read "| SUBTOTAL | | |" / "Partners | |" - one word, no digit, no officer title - as the
+next table's header; HEAD found the "Vice President" after it, Lane B found nothing. A header heads its title column
+too: a row with no words in the title cell is a break inside the table. Lane B's own next-table cases still end it.
+**R3 CONFIRMED, fixed - a bare "Insured" / "Applicant" word owned a carrier's home office (medium: wrong address).**
+`_names_the_insured` (4d) took any line using the word - "Insured: see schedule", an "Applicant Information" heading -
+between a carrier letterhead and "Home Office: <carrier address>" as the insured's line, so the carrier's home office
+stayed the insured's address (HEAD refused it). The line must now NAME the insured: one of its own names in a cell
+(label or not), or, with no own name known, an insured label carrying a party's name (`names_a_party`, not a
+placeholder / role / insurer).
+
+**Refuted / held (each probed):**
+- (2) the person door: every source the code writes (`producer`, `client_arq`, `user_confirmed`, `account`,
+  `derived`, document sources, `evidence_state: user_confirmed` on a document value) fed through each moved reader's old
+  set and its new question - the same answer on every one. The dropped `confidence == "client_arq"` reads: both writers
+  pair it with `source: client_arq`. `"cross_form_conflict"` is written only on QUESTIONS. Every moved reader is handed a
+  fact envelope (with `value`), never a bare row.
+- (1) GL codes: by-location only, schedule only, both, duplicates, envelopes, empty code cells, 4- vs 5-digit, a
+  location "Home office 456 Oak Ave ... 80202" (never a classification), WC as rows / a string / an envelope / a payroll
+  540300 (never 5403) - all as the doors say.
+- (5) `shape_of` on an SSN, FEIN, phone, e-mail, VIN, payroll, date: no digits / address / id survive; encrypted; admin
+  route behind `_require_admin`; a missing pool or a failed upsert puts the entries back and never raises; a full
+  recalculation (scoring probes, review plan) notes nothing.
+- (6) through the real answer route, 10 fields x "None" / "N/A": dismiss + answer = answer alone on every one; reopen
+  = never dismissed.
+- (7) rankings read the unchanged total; HIGH needs both leads, so nothing gained confidence.
+- (4a) a real mailing "C/O Smith CPA" is not an insurer's; (4c) "Grange Mutual Casualty Company" beside "Mutual
+  Plumbing Company" is still the insurer; (4e) SERVICE / COMMERCIAL / RETAIL / FARM / PERSONAL still read, N/A / NONE /
+  UNKNOWN never the policy use.
+
+**For the owner (named, not changed):**
+- (1) `_gl_code_tokens` reads ANY number in a free-text GL home (Z14's presence rule), so `gl_class_codes` on a string
+  home returns ZIPs / years / payrolls. The ops-mismatch rule then gives no verdict (safe); the WC/GL clerical check
+  would read a street number 8810 / 8742 / 8800 / 8820 as a clerical code. Pre-existing (HEAD searched the blob), rare
+  (the schema's homes are rows).
+- (4c) if extraction ever sets `applicant_name` to the CARRIER (the "carrier read as the insured" family), the own-name
+  door now exempts that carrier from the page-header binder and the party-box insurer guard. Speculative; no stored
+  package shows it.
+- (3) pre-existing, not Lane B: a name the uncertainty / N/A readers catch with no legal form ("TBD Construction",
+  "N/A Holdings") is still refused / read as not applicable; the per-vehicle row keeps "Na" for a "USE: N/A" cell (Z37's
+  rule, read as a non-answer downstream).
+
+### Z45. Owner's calls of 27 Oct + dashboard search (offline, uncommitted)
+- **Dashboard search reads the CURRENT applicant name.** The facts blob is one ciphertext, so the SQL `ILIKE` only ever saw
+  the upload-time `submission_label` - a name confirmed or edited later, or a package with no label, never matched. Now:
+  every facts write keeps a small ENCRYPTED copy of the name (`session_repository._encrypt_facts` -> `data.search_name`,
+  removed when the name is); `_matching_session_ids` reads only label + that copy, decrypts in the app and matches
+  ignoring case, punctuation and spacing (`name_matches_search`; a keyword with no letters/digits is literal - `%` / `_`
+  are no longer SQL wildcards). Old packages: the startup job `backfill_search_names` (batches of 25, each row tried
+  once, skipped under pytest, `SEARCH_NAME_BACKFILL=0` off) and, until it reaches them, the search fetches their facts in
+  batches of 20, caches the name by (id, updated_at) and back-fills the copy. Written by the server that decrypted it,
+  so the copy carries the same key as the facts (local and Render keys differ). No plaintext name added. The list shows
+  the copy when the label is empty (was "Unknown Applicant").
+- **ACORD 130:** a period built from the WC ANNIVERSARY (no term record of its own) prints only when a WC loss run's own
+  printed period runs on that anniversary (`pdf_service._same_anniversary`); else blank. A recorded term needs no check.
+- **Rule (h) (`scoped_evidence.foreign_evidence_answers`):** questions about the insured's practice or history -
+  subcontractors, sublet work, previous / prior coverage, declined / cancelled / non-renewed, tail, self-insured,
+  unpaid premium, common ownership, other insurance with this company - are not judged by the line's own documents
+  (`_asks_about_the_applicants_practice_or_history`). Policy terms (per project, "not covered by this policy") still are.
+- **Names:** "TBD Construction", "N/A Holdings", "Unknown Builders" are names: an absence word followed by 1-4
+  Capitalised words none of which defers, qualifies, names a coverage or a field (`answer_semantics._reads_as_a_name`).
+  "TBD - will send", "No previous coverage", "No DBA", "None - no agency", "Not Relevant" stay non-answers; field nouns
+  (dba / applicant / carrier / agency / landlord / holder) are absences on every name fact (`_FIELD_NOUNS`).
+- **Kept as is (owner):** archive behaviour (ask the client later); "All lines" loss runs count as WC coverage.
+- Tests: `tests/test_build_27oct_main.py` (now 77). Existing test changed: `test_lane_c_27oct::test_the_dashboard_lists_
+  split_on_the_archive` pinned the ILIKE query - the TEST was outdated by this change; the lineage writer list gains
+  `_backfill_search_names` (search_name only).
+- Search timing on the owner's account (1,106 packages, read-only, write-back off): 'choice' 47, 'orbin' 236, 'pinecrest' 2, nonsense 0, right names shown; cold 45 s (every package legacy - the startup backfill removes it), warm ~3 s. The page and its count now share one match for 5 s (`_MATCH_CACHE`). Suite 21,032 / 1 (known) / 19.
+
+### Z46. Reach 100 on ANY package (27 Oct night, owner: "the score must reach 100 if the user answers everything on the pre-form screen") - IN PROGRESS, offline, uncommitted
+**How it is measured.** `scratchpad/solve/solve.py` - a random-package solver: seed packages (Choice Electric, Orbin) with
+every person answer and saved table stripped, then mutated (facts and rows dropped, lines flipped, employees / business
+age / loss runs varied) and SOLVED through the page's own items and write doors (`review_plan._Sim` / `_apply`), round
+after round. A card with no answer is a DEAD END (Dismiss moves no score). Run 1 (old code): 7 of 30 reached 100.
+Run 2 (WC / auto questions): 17 of 30.
+
+**Classes found and fixed (each a class, not a package):**
+1. **Coverage gaps with no question** - "Employees are listed but no WC is carried" / "Vehicles are listed but no auto
+   coverage is carried" (-8 each) named no box. New answerable facts `workers_comp_arrangement` /
+   `auto_coverage_arrangement` (`answer_options.WC_ARRANGEMENT_OPTIONS` / `AUTO_ARRANGEMENT_OPTIONS`, `fact_registry`);
+   an answer retires the deduction (`sqs_service.coverage_deduction_items`).
+2. **The page's stand-in answers were junk** (`review_plan.probe_value`) - and the page's per-item points come from them:
+   "Yes" as a contact / applicant / producer name, "50" as a limit, building value, coinsurance, X-mod, SIR, hydrant
+   distance, months of restoration; every date "01/15/2027", so a card holding both term dates answered itself with a
+   term ending the day it starts (the backwards-term hard stop, 60). Now: a declared example per fact
+   (`fact_registry.EXAMPLE_ANSWERS` / `example_answer`, else the hint's own "e.g."); dates as a person answers them
+   (`review_plan._date_probe`: the proposed term a year long, an umbrella term following it, past dates in the past); a
+   limit under the scorer's threshold is answered AT the threshold (the limit applied for - reverses Z26's "never promise
+   points for a bigger limit", owner's 27 Oct rule); a gap the documents print one value for is answered with that value
+   (`_documents_value` - a made-up name / FEIN started a Data Consistency conflict).
+3. **The plan re-typed its own answers** - the umbrella card set the auto limit $1,000,000, then the Recommendations row
+   for the same box re-typed it "50". A box an item above answered stays (`_Sim.answered`).
+4. **A no-score notice held 85 in the plan** - `review_plan._released_cap` counted advisories (UM/UIM not specified,
+   ACORD 101 recommended) and form choices as holds; the scorer never does. Now only `_CROSS_ISSUE_TYPES`.
+5. **"Verify this figure" warnings a true answer could never clear** - coinsurance outside 80-100%, WC payroll vs revenue,
+   WC payroll vs total payroll, subcontracting vs WC payroll, state payroll vs total, umbrella term vs GL term, the
+   revenue-to-payroll ratio. `issue_registry.VERIFY_FIGURE_CODES` / `figures_verified`: once a person has entered or
+   vouched for every figure the card's window names (`fact_state.confirmed_by_person` - the window confirms the shown
+   values when nothing is typed), the warning stands down. Applied in `cross_form_validator` (beside the explained
+   filter) and at the end of `sqs_service.evaluate_stops` (`drop_verified_figure_stops`). Requirements a true value
+   fails (an underlying limit under the umbrella's minimum) are NOT on the list - their answer is the value that meets it.
+6. **Loss-history loop** - the narrative window's first loss phrase is "no reported losses"; written beside claims on
+   file it raised the narrative / claims-answer warning, whose answer then conflicted with the claims, round after round.
+   The plan writes and answers as someone with claims when the package asserts one (`review_plan._claims_on_file`).
+
+**Run 3 (all six classes fixed): 30 of 30 reach exactly 100.** Run 4 (fresh seed 9113, 60 new variants, root fixes only - before the safety net): **60 of 60 reach exactly 100.**
+**SAFETY NET BUILT (owner's go, 27 Oct night).** `sqs_service.charge_only_answerable` (coverage / umbrella / property
+deductions: an item naming no box `answer_routing` can answer is not charged) and `release_unanswerable_holds` (a
+warning whose rule's card is mode "none" no longer holds 85; form choices and unknown rules keep holding; hard stops
+never released). Decided inside `calculate_package_sqs`, so the first number shown is already right. Each one logs
+`SQS_NOT_SCORED` with its rule and lands on `package_sqs["not_scored"]`; the cover lists it ("Not scored - could not be
+asked on screen: ..." via `download_routes._split_open_recs`). Idle on ordinary packages (pinned). Tests:
+`tests/test_safety_net_27oct.py` (6); 48 scoring / cover files green (3,531). D6: scores rise only where it fires.
+**Next:** more seeds; a permanent seeded reach-100 test in the suite plus a check that
+every pillar deduction names an answerable box; reviewer; full suite. **Proposed, waiting for the owner:** a safety net -
+a deduction or warning hold that no item on the page can answer is not charged (logged loudly by rule code, still
+listed for the underwriter on the cover; hard stops excluded). Scores move up where it fires - D6, tell Brent.
+
+**Z46 continued - live, 28 Oct night (three packages, `ACORD_INTAKE.md` "Live round trips" / "Answers given AFTER
+generation").** Pre-form screen reached 100 on all three real packages through the real routes (Choice Electric 53,
+Orbin 68, CH125 85). Every item moved the points it showed, except a true answer raising a new item (Orbin's 35%
+subcontracted: shown +2, moved -6, the new item +8). Synthetic sweep: 40 of 40 at 100; 20 kept in the suite
+(`tests/test_reach_100_every_package.py`, with `tests/reach100_harness.py`) beside a static check that every pillar
+deduction names an answerable box. The safety net never fired on any of them.
+
+**Z46 hostile review, 28 Oct (offline, uncommitted).** A wider generator (`tests/reach100_harness.wider_package`: no
+lines / every line, umbrella + excess tower, two umbrellas, no underlying limits, 2-5 buildings at one address, no
+COPE, monopolistic and multi-state WC, HNOA-only, split auto limits, new venture, attested no losses beside claims,
+short loss runs, redacted premiums, name / date conflicts, no / ended term, renewal, ten entity types, odd values)
+and a stricter solver (`solve_checked`: the page read like the route - `complete_screen_shares`, merged rows - its
+numbers checked at EVERY reading, Data Consistency picks made for real, no released card) plus "honest" answers
+(None / N/A / 0 / 35% / a lower limit / a past date, through the route's own validators) in page, reverse and random
+order, and a real-door replay (`apply_producer_answer_to_session`, `save_session_schedule`,
+`append_producer_narrative` over an in-memory store). Before: on the first 30 wider packages 7 page readings did not
+add up (3 to 40 points "no item adds") and 3 packages stalled at 85; honest answers stalled 16 of 160 runs at 60;
+the real doors refused a credited term save. Eight classes, all fixed:
+1. A "verify this figure" card was answered by typing stand-ins over BOTH figures (raising the other ratio checks) -
+   now it confirms the shown figures (`review_plan._verifies_figures`).
+2. One rule code drew several cards (`uncovered_soft_stop`) but the plan weighed one item per code, and the page
+   printed the first card's number on all of them - now one item per code AND fix (`card:<code>#<issue_id>`), the
+   page reads a card by its issue id (`screenPoints.cardPoints`), `screen_card_points` sums a code's cards.
+3. An unchanged table save that DERIVES facts (a complete WC class table -> `wc_payroll_by_state`) was "nothing to
+   do" in the plan - now a save counts when it moves any fact (`_Sim.table` trial write).
+4. A card about a wrong stated value that also lists an empty box (the backwards term + umbrella expiration) typed
+   only the empty box - now the stated ones are corrected when the card still stands (`_card_still_raised`).
+5. A sample answer that raises a follow-up (a vehicle -> garaging / radius / use) left "points no item adds" - the
+   plan now does the follow-ups and gives their points to the step that raised them ("up to", `leads_to`).
+6. A sample that raises a new item where the box may truly take another answer (25 employees, no WC) - the step is
+   redone with the other answer (`_retry_with_other_samples`: its options, or 0 for a count; only on raising steps).
+7. Minimum Viable COPE checks a premises address its window did not show; "Premises address" answered "None" left a
+   60 with no box - the card shows the box when no premises is stated (`premises_cope._with_premises_box`).
+8. A proposed-term save the route REFUSES (effective date beside a document's ended expiration) was credited - the
+   key detail opens both term dates (`sqs_service._key_detail_actions`), the plan judges the save like the route
+   (`_term_refused`). Also: a narrative card answered in the plan records its code as explained like the real door;
+   the narrative step writes the topics the page needs when opened; an EMPTY table save over an empty table is
+   refused ("Add at least one row, then save.", was "applied: true").
+After: 1,010 runs over 380 wider packages (probe and honest answers, page / reverse / random order) all end at
+exactly 100; on the last code every page reading added up (one miss on the run before - the narrative topics, fixed);
+the safety net never fired; real doors 160 of 160 at 100.
+Tests: `tests/test_reach100_review_28oct.py` (19); 6 wider seeds in `tests/test_reach_100_every_package.py`. Updated
+tests that pinned the dead end (TEST wrong): the one-building COPE "byte identical" tests in
+`test_build21oct_b-cope-one-store.py`, `test_choice_electric_cards_7oct.py`, `test_choice_electric_dryrun_7oct.py`
+(no premises anywhere now adds the box). Cost: the plan reads ~1.3-1.8x slower on a big package (retries and
+follow-up readings run only when a step raises something).
+
+**Z46 review, 29 Oct - a one-document renewal stalled at 85 (offline, uncommitted).** Session 614c3211: ONE outside
+ACORD 125 renewal application read by the Transcriber, 36 before forms, the page added up, but answering everything
+ended at 85 in any order - "Policy Effective Date: documents disagree (12/01/2026, 12/01/2025)" and the same for the
+expiration, with the Data Consistency pick made. Two halves of one class, both fixed:
+(a) the "rival" was the SAME document's prior term: the picker's text scan takes the first label-adjacent date, and
+on a 125 that is the Prior Carrier grid ("EFFECTIVE DATE 12/01/2025 ..."; page one prints the proposed dates under
+their column headings). A scanned term date the document itself records as its PRIOR term in the same role (its
+`prior_*` date, a `prior_coverage_by_line` row, a retired predecessor row) is no rival
+(`underwriting_consistency._document_prior_term_dates`, read in Pass 2 of `assess_underwriting_consistency`;
+effective / expiration roles never mixed - a renewal's prior expiration is its proposed effective). Same line:
+"Prior / Previous / Expiring / Former / Predecessor ..." joined `_FOREIGN_LABEL_QUALIFIERS` (another period's
+printing; "renewal" and "current" deliberately not). Only ever drops a SCANNED candidate.
+(b) the pick did not retire the conflict: every stops reader took the STORED assessment, older than the pick.
+`stops_now._settled_by_confirmation` (the `unresolved_conflict_keys` test: a bare key through
+`usable_confirmations`, or a line-scoped pick on every line the row asks about) is applied in
+`underwriting_conflict_stops` (both `stops_now` callers pass the session's confirmations) and in
+`sqs_service.building_value_cross_items` (its 85 hold). The real confirm doors re-assess anyway; this makes the
+hold retire whatever the stored copy says.
+After: 614c3211 page 36, solve 100 (page and shuffled order; was 85); Orbin 432c8594 79 / CE 790d6faf 100 / CH125
+17eeeb33 100 unchanged, all solve to 100; D6 panel 0 of 12 moved. Tests: `tests/test_reach100_review_29oct.py` (12,
+the package built from the real Transcriber reply `fixtures/transcriber_stub/real_125_probe.json`; 8 fail with the
+fix undone). TEST outdated, updated: `test_build21oct_b-identity-verified-only` pinned exactly 3 arguments on
+`underwriting_conflict_stops` (it now checks the documents, and the confirmations from `stops_now`). Related files
+(67, 5,033 tests) green.
+
+
+**Pre-form page speed (28 Oct, after the reach-100 review):** Orbin's re-uploaded package (ae2f4c99) took 43 s per page load - the review plan re-scores the package dozens of times and `normalize_date` tried up to 47 strptime formats on the same strings (27 s). Cached four pure readers (`normalization.normalize_date` -> `_normalize_date_text`, `_no_identifier_reason`, `_entity_menus` -> `_entity_menus_cached` with fresh sets per caller, `lob_canon.canon_line` -> `_canon_line_cached` for strings). Page 6-7 s, score 79 and 10 items unchanged. Tests: `tests/test_page_speed_28oct.py`. Full suite 21,337 / 1 / 28.
+
+**After forms too (29 Oct, reviewer's finding; owner: "the points shown on items always add up to exactly 100 -
+score, AFTER forms are generated too").** `sqs_service._complete_screen_shares_plan` returned early once forms
+existed, so the editor's side panel printed the scorer's own row shares: Orbin 432c8594 (4 forms) at 79 read
++2 +1 +1 +2 +6 +3 = 15 -> 94, six points (employees, years in business, NAICS - key details, never Best Solutions
+rows) on no item. Built (offline, uncommitted):
+- `review_plan._Sim` weighs after forms with the recalculation's recipe: stops `stops_now(pre_form=False)` scoped
+  to the selected + generated forms, the forms' own scores passed through, and the stored score's dismissal
+  credits (`audit_service.credits_in_force` - the pure half of `active_score_credits`, which now calls it): a
+  credit is on every copy and retires on the copy where its field is answered. `build_review_plan(...,
+  credit_rows)`; a post-form plan carries `after_forms: true`. Before forms the copy, the scope and the payload
+  are exactly as they were (`_Sim(row)`, no `after_forms` key).
+- `_complete_screen_shares_plan` / `complete_screen_shares(..., credit_rows)` run after forms;
+  `review_page_grouped_view(row, pkg, after_forms=)` draws the post-generation cards.
+- `form_routes._pre_form_status` reads the dismissals once forms exist (`_dismissal_rows_after_forms`), so the
+  package page after forms (extraction-result) carries the plan; new read-only `GET
+  /api/session/{id}/screen-points` (`screen_points_after_forms`, run off the event loop) - the stored score with
+  the plan, its key details and its cards. Every other post-generation reply stays as quick as it was.
+- Editor (`AcordModal`): once the score settles the side panel asks screen-points (one try per score; a newer
+  score drops an older reply) and Best Solutions lists the plan's items in its order - key details, cards with
+  a number, score rows (`pointsFor`), a Data Consistency pick, the document row - each with the plan's number and
+  its own fix window (`utils/editorPlanList.js`: `editorPlanRows`, `planAfterForms`); "N points remaining to
+  100 - the points below add up to it"; the old row numbers are hidden while the plan is read, and the
+  recommendation cards' own "+N pts" are hidden beside the plan (an answer counted once). On the package page
+  after forms the cards' / Data Consistency rows' numbers and the document rows show again when the plan is the
+  post-form one (`!formsGenerated` guards, `Recommendations.jsx`, `ReviewRailLayout.jsx`). `scoreItems` rows
+  carry `rowIndex`.
+Measured: Orbin 432c8594 after forms 79 -> 4 key details +2 each, subcontracted +2, radius +1, vehicle use +1,
+narrative up to +6, loss-run ownership +3 = 21 = 100 - 79 (the old rows' "Annual revenue" mirrors its key
+detail); solved through the plan's doors in page / reverse / shuffled order and through the REAL doors + the real
+`recalculate_session_scores` (in-memory store): 79 -> 100 (98 after round one: the employee sample raises the
+WC-arrangement follow-up, listed next round, as before forms), every reading adding up. CE 790d6faf / CH125 17eeeb33 stay 100 (plan total 0).
+Synthetic sweep after forms: 70 of 70 (40 page order, 30 shuffled) and real doors 6 of 6 reach exactly 100 with
+no reading off. Speed on Orbin: the screen-points reading 5-10 s (cpu ~6 s warm) beside the pre-form page's
+6-13 s on the same (loaded) Mac - the plan makes the same 16 scorer runs either way. Tests:
+`tests/test_reach100_postform_29oct.py` (17: the three stored shapes add up and solve to 100 through the real
+doors, wider seeds in page and reverse order, a credit counted once, before forms unchanged, the route's owner
+check, the editor list via node; 13 fail with the early return restored). Kept unchanged on purpose (pre-form
+too): a one-pass plan that ends under 100 gives the rest to the upload row, shown "Counts once <hold> is fixed".
+Not done: the download screens' rows still print the cards' own `score_impact`.
+
+**Production review, 29 Oct 2026 (offline; `tests/test_production_review_29oct.py`, 15).** Question: is today's
+work ready for live users with random data? Odd input (empty / garbage / zero-page / encrypted / owner-password
+PDFs, foreign-key or forged records) never crashes the upload - every new door is wrapped. Fixed:
+- **The ACORD reader blocked the event loop** - `intake.read_for_document` (pdfplumber + overlay, measured 8.7-21.7 s
+  on a flattened 125 / the 59-page CH125 package) ran inline in the async upload: every other user's request froze.
+  Now `asyncio.to_thread` (`extraction_pipeline.extract_document`, AST-pinned).
+- **Restored person answers were stored in plaintext** - the decrypted record payload (FEIN, revenue, typed
+  narratives, tables, Data Consistency picks) rode `doc["acord"]["restored"]`, and `docs` is not field-encrypted.
+  Sealed with the field key (`primble_record.seal_restored`); ONE reader `primble_record.restored_of` (legacy plain
+  dicts still read); the 7 readers in `merge_rules` go through it. Three tests that pinned the plaintext shape now
+  read through the door (the TESTS were wrong).
+- **"Prior only when term ended" failed open** - our own form with a blanked / impossible expiration (or blank date
+  boxes on a 2023 record) restored its answers as a person's. The record's own `term` fills an unreadable box
+  (`read._with_record_term`); a start with no end ends 400 days later (`merge_rules._OWN_TERM_MAX_DAYS`); the
+  document's `prior_application` now says what the restore decided (`AcordRead.prior_own`).
+- **screen-points re-ran ~6 s of CPU on every box save** - cached per session against a fingerprint of the whole row
+  + credit rows, one run per session at a time, at most `SCREEN_POINTS_WORKERS` (2) server-wide
+  (`form_routes._screen_points_once`); a failed run is never cached.
+- **The side panel's plan outlived a dismiss / reopen** (items summed to 100 minus the OLD score: 103 beside 82) -
+  `editorPlanList.patchPackageScore` drops the plan when the headline moves; the four partial merges in AcordModal
+  use it.
+Open (ranked): (1) MED design - a record is bound to the insured NAME only: another account uploading the same
+company's form gets the first agency's answers / picks as a person's (fix: owner / agency id in the record, restore
+only for that account, else AI-box marking only). (2) MED - `stops_now._settled_by_confirmation` settles a row when
+every scoped line has a pick while the assessment can still flag it (a rival value on an unanswered line): the card
+stays, its stop / 85 hold / plan item go (suspect, not reproduced end to end). (3) LOW - `refreshArqData` replaces
+the score with the stored one (no plan) and the effect's one-try key can skip the refetch. (4) LOW - every foreign-
+key record logs an ERROR `InvalidToken` (localhost <-> Render re-uploads). (`screen_points_after_forms` reading a
+non-dict `integrity` outside its try - fixed the same pass.)
+
+**29 Oct night - a scoped Data Consistency pick (`stops_now._settled_by_confirmation`):** with every disputed
+line picked, the row is settled only when no rival is left: a value counts as answered when a pick on its
+own line agrees with it, ruled out when every line it is stated on is picked and none agrees; a value on an
+unpicked line keeps the stop (the card had stayed while the stop and its 85 hold vanished). Test:
+`test_a_scoped_pick_never_hides_a_rival_on_an_unpicked_line`.
+- **Download screens print the plan's numbers (29 Oct, offline, uncommitted):** the download review and the post-download checklist printed each row's stored `score_impact` while the editor's side panel printed the review plan's number, so one item read two numbers. Now `utils/downloadPlanPoints.js` (`downloadPlanPoints` / `withDownloadPlanPoints`) gives each row the plan's number for its plan item, found the way the side panel finds it (issue id, then rule code; a card row by its fact - the plan's Recommendations row read with `pointsFor`, else the first item writing that fact); a row the plan does not list shows no number (never the stale one), a plan item or the item it mirrors counts once, and the shown numbers never pass 100 - score; no plan = no numbers. `RecBox` prints `plan_points` only; AcordModal reuses the editor's plan, else reads screen-points once without holding the screen (`preflightPlanSqs`, used only on the same score + timestamp). No backend change. Tests: `tests/test_download_plan_points_29oct.py` (3, node).
+
+**Cap shares (29 Oct, offline, uncommitted; owner: every item a person must solve to reach 100 shows a number,
+summing to exactly 100 - score).** On cd683556 (85) the plan gave the whole 85 release (+4) to the LAST holder
+(Monopolistic) and "Counts once Monopolistic ... is fixed" to the others. `review_plan._share_group_releases` (run
+after the ordered simulation and the follow-ups): each item keeps its own measured gain; what a hold releases is paid
+back to the items it withheld, the rest split EVENLY over every item that holds that hold (an item whose step clears
+a holding stop, or a card whose own sentence held at the start), whole points by largest remainder inside the group
+pool, wording `with_others` ("counts when all K warnings / hard stops are fixed"). `_no_listed_zero`: a score item
+still at 0 takes one point from the largest number in its group, else on the page (everything above a hold is
+blocked behind it; the total never moves); an item that moves nothing and holds nothing is `score_item: False`
+("No effect on the score"). Frontend: `screenPoints.screenPointsText` / `recommendations.pointsText` append the
+condition and let a number beat a stale hold; `editorPlanList`, `downloadPlanPoints` carry `withOthers`;
+`sqs_service.apply_review_plan` passes `answer_gain_with_others` / `points_with_others`.
+cd683556 before -> after: DC picks (8) 0 -> 1 each; date mismatch 0 -> 1, BI period 0 -> 1, COPE 0 -> 1, Monopolistic
+4 -> 1 (each "counts when all 11 warnings are fixed"); ACORD 101 = mirror of the date card (its fix writes the
+narrative) -> 1; Loss history conflict 0 -> "No effect on the score" (its sentence holds nothing - not in the
+soft list - and its answer moves nothing); hydrant 1; upload 10 -> 2 (its points are behind the 85 too; 11 holders
+share a 4-point release, so integers need the borrow). Re-upload check: with the Primble 126 and its four restored
+answers removed in memory the same items read 0 the same way (plus "Years in business" comes back) - not the cause.
+Open: the borrow trades rule 1 (own gain) for "never 0" when holders outnumber the release (owner's call: tenths?).
+Tests: `tests/test_cap_shares_29oct.py` (31: shares, mixed caps, single holder +10, unscored, stored + cd683556, 20
+random packages). TESTS outdated, updated: postform credit test (a fraction left now shows 1), loss-plan journey
+(a 0 card says "No effect on the score").
+
+### Michelle review, 29 Oct (underwriter's pass over what Primble raises; offline, uncommitted)
+
+Read-only inputs: the owner's synthetic packages `c0b63963` / `cd683556` (the 29 Oct kit, Ridgeline), the kit README's
+planted rows, ~40 random `reach100_harness` packages, and synthetic two-document packages. No model, no upload.
+
+**Decided - the one-document rule (I2).** A document's own SCHEDULE items are not rival answers; a document that states
+two different TOTALS for the same fact is asked. Generic, `underwriting_consistency._drop_own_schedule_items` (runs with
+the other candidate filters, multi-document conflicts included): a TEXT-SCAN reading is that document's item when (a) the
+document's own extraction gives the amount to something else - a schedule row's cell or another fact
+(`_document_own_item_amounts`; only values that ARE amounts, never digits inside an address / date; never
+`dec_page_entries` / `coverage_lines`), or (b) every line printing it is a schedule row (`_printed_as_schedule_row`:
+"|" cells, a leading row number / state + code, an item named by number - "Bldg 2", "Location #3" - or two+ amounts on
+the line). What extraction read AS the fact is never judged. All readings items -> no card. Readings left from ONE
+document -> a card worded "<file> states more than one amount for this - confirm which one is right" (it replaces the
+morning's blanket drop of every one-document money conflict). cd683556: the stored building-value (3 buildings) and
+payroll (4 classes) cards do not come back; a labelled "$2,620,000" + "$2,900,000" in one application is asked.
+
+**Fixed (false alarms):**
+- A requested coverage term is not a rival to the current one: limits, deductibles, SIR / retention, attachment,
+  premium (`is_coverage_term_fact`, by the fact's own name tokens) on an application / quote / ACORD form are skipped
+  when a current-term document states them - the rule the policy dates already had. When the PROPOSALS disagree among
+  themselves, the card compares the proposals only (`_skip_current_term`, dates too) - the families
+  `check_doc_consistency` compares, so its "Confirm in Data Consistency" now finds a row.
+- `check_doc_consistency`: a form of ours echoing the documents (`echo_of`) is no second witness (the picker's 28 Oct
+  rule); `_conflicts_within_one_term` reads `_stated`. On c0b63963 our re-uploaded ACORD 126 (12/01/2026, a term we
+  calculated) raised "Policy date mismatch" against the outside 125 with no picker row.
+- `normalization.no_loss_statements`: "NO LOSSES REPORTED FOR THIS POLICY TERM" (every clean term of a carrier loss
+  run) is term-scoped (`_NO_LOSS_THIS_TERM_RE`). It was an account attestation: both kit packages showed "No Known
+  Losses attestation conflicts with claims" + Loss History held at 45 + a duplicate recommendation.
+- Monopolistic WC: a class row for each monopolistic state reading stop-gap / state fund places it with the state fund
+  (`sqs_service.documented_state_fund_placement`) - no "confirm the state fund" warning. A person's answer still
+  decides ("No - private carrier" stays the hard stop). The kit's WY stop-gap row held the package at 85.
+- `cross_form_validator._check_per_location_cope_completeness`: an address-only row at the same street as a documented
+  building is that premises again (`_address_only_echo`) - "1 of 4 insured locations missing COPE" on 2 premises / 3
+  buildings, all with COPE. The row itself is a merge artifact (extraction reviewer).
+- Labels: `_humanize` keeps initialisms ("NAICS Code", "GL Each Occurrence", "WC X-Mod").
+
+**Built (missing alarm):** `proposed_term_coverage_gap` (warning, 85; cross-form, not form-gated): the proposed
+effective date starts more than a day after the current policies end (`prior_expiration_date` routed from the current
+term, else one expiration every current line shares; > 366 days = history, not asked). "The proposed effective date
+(01/01/2027) is 31 days after the current policies expire (12/01/2026) - a gap in coverage. Confirm the proposed
+effective date, or change it to 12/01/2026." Field `effective_date`; a verify-a-figure code (a person's confirmed date
+stands it down). Kit row 7 is now raised (before: silent, or only by the false echo card above).
+
+**Found, NOT fixed (owner / other reviewers / Brent):**
+1. Schedule-row disagreements raise nothing (kit rows 8-11): VIN (the dec text prints 16 characters - the merge keeps
+   BOTH, 7 vehicles on a 4-vehicle fleet), driver 3 DOB (dec value kept silently), Bldg 2 area (22,000 and 25,000 in
+   one row), the 05/17/2022 claim (listed twice, $18,420 and $14,820 - 12 claims for 9). Needs row identity in the
+   merge (extraction) plus a row-level Data Consistency confirm door and UI - design decision.
+2. The outside 125's phone, revenue and employees were not read (24 facts) - intake. A location's revenue above the
+   business total ($9.2M at premises A vs $8.45M) is a part-over-whole alarm nobody raises - proposed, not built.
+3. The Transcriber's mailing address is garbled ("4150 S Kalamath St\nSuite 210\nDenver CO 80223, Suite 210, ...")
+   and that is what the forms print and the card offers - intake.
+4. Suggestions ignore the owner table (applicant facts = ACORD, current policy = dec); non-money cards show no
+   "Suggested" while the forms print the ACORD's value (D16 covers money only).
+5. Wording left (pinned strings): the date-mismatch card names no dates; the monopolistic card says "(ND/OH/WA/WY)" and
+   "Review and correct this" instead of the state and the answer; "wc_monopolistic_payroll breakdown" prints a raw key.
+6. BI "Period of Restoration missing" on an Actual Loss Sustained / 1/3 monthly limitation form (no period exists) -
+   the held Brent question.
+Tests: `tests/test_michelle_review_29oct.py` (40).
+
+**The scoring contract (29 Oct 2026 evening, offline, uncommitted; `SCORING_RULES.md`).** One guard and a random-package
+proof instead of fixture checks. Built:
+- `review_plan.enforce_contract`, run last in `build_review_plan`: repairs any P1 / P2 / P4 / P5 breach (mirror points
+  to the first place, negatives, surplus off the largest, a shortfall or `left` onto the score items, a 0 score item ->
+  "under 1 pt", nothing numbered at 100), logs `SCORING_CONTRACT_REPAIRED` (rule + item ids, never values), and puts the
+  rules on the plan as `contract_repaired` - the proof fails on any repair.
+- "under 1 pt" is ONE representation: points stay whole (P2 exact), a score item whole points cannot reach carries
+  `under: true`. `_no_listed_zero` no longer BORROWS a point from another item (it broke P3 when holders outnumbered
+  a release - cd683556: 11 warnings sharing 4 points). Frontend: `screenPoints.screenPointsText` / `underText`,
+  `recommendations.pointsText` / `pointsFor` print "under 1 pt (counts when all K warnings are fixed)"; the editor
+  side panel and the pre-form document rows list an under-1-pt document step.
+- Root causes the sweep found: (1) a class-code mismatch row (GL / WC) opened the codes table only - with codes and
+  description both on file nothing on the page cleared it (95 stuck, 5 points on no item): the row now also offers
+  the description and NAICS (`coverage_deduction_items` `also_facts` -> `review_recommendations.fix_route_for_row`),
+  and the plan corrects a still-raised row's stated boxes; (2) `_retry_with_other_samples` kept an alternative sample
+  that scored the same under a 60 / 85 hold but LOWER raw (umbrella "does not follow form", -1.2) - the plan ended at
+  98.8 with 2 points on no item; it now also requires the raw score no lower; (3) a mirror's step that still moved the
+  score kept its own points (counted twice beside its first place) - credited to the first place in `build_review_plan`.
+- Proof: `tests/test_scoring_contract.py` (guard unit tests, 40 random seeds in four orders / answer modes, at-100 and
+  hard-stop-only shapes, after forms, the download screen via node) on `reach100_harness.contract_package` /
+  `contract_problems` / `solve_contract`. TESTS outdated, updated: `test_cap_shares_29oct` (`_check`, cd683556 codes),
+  `test_reach100_postform_29oct` (credit test) and `test_build26_overview_resolved` (lone narrative) pinned the borrow
+  or points on no item.
+Related tests (149 files that touch these doors, 3 shards): 10,927 passed / 2 failed - the known
+`test_arq_acord125_missing_only`, and `test_cap_shares_29oct::test_cd683556_warnings_each_show_a_number`, whose file was
+being updated for these changes by the points engineer while the shard ran. It passes on a re-run of that file, which
+is green (71 with this file).
+
+**Builder B, 29 Oct (owner-approved Michelle items 1/2/3/5/6; offline, uncommitted).** Tests: `tests/test_build_rules_items_29oct.py` (32; the end-to-end ones read the page through `reach100_harness.read_page` / `solve_contract` and check the scoring contract at every reading).
+- **1 Coverage gap** (`cross_form_validator._check_proposed_term_coverage_gap`): verified, not rebuilt - a warning (85, never 60 after the pre-form demotion), listed by the plan with points (15 on the synthetic package), answered on the effective date (a person's date stands it down; a date meeting the current term clears it), reaches 100. Wording now "... is 31 days after the current policies expire (12/01/2026) - 31 days with no coverage. Confirm ...".
+- **2 One document, two totals**: the row carries `one_document`; `conflict_reason` and the warning (`stops_now.underwriting_conflict_stops`, the one builder) read "<file> states more than one amount for <label> (x, y) - confirm which one is right." Holds 85, the DC pick lists points and clears it (-> 100). Name / FEIN rows keep the blocking sentence.
+- **3 Requested vs current coverage**: `underwriting_consistency._requested_term_change` -> `requested_terms` on the assessment (an application / quote agreeing on ONE limit / deductible / SIR the current documents do not state; premium excluded; disagreeing proposals stay the existing card). Shown as the advisory, score-neutral `requested_coverage_change` note ("Requested Umbrella Limit $9,000,000 (current $1,000,000)."; `issue_registry.requested_coverage_notes`, tier binder_followup, in `SCORE_NEUTRAL_CODES`), appended to `structured_issues` by the pipeline and redrawn from the stored assessment by `review_page_grouped_view`. Never a stop; the plan gives it no number (P5). Caveat: like the coverage-part card, the view's `counts["warnings"]` counts it (the "counts = what rendered" contract) - so the rail can say "1 warning" for an info note.
+- **5 Suggestion = what the forms print, every kind**: the D16 money block in `assess_underwriting_consistency` now runs for every kind (host = the candidate whose printing is the merged value - exact normal form, else `fact_comparison.values_agree`; exactly one host or no override); line-scoped (collided-line) non-money rows keep the ranking. Medium, never pre-selected.
+- **6 Period of Restoration on Actual Loss Sustained**: ONE door `property_coverages.bi_actual_loss_sustained` (derived fact `_bi_actual_loss_sustained` written by the pipeline from the documents' text - `als_statement`: ALS / Actual Loss Sustained / 1/3 monthly / monthly limit(ation) of indemnity beside a property BI subject, never cyber - plus the BI limit's wording and the schedule's BI / EE rows). It stands down `bi_missing_period_of_restoration`, the 140 / BI-printing per-form soft gate, the Property pillar's 5-point POR (and BI limit) item, and counts as a stated BI limit (`business_income_limit_stated`). No ALS wording = today's warning. Stored sessions get it on their next pipeline run. Not changed: the client questionnaire inventory still lists POR.
+
+### Data items 4 / 7 / 8 / 9 (29 Oct 2026 night, Builder A; offline, uncommitted - detail in ACORD_INTAKE.md)
+Kit replay (stored c0b63963 / cd683556 re-merged on current code, no model): claims 12 -> 9 (one row per claim, the
+loss run's $18,420 kept, $14,820 recorded as a rival); vehicles 6 -> 4; the mailing address prints "4150 S Kalamath
+St, Suite 210, Denver, CO 80223" (was the block plus its parts again); new Data Consistency rows: business phone
+(0148 vs 0184), revenue ($8,450,000 vs the 125's premises $9,200,000), employees 68 / 62, FT 62 / 58, PT 6 / 4, and
+three ROW-LEVEL cards - driver 3 DOB, Bldg 2 area 22,000 / 25,000, the 05/17/2022 auto claim paid; plus the
+"location revenue above the business total" warning (credited to the revenue card - one fix). Both kit pages: plan adds
+up (score + points = 100), no contract repair. Not raised: kit row 10 (VIN) - the dec's text prints the Ram's VIN
+16 characters long, a truncation, which is no disagreement; a full one-character-off VIN raises it (tested).
+Doors: `services/row_rivals.py`, `services/acord_intake/document_settle.py`, `merge_rules.same_claim_event` /
+`near_vin_same_vehicle`, `reverse_map.applicant_row_a_targets`. Touched in Builder B's files: one call in
+`assess_underwriting_consistency` (its return wrapped), one in `apply_confirmations`, the new rule +
+`location_revenue_over_total` registry rows (cluster, tier, `_r_field("total_revenue")`, VERIFY_FIGURE_CODES).
+Open: the merge renumbers LOC # per row (building 2 at premises 1 reads "LOC 2") - pre-existing, the row card's label
+avoids it; the extra address-only location row (Michelle's list) is unchanged.
+- **Both Builder B gaps closed (owner: no open items).** (1) An advice-only card is drawn, never counted as a warning: `build_grouped_view` counts score-neutral clusters as `counts.info` (warnings + info = every warning-tier card, so "count == what is drawn" holds); `session_documents.review_counts`, the toast and the next-step banner read `warnings` only; frontend `packageIssueCounts` returns `infoCount`, `hasWarnings` draws the section for warnings OR notes, the rail's badges / "x of y handled" / tab and tier counts skip notes (`ReviewRailLayout.warningClustersOnly`), and a notes-only page still draws them. Tests pinning the two-key `counts` were outdated (TEST wrong) and now include `info`; `test_advisory_presentation_20260903` reads the coverage-part card as info. (2) The period of restoration is Not Applicable on ALS: `fact_state` (the HNOA door, `_owned_vehicle_fact_not_applicable`) asks `property_coverages.bi_actual_loss_sustained`, so the ARQ question is suppressed `not_applicable`; the narrative questionnaire's G.6 has its own gate (`period_of_restoration`). Tests in `tests/test_build_rules_items_29oct.py` (41).
+
+- **LOC # is the premises' (29 Oct 2026 night, Builder A).** `_consolidate_property_locations` threw away a LOC # a document printed and `assign_location_numbers` numbered by row, so building 2 at premises 1 read LOC 2 in the table, on 125 / 140 and on the row card. Now the printed LOC # is kept as `premises_number`; a printed number claimed by two different streets decides nothing; a building at a numbered premises' street takes its number; buildings at one street with none printed share one new number; rows without building numbers number 1, 2, 3 as before. Kit: LOC 1 / BLDG 1, LOC 1 / BLDG 2, LOC 2 / BLDG 1 on 125 and 140; the row card reads "(Loc 1 Bldg 2 - 4150 S Kalamath St)". Still separate: the address-only echo row (Michelle's list) takes the next number (LOC 3 on the 125).
+- **An address echo at a documented premises is that premises (29 Oct 2026 night, Builder A).** In `_consolidate_property_locations`, a row that states only an address (no building or premises number, no premises data) joins the first building at the same street (line 1 + city - its suite does not make it another premises); `assign_location_numbers` compares premises by line 1 + city too. A row at another street, with its own building data or its own building number stays. Kit: 3 location rows (was 4) - LOC 1 / BLDG 1, LOC 1 / BLDG 2, LOC 2 / BLDG 1 on 125 and 140; no echo row, no COPE item for it.
+- **Same street, another city = another premises (29 Oct 2026 night, Builder A).** The address-only joins in `_consolidate_property_locations` (the existing "row naming no building joins the first building" and the echo join) now require the city and the 5-digit ZIP to agree when both rows state them (`_same_place`); a side stating none may still join.
+
+### Strict review 29 Oct - Fixer 1 (offline, uncommitted)
+- **A one-digit FEIN is a placeholder.** `normalization.is_placeholder_fein` (nine digits, one digit repeated: 00-0000000, 11-1111111, 99-9999999) is refused at the answer door (`fact_registry._is_fein` - identity unchanged, so the merge partition and the stamp-time shape check blank it too; `validators.validate_fein`) and dropped at the merge like an extracted N/A (`answer_semantics.extracted_non_answer` -> "non_answer" for `FEIN_FIELDS`). NOT 12-3456789 / 123456789: no IRS rule makes them impossible and the review plan's sample FEIN answer is "12-3456789" (`review_plan`, `_PROBE_ANSWERS`).
+- **A clipped company name is one entity** - see ACORD_INTAKE.md "Clipped names". `same_entity_name` only (grouping keys stay exact); `fact_comparison.names_the_carrier` reads it; the 131 underlying grid prints the whole name (`normalization.fuller_entity_printing`).
+- **A table cell that cannot be its type is stored blank** (`schedule_capture.hard_cell_refusal`, inside `validate_rows`, so every save door - producer PUT, resolve-issue schedule mode, client submit, review plan, questionnaire): a VIN over 17 or with non-alphanumerics, a year not 1800..next year+1, a date `normalize_date` cannot read (13/45/2022), a non-number in a money / count column, more than 15 digits. `report["refused"]` keyed by the SENT row index + `refusal_message`; `save_session_schedule` and resolve-issue return `refused` / `refused_message`. A cell left exactly as the table showed it (a document's printing) is never refused. Still advisory: empty required cells, a VIN shorter than 17 or with I/O/Q, a real date not in MM/DD/YYYY, 1800s years (historic buildings - the caller's 1900 floor stays the advisory message), words in a percent cell, "None" in an amount. Frontend: the editor's "Fill schedules yourself" shows the refusal; the fix window stays open on it with the refused cells blanked (closing applies the refresh).
+- **Counts print whole; 30 digits are noise.** `display_canonicalizer` category "count" (a box name ending `...Count`, never CountryCode / ...Indicator): 12.0 / "12.0" -> "12"; `too_many_digits` (ONE number with more than 15 significant digits, or a float >= 1e15 - three amounts in one cell are not one number) prints "" in count and money boxes, is refused by `_is_currency` / `_is_positive_int` / `validators.validate_monetary`, and `answer_semantics.words_to_number` no longer turns 30 typed digits into float garbage.
+- **A non-list `coverage_lines` is no rows** in `loss_run_identity._package_identity` (`_rows`; a non-dict document is skipped).
+- Tests: `tests/test_strict_review_29oct.py` (the FEIN xfail now passes, +34). Related files green (1,678 + 1,420); `test_build26_questionnaire::test_use_this_on_a_secure_disagreement_posts_the_index_never_the_value` fails on the FEIN `state` (extracted vs conflicting) - it reads the stored underwriting assessment, which Fixer 2 is versioning in parallel; not touched by these changes.
+- **Strict review fixes B (29 Oct 2026, Fixer 2).** (1) **N/A is never an answer for a fact every operating business has** - FEIN, annual revenue, NAICS / SIC, years in business / start date (`fact_registry.ALWAYS_EXISTS` / `always_exists`). The one answer door (`answer_semantics.interpret_answer` step 2c) refuses "N/A" / "None" / "not applicable" there with "Every business has <label> - enter it ..."; a typed "0" stays a value; employee counts keep "0" / "None". The client path drops it (question stays open, never a 422); an extracted absence there is a gap (`extracted_non_answer`). The scorer never credits a stored typed absence on those facts (`answered_for` / `typed_absence_on_always_existing` in `sqs_service._answered` and `_tier2_not_applicable`); a SYSTEM-derived N/A (a confirmed new venture's years, source "derived") still leaves the denominator. D6: only packages holding a typed N/A on those facts move DOWN (they were gaming). Note for Brent: a sole proprietor with no EIN can no longer answer "None" on the FEIN. (2) **A date box prints a date or nothing** - `pdf_service.unreadable_date_in_date_box` (tooltip "Enter date:" / name segment ending "Date"; digits-and-separators values that parse as no date: "46023", "2027", "13/45/2026"); applied in `_deterministic_map` (owned blank, so a re-stamp's `or raw` cannot restore it), the `map_facts_to_form` canonicalization tail (AI values, logged `DROP_UNREADABLE_DATE`) and `display_value_for_box`. Words ("Continuous") and month/year stay. The fact and its format warning are untouched. D6: a year-only `business_start_date` ("2009") no longer prints on 125. (3) **Data Consistency assessments are versioned** - `underwriting_consistency.ASSESSMENT_VERSION` (bump with any rule change) on every result; `refresh_stale_assessment` re-assesses an older / unversioned stored one ON READ (`/extraction-result`, `recalculate_session_scores`) from stored docs + facts + confirmations, persists it with the `_uw_conflict(ed)_keys` bookkeeping, no model call, picks untouched. Hand-built test assessments must carry the version (`test_build26_questionnaire` fixtures updated - TEST outdated). (4) `form_routes._SCREEN_POINTS_LOCKS` is bounded by `_prune_screen_points_locks` (past 4x KEEP drops idle locks - not held, no queued waiter, so a woken waiter keeps single flight). Tests: `tests/test_strict_fixes_b_29oct.py`; outdated tests updated (they used FEIN / revenue as an N/A example): test_c3_sqs_integrity, test_h4_core_fact_matrix, test_build23_facts-hygiene, test_lane_b_27oct, test_loss_recommendation_routing_20260817, test_sys01_critical_tagging, test_sqs_scoring, test_structured_input_types, test_build26_questionnaire.
+- **Follow-up (coordinator):** (1) `test_build22_claims-checks::test_the_table_path_imports_brents_file_and_the_checks_read_it` lost `first_made_date_missing` - the CODE was wrong: `hard_cell_refusal` blanked a loss run's "NOT PROVIDED" first-made date, which the claims check reads as a stated absence. A whole-cell placeholder ("NOT PROVIDED", "N/A", "Unknown" - `answer_semantics.is_placeholder_text`) is now never refused, only advisory. (2) **An individual / sole proprietor may have no EIN:** `fact_registry.fein_may_be_absent(facts)` (`entity_family(entity_type) == individual`); `always_exists(key, facts)` drops FEIN for it; `interpret_answer(..., facts=)` reads "None" / "No EIN" / "N/A" on that FEIN as NOT_APPLICABLE (reason `individual_without_ein`); `typed_absence_on_always_existing` / `answered_for` take `facts`, so the scorer leaves it out of the Tier 2 denominator, and it is a gap again if the entity type moves to an LLC / corporation. Facts reach the doors: `audit_routes._validate_producer_answer(field, answer, facts)` (answer card, preview, resolve-issue), `apply_producer_answer_to_session`, the client submit (`_clean_answer_ex(..., facts)`, the session read only for a FEIN answer) and the client apply (`_answer_check_refusal`, both envelope builders). Two one-line `sqs_service` edits pass `facts` (`_answered`, the Tier 2 N/A check). Tests +38 in `tests/test_strict_review_29oct.py`.
+
+### End-user review, 29 Oct (offline, uncommitted; `tests/test_enduser_review_29oct.py`, 16)
+A producer's walk of the 27-29 Oct features over the 29 Oct kit (stored `c0b63963` / `cd683556` re-merged on current code with the login account, read-only) and synthetic packages. No model, no ASG (Transcriber stub tests green), no upload.
+- **The review page drew cards the current rules no longer raise, and drew live Data Consistency conflicts twice.** The page (and its reload, `/extraction-result`) draws the stops AS THEY STAND (`stops_now`) beside the STORED `structured_issues`. On the kit: 11 "X: documents disagree ... Fix: Confirm the correct value to apply it across forms." warnings under "Other validations" beside their own Data Consistency rows (a refreshed assessment's rows were never mirrored, so they reached `build_grouped_view`'s uncoded safety net) - each with a fix window that opened a PHONE box (`legacy_phone_format`, matched by the word "Phone"); plus four stale cards no answer could clear, listed with no number (P1): "Monopolistic WC state detected" (the dec places WY with the state fund), "1 of 4 insured locations are missing COPE" (3 rows, all complete), "Policy date mismatch", the No Known Losses conflict. Fixed: `issue_registry.structured_as_they_stand` (the recalculation's own retirement doors - cross-form, doc-conflict, source-conflict, loss-conflict - plus field-level copies the live lists no longer hold, then `with_live_conflict_issues`: a coded card for each live conflict stop the stored list lacks, only if the lists hold its sentence) in `sqs_service.review_page_grouped_view` (so the plan weighs the same cards) and the reload's live-stops branch; `with_live_conflict_issues` alone in the stored-stops views (`audit_routes._form_selection_view` / `_review_page_view`, the reload after forms). Kit: 19 warning cards -> 4, every listed item numbered, `contract_problems` clean. Display only.
+- **Wording:** Data Consistency labels "Num Employees Part Time" / "Num Employees Full Time" / "Applicant Business Phone" -> "Part-Time Employees" / "Full-Time Employees" / "Business Phone" (`underwriting_consistency._AUTO_LABELS`, also read by `extraction_service._conflict_field_label`; "num_x" reads "Number of X"); the reason "materially different values remain after normalization and scope matching" -> "the documents state different phone numbers" / "... different values". A row-level money card prints both amounts alike ("$18,420" / "$14,820", was "14,820" - `row_rivals._shown_cell`; the pick still posts the index). A share released with Data Consistency picks says so: "counts when all 15 warnings and Data Consistency picks are fixed" (was "15 warnings" beside 2 warning cards and 13 picks; `review_plan._share_group_releases`). The ACORD 101 card's "3 prior claims" was the outside 125's count beside a Loss History table of 6-9: it now counts through `loss_history_state.asserted_claims` (the larger).
+- **Forms:** ACORD 130 / 133 location rows are bound per PREMISES (`pdf_service._location_rows_list_premises`, in `_resolve_schedule_row_inner`): the kit's 130 printed premises 1 on row A, an EMPTY row B (building 2, folded by the duplicate-row guard) and premises 2 on row C; now A / B. Per-box, so a re-stamp agrees. ACORD 131 unchanged (its rows name a company per location - a second named insured at premises 1 keeps its row). Buildings past a form's premises rows continue on ACORD 101 like vehicles past the 127 (`_building_continuation`, 125 = 4 rows, 140 = 2): the kit's third building (1720 Westland Rd, Cheyenne) printed on no form.
+- **Harness:** `reach100_harness.confirm_conflict` now picks a row-level Data Consistency row (it stopped at 85 on the kit - harness, not product). With it, c0b63963 (re-merged) reaches exactly 100 in shuffled order with no contract problem.
+- TESTS outdated, updated: `test_prod02_prose_conflicts` ("Employee Count"), `test_download_review_seen_earlier_14oct` (the reload's call now passes `_stored_structured` through the doors), `test_build26_loss_plan_journeys` (age unknown was a person's N/A on years in business, refused since Fixer 2's `ALWAYS_EXISTS`; now the system's N/A).
+- Also TEST outdated: `test_cap_shares_29oct::test_cd683556_warnings_each_show_a_number` (a stored card the stops no longer raise is now not drawn - P5's "or is not listed"), `test_h2_readiness_presentation` (all-N/A Tier 2 = 0 under `ALWAYS_EXISTS`). CODE fixed on a pin: `_premises_row_capacity` reads `base_form_id` (`test_choice_electric_layers_7oct`).
+- Related files (204, run per file): 13,073 passed; the only failure is the known `test_arq_acord125_missing_only` (httpx). `test_scoring_contract` 55 passed. Transcriber stub / round trip / bug hunt files 134 passed. Frontend build clean (no frontend change).
+- **Full-suite fixes (29 Oct 2026 late).** (1) CODE: ONE year rule for every table - `schedule_capture.YEAR_MIN` / `YEAR_MAX` (1900-2099, the questionnaire's and `scheduleImport.js`'s rule) + `year_rule_message`; `hard_cell_refusal` refuses a year that is not four digits, past 2099 or before 1800 (`YEAR_HARD_MIN`, historic buildings stay advisory) with the SAME sentence + " - not saved". The 29 Oct "1800..next year + 1" ceiling refused 2028-2099 (a 2030 row in `test_duplicate_vins_never_cross_match`, the pinned 2099) with a message ("up to 2027") the advisory never said. A refused cell's `errors` entry is now the rule the typed value broke, never "<label> is required" for a blank we made. (2) TEST outdated: `test_shape_partition_merge::test_the_enforced_set_is_small_and_deliberate` now lists `applicant_business_phone` (registered with `_is_phone` today, ACORD_INTAKE item 8).
+
+### Z47. 30 Oct 2026 - live runs 6875e80c / 8aa8f3ad, the package / form split, always-on checks (offline, uncommitted)
+
+**Live bugs (each fixed as a rule for any package):**
+- Loss-run freshness: the newest included run's valuation date wins (`loss_history_state.latest_loss_run_valuation`,
+  merge tail). 6875e80c: 96 -> 100.
+- Dashboard = page: before forms the list reads `pre_form_score` first; every answer (`audit_routes.
+  _pre_form_readiness`) and the page load refresh it (`form_routes` extraction-result, `remember_score=True`).
+- A value ACORD's own tooltip lists is never "a person's name" (`pdf_service._tooltip_lists_value`; "Joisted Masonry"
+  on 140 had raised its download hard stop).
+- Per-form scores: own download blocker 60, own warning / required box on a row in use / check naming the form 85
+  (`sqs_service._form_download_blocker`, `_form_open_warning`); another form's or another line's stop never holds a
+  form (`stops_for_form`, line from the rule group); editor WARNINGS line per form (`cap_soft_stops`); Cross-Form panel
+  filtered to the open form; Best Solutions labelled package-wide.
+- Wrong-length VINs from a wrapped table cell: warning + plan probe correction; generalised to one identifier door
+  (`services/identifier_checks.py`: VIN, FEIN, NAIC, US ZIP, US phone, umbrella term order; person values exempt).
+- Prior grid: an undated "RENEWAL of policy X" is dated as the term ending when the current began
+  (`extraction_service.date_renewed_policies`); one undated policy no longer unkeys the grid; undated policies are
+  listed, never dropped.
+
+**Always-on checks:** `services/invariants.py` (10 rules, `INVARIANT_BROKEN` log, hooks at merge / pre-form /
+generation / recalc); `tests/shape_fuzz_harness.py` (200 generated packages pre-form + after-forms step). The fuzz
+found and fixed: a one-character VIN misread making a second vehicle (`_fold_misread_vins`), a prior policy on neither
+the 125 grid nor 101 (101 window includes the grid's years), a policy placed twice, another form's stop holding a form.
+
+**Package / form split (owner):** every cross-form check scoped `package` (54) or `form` (11) in
+`issue_registry.issue_scope` (guard test); form checks deferred before forms and holding only their named forms after;
+package checks worded by line before forms; package score after forms = pre-form score. The "your forms will also ask
+for" line on form selection was built and REMOVED the same day (owner: redundant - form items live in each form's side
+panel only).
+
+**D6 (tell Brent):** identifier warnings hold packages with malformed NAIC / ZIP / phone at 85; forms no longer drop
+for another form's or line's problems; the property COPE stop holds ACORD 140 only. Live kit: `test_kit_29oct/run5/`.
+Tests: `test_loss_run_valuation_30oct`, `test_dashboard_score_30oct`, `test_tooltip_listed_value_30oct`,
+`test_form_download_blocker_30oct`, `test_live_run_8aa8_30oct`, `test_identifier_checks_30oct`, `test_invariants_30oct`,
+`test_shape_fuzz_30oct`, `test_issue_scope_30oct`.
+- One-form download review (owner, same day): downloading ONE form lists only what holds that form
+  (`needs_attention.rows_for_form` via `/api/audit/open/{id}?form_id=`; the frontend passes the form and filters the
+  side-panel list). A whole-package download still lists everything. Test `test_one_form_download_review_30oct`.
+- Live 50a7d9e6 (run-5 kit, same night): all three routes verified (dec + loss runs read; the 807 to Transcriber once,
+  3 pages; the downloaded ACORD 126 read from its Primble record, restored, current). Two defects fixed: (1) a form's
+  proposed effective date (ACORD owns the submission term) stayed beside the dec's CURRENT-term expiration - a backwards
+  term and a false warning; `extraction_service.follow_proposed_expiration` now lets a form's effective date take its
+  expiration when the other source's expiration ends on or before it. (2) The NAIC and phone identifier cards offered
+  two boxes when one value was wrong; each wrong value now has its own card with one box (`identifier_checks`
+  PRIOR_NAIC_RULE / CONTACT_PHONE_RULE). The package then reached exactly 100 before forms; dashboard = page; no
+  invariant breaches.
+
+**Z47 continued - the G2 pass and two root fixes (30 Oct 2026, offline, uncommitted).**
+- *An answer raises no new item (G2).* The plan read one Recommendations row per pillar (`miss_list[0]`) and revealed the next only once the first was answered. Now every missing Tier 1 / Tier 2 item, every capped Exposure / Completeness gap and every umbrella deduction is its own row, with the points shared so they add up exactly (`sqs_service.calculate_package_sqs`, `coverage_deduction_items._add_capped`, `umbrella_gap_items`). Sample answers follow the documents (payroll within the stated payroll and 85% of revenue, the FEIN the documents print on probe loss runs: `review_plan._payroll_within_revenue`, `_Sim._fit_payroll_cells`, `_Sim.upload_complete_runs`). Four cross-form checks stopped waiting on a box they never read (physical vs mailing, coinsurance / valuation, umbrella auto, WC payroll vs revenue - the old wording kept where the old condition holds). Follow-ups the upload raises are declared on the upload row (`_declare_upload_follow_ups`). Sweep seeds 0-39: about 30 classes -> 8, all order-dependent; every seed still ends at exactly 100. **Tell Brent:** those four checks warn earlier, so some packages show an 85 sooner.
+- *G1 never narrows a relationship card* (`issue_registry.is_relationship_code`: verify-figure codes + codes named for a comparison). The attestation-conflict window had hidden the "no losses" answer - a well-formed value, and the very one that conflicts - leaving only "total incurred", so the window could not fix the card and the plan showed ownership at 1 point while it moved 4.
+- *G14: the Tier 1 card named ACORD 125 before forms.* `pre_form_view` now prints "Key detail missing: X" under "Missing key details" (display copy only).
+- Tests: `test_invariants_30oct` (+2), `test_build21oct_b-cope-one-store` (one building now offers only the missing occupancy box - the TEST pinned the pre-G1 window).
+- *A catch-all card keeps its rule* (`issue_registry.rule_code_of` / `is_relationship_card`): a sentence that reached the safety net (`uncovered_*`) is judged by the rule its own words classify as. Seed 5036: the backwards proposed term reached the net, G1 narrowed its window to the one EMPTY box (umbrella expiration), and the plan typed a sample there - raising the umbrella / GL misalignment card and dropping the score 75 -> 73. Relationship words now also cover backward / expired / expiring / failure; `test_every_multi_box_card_is_sorted_missing_or_relationship` lists every multi-box field card as missing (narrows) or relationship (keeps all) - a new card lands in that list and someone decides.
+- *The plan corrects a wrong value where it is* (`review_plan._apply`): on a relationship card it types the plan's known answer (the Loss History claims answer) or else the STATED boxes - never an empty box beside them.
+- *The plan sees Loss History rows* (`review_plan._loss_plan_rows`): the copy is scored as a probe and a probe leaves the plan's rows out, so a loss row a step raised (seed 5024: the No Known Losses conflict once the runs' years bring claims into the window) was never declared. `_raised` now reads them with the scorer's own listing rule and the step declares them (`leads_to`).
+- *ACORD 101 read a phantom fact* (live c5675766): its per-form checks read `form_reference`, which nothing writes, so EVERY ACORD 101 stopped at 87 (Structural 85, Exposure 66) with nothing to answer. Now `sqs_service._acord101_names_its_form` asks `pdf_service.acord101_attached_forms` - the forms its FORM NUMBER / TITLE boxes print. Forms generated before this keep 87 until their next save or recalculation. **Tell Brent:** 101 scores rise.
+- *G2 in ANY order - CLOSED the same day* (`review_plan._declare_alone_follow_ups`): the walk credited a follow-up only to the step that raised it in PAGE order; each item is now also done ALONE on the page as it stands, and the items that page would then list - in the page's own words (`page_items` over `review_page_grouped_view`, never a raw rule sentence: those name forms) - are declared on it. Names only, no number moves. Cost: one scoring per item that can raise something, on one copy rolled back each time - about +1-1.8 s per page read (seeds 14 / 30 / 5003: 2.8 / 2.4 / 4.4 s against 1.0 / 1.2 / 3.4 s). Seed 32 (a FEIN conflict) was the harness answering a Recommendations row the page no longer listed - `reach100_harness.solve_contract` now skips an item the current page dropped. (A first cut barred the plan from typing over a person's answer; it stuck six honest-mode contract seeds at 98-99 - a still-listed row means the answer must change - and was reverted.) Sweep 0-39 after: 0 new items in any order; contract seeds 5003/5011/5023/5024/5035/5036 green.
+- *A zero-length / backwards term from the documents* (CH125 live 7a85b6dd: both proposed dates read as 12/01/2026): `follow_proposed_expiration` - when a stated prior term ends exactly on the proposed effective date, the expiration follows by the prior term's length, derived (Please verify). No continuity = left alone, the warning asks. The effective-date sample follows renewal continuity (`_date_probe`: the prior term's end) instead of "a year before the expiration".
+- *Pre-form "add an ACORD 101 explanation"* (policy-by-line kit; G14): `pre_form_view` reads "a written explanation" before forms - display copy, ids kept. The invariant `every_item_answerable` counts a card Data Consistency settles (`stops_now.conflict_stop_facts`) as answerable.
+- *Not product bugs, found by the E2E:* Orbin stopped at 99 because the scripted narrative gave no marketing reason - the page kept that row listed with its point (correct); the policy-by-line kit carries a second insured by design (integrity screen; the script now removes that document like a producer).
+- *Was open (G2, order-dependent, 30 Oct sweep seeds 0-39):* answered in a shuffled / reversed order, four seeds raise an item the page declares nowhere - `gl_codes_no_operations` (GL codes before operations), `wc_payroll_mismatch` (a sample payroll), `loss_history_years` after the COPE card (a row that crosses 1 point), a FEIN conflict after the sample loss-run upload. Every seed still ends at exactly 100. The plan declares follow-ups only in page order.
+- *A step that dips the score declares it* (`review_plan` walk, G13; contract seed 5008: a business income limit typed before its period of restoration raised the 85 hold): the step carries `cost` instead of the walk hiding the dip.
+- *The page now SAYS what an answer raises and any dip* - before this, `leads_to` / `cost` reached no screen. `sqs_service` stamps `answer_gain_leads_to` / `answer_gain_cost` on plan rows; `recommendations.followUpText` adds " · then asks: X (+N more)" or " · score dips until you also answer: X" after the number, on Recommendations rows, cards and key details (`screenPoints.fromPlan`). 1,118 tests touching those texts green; frontend builds.
+- *A package policy takes its line's box in the prior grid* (`pdf_service._prior_coverage_grid_build`, policy-by-line kit): GL 2026 held the package policy QPC5519-26 and a project GL; both went to ACORD 101 while QPC5519-26 printed in that year's Property box - one policy twice (invariant `prior_policy_placed_once`). When exactly one contract in a contested box is a number another column of the same year holds, it takes the box; only the rest are listed.
+- E2E reruns: Orbin clean (pre-form 100, after forms 100, every form 100). Policy-by-line kit: integrity resolved; the 91 left was the upload row (the script cannot upload) and the EMOD narrative topic the scripted narrative lacked (`narrative_target_markets` is the repurposed EMOD slot - by design).
+- *Two rows that must be answered together are ONE row* (owner, 30 Oct 2026 - "solve in sequence" dipped the score): the plan's walk marks a Recommendations row whose answer DIPS the score and raises a check whose boxes another listed row asks for (`review_plan._codependent_rows` -> `items[].joins`); `join_codependent_rows` turns the pair into one row with both questions in one window (`merged_fields` / `merged_resolution`, the sub-point merge's machinery - no frontend change), and the plan is weighed again on it (`sqs_service` before `merge_subpoint_rows`). Contract seed 5008 (business income limit before period of restoration: 98 -> 85) now has no dip. A card or key detail that dips keeps its declared cost ("score dips until you also answer: X").
+- *Same class after forms* (policy-by-line kit, live e70e4e41): answering ACORD 130's WC class code made WC a carried underlying line, the umbrella then needed an Employers Liability limit, and the PACKAGE went 91 -> 85. A real follow-up (new information about the submission), not a form-dependence leak - the stop fires on the same facts before or after forms; it is declared like any raised item.
+
+**Z47 continued - fresh E2E (Ridgeline run 3 + Choice Electric, 30 Oct 2026 night) and the global rule G18.**
+- *A card another form lists showed on a one-form download* (run 3: ACORD 186's "add contractor license number" on the ACORD 127 download): rows with no form tag were read as package rows. `needs_attention.card_owner_forms` - a card some forms' scores list (not every form's) belongs to those forms; `rows_for_form(rows, form, generated_forms)`. Live: 127 download 5 -> 3 rows (its own).
+- *Page speed* (Choice Electric: 35 s a review read): `_form_open_warning` ran the side panel pass on the no-forms path's synthetic boxes (0.37 s a form, 10 forms) - `calculate_sqs(_form_boxes=False)` from `calculate_sqs_from_facts` (package score 7.0 -> 1.7 s); the plan was walked up to three times plus the any-order pass each time - intermediate builds skip it (`declare_alone=False`) and the final plan gets it without another walk (`review_plan.declare_follow_ups`, private `_ctx` dropped by `apply_review_plan`); the expiring-policies advisory's grid readings memoised by facts. Heavy synthetic page 25 s -> 3-8 s.
+- *G18 - every form deduction has a card* (Choice Electric live 6823e106: ACORD 28 at 73, the excess 131 at 98, nothing to answer). `sqs_service._cards_for_uncarded_pillars`: a pillar a form charges with no card of its own gets cards - the umbrella pillar's own deduction items; any form's empty declared checklist facts (`FORM_FIELD_INVENTORY`), never one the form prints in its header, one whose either-or partner is answered (`_EITHER_OR_FACTS`), or one no box / table / narrative takes. Two doors it needed: an answer on an umbrella layer's copy is that layer's (`umbrella_layers.ANSWERS_KEY` / `write_layer_answer` / `layer_answer_key`, read first by `_layer_value` for that copy - an upper layer could only read its own documents before); a section form's policy number / insurer / NAIC answered on that form goes to its own policy record (`apply_producer_answer_to_session(form_id=)` -> `policy_lines.package_target(ctx, fact, [form])`), never the package fact. ACORD 28 reads the number its header prints (`_prints_policy_number`). Declared lists completed (127, 130, 133, 101). Live: ACORD 28 73 -> 100, excess 131 98 -> 100, package 100, primary umbrella untouched. Tests: `tests/test_every_form_reaches_100_30oct.py` (10 random packages solved to 100, all 17 forms answered through their own cards -> exactly 100; plus an AST check that every fact a form's checks read is declared). Runtime: invariant `every_form_deduction_has_a_card`.
+- *G18 narrowed after the suite (same night).* The net now cards only the facts a form's OWN checks read - parsed once from `calculate_sqs` itself (`sqs_service._form_check_facts`, every `_fv(facts, "x")` in the form's `fid ==` branches plus the facts behind the helpers they call, `_CHECK_HELPER_FACTS`); a fill-scored form (137 / 138) keeps its inventory. Carding the whole questionnaire inventory offered cards that move no score (ACORD 140's mortgagee). Umbrella cards only on ACORD 131 copies (the umbrella pillar on any other form is the package's - its Best Solutions). The new cards get their choices / control (`attach_answer_controls`). Inventory aliases (`vehicle_schedule`, `remarks_text`, `explanation_of_yes_answers`) stay out of `FORM_FIELD_INVENTORY` - it drives the questionnaire (`test_question_eligibility`); they live in `_EITHER_OR_FACTS` only. Tests updated where they pinned the pre-G18 lists: `test_choice_electric_dryrun_7oct` (the 140 now also lists the occupancy no document states).

@@ -953,6 +953,11 @@ def _tier2_not_applicable(facts: dict, field: str) -> bool:
     so a fact we cannot classify is never silently excused.
     """
     try:
+        # A typed N/A on a fact every business has is a gap, never out of
+        # the denominator (29 Oct 2026); a derived one (a new venture) stands.
+        from services.answer_semantics import typed_absence_on_always_existing
+        if typed_absence_on_always_existing(field, (facts or {}).get(field), facts):
+            return False
         from services.fact_state import is_not_applicable
         return is_not_applicable(facts, field)
     except Exception:                                          # noqa: BLE001
@@ -1101,6 +1106,9 @@ def key_details(facts: dict, flags: dict | None = None) -> dict:
             "missing_items": _key_detail_actions(facts or {}, flags or {})}
 
 
+_TERM_PAIR = ("effective_date", "expiration_date")
+
+
 def _key_detail_actions(facts: dict, flags: dict) -> List[dict]:
     """Each missing key detail with the fix the pre-form screen can open for it
     (Orbin 22 Sep item 9, owner 30 Sep 2026: "do the action, not just mention
@@ -1142,6 +1150,13 @@ def _key_detail_actions(facts: dict, flags: dict) -> List[dict]:
                 typed.append(str(mode["fact"]))
             elif mode.get("mode") == MODE_SCHEDULE and mode.get("schedule_key") and not schedule_key:
                 schedule_key = str(mode["schedule_key"])
+        # A proposed-term date is typed with its partner (28 Oct 2026 review):
+        # a save that leaves the term backwards or ended is refused
+        # (`validators.term_save_refusal`), so a window holding only the
+        # effective date, beside a document's ended expiration, could never be
+        # saved - the item stood with nothing a person could do in it.
+        if any(t in _TERM_PAIR for t in typed):
+            typed += [t for t in _TERM_PAIR if t not in typed]
         if typed:
             resolution = {"mode": MODE_FIELD, "facts": list(dict.fromkeys(typed))}
         elif schedule_key:
@@ -1647,6 +1662,66 @@ def gl_class_codes_present(facts: Optional[dict]) -> bool:
     return False
 
 
+_GL_WORDS_SUBKEY_RE = re.compile(r"classification|description|operations?|duties", re.I)
+
+
+def gl_classification_text(facts: Optional[dict]) -> str:
+    """The WORDS of the GL classifications the package holds - what each GL
+    row says the work is - lower-cased and joined, "" when there are none.
+
+    THE ONE DOOR for "what kind of work do the GL classes describe?" (27 Oct
+    2026, Lane B item 1), beside `gl_class_codes` (which codes) and
+    `gl_class_codes_present` (any at all). Same homes and the same precedence:
+    a person's saved GL window speaks for itself; otherwise both homes, the
+    schedule through GL's own rows only (`pdf_service.gl_own_row_indices` -
+    a WC class filed under GL is not a GL classification). A row's LOCATION is
+    never its classification ("Home office: 456 Oak Ave" is an address, and a
+    blob read once took its "office" for clerical work), and the code digits
+    are taken off so a payroll or ZIP can never read as a word."""
+    facts = facts if isinstance(facts, dict) else {}
+    texts: List[str] = []
+
+    def _take(v: Any) -> None:
+        for one in (v if isinstance(v, list) else [v]):
+            s = re.sub(r"\d+", " ", str(one or "")).strip(" -:;,.")
+            if s and not re.fullmatch(r"[\W_]*", s):
+                texts.append(re.sub(r"\s+", " ", s).lower())
+
+    def _rows_of(home: str, rows: Any) -> None:
+        if not isinstance(rows, list):
+            if isinstance(rows, str):
+                _take(rows)
+            return
+        idx = list(range(len(rows)))
+        if home == "gl_class_code_schedule":
+            try:
+                from services.pdf_service import gl_own_row_indices
+                idx = gl_own_row_indices(rows, facts)
+            except Exception:                                 # noqa: BLE001
+                pass
+        for i in idx:
+            row = rows[i]
+            if isinstance(row, dict):
+                for k, v in row.items():
+                    if _GL_WORDS_SUBKEY_RE.search(str(k)) or _GL_CODE_SUBKEY_RE.search(str(k)):
+                        _take(v)
+            else:
+                _take(row)
+
+    try:
+        from services.schedule_capture import human_rows
+        person_rows, _src = human_rows(facts, "gl_class_code_schedule")
+    except Exception:                                         # noqa: BLE001
+        person_rows = None
+    if person_rows:
+        _rows_of("gl_class_code_schedule", person_rows)
+    else:
+        for home in GL_CLASS_CODE_HOMES:
+            raw = facts.get(home)
+            _rows_of(home, raw.get("value") if isinstance(raw, dict) and "value" in raw else raw)
+    return " ; ".join(dict.fromkeys(texts))
+
+
 def _term_not_ended(value: Any) -> bool:
     """True when `value` reads as a date today or later (a term still to run)."""
     iso = normalize_date(str(value)) if value not in (None, "") else ""
@@ -1659,12 +1734,33 @@ def _term_not_ended(value: Any) -> bool:
         return False
 
 
+def vehicles_with_bad_vin(facts: dict) -> List[str]:
+    """The vehicle numbers (1-based, schedule order) whose document-read VIN is
+    not a 17-character VIN, on a vehicle from model year 1981 on (or of unknown
+    year). Delegates to the one identifier door (`identifier_checks`). Never raises."""
+    try:
+        from services.identifier_checks import VIN_RULE, impossible_identifiers
+        return list(impossible_identifiers(facts).get(VIN_RULE.code) or [])
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
     Cross-doc hard stops appended by caller after check_doc_consistency().
     """
     hard, soft = run_field_validations(facts)
+    # FIXED-FORMAT IDENTIFIERS (30 Oct 2026, owner: "fix these globally"): a
+    # VIN, NAIC, ZIP, phone or term read off the documents whose format is
+    # impossible - one warning per rule, from the one door. Started as the VIN
+    # warning (live 8aa8f3ad: a wrapped table cell dropped a VIN's last
+    # character); "Vehicle VIN incomplete - " is that rule's sentence.
+    try:
+        from services.identifier_checks import warning_messages as _id_warnings
+        soft.extend(_id_warnings(facts))
+    except Exception as _idx:                                  # noqa: BLE001
+        logger.warning("identifier checks skipped: %s", _idx)
 
     # ── ACORD 125 BASELINE (Tier 1) - EMITTED HERE, NOT IN A ROUTE ───────────
     # These warnings lived in `form_routes` on the UPLOAD response only
@@ -1794,7 +1890,10 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         if flags.get("property_has_bi_coverage"):
             # BI limit + POR ownership moved to cross_form_validator as hard stop.
             # Keep only the "no BI limit at all" soft advisory here to avoid duplication.
-            if not _fv(facts, "business_income_limit"):
+            # A BI row the property schedule prints is a stated limit - the ONE
+            # door the Property pillar asks (`property_coverages.
+            # business_income_limit_stated`, 27 Oct 2026).
+            if not _bi_limit_stated(facts):
                 soft.append("Business Income coverage detected - BI limit and Period of Restoration should be provided")
 
         # ── ONE PERIL IS WHAT THE FLAG MEANS (2026-09-23) ───────────────────
@@ -1896,6 +1995,14 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             _placement = _wc_placement(_fv(facts, "wc_state_fund_acknowledged"))
             private_wc_requested = _placement == "private_carrier"
             state_fund_ack = _placement == "state_fund"
+            # THE DOCUMENTS ALREADY ANSWER IT (Michelle review, 29 Oct 2026):
+            # a WC declarations whose class row for the monopolistic state reads
+            # "stop-gap Employers Liability only (WY state fund)" places that
+            # state with the state fund - asking the producer to confirm what
+            # the policy prints is a false alarm. Every monopolistic state on
+            # the package must be so placed; a person's answer still decides.
+            if not _placement and documented_state_fund_placement(facts):
+                state_fund_ack = True
             if private_wc_requested and not state_fund_ack:
                 hard.append(
                     "Monopolistic WC state (ND/OH/WA/WY) requires the state fund - "
@@ -2179,7 +2286,45 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             "is wrong."
         )
 
+    # A warning that only asks to verify figures stands down once a person
+    # verified them (27 Oct 2026, `issue_registry.figures_verified`).
+    try:
+        from services.issue_registry import drop_verified_figure_stops
+        soft = drop_verified_figure_stops(soft, facts, "soft")
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("evaluate_stops: verified-figure filter skipped: %s", exc)
     return hard, soft
+
+
+_MONOPOLISTIC_WC_STATES = frozenset({"ND", "OH", "WA", "WY"})
+_STATE_FUND_WORDS_RE = re.compile(
+    r"stop[\s-]*gap|state[\s-]+fund|monopolistic\s+fund|"
+    r"workers'?\s*compensation\s+(?:division|bureau|fund)", re.IGNORECASE)
+
+
+def documented_state_fund_placement(facts: Any) -> bool:
+    """True when the package's own WC rows place EVERY monopolistic state it
+    carries with the state fund: each such state has a WC class row whose
+    description reads stop-gap / state fund (the private policy then gives
+    only Employers Liability there). False when no monopolistic state can be
+    named from the rows / payroll, or any one of them is not so placed."""
+    facts = facts if isinstance(facts, dict) else {}
+    rows = _fv(facts, "wc_class_codes")
+    rows = rows if isinstance(rows, list) else []
+    states: set = set()
+    for key in ("wc_payroll_by_state", "wc_monopolistic_payroll"):
+        held = _fv(facts, key)
+        if isinstance(held, dict):
+            states |= {str(k).strip().upper() for k in held}
+    states |= {str((r or {}).get("state") or "").strip().upper()
+               for r in rows if isinstance(r, dict)}
+    mono = states & _MONOPOLISTIC_WC_STATES
+    if not mono:
+        return False
+    placed = {str(r.get("state") or "").strip().upper() for r in rows
+              if isinstance(r, dict) and _STATE_FUND_WORDS_RE.search(
+                  " ".join(str(r.get(c) or "") for c in ("description", "classification", "code")))}
+    return mono <= placed
 
 
 # ── Hard-stop classification for non-property submissions ─────────────────────
@@ -2486,7 +2631,7 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
             issues.append({"type": "warning", "message": f"Payroll is only {ratio * 100:.1f}% of revenue - unusually low; verify revenue and payroll figures"})
 
     if "ACORD_140" in selected_form_ids:
-        if flags.get("property_has_bi_coverage") and not _fv(facts, "business_income_limit"):
+        if flags.get("property_has_bi_coverage") and not _bi_limit_stated(facts):
             issues.append({"type": "warning", "message": "Business Income coverage detected - BI limit required"})
         if not _fv(facts, "valuation_method"):
             issues.append({"type": "warning", "message": "Property valuation method not specified on ACORD 140"})
@@ -2633,12 +2778,25 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     def _names_no_insured(key: str, value: Any) -> bool:
         return key in _INSURED_KEYS and isinstance(value, str) and _not_insured(value)
 
+    def _echo(d: dict, key: str) -> bool:
+        held = (d.get("facts") or {}).get(key)
+        return isinstance(held, dict) and held.get("echo_of") in ("documents", "loss_run")
+
     def _stated(key: str) -> List[dict]:
         # Role scope (client 1.2): a document is only read as stating a fact its
         # ROLE covers. See fact_comparison.document_witnesses.
-        return [d for d in docs
-                if _fv(d["facts"], key) and _doc_witnesses(d.get("doc_type"), key)
-                and not _names_no_insured(key, _fv(d["facts"], key))]
+        out = [d for d in docs
+               if _fv(d["facts"], key) and _doc_witnesses(d.get("doc_type"), key)
+               and not _names_no_insured(key, _fv(d["facts"], key))]
+        # A form of OURS printing what the documents stated is those documents
+        # speaking again (`echo_of`, the Data Consistency picker's rule since 28
+        # Oct 2026) - no second witness while a document that is no echo states
+        # the fact. Michelle review, 29 Oct: our own re-uploaded ACORD 126 (its
+        # effective date the next term we had calculated) raised "Policy date
+        # mismatch" against the outside ACORD 125, with no picker row to fix it.
+        if any(not _echo(d, key) for d in out):
+            out = [d for d in out if not _echo(d, key)]
+        return out
 
     def _raw(key: str, verified_only: bool = False) -> List:
         stated = [d for d in _stated(key)
@@ -2929,9 +3087,9 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
 
     def _conflicts_within_one_term(key: str) -> bool:
         cur, prop = [], []
-        for d in docs:
+        for d in _stated(key):
             v = _fv(d["facts"], key)
-            if not v or not _doc_witnesses(d.get("doc_type"), key):
+            if not v:
                 continue
             role = str(d.get("doc_type") or "").strip().lower()
             (prop if role in _PROPOSED_TERM_ROLES else cur).append(v)
@@ -3879,6 +4037,8 @@ def _gap_rows(pillar: str, score: float, items: List[dict], eff_weight: float) -
                "action": it.get("row_action") or it.get("label") or fact,
                "missing": [it.get("label") or fact], "field": fact,
                "points_available": round(pts * eff_weight, 1), "closes_with": "type"}
+        if it.get("also_facts"):
+            row["also_facts"] = list(it["also_facts"])
         seen[fact] = row
         rows.append(row)
     rest = [i for i in items if not i.get("fact")]
@@ -4608,7 +4768,7 @@ def loss_history_plan(facts: dict, flags: dict, docs: Optional[List[dict]],
             LOSS_RUN_OWNERSHIP_FIELD, LOSS_RUN_OWNERSHIP_OPTIONS, LOSS_RUN_STATUS_FIELD,
             LOSS_RUN_STATUS_OPTIONS, asserted_claims, claims_are_corroborated,
             claims_question_answers, had_claims_answer, loss_run_ownership_answer,
-            loss_run_years_suggestion, loss_runs_pending_stated, loss_years_required,
+            ownership_question_open, loss_run_years_suggestion, loss_runs_pending_stated, loss_years_required,
             markable_loss_run_documents, package_has_loss_runs, parse_loss_run_status,
             previously_uninsured, prior_carrier_applicable, user_attested_no_losses,
             with_claims_answer,
@@ -4760,7 +4920,7 @@ def loss_history_plan(facts: dict, flags: dict, docs: Optional[List[dict]],
             carrier_after_upload = True
 
     if _live() and package_has_loss_runs(st["docs"], st["facts"]) \
-            and loss_run_ownership_answer(st["facts"]) is None \
+            and ownership_question_open(st["facts"], st["docs"]) \
             and match_loss_run_identity(st["docs"], applicant, st["facts"])["tier"] != "strong":
         yes = LOSS_RUN_OWNERSHIP_OPTIONS[0]
         confirmed = {**st["facts"], LOSS_RUN_OWNERSHIP_FIELD: _env(yes)}
@@ -5198,15 +5358,13 @@ def _is_ops_class_code_mismatch(facts: dict, flags: dict, coverage_type: str = "
     if not ops_ind:
         return False
 
-    codes = (
-        _fv(facts, "gl_class_codes_by_location") if coverage_type == "gl"
-        else _fv(facts, "wc_class_codes")
-    )
-    if coverage_type == "gl":
-        # The GL window a person saved is the answer (`person_gl_class_codes`,
-        # 21 Oct 2026): this card opens the window, so a code the person fixed
-        # there must decide the check - never the stale home beside it.
-        codes = person_gl_class_codes(facts) or codes
+    # The GL codes are the ONE door's (`gl_class_codes`, 27 Oct 2026, Lane B
+    # item 1): a person's saved GL window first (`person_gl_class_codes`, 21
+    # Oct), then BOTH homes, minus another line's codes. This read
+    # `gl_class_codes_by_location` alone, so a package whose codes live in the
+    # schedule (the declarations' class table, the GL window) was never judged.
+    codes = (gl_class_codes(facts) if coverage_type == "gl"
+             else _fv(facts, "wc_class_codes"))
     if not codes or (isinstance(codes, list) and not codes):
         return False
     code_ind = _codes_to_industry(str(codes), _class_code_tokens(codes))
@@ -5466,6 +5624,87 @@ def _cross_issue_facts(issue: dict) -> set:
     return out
 
 
+# ── THE SAFETY NET: NO POINT IS LOST THAT THE PAGE CANNOT GIVE BACK (27 Oct 2026) ──
+# Owner's rule: answering everything the pre-form screen asks reaches exactly 100.
+# The first line of defence is that every deduction and every warning carries an
+# answer that clears it (the reach-100 solver, `tests/test_reach_100_every_package`).
+# This is the backstop for the case that slips through: a pillar deduction naming
+# no box a person can answer, or a warning hold whose card offers no answer, is NOT
+# charged. Decided here, inside the scorer, so the first number the page shows is
+# already right - nothing jumps later. Each one is logged loudly (SQS_NOT_SCORED,
+# with its rule) so the missing question gets built, and listed on the package's
+# `not_scored` for the underwriter's cover. Hard stops are never released: each of
+# the five kinds keeps a real answer.
+import contextvars as _contextvars
+_NOT_SCORED = _contextvars.ContextVar("sqs_not_scored", default=None)
+_CARD_FIXED_BUCKETS = ("cross_document_consistency", "cross_form_details")
+_ANSWER_MODES = ("field", "schedule", "narrative")
+
+
+def _record_not_scored(entry: dict) -> None:
+    logger.warning("SQS_NOT_SCORED: %s", entry)
+    sink = _NOT_SCORED.get()
+    if isinstance(sink, list) and entry not in sink:
+        sink.append(entry)
+
+
+def _item_is_answerable(item: dict) -> bool:
+    if item.get("bucket") in _CARD_FIXED_BUCKETS:
+        return True                       # the cross-form cards carry their own fixes
+    fact = item.get("fact")
+    if not fact:
+        return False
+    try:
+        from services.answer_routing import answer_mode
+        return (answer_mode(str(fact)) or {}).get("mode") in _ANSWER_MODES
+    except Exception:                                          # noqa: BLE001
+        return True                       # cannot tell: charge it, as before
+
+
+def charge_only_answerable(items: List[dict], pillar: str) -> List[dict]:
+    """`items` less the deductions no box on the page can answer (each recorded)."""
+    kept: List[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict) or _item_is_answerable(item):
+            kept.append(item)
+            continue
+        _record_not_scored({"pillar": pillar, "points": int(item.get("points") or 0),
+                            "label": str(item.get("label") or ""), "fact": item.get("fact"),
+                            "rule": item.get("bucket") or pillar})
+    return kept
+
+
+def release_unanswerable_holds(messages: List[str], cross_issues: Optional[List[dict]]) -> List[str]:
+    """The warning messages that may hold the 85: those whose card offers no answer
+    (a known rule whose resolution is mode "none", never a form choice) are
+    released and recorded. A message whose rule cannot be told keeps holding."""
+    by_message = {str(i.get("message")): i for i in (cross_issues or [])
+                  if isinstance(i, dict) and i.get("message")}
+    try:
+        from services.issue_registry import classify_legacy, resolution_for
+    except Exception:                                          # noqa: BLE001
+        return list(messages or [])
+    out: List[str] = []
+    for msg in messages or []:
+        issue = by_message.get(str(msg))
+        if issue is not None and issue.get("form_choice"):
+            out.append(msg)
+            continue
+        code = (issue or {}).get("code")
+        if not code:
+            try:
+                code = classify_legacy(str(msg), "soft")[0]
+            except Exception:                                  # noqa: BLE001
+                code = None
+        res = resolution_for(code) if code else None
+        if isinstance(res, dict) and res.get("mode") == "none":
+            _record_not_scored({"pillar": "hold_85", "points": None, "label": str(msg)[:200],
+                                "fact": None, "rule": code})
+            continue
+        out.append(msg)
+    return out
+
+
 def exposure_deduction_items(
     facts: dict,
     flags: dict,
@@ -5514,24 +5753,52 @@ def coverage_deduction_items(
     items: List[dict] = []
 
     def _add(bucket: str, points: int, fact: Optional[str], label: str,
-             kind: str = "missing") -> None:
+             kind: str = "missing", also: Tuple[str, ...] = ()) -> None:
         if points:
-            items.append({"bucket": bucket, "points": int(points),
-                          "fact": fact, "label": label, "kind": kind})
+            item = {"bucket": bucket, "points": int(points),
+                    "fact": fact, "label": label, "kind": kind}
+            if also:
+                # The other side of a comparison (SCORING_RULES.md I1): the
+                # row's window offers it too, so the person can correct
+                # whichever side is wrong.
+                item["also_facts"] = list(also)
+            items.append(item)
+
+    # A class-code mismatch compares the codes with the operations described
+    # (the description, else the NAICS sector): both are the row's to correct.
+    _OPS_SIDES = ("operations_description", "naics_code")
 
     def _add_capped(bucket: str, gaps, cap: int) -> None:
-        left = int(cap)
-        for fact, pts, label in gaps or []:
-            take = min(int(pts), left)
-            if take <= 0:
-                break
+        # EVERY GAP IS LISTED (owner rule G2, 30 Oct 2026). The bucket used to
+        # list its gaps in rule order until the cap was reached, so the gaps past
+        # the cap (garaging, radius, vehicle use behind a missing vehicle and
+        # driver schedule) appeared only once an earlier one was answered - a
+        # correct answer raised a new item. Now each gap is an item; when they
+        # add up to more than the cap, the cap is shared by their own points
+        # (largest remainder, each at least 1 while the cap allows), so the
+        # items still add up to exactly what the bucket charges.
+        gaps = [(f, int(p), l) for f, p, l in (gaps or []) if int(p) > 0]
+        if not gaps or int(cap) <= 0:
+            return
+        total = sum(p for _f, p, _l in gaps)
+        cap_now = min(int(cap), total)
+        if total <= cap_now:
+            shares = [p for _f, p, _l in gaps]
+        else:
+            floor_each = 1 if cap_now >= len(gaps) else 0
+            spread = cap_now - floor_each * len(gaps)
+            quotas = [p * spread / total for _f, p, _l in gaps]
+            shares = [floor_each + int(q) for q in quotas]
+            for n in sorted(range(len(gaps)), key=lambda n: -(quotas[n] - int(quotas[n])))[
+                    :cap_now - sum(shares)]:
+                shares[n] += 1
+        for (fact, _pts, label), take in zip(gaps, shares):
             # The rule tables word a gap as its absence ("No radius of
             # operation"); a row names what to answer ("Radius of operation").
             label = str(label or "")
             if label.startswith("No ") and len(label) > 3:
                 label = label[3].upper() + label[4:]
             _add(bucket, take, fact, label)
-            left -= take
 
     # ── GL: class codes vs operations (L90, L92) ─────────────────────────────
     #
@@ -5557,7 +5824,7 @@ def coverage_deduction_items(
         elif _is_ops_class_code_mismatch(facts, flags, "gl"):
             # GL class code does not match operations description
             _add("operations_description", 15, "gl_class_codes_by_location",
-                 "GL class codes that match the operations described", "conflict")
+                 "GL class codes that match the operations described", "conflict", _OPS_SIDES)
         if not _answered(facts, "gl_limits") and not _answered(facts, "gl_each_occurrence"):
             _add("coverage_information", 8, "gl_each_occurrence", "GL each occurrence limit")
 
@@ -5611,7 +5878,7 @@ def coverage_deduction_items(
         elif _is_ops_class_code_mismatch(facts, flags, "wc"):
             # WC class code does not match operations description
             _add("operations_description", 15, "wc_class_codes",
-                 "Workers comp class codes that match the operations described", "conflict")
+                 "Workers comp class codes that match the operations described", "conflict", _OPS_SIDES)
         if flags.get("wc_multi_state") and not _answered(facts, "wc_payroll_by_state"):
             # The breakdown by state IS the class table (V1 H3).
             _add("payroll_employee_information", 8, "wc_class_codes",
@@ -5670,9 +5937,12 @@ def coverage_deduction_items(
 
     # ── Exposure-coverage gaps (employees without WC, vehicles without auto) ─
     _num_emp = _to_int(_fv(facts, "num_employees"))
-    if _num_emp and _num_emp > 5 and not _wc_carried(flags):
-        # Employees detected but no WC coverage - a coverage decision, no box
-        _add("payroll_employee_information", 8, None,
+    # A coverage decision the PRODUCER states (27 Oct 2026, owner: answering
+    # everything reaches 100): "no box" left a package with 6 employees and no
+    # WC policy at 97 whatever was answered. Any answer settles the question.
+    if _num_emp and _num_emp > 5 and not _wc_carried(flags) \
+            and not _answered(facts, "workers_comp_arrangement"):
+        _add("payroll_employee_information", 8, "workers_comp_arrangement",
              "Employees are listed but no workers comp coverage is carried", "conflict")
 
     _has_vehicle_exposure = bool(
@@ -5680,9 +5950,9 @@ def coverage_deduction_items(
         or _fv(facts, "vehicle_schedule")
         or flags.get("auto_vehicles_detected")
     )
-    if _has_vehicle_exposure and not flags.get("has_auto_coverage"):
-        # Vehicles detected but no auto coverage - a coverage decision, no box
-        _add("coverage_information", 8, None,
+    if _has_vehicle_exposure and not flags.get("has_auto_coverage") \
+            and not _answered(facts, "auto_coverage_arrangement"):
+        _add("coverage_information", 8, "auto_coverage_arrangement",
              "Vehicles are listed but no auto coverage is carried", "conflict")
 
     # ── Claims (Brent 17 Oct attachment C, 21 Oct 2026) ─────────────────────
@@ -5721,7 +5991,7 @@ def coverage_deduction_items(
     if miss_pen > 0:
         _add("cross_form_details", miss_pen, None,
              "Cross-form checks asking for details (see the warnings)", "missing")
-    return items
+    return charge_only_answerable(items, "coverage")
 
 
 def _cross_points(conflicts: List[dict], owed: List[dict], hard_cross: list) -> Tuple[int, int]:
@@ -7312,7 +7582,7 @@ def umbrella_deduction_items(facts: dict, flags: dict) -> List[dict]:
     if not _has_explicit_follow_form(_ff_combined):
         items.append({"points": 10, "fact": "umbrella_follow_form",
                       "label": "Does the umbrella follow form over the underlying policies?"})
-    return items
+    return charge_only_answerable(items, "umbrella")
 
 
 def umbrella_gap_items(facts: dict, flags: dict) -> List[dict]:
@@ -7332,9 +7602,36 @@ def umbrella_gap_items(facts: dict, flags: dict) -> List[dict]:
     if not _umbrella_has_underlying(facts):
         # The box of the first line the umbrella sits over (21 Oct 2026: an
         # employers liability limit lifts it too - `umbrella_underlying_box`).
-        return [{"points": 100, "fact": umbrella_underlying_box(facts, flags),
+        box = umbrella_underlying_box(facts, flags)
+        first = {"points": 100, "fact": box,
                  "label": "Underlying liability limit (general liability, auto or "
-                          "employers liability)"}]
+                          "employers liability)"}
+        # EVERYTHING THE PILLAR WILL ASK, UP FRONT (owner rule G2, 30 Oct 2026):
+        # the deductions read once that limit is stated (at the threshold the
+        # answer is probed with) are listed now too - before, answering the one
+        # row revealed the umbrella limit, the schedule, follow form and the
+        # employers liability limit as new items. The first row keeps what the
+        # rest cannot give (at least 1); the rest share the other points.
+        try:
+            probe = dict(facts or {})
+            probe[box] = {"value": str(int(_THRESHOLD_PROBE_FACTS.get(box, 1_000_000))),
+                          "source": "producer", "confidence": "producer"}
+            rest = [i for i in umbrella_deduction_items(probe, flags)
+                    if i.get("fact") != box and int(i.get("points") or 0) > 0]
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("umbrella gap items: later items not read: %s", exc)
+            rest = []
+        if not rest:
+            return [first]
+        give = 99
+        total = sum(int(i["points"]) for i in rest)
+        quotas = [int(i["points"]) * min(total, give) / total for i in rest]
+        shares = [int(q) for q in quotas]
+        left = min(total, give) - sum(shares)
+        for n in sorted(range(len(rest)), key=lambda n: -(quotas[n] - shares[n]))[:left]:
+            shares[n] += 1
+        first["points"] = 100 - sum(shares)
+        return [first] + [{**i, "points": shares[n]} for n, i in enumerate(rest) if shares[n] > 0]
     items = umbrella_deduction_items(facts, flags)
     total = sum(int(i["points"]) for i in items)
     if total <= 100:
@@ -7650,8 +7947,21 @@ def property_gap_items(facts: dict, flags: dict) -> List[dict]:
         "property_building_value": (_answered(facts, "property_building_value")
                                     or _answered(facts, "property_bpp_value")),
     }
+    # A Business Income limit the property SCHEDULE prints per premises is a
+    # stated BI limit (27 Oct 2026, the round trip's ACORD 140: two premises,
+    # $1,000,000 and $25,000, no one package value - and charged "missing").
+    try:
+        from services.property_coverages import schedule_states_limit
+        _bi_scheduled = schedule_states_limit(facts, "bi")
+    except Exception:                                          # noqa: BLE001
+        _bi_scheduled = False
     tier_missing = [(k, label) for k, label in _COPE_TIER1 + _COPE_TIER2
-                    if not _answered(facts, k)]
+                    if not _answered(facts, k)
+                    and not (k == "business_income_limit" and _bi_scheduled)
+                    # Actual Loss Sustained: no period to state, and its basis
+                    # is the BI limit's statement (Michelle review item 6).
+                    and not (k in ("period_of_restoration", "business_income_limit")
+                             and not _por_needed(facts))]
     tier_filled = len(_COPE_TIER1) + len(_COPE_TIER2) - len(tier_missing)
     items: List[dict] = []
     min_missing = [(k, label) for k, label in _COPE_MINIMUM if not present[k]]
@@ -7671,8 +7981,37 @@ def property_gap_items(facts: dict, flags: dict) -> List[dict]:
     if not min_missing and _acv_rcv_conflict(facts):
         items.append({"points": 10, "fact": "valuation_method",
                       "label": "Valuation method - the documents disagree (replacement cost or actual cash value)"})
-    return items
+    return charge_only_answerable(items, "property")
 
+
+
+def _por_needed(facts: dict) -> bool:
+    """`property_coverages.period_of_restoration_needed` - False when the BI
+    coverage is Actual Loss Sustained (no period to state; Michelle review item
+    6, 29 Oct 2026). True when that module is unavailable (today's rule)."""
+    try:
+        from services.property_coverages import period_of_restoration_needed
+        return period_of_restoration_needed(facts)
+    except Exception:                                          # noqa: BLE001
+        return True
+
+
+def _cope_tier_ok(facts: dict, key: str) -> bool:
+    """A Tier 2 COPE field present - or, for the Period of Restoration, not
+    applicable on an Actual Loss Sustained BI coverage."""
+    if key in ("period_of_restoration", "business_income_limit") and not _por_needed(facts):
+        return True
+    return bool(_fv(facts, key))
+
+
+def _bi_limit_stated(facts: dict) -> bool:
+    """`property_coverages.business_income_limit_stated` - the package BI limit
+    or a scheduled BI row; the bare fact when that module is unavailable."""
+    try:
+        from services.property_coverages import business_income_limit_stated
+        return business_income_limit_stated(facts)
+    except Exception:                                          # noqa: BLE001
+        return bool(_fv(facts, "business_income_limit"))
 
 # ── Package-level SQS ─────────────────────────────────────────────────────────
 
@@ -8361,8 +8700,16 @@ def building_value_cross_items(flags: Optional[dict], session_data: Optional[dic
     _uw = (session_data or {}).get("underwriting_consistency") or {}
     if not (flags or {}).get("has_property_coverage"):
         return []
+    # A confirmed pick retires it, whatever the stored assessment says (29 Oct
+    # 2026 - the one test `stops_now` applies to every picker row).
+    try:
+        from services.stops_now import _settled_by_confirmation as _settled
+    except Exception:                                         # noqa: BLE001
+        _settled = lambda _f, _c: False                       # noqa: E731
+    _conf = (session_data or {}).get("underwriting_confirmations")
     if not any(isinstance(f, dict) and f.get("fact_key") == "property_building_value"
-               and f.get("review_required") for f in (_uw.get("fields") or [])):
+               and f.get("review_required") and not _settled(f, _conf)
+               for f in (_uw.get("fields") or [])):
         return []
     return [{"type": "soft_warning", "field": "property_building_value",
              "message": BUILDING_VALUE_CONFLICT_MSG}]
@@ -8406,6 +8753,8 @@ def calculate_package_sqs(
     hard_stops  = hard_stops  or []
     soft_stops  = soft_stops  or []
     cross_issues = cross_issues or []
+    _not_scored: List[dict] = []
+    _not_scored_token = _NOT_SCORED.set(_not_scored)
 
     # Classified supporting-evidence presence feeds the narrative & loss-history
     # pillars so reclassifying a document measurably moves the score (§4.2).
@@ -8566,7 +8915,9 @@ def calculate_package_sqs(
                   and (i.get("message") == BUILDING_VALUE_CONFLICT_MSG or i.get("escalates_acord101"))]
     cap_applied, cap_reason = _resolve_cap(
         hard_stops,
-        list(soft_stops or []) + [m for m in _held_soft if m not in (soft_stops or [])],
+        release_unanswerable_holds(
+            list(soft_stops or []) + [m for m in _held_soft if m not in (soft_stops or [])],
+            cross_issues),
         hard_cross=[i.get("message") for i in hard_cross if isinstance(i, dict)],
     )
     raw = raw_uncapped if cap_applied is None else min(raw_uncapped, cap_applied)
@@ -8834,6 +9185,44 @@ def calculate_package_sqs(
                        f"(Form Fill Rate {int(sum(_form_fill_rates) / len(_form_fill_rates))}%)")
         else:
             _action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
+        # EVERY MISSING KEY DETAIL IS ITS OWN ROW (owner rule G2, 30 Oct 2026).
+        # One row naming only `miss_list[0]` meant answering it revealed the next
+        # ("Proposed effective date" appeared after "Producer / Agency name" was
+        # answered) - a correct answer raised an item that was not listed before.
+        # Each Tier 1 / Tier 2 label now gets its own row from the start, the way
+        # `_gap_rows` lists the Exposure / Property / Umbrella items; the pillar's
+        # points are shared by what each label costs (Tier 1 20 each, Tier 2 its
+        # equal share), so the rows still add up to the pillar's gap.
+        if pillar == "structural_completeness" and len(miss_list) > 1:
+            _total = (_points_available(pillar, score) if _struct_rest is None
+                      else _points_available(pillar, 100 - _struct_rest))
+            _w = {p.get("key"): float(p.get("weight") or 0.0) for p in _p1_parts}
+            _t1 = [m for m in miss_list if m in tier1_missing]
+            _t2 = [m for m in miss_list if m not in tier1_missing]
+            _cost: List[float] = []
+            for _m in miss_list:
+                if _m in _t1:
+                    _cost.append(min(20.0, (100 - int(tier1_score)) / max(1, len(_t1)))
+                                 * _w.get("tier1", 0.0))
+                else:
+                    _cost.append((100 - int(tier2_score)) / max(1, len(_t2)) * _w.get("tier2", 0.0))
+            _sum_cost = sum(_cost)
+            # Tenths shared by largest remainder, so the rows add up to exactly
+            # the pillar's (rounded) gap.
+            _tenths_total = int(round(_total * 10))
+            _quota = [(_tenths_total * _c / _sum_cost) if _sum_cost else
+                      (_tenths_total / len(miss_list)) for _c in _cost]
+            _tenths = [int(q) for q in _quota]
+            for _n in sorted(range(len(_quota)), key=lambda n: -(_quota[n] - _tenths[n]))[
+                    :_tenths_total - sum(_tenths)]:
+                _tenths[_n] += 1
+            for _m, _t in zip(miss_list, _tenths):
+                _f = _pillar_rec_field(pillar, _m)
+                top_recs.append({"pillar": pillar, "score": score, "action": _m,
+                                 "missing": [_m], "field": _f,
+                                 "points_available": _t / 10.0,
+                                 "closes_with": "type" if _f else "review"})
+            continue
         _field = _pillar_rec_field(pillar, _action)
         # WHAT WOULD ACTUALLY CLOSE THIS. A producer needs to know whether a gap
         # is theirs to type or waits on the insured to send something - without
@@ -8985,8 +9374,12 @@ def calculate_package_sqs(
             # Never break scoring: the cards keep each form's own number.
             logger.warning("card points not unified: %s", _unify_ex)
 
+    _NOT_SCORED.reset(_not_scored_token)
     return {
         "package_sqs_score": raw,
+        # The safety net (27 Oct 2026): deductions and holds no item on the page
+        # can answer, not charged - for the cover and the logs, never the page.
+        "not_scored":        list(_not_scored),
         # Every fact on the review screen -> [points, exact, alone] (15 Oct 2026,
         # `screen_fields` / `_unify_card_points`); completed by the review screen.
         "screen_shares":     _screen_shares or {},
@@ -9851,11 +10244,14 @@ def screen_fields(facts: dict, flags: dict, hard_stops, soft_stops, cross_issues
 
 
 def complete_screen_shares(row: dict, session_id: str, user_id: str,
-                           pkg: Optional[dict], kd: Optional[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+                           pkg: Optional[dict], kd: Optional[dict],
+                           credit_rows: Optional[List[dict]] = None) -> Tuple[Optional[dict], Optional[dict]]:
     """The review page's numbers (`_complete_screen_shares_plan`), plus the
     years the included loss runs cover as `loss_coverage` (display only, 24 Oct
-    2026 - `loss_history_state.loss_run_coverage`; left out with no loss runs)."""
-    pkg, kd = _complete_screen_shares_plan(row, session_id, user_id, pkg, kd)
+    2026 - `loss_history_state.loss_run_coverage`; left out with no loss runs).
+    `credit_rows`: after forms, the dismissal rows behind the stored score's
+    credits (the plan retires each one where its field is answered)."""
+    pkg, kd = _complete_screen_shares_plan(row, session_id, user_id, pkg, kd, credit_rows)
     try:
         if isinstance(pkg, dict) and isinstance(row, dict):
             from services.loss_history_state import loss_run_coverage
@@ -9869,7 +10265,8 @@ def complete_screen_shares(row: dict, session_id: str, user_id: str,
 
 
 def _complete_screen_shares_plan(row: dict, session_id: str, user_id: str,
-                                 pkg: Optional[dict], kd: Optional[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+                                 pkg: Optional[dict], kd: Optional[dict],
+                                 credit_rows: Optional[List[dict]] = None) -> Tuple[Optional[dict], Optional[dict]]:
     """THE REVIEW PAGE'S NUMBERS, FROM ITS ONE ORDERED PLAN (owner, 24 Oct 2026).
 
     Every item the pre-form page offers - the key details, a file to mark, a
@@ -9884,19 +10281,40 @@ def _complete_screen_shares_plan(row: dict, session_id: str, user_id: str,
     the page reads its numbers from here), and for older readers the same
     numbers as `screen_shares` / `screen_card_points` / `screen_dc_points` /
     `screen_unanswerable`, each row's `answer_gain` and each key detail's
-    `points`. Before forms only. Never raises."""
+    `points`. Never raises.
+
+    AFTER FORMS TOO (owner, 29 Oct 2026, Orbin 432c8594: 79 after forms with
+    the side panel's rows at +2 +1 +1 +2 +6 +3 = 94 - six points on no item,
+    while the same facts before forms listed ten items adding to exactly 100).
+    Once forms exist the plan is weighed with the post-generation stops (the
+    selected + generated forms, `stops_now(pre_form=False)`) and the stored,
+    credit-bearing score (`credit_rows`), and its items are the ones the editor's
+    side panel lists (`after_forms` on the plan)."""
     try:
-        if not isinstance(pkg, dict) or not isinstance(row, dict) or row.get("generated_forms"):
+        if not isinstance(pkg, dict) or not isinstance(row, dict):
             return pkg, kd
         # Only a scored package has a plan (a payload with no pillars passes through).
         if pkg.get("package_sqs_score") is None or pkg.get("raw_sqs_score") is None \
                 or not pkg.get("pillars"):
             return pkg, kd
         from services.review_plan import build_review_plan
-        grouped = review_page_grouped_view(row, pkg)
-        plan = build_review_plan(row, pkg, kd, grouped)
+        _after = bool(row.get("generated_forms"))
+        grouped = review_page_grouped_view(row, pkg, after_forms=_after)
+        _cr = credit_rows if _after else None
+        plan = build_review_plan(row, pkg, kd, grouped, _cr, declare_alone=False)
         # Same-pillar rows each under a point are one row; the plan is weighed
         # again on it so its number is what doing them together moves.
+        # Rows that must be answered together (an answer raising a check another
+        # row answers) are ONE row first; the plan is weighed again on it.
+        from services.review_plan import join_codependent_rows
+        try:
+            _joined = join_codependent_rows(pkg, plan)
+            if _joined is not None:
+                _plan_j = build_review_plan(row, _joined, kd, grouped, _cr, declare_alone=False)
+                if _plan_j:
+                    pkg, plan = _joined, _plan_j
+        except Exception as _jx:                               # noqa: BLE001
+            logger.debug("co-dependent rows not joined: %s", _jx)
         from services.review_plan import merge_subpoint_rows, saved_merged_groups
         try:
             from services.issue_fix_undo import load_receipts
@@ -9905,28 +10323,42 @@ def _complete_screen_shares_plan(row: dict, session_id: str, user_id: str,
             _saved = {}
         merged = merge_subpoint_rows(pkg, plan, _saved)
         if merged is not None:
-            plan2 = build_review_plan(row, merged, kd, grouped)
+            plan2 = build_review_plan(row, merged, kd, grouped, _cr, declare_alone=False)
             if plan2:
                 pkg, plan = merged, plan2
         if not plan:
             return pkg, kd
+        # The final plan: what each item raises in any order (names only).
+        from services.review_plan import declare_follow_ups
+        plan = declare_follow_ups(row, plan)
         return apply_review_plan(pkg, kd, plan)
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("screen shares not completed: %s", exc)
         return pkg, kd
 
 
-def review_page_grouped_view(row: dict, pkg: Optional[dict]) -> Optional[dict]:
+def review_page_grouped_view(row: dict, pkg: Optional[dict],
+                             after_forms: bool = False) -> Optional[dict]:
     """The hard-stop and warning cards the pre-form review page draws, from the
     stops AS THEY STAND (`stops_now`) - the view every pre-form route returns
-    (`issue_registry.grouped_with_package_caps`)."""
+    (`issue_registry.grouped_with_package_caps`). `after_forms` (29 Oct 2026):
+    the cards as they stand once forms exist - the post-generation stops,
+    scoped to the selected + generated forms (the review plan after forms)."""
     try:
         from services.issue_registry import grouped_with_package_caps
         from services.stops_now import stops_now
-        st = stops_now(row, pre_form=True)
+        from services.issue_registry import refresh_requested_coverage_notes
+        st = stops_now(row, pre_form=not after_forms)
+        # The information notes are redrawn from the stored assessment (item 3).
+        _structured = refresh_requested_coverage_notes(
+            row.get("structured_issues") or [], row.get("underwriting_consistency"))
+        from services.issue_registry import structured_as_they_stand
+        _structured = structured_as_they_stand(_structured, row, st.get("hard"), st.get("soft"),
+                                               st.get("cross_issues"))
         return grouped_with_package_caps(
-            row.get("structured_issues") or [], st.get("hard") or [], st.get("soft") or [],
-            pkg, cross_issues=st.get("cross_issues") or [], facts=row.get("facts") or {})
+            _structured, st.get("hard") or [], st.get("soft") or [],
+            pkg, cross_issues=st.get("cross_issues") or [], facts=row.get("facts") or {},
+            pre_form=not after_forms)
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("review page cards not read: %s", exc)
         return None
@@ -9935,6 +10367,8 @@ def review_page_grouped_view(row: dict, pkg: Optional[dict]) -> Optional[dict]:
 def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, Optional[dict]]:
     """The plan's numbers on every surface that prints one (see
     `complete_screen_shares`)."""
+    if isinstance(plan, dict) and "_ctx" in plan:
+        plan = {k: v for k, v in plan.items() if k != "_ctx"}
     items = [i for i in (plan.get("items") or []) if isinstance(i, dict)]
     pkg = dict(pkg)
     pkg["review_plan"] = plan
@@ -9956,13 +10390,20 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
             if facts_:
                 shares.setdefault(str(facts_[0])[5:], [pts, exact, pts])
         elif it.get("kind") == "card" and it.get("code"):
-            card_points[str(it["code"])] = [pts, exact]
+            # One code can draw several cards (`review_plan.page_items`): the
+            # code's entry is their sum (what the code's cards add together);
+            # the page reads each card by its plan item (`issue_id`).
+            _prev = card_points.get(str(it["code"]))
+            card_points[str(it["code"])] = ([_prev[0] + pts, bool(_prev[1]) and exact]
+                                            if _prev else [pts, exact])
         elif it.get("kind") == "dc" and it.get("fact"):
             dc_points[str(it["fact"])] = [pts, False]
-        elif it.get("kind") == "doc" and pts > 0:
+        elif it.get("kind") == "doc" and (pts > 0 or it.get("under")):
+            # (P1: a document step whole points cannot reach is listed "under 1 pt".)
             doc = {"label": str(it.get("label") or ""), "points": pts, "action": "add_documents",
                    "title": "Loss History", "plan_order": it.get("plan_order"),
-                   "plan_id": it.get("id"), "step": it.get("step")}
+                   "plan_id": it.get("id"), "step": it.get("step"),
+                   "under": bool(it.get("under")) and pts <= 0, "with_others": it.get("with_others")}
             for extra in ("doc_id", "filename"):
                 if it.get(extra):
                     doc[extra] = it[extra]
@@ -9984,10 +10425,17 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
                      answer_gain_share=True, answer_gain_alone=pts, plan_id=it.get("id"),
                      answer_gain_under=bool(it.get("under")),
                      answer_gain_held_by=it.get("held_by"),
+                     # Cap shares (`review_plan._share_group_releases`).
+                     answer_gain_with_others=it.get("with_others"),
+                     answer_gain_score_item=it.get("score_item", True),
                      # Offered first by an earlier item (a card, a key detail):
                      # that item's number, never added twice.
                      answer_gain_mirror_of=it.get("mirror_of"),
-                     answer_gain_mirror=int(it.get("mirror") or 0))
+                     answer_gain_mirror=int(it.get("mirror") or 0),
+                     # What answering it raises next, and a dip it causes first
+                     # (rule G2 / G13: named on the row, never a surprise).
+                     answer_gain_leads_to=list(it.get("leads_to") or [])[:3],
+                     answer_gain_cost=int(it.get("cost") or 0))
         out_rows.append(r)
     pkg["top_recommendations"] = out_rows
     if isinstance(kd, dict) and isinstance(kd.get("missing_items"), list):
@@ -9998,6 +10446,7 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
             if isinstance(it, dict) and p is not None:
                 it = dict(it, points=int(p.get("points") or 0), points_exact=bool(p.get("exact", True)),
                           points_under=bool(p.get("under")), points_held_by=p.get("held_by"),
+                          points_with_others=p.get("with_others"),
                           plan_id=p.get("id"))
             out_items.append(it)
         kd["missing_items"] = out_items
@@ -10327,6 +10776,364 @@ def _page_one_carrier_printed(facts: dict, mapped_data: Optional[dict]) -> bool:
         return True
 
 
+def _form_open_warning(form_id: Any, mapped_data: Optional[dict], confidence_dict: Optional[dict],
+                       form_schema: Optional[dict], facts: Optional[dict], flags: Optional[dict],
+                       cross_issues: Optional[List[dict]]) -> Optional[str]:
+    """What holds ONE FORM at 85 after forms (owner, 30 Oct 2026: "only form
+    specific hard stops / warnings / required things / cross-form validation /
+    anything important as per our rules should lower or hold the score of forms,
+    not just any random value missing on the form"). Two things, both already
+    shown on that form's screens:
+      - a cross-form check that names this form and is not advisory (a warning -
+        cross-form checks keep one status, Brent 14 Oct 2026);
+      - a box the form REQUIRES that the side panel lists as Missing - on a row
+        the form actually uses, never the applicant's signature / date (the
+        client signs later) and never a box our rules leave blank on purpose
+        (the side panel's own rule, `needs_attention.needs_attention`).
+    Optional empty boxes and "Please verify" values never hold a form.
+    None when nothing holds. Never raises."""
+    try:
+        from services.form_instances import base_form_id
+        base = base_form_id(str(form_id or ""))
+        for i in cross_issues or []:
+            if not isinstance(i, dict):
+                continue
+            # A FORM-scope check (owner, 30 Oct 2026) is deferred off the
+            # package - an advisory `form_choice` - but holds the forms it names
+            # at its own severity (`deferred_type`).
+            _t = str((i.get("deferred_type") if i.get("form_choice") else None)
+                     or i.get("type") or "")
+            if _t == "advisory":
+                continue
+            if base in {base_form_id(str(f)) for f in (i.get("forms") or [])}:
+                return str(i.get("message") or "A cross-form check on this form is open")
+        mapped = mapped_data if isinstance(mapped_data, dict) else {}
+        schema = form_schema if isinstance(form_schema, dict) else {}
+        if not mapped or not schema:
+            return None
+        from services.needs_attention import needs_attention, unused_trailing_row
+        from services.signature_boxes import is_applicant_step
+        gen = {"mapped": mapped, "field_state": mapped, "confidence": confidence_dict or {},
+               "schema": schema}
+        rows = needs_attention(gen, facts or {}, str(form_id or ""), flags=flags or {})
+
+        def _row_in_use(field: str) -> bool:
+            m = re.match(r"^([^_]+)_.*_([B-Z])$", field or "")
+            if not m:
+                return True
+            root, suffix = m.group(1), m.group(2)
+            # ACORD names a contact list under its party's root ("NamedInsured_
+            # Contact_*"): a contact on row B is not a second named insured.
+            own_contact = field.startswith(root + "_Contact_")
+            return any(k != field and k.startswith(root + "_") and k.endswith("_" + suffix)
+                       and k.startswith(root + "_Contact_") == own_contact
+                       and str(v or "").strip() not in ("", "None", "null", "Off", "No", "False")
+                       for k, v in mapped.items())
+
+        open_req = []
+        for r in rows or []:
+            f = str(r.get("field") or "")
+            if r.get("status") != "missing" or not r.get("required"):
+                continue
+            tu = (schema.get(f) or {}).get("tu") if isinstance(schema.get(f), dict) else ""
+            if is_applicant_step(f, tu or ""):
+                continue
+            if unused_trailing_row(f, mapped, str(form_id or "")) or not _row_in_use(f):
+                continue
+            open_req.append(r)
+        if not open_req:
+            return None
+        name = str(form_id or "").replace("ACORD_", "ACORD ")
+        first = str(open_req[0].get("label") or open_req[0].get("field"))
+        more = f" (+{len(open_req) - 1} more)" if len(open_req) > 1 else ""
+        return f"{name}: required box still empty - {first}{more}"
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+# The forms whose Structural / Exposure pillars score their OWN checklist (the
+# `fid ==` branches of `calculate_sqs`; the rest score the fill rate). Their
+# checklist facts are `FORM_FIELD_INVENTORY`.
+_CHECKLIST_FORMS = frozenset({
+    "ACORD_25", "ACORD_125", "ACORD_126", "ACORD_127", "ACORD_130", "ACORD_131",
+    "ACORD_133", "ACORD_140", "ACORD_141", "ACORD_160", "ACORD_186", "ACORD_28", "ACORD_101",
+})
+# Either fact satisfies the check that reads them.
+_EITHER_OR_FACTS = (
+    ("additional_remarks_text", "remarks_text", "explanation_of_yes_answers"),
+    ("auto_vin_schedule", "vehicle_schedule"),
+    ("wc_payroll", "total_payroll"),
+    ("umbrella_sir", "umbrella_attachment_point"),
+    ("property_building_value", "property_bpp_value"),
+    ("mortgagee_name", "certificate_holder"),
+    ("total_revenue", "total_payroll"),
+    ("gl_limits", "gl_aggregate", "gl_each_occurrence"),
+)
+_HEADER_BOX_OF = {"policy_number": "Policy_PolicyNumberIdentifier_A",
+                  "carrier_name": "Insurer_FullName_A", "carrier_naic": "Insurer_NAICCode_A"}
+
+
+_FORM_CHECK_FACTS_CACHE: Dict[str, List[str]] = {}
+# A check that reads its fact through a helper: the facts that helper reads.
+_CHECK_HELPER_FACTS: Dict[str, Tuple[str, ...]] = {
+    "_prints_policy_number": ("policy_number",),
+    "_auto_liability_stated": ("auto_liability_limit",),
+    "gl_class_codes_present": ("gl_class_codes_by_location",),
+    "_radius_known": ("auto_radius_of_operation",),
+    "_narrative_remarks_text": ("additional_remarks_text",),
+    "_umbrella_retention_checks": ("umbrella_sir", "umbrella_attachment_point"),
+    "_umbrella_underlying_checks": ("gl_each_occurrence", "auto_liability_limit",
+                                    "employers_liability_limits", "schedule_of_underlying_insurance"),
+}
+
+
+def _form_check_facts(base: str) -> List[str]:
+    """The facts THIS form's own checks read - every `_fv(facts, "x")` inside its
+    `fid == "<form>"` branches of `calculate_sqs`, in order (parsed once from the
+    scorer itself, so a card is offered only for what the score counts). A form
+    with no branch of its own (it scores its fill) - its inventory."""
+    if not _FORM_CHECK_FACTS_CACHE:
+        import ast as _ast
+        import inspect as _inspect
+        try:
+            tree = _ast.parse(_inspect.getsource(calculate_sqs).lstrip())
+        except Exception:                                      # noqa: BLE001
+            tree = None
+        found: Dict[str, List[str]] = {}
+        for n in (_ast.walk(tree) if tree is not None else ()):
+            if (isinstance(n, _ast.If) and isinstance(n.test, _ast.Compare)
+                    and isinstance(n.test.left, _ast.Name) and n.test.left.id == "fid"
+                    and n.test.comparators and isinstance(n.test.comparators[0], _ast.Constant)):
+                lst = found.setdefault(str(n.test.comparators[0].value), [])
+                for b in n.body:
+                    for m in _ast.walk(b):
+                        if not isinstance(m, _ast.Call):
+                            continue
+                        name = getattr(m.func, "id", None)
+                        if (name == "_fv" and len(m.args) >= 2 and isinstance(m.args[1], _ast.Constant)
+                                and m.args[1].value not in lst):
+                            lst.append(m.args[1].value)
+                        for hf in _CHECK_HELPER_FACTS.get(str(name or ""), ()):
+                            if hf not in lst:
+                                lst.append(hf)
+        _FORM_CHECK_FACTS_CACHE.update(found or {"_": []})
+    got = _FORM_CHECK_FACTS_CACHE.get(base)
+    return list(got) if got else list(FORM_FIELD_INVENTORY.get(base) or [])
+
+
+def _cards_for_uncarded_pillars(form_id: Any, breakdown: dict, recommendations: List[dict],
+                                facts: dict, flags: dict, mapped_data: Optional[dict]) -> List[dict]:
+    """Cards for a pillar the form charges with no card of its own (a deduction
+    with nothing to answer is a dead end): the umbrella pillar's own deduction
+    items; for a checklist form, its empty checklist facts - never one the form
+    prints, one whose either-or partner is answered, or one no box can take."""
+    from services.form_instances import base_form_id
+    from services.answer_routing import answer_mode
+    base = base_form_id(str(form_id or ""))
+    recs = [r for r in (recommendations or []) if isinstance(r, dict)]
+    have = {str(r.get("field") or "") for r in recs}
+    comps = {str(r.get("component") or "") for r in recs}
+    mapped = mapped_data if isinstance(mapped_data, dict) else {}
+    out: List[dict] = []
+
+    def low(comp: str) -> bool:
+        v = (breakdown or {}).get(comp)
+        return isinstance(v, (int, float)) and v < 100 and comp not in comps
+
+    def card(f: str, comp: str, label: str, pts: int) -> dict:
+        have.add(f)
+        return {"rec_id": f"rec_{f}", "field": f, "component": comp, "message": label,
+                "type": "missing_field", "score_impact": int(pts or 0), "priority": 2}
+
+    # The umbrella pillar's items are the umbrella's own form's (ACORD 131) - on
+    # any other form they are the package's (its Best Solutions), never this
+    # form's side panel.
+    if base == "ACORD_131" and low("umbrella_limit_adequacy"):
+        for it in umbrella_deduction_items(facts, flags) or []:
+            f = str((it or {}).get("fact") or "")
+            if f and f not in have and answer_mode(f, facts).get("mode") == "field":
+                out.append(card(f, "umbrella_limit_adequacy", str(it.get("label") or f),
+                                int(it.get("points") or 0)))
+    # Every form: a checklist form's facts are its checks', a fill-scored one's
+    # are the boxes its fill counts (`FORM_FIELD_INVENTORY`, pinned to the checks
+    # by tests/test_every_form_reaches_100_30oct.py).
+    if base in FORM_FIELD_INVENTORY:
+        try:
+            from services.fact_registry import FACT_REGISTRY
+        except Exception:                                      # noqa: BLE001
+            FACT_REGISTRY = {}
+        for comp in ("structural_completeness", "exposure_consistency"):
+            if not low(comp):
+                continue
+            for f in _form_check_facts(base):
+                if f in have or _answered(facts, f):
+                    continue
+                box = _HEADER_BOX_OF.get(f)
+                if box and str(mapped.get(box) or "").strip() not in ("", "None", "null"):
+                    continue
+                if any(f in g and any(_answered(facts, x) or x in have for x in g if x != f)
+                       for g in _EITHER_OR_FACTS):
+                    continue
+                if answer_mode(f, facts).get("mode") not in ("field", "narrative", "schedule"):
+                    continue
+                label = str((FACT_REGISTRY.get(f) or {}).get("label") or f.replace("_", " ").capitalize())
+                out.append(card(f, comp, label, 0))
+    # The same choices / control every other card carries (added after the
+    # form's own cards got theirs).
+    try:
+        from services.answer_options import attach_answer_controls
+        attach_answer_controls(out)
+    except Exception:                                          # noqa: BLE001
+        pass
+    return out
+
+
+def _prints_policy_number(facts: dict, mapped_data: Optional[dict]) -> bool:
+    """A section form names its policy: the number its own header box prints
+    (`Policy_PolicyNumberIdentifier_A`, its line's - `policy_lines.HEADER_BOXES`),
+    else the package fact (the no-forms path's synthetic boxes are the facts)."""
+    m = mapped_data if isinstance(mapped_data, dict) else {}
+    box = m.get("Policy_PolicyNumberIdentifier_A")
+    if isinstance(box, dict):
+        box = box.get("value")
+    if str(box or "").strip() not in ("", "None", "null"):
+        return True
+    return bool(_fv(facts, "policy_number"))
+
+
+def _acord101_names_its_form(facts: dict) -> bool:
+    """ACORD 101 names the form it continues - what its FORM NUMBER / TITLE boxes
+    print (`pdf_service.acord101_attached_forms`, the stamper's own answer). The
+    check read a `form_reference` fact nothing writes, so every ACORD 101 stopped at
+    87 with nothing to answer (live c5675766, 30 Oct 2026). A person's or an
+    uploaded form's value still counts."""
+    if _fv(facts, "form_reference"):
+        return True
+    try:
+        from services.pdf_service import acord101_attached_forms
+        return bool(acord101_attached_forms(facts))
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+_STOP_SUBJECT_FORM_RE = re.compile(r"^\s*ACORD[\s_]+(\d{2,3})(?:[\s_]+(CA|CO))?\b", re.I)
+
+
+def stops_for_form(stops: Optional[List[str]], form_id: Any) -> List[str]:
+    """The package's field-level stops that may hold ONE form (owner, 30 Oct
+    2026: "only form specific hard stops / warnings ... should lower or hold the
+    score of forms"). A stop whose SUBJECT is another ACORD form - its sentence
+    starts "ACORD <n> ..." ("ACORD 125 minimum field missing: Producer / Agency
+    name") - is that form's, never this one's: it held ACORD 126 and 127 at 85
+    (and at 60 for a missing proposed term) with nothing on those forms to fix
+    (shape fuzz, 30 Oct 2026). A stop naming no form, or naming this form,
+    stays. The package score still takes every stop. No form id: unchanged."""
+    out = [m for m in (stops or []) if m]
+    if not form_id:
+        return out
+    try:
+        from services.form_instances import base_form_id
+        base = base_form_id(str(form_id))
+    except Exception:                                          # noqa: BLE001
+        base = str(form_id)
+    m_self = re.match(r"^ACORD_(\d{2,3})", base)
+    if not m_self:
+        return out
+    lines_here = _FORM_LINES.get(m_self.group(1))
+    kept = []
+    for msg in out:
+        m = _STOP_SUBJECT_FORM_RE.match(str(msg))
+        if m and m.group(1) != m_self.group(1):
+            continue
+        # A LINE's stop holds only that line's forms (30 Oct 2026, shape fuzz:
+        # "GL coverage detected but no class codes" held ACORD 127 at 85). The
+        # line is read off the stop's own rule group (`classify_legacy`'s
+        # cluster) - one table, no wording match. The application (125), the
+        # remarks (101) and any form not in `_FORM_LINES` take every stop.
+        if lines_here is not None and not m:
+            try:
+                from services.issue_registry import classify_legacy
+                _code, cluster, _tier = classify_legacy(str(msg), "soft_warning")
+            except Exception:                                  # noqa: BLE001
+                cluster = None
+            line = _cluster_line(cluster)
+            if line and line not in lines_here:
+                continue
+        kept.append(msg)
+    return kept
+
+
+# The rule group (`issue_registry` cluster) -> its line, read from the group's own
+# line words. A group naming no line (identity, dates, formats, loss history,
+# carrier context) is the package's and holds every form.
+_CLUSTER_LINE_WORDS = (
+    ("umbrella", "umbrella"), ("excess", "umbrella"),
+    ("workers", "wc"), ("wc ", "wc"), ("employers liability", "wc"),
+    ("general liability", "gl"), ("gl ", "gl"),
+    ("auto", "auto"), ("vehicle", "auto"), ("driver", "auto"),
+    ("property", "property"), ("cope", "property"), ("business income", "property"),
+)
+
+
+def _cluster_line(cluster: Any) -> Optional[str]:
+    c = " " + str(cluster or "").lower() + " "
+    for word, line in _CLUSTER_LINE_WORDS:
+        if word in c:
+            return line
+    return None
+
+
+# Each section form's lines. 125 (the application) and 101 (remarks) are absent:
+# they speak for every line, so every stop may hold them.
+_FORM_LINES = {
+    "126": {"gl"}, "186": {"gl"},
+    "127": {"auto"}, "137": {"auto"}, "138": {"auto"},
+    "130": {"wc"}, "133": {"wc"},
+    "131": {"umbrella"},
+    "140": {"property"}, "28": {"property"}, "160": {"property", "gl"},
+    "141": set(),
+    "25": {"gl", "auto", "wc", "umbrella"},
+}
+
+
+def _form_download_blocker(form_id: Any, mapped_data: Optional[dict],
+                           confidence_dict: Optional[dict]) -> Optional[str]:
+    """A FORM's own hard stop (owner, 30 Oct 2026: "forms score is 100 but there
+    are stops"). The download screen lists a box that blocks a clean download -
+    a required-gate box left empty (today ACORD 140's construction type) or a
+    leaked placeholder value - as a hard stop. The form's score now holds at 60
+    while one is open, like every other hard stop. The same rule the download
+    gate enforces (`field_qa._gate_still_blocks`, `is_placeholder_value`), read
+    from this form's own boxes - no QA run. None when nothing blocks."""
+    try:
+        from services.field_qa import _gate_still_blocks
+        from services.placeholder_detector import is_placeholder_value
+        mapped = mapped_data if isinstance(mapped_data, dict) else {}
+        conf = confidence_dict if isinstance(confidence_dict, dict) else {}
+        blocked = []
+        for field, label in conf.items():
+            lab = label.get("label") if isinstance(label, dict) else label
+            if lab != "missing_required_gate" or not _gate_still_blocks(form_id, field):
+                continue
+            if str(mapped.get(field) or "").strip() in ("", "None", "null"):
+                blocked.append(field)
+        for field, val in mapped.items():
+            if isinstance(val, str) and val.strip() and is_placeholder_value(val)[0]:
+                blocked.append(field)
+        if not blocked:
+            return None
+        try:
+            from services.needs_attention import form_box_label
+            words = form_box_label(form_id, blocked[0], None) or blocked[0]
+        except Exception:                                      # noqa: BLE001
+            words = blocked[0]
+        more = f" (+{len(blocked) - 1} more)" if len(blocked) > 1 else ""
+        name = str(form_id or "").replace("ACORD_", "ACORD ")
+        return f"{name}: \"{words}\" is required before download{more}"
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def calculate_sqs(
     facts: dict,
     flags: dict,
@@ -10355,6 +11162,10 @@ def calculate_sqs(
     # impacts again - i.e. it is what makes the recursion terminate. Never set
     # it from production code.
     _simulate: bool = False,
+    # False on the no-forms path (`calculate_sqs_from_facts`): its boxes are a
+    # synthetic copy of the facts, so no form box can hold it (30 Oct 2026 -
+    # the side panel pass on that copy cost 0.37 s a form for nothing).
+    _form_boxes: bool = True,
 ) -> dict:
     """Per-form SQS calculation with full metadata and structured recommendations."""
     # ONE RULE for a form's second copy (7 Oct 2026, Choice Electric #4): the
@@ -10371,6 +11182,9 @@ def calculate_sqs(
         form_id = _base_form_id(form_id)
         if any(_is_instance(f) for f in (selected_form_ids or [])):
             selected_form_ids = _base_form_ids(selected_form_ids)
+        # Only this form's stops hold it (`stops_for_form`, 30 Oct 2026).
+        hard_stops = stops_for_form(hard_stops, form_id)
+        soft_stops = stops_for_form(soft_stops, form_id)
     extraction_quality = facts.get("_extraction_quality", 1.0)
     if isinstance(extraction_quality, float) and extraction_quality < 0.60:
         return {
@@ -10610,7 +11424,7 @@ def calculate_sqs(
                 ("period_of_restoration", "period of restoration"),
             ]
             _t1_ok = [bool(_fv(facts, k)) for k, _ in _cope_t1]
-            _t2_ok = [bool(_fv(facts, k)) for k, _ in _cope_t2]
+            _t2_ok = [_cope_tier_ok(facts, k) for k, _ in _cope_t2]
             struct = 60 + sum(_t1_ok) * 5 + sum(_t2_ok) * 5
             carrier_cope_fields = _cope_t1 + _cope_t2
             carrier_cope = _t1_ok + _t2_ok
@@ -10906,10 +11720,12 @@ def calculate_sqs(
 
     elif fid == "ACORD_28":
         # Evidence of Property: policy number + dates + values + mortgagee.
+        # The policy number is the one the form PRINTS (its line's header - a
+        # multi-carrier package has no package-level number, 30 Oct 2026).
         chks = [
             bool(_fv(facts, "applicant_name")),
             bool(_fv(facts, "effective_date") and _fv(facts, "expiration_date")),
-            bool(_fv(facts, "policy_number")),
+            _prints_policy_number(facts, mapped_data),
             bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
             bool(_fv(facts, "mortgagee_name") or _fv(facts, "certificate_holder")),
         ]
@@ -10921,7 +11737,7 @@ def calculate_sqs(
         chks = [
             bool(_fv(facts, "applicant_name")),
             bool(_fv(facts, "effective_date")),
-            bool(_fv(facts, "form_reference")),
+            _acord101_names_its_form(facts),
             len(remarks_text) >= 50,
         ]
         struct = int(sum(chks) / len(chks) * 100)
@@ -11043,7 +11859,7 @@ def calculate_sqs(
     elif fid == "ACORD_28":
         chks = [
             bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
-            bool(_fv(facts, "policy_number")),
+            _prints_policy_number(facts, mapped_data),
             bool(_fv(facts, "mortgagee_name") or _fv(facts, "certificate_holder")),
             bool(_fv(facts, "effective_date") and _fv(facts, "expiration_date")),
         ]
@@ -11052,7 +11868,7 @@ def calculate_sqs(
     elif fid == "ACORD_101":
         remarks_text = _narrative_remarks_text(facts) or str(_fv(facts, "remarks_text") or "")
         chks = [
-            bool(_fv(facts, "form_reference")),
+            _acord101_names_its_form(facts),
             bool(_fv(facts, "explanation_of_yes_answers") or remarks_text),
             len(remarks_text) >= 100,
         ]
@@ -11100,7 +11916,8 @@ def calculate_sqs(
         # BI coverage: BI limit present but period of restoration missing - a
         # WARNING since 19 Oct 2026 (Brent: no substitute, blank + flagged; only
         # what is essential to the coverage is a hard stop), so it holds 85.
-        if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
+        if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration") \
+                and _por_needed(facts):
             _prop_soft_because(
                 "Business income limit present but period of restoration not specified")
             issues.append("Business income limit present but period of restoration not specified")
@@ -11191,7 +12008,7 @@ def calculate_sqs(
         else:
             _p_t1 = ["year_built", "roof_year", "sprinkler_system", "fire_protection_class"]
             _p_t2 = ["distance_to_hydrant", "fire_department_type", "business_income_limit", "period_of_restoration"]
-            prop = 60 + sum(bool(_fv(facts, k)) for k in _p_t1) * 5 + sum(bool(_fv(facts, k)) for k in _p_t2) * 5
+            prop = 60 + sum(bool(_fv(facts, k)) for k in _p_t1) * 5 + sum(_cope_tier_ok(facts, k) for k in _p_t2) * 5
     else:
         prop = 100
 
@@ -11206,7 +12023,7 @@ def calculate_sqs(
         # 126 / 127 were each capped at 85 for a period-of-restoration box none
         # of them has.
         if fid in _BI_PRINTING_FORMS and _fv(facts, "business_income_limit") \
-                and not _fv(facts, "period_of_restoration"):
+                and not _fv(facts, "period_of_restoration") and _por_needed(facts):
             _prop_soft_because(
                 "Business income limit present but period of restoration not specified")
             issues.append("BI coverage present but period of restoration not specified")
@@ -11371,8 +12188,10 @@ def calculate_sqs(
     )
     breakdown["narrative_quality"] = narrative_score
 
-    # §6.3 AC#4: per-component gap as a targeted recommendation.
-    if _narrative_components and narrative_score < 80:
+    # §6.3 AC#4: per-component gap as a targeted recommendation - whenever the
+    # pillar deducts (G18, 30 Oct 2026: it waited for < 80, so ACORD 130 sat at
+    # 98 with a narrative at 89 and nothing to answer).
+    if _narrative_components and narrative_score < 100:
         _absent_comps = [
             NARRATIVE_COMPONENT_LABELS[k]
             for k, present in _narrative_components.items()
@@ -11492,7 +12311,7 @@ def calculate_sqs(
     _gate_hard_reason = (
         "Minimum Viable COPE incomplete" if cope_hard else
         "Umbrella present with no underlying GL or Auto limits" if _umb_unstated else
-        None
+        _form_download_blocker(_scored_form_id or fid, mapped_data, confidence_dict)
     )
     _gate_soft_reason = (
         "Umbrella coverage is present but its supporting detail is incomplete - "
@@ -11508,6 +12327,10 @@ def calculate_sqs(
         (_prop_soft_reason
          or "Property details are incomplete - review the property section")
         if _prop_soft else None)
+    if not _gate_soft_reason and not _simulate:
+        _gate_soft_reason = _form_open_warning(
+            _scored_form_id or fid, mapped_data if _form_boxes else None, confidence_dict,
+            form_schema if _form_boxes else None, facts, flags, cross_issues_full)
     cap_applied, cap_reason = _resolve_cap(
         hard_stops, soft_stops,
         extra_hard_reason=_gate_hard_reason,
@@ -11658,6 +12481,13 @@ def calculate_sqs(
     # Structural is that form's own ACORD checklist, not the Tier 1 / Tier 2 /
     # fill blend - spec sections 3.1 and 10 both state the two formulas side by
     # side, and C3 3.2 modifies only the submission one.
+    # EVERY DEDUCTION HAS ITS CARD (30 Oct 2026, Choice Electric live 6823e106:
+    # ACORD 28 at 73 and the excess 131 at 98 with nothing to answer).
+    try:
+        recommendations = list(recommendations) + _cards_for_uncarded_pillars(
+            fid, breakdown, recommendations, facts, flags, mapped_data)
+    except Exception as _ucx:                                  # noqa: BLE001
+        logger.debug("uncarded pillar cards skipped: %s", _ucx)
     _score_trace = build_score_trace(
         pillars=breakdown,
         weights=weights,
@@ -11827,6 +12657,8 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
         "auto_liability_limit", "auto_covered_symbols",
         "auto_deductible_comp", "auto_deductible_collision",
         "auto_physical_damage_valuation",
+        # Read by this form's own checks (G18, 30 Oct 2026 - the card net needs them).
+        "auto_liability_structure", "locations",
     ],
     "ACORD_140": [
         "locations", "occupancy_type", "construction_type", "year_built",
@@ -11859,6 +12691,8 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
         # 130 checklist but absent from this inventory, i.e. asked of nobody.
         "wc_payroll_period",
         "total_payroll", "num_employees", "applicant_name", "effective_date",
+        # Read by this form's own checks (G18, 30 Oct 2026 - the card net needs them).
+        "operations_description",
     ],
     "ACORD_137_CA": [
         "auto_liability_limit", "auto_liability_structure", "auto_covered_symbols",
@@ -11887,6 +12721,8 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     "ACORD_133": [   # WC Assigned Risk section (Z37) - never builders risk
         "wc_class_codes", "wc_payroll", "num_employees", "wc_xmod",
         "applicant_name", "effective_date",
+        # Read by this form's own checks (G18, 30 Oct 2026 - the card net needs them).
+        "total_payroll",
     ],
     # Z37 (24 Oct 2026): 141 is the Crime section, 160 the Business Owners
     # section (their templates' own titles).
@@ -11939,8 +12775,16 @@ def _fact_is_filled(val) -> bool:
 
 def _answered(facts: dict, key: str) -> bool:
     """Completeness predicate: did this fact get an answer, from a document or
-    a person? Reads the RAW envelope (not `_fv`) so `value_state` survives."""
-    return _fact_is_filled((facts or {}).get(key))
+    a person? Reads the RAW envelope (not `_fv`) so `value_state` survives.
+    An absence on a fact every operating business has (FEIN, revenue, NAICS /
+    SIC, years / start date) is never an answer (`answer_semantics.answered_for`,
+    strict review 29 Oct 2026)."""
+    raw = (facts or {}).get(key)
+    try:
+        from services.answer_semantics import answered_for
+        return answered_for(key, raw, facts)
+    except Exception:                                         # noqa: BLE001
+        return _fact_is_filled(raw)
 
 
 def calculate_sqs_from_facts(
@@ -12004,4 +12848,5 @@ def calculate_sqs_from_facts(
         loss_run_match=_loss_match,
         cross_issues_full=cross_issues_full,
         narrative_doc_text=_extract_narrative_doc_text(_docs),
+        _form_boxes=False,
     )

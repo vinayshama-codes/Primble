@@ -334,7 +334,10 @@ def test_uploaded_acord_130_tagged_source_document():
                  text="acord 130 (2026/01) workers compensation application")
     r = _by_id(recs)["ACORD_130"]
     assert r.get("is_source_document") is True
-    assert "clean copy" in r["reason_label"].lower()
+    # 27 Oct 2026 (owner): an uploaded, FILLED application form is read into the
+    # package and pre-ticked - its label says so (certificates keep "clean copy").
+    assert r.get("uploaded_application_form") is True
+    assert "values were read into this package" in r["reason_label"].lower()
 
 
 def test_uploaded_form_backstop_surfaces_untriggered_form():

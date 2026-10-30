@@ -4650,3 +4650,16 @@ lists, read by `audit_routes.sqs_narrative` through `audit_service.current_unres
 one context line and one instruction: name the most important advisory; never say there are no risk drivers / issues
 while one is listed. Live 654f34c4: at 100 the prompt said "Top risk drivers: none" and the prose read "no material
 risk drivers identified" beside "high loss frequency - 12 claims". Cost: same single call, ~40 more input tokens.
+
+### C112 (27 Oct 2026, lane A) - the per-form gap-fill FALLBACK goes through the line-scoped door; one key leaves the facts block
+**No prompt, chunker, batch size or system prompt changed.** `form_service.process_single_form` with no shared answers
+for a plain form (the package's shared pass failed, or it held no question for the form) used to run
+`map_facts_to_form`'s own `_fill_unmatched_with_gpt` over the WHOLE document, every line's pages, and the questions about
+coverage the documents do not carry (C104) - the one generation path left unscoped (v1-20AUG.md "the per-form fallback
+is still unscoped"). It now asks `shared_gap_fill(session, [form_id])` - that form's slice through the one door (line
+page scopes, absent sections not asked) - and, when that gives nothing too, stamps the form deterministically. **Cost:**
+on the error path, at most one scoped `combined_gap_fill` per form instead of one unscoped per-form fill - the same order,
+fewer questions (the absent sections) and a smaller document per call; a form with no gaps makes no call either way.
+A layer copy keeps its 7 Oct rule (deterministic only). `_line_dec_limits` (each line's declarations limits, kept past the
+dec-index purge for the policies table and ACORD 101 - `policy_lines.DEC_LINE_LIMITS_KEY`) is in
+`pdf_service._GAP_FILL_FACTS_EXCLUDE`, so the facts block is byte-identical. Tests: `tests/test_lane_a_27oct.py`.

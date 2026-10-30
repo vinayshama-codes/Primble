@@ -237,6 +237,11 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # its value. Purge-safe: fewer refusals after the purge, never more -
         # pinned by test_round5_ai_role_guards_7oct.py::TestPurgedIndex.
         "ai_role_guards.py",
+        # fact_history (Brent's V2 E&O lineage, 27 Oct 2026). DECIDED: never
+        # reads the index - it names the key only to LEAVE IT OUT of the lineage
+        # (internal machinery, not a fact; the purge's own delete would
+        # otherwise write a "removed" row per package). Purge-safe.
+        "fact_history.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

@@ -140,7 +140,9 @@ def test_the_placeholder_vocabulary_has_exactly_one_home():
     caught "(None)" and did not, because its membership test is a bare exact
     match. That is now fixed at the source rather than only backstopped.)"""
     src = (BACKEND / "services" / "pdf_service.py").read_text()
-    assert src.count("from services.answer_semantics import is_placeholder_text") == 2, (
+    # >= 2: every caller delegates to the one door (27 Oct 2026 added the 127
+    # USE cell reader as a third caller - a delegate, not a copy).
+    assert src.count("from services.answer_semantics import is_placeholder_text") >= 2, (
         "both the absorb-time door and Guard 13 must delegate to answer_semantics")
     start = src.index("Guard 13: a placeholder is not a value")
     block = src[start:src.index('Guard 9: a "Yes" may not stand', start)].lower()

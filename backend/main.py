@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import logging
 import os
 import signal
@@ -173,6 +174,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Added FIRST, so they sit innermost - inside CORS, so the guard's 409 carries
+# the CORS headers a browser needs to read it (27 Oct 2026):
+#   ArchivedPackageGuard  - a write request naming an archived package is
+#                           refused (services/package_archive.py);
+#   RequestContextMiddleware - each request's "who" for the E&O fact lineage
+#                           (services/fact_history.py).
+from services.package_archive import ArchivedPackageGuard          # noqa: E402
+from services.fact_history import RequestContextMiddleware         # noqa: E402
+app.add_middleware(ArchivedPackageGuard)
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TraceIDMiddleware)
 app.add_middleware(InFlightMiddleware)
@@ -250,6 +261,8 @@ app.include_router(session_documents_router)
 app.include_router(policy_line_router)
 app.include_router(dry_run_router)
 app.include_router(questionnaire_router)
+from routes.package_history_routes import router as package_history_router   # noqa: E402
+app.include_router(package_history_router)
 
 if _IS_PROD and _DEV_ROUTES_ENABLED:
     raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")
@@ -278,9 +291,23 @@ def _check_redis_reachable() -> bool:
         return False
 
 
+# Detached startup jobs, held by reference (see the search-name backfill).
+_STARTUP_TASKS: set = set()
+
+
 @app.on_event("startup")
 async def startup():
     validate_production_config()
+
+    # ACORD's shared field dictionary (29 Oct 2026, ASG_TRANSCRIBER.md "Keep
+    # everything"): built once per process OFF the request path, so the first
+    # upload of a form outside our 17 never pays the ~3 s inline.
+    try:
+        import threading
+        from services.acord_intake.reverse_map import build_shared_dictionary
+        threading.Thread(target=build_shared_dictionary, name="acord-shared-dictionary", daemon=True).start()
+    except Exception as _sdx:                                  # noqa: BLE001
+        logger.warning(f"startup: shared ACORD dictionary not warmed: {_sdx}")
 
     if _SETTINGS_DEV_ROUTES_ENABLED and not _SETTINGS_ADMIN_EMAILS:
         logger.warning(
@@ -312,6 +339,14 @@ async def startup():
     # Run DDL migrations
     try:
         await init_db()
+        # Encrypted search copies of the applicant name for packages saved before
+        # they existed (27 Oct 2026, dashboard search) - in the background, held
+        # by reference. SEARCH_NAME_BACKFILL=0 turns it off.
+        if os.getenv("SEARCH_NAME_BACKFILL", "1") != "0" and "pytest" not in sys.modules:
+            from repositories.session_repository import backfill_search_names
+            _t = asyncio.ensure_future(backfill_search_names())
+            _STARTUP_TASKS.add(_t)
+            _t.add_done_callback(_STARTUP_TASKS.discard)
     except Exception as _e:
         logger.warning(f"DB init failed (non-fatal): {_e}")
 

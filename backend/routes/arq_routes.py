@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -169,7 +170,7 @@ async def generate_questions(
 
     generated = proc_session.get("generated_forms", {})
     if not generated:
-        raise HTTPException(400, "No forms generated yet — generate forms first")
+        raise HTTPException(400, "No forms generated yet - generate forms first")
 
     _facts = proc_session.get("facts", {})
     # Close the "known fact, blank box" mapping gap before generating questions:
@@ -510,6 +511,16 @@ async def client_view(token: str, request: Request):
         return JSONResponse({"success": False, "error": "expired", "message": "This link has expired."}, status_code=410)
     if arq["status"] == "submitted":
         return JSONResponse({"success": False, "error": "already_submitted", "message": "Already submitted."}, status_code=409)
+    # The producer archived the package (27 Oct 2026): the questionnaire is
+    # closed - its draft and submit are refused, so say so before the client
+    # starts typing.
+    try:
+        from services.package_archive import archived_state, ARCHIVED_CLIENT_MESSAGE
+        if arq.get("session_id") and await archived_state(arq["session_id"]):
+            return JSONResponse({"success": False, "error": "closed",
+                                 "message": ARCHIVED_CLIENT_MESSAGE}, status_code=409)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"client_view: archive check skipped: {ex}")
 
     # Log the first open only (viewed_at is set once, on first view).
     if not arq.get("viewed_at"):
@@ -772,6 +783,9 @@ async def submit_arq(token: str, request: Request):
     arq = await get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "message": "Questionnaire not found."}, status_code=404)
+    # The E&O lineage's "who" for the answers this request applies.
+    from services.fact_history import note_client
+    note_client(arq.get("id"))
 
     # A client's answers that would leave the proposed term backwards or
     # already ended are refused like a producer's (22 Oct 2026, the one door
@@ -793,6 +807,13 @@ async def submit_arq(token: str, request: Request):
         generated_forms={},
         touched_fields=touched_fields,
     )
+    # The phrasings the answer readers could not read are kept (GAP 2,
+    # services/unread_answers.py - their shape only). Never fails the submit.
+    try:
+        from services.unread_answers import flush_pending as _flush_unread
+        await _flush_unread()
+    except Exception:                                          # noqa: BLE001
+        pass
 
     if field_errors:
         # 422 + field_errors is the shape the questionnaire already knows how
@@ -818,6 +839,11 @@ async def submit_arq(token: str, request: Request):
         arq_id=arq["id"],
         processing_session_id=arq["session_id"],
     )
+    try:
+        from services.unread_answers import flush_pending as _flush_unread
+        await _flush_unread()
+    except Exception:                                          # noqa: BLE001
+        pass
 
     # Orbin item 14: a signature given in this questionnaire is recorded on the
     # forms now - after the answers - so it covers the forms as they print.
@@ -1126,13 +1152,23 @@ async def arq_chat(token: str, request: Request):
     if not arq:
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
 
+    # Brent's V2 "ARQ Bot usage tracking" (27 Oct 2026): every use is counted -
+    # outcome, tokens, latency, the question open - never the client's words
+    # (services/arq_assistant_usage.py).
+    from services import arq_assistant_usage as _usage
+    _t0 = time.monotonic()
+
     now     = datetime.now(timezone.utc)
     expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if now > expires:
+        await _usage.record_use(arq=arq, field_name=None, outcome=_usage.OUTCOME_REFUSED,
+                                detail=_usage.DETAIL_LINK_EXPIRED)
         return JSONResponse({"success": False, "reply": "This questionnaire link has expired."}, status_code=410)
     if arq.get("status") == "submitted":
+        await _usage.record_use(arq=arq, field_name=None, outcome=_usage.OUTCOME_REFUSED,
+                                detail=_usage.DETAIL_ALREADY_SUBMITTED)
         return JSONResponse({"success": False, "reply": "This questionnaire has already been submitted."}, status_code=409)
 
     body    = await request.json()
@@ -1141,6 +1177,7 @@ async def arq_chat(token: str, request: Request):
     # Figure 19: the field the client has focused in the UI, sent as its
     # field_name (the stable question id used everywhere else in the ARQ).
     active_field = _sanitize_str(body.get("active_field", ""), 200)
+    _usage_field = _usage.known_field(arq.get("questions"), active_field)
 
     if not message:
         return JSONResponse({"success": False, "reply": "No message provided."}, status_code=400)
@@ -1174,6 +1211,9 @@ async def arq_chat(token: str, request: Request):
     # refusals - so this must not read like the assistant declined to help.
     fallback = "Sorry, I couldn't get you an answer just now. Please try again in a moment, or ask your broker."
 
+    from config.settings import LLM_USAGE_SINK
+    _spend: list = []
+    _sink_token = LLM_USAGE_SINK.set(_spend)
     try:
         reply = await groq_chat(
             LLM_MODEL,
@@ -1183,10 +1223,19 @@ async def arq_chat(token: str, request: Request):
         )
         if not reply or len(reply) < 5:
             reply = fallback
-        return JSONResponse({"success": True, "reply": reply})
+        _outcome, _detail = _usage.classify_reply(reply, fallback)
     except Exception as ex:
         logger.error(f"ARQ chat failed: {ex}")
-        return JSONResponse({"success": True, "reply": fallback})
+        reply = fallback
+        _outcome, _detail = _usage.OUTCOME_ERROR, _usage.DETAIL_LLM_ERROR
+    finally:
+        LLM_USAGE_SINK.reset(_sink_token)
+    await _usage.record_use(
+        arq=arq, field_name=_usage_field, outcome=_outcome, detail=_detail,
+        model=LLM_MODEL, usage=_usage.sum_usage(_spend),
+        latency_ms=int((time.monotonic() - _t0) * 1000),
+    )
+    return JSONResponse({"success": True, "reply": reply})
 
 
 @router.get("/status/{arq_id}")
@@ -1222,7 +1271,19 @@ async def get_arq_status(
         # in `answers`, surfaced here so the producer can confirm them.
         "review_fields":   arq.get("review_fields", []),
         "review_count":    len(arq.get("review_fields", []) or []),
+        # How often the client used the Form Assistant (counts only).
+        "assistant_usage": (await _assistant_counts([arq["id"]])).get(str(arq["id"])),
     })
+
+
+async def _assistant_counts(arq_ids) -> dict:
+    """{arq_id: counts} from services.arq_assistant_usage - never fails a page."""
+    try:
+        from services.arq_assistant_usage import counts_for_arqs
+        return await counts_for_arqs(arq_ids)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning("assistant usage counts skipped: %s", ex)
+        return {}
 
 
 @router.get("/receipt/{arq_id}")
@@ -1348,6 +1409,14 @@ async def list_arqs(
         d.pop("questions", None)
         d.pop("answers", None)
         sessions.append(d)
+
+    # Brent's V2 "ARQ Bot usage tracking": the Form Assistant's use per
+    # questionnaire, beside the questionnaire's status.
+    _counts = await _assistant_counts([s.get("id") for s in sessions])
+    for s in sessions:
+        c = _counts.get(str(s.get("id"))) or {}
+        s["assistant_uses"] = int(c.get("uses") or 0)
+        s["assistant_last_used_at"] = c.get("last_used_at")
 
     return JSONResponse({"success": True, "arq_sessions": sessions})
 

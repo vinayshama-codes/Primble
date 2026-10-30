@@ -974,6 +974,16 @@ async def delete_account(
             await conn.execute("DELETE FROM arq_sessions        WHERE user_id = $1", user_id)
             # the client's signature images (Orbin item 14) go with the account
             await conn.execute("DELETE FROM signature_requests  WHERE user_id = $1", user_id)
+            # The packages' fact lineage (encrypted past values) and the Form
+            # Assistant's usage rows (27 Oct 2026). A savepoint each, so a store
+            # not created yet never blocks an account deletion.
+            for _v2_sql in ("DELETE FROM fact_lineage        WHERE user_id = $1",
+                            "DELETE FROM arq_assistant_usage WHERE user_id = $1"):
+                try:
+                    async with conn.transaction():
+                        await conn.execute(_v2_sql, user_id)
+                except Exception as _v2_ex:                    # noqa: BLE001
+                    logger.warning(f"delete_account: {_v2_sql.split()[2]} not cleared: {_v2_ex}")
             # Anonymize audit log rows rather than deleting (preserves the deletion record)
             await conn.execute(
                 """UPDATE acord_audit_log

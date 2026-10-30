@@ -57,6 +57,8 @@ import re
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from services.fact_state import typed_box   # a box a person typed - the one door
+
 logger = logging.getLogger(__name__)
 
 STATUS_MISSING = "missing"
@@ -702,6 +704,25 @@ _VERIFY_CALCULATED = "Calculated, not read from your documents. Confirm it befor
 # An AI value the stamper FOUND in the documents ("ai_verified", 13 Oct 2026):
 # printed there, but placed in this box by the AI - a person confirms the fit.
 _VERIFY_FOUND = "Filled by the AI from your documents. Confirm it belongs in this box."
+# A value ACORD Transcriber read off an outside ACORD form (29 Oct 2026,
+# ASG_TRANSCRIBER.md): on the document, read by ASG's OCR, not confirmed by a person.
+_VERIFY_TRANSCRIBER = "Read from an uploaded ACORD form by ACORD Transcriber. Confirm it before sending."
+
+
+def _transcriber_reason(form_id: Optional[str], field: str, value: Any, facts: Optional[dict]) -> Optional[str]:
+    try:
+        from services.pdf_service import prints_a_transcriber_value
+        held = prints_a_transcriber_value(form_id or "", field, value, facts or {})
+    except Exception:                                      # pragma: no cover
+        return None
+    if held is None:
+        return None
+    score = held.get("confidence_score")
+    try:
+        pct = f" ({float(score):.0f}% confidence)" if score is not None else ""
+    except (TypeError, ValueError):
+        pct = ""
+    return _VERIFY_TRANSCRIBER.replace(" Confirm", pct + ". Confirm", 1) if pct else _VERIFY_TRANSCRIBER
 
 
 def _documents_print(value: Any, haystack: Optional[str]) -> Optional[bool]:
@@ -745,6 +766,9 @@ def verify_reason(schema: dict, field: str, value: Any, facts: Optional[dict],
             return _VERIFY_CALCULATED
     except Exception:                                      # pragma: no cover
         pass
+    _tr = _transcriber_reason(form_id, field, text, facts)
+    if _tr:
+        return _tr
     printed = _documents_print(text, haystack)
     if printed is None:
         return _VERIFY_NO_TEXT
@@ -1271,7 +1295,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
                     else "Check your documents and enter the right value if there is one.")
         else:
             what = "Check it against your documents and correct it on the form if it is wrong."
-            reason = (_VERIFY_FOUND if label == "ai_verified"
+            reason = ((_transcriber_reason(_base, field, value, facts) or _VERIFY_FOUND) if label == "ai_verified"
                       else verify_reason(schema, field, value, facts, doc_haystack, _base))
 
         fact_key = box_fact_key(field)
@@ -1782,7 +1806,7 @@ def _with_value_findings(rows: List[dict], values: List[dict], *, schema: dict, 
     by_field = {r["field"]: r for r in rows}
     for v in values or []:
         field = str(v.get("field") or "")
-        if not field or field in client_filled or labels.get(field) in ("producer", "client_arq"):
+        if not field or field in client_filled or typed_box(labels.get(field)):
             continue                                       # a person's own value
         value = mapped.get(field)
         if not _has_value(value) or str(value).strip() in _UNTICKED:
@@ -2185,6 +2209,13 @@ def review_issue_rows(views: Iterable[Optional[dict]], statuses: Optional[Iterab
                  if isinstance(s, dict) and s.get("status") == "dismissed"}
     seen: set = set()
     out: List[dict] = []
+    # Which of them are cross-form checks: the download review steps through
+    # Hard Stops > Warnings > Cross-Form Validation (Brent, 26 Oct 2026).
+    try:
+        from services.cross_form_validator import rule_codes
+        cross_codes = rule_codes()
+    except Exception:                                          # noqa: BLE001
+        cross_codes = frozenset()
     for view in views or []:
         for severity, it in _view_items(view):
             msg = str(it.get("message") or "").strip()
@@ -2205,7 +2236,76 @@ def review_issue_rows(views: Iterable[Optional[dict]], statuses: Optional[Iterab
                 "code": it.get("code"),
                 "fix_facts": sorted(issue_fix_keys(it)),
                 "review_issue": True,
+                "cross_form": str(it.get("code") or "") in cross_codes,
             })
+    return out
+
+
+def row_form_ids(row: dict) -> set:
+    """The base form ids a review row belongs to: its own tags (`form_id`,
+    `component`, `forms`), the form in its record id ("fieldqa_attn_ACORD_125_
+    missing") and the form its sentence is about ("ACORD 125 - Missing ...",
+    "ACORD 125's Prior Carrier ..."). Empty = a package row."""
+    import re as _re
+    from services.form_instances import base_form_id
+    out = set()
+    for k in ("form_id", "component"):
+        v = str(row.get(k) or "")
+        if v.startswith("ACORD_"):
+            out.add(base_form_id(v))
+    for v in row.get("forms") or []:
+        if str(v).startswith("ACORD_"):
+            out.add(base_form_id(str(v)))
+    m = _re.search(r"(ACORD_\d{2,3}(?:_[A-Z]{2})?)", str(row.get("rec_id") or ""))
+    if m:
+        out.add(base_form_id(m.group(1)))
+    m = _re.match(r"\s*ACORD\s+(\d{2,3})(?:\s+([A-Z]{2})\b)?", str(row.get("message") or ""))
+    if m:
+        out.add("ACORD_" + m.group(1) + (("_" + m.group(2)) if m.group(2) else ""))
+    return out
+
+
+def card_owner_forms(generated_forms: Optional[dict]) -> Dict[str, set]:
+    """{rec_id: base forms whose OWN score lists the card} - only for a card some
+    forms list and others do not (one listed by every form is the package's).
+    Live d75d50c5 (30 Oct 2026): ACORD 186's "Contractors Supplement: add
+    contractor license number" carries no form tag, read as a package row, and
+    showed on the ACORD 127 download."""
+    from services.form_instances import base_form_id
+    owners: Dict[str, set] = {}
+    forms = [f for f, g in (generated_forms or {}).items() if isinstance(g, dict)]
+    for fid in forms:
+        for rec in ((generated_forms[fid].get("sqs") or {}).get("recommendations") or []):
+            rid = str((rec or {}).get("rec_id") or "") if isinstance(rec, dict) else ""
+            if rid:
+                owners.setdefault(rid, set()).add(base_form_id(fid))
+    every = {base_form_id(f) for f in forms}
+    return {k: v for k, v in owners.items() if v and v != every}
+
+
+def rows_for_form(rows: Iterable[dict], form_id: str,
+                  generated_forms: Optional[dict] = None) -> List[dict]:
+    """A one-form download reviews only what holds THAT form (owner, 30 Oct 2026):
+    rows tied to it, and package rows the form's own score would take
+    (`sqs_service.stops_for_form` - package-wide items stay, another form's or
+    another line's go). Rows tied only to other forms are left out. A card with
+    no tag of its own belongs to the forms whose score lists it
+    (`card_owner_forms`)."""
+    from services.form_instances import base_form_id
+    from services.sqs_service import stops_for_form
+    base = base_form_id(str(form_id or ""))
+    owners = card_owner_forms(generated_forms)
+    out: List[dict] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        tied = row_form_ids(r) or owners.get(str(r.get("rec_id") or ""), set())
+        if tied:
+            if base in tied or any(base.startswith(t) or t.startswith(base) for t in tied):
+                out.append(r)
+            continue
+        if stops_for_form([str(r.get("message") or "")], base):
+            out.append(r)
     return out
 
 
@@ -2323,7 +2423,7 @@ def document_suggestion_rows(generated_forms: Optional[dict], suggestions: Itera
             continue
         state = fr.get("field_state") if isinstance(fr.get("field_state"), dict) else (fr.get("mapped") or {})
         label = (fr.get("confidence") or {}).get(field)
-        if label in ("producer", "client_arq") or field in set(fr.get("client_filled_fields") or []):
+        if typed_box(label) or field in set(fr.get("client_filled_fields") or []):
             continue
         if _NORM.sub("", str(state.get(field) or "").lower()) != _NORM.sub("", str(s.get("current") or "").lower()):
             continue

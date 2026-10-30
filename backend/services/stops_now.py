@@ -118,9 +118,64 @@ def field_level_stops(facts: dict, flags: dict, docs: List[dict]) -> Tuple[List[
     return list(hard), list(soft)
 
 
+def _settled_by_confirmation(field: dict, confirmations: Optional[dict]) -> bool:
+    """Has a person's Data Consistency pick settled this conflict row?
+
+    A CONFIRMED PICK RETIRES ITS CONFLICT, ALWAYS (29 Oct 2026, review of
+    614c3211). The assessment answers it when re-run with the confirmations
+    (`status: "confirmed"`), but every reader here takes the STORED assessment,
+    and a stored one older than the pick - a copy the answer preview edits, a
+    row written before the re-run - kept the conflict and its 85 hold with the
+    pick made. The same test `underwriting_consistency.unresolved_conflict_keys`
+    applies (the bare key, read through `usable_confirmations` - a form number
+    confirmed as a policy number is no answer), plus a line-scoped pick that
+    answers every line the row asks about (SYS-06)."""
+    if not confirmations:
+        return False
+    try:
+        from services.underwriting_consistency import (
+            scoped_confirmation_key, usable_confirmations,
+        )
+        usable = usable_confirmations(confirmations)
+    except Exception:                                         # noqa: BLE001
+        return False
+    key = str(field.get("fact_key") or "")
+    if not key:
+        return False
+    if key in usable:
+        return True
+    lines = [str(x) for x in (field.get("conflict_scope") or []) if x]
+    if not lines or not all(scoped_confirmation_key(key, ln) in usable for ln in lines):
+        return False
+    # Every disputed line has a pick. Settled only when no candidate is left to
+    # disagree - the assessment's own rule (`_drop_answered_line_candidates`): a
+    # value is ruled out only when EVERY line it is stated on is answered and no
+    # answer agrees with it; a value on an unanswered line (or with no line) still
+    # stands (review, 29 Oct 2026 - a rival on an unpicked line kept the card
+    # while its stop and hold vanished).
+    try:
+        from services.underwriting_consistency import _door_values_agree
+    except Exception:                                         # noqa: BLE001
+        return False
+    picks = {ln: usable[scoped_confirmation_key(key, ln)] for ln in lines}
+    for g in field.get("values") or []:
+        if not isinstance(g, dict):
+            continue
+        val = g.get("display") if g.get("display") is not None else g.get("normalized")
+        on = {str(x) for x in (g.get("scope") or []) if x}
+        mine = [picks[ln] for ln in on if ln in picks] if on else list(picks.values())
+        if any(_door_values_agree(key, val, p) for p in mine):
+            continue                          # the value a pick chose for its line
+        if on and on <= set(picks):
+            continue                          # ruled out on every line it is stated on
+        return False                          # a rival on an unanswered line still stands
+    return True
+
+
 def underwriting_conflict_stops(underwriting: Optional[dict],
                                 flags: Optional[dict],
-                                docs: Optional[List[dict]] = None) -> List[Tuple[str, str, bool]]:
+                                docs: Optional[List[dict]] = None,
+                                confirmations: Optional[dict] = None) -> List[Tuple[str, str, bool]]:
     """[(fact_key, message, blocking)] for every OPEN Data Consistency conflict.
 
     BLOCKING MEANS HARD STOP, AND RELEVANCE IS A PRECONDITION (C75): a key in
@@ -134,7 +189,10 @@ def underwriting_conflict_stops(underwriting: Optional[dict],
     conflict_sources_verified`, over the ONE definition `is_verified_source`);
     otherwise it is a warning whose sentence ends by naming the unverified
     document(s). Every production caller passes its documents; without them
-    the stored answer stands, exactly as before."""
+    the stored answer stands, exactly as before.
+
+    `confirmations`: the session's Data Consistency picks - a row they settle
+    is not open, whatever the stored assessment says (`_settled_by_confirmation`)."""
     uw = underwriting or {}
     if not uw.get("review_required"):
         return []
@@ -155,12 +213,20 @@ def underwriting_conflict_stops(underwriting: Optional[dict],
     for f in uw.get("fields") or []:
         if not isinstance(f, dict) or not f.get("review_required"):
             continue
+        if _settled_by_confirmation(f, confirmations):
+            continue                         # the pick is made (see the helper)
         key = f.get("fact_key", "field")
-        msg = (
-            f"{f.get('label')}: documents disagree "
-            f"({', '.join(str(v.get('display')) for v in (f.get('values') or []))}). "
-            "Fix: Confirm the correct value to apply it across forms."
-        )
+        _shown = ', '.join(str(v.get('display')) for v in (f.get('values') or []))
+        if f.get("one_document") and key not in blocking_keys:
+            # ONE document contradicting its own figure (Michelle review item
+            # 2, 29 Oct 2026) is not "documents disagree": it names the file.
+            msg = (f"{f.get('one_document')} states more than one amount for "
+                   f"{f.get('label')} ({_shown}) - confirm which one is right.")
+        else:
+            msg = (
+                f"{f.get('label')}: documents disagree ({_shown}). "
+                "Fix: Confirm the correct value to apply it across forms."
+            )
         needs_flag = _RELEVANCE_FLAG.get(key)
         relevant = (not needs_flag) or bool((flags or {}).get(needs_flag))
         downgraded = bool(f.get("blocking_downgraded"))
@@ -303,7 +369,8 @@ def conflict_stop_issues(session: Optional[dict]) -> List[Dict[str, Any]]:
         logger.warning("conflict_stop_issues: document conflicts skipped (%s)", exc)
     flags = session.get("flags") if isinstance(session.get("flags"), dict) else {}
     for key, msg, _blocking in underwriting_conflict_stops(session.get("underwriting_consistency") or {}, flags,
-                                                           active_documents(session)):
+                                                           active_documents(session),
+                                                           session.get("underwriting_confirmations")):
         out.append({"message": str(msg), "code": f"underwriting_reconciliation_{key}",
                     "fact": str(key), "picker": True})
     return out
@@ -405,7 +472,8 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
     form_hard, form_soft = list(hard), list(soft)
 
     underwriting = session.get("underwriting_consistency") or {}
-    for _key, msg, blocking in underwriting_conflict_stops(underwriting, flags, docs):
+    for _key, msg, blocking in underwriting_conflict_stops(underwriting, flags, docs,
+                                                           session.get("underwriting_confirmations")):
         (hard if blocking else soft).append(msg)
     try:
         from services.issue_registry import explained_issue_codes, person_settled_fact
@@ -426,6 +494,18 @@ def stops_now(session: Optional[dict], form_ids: Optional[Iterable[str]] = None,
         try:
             from services.cross_form_validator import defer_form_choices, split_cross_form_issues
             cross = cross_form_run(facts, flags, form_ids)
+            # THE PACKAGE NEVER DEPENDS ON THE FORMS (owner, 30 Oct 2026): after
+            # forms the PACKAGE checks are read on the same scope as before
+            # forms (the recommended forms), so the same facts give the same
+            # package stops; the FORM checks are read on the forms generated
+            # (they hold only those forms - `issue_registry.issue_scope`).
+            if not pre_form:
+                _rec = recommended_form_ids(session)
+                if _rec and sorted(set(_rec)) != sorted(set(form_ids)):
+                    from services.issue_registry import issue_scope as _scope_of
+                    cross = ([i for i in cross_form_run(facts, flags, _rec)
+                              if _scope_of(i) == "package"]
+                             + [i for i in cross if _scope_of(i) == "form"])
             # A check whose only fix is choosing a form is a form choice, not a
             # stop (13 Oct 2026, the SQS without forms) - outside both lists,
             # marked `form_choice`. AFTER forms too (25 Oct 2026, Brent 23 Oct

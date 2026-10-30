@@ -54,7 +54,19 @@ def _narrative_field() -> str:
 
 
 def fix_route_for_row(row: Any, facts: Optional[dict] = None) -> Optional[dict]:
-    """The ResolutionModal descriptor for one Best Solutions row, or None."""
+    """The ResolutionModal descriptor for one Best Solutions row, or None. A
+    row comparing two sides (`also_facts`, a class-code mismatch) offers the
+    other side's boxes in the same window (SCORING_RULES.md I1)."""
+    res = _fix_route_for_row(row, facts)
+    also = [str(f) for f in ((row or {}).get("also_facts") or []) if str(f or "").strip()] \
+        if isinstance(row, dict) else []
+    if res and also and res.get("mode") in ("schedule", "field"):
+        have = [str(f) for f in (res.get("facts") or [])]
+        res = {**res, "facts": have + [f for f in also if f not in have]}
+    return res
+
+
+def _fix_route_for_row(row: Any, facts: Optional[dict] = None) -> Optional[dict]:
     if not isinstance(row, dict) or row.get("pillar") == HARD_STOPS_ROW:
         return None
     field = str(row.get("field") or "").strip()

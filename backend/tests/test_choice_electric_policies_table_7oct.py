@@ -138,8 +138,12 @@ def test_gl_auto_and_wc_read_their_own_line_facts(merged):
 def test_a_line_with_no_limit_of_its_own_is_blank(merged):
     mf, _flags, _docs_ = merged
     rows = {r["line"]: r for r in pl.table_rows(mf)}
-    for line in ("property", "inland_marine", "employee_benefits", "epli"):
+    for line in ("property", "inland_marine", "employee_benefits"):
         assert rows[line]["limit_parts"] == [] and rows[line]["limit"] == "", line
+    # EPL has no limit FACT, but its own declarations print "(A) Aggregate Limit
+    # of Liability: $1,000,000" (27 Oct 2026, lane A: `policy_lines.
+    # dec_line_limits`) - this assertion pinned the reported defect.
+    assert rows["epli"]["limit_parts"] == [{"label": "aggregate", "amount": "$1,000,000"}]
 
 
 def test_a_gl_limit_is_never_borrowed_from_the_umbrella(merged):

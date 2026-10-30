@@ -311,6 +311,8 @@ def canonicalize_currency(value: Any) -> str:
     s = _s(value)
     if not s:
         return s
+    if too_many_digits(value):
+        return ""             # 30 typed digits / a float past 1e15 is noise
     if _NON_MONEY_UNIT_RE.search(s):
         return s
     tokens = list(_CURRENCY_TOKEN_RE.finditer(s))
@@ -432,6 +434,57 @@ def canonicalize_entity_type(value: Any) -> str:
 
 # ── Field-name category inference + dispatcher ────────────────────────────────
 
+# ── A COUNT PRINTS AS A WHOLE NUMBER (29 Oct 2026 strict review) ────────────
+# An employee count stored as 12.0 (a spreadsheet cell, a JSON number) printed
+# "12.0" on ACORD 125. A box whose name ends "...Count" holds a count: an
+# integral number prints without its ".0". Nothing else is rewritten - "1,200",
+# "approx. 25" and "0 - 25" print as written (the stamp-time shape check owns
+# a two-number value). A count or amount past 15 significant digits is not a
+# number a float holds exactly - it is noise, and prints nothing.
+_COUNT_FIELD_RE = re.compile(r"Count(?:_[A-Z])?$")
+_INTEGRAL_TEXT_RE = re.compile(r"^\s*(-?\d{1,3}(?:,\d{3})*|-?\d+)\.0+\s*$")
+MAX_SIGNIFICANT_DIGITS = 15
+
+
+def too_many_digits(value: Any) -> bool:
+    """True when a number carries more than 15 significant digits (in its whole
+    part, or overall for a float) - the point past which a float is binary
+    noise. ONE rule for the answer door (`fact_registry`) and this module."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return True
+        return abs(value) >= 1e15
+    # ONE number only: "$1,000,000 / $2,000,000 / $3,000,000" is three amounts
+    # (printed as written), never one 21-digit number.
+    toks = re.findall(r"\d[\d,]*(?:\.\d+)?(?:[eE][+-]?\d+)?", str(value))
+    if len(toks) != 1:
+        return False
+    tok = toks[0]
+    if re.search(r"[eE]", tok):
+        try:
+            return abs(float(tok.replace(",", ""))) >= 1e15
+        except ValueError:
+            return False
+    whole = re.sub(r"\D", "", tok.split(".")[0]).lstrip("0")
+    return len(whole) > MAX_SIGNIFICANT_DIGITS
+
+
+def canonicalize_count(value: Any) -> Any:
+    """A whole-number count prints as an integer ("12.0" -> "12")."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if too_many_digits(value):
+        return ""
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else value
+    if isinstance(value, int):
+        return str(value)
+    m = _INTEGRAL_TEXT_RE.match(str(value))
+    return m.group(1) if m else value
+
+
 def category_for_field(field_name: str) -> Optional[str]:
     """Infer the value type of an ACORD field from its NAME shape.
 
@@ -455,6 +508,8 @@ def category_for_field(field_name: str) -> Optional[str]:
         return "city"
     if "date" in fl:
         return "date"
+    if _COUNT_FIELD_RE.search(field_name) and "indicator" not in fl:
+        return "count"                      # ...EmployeeCount_A (never CountryCode)
     if "address" in fl and "line" in fl:
         return "address"
     if any(k in fl for k in ("amount", "revenue", "grosssales", "sales",
@@ -495,6 +550,7 @@ _DISPATCH = {
     "name": canonicalize_name,
     "entity": canonicalize_entity_type,
     "phone": canonicalize_phone,
+    "count": canonicalize_count,
 }
 
 

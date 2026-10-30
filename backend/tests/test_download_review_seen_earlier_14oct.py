@@ -428,15 +428,17 @@ console.log(JSON.stringify(shown.forms.flatMap(f => f.rows).filter(r => r.blocks
 
 
 def test_both_download_screens_draw_the_same_list():
+    # Brent, 26 Oct 2026: both screens draw `downloadSteps` - Hard Stops >
+    # Warnings > Cross-Form Validation, the review one step at a time with Skip.
     body = MODAL.read_text(encoding="utf-8")
     pre = body[body.index("function DownloadPreflightModal"):body.index("function DashboardAssistant")]
-    assert "<DownloadReviewList openRecs={openRecs} attention={attention} />" in pre
-    assert "downloadReviewHeadline(counts)" in pre and "Also listed" not in pre
+    assert "const steps = downloadSteps(openRecs, attention);" in pre
+    assert "<DownloadStep step={step} />" in pre and 'data-testid="download-step-skip"' in pre
     i = body.index("Post-download checklist")
     post = body[i:i + 4000]
-    assert "<DownloadReviewList openRecs={recs} attention={preflightAttention} />" in post
-    assert "To fix before sending (${counts.toFix})" in post and "Also listed" not in post
-    assert body.count("<DownloadReviewList ") == 2
+    assert "<DownloadStepsList openRecs={recs} attention={preflightAttention} />" in post
+    assert "To fix before sending (${toFix})" in post and "Also listed" not in post
+    assert "<DownloadReviewList " not in body
     assert "NeedsAttentionSummary" not in body and "alsoListedText" not in body
 
 
@@ -565,7 +567,11 @@ def test_the_review_page_view_is_the_page_reload_s_own(monkeypatch):
     seg = _ast.get_source_segment(src, fn)
     call = seg[seg.index("_grouped_issues = _grouped_with_package_caps("):]
     call = call[:call.index("\n    )") + 6]
-    for arg in ('proc_session.get("structured_issues") or []', "hard_stops", "_final_soft_stops",
+    # End-user review 29 Oct: the stored cards pass through `structured_as_they_stand`
+    # (live stops) / `with_live_conflict_issues` (stored stops) first (TEST updated).
+    assert '_stored_structured = proc_session.get("structured_issues") or []' in seg
+    assert "with_live_conflict_issues(_stored_structured" in call
+    for arg in ("_stored_structured", "hard_stops", "_final_soft_stops",
                 "_pkg_now", 'cross_issues=_cross_shown',  # build 26: live stops before forms (TEST updated)
                 'facts=proc_session.get("facts") or {}'):
         assert arg in call, arg
@@ -848,3 +854,36 @@ def test_the_list_component_shows_each_group_as_one_line_with_show():
         assert words in util
     assert '"values the AI held back"' not in util                 # 23 Oct 2026 (Brent)
     assert "—" not in util[util.index("// THE DOWNLOAD REVIEW (owner, 14 Oct 2026)"):]
+
+
+def test_the_download_steps_are_hard_warnings_cross_form_only(tmp_path):
+    """Brent, 26 Oct 2026: the download screen steps through Hard Stops >
+    Warnings > Cross-Form Validation only; recommendations, Missing boxes,
+    values to confirm and signatures stay in the side panel; empty steps go."""
+    recs = [
+        {"rec_id": "hardblock_x", "recommendation_type": "hard_stop", "message": "gate"},
+        {"rec_id": "iss1", "recommendation_type": "hard_stop", "message": "h", "review_issue": True},
+        {"rec_id": "iss2", "recommendation_type": "soft_warning", "message": "w", "review_issue": True},
+        {"rec_id": "iss3", "recommendation_type": "soft_warning", "message": "x", "review_issue": True, "cross_form": True},
+        {"rec_id": "rec_gl_form_type", "recommendation_type": "missing_field", "message": "rec"},
+    ]
+    out = _node(tmp_path, f"""
+const s = A.downloadSteps({json.dumps(recs)}, null);
+const none = A.downloadSteps([{{rec_id: "rec_a", recommendation_type: "missing_field"}}], null);
+console.log(JSON.stringify({{ keys: s.map(x => x.key), ids: s.map(x => x.rows.map(r => r.rec_id)), none: none.length }}));
+""")
+    assert out["keys"] == ["hard", "warnings", "cross"]
+    assert out["ids"] == [["hardblock_x", "iss1"], ["iss2"], ["iss3"]]
+    assert out["none"] == 0
+
+
+def test_review_rows_mark_cross_form_checks():
+    view = {"hard_stops": [], "warnings": {"tier": [{"items": [
+        {"issue_id": "a", "message": "m", "code": "umbrella_term_misalignment"},
+        {"issue_id": "b", "message": "n", "code": "legacy_minimum_viable_cope"}]}]}}
+    rows = na.review_issue_rows([view])
+    marks = {r["issue_id"]: r["cross_form"] for r in rows}
+    from services.cross_form_validator import rule_codes
+    assert marks.get("b") is False
+    if "umbrella_term_misalignment" in rule_codes():
+        assert marks.get("a") is True

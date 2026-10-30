@@ -4,7 +4,7 @@
 
 `ENABLE_ASYNC_PROCESSING=true` is **NOT production-ready**.
 
-No background worker process exists yet. Setting this flag causes upload endpoints to return HTTP 202 immediately, but the actual OCR/LLM work is never performed. Leave this env var unset (defaults to `false`) until a real worker (Celery, ARQ, or similar) is wired up.
+A worker exists (`backend/worker.py`, DB-backed job queue), but production and localhost both run the SYNC route (the Render dashboard sets `ENABLE_ASYNC_PROCESSING=false`). Leave it `false`; the async path is a fallback, not the tested path. (Updated 26 Oct 2026.)
 
 ## OCR + LLM Latency
 
@@ -27,21 +27,12 @@ Both `utils/rate_limiter.py` and `utils/concurrency.py` use in-process state (di
 
 **For MVP:** `WEB_CONCURRENCY=1` (set in Dockerfile) is required. With a single worker these controls are fully effective.
 
-**To scale past one worker:** Configure `REDIS_URL`. The rate limiter will automatically use Redis for cross-process coordination. A Redis-based semaphore must also be added to `utils/concurrency.py` before raising concurrency.
+**To scale past one worker:** Configure `REDIS_URL`. The rate limiter and the Redis distributed semaphore in `utils/concurrency.py` both use it automatically. (Updated 26 Oct 2026 - the semaphore exists now.)
 
 ## Cover Narrative Cache
 
-The cover-page narrative is cached in-process with no TTL and no maximum size. The cache resets on every server restart.
+The cover-page narrative is cached in-process in a `TTLCache(maxsize=256, ttl=3600)` (`routes/download_routes.py`). It resets on every server restart and is per worker process. (Updated 26 Oct 2026 - it was unbounded.)
 
-**Implication:** Cache grows unboundedly in long-running single-worker deployments. Add `functools.lru_cache(maxsize=512)` or a TTL-aware cache before scaling past ~50 active users.
+## Template-Pending Forms - RESOLVED
 
-## Template-Pending Forms
-
-The following ACORD forms are matched and shown in recommendations but **cannot generate PDFs yet** because their template files are not available:
-
-- ACORD 127 — Business Auto Section
-- ACORD 130 — Workers Compensation Application  
-- ACORD 131 — Umbrella / Excess Liability
-- ACORD 141 — Property Schedule
-
-These appear in the UI with a "Template coming soon" label and are excluded from the PDF generation pipeline. Supported PDF-generating forms: **ACORD 25, 125, 126, 140**.
+All 17 supported forms have templates and generate PDFs, ACORD 127 / 130 / 131 / 141 included (`backend/templates/`). (Updated 26 Oct 2026.)

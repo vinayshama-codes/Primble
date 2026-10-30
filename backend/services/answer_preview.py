@@ -244,7 +244,9 @@ def _ident(it: dict) -> str:
     if kind == "rec":
         return f"rec:{it.get('pillar') or ''}:{'|'.join(it.get('keys') or []) or it.get('label')}"
     if kind == "card":
-        return f"card:{it.get('code')}"
+        # One code can draw several cards (`review_plan.page_items`): the first
+        # is `card:<code>`, a later one with its own fix carries its issue id.
+        return str(it.get("id") or f"card:{it.get('code')}")
     return str(it.get("id") or "")
 
 
@@ -285,7 +287,7 @@ def _follow_up(it: dict, issue_ids: Dict[str, str]) -> Optional[dict]:
     if kind == "rec":
         out.update({"pillar": it.get("pillar"), "field": it.get("field")})
     elif kind == "card":
-        out.update({"code": it.get("code"), "issue_id": issue_ids.get(str(it.get("code"))),
+        out.update({"code": it.get("code"), "issue_id": (it.get("issue_id") or issue_ids.get(str(it.get("code")))),
                     "message": it.get("message") or ""})
     return out
 
@@ -343,7 +345,7 @@ def _follow_ups(row: dict, work: dict, session_id: str, user_id: str, written: L
                 out.append({"id": it.get("id"), "kind": WARNING, "source": "card",
                             "label": str(it.get("message") or it.get("label") or ""),
                             "code": it.get("code"),
-                            "issue_id": issue_ids.get(str(it.get("code")))})
+                            "issue_id": (it.get("issue_id") or issue_ids.get(str(it.get("code"))))})
             continue
         keys = set(it.get("keys") or [])
         if keys and keys <= before_keys:

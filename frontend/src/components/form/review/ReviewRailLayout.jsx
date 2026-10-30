@@ -2,12 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gradeColor, sqsGradeFromScore, lineLabel, scoreSoFar, sourceLabel } from "../../../utils/formatters";
 import { formLabel } from "../../../utils/formInstances";
 import KeyDetailsMissing, { KeyDetailsResolved } from "./KeyDetailsMissing";
-import { screenPoints, screenPointsText } from "../../../utils/screenPoints";
+import { screenPoints, screenPointsText, dismissedRowPointsText } from "../../../utils/screenPoints";
+import { planAfterForms } from "../../../utils/editorPlanList";
 import { openConflictFacts } from "../../../utils/dcFacts";
 import Recommendations from "./Recommendations";
 import useAttentionList from "./useAttentionList";
 import { buildRecommendations, recommendationsText, considerText } from "../../../utils/recommendations";
 import PoliciesTable from "./PoliciesTable";
+import FormValuesLink from "./FormValuesLink";
 import QuestionnairePage from "./QuestionnairePage";
 import { QUESTIONNAIRE_TITLE, QUESTIONNAIRE_DESC, railSub, railBadge } from "../../../utils/questionnaire";
 import {
@@ -86,10 +88,16 @@ const isHandled = (status) => status === "resolved" || status === "dismissed";
 // ── Counting ──────────────────────────────────────────────────────────────────
 // Same arithmetic as AcordModal's sectionProgress: a cluster contributes its
 // `count`, and an item is handled once it is resolved or dismissed.
+// An advice-only card (`score_neutral` - e.g. a requested coverage change) is
+// drawn with the warnings but is no warning: never counted as one (owner,
+// 29 Oct 2026; the backend counts it as `counts.info`).
+const isInfoCluster = (c) => !!(c && c.score_neutral);
+const warningClustersOnly = (clusters) => (clusters || []).filter((c) => !isInfoCluster(c));
+
 function tallyClusters(clusters, issueStatuses, issueIdOf) {
   let total = 0;
   let done = 0;
-  for (const c of clusters || []) {
+  for (const c of warningClustersOnly(clusters)) {
     const items = Array.isArray(c.items) ? c.items : [];
     total += Number(c.count) || items.length;
     for (const it of items) {
@@ -413,8 +421,11 @@ export default function ReviewRailLayout(props) {
     storedHandledRows(statusEntries, { liveIds: liveIssueIds, page: "hard" }));
   const warnResolved = resolvedRows(WARNING_TIERS.flatMap((t) => warnSplit[t].handled),
     storedHandledRows(statusEntries, { liveIds: liveIssueIds, page: "warning" }));
-  const openCountOf = (clusters) => (clusters || []).reduce((n, c) => n + (Number(c.count) || 0), 0);
+  const openCountOf = (clusters) => warningClustersOnly(clusters).reduce((n, c) => n + (Number(c.count) || 0), 0);
   const openWarnTotal = WARNING_TIERS.reduce((n, t) => n + openCountOf(warnSplit[t].open), 0);
+  // Advice-only cards still on the page (drawn, not counted as warnings).
+  const openInfoTotal = WARNING_TIERS.reduce(
+    (n, t) => n + (warnSplit[t].open || []).filter(isInfoCluster).length, 0);
 
   // ── "x of y handled" (owner, 13 Oct 2026) ─────────────────────────────────
   // y = every blocker this package has had: what is still listed PLUS the
@@ -426,7 +437,7 @@ export default function ReviewRailLayout(props) {
     ? pageProgress(hardSplit.open, hardResolved)
     : { open: hardTally.open, done: hardTally.done + hardResolved.length, total: hardTally.total + hardResolved.length };
   const warnProg = groupedIssues?.warnings
-    ? pageProgress(WARNING_TIERS.flatMap((t) => warnSplit[t].open), warnResolved)
+    ? pageProgress(warningClustersOnly(WARNING_TIERS.flatMap((t) => warnSplit[t].open)), warnResolved)
     : { open: warnTally.open, done: warnTally.done + warnResolved.length, total: warnTally.total + warnResolved.length };
 
   // Locked once forms exist or are generating (Orbin item 1): a document or a
@@ -483,7 +494,7 @@ export default function ReviewRailLayout(props) {
   // The rows only a document lifts sit in the same "Raise your score" list
   // (23 Oct 2026), so every count of that list - this rail badge, the section's
   // pill, the Overview link - counts them too.
-  const recDocRows = formsExist ? 0
+  const recDocRows = formsExist && !planAfterForms(packageSqs) ? 0
     : (screenPts.unanswerable || []).filter((u) => u && u.action === "add_documents").length;
   if (recDocRows) { recModel.count += recDocRows; recModel.docRows = recDocRows; }
   const recChecking = !formsExist && genState !== GEN_RUNNING && dryRun?.status === "pending";
@@ -634,6 +645,11 @@ export default function ReviewRailLayout(props) {
                 <span className={`rr-resolved__label rr-resolved__label--${r.status}`}>
                   {RESOLVED_LABELS[r.status] || RESOLVED_LABELS.resolved}
                 </span>
+                {dismissedRowPointsText(r, screenPts.cards) && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#be185d", whiteSpace: "nowrap" }}>
+                    {dismissedRowPointsText(r, screenPts.cards)}
+                  </span>
+                )}
                 {reopenKind(r) === "none" ? (
                   <span className="rr-resolved__gone">{NO_LONGER_APPLIES}</span>
                 ) : (
@@ -884,6 +900,15 @@ export default function ReviewRailLayout(props) {
                   <div className="rr-doc__meta">
                     <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
                     {typeTag && <span title={typeTag.title} className="rr-doc__conf" style={{ color: typeTag.color }} data-testid="doc-type-tag">{typeTag.label}</span>}
+                    {d.reader === "transcriber" && (
+                      // An outside ACORD form read by ASG's Transcriber (29 Oct 2026,
+                      // ASG_TRANSCRIBER.md): its values are "please verify", like AI values.
+                      <span title="ACORD Solutions Group's Transcriber read this form's boxes. Its values are marked for verification."
+                            className="rr-doc__conf" style={{ color: "#0f766e" }} data-testid="doc-reader-tag">
+                        Read by ACORD Transcriber{d.reader_accuracy != null ? ` - ${Math.round(d.reader_accuracy)}%` : ""}
+                      </span>
+                    )}
+                    <FormValuesLink sessionId={dryRunSessionId} doc={d} />
                     {insuredTag && <span title={insuredTag.title} style={INSURED_TAG_STYLE} data-testid="doc-insured-tag">{insuredTag.label}</span>}
                     {lossRunDocNote(packageSqs?.loss_coverage, d.doc_id) && (
                       <span className="rr-doc__note" data-testid="doc-loss-years">{lossRunDocNote(packageSqs?.loss_coverage, d.doc_id)}</span>
@@ -1001,6 +1026,7 @@ export default function ReviewRailLayout(props) {
                   <div className="rr-conf__side">
                     <div className="rr-conf__label">{f.label}</div>
                     {isConflict && <div className="rr-conf__tag">Values differ - confirm</div>}
+                    {isConflict && f.row_level && <div className="rr-conf__why">One schedule row - your pick changes only this value on this row.</div>}
                     {isConflict && screenPointsText(screenPts.dc.get(f.fact_key)) && (
                       <div style={{ fontSize: 10, fontWeight: 700, color: "#be185d", marginTop: 2 }}>
                         {screenPointsText(screenPts.dc.get(f.fact_key))}
@@ -1015,7 +1041,7 @@ export default function ReviewRailLayout(props) {
                   </div>
                   <div className="rr-conf__main">
                     {isConfirmed && (
-                      <span className="rr-conf__ok"><CheckIcon />Confirmed: {f.confirmed_value}{formsLabel ? ` - available for ${formsLabel}` : ""}</span>
+                      <span className="rr-conf__ok"><CheckIcon />Confirmed: {f.confirmed_value}{formsExist && formsLabel ? ` - available for ${formsLabel}` : ""}</span>
                     )}
                     {isConflict && (
                       <>
@@ -1188,13 +1214,13 @@ export default function ReviewRailLayout(props) {
       <div className="rr-stack">
         {!hasWarnings && <EmptyState title="No warnings." sub="Your Submission Quality Score (SQS)™ is clear of warnings." />}
         {hasWarnings && !groupedIssues?.warnings && renderBareStops(softStops, "soft")}
-        {hasWarnings && groupedIssues?.warnings && openWarnTotal === 0 && (
+        {hasWarnings && groupedIssues?.warnings && openWarnTotal === 0 && openInfoTotal === 0 && (
           <EmptyState title="No open warnings."
             sub={WARNING_TIERS.some((t) => warnSplit[t].handled.length)
               ? "Fix a dismissed warning's value to increase your Submission Quality Score (SQS)™."
               : "Everything here has been handled."} />
         )}
-        {hasWarnings && groupedIssues?.warnings && openWarnTotal > 0 && (
+        {hasWarnings && groupedIssues?.warnings && (openWarnTotal > 0 || openInfoTotal > 0) && (
           activeWarnTab === "all"
             ? WARNING_TIERS.map((t) => renderTier(t, t === "required"))
             : renderTier(activeWarnTab, true)

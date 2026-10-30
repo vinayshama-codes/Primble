@@ -60,8 +60,10 @@ def test_a_method_the_document_names_is_kept(method, text):
 
 # ── 2. Provenance decides (Principle 6) ─────────────────────────────────────
 
-@pytest.mark.parametrize("source", ["producer", "client_arq", "client",
-                                    "derived", "human"])
+# "client" / "human" left this list 27 Oct 2026 (Lane B item 2): no code writes
+# either on a fact (25sepChanges.md Z31-P, checked in the tree and its history);
+# a person's sources are the one door's (`fact_state.PERSON_ENTRY_SOURCES`).
+@pytest.mark.parametrize("source", ["producer", "client_arq", "derived"])
 def test_a_human_or_derived_answer_is_never_gated(source):
     """A producer or client answer IS the named evidence; a derived value was
     computed from a corroborating label to begin with. Only the model's own

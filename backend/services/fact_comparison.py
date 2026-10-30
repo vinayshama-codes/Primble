@@ -588,10 +588,8 @@ def carriers_same_family(a: Any, b: Any) -> bool:
         ta, tb = set(ka.split()), set(kb.split())
         if ta == tb or ta <= tb or tb <= ta:
             return True                   # truncation / missing suffix
-    xa, xb = entity_compact_key(sa), entity_compact_key(sb)
-    if xa and xb and xa == xb:
-        return True                       # one name, spaces lost by OCR
-    return False
+    from services.normalization import same_entity_name
+    return same_entity_name(sa, sb)       # spaces lost by OCR / a clipped last word
 
 
 # ── ONE AGENCY, SEVERAL PRINTINGS (14 Sep 2026) ─────────────────────────────

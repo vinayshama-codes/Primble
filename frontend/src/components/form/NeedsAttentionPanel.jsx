@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../../config/constants";
-import { ATTENTION_TAG_STYLE, DOWNLOAD_GROUPS, attentionGroups, downloadReviewParts, fetchNeedsAttention, groupLineText, isApplicantStep } from "../../utils/needsAttention";
+import { ATTENTION_TAG_STYLE, DOWNLOAD_GROUPS, attentionGroups, downloadReviewParts, downloadSteps, fetchNeedsAttention, groupLineText, isApplicantStep } from "../../utils/needsAttention";
 import { positiveScoreWording } from "../../utils/positiveWording";
 import { formLabel } from "../../utils/formInstances";
 import { confirmableRows, rowKey } from "../../utils/confirmValues";
@@ -331,8 +331,11 @@ function NeedsAttentionSections({ sessionId, formId, formSqs, packageSqs, refres
 // applicant's steps and new-document choices as ONE line each, with
 // its count and Show, which opens the group in place. Not clickable - the
 // review is a last look, and the side panel is where boxes are fixed.
-const pts = (r) => (typeof r?.score_impact === "number" && r.score_impact > 0 ? r.score_impact : 0);
-const plusPoints = (r) => (pts(r) ? (r.impact_is_exact === true ? `+${pts(r)} pts` : `up to +${pts(r)} pts`) : "");
+// A row's number is the review plan's (`plan_points`, utils/downloadPlanPoints.js
+// - the side panel's number for the same item, 29 Oct 2026); the card's own
+// stored `score_impact` is never printed (it did not match the side panel and
+// did not add up to 100 minus the score). No plan number = no number.
+const planPts = (r) => (typeof r?.plan_points === "string" ? r.plan_points.trim() : "");
 const formsOf = (r) => (Array.isArray(r?.forms) && r.forms.length ? r.forms : []);
 
 function RecBox({ title, rows, tone, testId }) {
@@ -350,9 +353,7 @@ function RecBox({ title, rows, tone, testId }) {
           {"• "}
           {formsOf(r).length > 0 && <span style={{ fontWeight: 700, color: "#E61B84" }}>{formsOf(r).map(formLabel).join(", ")}: </span>}
           {positiveScoreWording(r.message)}
-          {tone === "hard"
-            ? (pts(r) ? <span style={{ color: t.pts, fontWeight: 700 }}> (-{pts(r)} pts)</span> : null)
-            : (plusPoints(r) ? <span style={{ color: t.pts, fontWeight: 600 }}> ({plusPoints(r)})</span> : null)}
+          {planPts(r) ? <span style={{ color: t.pts, fontWeight: tone === "hard" ? 700 : 600 }}> ({planPts(r)})</span> : null}
         </div>
       ))}
     </div>
@@ -379,6 +380,19 @@ function FormRows({ groups, heading = false }) {
       <StatusGroups rows={f.rows} showAll hideHeading={!heading} />
     </div>
   ));
+}
+
+// One step of the download screen (`downloadSteps`), or all of them at once.
+export function DownloadStep({ step }) {
+  return step ? <RecBox title={step.title} rows={step.rows} tone={step.tone} testId={`download-step-${step.key}`} /> : null;
+}
+
+export function DownloadStepsList({ openRecs, attention }) {
+  return (
+    <div data-testid="download-steps-list">
+      {downloadSteps(openRecs, attention).map((st) => <DownloadStep key={st.key} step={st} />)}
+    </div>
+  );
 }
 
 export function DownloadReviewList({ openRecs, attention }) {

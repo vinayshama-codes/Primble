@@ -420,3 +420,20 @@ def test_every_schedule_column_binds_to_a_live_acord_field():
                 f"{list_key}.{col['key']} is not bound to any real ACORD field - "
                 f"data entered in this column would be discarded"
             )
+
+
+def test_loss_table_hides_a_loss_run_summary_line_and_keeps_it_on_save():
+    """26 Oct 2026: a policy-year summary ("All lines", 12 claims, $322,650) is
+    not a claim - the loss table does not show it, and a save keeps it."""
+    from services import schedule_capture as sc
+    claim = {"date": "03/13/2025", "claim_number": "C1", "amount": "$12,000", "description": "Collision"}
+    total = {"date": None, "claim_number": None, "amount": "322650", "description": "All lines",
+             "line_of_business": "All lines"}
+    facts = {"loss_history": [claim, total]}
+    shown = sc.rows_from_facts("loss_history", facts)
+    assert len(shown) == 1 and shown[0].get("description") == "Collision"
+    kept = sc.merge_saved_rows("loss_history", facts["loss_history"], shown, facts=facts)
+    assert any(isinstance(r, dict) and r.get("description") == "All lines" for r in kept)
+    assert sc.refused_rows("loss_history", [claim], facts) == {}
+    typed_total = sc.refused_rows("loss_history", [total], facts)
+    assert typed_total == {"0": {"row": sc._LOSS_TOTAL_ROW_MESSAGE}}

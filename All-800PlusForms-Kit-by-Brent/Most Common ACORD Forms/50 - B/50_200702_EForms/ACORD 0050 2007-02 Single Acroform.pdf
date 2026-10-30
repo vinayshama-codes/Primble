@@ -1,0 +1,220 @@
+%PDF-1.4
+%ÿğ°
+1 0 obj 
+<< /AcroForm << /DR << /Font << /F1 2 0 R /F2 3 0 R >> >> /Fields [ 4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R 27 0 R 28 0 R 29 0 R 30 0 R 31 0 R ] >> /OpenAction << /JS (function DateV\(event\) {  var regEx = /^\\d{1,2}\\/\\d{1,2}\\/\\d{4}$/; if \(event.value!=null && event.value.length>0 && !regEx.test\(event.value\)\) { event.rc = false; app.alert\("The date must be of the format MM/DD/YYYY."\); } };) /S /JavaScript /Type /Action >> /Pages 32 0 R /Type /Catalog >>
+endobj
+33 0 obj 
+<< /Author (ACORD Corporation) /CreationDate (D:20200501162251-04'00') /Creator (Silverlake Software LLC - Forms Dev Environment) /ModDate (D:20200501162251-04'00') /Producer (Silverlake Software LLC - Form Designer - v1.4.19260) /Title (ACORD 0050Single 2020-05 Acroform) >>
+endobj
+2 0 obj 
+<< /BaseFont /Arial /Encoding /WinAnsiEncoding /FirstChar 0 /FontDescriptor << /Ascent 905.27 /CapHeight 716.31 /Descent -211.91 /Flags 32 /FontBBox [ -45.90 -168.46 1000.00 938.48 ] /FontName /Arial /ItalicAngle 0.00 /StemV 0.00 /Type /FontDescriptor >> /LastChar 255 /Subtype /Type1 /Type /Font /Widths [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 277.83 277.83 354.98 556.15 556.15 889.16 666.99 190.92 333.01 333.01 389.16 583.98 277.83 333.01 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 277.83 277.83 583.98 583.98 583.98 556.15 1015.14 666.99 666.99 722.17 722.17 666.99 610.84 777.83 722.17 277.83 500.00 666.99 556.15 833.01 722.17 777.83 666.99 777.83 722.17 666.99 610.84 722.17 666.99 943.85 666.99 666.99 610.84 277.83 277.83 277.83 469.24 556.15 333.01 556.15 556.15 500.00 556.15 556.15 277.83 556.15 556.15 222.17 222.17 500.00 222.17 833.01 556.15 556.15 556.15 556.15 333.01 500.00 277.83 556.15 500.00 722.17 500.00 500.00 500.00 333.98 259.77 333.98 583.98 0 556.15 0 222.17 556.15 333.01 1000.00 556.15 556.15 333.01 1000.00 666.99 333.01 1000.00 0 610.84 0 0 222.17 222.17 333.01 333.01 350.10 556.15 1000.00 333.01 1000.00 500.00 333.01 943.85 0 500.00 666.99 277.83 333.01 556.15 556.15 556.15 556.15 259.77 556.15 333.01 736.82 370.12 556.15 583.98 333.01 736.82 552.25 399.90 548.83 333.01 333.01 333.01 576.17 537.11 333.01 333.01 333.01 365.23 556.15 833.98 833.98 833.98 610.84 666.99 666.99 666.99 666.99 666.99 666.99 1000.00 722.17 666.99 666.99 666.99 666.99 277.83 277.83 277.83 277.83 722.17 722.17 777.83 777.83 777.83 777.83 777.83 583.98 777.83 722.17 722.17 722.17 722.17 666.99 666.99 610.84 556.15 556.15 556.15 556.15 556.15 556.15 889.16 500.00 556.15 556.15 556.15 556.15 277.83 277.83 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 548.83 610.84 556.15 556.15 556.15 556.15 500.00 556.15 500.00 ] >>
+endobj
+3 0 obj 
+<< /BaseFont /Arial,Bold /Encoding /WinAnsiEncoding /FirstChar 0 /FontDescriptor << /Ascent 905.27 /CapHeight 715.82 /Descent -211.91 /Flags 32 /FontBBox [ -45.90 -175.78 1000.00 938.48 ] /FontName /Arial,Bold /ItalicAngle 0.00 /StemV 0.00 /Type /FontDescriptor >> /LastChar 255 /Subtype /Type1 /Type /Font /Widths [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 277.83 333.01 474.12 556.15 556.15 889.16 722.17 237.79 333.01 333.01 389.16 583.98 277.83 333.01 277.83 277.83 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 556.15 333.01 333.01 583.98 583.98 583.98 610.84 975.10 722.17 722.17 722.17 722.17 666.99 610.84 777.83 722.17 277.83 556.15 722.17 610.84 833.01 722.17 777.83 666.99 777.83 722.17 666.99 610.84 722.17 666.99 943.85 666.99 666.99 610.84 333.01 277.83 333.01 583.98 556.15 333.01 556.15 610.84 556.15 610.84 556.15 333.01 610.84 610.84 277.83 277.83 556.15 277.83 889.16 610.84 610.84 610.84 610.84 389.16 556.15 333.01 610.84 556.15 777.83 556.15 556.15 500.00 389.16 279.79 389.16 583.98 0 556.15 0 277.83 556.15 500.00 1000.00 556.15 556.15 333.01 1000.00 666.99 333.01 1000.00 0 610.84 0 0 277.83 277.83 500.00 500.00 350.10 556.15 1000.00 333.01 1000.00 556.15 333.01 943.85 0 500.00 666.99 277.83 333.01 556.15 556.15 556.15 556.15 279.79 556.15 333.01 736.82 370.12 556.15 583.98 333.01 736.82 552.25 399.90 548.83 333.01 333.01 333.01 576.17 556.15 333.01 333.01 333.01 365.23 556.15 833.98 833.98 833.98 610.84 722.17 722.17 722.17 722.17 722.17 722.17 1000.00 722.17 666.99 666.99 666.99 666.99 277.83 277.83 277.83 277.83 722.17 722.17 777.83 777.83 777.83 777.83 777.83 583.98 777.83 722.17 722.17 722.17 722.17 666.99 666.99 610.84 556.15 556.15 556.15 556.15 556.15 556.15 889.16 556.15 556.15 556.15 556.15 556.15 277.83 277.83 277.83 277.83 610.84 610.84 610.84 610.84 610.84 610.84 610.84 548.83 610.84 610.84 610.84 610.84 610.84 556.15 610.84 556.15 ] >>
+endobj
+4 0 obj 
+<< /DV (ACORD 0050Single 2020-05 Acroform) /F 2 /Ff 1 /FT /Tx /P 34 0 R /Rect [ 0 1 0 1 ] /Subtype /Widget /T (Form_EditionIdentifier_A) /TU (The edition identifier of the form including the form number and edition \(the date is typically formatted YYYY/MM\).) /Type /Annot /V (ACORD 0050Single 2020-05 Acroform) >>
+endobj
+5 0 obj 
+<< /DA (/F2 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Q 1 /Rect [ 130 732 202 744 ] /Subtype /Widget /T (NamedInsured_StateOrProvinceName_B) /TU (Enter text: The full name of the state as determined by the carrier.   ) /Type /Annot >>
+endobj
+6 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 205 720 342 732 ] /Subtype /Widget /T (AutomobileIdentificationCard_RemarkText_D) /TU (Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states. ) /Type /Annot >>
+endobj
+7 0 obj 
+<< /AP << /D << /1 35 0 R /Off 36 0 R >> /N << /1 37 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 34 0 R /Rect [ 227 708 241 720 ] /Subtype /Widget /T (Policy_BroadLineOfBusiness_CommercialIndicator_B) /TU (Check the box \(if applicable\): Indicates the policy is a commercial lines policy. ) /Type /Annot >>
+endobj
+8 0 obj 
+<< /AP << /D << /1 38 0 R /Off 39 0 R >> /N << /1 40 0 R >> >> /AS /Off /F 4 /Ff 8388608 /FT /Btn /MK << /CA (8) >> /P 34 0 R /Rect [ 299 708 313 720 ] /Subtype /Widget /T (Policy_BroadLineOfBusiness_PersonalIndicator_B) /TU (Check the box \(if applicable\): Indicates the policy is a personal lines policy. ) /Type /Annot >>
+endobj
+9 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 696 133 708 ] /Subtype /Widget /T (Insurer_NAICCode_B) /TU (Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners \(NAIC\). ) /Type /Annot >>
+endobj
+10 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 133 696 342 708 ] /Subtype /Widget /T (Insurer_FullName_B) /TU (Enter text: The insurer's full legal company name\(s\) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ) /Type /Annot >>
+endobj
+11 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 672 162 684 ] /Subtype /Widget /T (Policy_PolicyNumberIdentifier_B) /TU (Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ) /Type /Annot >>
+endobj
+12 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 34 0 R /Rect [ 162 672 256 684 ] /Subtype /Widget /T (Policy_EffectiveDate_B) /TU (Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+13 0 obj 
+<< /AA << /V << /JS (DateV\(event\);) /S /JavaScript /Type /Action >> >> /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /MaxLen 10 /P 34 0 R /Rect [ 256 672 342 684 ] /Subtype /Widget /T (Policy_ExpirationDate_B) /TU (Enter date: The date on which the terms and conditions of the policy will expire.  \(MM/DD/YYYY\) ) /Type /Annot >>
+endobj
+14 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 648 90 660 ] /Subtype /Widget /T (Vehicle_ModelYear_B) /TU (Enter year: The model year of the vehicle. ) /Type /Annot >>
+endobj
+15 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 97 648 158 660 ] /Subtype /Widget /T (Vehicle_ManufacturersName_B) /TU (Enter text: The manufacturer of the vehicle \(e.g., Ford, Chevy\). ) /Type /Annot >>
+endobj
+16 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 158 648 216 660 ] /Subtype /Widget /T (Vehicle_ModelName_B) /TU (Enter text: The manufacturer's model name for the vehicle. ) /Type /Annot >>
+endobj
+17 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 220 648 342 660 ] /Subtype /Widget /T (Vehicle_VINIdentifier_B) /TU (Enter identifier: The vehicle identification number \(VIN\) or serial number assigned by the manufacturer. ) /Type /Annot >>
+endobj
+18 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 624 292 636 ] /Subtype /Widget /T (Producer_FullName_B) /TU (Enter text: The full name of the producer / agency. ) /Type /Annot >>
+endobj
+19 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 612 166 624 ] /Subtype /Widget /T (Producer_MailingAddress_LineOne_B) /TU (Enter text: The mailing address line one of the producer / agency. ) /Type /Annot >>
+endobj
+20 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 166 612 292 624 ] /Subtype /Widget /T (Producer_MailingAddress_LineTwo_B) /TU (Enter text: The mailing address line two of the producer / agency. ) /Type /Annot >>
+endobj
+21 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 40 600 227 612 ] /Subtype /Widget /T (Producer_MailingAddress_CityName_B) /TU (Enter text: The mailing address city name of the producer / agency. ) /Type /Annot >>
+endobj
+22 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 227 600 245 612 ] /Subtype /Widget /T (Producer_MailingAddress_StateOrProvinceCode_B) /TU (Enter code: The mailing address state or province code of the producer / agency. ) /Type /Annot >>
+endobj
+23 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 245 600 292 612 ] /Subtype /Widget /T (Producer_MailingAddress_PostalCode_B) /TU (Enter code: The mailing address postal code of the producer / agency. ) /Type /Annot >>
+endobj
+24 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 68 570 320 582 ] /Subtype /Widget /T (NamedInsured_FullName_B) /TU (Enter text: The named insured\(s\) as it / they will appear on the policy declarations page. ) /Type /Annot >>
+endobj
+25 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 68 558 194 570 ] /Subtype /Widget /T (NamedInsured_MailingAddress_LineOne_B) /TU (Enter text: The named insured's mailing address line one. ) /Type /Annot >>
+endobj
+26 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 194 558 320 570 ] /Subtype /Widget /T (NamedInsured_MailingAddress_LineTwo_B) /TU (Enter text: The named insured's mailing address line two. ) /Type /Annot >>
+endobj
+27 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 68 546 256 558 ] /Subtype /Widget /T (NamedInsured_MailingAddress_CityName_B) /TU (Enter text: The named insured's mailing address city name. ) /Type /Annot >>
+endobj
+28 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 256 546 274 558 ] /Subtype /Widget /T (NamedInsured_MailingAddress_StateOrProvinceCode_B) /TU (Enter code: The named insured's mailing address state or province code. ) /Type /Annot >>
+endobj
+29 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8388608 /FT /Tx /P 34 0 R /Rect [ 274 546 320 558 ] /Subtype /Widget /T (NamedInsured_MailingAddress_PostalCode_B) /TU (Enter code: The named insured's mailing address postal code. ) /Type /Annot >>
+endobj
+30 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 34 0 R /Rect [ 40 516 342 540 ] /Subtype /Widget /T (AutomobileIdentificationCard_RemarkText_E) /TU (Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states. ) /Type /Annot >>
+endobj
+31 0 obj 
+<< /DA (/F1 8 Tf 0 g) /F 4 /Ff 8392704 /FT /Tx /P 41 0 R /Rect [ 252 516 576 588 ] /Subtype /Widget /T (AutomobileIdentificationCard_RemarkText_F) /TU (Enter text: The remarks associated with the Auto ID Card.  Certain states require special provisions to be added to the Auto ID card exactly below the form title.  Use this space for any additional required text in these states. ) /Type /Annot >>
+endobj
+32 0 obj 
+<< /Count 2 /Kids [ 34 0 R 41 0 R ] /Type /Pages >>
+endobj
+34 0 obj 
+<< /Annots 42 0 R /Contents 43 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 32 0 R /Resources << /Font << /F1 2 0 R /F2 3 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+35 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+36 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+37 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+38 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 67 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\ÆzF@°l./—¡!ˆ–Ïñà’ÆÈrÁ¼\¼\ °Wè
+endstream
+endobj
+39 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 41 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ğ37UHÑ
+`ÂĞDÏHØE©¼\i¼\¼\ «Q¨
+endstream
+endobj
+40 0 obj 
+<< /BBox [ 0.00 0.00 14.40 12.00 ] /Filter [ /FlateDecode ] /FormType 1 /Length 45 /Subtype /Form /Type /XObject >>
+stream
+xœ+äå2Ö32P04Ğ30PÈåå24q@¼.iŒ,ÌËÈË |ç1
+endstream
+endobj
+41 0 obj 
+<< /Annots 44 0 R /Contents 45 0 R /CropBox [ 0 0 612 792 ] /MediaBox [ 0 0 612 792 ] /Parent 32 0 R /Resources << /Font << /F1 2 0 R /F2 3 0 R >> /ProcSet [ /PDF /Text /ImageB ] >> /Type /Page >>
+endobj
+42 0 obj 
+[ 4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R 27 0 R 28 0 R 29 0 R 30 0 R ]
+endobj
+43 0 obj 
+<< /Filter [ /FlateDecode ] /Length 520 >>
+stream
+xœTM“š@½SÅè£Äù ,¶›Id°`´b•³ê–ÉF·Ôªüıà0DY	±rq„¦ß{Óıº‰Gê§öøòÓu´ëôÇóFo]‡|ó?RnŞ­]§şrÎ³<UÑ¤ú»ë`‘í_bEˆùCóÙ€sRf-×ÉùH_œ&	f±lb¤âÿ9/	9+Âõ„(£gTñ¢_O#µ ™ç3©!²ÑUÂ=(5¸A%à%ê?Éx‚ G¨´Ë8Ò2U fÉfm¸Ã{Øku’èö“t„“6Ş±Àè†ŸÁg×	BöF/gáf+> µÈ›)p=§¤½Éù€Ö#ÄßrD‰öPN¥ÍFŞÚ›ï›Š!U>Ë°µÏŒÚj†5÷ëü:•YÙÛQ¤±Õ1<¸G"·Áñc-çøO Ş¨hÈìÄ¦/p¥´Ä†ÒØyxDÇM~{,¨< DP;ÖM:–\õXv¹ŠÏj¥-FÅ &Ó4Ó‘Ò R-c„¢cÎ‹õ†SúAx…­Bz«°jœ1Q¤â»a¯¯Qm±Rö€—şåv™õXÓc ¸!Ú^?0	"d^ğç½ãì´÷ÕëæVû50Ø°=ög8àÛêå,;¬wÚ­7ëeŞ»ıy·½
+ü+E{
+endstream
+endobj
+44 0 obj 
+[ 31 0 R ]
+endobj
+45 0 obj 
+<< /Filter [ /FlateDecode ] /Length 492 >>
+stream
+xœ“]¢0†ïIøçr&Yk[>”¹c Éî¨‘ºWsS¡*l ÆŸ´ÿrŠø‘Ù5fnzRh‡óÒƒ¡€Æ—åË6ÛØÖ+·­ş7@d |i[çŞº”ÛÊsÛêDàÛzúa4™Å`–édòd2Åx€ Â²„ªX­›*YËj/sôüm1~OG1ù_G:]'ó0|<µ‚>¦Ïÿâ<4t:œïøÈ÷—^päJã£$…(4Ä÷yÊá•ÁO6åŒ˜)é|ÆâÇxÏo±Şnø`Øá³Qıbc˜ÎXÊÆœÅ0Ÿšˆbön>D»¸"ğ¯hŠüA‡ŞËu‘•
+µ×å½Lï¡<|Cõ0òÎ)Pc±‘ —¨zW	•Iˆôf+Ô„Êa«Ë";‚Úm²‚¥®@Šlı-#	è#9[¸Èss1êÖŞR!¯Š½¬~ÀVÔµT+#lOŠF™SÛ$g©C¾´évÒZk¢6İÔu±(%‚É¢…‚f-MSe©…Z™DMƒÑZ½|ËæŞlÔA®×ÙÌŠÂ”ÁäÍH”Äæß¿ÀLnuÕ€03!²¬È¥2cÑh8ê]áÊlû×Üë›ü4J‚n}§S›rª½Ë·TÒ¶RÛú†ğ 
+endstream
+endobj
+xref
+0 46
+0000000000 65535 f
+0000000017 00000 n
+0000000916 00000 n
+0000002856 00000 n
+0000004805 00000 n
+0000005140 00000 n
+0000005398 00000 n
+0000005816 00000 n
+0000006165 00000 n
+0000006510 00000 n
+0000006800 00000 n
+0000007206 00000 n
+0000007641 00000 n
+0000008019 00000 n
+0000008370 00000 n
+0000008579 00000 n
+0000008821 00000 n
+0000009048 00000 n
+0000009327 00000 n
+0000009546 00000 n
+0000009794 00000 n
+0000010043 00000 n
+0000010293 00000 n
+0000010568 00000 n
+0000010823 00000 n
+0000011087 00000 n
+0000011330 00000 n
+0000011574 00000 n
+0000011819 00000 n
+0000012089 00000 n
+0000012339 00000 n
+0000012757 00000 n
+0000013176 00000 n
+0000000620 00000 n
+0000013248 00000 n
+0000013465 00000 n
+0000013689 00000 n
+0000013887 00000 n
+0000014089 00000 n
+0000014313 00000 n
+0000014511 00000 n
+0000014713 00000 n
+0000014930 00000 n
+0000015137 00000 n
+0000015741 00000 n
+0000015772 00000 n
+trailer
+<< /Info 33 0 R /Root 1 0 R /Size 46 >>
+startxref
+16348
+%%EOF

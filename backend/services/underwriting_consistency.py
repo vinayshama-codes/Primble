@@ -57,6 +57,15 @@ from services.normalization import (
 logger = logging.getLogger(__name__)
 
 UNDERWRITING_CONSISTENCY_MODEL_VERSION = "1.1.0"
+# THE ASSESSMENT'S RULES VERSION (strict review, 29 Oct 2026). A stored session
+# keeps the Data Consistency assessment of its last processing; after a deploy
+# that changes the rules, its first confirm re-assessed and the producer saw
+# "new" conflicts appear. The assessment now carries this number and is
+# re-assessed ON READ when the stored one is older (`stale_assessment_refresh`)
+# - a pure recompute from the stored documents, facts and confirmations, no
+# model call, a person's picks untouched. BUMP IT with any change to what this
+# module reports.
+ASSESSMENT_VERSION = 1
 
 # Confidence/source labels for a user-confirmed value applied to merged facts.
 # "client_arq" scores 1.00 in sqs_service.CONFIDENCE_SCORE — a value the broker
@@ -213,6 +222,14 @@ _FOREIGN_LABEL_QUALIFIERS = (
     # lease, and an endorsement / cancellation / reinstatement's own date.
     "registration", "plate", "license", "licence", "permit", "lease",
     "endorsement", "cancellation", "reinstatement",
+    # 29 Oct 2026 (614c3211): another PERIOD's printing - "Prior Policy
+    # Effective Date:", "Expiring Policy Expiration Date:", "Previous Year Gross
+    # Sales:" - states the term or year before the one compared (client item 10,
+    # "applicable time period"). Same line only, as above; a prior term printed
+    # under a section heading is read off the document's own prior-term facts
+    # (`_document_prior_term_dates`). Never "renewal" (a renewal's dates ARE the
+    # new term) and never "current".
+    "prior", "previous", "expiring", "former", "predecessor",
 )
 _QUALIFIER_TAIL_CHARS = 48
 
@@ -988,10 +1005,37 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
     same length-of-information), so length is not a genuine completeness signal
     there and scoring them would invent a preference with no basis - they stay at
     0.0, keeping their existing frequency-only tiebreak unchanged.
+
+    The score is ``structural + proxy`` (`_completeness_parts`); this total is
+    what every RANKING reads, unchanged.
+    """
+    structural, proxy = _completeness_parts(fact_key, kind, value)
+    return structural + proxy
+
+
+def _completeness_parts(fact_key: str, kind: str, value: Any) -> Tuple[float, float]:
+    """(structural, proxy) completeness of one candidate value.
+
+    STRUCTURAL is a component a printing either has or lacks - an address's
+    ZIP+4 / ZIP / state / street number, a FEIN's nine digits - counted in the
+    same units on every kind (a ZIP+4 over a ZIP, a state, a full FEIN: 1.0).
+    PROXY is a fullness hint - an address's word count, a descriptive text's
+    length - that ranks two printings but proves nothing.
+
+    WHY THE SPLIT (27 Oct 2026, Lane B item 7; CLAUDE.md "Known, not touched"):
+    `_COMPLETENESS_MARGIN` (1.0) decides a HIGH-confidence suggestion, and it
+    was compared with the TOTAL, whose scale differs wildly by kind - an
+    address scores 0 to 4.5+, a FEIN 0 or 1, a name 0.01 a character, money
+    a flat 0. So ten extra words of an address ("Attn Accounts Payable Suite
+    100 Building B ...") or 100 extra characters of a carrier name (an
+    endorsement clause glued on - the 17 Aug "Suggested" defect) cleared the
+    margin with no structural lead at all, and badged the longer printing
+    HIGH - pre-selected on every non-hard-stop field. The margin now means
+    the same thing on every kind: a lead of one structural component.
     """
     s = str(value or "").strip()
     if not s:
-        return 0.0
+        return 0.0, 0.0
 
     # WHICH fields get which scoring is now DERIVED from the value's kind, not
     # from a two-key list - an auto-discovered `premises_address` was getting
@@ -1008,7 +1052,8 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
         KIND_ADDRESS = KIND_FEIN = KIND_NAME = KIND_TEXT = KIND_NARRATIVE = None
 
     if vk == KIND_ADDRESS or fact_key in ("mailing_address", "physical_address"):
-        score = len(re.findall(r"\w+", s)) * 0.1          # mild fullness preference
+        proxy = len(re.findall(r"\w+", s)) * 0.1          # mild fullness preference
+        score = 0.0
         if re.search(r"\b\d{5}-\d{4}\b", s):
             score += 3.0                                  # ZIP+4 (most complete)
         elif re.search(r"\b\d{5}\b", s):
@@ -1017,9 +1062,9 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
             score += 1.0                                  # state present ("CO 80216")
         if re.match(r"\s*\d+\b", s):
             score += 0.5                                  # leading street number
-        return score
+        return score, proxy
     if vk == KIND_FEIN or fact_key == "fein":
-        return 1.0 if len(re.sub(r"\D", "", s)) == 9 else 0.0
+        return (1.0 if len(re.sub(r"\D", "", s)) == 9 else 0.0), 0.0
 
     # THE "SUGGESTED" DEFECT (probe run B, 2026-08-17). Raw length was applied
     # to every auto-discovered field, so the longest string won - and the
@@ -1034,8 +1079,8 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
     # "more complete" printing - those score 0.0 and ranking falls through to
     # DOCUMENT AGREEMENT, which is real evidence.
     if kind == "identity" and vk in (KIND_NAME, KIND_TEXT, KIND_NARRATIVE, None):
-        return len(s) * 0.01
-    return 0.0
+        return 0.0, len(s) * 0.01                         # length proves nothing
+    return 0.0, 0.0
 
 
 def _submission_backed(group: dict) -> bool:
@@ -1141,7 +1186,14 @@ def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional
         else:
             confidence = "low"                                # genuine tie — no clear winner
     else:
-        if top_c - sec_c >= _COMPLETENESS_MARGIN:
+        # HIGH needs the lead in STRUCTURE, in the same units on every kind
+        # (`_completeness_parts`, 27 Oct 2026): a fullness proxy - word count,
+        # length - only ever reaches medium. Both leads must clear the margin,
+        # so nothing is more confident than it was; only the proxy-made HIGHs
+        # drop to medium (no pre-selection, the producer chooses).
+        top_s = _completeness_parts(fact_key, kind, top.get("display"))[0]
+        sec_s = _completeness_parts(fact_key, kind, second.get("display"))[0]
+        if top_c - sec_c >= _COMPLETENESS_MARGIN and top_s - sec_s >= _COMPLETENESS_MARGIN:
             confidence = "high"                               # clearly more complete
         elif top_c > sec_c:
             confidence = "medium"                             # somewhat more complete
@@ -1193,10 +1245,45 @@ def _full_field_enabled() -> bool:
         return False
 
 
+# Initialisms a producer reads in capitals (Michelle review, 29 Oct 2026: the
+# card read "Naics Code: documents disagree" and "Gl Each Occurrence").
+_LABEL_INITIALISMS = {
+    "naics": "NAICS", "sic": "SIC", "fein": "FEIN", "ein": "EIN", "naic": "NAIC",
+    "gl": "GL", "wc": "WC", "el": "EL", "dba": "DBA", "vin": "VIN", "dob": "DOB",
+    "um": "UM", "uim": "UIM", "bi": "BI", "pd": "PD", "sir": "SIR", "bpp": "BPP",
+    "itv": "ITV", "coi": "COI", "ebl": "EBL", "epl": "EPL", "epli": "EPLI",
+    "hnoa": "HNOA", "id": "ID", "aop": "AOP", "acv": "ACV", "rcv": "RCV",
+    "xmod": "X-Mod", "llc": "LLC"}
+
+
+# Auto-discovered keys whose word-by-word reading is not how a producer says it
+# (end-user review, 29 Oct 2026: the card read "Num Employees Part Time" and
+# "Applicant Business Phone").
+_AUTO_LABELS = {
+    "num_employees": "Employee Count",
+    "num_employees_full_time": "Full-Time Employees",
+    "num_employees_part_time": "Part-Time Employees",
+    "applicant_business_phone": "Business Phone",
+    "applicant_phone": "Business Phone",
+    "applicant_email": "Business E-mail",
+    "applicant_website": "Website",
+}
+
+
 def _humanize(fact_key: str) -> str:
     """Readable label for an auto-discovered fact key
-    ('gl_each_occurrence_limit' -> 'Gl Each Occurrence Limit')."""
-    return fact_key.replace("_", " ").strip().title() or fact_key
+    ('gl_each_occurrence_limit' -> 'GL Each Occurrence Limit'). A leading
+    "num" reads "Number of"; `_AUTO_LABELS` names the rest."""
+    key = str(fact_key or "")
+    if key.lower() in _AUTO_LABELS:
+        return _AUTO_LABELS[key.lower()]
+    words = [w for w in key.replace("_", " ").split() if w]
+    if not words:
+        return fact_key
+    lead = []
+    if len(words) > 1 and words[0].lower() in ("num", "no"):
+        lead, words = ["Number of"], words[1:]
+    return " ".join(lead + [_LABEL_INITIALISMS.get(w.lower(), w.title()) for w in words])
 
 
 def _drop_declared_trade_names(fact_key: str, values: List[dict],
@@ -1291,6 +1378,168 @@ def _class_exposure_amounts(merged_facts: Optional[dict]) -> set:
                 if norm:
                     out.add(norm)
     return out
+
+
+# ── A COVERAGE TERM IS STATED PER TERM (Michelle review, 29 Oct 2026) ────────
+# Limits, deductibles, retentions, attachment points and premiums belong to ONE
+# policy term: a declarations page states the CURRENT policy's, an application,
+# quote or ACORD form the term APPLIED FOR. Read off the fact's own name (its
+# tokens), so a new limit / deductible fact is covered without a list.
+_COVERAGE_TERM_TOKENS = frozenset({
+    "limit", "limits", "deductible", "deductibles", "sir", "retention",
+    "attachment", "premium", "aggregate", "occurrence"})
+
+
+def is_coverage_term_fact(fact_key: Any) -> bool:
+    """True when `fact_key` names a coverage term (a limit, deductible, SIR /
+    retention, attachment point or premium) rather than a fact of the insured."""
+    toks = set(str(fact_key or "").lower().split("_"))
+    return bool(toks & _COVERAGE_TERM_TOKENS)
+
+
+# ── ONE DOCUMENT'S SCHEDULE ITEMS ARE NOT RIVAL TOTALS (Michelle review) ─────
+# Keys whose rows are not the document's items of the insured: the verified
+# declarations index restates every labelled figure (the totals too), and a
+# per-line record restates limits and premiums.
+_NOT_ITEM_FACTS = frozenset({"dec_page_entries", "coverage_lines"})
+# A printed row: cells joined by "|", or a line that starts with a short row
+# number / state + code ("1 2 Building $1,780,000", "CO 5537 HVAC ... $1,240,000").
+_ROW_START_RE = re.compile(r"^\s*(?:[A-Z]{2}\s+)?\d{1,5}\b(?![,.]\d)")
+_AMOUNT_RE = re.compile(r"\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\d+(?:\.\d+)?")
+# A line naming ONE item by its number: "Bldg 2", "Location #3", "Class Code
+# 5537", "Veh 4", "Premises No. 1".
+_ITEM_LABEL_RE = re.compile(
+    r"\b(?:bldg|building|loc|location|prem|premises|veh|vehicle|unit|item|class|"
+    r"driver|site)\s*(?:code\s*)?(?:no\.?|number|#)?\s*\d{1,5}\b", re.IGNORECASE)
+_BARE_AMOUNT_RE = re.compile(r"^\s*\$?\s*\d[\d,]*(?:\.\d+)?\s*$")
+
+
+def _document_own_item_amounts(doc_facts: Any, fact_key: str, kind: str) -> set:
+    """Every amount the document's OWN extraction assigns to something other
+    than `fact_key` - a schedule row's cell (a building's value, a class's
+    payroll, a vehicle's cost) or another figure it read as a different fact.
+    Normalised with `kind`'s normaliser. Never raises."""
+    out: set = set()
+    if not isinstance(doc_facts, dict):
+        return out
+    norm = _normalize_currency if kind == "currency" else _normalize_integer
+
+    def _walk(val: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(val, dict):
+            if "value" in val and set(val) & {"source", "confidence"}:
+                _walk(val.get("value"), depth + 1)
+                return
+            for v in val.values():
+                _walk(v, depth + 1)
+        elif isinstance(val, (list, tuple)):
+            for v in val:
+                _walk(v, depth + 1)
+        elif isinstance(val, (str, int, float)) and not isinstance(val, bool):
+            # Only a value that IS an amount / a count - never the digits of an
+            # address, a date, a phone number or a code inside prose.
+            if isinstance(val, str) and not _BARE_AMOUNT_RE.match(val):
+                return
+            try:
+                n = norm(val)
+            except Exception:                                 # noqa: BLE001
+                n = None
+            if n:
+                out.add(n)
+
+    for key, val in doc_facts.items():
+        if key == fact_key or key in _NOT_ITEM_FACTS or str(key).startswith("_"):
+            continue
+        _walk(val)
+    return out
+
+
+def _printed_as_schedule_row(text: str, printing: str) -> bool:
+    """True when every line of `text` printing `printing` is a schedule ROW -
+    cells joined by "|", a leading row number / state + code, an item named by
+    its number ("Bldg 2", "Location #3"), or two or more amounts on the line (a
+    value beside its rate and premium). A labelled total
+    ("Total Payroll: $2,620,000") is none of these."""
+    if not text or not printing:
+        return False
+    lines = [ln for ln in text.splitlines() if printing in ln]
+    if not lines:
+        return False
+
+    def _row(ln: str) -> bool:
+        if ln.count("|") >= 3:
+            return True
+        if _ROW_START_RE.match(ln) or _ITEM_LABEL_RE.search(ln):
+            return True
+        return len(_AMOUNT_RE.findall(ln)) >= 2
+
+    return all(_row(ln) for ln in lines)
+
+
+def _drop_own_schedule_items(fact_key: str, kind: str, values: List[dict],
+                             docs: Optional[List[dict]]) -> List[dict]:
+    """Remove the text-scan readings that are a document's OWN items.
+
+    The text scan reads every "<label> $amount" in a document, and a schedule
+    prints the label once per item - a building value per building, a payroll
+    per class. Those are not rival answers for the package's one figure (I2:
+    "One document's own schedule ... is never a disagreement"). A text-scan
+    source is dropped when its amount is one THAT document's own extraction
+    assigns to an item or another fact (`_document_own_item_amounts`), or when
+    every line printing it is a schedule row (`_printed_as_schedule_row`).
+
+    Only TEXT-SCAN sources are judged: what a document's extraction read as
+    this very fact is its own statement and always stays. Money and counts
+    only. A group left with no source is dropped - when every group goes, no
+    document states the figure as such and the list comes back empty. Never
+    raises (a failure keeps the list as it was).
+    """
+    if kind not in ("currency", "integer") or len(values) < 2 or not docs:
+        return values
+    try:
+        by_id: Dict[str, dict] = {}
+        for i, d in enumerate(docs):
+            if isinstance(d, dict):
+                by_id[str(d.get("doc_id") or i)] = d
+        cache: Dict[str, set] = {}
+        kept: List[dict] = []
+        dropped = 0
+        for g in values:
+            srcs = list(g.get("sources") or [])
+            keep_srcs = []
+            for s in srcs:
+                if s.get("source_method") != "text_scan":
+                    keep_srcs.append(s)
+                    continue
+                d = by_id.get(str(s.get("doc_id")))
+                if d is None:
+                    keep_srcs.append(s)
+                    continue
+                did = str(s.get("doc_id"))
+                if did not in cache:
+                    cache[did] = _document_own_item_amounts(d.get("facts"), fact_key, kind)
+                raw = str(s.get("raw") or "")
+                try:
+                    n = _normalize(raw, kind, fact_key)
+                except Exception:                             # noqa: BLE001
+                    n = None
+                if (n and n in cache[did]) or _printed_as_schedule_row(
+                        str(d.get("text") or ""), raw):
+                    dropped += 1
+                    continue
+                keep_srcs.append(s)
+            if keep_srcs:
+                kept.append(dict(g, sources=keep_srcs) if len(keep_srcs) < len(srcs) else g)
+        if dropped:
+            logger.info("underwriting: %s - %d text-scan reading(s) are a document's "
+                        "own schedule items, not rival answers", fact_key, dropped)
+        # Every reading an item: no document states this figure as such, so
+        # there is nothing to compare (the caller skips the field).
+        return kept
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: own-schedule filter failed for %s - %s", fact_key, exc)
+        return values
 
 
 def _drop_class_exposure_candidates(fact_key: str, values: List[dict],
@@ -2653,6 +2902,21 @@ def _scope_by_policy_record(fact_key: str, values: List[dict],
         own_policy_docs = {str(d.get("filename") or "") for d in (docs or [])
                            if isinstance(d, dict) and not d.get("excluded")
                            and str(d.get("doc_type") or "").lower() in _OWN_POLICY_DOC_TYPES}
+        # A filled ACORD APPLICATION form (services/acord_intake, 27 Oct 2026)
+        # is no policy's own paperwork, so no line record names it - but it
+        # states the policy its section is for. Where it prints the SAME value
+        # as a policy's own documents it adds nothing to place: the round trip's
+        # ACORD 131 printed the umbrella's $5,000,000 beside the umbrella dec,
+        # and the excess dec's $4,000,000 (a different policy) became a conflict
+        # card that held the package at 85. Alone in its group it still places
+        # nothing (Orbin's certificate $1M against the dec's $3M stays a real
+        # conflict); a certificate (ACORD 25 / 28) is never one of these.
+        try:
+            from services.acord_intake.merge_rules import is_application_doc
+            acord_apps = {str(d.get("filename") or "") for d in (docs or [])
+                          if isinstance(d, dict) and not d.get("excluded") and is_application_doc(d)}
+        except Exception:                                     # noqa: BLE001
+            acord_apps = set()
         for g in values:
             got: set = set()
             for src in g.get("sources") or []:
@@ -2661,6 +2925,8 @@ def _scope_by_policy_record(fact_key: str, values: List[dict],
                 if not recs and name and name in own_policy_docs and not any(
                         name in (r.get("sources") or []) for r in _line_records(merged_facts)):
                     recs = {f"doc:{name}"}        # its own policy, no record of ours
+                if not recs and name in acord_apps:
+                    continue                      # placed by its co-sources, or by none
                 if not recs:
                     return False                  # an unplaceable source decides nothing
                 got |= recs
@@ -2816,7 +3082,12 @@ def _conflict_reason(fact_key: str, kind: str, values: List[dict]) -> str:
         return "the documents point to materially different locations"
     if k in ("identifier", "fein", "code"):
         return "the documents carry different identifiers"
-    return "materially different values remain after normalization and scope matching"
+    # The default used to be "materially different values remain after
+    # normalization and scope matching" - our pipeline's words, printed on a
+    # producer's card (end-user review, 29 Oct 2026: two phone numbers).
+    if k == "phone" or "phone" in str(fact_key or "").lower() or "fax" in str(fact_key or "").lower():
+        return "the documents state different phone numbers"
+    return "the documents state different values"
 
 
 def unevidenced_boolean_negative(fact_key: str, value: Any) -> bool:
@@ -2945,6 +3216,109 @@ _POLICY_TERM_DATE_FACTS = frozenset({"effective_date", "expiration_date"})
 _PROPOSED_TERM_ROLES = frozenset({
     "application", "supplemental", "quote", "narrative", "acord_form",
     "submission", "proposal"})
+
+
+# ── REQUESTED VS CURRENT COVERAGE: INFORMATION, NEVER A QUESTION (item 3) ────
+# Michelle review, 29 Oct 2026 (owner-approved): an application / quote asking
+# for a different limit, deductible or SIR than the current declarations print
+# is a change being asked for. It is skipped as a rival (`is_coverage_term_fact`)
+# and shown to the producer as an information note only - never scored, never
+# a card that holds (`issue_registry.requested_coverage_notes`). A premium is
+# not a coverage term asked for (an application's figure is an estimate).
+def _requested_term_change(fact_key: str, kind: str, label: str,
+                           docs: List[dict], witnesses) -> Optional[dict]:
+    """{fact_key, label, requested, current, requested_documents,
+    current_documents} when the documents applying for coverage agree on ONE
+    value of `fact_key` and no current-term document states that value; else
+    None. Never raises."""
+    try:
+        if "premium" in str(fact_key).lower().split("_"):
+            return None
+        req: Dict[str, dict] = {}
+        cur: Dict[str, dict] = {}
+        for i, d in enumerate(docs or []):
+            if not isinstance(d, dict):
+                continue
+            dt = str(d.get("doc_type") or "unknown").strip().lower()
+            raw = _fv(d.get("facts") or {}, fact_key)
+            if raw in (None, "", [], {}) or not witnesses(d.get("doc_type") or "unknown", fact_key):
+                continue
+            norm = _normalize(raw, kind, fact_key)
+            if not norm:
+                continue
+            bucket = req if dt in _PROPOSED_TERM_ROLES else cur
+            g = bucket.setdefault(norm, {"normalized": norm, "display": str(raw), "files": []})
+            g["files"].append(d.get("filename") or f"document_{i + 1}")
+        if len(req) != 1 or not cur:
+            return None
+        (rnorm, rg), = req.items()
+        if rnorm in cur or any(_door_values_agree(fact_key, rg["display"], c["display"])
+                               for c in cur.values()):
+            return None
+        shown = [rg] + list(cur.values())
+        _display_money(fact_key, kind, shown)
+        return {"fact_key": fact_key, "label": label, "requested": rg["display"],
+                "current": ", ".join(c["display"] for c in cur.values()),
+                "requested_documents": sorted(set(rg["files"])),
+                "current_documents": sorted({f for c in cur.values() for f in c["files"]})}
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: requested-term reading skipped for %s - %s", fact_key, exc)
+        return None
+
+# ── A DOCUMENT'S OWN PRIOR TERM IS NOT ITS RIVAL (29 Oct 2026) ───────────────
+# Review of 614c3211: ONE document, an outside ACORD 125 renewal application
+# read by the Transcriber. Its box read the proposed term 12/01/2026 -
+# 12/01/2027; the text scan (`_text_scan_values`, first labelled match) read
+# the PRIOR CARRIER grid's "EFFECTIVE DATE 12/01/2025 ..." and "EXPIRATION DATE
+# 12/01/2026 ...", because page one prints its proposed dates under their
+# column headings, never label-adjacent. Two "documents disagree" warnings on a
+# one-document package held it at 85 with every item answered.
+#
+# The scan reads a LABEL and cannot see the section it stands in; the document
+# itself can. A date the document records as its PRIOR term in the same role -
+# its scalar `prior_*` date, a `prior_coverage_by_line` row (the fact whose
+# entire meaning is the expiring programme - `extraction_service.
+# prior_term_policy_numbers` reads it for the same reason) or a retired
+# predecessor row - is that period printed again, never a rival for the term
+# this card compares. Structure, no heading vocabulary; any document type (a
+# 125's prior grid, a renewal dec's expiring term). Only ever drops a SCANNED
+# candidate: the document's own reading of the field is never touched.
+_PRIOR_TERM_OF: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    "effective_date": ("prior_effective_date", ("effective", "effective_date")),
+    "expiration_date": ("prior_expiration_date", ("expiration", "expiration_date")),
+}
+
+
+def _document_prior_term_dates(fact_key: str, kind: str, doc_facts: Optional[dict]) -> set:
+    """{normalized date} ONE document states for its prior term, in
+    `fact_key`'s role (effective <-> prior effective, expiration <-> prior
+    expiration - a renewal's prior expiration is its proposed effective date,
+    so the roles are never mixed). Empty for any other fact. Never raises."""
+    spec = _PRIOR_TERM_OF.get(fact_key)
+    if not spec or not isinstance(doc_facts, dict):
+        return set()
+    scalar, columns = spec
+    try:
+        from services.extraction_service import RETIRED_COVERAGE_LINES_KEY as _retired
+    except Exception:                                         # noqa: BLE001
+        _retired = "prior_coverage_lines"
+    raws: List[Any] = [_fv(doc_facts, scalar)]
+    for grid_key in ("prior_coverage_by_line", _retired):
+        rows = _fv(doc_facts, grid_key)
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                raws += [row.get(c) for c in columns]
+    out: set = set()
+    for raw in raws:
+        if raw in (None, "", [], {}) or isinstance(raw, (list, dict)):
+            continue
+        try:
+            norm = _normalize(raw, kind, fact_key)
+        except Exception:                                     # noqa: BLE001
+            norm = None
+        if norm:
+            out.add(norm)
+    return out
 
 
 def _out_of_scope_contract_rows(merged_facts: Optional[dict], docs: Optional[list]):
@@ -3095,6 +3469,7 @@ def assess_underwriting_consistency(
             )
 
     fields_out: List[dict] = []
+    requested_terms: List[dict] = []
     conflict_count = 0
     assessed_keys: set = set()
 
@@ -3227,18 +3602,64 @@ def assess_underwriting_consistency(
         # proposed-term printing is a different period, not a rival - the same
         # rule `sqs_service.check_doc_consistency` applies to its date stop.
         _skip_proposed_term = False
-        if fact_key in _POLICY_TERM_DATE_FACTS:
+        # The same rule for a COVERAGE TERM (Michelle review, 29 Oct 2026): an
+        # application / quote / ACORD form states the limit, deductible,
+        # retention or premium APPLIED FOR; a declarations page states the
+        # CURRENT policy's. A requested $2,000,000 umbrella beside a current
+        # $1,000,000 one is a change being asked for, not two documents
+        # disagreeing - see `is_coverage_term_fact`.
+        if fact_key in _POLICY_TERM_DATE_FACTS or is_coverage_term_fact(fact_key):
             _skip_proposed_term = any(
                 str(_d.get("doc_type") or "").strip().lower() not in _PROPOSED_TERM_ROLES
                 and _door_witnesses(_d.get("doc_type") or "unknown", fact_key)
                 and _fv(_d.get("facts") or {}, fact_key)
                 for _d in docs)
+        # ...but when the documents APPLYING for coverage disagree among
+        # themselves, THAT is the question (Michelle review, 29 Oct 2026: an
+        # ACORD 125 asking for 01/01/2027 beside an ACORD 126 asking for
+        # 12/01/2026). The card then compares the proposals only - the current
+        # policy's own date is no answer to "which term is applied for" - the
+        # same families `sqs_service.check_doc_consistency` compares, so its
+        # "Confirm the correct value in Data Consistency" finds this row.
+        _skip_current_term = False
+        if _skip_proposed_term:
+            _proposed_vals = {
+                _normalize(_fv(_d.get("facts") or {}, fact_key), kind, fact_key)
+                for _d in docs
+                if str(_d.get("doc_type") or "").strip().lower() in _PROPOSED_TERM_ROLES
+                and _door_witnesses(_d.get("doc_type") or "unknown", fact_key)
+                and _fv(_d.get("facts") or {}, fact_key)}
+            _proposed_vals.discard(None)
+            _proposed_vals.discard("")
+            if len(_proposed_vals) >= 2:
+                _skip_proposed_term, _skip_current_term = False, True
+        # A coverage term APPLIED FOR that differs from the current one is
+        # information for the producer (item 3, 29 Oct 2026) - see the helper.
+        if (_skip_proposed_term and fact_key not in _POLICY_TERM_DATE_FACTS
+                and is_coverage_term_fact(fact_key)):
+            _rq = _requested_term_change(fact_key, kind, label, docs, _door_witnesses)
+            if _rq:
+                requested_terms.append(_rq)
+        # A form of OURS printing a value the documents stated is those documents
+        # speaking again (`primble_record`, echo_of): when a document that is no
+        # echo states the fact too, the echo is no second witness (28 Oct 2026).
+        def _echoes(_d):
+            _h = (_d.get("facts") or {}).get(fact_key)
+            return isinstance(_h, dict) and _h.get("echo_of") in ("documents", "loss_run")
+        _skip_echoes = any(
+            not _echoes(_d) and _door_witnesses(_d.get("doc_type") or "unknown", fact_key)
+            and _fv(_d.get("facts") or {}, fact_key) not in (None, "", [], {})
+            for _d in docs)
         for idx, d in enumerate(docs):
             dt = d.get("doc_type") or "unknown"
             doc_id   = str(d.get("doc_id") or idx)
             filename = d.get("filename") or f"document_{idx + 1}"
             dt_label = DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title())
             if _skip_proposed_term and str(dt).strip().lower() in _PROPOSED_TERM_ROLES:
+                continue
+            if _skip_current_term and str(dt).strip().lower() not in _PROPOSED_TERM_ROLES:
+                continue
+            if _skip_echoes and _echoes(d):
                 continue
 
             # Pass 1: LLM-extracted fact value.
@@ -3341,9 +3762,18 @@ def assess_underwriting_consistency(
             # label scan adds cost without a reliable signal for arbitrary keys).
             raw_text = d.get("text") or ""
             if raw_text and not is_auto:
+                # The document's own PRIOR term, in this field's role (empty
+                # for every fact but the two term dates) - see the helper.
+                _prior_term = _document_prior_term_dates(fact_key, kind, d.get("facts") or {})
                 for scanned_raw in _text_scan_values(raw_text, fact_key):
                     scanned_norm = _normalize(scanned_raw, kind, fact_key)
                     if not scanned_norm or scanned_norm == llm_norm:
+                        continue
+                    if scanned_norm in _prior_term:
+                        logger.info(
+                            "underwriting: %s text scan of %s read %r - that "
+                            "document's own prior term, not a rival", fact_key,
+                            filename, scanned_raw)
                         continue
                     # A genuinely different value found directly in the text.
                     src = {
@@ -3489,6 +3919,11 @@ def assess_underwriting_consistency(
         # these are not rival answers, so they must never reach the point where
         # something has to choose between them.
         values = _drop_class_exposure_candidates(fact_key, values, merged_facts)
+        # Nor is an amount a document's own SCHEDULE states for one of its items
+        # (a building, a class, a vehicle, a location) - see the helper.
+        values = _drop_own_schedule_items(fact_key, kind, values, docs)
+        if not values and confirmed_value is None:
+            continue
         # A value that is not legal FOR THIS FIELD is not a rival answer.
         values = _drop_values_outside_declared_domain(fact_key, values)
         # Nor is a value of another KIND - an amount in a Yes/No fact, or a
@@ -3667,6 +4102,37 @@ def assess_underwriting_consistency(
             conflict_count -= 1
             continue
 
+        # ── ONE DOCUMENT'S SCHEDULE IS NOT A DISAGREEMENT (29 Oct 2026, live
+        # test kit cd683556; decided in the Michelle review the same day) ─────
+        # A declarations package prints a building value per BUILDING and a
+        # payroll per WC CLASS; the text scan read each as a candidate for the
+        # package's one `property_building_value` / `total_payroll`. Those are
+        # the document's own items and `_drop_own_schedule_items` has already
+        # removed them, so what reaches here from ONE document is that document
+        # printing two different figures for the SAME total that are not its
+        # schedule's items - e.g. "Total payroll $2,620,000" on one page and
+        # "$2,900,000" on another. That is a real question for the producer
+        # (an underwriter would ask it), worded as what it is: one document
+        # contradicting itself, never "the documents state different amounts".
+        _one_doc_file = None
+        if status == "conflict" and kind in ("currency", "integer"):
+            _stating = {str(src.get("doc_id") or src.get("filename") or "")
+                        for g in values for src in (g.get("sources") or [])}
+            _stating.discard("")
+            if len(_stating) == 1:
+                _fname = next((src.get("filename") for g in values
+                               for src in (g.get("sources") or []) if src.get("filename")),
+                              None) or "One document"
+                # Item 2 (owner-approved, 29 Oct 2026): the card names the
+                # document, the fact and every amount it states.
+                _one_doc_file = _fname
+                _amounts = ", ".join(str(g.get("display")) for g in values if g.get("display"))
+                conflict_reason = (f"{_fname} states more than one amount for {label} "
+                                   f"({_amounts}) - confirm which one is right")
+                logger.info("underwriting: %s - %s states %d different amounts that "
+                            "are not its own schedule's items; asked", fact_key,
+                            _fname, len(values))
+
         # Figure 3: recommend the most complete/correct value + a confidence level.
         # Only computed for an OPEN conflict — a confirmed/consistent field needs
         # no suggestion. ``preselect`` is True only for HIGH confidence on a
@@ -3679,13 +4145,32 @@ def assess_underwriting_consistency(
         # badge now names what the forms actually print - the declarations'
         # own figure when it is one of the candidates - so the card and the
         # form cannot disagree; the producer still confirms either value.
-        if status == "conflict" and kind == "currency":
+        # EVERY KIND, NOT ONLY MONEY (Michelle review item 5, 29 Oct 2026): the
+        # merge's value IS what the forms print - the owner table decides it
+        # (ACORD_INTAKE.md: the ACORD application for applicant / submission
+        # facts, the declarations for the current policy's, a person over
+        # both) - so a name, address, date or code card names that value too.
+        # The host is the candidate whose own printing is the stamped value
+        # (exact normal form, else the one comparison door); two hosts, none,
+        # or a question about ONE coverage line (the package scalar is not that
+        # line's printing) leave the ranking's suggestion as it was.
+        if status == "conflict" and (kind == "currency" or not collided_lines):
             try:
-                _stamped = _normalize(_fv(merged_facts, fact_key), kind, fact_key)
-                _host = next((g for g in values if g.get("normalized") == _stamped), None)
+                _stamped_raw = _fv(merged_facts, fact_key)
+                _stamped = (_normalize(_stamped_raw, kind, fact_key)
+                            if _stamped_raw not in (None, "", [], {}) else None)
+                _host = None
+                if _stamped:
+                    _hosts = [g for g in values if g.get("normalized") == _stamped]
+                    if not _hosts and kind != "currency" and isinstance(_stamped_raw, (str, int, float)):
+                        _hosts = [g for g in values if any(
+                            _door_values_agree(fact_key, _stamped_raw, p)
+                            for p in [g.get("display")] + [s.get("raw") for s in g.get("sources") or []]
+                            if p)]
+                    _host = _hosts[0] if len(_hosts) == 1 else None
                 if _host is not None and (suggestion is None
-                                          or suggestion.get("normalized") != _stamped):
-                    suggestion = {"value": _host.get("display"), "normalized": _stamped,
+                                          or suggestion.get("normalized") != _host.get("normalized")):
+                    suggestion = {"value": _host.get("display"), "normalized": _host.get("normalized"),
                                   "confidence": "medium", "preselect": False}
             except Exception:                                 # noqa: BLE001
                 pass
@@ -3759,6 +4244,9 @@ def assess_underwriting_consistency(
             "forms":           _forms_for_field(fact_key, cfg),
             "status":          status,
             "conflict_reason": conflict_reason if status == "conflict" else None,
+            # The one document contradicting its own figure (item 2), or None -
+            # the warning sentence names it (`stops_now.underwriting_conflict_stops`).
+            "one_document":    _one_doc_file if status == "conflict" else None,
             "review_required": review_required,
             "merged_value":    _display(_fv(merged_facts, fact_key)),
             "confirmed_value": confirmed_value,
@@ -3811,7 +4299,11 @@ def assess_underwriting_consistency(
         logger.warning("underwriting: policy table skipped - %s", _ple)
         _policy_lines, _unmatched_policy_edits = [], []
 
-    return {
+    # Schedule rows two documents state differently (item 4, 29 Oct 2026): one
+    # row-level card per disputed cell, in this same field shape, appended by
+    # `services/row_rivals.add_row_fields`. No rival recorded: nothing added.
+    from services.row_rivals import add_row_fields as _add_row_fields
+    return _add_row_fields({
         "fields":          fields_out,
         "review_required": any(f["review_required"] for f in fields_out),
         "conflict_count":  conflict_count,
@@ -3820,10 +4312,14 @@ def assess_underwriting_consistency(
         # is never ALSO reported as a raw-string source conflict (no double count).
         "assessed_keys":   sorted(assessed_keys),
         "model_version":   UNDERWRITING_CONSISTENCY_MODEL_VERSION,
+        "assessment_version": ASSESSMENT_VERSION,
         "assessed_at":     now,
         "policy_lines":    _policy_lines,
         "unmatched_policy_edits": _unmatched_policy_edits,
-    }
+        # Coverage terms an application / quote asks for that differ from the
+        # current policy's (item 3) - information only, never scored.
+        "requested_terms": requested_terms,
+    }, merged_facts, confirmations)
 
 
 def _display(value: Any) -> Optional[str]:
@@ -4247,6 +4743,12 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict], docs:
         if norm:
             envelope["normalized"] = norm
         out[fact_key] = envelope
+    # A row-level pick writes its one cell (`services/row_rivals`, item 4).
+    try:
+        from services.row_rivals import apply_row_confirmations
+        apply_row_confirmations(out, confirmations)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: row-level picks skipped - %s", exc)
     # A confirmed key is resolved: its held client candidate (F7) is released.
     _cc = out.get("_client_answer_conflicts")
     if isinstance(_cc, dict):
@@ -4538,3 +5040,91 @@ def stamp_mismatch_issues(stamp_check: Optional[dict]) -> List[dict]:
             "forms":   flist,
         })
     return issues
+
+
+# ── Re-assess a stored assessment written under older rules (29 Oct 2026) ────
+
+def assessment_is_stale(uw: Any) -> bool:
+    """True when a stored assessment predates `ASSESSMENT_VERSION` (an
+    assessment with no version at all included). An empty / absent one is not
+    stale - there is nothing on screen to correct."""
+    if not isinstance(uw, dict) or not uw:
+        return False
+    try:
+        return int(uw.get("assessment_version") or 0) < ASSESSMENT_VERSION
+    except (TypeError, ValueError):
+        return True
+
+
+def stale_assessment_refresh(session: Optional[dict]) -> Optional[dict]:
+    """The write that brings a stale stored assessment up to the current rules,
+    or None (current, nothing stored, no documents, or the recompute failed).
+
+    Returns {"updates": {...}, "delete_facts": [...]}: the new assessment and
+    the conflict bookkeeping the pipeline keeps beside it (`_uw_conflicted_keys`
+    / `_uw_conflict_keys` - the same union the editor's confirm writes). Reads
+    the STORED facts and confirmations; never writes a confirmation."""
+    if not isinstance(session, dict) or not assessment_is_stale(session.get("underwriting_consistency")):
+        return None
+    try:
+        from services.stops_now import active_documents
+        docs = active_documents(session)
+        if not docs:
+            return None
+        facts = dict(session.get("facts") or {})
+        confirmations = dict(session.get("underwriting_confirmations") or {})
+        uw = assess_underwriting_consistency(docs, facts, confirmations,
+                                             flags=session.get("flags") or {})
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("stale assessment not re-assessed (%s) - the stored one stands", exc)
+        return None
+    confirmed = set(confirmations.keys())
+    withheld = set(unresolved_withheld_keys(uw, confirmations))
+    withheld |= {k for k in (facts.get("_uw_conflicted_keys") or []) if k not in confirmed}
+    conflicts = set(unresolved_conflict_keys(uw, confirmations)) | withheld
+    fact_updates: Dict[str, Any] = {}
+    delete_facts: List[str] = []
+    for key, vals in (("_uw_conflicted_keys", withheld), ("_uw_conflict_keys", conflicts)):
+        if vals:
+            if sorted(vals) != list(facts.get(key) or []):
+                fact_updates[key] = sorted(vals)
+        elif key in facts:
+            delete_facts.append(key)
+    updates: Dict[str, Any] = {"underwriting_consistency": uw}
+    if fact_updates:
+        updates["facts"] = fact_updates
+    return {"updates": updates, "delete_facts": delete_facts}
+
+
+def apply_refresh_to_session(session: dict, refresh: Optional[dict]) -> dict:
+    """`session` as it reads after `refresh` (`stale_assessment_refresh`) is
+    written - for a caller that keeps using the row it already loaded."""
+    if not refresh:
+        return session
+    out = dict(session)
+    up = refresh.get("updates") or {}
+    out["underwriting_consistency"] = up.get("underwriting_consistency")
+    facts = dict(out.get("facts") or {})
+    facts.update(up.get("facts") or {})
+    for key in refresh.get("delete_facts") or ():
+        facts.pop(key, None)
+    out["facts"] = facts
+    return out
+
+
+async def refresh_stale_assessment(session_id: str, session: dict) -> dict:
+    """Re-assess and PERSIST a stale stored assessment; returns the session as
+    it now reads (unchanged when current, or when the write is refused - an
+    archived package keeps its record)."""
+    refresh = stale_assessment_refresh(session)
+    if not refresh:
+        return session
+    try:
+        from repositories.session_repository import upd_processing_session
+        await upd_processing_session(session_id, refresh["updates"],
+                                     delete_facts=refresh["delete_facts"] or None)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("stale assessment not persisted [session=%s] (%s)", session_id, exc)
+        return session
+    logger.info("UW_REASSESSED session=%s version=%s", session_id, ASSESSMENT_VERSION)
+    return apply_refresh_to_session(session, refresh)

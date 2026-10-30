@@ -113,6 +113,22 @@ export function downloadReviewParts(openRecs, attention) {
   };
 }
 
+// THE DOWNLOAD SCREEN'S THREE STEPS (Brent, 26 Oct 2026): only what can stop the
+// package - Hard Stops > Warnings > Cross-Form Validation, each skippable.
+// Everything else (Missing boxes, recommendations, values to confirm,
+// signatures) stays in each form's side panel. The download gate's boxes are
+// Hard Stops. Empty steps are left out.
+export function downloadSteps(openRecs, attention) {
+  const p = downloadReviewParts(openRecs, attention);
+  const cross = (r) => !!r?.cross_form;
+  return [
+    { key: "hard", title: "Hard Stops", tone: "hard", rows: p.hard.filter((r) => !cross(r)) },
+    { key: "warnings", title: "Warnings", tone: "warn", rows: p.warnings.filter((r) => !cross(r)) },
+    { key: "cross", title: "Cross-Form Validation", tone: "warn",
+      rows: [...p.hard, ...p.warnings].filter(cross) },
+  ].filter((st) => st.rows.length > 0);
+}
+
 const rowCount = (groups) => groups.reduce((n, g) => n + g.rows.length, 0);
 
 export function downloadReviewCounts(openRecs, attention) {
