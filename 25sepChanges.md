@@ -8481,3 +8481,22 @@ Tests: `test_loss_run_valuation_30oct`, `test_dashboard_score_30oct`, `test_tool
 - *G18 narrowed after the suite (same night).* The net now cards only the facts a form's OWN checks read - parsed once from `calculate_sqs` itself (`sqs_service._form_check_facts`, every `_fv(facts, "x")` in the form's `fid ==` branches plus the facts behind the helpers they call, `_CHECK_HELPER_FACTS`); a fill-scored form (137 / 138) keeps its inventory. Carding the whole questionnaire inventory offered cards that move no score (ACORD 140's mortgagee). Umbrella cards only on ACORD 131 copies (the umbrella pillar on any other form is the package's - its Best Solutions). The new cards get their choices / control (`attach_answer_controls`). Inventory aliases (`vehicle_schedule`, `remarks_text`, `explanation_of_yes_answers`) stay out of `FORM_FIELD_INVENTORY` - it drives the questionnaire (`test_question_eligibility`); they live in `_EITHER_OR_FACTS` only. Tests updated where they pinned the pre-G18 lists: `test_choice_electric_dryrun_7oct` (the 140 now also lists the occupancy no document states).
 - *A one-form download lists every open PACKAGE issue - globally* (live 130ad4f4 on primble.ai, 30 Oct evening: the ACORD 126 download listed 1 of 9 open items, the 125 7). `needs_attention.rows_for_form` judged review-page issues by "does it hold this form's score" (`stops_for_form`) - the side panel's rule - so the property COPE hard stop, key details whose sentence names ACORD 125, the driver schedule and the proposed-term check were dropped from other forms' downloads. Now a review issue is judged by its SCOPE (`issue_registry.issue_scope`): package -> on every one-form download while open; form -> only on the forms it names. Cards and boxes keep the existing rule. Live: 125 and 126 both list the same 9 package items. Test: `test_every_open_package_issue_is_on_every_one_form_download`. Was open: the download list still shows the COPE twin (legacy hard stop + cross-form warning for one missing occupancy) - the review page folds such twins, the download rows do not.
 - *No duplicated rows on the download screen - globally* (owner, 30 Oct: "not just this twin ... no duplicated"). `needs_attention.fold_twin_issues`, run in `audit_routes.get_open_recs` before the one-form filter (both download kinds): (1) every legacy / coded twin pair in `issue_registry._LEGACY_SUPERSEDED_BY_CODE` (all 10, the review page's own table) is one row - the coded row, unless the legacy copy is the hard stop; (2) any other two rows with the same issue id, or the same words (case / punctuation set aside), are one row, hard stop's copy kept. Box rows keep their form + box in the key, so the same words on two forms' boxes stay two rows. Tests: `test_a_legacy_stop_and_its_coded_twin_are_one_download_row`, `test_any_duplicate_row_is_listed_once_hard_stop_wins`; 122 download tests green.
+
+
+### Z48. 30-31 Oct 2026 - the score rebuild (real score, holds, Package items) - offline, uncommitted
+Owner's rules R5 / P1-P3 / A1-A7 (SCORING_RULES.md). Built and verified:
+- **Points = the real score's move** (no cap shares; `_share_group_releases` no longer called);
+  cap-only items "Holds the score at 85 / 60"; "Held at N - real score M" on the review rail and the
+  editor's Total Package Score. Decision 4 revised: page-order whole points (a proportional split
+  shrank real numbers - caught by the loss-run journey tests).
+- Two hostile reviews: 8 + 7 breaks, all fixed (follow-ups weighed on the shown score, wrong
+  raiser, upload priced exact, hold labels from the end state, invariant / harnesses on the shown
+  score, sub-point merge, dashboard copy shape, dismissal price, shown-once for hard conflicts,
+  the plan's and the screen's conflict-card rules). Reviewer re-run seeds 10/15/26: 100, zero alarms.
+- Live runs: Choice Electric d56e445b 43 -> 100 (17 answers, each moved its number), forms generated,
+  package stayed 100; Orbin fb83c9c6 found the form-selection WC flag (A1) - fixed.
+- Download screen: form holds (A4), same-rule fold (A5); SQS summary now shows on a held form.
+- Package items (A3): Add ACORD 101 for expiring policies lives there on d56e445b / fb83c9c6.
+- Open: per-form side-panel numbers (parked); review page 13.5 s on Choice Electric (under 15 s,
+  slower than before - speed pass due); extraction not repeatable (CE read Amerisure's address as the
+  insured's on one upload) - Brent item; full suite not yet run on this code; nothing committed.

@@ -3532,6 +3532,25 @@ breaks a rule - grep live logs for it. `tests/test_shape_fuzz_30oct.py` runs gen
 Fixed-format identifiers (VIN / FEIN / NAIC / ZIP / phone) go through `services/identifier_checks.py`.
 **G18 (30 Oct 2026 night): every form deduction has a card** - with the package at 100, answering a form's own cards takes it to exactly 100 (`sqs_service._cards_for_uncarded_pillars`, cards only for facts the form's own checks read - `_form_check_facts`, parsed from `calculate_sqs`; add a helper to `_CHECK_HELPER_FACTS` when a check reads a fact through one). Two doors it needed: an answer on an umbrella layer's copy (`ACORD_131__excess`) is stored for that layer (`umbrella_layers.ANSWERS_KEY`), and a section form's policy number / insurer / NAIC goes to that form's own policy record (`apply_producer_answer_to_session(form_id=)`), never the package fact. A one-form download keeps a card only on the forms whose score lists it (`needs_attention.card_owner_forms`), and lists EVERY open package-scope review issue (`issue_scope`) on every form's download; duplicates are folded first (`needs_attention.fold_twin_issues`: the twin table, then same issue id / same words, hard stop kept). Two rows that must be answered together are one window (`review_plan.join_codependent_rows`); every item declares what it raises in any order (`declare_follow_ups`) and the page shows " · then asks: X" / " · score dips until you also answer: X". Read `25sepChanges.md` Z47 before touching any of these.
 
+## SCORE REBUILD - REAL SCORE, HOLDS, PACKAGE ITEMS (30-31 Oct 2026, offline, uncommitted)
+**Read `SCORING_RULES.md` R5, "Final decisions", P1-P6 and A1-A7 before touching any score, point,
+cap, download row or side-panel list.** Each item's points = what its answer moves the REAL score
+(`review_plan.build_review_plan`: page-order whole points of the real score; follow-ups to the step
+that raised them, else found alone, else "up to"; points the walk cannot place logged
+`SCORING_UNOWNED_DEDUCTION` and split in proportion); a cap never gives points - a cap-only item reads
+"Holds the score at 85 / 60 until fixed"; while a cap binds the screen shows "Held at 85 by open
+warnings - real score N" (`reviewedStops.heldScoreLine`). Spec prices only (SQS_Scoring_Specification
+section 3); an unpriced item (Data Consistency conflict, format error) only holds. Brent's "shown
+once": a FEIN / name conflict is Data Consistency's only (`issue_registry` UI-13 + supersession).
+Dismissal credit = the server's audit-row price. Transcriber: a cached result under another
+server's key is never re-sent (`transcriber_repository.get_cached` -> `held_under_another_key`;
+a DB read error fails closed). After forms: package page never shows form items
+(`package_page_view`); Total Package Score -> Package items holds everything not form-specific
+(`package_items_after_forms` + the package plan); a held form's hold is on its download
+(`form_hold_rows`). Verified: two hostile reviews (findings fixed), 45+ random packages x 4 orders,
+Choice Electric live (43 -> 100, every answer moved its number), Orbin; 93 related test files green.
+Per-form side-panel point numbers are still PARKED.
+
 ## CLIENT CHECKLIST (25 Oct 2026)
 
 **`client-checklist-25oct.md` at the repo root** is the one list of every client item (122) with its status and the

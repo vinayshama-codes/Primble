@@ -157,7 +157,10 @@ def test_the_screen_shares_the_cap_a_hard_stop_holds_and_adds_up_to_100():
     pkg, (pkg2, _kd2) = _screen(facts, {"has_general_liability": True})
     now, raw, cap = pkg["package_sqs_score"], pkg["raw_sqs_score"], pkg["cap_applied"]
     assert cap == 60 and raw > now == 60
-    target = 100 - now
+    # R5 (owner, 30 Oct 2026; TEST updated): the screen adds up to 100 - the
+    # REAL score; the hard stop's 60 holds the number and is never points.
+    target = 100 - int(pkg2["review_plan"]["real"])
+    assert int(pkg2["review_plan"]["real"]) == int(raw)
     assert pkg2["screen_total"] == target
     assert _shown(pkg2) == target
     # Build 26 page-wide plan (TEST updated - it pinned the 15 Oct Shapley

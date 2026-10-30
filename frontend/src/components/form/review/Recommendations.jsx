@@ -94,7 +94,7 @@ function ScoreGroup({ items, onOpenFix, docRows = [], onAddDocuments, lossCovera
             : "Upload a document to add these points."}</div>
         </div>
         <span className="rec-pts">{screenPointsText({ points: Number(u.points) || 0, exact: true, under: u.under === true,
-          withOthers: u.with_others || null })}</span>
+          withOthers: u.with_others || null, hold: u.hold || null })}</span>
         {typeof onAddDocuments === "function" && (
           <button type="button" className="rec-link" onClick={() => goToDocuments(mark)} disabled={!!openingDocs}>
             {mark ? "Mark as Loss runs" : "Add documents"}

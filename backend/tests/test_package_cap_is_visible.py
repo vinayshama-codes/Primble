@@ -194,16 +194,14 @@ def test_promotion_upgrades_the_existing_card_and_does_not_duplicate_it():
                                   promote_codes=[_PICKER_CODE])["counts"])
     after = build_grouped_view(
         structured, hard, soft, promote_codes=old_pkg["cap_hard_stop_codes"])
-    assert after["counts"]["hard_stops"] == 1
-    assert len(after["hard_stops"]) == 1
-    # The SAME row moved - its wording is preserved, so its Resolve control
-    # ("Fix in Data Consistency", derived from the code) moves with it.
-    assert after["hard_stops"][0]["items"][0]["message"] == _WARN
-    assert after["hard_stops"][0]["items"][0]["code"] == _PICKER_CODE
-    # Exactly one row total for this problem - counted over the whole view,
-    # which states "not duplicated" directly instead of inferring it from a
-    # warning-count delta.
-    assert _all_messages(after).count(_WARN) == 1
+    # Brent's "shown once" (owner, 30 Oct 2026; TEST updated): a FEIN / name
+    # conflict - hard or promoted - shows in Data Consistency only, its row
+    # reading "Holds the score at 60 until fixed"; the view draws no card for it
+    # and accounts for it in `hidden_warning_messages`.
+    assert after["counts"]["hard_stops"] == 0
+    assert _WARN.strip() in (after.get("hidden_warning_messages") or [])
+    # No card for it anywhere on this view (never twice: Data Consistency owns it).
+    assert _all_messages(after).count(_WARN) == 0
     assert after["counts"]["warnings"] == _before_warn
     # PROMOTION MOVES A ROW, it never mints one (2026-09-23). `counts` reports
     # only what rendered, so the un-promoted picker row appears in neither
@@ -217,7 +215,7 @@ def test_promotion_upgrades_the_existing_card_and_does_not_duplicate_it():
         "the un-promoted picker row caps the score at 85 and draws no card - it "
         "must still be accounted for somewhere, or the screen reads 0 warnings"
     )
-    assert after["hidden_warnings"] == 0
+    assert after["hidden_warnings"] == 1
 
 
 def test_promotion_is_inert_without_codes():

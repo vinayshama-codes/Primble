@@ -35,20 +35,41 @@ async def get_cached(content_hash: str, env: str) -> Optional[dict]:
             row = await conn.fetchrow(
                 "SELECT body FROM transcriber_results WHERE content_hash=$1 AND env=$2", content_hash, env)
     except Exception as ex:                                    # noqa: BLE001
-        logger.warning("transcriber cache read failed: %s", ex)
-        return None
+        # FAIL CLOSED (hostile review, 30 Oct 2026): a cache we cannot read is
+        # never taken as "not sent yet" - that pays the pages again. Today's
+        # reading stands for this upload.
+        logger.warning("transcriber cache read failed - not sending: %s", ex)
+        return {"status": FOREIGN_KEY}
     if not row:
         return None
     raw = _dec(row["body"])
+    if not raw:
+        # A result another server stored under ITS key (localhost and Render share
+        # one database, not one key - 30 Oct 2026: the Mac re-sent both forms and
+        # paid 8 pages twice). It IS a result: never treated as missing, never sent
+        # again, never overwritten. The caller falls back to today's reading.
+        return {"status": FOREIGN_KEY}
     try:
-        return json.loads(raw) if raw else None
+        return json.loads(raw)
     except ValueError:
-        return None
+        return {"status": FOREIGN_KEY}
+
+
+FOREIGN_KEY = "held_under_another_key"
+
+
+async def _row_is_foreign(conn, content_hash: str, env: str) -> bool:
+    row = await conn.fetchrow(
+        "SELECT body FROM transcriber_results WHERE content_hash=$1 AND env=$2", content_hash, env)
+    return bool(row and row["body"] and not _dec(row["body"]))
 
 
 async def put_cached(content_hash: str, env: str, result: dict, *, pages: int, form_numbers: str) -> None:
     try:
         async with get_pool().acquire() as conn:
+            if await _row_is_foreign(conn, content_hash, env):
+                logger.info("TRANSCRIBER_CACHE_FOREIGN hash=%s kept (another server's key)", content_hash[:12])
+                return
             await conn.execute(
                 """INSERT INTO transcriber_results (content_hash, env, request_id, form_numbers, pages, body, created_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7)

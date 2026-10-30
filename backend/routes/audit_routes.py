@@ -538,6 +538,23 @@ async def dismiss_recommendation(
     current_user: dict = Depends(get_current_user),
 ):
     await _verify_session_owner(req.session_id, current_user)
+    # The price is the SERVER's (hostile review, 30 Oct 2026): a dismissal with a
+    # reason earns the number the package's own plan gives the row, never more
+    # than that - the browser's `score_impact` can be stale or forged.
+    # The server's price is the card's own audit row (written when the card was
+    # presented and repointed to the live number on every sync - never by the
+    # browser; the dismiss upsert does not overwrite it). A card the server
+    # never presented earns nothing (second hostile review, 30 Oct 2026).
+    try:
+        from services.audit_service import get_recommendation_audit_row
+        _row = await get_recommendation_audit_row(req.session_id, req.rec_id) if req.rec_id else None
+        _srv = (_row or {}).get("score_impact")
+        if isinstance(_srv, (int, float)) and not isinstance(_srv, bool):
+            req.score_impact = max(0, min(int(req.score_impact or 0), int(_srv)))
+        elif _row is None:
+            req.score_impact = 0
+    except Exception as _px:                                   # noqa: BLE001
+        logger.warning(f"dismiss: server price not read for {req.session_id}: {_px}")
     success = await mark_recommendation_dismissed(
         session_id=req.session_id,
         rec_id=req.rec_id,
@@ -2439,6 +2456,13 @@ async def get_open_recs(
                 r["attention_superseded"] = True
     except Exception as _ex:                              # noqa: BLE001
         logger.warning(f"attention marker skipped for session {session_id}: {_ex}")
+    # What holds a FORM (its own required boxes / gate) is on its download - a
+    # row in Warnings / Hard Stops (owner, 30 Oct 2026).
+    try:
+        from services.needs_attention import form_hold_rows
+        recs = list(recs) + form_hold_rows(recs, (session or {}).get("generated_forms"))
+    except Exception as _hx:                                  # noqa: BLE001
+        logger.warning(f"download review: form holds skipped for session {session_id}: {_hx}")
     # One problem, one row: a legacy stop and its coded twin listed once.
     try:
         from services.needs_attention import fold_twin_issues

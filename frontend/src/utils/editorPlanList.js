@@ -89,6 +89,8 @@ const entryOf = (it) => ({
   points: Number(it.points) || 0, exact: it.exact !== false,
   held: it.held_by ? String(it.held_by) : null, under: it.under === true,
   withOthers: it.with_others ? String(it.with_others) : null, scoreItem: it.score_item !== false,
+  hold: it.hold ? String(it.hold) : null,
+  coveredBy: it.covered_by ? String(it.covered_by) : null,
 });
 
 // [{ id, kind, label, title, points, text, ...the fix's payload }] in the plan's
@@ -131,7 +133,7 @@ export function editorPlanRows(packageSqs, keyDetails, groupedIssues) {
       if (!text) continue;
       rows.push({ ...base, title: "Data Consistency", label: clean(it.label || it.fact), fact: clean(it.fact) });
     } else if (it.kind === "doc") {
-      if (!(entry.points > 0) && !entry.under) continue;      // P1: "under 1 pt" is listed too
+      if (!(entry.points > 0) && !entry.under && !entry.hold) continue;      // P1: "under 1 pt" / a hold is listed too
       rows.push({ ...base, title: it.step === "mark" ? "Documents" : "Loss History", label: clean(it.label), step: it.step || null });
     }
   }

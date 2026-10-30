@@ -2433,9 +2433,9 @@ def build_grouped_view(
             fk = doc_conflict_fact_key(issue.get("code"))
             if not fk or fk not in _picker_severity:
                 return False
-            own = issue.get("severity") or issue.get("type") or "soft_warning"
-            if own == "hard_stop" and _picker_severity[fk] != "hard_stop":
-                return False          # never hide a blocker behind a warning
+            # One problem, one place (Brent; owner, 30 Oct 2026 - SCORING_RULES.md
+            # P4): Data Consistency owns a conflict whatever its severity; its row
+            # there says what it holds ("Holds the score at 60 until fixed").
             return True
 
         _dup_msgs = {
@@ -2527,7 +2527,9 @@ def build_grouped_view(
         # UI-13 (full reasoning in the note above `enriched`): this row is a
         # Data Consistency row and it is rendering as a warning - drop it, the
         # picker above already shows it with a control that fixes it.
-        if severity != "hard_stop" and picker_fact_key(code):
+        # (30 Oct 2026, Brent's "shown once": hard stops too - the Data
+        # Consistency row carries the conflict and its 60 hold.)
+        if picker_fact_key(code):
             _picker_hidden_msgs.add(message.strip())
             continue
 
@@ -2586,11 +2588,13 @@ def build_grouped_view(
             return any(t == m or t.startswith(m) or m.startswith(t)
                        for m in _picker_hidden_msgs)
 
-        # hard_stops is deliberately NOT filtered: a picker sentence sitting in
-        # the blocking array while this view called it a warning would mean the
-        # two disagree, and the right failure there is a visible row, not a
-        # silent one.
+        # Brent's "shown once" (owner, 30 Oct 2026): a hard picker row is Data
+        # Consistency's too, so its sentence leaves BOTH local lists - the
+        # safety net below would otherwise redraw it as "Other validations".
+        # Display only: the caller's capping lists are not touched, and the
+        # Data Consistency row says what it holds.
         soft_stops = [m for m in soft_stops if not _is_hidden_picker_message(m)]
+        hard_stops = [m for m in hard_stops if not _is_hidden_picker_message(m)]
 
     # A form choice the stored cards never mirrored is still listed - from the
     # package's own entry - and a stale display copy of its sentence in the
@@ -3093,7 +3097,7 @@ def grouped_with_package_caps(
         facts=facts,
         form_choices=pkg.get("form_choices"),
     )
-    return pre_form_view(view) if pre_form else view
+    return pre_form_view(view) if pre_form else package_page_view(view)
 
 
 def _cross_rule_codes() -> frozenset:
@@ -3102,6 +3106,138 @@ def _cross_rule_codes() -> frozenset:
         return rule_codes()
     except Exception:                                          # noqa: BLE001
         return frozenset()
+
+
+def package_items_after_forms(row: Optional[dict], page_view: Optional[dict] = None) -> List[dict]:
+    """THE SIDE PANEL'S "PACKAGE ITEMS" (owner, 31 Oct 2026). After forms every
+    open item is shown in exactly one place: an item about a GENERATED form on
+    that form's side panel; one about NO generated form - a check that needs a
+    form not added yet (ACORD 101 for the expiring policies) - here, in the
+    Total Package Score dropdown, with its fix (Add <form>). The package page
+    never shows it (`package_page_view`). One row per problem, hard stops first.
+    [] before forms or when nothing is left. Never raises."""
+    out: List[dict] = []
+    try:
+        if not isinstance(row, dict) or not row.get("generated_forms"):
+            return out
+        from services.form_instances import base_form_id
+        from services.stops_now import stops_now
+        generated = {base_form_id(str(f)) for f in (row.get("generated_forms") or {})}
+        st = stops_now(row, pre_form=False)
+        seen: set = set()
+        for i in st.get("cross_issues") or []:
+            if not isinstance(i, dict) or not i.get("message"):
+                continue
+            t = str((i.get("deferred_type") if i.get("form_choice") else None) or i.get("type") or "")
+            if t not in ("hard_stop", "soft_warning", "advisory"):
+                continue
+            named = [str(f) for f in (i.get("forms") or []) if str(f).startswith("ACORD_")]
+            bases = {base_form_id(f) for f in named}
+            if bases & generated:
+                continue                    # a generated form's own item: its side panel
+            if not bases and issue_scope(i) != "form":
+                continue                    # a package item: the package section lists it
+            msg = str(i.get("message") or "")
+            key = (str(i.get("code") or ""), msg.split("(")[0].strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            add = sorted({f for f in named if base_form_id(f) not in generated})
+            res = dict(i.get("resolution") or {}) if isinstance(i.get("resolution"), dict) else {}
+            res.setdefault("mode", "none")
+            res["add_forms"] = sorted(set(res.get("add_forms") or []) | set(add))
+            out.append({"code": i.get("code"), "issue_id": issue_id_for(msg, named), "message": msg,
+                        "forms": named, "severity": t, "kind": "form_to_add",
+                        "resolution": res})
+        # The cards the package page left out as form-only (`package_page_view`)
+        # that no generated form's panel holds - stored cards included.
+        for d in ((page_view or {}).get("form_items") or []):
+            if not isinstance(d, dict) or not d.get("message"):
+                continue
+            named = [str(f) for f in (d.get("forms") or []) if str(f).startswith("ACORD_")]
+            if {base_form_id(f) for f in named} & generated:
+                continue
+            msg = str(d.get("message") or "")
+            key = (str(d.get("code") or ""), msg.split("(")[0].strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            res = dict(d.get("resolution") or {}) if isinstance(d.get("resolution"), dict) else {"mode": "none"}
+            add = sorted({f for f in named if base_form_id(f) not in generated})
+            if add:
+                res["add_forms"] = sorted(set(res.get("add_forms") or []) | set(add))
+            sev = str(d.get("severity") or d.get("type") or "soft_warning")
+            out.append({"code": d.get("code"), "issue_id": d.get("issue_id") or issue_id_for(msg, named),
+                        "message": msg, "forms": named, "severity": sev,
+                        "kind": "form_to_add" if add else "package", "resolution": res})
+        order = {"hard_stop": 0, "soft_warning": 1, "advisory": 2}
+        out.sort(key=lambda x: order.get(x["severity"], 3))
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("package items not read: %s", exc)
+    return out
+
+
+def package_page_view(view: Any) -> Any:
+    """The PACKAGE page after forms (owner, 31 Oct 2026): a FORM-scope card - a
+    hard stop / warning / check raised once forms exist, about one form - stays
+    on that form's own screens (side panel, its download), never on the package
+    page, exactly as before forms. Package cards keep their words. A copy; the
+    stored issues, stop lists and issue ids are untouched."""
+    if not isinstance(view, dict):
+        return view
+    import copy as _cp
+    view = _cp.deepcopy(view)
+    _dropped: List[dict] = []
+
+    def _keep(it: Any) -> bool:
+        k = not (isinstance(it, dict) and (str(it.get("code") or "") in FORM_SCOPE_CODES
+                                           or issue_scope(it) == "form"))
+        if not k and isinstance(it, dict) and all(it is not d for d in _dropped):
+            _dropped.append(it)
+        return k
+
+    def _clusters(cl: Any) -> Any:
+        if not isinstance(cl, list):
+            return cl
+        out = []
+        for c in cl:
+            if not isinstance(c, dict):
+                out.append(c)
+                continue
+            items = [i for i in (c.get("items") or []) if isinstance(i, dict)]
+            if not items:
+                out.append(c)
+                continue
+            kept = [i for i in items if _keep(i)]
+            if not kept:
+                continue
+            c = dict(c, items=kept)
+            if "count" in c:
+                c["count"] = len(kept)
+            out.append(c)
+        return out
+
+    view["hard_stops"] = _clusters(view.get("hard_stops"))
+    if isinstance(view.get("warnings"), dict):
+        view["warnings"] = {t: _clusters(cl) for t, cl in view["warnings"].items()}
+    if isinstance(view.get("important"), list):
+        view["important"] = [i for i in view["important"] if _keep(i) and not (
+            isinstance(i, dict) and isinstance(i.get("items"), list) and i["items"]
+            and not any(_keep(x) for x in i["items"]))]
+    try:
+        counts = dict(view.get("counts") or {})
+        counts["hard_stops"] = sum(int(c.get("count") or len(c.get("items") or [])) for c in view.get("hard_stops") or []
+                                   if isinstance(c, dict))
+        counts["warnings"] = sum(int(c.get("count") or len(c.get("items") or [])) for cl in (view.get("warnings") or {}).values()
+                                 for c in (cl or []) if isinstance(c, dict))
+        view["counts"] = counts
+    except Exception:                                          # noqa: BLE001
+        pass
+    # What left the package page goes to a form's side panel - or, when no
+    # generated form holds it, the side panel's Package items
+    # (`package_items_after_forms`): never nowhere.
+    view["form_items"] = [dict(d) for d in _dropped]
+    return view
 
 
 def pre_form_view(view: Any) -> Any:

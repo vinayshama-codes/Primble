@@ -195,7 +195,8 @@ def test_page_numbers_add_up_and_the_truthful_answer_reaches_100():
     row = _row(J.NARRATIVE + " " + CLAIMS_TEXT, NO_CLAIMS)
     pkg = J._page(row)
     plan = pkg["review_plan"]
-    assert sum(i["points"] for i in plan["items"]) + int(plan.get("left") or 0) == 100 - J._score(pkg)
+    assert sum(i["points"] for i in plan["items"]) + int(plan.get("left") or 0) \
+        == 100 - int(plan.get("real", J._score(pkg)))  # R5 / P2 (owner, 30 Oct 2026; TEST updated): 100 - the REAL score - a cap holds the number, never gives points.
     # By its sentence: on a row whose stored cards were not re-synced the view's
     # safety net draws it (code `uncovered_soft_stop`, the same resolution).
     card = next(i for i in plan["items"] if str(i.get("label")).startswith(MSG))
@@ -205,12 +206,15 @@ def test_page_numbers_add_up_and_the_truthful_answer_reaches_100():
     J._answer(row, INDICATOR, HAD_CLAIMS)
     pkg2 = J._page(row)
     assert not _cards(row)
-    assert abs(J._score(pkg2) - (J._score(pkg) + card["points"])) <= 1
+    # R5 (owner, 30 Oct 2026; TEST updated): a number is what the answer moves
+    # the REAL score - a cap may hold the shown one.
+    _real = lambda p: int(p["review_plan"].get("real", J._score(p)))
+    assert abs(_real(pkg2) - (_real(pkg) + card["points"])) <= 1
     assert J._score(pkg2) >= J._score(pkg)          # the truthful answer never lowers it
     steps = [i for i in pkg2["review_plan"]["items"] if i["points"] > 0]
     assert any(i.get("step") == "upload" for i in steps)
     plan2 = pkg2["review_plan"]
-    assert sum(i["points"] for i in plan2["items"]) + int(plan2.get("left") or 0) == 100 - J._score(pkg2)
+    assert sum(i["points"] for i in plan2["items"]) + int(plan2.get("left") or 0) == 100 - _real(pkg2)
     J._upload(row, J._required_years(row))
     if any(i.get("field") == "loss_run_status" for i in steps):
         J._answer(row, "loss_run_status", J.REQUESTED)

@@ -32,7 +32,7 @@ import ContactModal from "../account/ContactModal";
 import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 import { useToasts } from "../../hooks/useToasts";
 import { getReviewLayout } from "../../utils/reviewLayout";
-import { packageCapReasons, packageCapItems, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
+import { heldScoreLine, packageCapReasons, packageCapItems, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
 import { listedIssues, fixLeftOpen } from "../../utils/fixProgress";
 import { recClosedBySave } from "../../utils/fixWindow";
 import {
@@ -5781,7 +5781,8 @@ const AcordModal = forwardRef(function AcordModal({
           && prev.package_sqs_score === next.package_sqs_score
           && (prev.timestamp ?? null) === (next.timestamp ?? null) ? next : prev));
         // The key details and cards this plan was weighed on, tied to it.
-        setPlanScreen({ plan: next.review_plan, key_details: d.key_details || null, grouped_issues: d.grouped_issues || null });
+        setPlanScreen({ plan: next.review_plan, key_details: d.key_details || null, grouped_issues: d.grouped_issues || null,
+                        package_items: Array.isArray(d.package_items) ? d.package_items : [] });
       } catch (e) {
         // Aborted (a newer score is on its way) - or offline: the panel then
         // keeps the numbers it has.
@@ -9781,6 +9782,85 @@ const AcordModal = forwardRef(function AcordModal({
                           <span style={{ fontSize: 9, color: "#94a3b8" }}>/100</span>
                         </>}
                       >
+                        {heldScoreLine(packageSqs) && (
+                          <div data-held-score="editor" style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginBottom: 6 }}>{heldScoreLine(packageSqs)}</div>
+                        )}
+                        {/* THE PACKAGE'S OWN OPEN ITEMS (owner, 31 Oct 2026): everything that is
+                            not form-specific sits under Total Package Score - the package plan
+                            (hard stops, warnings, Data Consistency, key details, package
+                            recommendations, documents), each with its points or hold. The
+                            Recommendations section keeps only this form's own. */}
+                        {editorPlan && (editorPlan.rows.length > 0 || editorPlan.left > 0) && (
+                          <div data-testid="editor-plan-list" style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Package items <span style={{ textTransform: "none", fontWeight: 500, color: "#64748b", letterSpacing: 0 }}>- for the package score, the same on every form</span></div>
+                            {editorPlan.total > 0 && (
+                              <div style={{ fontSize: 10.5, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 9px", marginBottom: 8 }}>
+                                <strong>{editorPlan.total} {editorPlan.total === 1 ? "point" : "points"}</strong> remaining to 100 - the points below add up to it.
+                              </div>
+                            )}
+                            {editorPlan.rows.map((r, i) => {
+                              const canOpen = (r.kind === "detail" && !!r.item?.resolution) || (r.kind === "card" && !!r.issue?.resolution)
+                                || (r.kind === "rec" && !!r.scoreItem?.resolution) || r.kind === "dc" || r.kind === "doc";
+                              return (
+                                <div key={r.id || i} data-plan-id={r.id} style={{ padding: "4px 0", borderBottom: i < editorPlan.rows.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16, flexShrink: 0 }}>{i + 1}</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      {r.title && <div style={{ fontSize: 11, fontWeight: 700, color: "#000" }}>{r.title}</div>}
+                                      <div style={{ fontSize: 11, color: "#334155", marginTop: r.title ? 2 : 0 }}>{positiveScoreWording(r.label)}</div>
+                                    </div>
+                                    {r.text && (
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: r.points?.held ? "#92400e" : "#E61B84", whiteSpace: r.points?.held ? "normal" : "nowrap", maxWidth: 110, textAlign: "right" }}>{r.text}</span>
+                                    )}
+                                  </div>
+                                  {canOpen && (
+                                    <button type="button" onClick={() => openEditorPlanRow(r)}
+                                      style={{ marginLeft: 22, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                                      {r.kind === "dc" ? "Confirm in Data Consistency" : r.kind === "doc" ? "Open Documents" : "Open to fix"}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {editorPlan.left > 0 && (
+                              <div style={{ fontSize: 10, color: "#475569", marginTop: 6 }}>
+                                {editorPlan.left} {editorPlan.left === 1 ? "pt is" : "pts are"} not tied to an item here yet. Open the review page to see what is still missing.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* PACKAGE ITEMS (owner, 31 Oct 2026): what is open after forms but
+                            about NO generated form - a check that needs a form not added
+                            yet - listed here with its fix, never on the package page.
+                            The same on every form's side panel. */}
+                        {formsGenerated && Array.isArray(planScreen?.package_items) && planScreen.package_items.length > 0 && (
+                          <div data-package-items="editor" style={{ border: "1px solid #fde68a", background: "#fffbeb", borderLeft: "3px solid #f59e0b", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>
+                              Package items ({planScreen.package_items.length})
+                            </div>
+                            {planScreen.package_items.map((it) => {
+                              const adds = (it.resolution?.add_forms || []);
+                              const hard = it.severity === "hard_stop";
+                              return (
+                                <div key={it.issue_id || it.message} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "4px 0", borderTop: "1px solid #fef3c7" }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 9.5, fontWeight: 700, color: hard ? "#b91c1c" : "#b45309" }}>
+                                      {hard ? "Hard stop" : it.severity === "soft_warning" ? "Warning" : "Form to add"}
+                                      {adds.length > 0 ? ` - ${adds.map((f) => formLabel(f)).join(", ")}` : ""}
+                                    </div>
+                                    <div style={{ fontSize: 11.5, color: "#0f172a", lineHeight: 1.4 }}>{positiveScoreWording(it.message)}</div>
+                                  </div>
+                                  {it.resolution && (
+                                    <button type="button" onClick={() => openResolution(it)}
+                                      style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: "#E61B84", background: "#fff", border: "1px solid #f9a8d4", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                                      {adds.length ? `Add ${formLabel(adds[0])}${adds.length > 1 ? ` +${adds.length - 1}` : ""}` : "Open to fix"}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                         {/* §6.1: distinguish SQS from per-form Match % (shown directly, no "hints" label) */}
                         <div style={{ fontSize: 9, background: "rgba(0,0,0,0.035)", borderRadius: 5, padding: "5px 7px", marginBottom: 8, display: "flex", flexDirection: "column", gap: 3 }}>
                           <div style={{ display: "flex", gap: 6 }}>
@@ -10197,45 +10277,6 @@ const AcordModal = forwardRef(function AcordModal({
                             cards, the score rows, a Data Consistency pick, a document -
                             in its order, each with the plan's number. They add up to
                             exactly 100 minus the score, as on the review page. */}
-                        {editorPlan && (editorPlan.rows.length > 0 || editorPlan.left > 0) && (
-                          <div data-testid="editor-plan-list" style={{ marginBottom: 8 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions <span style={{ textTransform: "none", fontWeight: 500, color: "#64748b", letterSpacing: 0 }}>- for the package score, the same on every form</span></div>
-                            {editorPlan.total > 0 && (
-                              <div style={{ fontSize: 10.5, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 9px", marginBottom: 8 }}>
-                                <strong>{editorPlan.total} {editorPlan.total === 1 ? "point" : "points"}</strong> remaining to 100 - the points below add up to it.
-                              </div>
-                            )}
-                            {editorPlan.rows.map((r, i) => {
-                              const canOpen = (r.kind === "detail" && !!r.item?.resolution) || (r.kind === "card" && !!r.issue?.resolution)
-                                || (r.kind === "rec" && !!r.scoreItem?.resolution) || r.kind === "dc" || r.kind === "doc";
-                              return (
-                                <div key={r.id || i} data-plan-id={r.id} style={{ padding: "4px 0", borderBottom: i < editorPlan.rows.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                                    <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16, flexShrink: 0 }}>{i + 1}</span>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      {r.title && <div style={{ fontSize: 11, fontWeight: 700, color: "#000" }}>{r.title}</div>}
-                                      <div style={{ fontSize: 11, color: "#334155", marginTop: r.title ? 2 : 0 }}>{positiveScoreWording(r.label)}</div>
-                                    </div>
-                                    {r.text && (
-                                      <span style={{ fontSize: 10, fontWeight: 700, color: r.points?.held ? "#92400e" : "#E61B84", whiteSpace: r.points?.held ? "normal" : "nowrap", maxWidth: 110, textAlign: "right" }}>{r.text}</span>
-                                    )}
-                                  </div>
-                                  {canOpen && (
-                                    <button type="button" onClick={() => openEditorPlanRow(r)}
-                                      style={{ marginLeft: 22, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                                      {r.kind === "dc" ? "Confirm in Data Consistency" : r.kind === "doc" ? "Open Documents" : "Open to fix"}
-                                    </button>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {editorPlan.left > 0 && (
-                              <div style={{ fontSize: 10, color: "#475569", marginTop: 6 }}>
-                                {editorPlan.left} {editorPlan.left === 1 ? "pt is" : "pts are"} not tied to an item here yet. Open the review page to see what is still missing.
-                              </div>
-                            )}
-                          </div>
-                        )}
 
                         {/* Best Solutions (renamed from Top Recommendations) - numbered list */}
                         {!editorPlan && packageSqs?.top_recommendations?.length > 0 && (

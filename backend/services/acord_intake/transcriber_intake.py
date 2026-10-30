@@ -202,6 +202,11 @@ async def fetch(group: SendGroup, *, client: Optional[TranscriberClient] = None,
         except Exception as ex:                                # noqa: BLE001
             logger.warning("transcriber cache lookup failed: %s", ex)
             hit = None
+        if hit and hit.get("status") == "held_under_another_key":
+            # Read and paid for by another server; this one cannot decrypt it. Never
+            # re-sent (that pays the pages twice) - today's reading stands here.
+            logger.warning("TRANSCRIBER_CACHE_FOREIGN hash=%s label=%s - not re-sent", group.hash[:12], group.label)
+            return GroupResult(group=group, result=None, cached=True, error="held_under_another_key")
         if hit and hit.get("status") == "pending":
             # submitted earlier, never collected (a timeout, a crash): poll it again
             # rather than pay for the pages twice; a pending mark older than

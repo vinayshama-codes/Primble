@@ -189,9 +189,13 @@ def test_a_hard_stop_IS_superseded_by_an_equally_hard_picker_row():
         _issue("doc_conflict_hard_fein_conflict", "hard_stop", legacy_fein),
         _issue("underwriting_reconciliation_fein", "hard_stop", picker_fein),
     ]
-    msgs = _messages(_view(issues, [legacy_fein, picker_fein], []))
-    assert picker_fein in msgs
+    v = _view(issues, [legacy_fein, picker_fein], [])
+    msgs = _messages(v)
+    # TEST updated (owner, 30 Oct 2026, Brent's "shown once"): neither card is
+    # drawn - Data Consistency shows the conflict and its 60 hold.
+    assert picker_fein not in msgs
     assert legacy_fein not in msgs
+    assert picker_fein.strip() in (v.get("hidden_warning_messages") or [])
 
 
 def test_the_callers_stop_arrays_are_not_mutated():

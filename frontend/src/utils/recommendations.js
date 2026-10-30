@@ -164,6 +164,8 @@ export function pointsFor(row) {
     const p = Math.round(num(row.answer_gain) ?? 0);
     if (p >= 1) return { points: p, exact: row.answer_gain_is_exact === true || !!withOthers, share: true, ...wo };
     if (row.answer_gain_under === true && !row.answer_gain_mirror_of) return { points: 0, exact: false, share: true, under: true, ...wo };
+    if (clean(row.answer_gain_hold)) return { points: 0, exact: true, share: true, hold: clean(row.answer_gain_hold) };
+    if (clean(row.answer_gain_covered_by)) return { points: 0, exact: true, share: true, coveredBy: clean(row.answer_gain_covered_by) };
     if (row.answer_gain_held_by) return { points: 0, exact: true, share: true, held: clean(row.answer_gain_held_by) };
     // A fix an earlier item on the page offers first (a card, a key detail):
     // its number, as a mirror - the page lists the row only where nothing
@@ -220,6 +222,8 @@ export const pointsText = (p) => {
   if (!p) return "";
   if (p.points > 0) return `${p.exact ? "" : "up to "}+${p.points} pts${p.withOthers ? ` (${p.withOthers})` : ""}${followUpText(p)}`;
   if (p.under) return `under 1 pt${p.withOthers ? ` (${p.withOthers})` : ""}${followUpText(p)}`;
+  if (p.hold) return p.hold;
+  if (p.coveredBy) return `Answered with: ${p.coveredBy}`;
   if (p.held) return `Counts once ${p.held} is fixed`;
   return "";
 };

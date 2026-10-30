@@ -108,3 +108,31 @@ def test_any_duplicate_row_is_listed_once_hard_stop_wins():
         {"rec_id": "b2", "form_id": "ACORD_127", "field": "Policy_A", "message": "Missing: policy number"},
     ]
     assert [r["rec_id"] for r in fold_twin_issues(rows)] == ["h", "i1", "b1", "b2"]
+
+
+def test_the_same_rule_worded_twice_is_one_download_row():
+    """Live d56e445b: one ACORD 101 check raised twice, its list in another order."""
+    from services.needs_attention import fold_twin_issues
+    a = {"rec_id": "i1", "review_issue": True, "code": "acord101_for_expiring_policies", "forms": ["ACORD_101"],
+         "recommendation_type": "soft_warning", "message": "ACORD 125's Prior Carrier Information has no column for 6 expiring policies (Cyber, Crime)."}
+    b = dict(a, rec_id="i2", message="ACORD 125's Prior Carrier Information has no column for 6 expiring policies (Crime, Cyber).")
+    c = {"rec_id": "i3", "review_issue": True, "code": "per_location_cope_incomplete", "forms": ["ACORD_140"],
+         "recommendation_type": "soft_warning", "message": "12 Main St: COPE incomplete (year built)."}
+    d = dict(c, rec_id="i4", message="40 Oak Ave: COPE incomplete (year built).")
+    assert [r["rec_id"] for r in fold_twin_issues([a, b, c, d])] == ["i1", "i3", "i4"]
+
+
+def test_a_form_held_by_its_own_boxes_is_on_its_download():
+    """Live d56e445b: ACORD 125 at 85 (required boxes) - the download screen was empty."""
+    from services.needs_attention import form_hold_rows
+    gen = {"ACORD_125": {"sqs": {"sqs_score": 85, "raw_sqs_score": 100, "cap_applied": 85,
+                                 "cap_reason": "ACORD 125: required box still empty - Number of members (+11 more)"}},
+           "ACORD_127": {"sqs": {"sqs_score": 100, "raw_sqs_score": 100, "cap_applied": None, "cap_reason": None}},
+           "ACORD_140": {"sqs": {"sqs_score": 60, "raw_sqs_score": 90, "cap_applied": 60,
+                                 "cap_reason": 'ACORD 140: "Construction type" is required before download'}}}
+    rows = form_hold_rows([], gen)
+    assert [(r["rec_id"], r["recommendation_type"]) for r in rows] == [
+        ("formhold_ACORD_125", "soft_warning"), ("formhold_ACORD_140", "hard_stop")]
+    # a listed warning already saying it: no second row
+    listed = [{"recommendation_type": "soft_warning", "message": gen["ACORD_125"]["sqs"]["cap_reason"]}]
+    assert [r["rec_id"] for r in form_hold_rows(listed, gen)] == ["formhold_ACORD_140"]

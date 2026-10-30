@@ -255,6 +255,17 @@ async def _remember_pre_form_score(session_id: str, row: Optional[dict], pkg: An
              # Brent, 19 Oct 2026: "Quote Ready" also needs no open hard stop.
              "submission_ready": pkg.get("submission_ready")}
             if isinstance(score, (int, float)) and not isinstance(score, bool) else None)
+    try:
+        # One shape on every path (second hostile review, 30 Oct 2026): the real
+        # score from the scorer's own raw + credits when no plan is on it yet.
+        _real = (pkg.get("review_plan") or {}).get("real", pkg.get("real_sqs_score"))
+        if _real is None and isinstance(pkg.get("raw_sqs_score"), (int, float)):
+            import math as _m
+            _real = min(100, int(_m.floor(float(pkg["raw_sqs_score"]) + float(pkg.get("credits_applied") or 0) + 1e-9)))
+        if snap is not None and isinstance(_real, (int, float)) and not isinstance(_real, bool):
+            snap["real_sqs_score"] = int(_real)
+    except Exception:                                          # noqa: BLE001
+        pass
     if row.get("pre_form_score") == snap:
         return
     try:
@@ -2799,9 +2810,14 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             # Recomputed rather than reusing `_selected_for_flags`, which is
             # bound inside the try above and would not exist if that import
             # failed.
-            _sel_ids = list((session.get("selected_form_ids") or [])) + \
-                list((session.get("generated_forms") or {}).keys())
-            _rec = reconcile_line_flags(fresh_flags, updated_facts, _sel_ids)
+            # THE PACKAGE NEVER READS FORM SELECTION (owner, 30 Oct 2026 - Brent's
+            # "package score independent of forms", SCORING_RULES.md decision 8):
+            # the line flags follow the facts and a person's answers only. Passing
+            # the selected / generated forms here made a generated ACORD 130 switch
+            # Workers Comp on for the PACKAGE after forms (live Orbin fb83c9c6:
+            # 99 -> 85 -> 96 with no answer about WC). A form's own checks charge
+            # its own score.
+            _rec = reconcile_line_flags(fresh_flags, updated_facts)
             if _rec:
                 logger.info("update_pdf: coverage flags reconciled - %s",
                             ", ".join(f"{k}={v}" for k, v in sorted(_rec.items())))
@@ -3358,7 +3374,9 @@ def screen_points_after_forms(row: dict, session_id: str, user_id: str,
         pkg, kd = complete_screen_shares(row, session_id, user_id, pkg, kd, credit_rows=credit_rows)
         grouped = (review_page_grouped_view(row, pkg, after_forms=bool(row.get("generated_forms")))
                    if isinstance(pkg, dict) else None)
-        return {"package_sqs": pkg, "key_details": kd, "grouped_issues": grouped}
+        from services.issue_registry import package_items_after_forms
+        return {"package_sqs": pkg, "key_details": kd, "grouped_issues": grouped,
+                "package_items": package_items_after_forms(row, grouped)}
     except Exception as _ex:                                     # noqa: BLE001
         logger.error(f"screen points unavailable [session={session_id}]: {_ex}", exc_info=True)
         return {"package_sqs": None, "key_details": None, "grouped_issues": None}
@@ -3576,11 +3594,12 @@ async def get_extraction_result(
         "key_details":           _key_now,
         # Choice Electric #27: the form checks before generation (None after).
         "dry_run":               _status_now.dry_run,
-        "recommendations":       proc_session.get("recommendations", []),
+        "recommendations":       proc_session.get("recommendations") or [],
         "account_profile":       proc_session.get("account_profile", {}),
         "all_available_forms":   score_extra_forms(
-            proc_session.get("facts", {}),
-            {r["form_id"] for r in proc_session.get("recommendations", [])},
+            proc_session.get("facts") or {},
+            {r["form_id"] for r in (proc_session.get("recommendations") or [])
+             if isinstance(r, dict) and r.get("form_id")},
             filter_available_forms(load_all_forms()),
         ),
         "low_confidence_tokens": proc_session.get("low_confidence_tokens", []),

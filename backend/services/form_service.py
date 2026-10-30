@@ -1003,6 +1003,8 @@ def _score_field_coverage(form_id: str, facts: dict) -> Tuple[float, int, int]:
     Facts stored as annotated dicts {value, confidence} are handled via _fv/_is_empty.
     List-type facts (e.g. lines_of_business) count as filled when non-empty.
     """
+    # Facts another server's key encrypted read as None (30 Oct 2026): no facts, not a crash.
+    facts = facts if isinstance(facts, dict) else {}
     required = _FORM_REQUIRED_KEYS.get(form_id, frozenset())
     total    = len(required)
     if total == 0:
@@ -2310,6 +2312,8 @@ def score_extra_forms(facts: dict, triggered_ids: set, all_forms: List[dict]) ->
 
     Sorted by confidence descending.
     """
+    # Facts another server's key encrypted read as None (30 Oct 2026): no facts, not a crash.
+    facts = facts if isinstance(facts, dict) else {}
     scored: List[dict] = []
     for form in all_forms:
         fid = form["form_id"]

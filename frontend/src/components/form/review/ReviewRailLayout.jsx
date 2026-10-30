@@ -17,7 +17,7 @@ import {
   GENERATION_DIDNT_FINISH, GENERATION_DIDNT_FINISH_NEXT, GENERATION_RUNNING_TEXT, DOCUMENTS_AFTER_FORMS_NOTE,
   SKIP_TO_SELECTION, nextReviewStep,
 } from "../../../utils/packageGeneration";
-import { railCapNote } from "../../../utils/reviewedStops";
+import { railCapNote, heldScoreLine } from "../../../utils/reviewedStops";
 import {
   RESOLVED_LABELS, NO_LONGER_APPLIES, liveIdsOf, splitClusters, storedHandledRows, resolvedRows, reopenKind,
   pageProgress,
@@ -734,6 +734,9 @@ export default function ReviewRailLayout(props) {
                   <div className="rr-ready__big">
                     {(keyDetails?.satisfied || []).length} of {(keyDetails?.satisfied || []).length + (keyDetails?.missing || []).length} key details in place
                   </div>
+                )}
+                {soFar && heldScoreLine(packageSqs) && (
+                  <div className="rr-ready__note" data-held-score="review"><strong>{heldScoreLine(packageSqs)}</strong></div>
                 )}
                 {soFar && (formsExist
                   ? <div className="rr-ready__note">Total Package Score</div>

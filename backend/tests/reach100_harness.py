@@ -415,8 +415,11 @@ def plan_problems(pkg: dict) -> List[str]:
         pts = [int(i.get("points") or 0) for i in items if not i.get("mirror_of")]
         if any(p < 0 for p in pts):
             out.append("negative points")
-        if score + sum(pts) + int(plan.get("left") or 0) != 100:
-            out.append(f"score {score} + shown {sum(pts)} + left {plan.get('left')} != 100")
+        # R5 / P2 (owner, 30 Oct 2026): the points add up to 100 - the REAL
+        # score (a cap holds the number down, it never gives points).
+        real = plan.get("real", score)
+        if real + sum(pts) + int(plan.get("left") or 0) != 100:
+            out.append(f"real {real} + shown {sum(pts)} + left {plan.get('left')} != 100")
         if int(plan.get("left") or 0):
             out.append(f"{plan['left']} pts no item adds")
     if pkg.get("not_scored"):
@@ -624,7 +627,8 @@ def contract_problems(pkg: dict) -> List[str]:
             if pts or it.get("under"):
                 out.append(f"P5 not a score item with a number: {iid}")
             continue
-        if score is not None and score < 100:
+        _real = plan.get("real", score)
+        if _real is not None and _real < 100:
             if pts <= 0 and not it.get("under"):
                 out.append(f"P1 score item at 0: {iid}")
             if pts <= 0 and it.get("held_by"):

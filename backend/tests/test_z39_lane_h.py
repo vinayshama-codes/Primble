@@ -65,7 +65,7 @@ def test_the_plan_lists_requested_and_upload_beside_the_card(age):
     fields = [it.get("field") or it.get("step") for it in items]
     assert "loss_run_status" in fields
     assert sum(i["points"] for i in items) + int(pkg["review_plan"].get("left") or 0) \
-        == 100 - J._score(pkg)
+        == 100 - int(pkg["review_plan"].get("real", J._score(pkg)))  # R5 / P2 (owner, 30 Oct 2026; TEST updated): 100 - the REAL score - a cap holds the number, never gives points.
 
 
 def test_with_no_loss_pillar_in_the_input_the_steps_are_the_same():

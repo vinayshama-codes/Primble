@@ -182,9 +182,13 @@ def test_the_review_lists_a_form_choice_apart_from_the_warnings():
     assert view["counts"]["warnings"] == 1
     assert [c["code"] for c in view["form_choices"]] == [_ACORD25["code"]]
     assert view["form_choices"][0]["resolution"]["add_forms"] == ["ACORD_25"]
-    # After forms (no `form_choices` on the package) nothing changes: it is a warning.
+    # After forms (owner, 31 Oct 2026; TEST updated): a form-only check never
+    # comes back to the PACKAGE page - it is not a warning here; it lives with
+    # its form (or, for a form not generated, in the side panel's package items).
     after = grouped_with_package_caps(structured, [], soft, {})
-    assert after["counts"]["warnings"] == 2 and after["form_choices"] == []
+    assert after["counts"]["warnings"] == 1 and after["form_choices"] == []
+    assert _ACORD25["message"] not in " ".join(
+        str(it.get("message")) for tier in after["warnings"].values() for c in tier for it in (c.get("items") or [c]))
 
 
 # ══ Every deduction is a question ═════════════════════════════════════════════

@@ -851,8 +851,15 @@ def page_items(row: dict, pkg: dict, kd: Optional[dict], grouped: Optional[dict]
     # item, `card:<code>#<issue_id>`, and carries its `issue_id` for the page.
     seen_cards: set = set()
     seen_codes: set = set()
+    _dc_facts = {str(x.get("fact")) for x in items if x.get("kind") == "dc"}
     for card in rendered_cards(grouped):
         code = str(card.get("code") or "")
+        try:
+            from services.issue_registry import doc_conflict_fact_key, picker_fact_key
+            _cf = doc_conflict_fact_key(code) or picker_fact_key(code)
+        except Exception:                                      # noqa: BLE001
+            _cf = None
+        _dc_owner = (f"dc:{_cf}" if _cf and str(_cf) in _dc_facts else None)
         if not code:
             continue
         sig_keys = tuple(sorted(fix_keys(card.get("resolution"))))
@@ -868,6 +875,12 @@ def page_items(row: dict, pkg: dict, kd: Optional[dict], grouped: Optional[dict]
                       "issue_id": card.get("issue_id"), "first_of_code": first_of_code,
                       "label": card.get("message") or code, "resolution": card.get("resolution"),
                       "message": card.get("message") or ""})
+        if _dc_owner:
+            # The screen still draws this card (no Data Consistency row for the
+            # fact): it is the Data Consistency entry's other face - counted once
+            # there, fixed there, and it reads that entry's number / hold (P4).
+            items[-1]["mirror_of"] = _dc_owner
+            items[-1]["dc_fact"] = str(_cf)
     # 6. Recommendations rows, in the order they are listed.
     for n, r in enumerate((pkg or {}).get("top_recommendations") or []):
         if not isinstance(r, dict) or r.get("pillar") == HARD_STOPS_ROW:
@@ -1672,7 +1685,6 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
     now = pkg.get("package_sqs_score")
     if now is None:
         return None
-    total = max(0, 100 - int(now))
     items = page_items(row, pkg, kd, grouped)
     probes = _loss_plan_probes(pkg)
     try:
@@ -1684,14 +1696,14 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
     sim = _Sim(row, credit_rows) if credit_rows else _Sim(row)
     sim.choose_samples = True
     shown, raw, cap, reason = sim.measure()
+    raw_start = float(raw)
+    cap_start = cap
     if _floor(shown) != int(now):
         logger.warning("review plan: simulated start %.3f is not the score %s", shown, now)
     try:
         _h0, _s0 = _holding_stops(sim)
-        hold_counts = {"hard": len(_h0), "soft": len(_s0)}
     except Exception:                                          # noqa: BLE001
         _h0, _s0 = set(), set()
-        hold_counts = {"hard": 0, "soft": 0}
     hold_start = (_h0, _s0)
     gains: List[float] = []
     shown_after: List[float] = []
@@ -1759,7 +1771,10 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
         # Cap shares (`_share_group_releases`): what the answer moves on its own,
         # which holds it clears, which hold its step releases.
         it["_own"] = max(0.0, raw - before_raw) if did else 0.0
+        it["_rawgain"] = max(0.0, raw - before_raw) if did else 0.0
+        it["real_gain"] = round(it["_rawgain"], 4)
         it["_did"] = bool(did)
+        it["_raw_after"] = float(raw)
         if did:
             try:
                 hold_after = _holding_stops(sim)
@@ -1788,6 +1803,14 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
                          if did and it["gain"] <= _EPS and raw - before_raw > _EPS else None)
         gains.append(it["gain"])
         shown_after.append(shown)
+        # Answered by an item above it (its boxes were filled first): named on
+        # it, never "No effect on the score" (second hostile review, 30 Oct 2026).
+        if not did and not it.get("mirror_of") and it.get("keys"):
+            _ks = set(it["keys"])
+            _by = next((iid for iid, keys in applied_keys if _ks & set(keys)), None)
+            if _by is not None and _by in {x["id"] for x in items}:
+                _src = next(x for x in items if x["id"] == _by)
+                it["_covered_by"] = str(_src.get("label") or _by)
         applied_keys.append((it["id"], set(it["keys"])))
     # A Loss History row a step raised (the plan's copy never lists them - see
     # `_loss_plan_rows`) is that step's declared follow-up (rule G2).
@@ -1832,65 +1855,174 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
     # naming them (`leads_to`) - so the numbers add up to exactly 100 - score,
     # and the raised item shows the rest of its own number once it appears.
     follow: List[Tuple[int, float, float]] = []
-    if _floor(shown) < 100:
+    if _floor(shown) < 100 or _floor(raw) < 100:
         try:
-            follow = _follow_ups(sim, items, probes, full_years, raised_by, last_did, shown)
+            follow = _follow_ups(sim, items, probes, full_years, raised_by, last_did, shown,
+                                 row=row, credit_rows=credit_rows)
         except Exception as exc:                               # noqa: BLE001
             logger.debug("review plan: follow-ups not simulated: %s", exc)
             follow = []
         if follow:
             shown = follow[-1][2]
-    seq_shown = shown_after + [f[2] for f in follow]
-    seq_gain = gains + [f[1] for f in follow]
-    ints, under = _whole_points(seq_shown, seq_gain, int(now), up_index)
-    reached = max([int(now)] + [_floor(v) for v in seq_shown])
-    left = 0 if up_index is not None else max(0, 100 - reached)
+    # ── THE POINTS (owner, 30 Oct 2026 - SCORING_RULES.md R5 / P1-P3) ────────
+    # An item's points are what its answer moves the REAL score (the pillars, no
+    # cap) in page order - never the shown one, and a cap's release is never
+    # handed out as points. They add up to exactly 100 - the real score. An item
+    # that moves nothing but holds a cap reads "Holds the score at 85 / 60 until
+    # fixed" (`hold`), with no number.
     by_id = {it["id"]: it for it in items}
-    for it, n, small in zip(items, ints, under):
-        it["points"] = int(n)
-        it["under"] = bool(small)
-        it["exact"] = not it.get("prose") and not it.get("hedged") and it.get("held_by") is None
-    for k, (raiser, _g, _s) in enumerate(follow):
-        extra = int(ints[len(items) + k])
-        it = items[raiser]
-        it["points"] = int(it.get("points") or 0) + extra
-        it["exact"] = False
-        it["_follow"] = float(it.get("_follow") or 0) + extra
-        if extra:
-            it["under"] = False
-    # ONE FIX, ONE NUMBER (P4): a mirror's step can still move the score - the
-    # first place typed only the empty boxes, the mirror's window the rest -
-    # and that is the same fix's worth. It is credited to the first place, so
-    # the mirror adds nothing to the total (29 Oct 2026, scoring contract).
-    for it in items:
+    # ONE CALCULATION (R5): the real score is the scorer's own figure on the
+    # payload (raw + credits in force), never a second reading of the copy - the
+    # copy's deltas only weigh the items.
+    try:
+        _pr = pkg.get("raw_sqs_score")
+        real_start = (min(100, _floor(float(_pr) + float(pkg.get("credits_applied") or 0)))
+                      if isinstance(_pr, (int, float)) and not isinstance(_pr, bool) else _floor(raw_start))
+    except Exception:                                          # noqa: BLE001
+        real_start = _floor(raw_start)
+    real_start = max(int(now), int(real_start))
+    if abs(real_start - _floor(raw_start)) > 1:
+        logger.warning("review plan: simulated real %.3f is not the scorer's real %s", raw_start, real_start)
+    real_total = max(0, 100 - real_start)
+    # Whole points: what the REAL score (rounded down) moves when the steps are
+    # done in page order - each number is exactly what its answer moves, and
+    # they telescope, so they add up exactly. A dip never makes a negative.
+    seq: List[Tuple[int, float, float]] = [(n, float(it.get("_raw_after", raw_start)), float(it.get("_rawgain") or 0.0))
+                                           for n, it in enumerate(items)]
+    _cur = float(seq[-1][1]) if seq else float(raw_start)
+    for raiser, g, _s in follow:
+        _cur += max(0.0, float(g or 0.0))
+        seq.append((raiser, _cur, max(0.0, float(g or 0.0))))
+    ints: Dict[int, int] = {}
+    moved: Dict[int, float] = {}
+    prev = int(real_start)
+    for n, v, g in seq:
+        cur = max(prev, _floor(v))
+        if 0 <= n < len(items):
+            ints[n] = ints.get(n, 0) + (cur - prev)
+            moved[n] = moved.get(n, 0.0) + g
+        prev = cur
+    # An upload row owns what only documents fix: what Loss History still lacks
+    # once every other item is done (whole points; within a point of a real
+    # Loss History gap the rest is that gap's rounding). Never another pillar's.
+    if up_index is not None and prev < 100:
+        _loss_gap = 0.0
+        try:
+            _lp0 = getattr(sim, "last_pkg", None) or {}
+            for _pt in ((_lp0.get("score_trace") or {}).get("pillars") or []):
+                if _pt.get("pillar") == "loss_history_alignment" and not _pt.get("not_applicable"):
+                    _loss_gap = max(0.0, (100.0 - float(_pt.get("score") or 0)) * float(_pt.get("effective_weight") or 0))
+        except Exception:                                      # noqa: BLE001
+            _loss_gap = 0.0
+        _rest = 100 - prev
+        _take = (_rest if _loss_gap > _EPS and _rest <= _floor(_loss_gap) + 1
+                 else min(_rest, _floor(_loss_gap + 1e-6)))
+        ints[up_index] = ints.get(up_index, 0) + _take
+        prev += _take
+    # One fix, one number (P4): a mirror's points are its first place's.
+    for n, it in enumerate(items):
         first = by_id.get(it.get("mirror_of"))
         while first is not None and first.get("mirror_of") in by_id:
             first = by_id[first["mirror_of"]]
         if first is None or first is it:
             continue
-        if int(it.get("points") or 0) or float(it.get("gain") or 0) > _EPS:
-            first["points"] = int(first.get("points") or 0) + int(it.get("points") or 0)
-            first["gain"] = float(first.get("gain") or 0) + float(it.get("gain") or 0)
-            first["_own"] = float(first.get("_own") or 0) + float(it.get("_own") or 0)
-            first["_cleared"] = sorted(set(first.get("_cleared") or []) | set(it.get("_cleared") or []))
-            first["_released"] = sorted(set(first.get("_released") or []) | set(it.get("_released") or []))
-            first["exact"] = False
-            first["under"] = False
-            it["points"], it["gain"], it["_own"], it["under"] = 0, 0.0, 0.0, False
         if it.get("mirror_of") != first.get("id"):
             it["mirror_of"] = first.get("id")
+        fi = items.index(first)
+        ints[fi] = ints.get(fi, 0) + ints.get(n, 0)
+        moved[fi] = moved.get(fi, 0.0) + moved.get(n, 0.0)
+        ints[n], moved[n] = 0, 0.0
+        first["_cleared"] = sorted(set(first.get("_cleared") or []) | set(it.get("_cleared") or []))
+        first["_released"] = sorted(set(first.get("_released") or []) | set(it.get("_released") or []))
+    live_idx = [n for n, it in enumerate(items) if not it.get("mirror_of")]
+    left = 0
+    # A deduction no listed item answers (SCORING_RULES.md P2) must never
+    # happen - and is never silent: logged as an error, and its points split
+    # over the listed items in proportion so the screen still adds up.
+    unowned = max(0, 100 - prev)
+    spread: Dict[int, int] = {}
+    # What a step RAISES and leaves open at the end of the walk (a warning the
+    # answer brings - the WC class table raising "WC payroll differs from total
+    # payroll", the loss-run upload's new warning) is that step's follow-up: its
+    # points are the raising step's, "up to" (second hostile review, 30 Oct 2026:
+    # seeds 15 / 26 logged them unowned). Split evenly when several raised them.
+    if unowned:
+        try:
+            _open_end = _raised(sim)
+            _raisers = sorted({idx for sig, idx in raised_by.items()
+                               if sig in _open_end and 0 <= idx < len(items)})
+            _raisers = [next((items.index(x) for x in items if x["id"] == items[r].get("mirror_of")), r)
+                        if items[r].get("mirror_of") else r for r in _raisers]
+            if _raisers:
+                for r, k in zip(_raisers, _largest_remainder([1.0] * len(_raisers), unowned)):
+                    ints[r] = ints.get(r, 0) + k
+                    items[r]["_guessed_follow"] = True
+                logger.info("SCORING_FOLLOW_UP_OWNED points=%d raisers=%s", unowned,
+                            [items[r].get("id") for r in _raisers])
+                prev += unowned
+                unowned = 0
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("review plan: raised items not weighed: %s", exc)
+    if unowned and real_total:
+        try:
+            _lp = getattr(sim, "last_pkg", None) or {}
+            _open = {k: v for k, v in (_lp.get("pillars") or {}).items()
+                     if isinstance(v, (int, float)) and v < 100}
+        except Exception:                                      # noqa: BLE001
+            _open = {}
+        logger.error("SCORING_UNOWNED_DEDUCTION points=%d real_start=%d pillars_left=%s - no listed item "
+                     "answers them; split over the listed items in proportion", unowned, real_start, _open)
+        _w = [float(ints.get(n, 0)) or (moved.get(n, 0.0) if moved.get(n, 0.0) > _EPS else 0.0) for n in live_idx]
+        if sum(_w) > _EPS:
+            spread = dict(zip(live_idx, _largest_remainder(_w, unowned)))
+        else:
+            left = unowned
+    for n, it in enumerate(items):
+        it.pop("with_others", None)
+        it["held_by"] = None
+        it.pop("hold", None)
+        if it.get("mirror_of"):
+            it["points"], it["under"], it["score_item"] = 0, False, True
+            continue
+        p = int(ints.get(n, 0)) + int(spread.get(n, 0))
+        g = float(moved.get(n, 0.0))
+        it["points"] = p
+        it["under"] = bool(p == 0 and g > _EPS)
+        it["score_item"] = bool(p > 0 or g > _EPS)
+        # Exact only when the number IS what the answer moves on its own ("up
+        # to" when part of it comes from what the answer raises next).
+        it["exact"] = bool(p > 0 and not spread.get(n) and abs(g - p) < 1.0 and not it.get("_guessed_follow")
+                           and not it.get("prose") and not it.get("hedged"))
+        if p == 0 and g <= _EPS and not it.get("hold") and it.get("_covered_by"):
+            it["covered_by"] = str(it["_covered_by"])[:120]
+        if p == 0 and g <= _EPS:
+            # Decided on the page as it was read: which holds it clears / releases.
+            cleared = set(it.get("_cleared") or []) | set(it.get("_released") or [])
+            if "hard" in cleared:
+                it["hold"] = "Holds the score at 60 until fixed"
+            elif cleared or (it.get("kind") == "dc" and cap_start is not None):
+                it["hold"] = "Holds the score at 85 until fixed"
+    # A row whose deduction an item above it already cleared moves 0 in page
+    # order but would move the score done first: it is answered there, never
+    # "No effect on the score" (second hostile review, 30 Oct 2026).
     try:
-        _share_group_releases(items, sum(int(x.get("points") or 0) for x in items), hold_counts)
-        _no_listed_zero(items, up_index)
+        _cov = [n for n in live_idx if not items[n].get("points") and not items[n].get("hold")
+                and not items[n].get("covered_by") and items[n].get("_did")
+                and items[n].get("kind") not in ("dc", "doc") and moved.get(n, 0.0) <= _EPS]
+        if _cov and real_total:
+            for n, g in _alone_raw_gains(row, items, _cov, probes, full_years, credit_rows).items():
+                if g > _EPS:
+                    items[n]["covered_by"] = "an item listed above"
     except Exception as exc:                                   # noqa: BLE001
-        logger.warning("review plan: cap shares not applied: %s", exc)
-    left, repaired = enforce_contract(items, int(now), left)
+        logger.debug("review plan: covered rows not read: %s", exc)
+    left, repaired = enforce_contract(items, real_start, left)
     for it in items:
         if it.get("mirror_of") in by_id:
             it["mirror"] = int(by_id[it["mirror_of"]]["points"])
     out = {"items": [{k: v for k, v in it.items() if k not in ("resolution",) and not k.startswith("_")}
                      for it in items],
-           "total": total, "end": round(shown, 4), "left": int(left)}
+           "total": real_total, "end": round(shown, 4), "left": int(left),
+           "real": real_start, "shown": int(now)}
     if repaired:
         out["contract_repaired"] = repaired
     if not getattr(sim, "pre_form", True):
@@ -1899,6 +2031,57 @@ def build_review_plan(row: dict, pkg: dict, kd: Optional[dict],
     # follow-ups without walking the page again (popped before it is sent).
     if not declare_alone:
         out["_ctx"] = (items, probes, full_years, credit_rows)
+    return out
+
+
+def _raiser_alone(row: dict, items: List[dict], target: dict, probes: Dict[str, str],
+                  full_years: int, credit_rows: Optional[List[dict]] = None) -> Optional[int]:
+    """The index of the first step (page order) whose answer, done ALONE on the
+    page as it stands, raises `target` (by its signature, else its label);
+    None when none does. One copy, rolled back after each step."""
+    sig = _signature(target)
+    label = str(target.get("label") or "")[:120]
+    sim = _Sim(row, credit_rows) if credit_rows else _Sim(row)
+    sim.measure()
+    start = _raised(sim)
+    saved = (copy.deepcopy(sim.session), set(sim.suppressed), set(sim.answered),
+             list(sim.form_ids), getattr(sim, "_measured", None))
+    for n, it in enumerate(items):
+        if it.get("mirror_of") or not it.get("_did") or it is target:
+            continue
+        sim.session = copy.deepcopy(saved[0])
+        sim.suppressed, sim.answered = set(saved[1]), set(saved[2])
+        sim.form_ids, sim._measured = list(saved[3]), saved[4]
+        try:
+            if not _apply(sim, it, probes, full_years):
+                continue
+            new = _raised(sim) - start
+            if (sig and sig in new) or (label and any(label[:60] in str(x[1] if isinstance(x, tuple) and len(x) > 1 else x) for x in new)):
+                return n
+        except Exception:                                      # noqa: BLE001
+            continue
+    return None
+
+
+def _alone_raw_gains(row: dict, items: List[dict], idxs: List[int], probes: Dict[str, str],
+                     full_years: int, credit_rows: Optional[List[dict]] = None) -> Dict[int, float]:
+    """{index: what that item's answer moves the REAL score done ALONE on the page
+    as it stands}. One copy, rolled back after each item. Read only when the
+    page-order walk left points unplaced."""
+    out: Dict[int, float] = {}
+    sim = _Sim(row, credit_rows) if credit_rows else _Sim(row)
+    base_raw = float(sim.measure()[1])
+    saved = (copy.deepcopy(sim.session), set(sim.suppressed), set(sim.answered),
+             list(sim.form_ids), getattr(sim, "_measured", None))
+    for n in idxs:
+        sim.session = copy.deepcopy(saved[0])
+        sim.suppressed, sim.answered = set(saved[1]), set(saved[2])
+        sim.form_ids, sim._measured = list(saved[3]), saved[4]
+        try:
+            if _apply(sim, items[n], probes, full_years):
+                out[n] = max(0.0, float(sim.measure()[1]) - base_raw)
+        except Exception:                                      # noqa: BLE001
+            continue
     return out
 
 
@@ -2024,18 +2207,56 @@ def _declare_alone_follow_ups(row: dict, items: List[dict], probes: Dict[str, st
         sim.suppressed, sim.answered = set(saved[1]), set(saved[2])
         sim.form_ids, sim._measured = list(saved[3]), saved[4]
 
-    for it in items:
-        if it.get("mirror_of") or it.get("kind") == "dc":
-            continue
+    def _variants(it: dict) -> List[Dict[str, str]]:
+        """The plan's own sample, then a realistic other answer per fact (a count
+        other than the sample, another choice): what an answer raises can depend
+        on the VALUE (live Orbin fb83c9c6, 30 Oct 2026: the sample "0 employees"
+        raised nothing, the person's "6" raised the workers comp question)."""
+        out: List[Dict[str, str]] = [{}]
+        if it.get("kind") not in ("detail", "rec"):
+            return out                       # cards / documents: their fix is fixed
+        for k in it.get("keys") or []:
+            if not str(k).startswith("fact:"):
+                continue
+            f = str(k)[5:]
+            try:
+                first = str(probe_value(f, row.get("facts") or {}, row))
+            except Exception:                                  # noqa: BLE001
+                first = ""
+            alts: List[str] = []
+            try:
+                from services.answer_semantics import _declared_kind, _registry_entry
+                kind = str(_declared_kind(f, _registry_entry(f)) or "")
+            except Exception:                                  # noqa: BLE001
+                kind = ""
+            low = f.lower()
+            if kind == "integer":
+                # BOTH sides of a threshold rule ("more than 5 employees and no
+                # workers comp": the sample 5 sits on the line - live Orbin
+                # f80dd700, 31 Oct 2026): none, and clearly many.
+                alts = ["0", "25"]
+            elif kind in ("percent", "percentage") or "percent" in low or low.endswith("_pct"):
+                alts = ["0", "60"]
+            else:
+                alts = [str(a) for a in _alternative_samples(f)][:1]
+            for a in alts:
+                if a != first and len(out) < 3:
+                    out.append({f: a})
+            if len(out) >= 3:
+                break                        # at most two other answers per item
+        return out
+
+    def _declare_one(it: dict, forced: Dict[str, str]) -> None:
         rollback()
+        sim.forced = dict(forced)
         try:
             if not _apply(sim, it, probes, full_years):
-                continue
+                return
             # Cheap first: an answer that raises no new stop, row or Loss History
             # row has nothing to declare (most items) - the page is read only
             # for the few that do.
             if not (_raised(sim) - start_raised):
-                continue
+                return
             pkg_now = getattr(sim, "last_pkg", None) or {}
             facts, flags = sim.session["facts"], sim.session["flags"]
             grouped_now = S.review_page_grouped_view(sim.session, pkg_now,
@@ -2043,7 +2264,9 @@ def _declare_alone_follow_ups(row: dict, items: List[dict], probes: Dict[str, st
             fresh_items = page_items(sim.session, pkg_now, S.key_details(facts, flags), grouped_now)
             loss_now = _loss_plan_rows(sim, pkg_now)
         except Exception:                                      # noqa: BLE001
-            continue
+            return
+        finally:
+            sim.forced = {}
         new: List[str] = []
         for x in fresh_items:
             xk = [str(k) for k in (x.get("keys") or [])]
@@ -2053,9 +2276,14 @@ def _declare_alone_follow_ups(row: dict, items: List[dict], probes: Dict[str, st
                 continue
             new.append(str(x.get("label") or ""))
         new += [lab for sig, lab in loss_now.items() if sig not in start_loss]
+        if forced:
+            # A note raised by a TRIED answer must not quote that answer's figures
+            # ("reports 60% subcontracted" beside a person's 35%): figures out.
+            import re as _re
+            new = [_re.sub(r"\s{2,}", " ", _re.sub(r"\(?\$?\d[\d,.]*%?\)?", "", n)).strip(" -,;:") for n in new]
         new = [n[:120] for n in new if n]
         if not new:
-            continue
+            return
         owner = it
         while owner.get("mirror_of") in by_id:
             owner = by_id[owner["mirror_of"]]
@@ -2063,6 +2291,12 @@ def _declare_alone_follow_ups(row: dict, items: List[dict], probes: Dict[str, st
         for lab in new:
             if lab not in leads:
                 leads.append(lab)
+
+    for it in items:
+        if it.get("mirror_of") or it.get("kind") == "dc":
+            continue
+        for _forced in _variants(it):
+            _declare_one(it, _forced)
 
 
 def _signature(it: dict) -> Optional[tuple]:
@@ -2082,7 +2316,8 @@ def _gaps_of(it: dict) -> tuple:
 
 def _follow_ups(sim: "_Sim", items: List[dict], probes: Dict[str, str], full_years: int,
                 raised_by: Dict[tuple, int], last_did: Optional[int],
-                shown: float) -> List[Tuple[int, float, float]]:
+                shown: float, row: Optional[dict] = None,
+                credit_rows: Optional[List[dict]] = None) -> List[Tuple[int, float, float]]:
     """[(the step that raised it, gain, shown after)] for every item the page
     would list once the plan's steps are done, in up to three readings."""
     from services import sqs_service as S
@@ -2112,10 +2347,14 @@ def _follow_ups(sim: "_Sim", items: List[dict], probes: Dict[str, str], full_yea
                     and _gaps_of(it) in done_gaps.get(tuple(it["keys"]), {_gaps_of(it)})):
                 continue
             before = shown
+            raw_before = float(sim.measure()[1])
             if not _apply(sim, it, probes, full_years):
                 continue
-            shown = max(sim.measure()[0], before)
-            gain = shown - before
+            _m = sim.measure()
+            shown = max(_m[0], before)
+            # The REAL score's move (R5 / P2, 30 Oct 2026): a follow-up is
+            # weighed by what it moves the real score, never by a cap release.
+            gain = max(0.0, float(_m[1]) - raw_before)
             if gain <= _EPS:
                 # A raised item worth nothing yet (another hold still stands) is
                 # still the raising step's declared follow-up (rule G2, 30 Oct
@@ -2130,7 +2369,24 @@ def _follow_ups(sim: "_Sim", items: List[dict], probes: Dict[str, str], full_yea
                     if _lead and _lead not in _leads:
                         _leads.append(_lead)
                 continue
-            raiser = raised_by.get(_signature(it) or ("", ""), last_did)
+            # Only the step that RAISED it owns a follow-up (hostile review, 30 Oct
+            # 2026: the last step took one it never raised). Unknown = unowned
+            # here; the points-to-owner pass below finds its owner.
+            raiser = raised_by.get(_signature(it) or ("", ""))
+            if raiser is None and row is not None:
+                # Its signature moved while the walk ran (a count in the sentence
+                # changed): the step that raises it is found by doing each step
+                # ALONE on the page (second hostile review, 30 Oct 2026 - a
+                # dropped follow-up left its points unowned).
+                raiser = _raiser_alone(row, items, it, probes, full_years, credit_rows)
+            if raiser is None:
+                # No step raises it alone (it needs two): the last step that did
+                # something owns it, its number "up to" (never unowned).
+                raiser = last_did
+                if raiser is not None:
+                    items[raiser]["_guessed_follow"] = True
+                    logger.warning("SCORING_FOLLOW_UP_RAISER_GUESSED item=%s credited to %s",
+                                   it.get("id"), items[raiser].get("id"))
             if raiser is None:
                 continue
             first = items[raiser].get("mirror_of")
@@ -2142,7 +2398,7 @@ def _follow_ups(sim: "_Sim", items: List[dict], probes: Dict[str, str], full_yea
                 leads.append(label)
             out.append((raiser, gain, shown))
             moved = True
-            if _floor(shown) >= 100:
+            if _floor(float(_m[1])) >= 100 and _floor(shown) >= 100:
                 return out
         if not moved:
             break
@@ -2161,7 +2417,7 @@ MERGE_JOIN = " + "
 def _mergeable(it: dict) -> bool:
     return (it.get("kind") == "rec" and not it.get("mirror_of") and it.get("held_by") is None
             and not it.get("prose") and not it.get("hedged") and it.get("pillar")
-            and _EPS < float(it.get("gain") or 0.0) < 1.0 - _EPS
+            and _EPS < float(it.get("real_gain", it.get("gain")) or 0.0) < 1.0 - _EPS
             and all(str(k).startswith("fact:") for k in (it.get("keys") or [])) and it.get("keys"))
 
 

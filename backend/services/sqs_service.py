@@ -4051,7 +4051,7 @@ def _gap_rows(pillar: str, score: float, items: List[dict], eff_weight: float) -
     return rows
 
 
-def _pillar_rec_field(pillar: str, action: str) -> Optional[str]:
+def _pillar_rec_field(pillar: str, action: str, facts: Optional[dict] = None) -> Optional[str]:
     """The canonical fact that would answer a PACKAGE top-recommendation.
 
     WHY THIS EXISTS (2026-09-23). `top_recs` entries are built from pillar
@@ -4080,7 +4080,7 @@ def _pillar_rec_field(pillar: str, action: str) -> Optional[str]:
     if not action:
         return None
     if pillar == "loss_history_alignment":
-        return loss_recommendation_field(action)
+        return loss_recommendation_field(action, facts)
     if pillar == "narrative_quality":
         # The literal, matching `rec_narrative_components` a few hundred lines
         # below in this same file. Importing arq_service.NARRATIVE_ANSWER_FIELD
@@ -4142,7 +4142,7 @@ def _route_recommendations(recs, facts=None):
         return recs
 
 
-def loss_recommendation_field(message: str) -> Optional[str]:
+def loss_recommendation_field(message: str, facts: Optional[dict] = None) -> Optional[str]:
     """The canonical fact that would actually answer this loss recommendation.
 
     `None` = no single fact closes it (needs a document or a reconciliation).
@@ -4153,6 +4153,14 @@ def loss_recommendation_field(message: str) -> Optional[str]:
     m = (message or "").lower()
     for phrase, field in _LOSS_RECOMMENDATION_FIELDS:
         if phrase in m:
+            # A typed years-covered answer counts ONLY when the runs on file show
+            # no readable claim period (`calculate_p4_loss_history`'s option B);
+            # with a readable period the gap is closed by uploading runs, never
+            # by typing a number - a box that moves nothing is a dead card (live
+            # Choice Electric e36183e8, 30 Oct 2026: "5" typed three times, +0).
+            if field == "loss_history_years" and isinstance(facts, dict) and (
+                    _fv(facts, "loss_run_period_start") or _fv(facts, "loss_run_period_end")):
+                return None
             return field
     return None
 
@@ -9217,13 +9225,13 @@ def calculate_package_sqs(
                     :_tenths_total - sum(_tenths)]:
                 _tenths[_n] += 1
             for _m, _t in zip(miss_list, _tenths):
-                _f = _pillar_rec_field(pillar, _m)
+                _f = _pillar_rec_field(pillar, _m, facts)
                 top_recs.append({"pillar": pillar, "score": score, "action": _m,
                                  "missing": [_m], "field": _f,
                                  "points_available": _t / 10.0,
                                  "closes_with": "type" if _f else "review"})
             continue
-        _field = _pillar_rec_field(pillar, _action)
+        _field = _pillar_rec_field(pillar, _action, facts)
         # WHAT WOULD ACTUALLY CLOSE THIS. A producer needs to know whether a gap
         # is theirs to type or waits on the insured to send something - without
         # it, a package whose last points need a loss run reads exactly like one
@@ -10398,12 +10406,13 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
                                             if _prev else [pts, exact])
         elif it.get("kind") == "dc" and it.get("fact"):
             dc_points[str(it["fact"])] = [pts, False]
-        elif it.get("kind") == "doc" and (pts > 0 or it.get("under")):
+        elif it.get("kind") == "doc" and (pts > 0 or it.get("under") or it.get("hold")):
             # (P1: a document step whole points cannot reach is listed "under 1 pt".)
             doc = {"label": str(it.get("label") or ""), "points": pts, "action": "add_documents",
                    "title": "Loss History", "plan_order": it.get("plan_order"),
                    "plan_id": it.get("id"), "step": it.get("step"),
-                   "under": bool(it.get("under")) and pts <= 0, "with_others": it.get("with_others")}
+                   "under": bool(it.get("under")) and pts <= 0, "with_others": it.get("with_others"),
+                   "hold": it.get("hold")}
             for extra in ("doc_id", "filename"):
                 if it.get(extra):
                     doc[extra] = it[extra]
@@ -10416,6 +10425,9 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
     pkg["screen_dc_points"] = dc_points
     pkg["screen_unanswerable"] = unanswerable
     pkg["screen_total"] = int(plan.get("total") or 0)
+    # The real score beside the shown one while a cap holds (R5, 30 Oct 2026).
+    if plan.get("real") is not None:
+        pkg["real_sqs_score"] = int(plan["real"])
     out_rows = []
     for n, r in enumerate(pkg.get("top_recommendations") or []):
         it = by_row.get(n)
@@ -10425,6 +10437,10 @@ def apply_review_plan(pkg: dict, kd: Optional[dict], plan: dict) -> Tuple[dict, 
                      answer_gain_share=True, answer_gain_alone=pts, plan_id=it.get("id"),
                      answer_gain_under=bool(it.get("under")),
                      answer_gain_held_by=it.get("held_by"),
+                     # A cap-only row (R5): no points, "Holds the score at 85 until fixed".
+                     answer_gain_hold=it.get("hold"),
+                     # Answered by an item above it on the page (named, never "No effect").
+                     answer_gain_covered_by=it.get("covered_by"),
                      # Cap shares (`review_plan._share_group_releases`).
                      answer_gain_with_others=it.get("with_others"),
                      answer_gain_score_item=it.get("score_item", True),
@@ -12097,7 +12113,7 @@ def calculate_sqs(
             # "confirm No Known Losses" card wrote the attestation into a year
             # count and the score could never move. See
             # _LOSS_RECOMMENDATION_FIELDS.
-            "field": loss_recommendation_field(rec_msg),
+            "field": loss_recommendation_field(rec_msg, facts),
             "component": "loss_history_alignment",
             "message": rec_msg,
             "type": "suggestion",
@@ -12105,7 +12121,7 @@ def calculate_sqs(
             "priority": 3 if _no_impact else 2,
             # A status notice, not a gap: its card says so instead of asking
             # for a document (answer_routing.NOTE_INFORMATIONAL).
-            "informational": bool(_no_impact) and not loss_recommendation_field(rec_msg),
+            "informational": bool(_no_impact) and not loss_recommendation_field(rec_msg, facts),
             # A status note about the score, not a gap (1 Oct 2026): kept off
             # the underwriter cover. See _LOSS_NOT_APPLICABLE_NOTICES.
             **({"unscored": True} if _status_note else {}),

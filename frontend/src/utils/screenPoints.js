@@ -62,6 +62,12 @@ export const withOthersOf = (it, first = null) => {
   const w = (it && it.with_others) || (first && first.with_others) || "";
   return String(w || "").trim() || null;
 };
+// A cap-only item (SCORING_RULES.md R5 / P1, 30 Oct 2026): no points of its own,
+// it only holds the score - "Holds the score at 85 until fixed".
+export const holdOf = (it, first = null) => {
+  const h = (it && it.hold) || (first && first.hold) || "";
+  return String(h || "").trim() || null;
+};
 const withOthersText = (p) => (p && p.withOthers ? ` (${p.withOthers})` : "");
 
 function fromPlan(plan, packageSqs) {
@@ -75,6 +81,8 @@ function fromPlan(plan, packageSqs) {
       mirror, held: it.held_by ? String(it.held_by) : null, under: it.under === true, id: it.id,
       withOthers: withOthersOf(it, first), scoreItem: it.score_item !== false || !!first,
       leadsTo: Array.isArray(it.leads_to) ? it.leads_to : [], cost: Number(it.cost) || 0,
+      hold: holdOf(it, first),
+      coveredBy: it.covered_by ? String(it.covered_by) : null,
     };
   };
   const cards = new Map();
@@ -90,7 +98,7 @@ function fromPlan(plan, packageSqs) {
     else if (it.kind === "dc" && clean(it.fact)) dc.set(clean(it.fact), entry(it));
   }
   const unanswerable = Array.isArray(packageSqs && packageSqs.screen_unanswerable)
-    ? packageSqs.screen_unanswerable.filter((u) => u && (Number(u.points) > 0 || u.under === true)) : [];
+    ? packageSqs.screen_unanswerable.filter((u) => u && (Number(u.points) > 0 || u.under === true || !!u.hold)) : [];
   return { cards, details, dc, unanswerable };
 }
 
@@ -219,6 +227,8 @@ export const screenPointsText = (p) => {
   if (!p) return "";
   if (p.points > 0) return `${p.exact || p.withOthers ? "" : "up to "}+${p.points} pts${withOthersText(p)}${followUpText(p)}`;
   if (p.under) return `${underText(p)}${followUpText(p)}`;
+  if (p.hold) return p.hold;
+  if (p.coveredBy) return `Answered with: ${p.coveredBy}`;
   if (p.held) return `Counts once ${p.held} is fixed`;
   if (p.scoreItem === false) return "No effect on the score";
   return "";

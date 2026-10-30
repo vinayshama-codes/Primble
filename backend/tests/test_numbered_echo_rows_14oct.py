@@ -37,8 +37,13 @@ def _items(view, key):
 def test_the_live_shape_draws_each_problem_once():
     v = build_grouped_view(_rows(), [NAME], [ENTITY])
     hard = _items(v, "hard_stops")
-    assert [i["code"] for i in hard] == ["underwriting_reconciliation_applicant_name"]
-    assert v["counts"]["hard_stops"] == 1
+    # Brent's "shown once" (owner, 30 Oct 2026; TEST updated): a FEIN / name
+    # conflict - hard or promoted - shows in Data Consistency only, its row
+    # reading "Holds the score at 60 until fixed"; the view draws no card for it
+    # and accounts for it in `hidden_warning_messages`.
+    assert [i["code"] for i in hard] == []
+    assert v["counts"]["hard_stops"] == 0
+    assert any("Applicant / Named Insured" in m for m in (v.get("hidden_warning_messages") or []))
     assert not any(str(i.get("code", "")).startswith("legacy_") for i in hard + _items(v, "warnings"))
 
 

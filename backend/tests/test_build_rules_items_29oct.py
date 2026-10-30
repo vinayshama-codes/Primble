@@ -169,7 +169,9 @@ def test_the_one_document_warning_holds_85_and_the_pick_clears_it(solved_row):
     assert pkg["cap_applied"] == 85
     dc = [i for i in pkg["review_plan"]["items"] if i.get("kind") == "dc"
           and i.get("fact") == "total_payroll"]
-    assert dc and int(dc[0]["points"]) > 0
+    # R5 / P1 (owner, 30 Oct 2026; TEST updated): a pick the spec prices
+    # nowhere holds the 85 and shows its hold, not points.
+    assert dc and (int(dc[0]["points"]) > 0 or dc[0].get("hold") == "Holds the score at 85 until fixed")
     assert H.contract_problems(pkg) == []
     score, problems, after = H.solve_contract(row)
     assert score == 100 and problems == []

@@ -33,6 +33,8 @@ function planEntry(it, first) {
     held: it.held_by ? String(it.held_by) : null,
     under: it.under === true,
     withOthers: (it.with_others || (first && first.with_others)) ? String(it.with_others || first.with_others) : null,
+    hold: (it.hold || (first && first.hold)) ? String(it.hold || first.hold) : null,
+    coveredBy: it.covered_by ? String(it.covered_by) : null,
   };
 }
 
@@ -63,8 +65,11 @@ export function downloadPlanPoints(packageSqs, rows) {
   const items = packageSqs.review_plan.items.filter((it) => it && typeof it === "object");
   const byId = new Map(items.map((it) => [clean(it.id), it]));
   const recs = Array.isArray(packageSqs.top_recommendations) ? packageSqs.top_recommendations : [];
+  // The points add up to 100 - the REAL score (R5): the plan's own total.
+  const planTotal = Number(packageSqs.review_plan.total);
   const score = Number(packageSqs.package_sqs_score);
-  let room = Number.isFinite(score) ? Math.max(0, 100 - Math.floor(score)) : 0;
+  let room = Number.isFinite(planTotal) ? Math.max(0, planTotal)
+    : (Number.isFinite(score) ? Math.max(0, 100 - Math.floor(score)) : 0);
   const used = new Set();
   for (const r of Array.isArray(rows) ? rows : []) {
     const key = downloadRowKey(r);
@@ -84,8 +89,8 @@ export function downloadPlanPoints(packageSqs, rows) {
     if (!p) continue;
     let points = p.held ? 0 : Math.max(0, Math.round(Number(p.points) || 0));
     let exact = p.exact !== false;
-    if (points > room) {                                   // never past 100 - score
-      if (room < 1) continue;
+    if (points > room) {                                   // never past 100 - real score
+      if (room < 1 && !p.hold) continue;
       points = room;
       exact = false;
     }

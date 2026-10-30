@@ -2305,6 +2305,17 @@ def fold_twin_issues(rows: Iterable[dict]) -> List[dict]:
             out.append("id:" + str(r["issue_id"]))
         if msg:
             out.append("msg:" + msg + "@" + where)
+        # The same RULE about the same thing, worded a little differently (live
+        # d56e445b: `acord101_for_expiring_policies` raised twice, its policy
+        # list in another order): one problem. Keyed on the code + the forms it
+        # names + the sentence up to its detail list, so per-building / per-
+        # location copies (their address comes first) stay separate.
+        code = str(r.get("code") or "")
+        if r.get("review_issue") and code and not code.startswith(("uncovered_", "uncategorized")):
+            head = _re.sub(r"[^a-z0-9]+", " ", str(r.get("message") or "").split("(")[0].lower()).strip()
+            forms = ",".join(sorted(str(f) for f in (r.get("forms") or [])))
+            if head:
+                out.append(f"rule:{code}|{forms}|{head}")
         return out
 
     owner: Dict[str, int] = {}
@@ -2344,6 +2355,42 @@ def card_owner_forms(generated_forms: Optional[dict]) -> Dict[str, set]:
     return {k: v for k, v in owners.items() if v and v != every}
 
 
+def form_hold_rows(rows: Iterable[dict], generated_forms: Optional[dict]) -> List[dict]:
+    """WHAT HOLDS A FORM IS ON ITS DOWNLOAD (owner, 30 Oct 2026 - live Choice
+    Electric d56e445b: ACORD 125 at 85, its download screen empty, the form
+    downloaded). The download screen shows Hard Stops > Warnings > Cross-Form
+    (Brent, 26 Oct); a form held by its OWN required boxes (`sqs_service.
+    _form_open_warning` - "required box still empty ...") or its download gate
+    had no row in any of them. One row per held form, at the hold's severity
+    (60 = hard stop, 85 = warning), worded as the form's score names it - unless
+    a listed hard stop / warning already says it. Returns the rows to ADD."""
+    out: List[dict] = []
+    listed = [str((r or {}).get("message") or "") for r in rows or []
+              if isinstance(r, dict) and r.get("recommendation_type") in ("hard_stop", "soft_warning")]
+    for fid, g in (generated_forms or {}).items():
+        q = (g or {}).get("sqs") if isinstance(g, dict) else None
+        if not isinstance(q, dict):
+            continue
+        cap, reason = q.get("cap_applied"), str(q.get("cap_reason") or "").strip()
+        if cap is None or not reason:
+            continue
+        try:
+            shown = float(q.get("sqs_score") if q.get("sqs_score") is not None else q.get("package_sqs_score"))
+            raw = float(q.get("raw_sqs_score"))
+        except (TypeError, ValueError):
+            shown, raw = None, None
+        # Only a hold that BINDS (the form scores above its ceiling) holds anything.
+        if shown is not None and raw is not None and raw <= shown:
+            continue
+        if any(reason[:60] in m or m[:60] in reason for m in listed if m):
+            continue
+        out.append({"rec_id": f"formhold_{fid}", "form_id": str(fid), "component": str(fid),
+                    "forms": [str(fid)], "message": reason,
+                    "recommendation_type": "hard_stop" if int(cap) <= 60 else "soft_warning",
+                    "form_hold": True})
+    return out
+
+
 def rows_for_form(rows: Iterable[dict], form_id: str,
                   generated_forms: Optional[dict] = None) -> List[dict]:
     """A one-form download reviews only what holds THAT form (owner, 30 Oct 2026):
@@ -2376,7 +2423,9 @@ def rows_for_form(rows: Iterable[dict], form_id: str,
                 out.append(r)
                 continue
             if _scope == "form":
-                if base in {base_form_id(str(f)) for f in (r.get("forms") or [])}:
+                _named = {base_form_id(str(f)) for f in (r.get("forms") or [])}
+                # A form check naming no form is kept everywhere, never dropped.
+                if not _named or base in _named:
                     out.append(r)
                 continue
         tied = row_form_ids(r) or owners.get(str(r.get("rec_id") or ""), set())

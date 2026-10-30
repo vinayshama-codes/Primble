@@ -206,6 +206,9 @@ def rule_points_add_up(session: dict, stage: str) -> List[dict]:
         return []
     items = [i for i in (plan.get("items") or []) if isinstance(i, dict)]
     out: List[dict] = []
+    # R5 / P2 (30 Oct 2026): the points add up to 100 - the REAL score; a cap
+    # holds the shown number down and is never counted as points.
+    now = int(plan.get("real", now))
     total = 0
     for it in items:
         pts = int(it.get("points") or 0)

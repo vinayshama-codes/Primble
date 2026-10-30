@@ -251,7 +251,7 @@ def test_download_screen_numbers_add_up_and_print_under_1_pt(tmp_path):
     out = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
-    total = 100 - int(sqs["package_sqs_score"])
+    total = int((sqs.get("review_plan") or {}).get("total", 100 - int(sqs["package_sqs_score"])))
     assert res["sum"] <= total and res["zero"] == 0, res
     assert res["under"] == "under 1 pt (counts when all 3 warnings are fixed)"
 

@@ -145,3 +145,18 @@ export function stillCappedNote(handled, scope) {
   const what = n === 1 ? "an item" : `${n} items`;
   return `Fix the value of ${what} you marked ${verb} to increase ${whose} Submission Quality Score (SQS)™, or reopen ${n === 1 ? "it" : "them"} under Reviewed.`;
 }
+
+// THE REAL SCORE BESIDE THE HELD ONE (SCORING_RULES.md R5, owner 30 Oct 2026).
+// While a hard stop (60) or a warning (85) holds the score below what the
+// package really scores, the screen says so: the items' points add up to 100
+// minus the REAL score, so without it 85 + the points reads as past 100.
+// "" when no cap holds the number.
+export function heldScoreLine(pkg) {
+  if (!pkg) return "";
+  const shown = Number(pkg.package_sqs_score ?? pkg.sqs_score);
+  const real = Number(pkg.real_sqs_score ?? Math.floor(Number(pkg.raw_sqs_score)));
+  const cap = Number(pkg.cap_applied);
+  if (!Number.isFinite(shown) || !Number.isFinite(real) || !(real > shown) || !cap) return "";
+  const by = cap <= 60 ? "an open hard stop" : "open warnings";
+  return `Held at ${shown} by ${by} - real score ${real}`;
+}

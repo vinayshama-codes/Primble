@@ -504,8 +504,10 @@ def problems(case: dict, out: dict) -> List[str]:
         plan = pkg.get("review_plan") or {}
         items = [i for i in (plan.get("items") or []) if isinstance(i, dict)]
         pts = sum(int(i.get("points") or 0) for i in items if not i.get("mirror_of"))
-        if score < 100 and score + pts + int(plan.get("left") or 0) != 100:
-            bad.append(f"plan: score {score} + points {pts} + left {plan.get('left')} != 100")
+        # R5 / P2 (30 Oct 2026): 100 - the REAL score, never the held one.
+        _real = int(plan.get("real", score)) if plan else score
+        if _real < 100 and _real + pts + int(plan.get("left") or 0) != 100:
+            bad.append(f"plan: real {_real} + points {pts} + left {plan.get('left')} != 100")
         if any(int(i.get("points") or 0) < 0 for i in items):
             bad.append("plan: negative points")
         for r in plan.get("contract_repaired") or []:
@@ -729,11 +731,12 @@ def problems_after_forms(case: dict, out: dict, after: dict) -> List[str]:
     else:
         score = pp.get("package_sqs_score")
         plan = pp.get("review_plan") or {}
-        if isinstance(score, (int, float)) and score < 100 and plan:
+        _real = int(plan.get("real", score)) if plan and isinstance(score, (int, float)) else score
+        if isinstance(score, (int, float)) and _real < 100 and plan:
             items = [i for i in (plan.get("items") or []) if isinstance(i, dict)]
             pts = sum(int(i.get("points") or 0) for i in items if not i.get("mirror_of"))
-            if score + pts + int(plan.get("left") or 0) != 100:
-                bad.append(f"post-form plan: score {score} + points {pts} + left {plan.get('left')} != 100")
+            if _real + pts + int(plan.get("left") or 0) != 100:
+                bad.append(f"post-form plan: real {_real} + points {pts} + left {plan.get('left')} != 100")
             for r in plan.get("contract_repaired") or []:
                 bad.append(f"post-form plan repaired: {r}")
     return bad

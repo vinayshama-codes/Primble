@@ -126,38 +126,45 @@ def test_an_annotated_stop_string_is_not_resurrected_either():
 # -- 2. A blocker is never hidden --------------------------------------------
 
 def test_a_blocking_picker_row_keeps_its_red_card():
+    """TEST updated (owner, 30 Oct 2026, Brent's "shown once"): a blocking picker
+    row is drawn in Data Consistency only ("Holds the score at 60"), never here -
+    and the view accounts for it."""
     name = ("Applicant / Named Insured: documents disagree (ORBIN CONTRACTING "
             "LLC, Orbin Contract). Fix: Confirm the correct value to apply it "
             "across forms.")
     view = build_grouped_view(
         [make_issue("underwriting_reconciliation_applicant_name", "hard_stop", name)],
         [name], [])
-    assert view["counts"]["hard_stops"] == 1
-    assert name in _messages(view)
+    assert view["counts"]["hard_stops"] == 0
+    assert name not in _messages(view)
+    assert name.strip() in (view.get("hidden_warning_messages") or [])
 
 
 @pytest.mark.parametrize("key", sorted(HARD_STOP_RECONCILABLE_KEYS))
 def test_every_blocking_picker_field_still_renders(key):
-    """Driven off the real declaration: if a field is added to
-    HARD_STOP_RECONCILABLE_KEYS, its blocker must still reach the screen."""
+    """Driven off the real declaration. Brent's "shown once" (owner, 30 Oct 2026;
+    TEST updated): a blocking picker field is drawn in Data Consistency only -
+    never as a card here - and the view still accounts for it, so the 60 is
+    explained (the Data Consistency row reads "Holds the score at 60")."""
     msg = "%s: documents disagree (A, B). Fix: Confirm the correct value." % key
     view = build_grouped_view(
         [make_issue("underwriting_reconciliation_%s" % key, "hard_stop", msg)],
         [msg], [])
-    assert msg in _messages(view)
+    assert msg not in _messages(view)
+    assert msg.strip() in (view.get("hidden_warning_messages") or [])
 
 
 def test_a_promoted_row_keeps_its_card():
-    """A row the package scorer is capping at 60 renders as the blocker it is -
-    and since UI-13 that promotion is the ONLY thing keeping it on this screen,
-    so hiding it would take the cap's explanation with it."""
+    """TEST updated (owner, 30 Oct 2026, Brent's "shown once"): a promoted
+    picker row is Data Consistency's too - no card here, accounted for."""
     bv = ("Building Value: documents disagree ($1,200,000, $950,000). "
           "Fix: Confirm the correct value to apply it across forms.")
     code = "underwriting_reconciliation_property_building_value"
     view = build_grouped_view([make_issue(code, "soft_warning", bv)], [], [bv],
                               promote_codes=[code])
-    assert view["counts"]["hard_stops"] == 1
-    assert bv in _messages(view)
+    assert view["counts"]["hard_stops"] == 0
+    assert bv not in _messages(view)
+    assert bv.strip() in (view.get("hidden_warning_messages") or [])
 
 
 # -- 3. Nothing else moves ---------------------------------------------------

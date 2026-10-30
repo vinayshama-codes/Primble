@@ -120,8 +120,12 @@ def test_cd683556_warnings_each_show_a_number():
         if it is None:
             assert code != "bi_missing_period_of_restoration"
             continue
-        assert ((it["points"] >= 1 or it.get("under")) and "counts when all" in it["with_others"]) \
-            or (it.get("score_item") is False and not it["points"]), (code, it)
+        # R5 / P3 (owner, 30 Oct 2026; TEST updated): no cap shares - a card
+        # shows what its own answer moves the real score, or its hold, or
+        # nothing ("No effect on the score").
+        assert "with_others" not in it, (code, it)
+        assert (it["points"] >= 1 or it.get("under")
+                or (it.get("score_item") is False and not it["points"])), (code, it)
     if "acord101_required" in items:
         assert items["acord101_required"].get("mirror_of") or items["acord101_required"]["points"] >= 1
     if "loss_history_attestation_conflict" in items:

@@ -808,3 +808,28 @@ def test_a_transport_error_on_submit_is_refunded(monkeypatch):
     with pytest.raises(T.TranscriberError):
         asyncio.run(c.extract(b"%PDF", pages=4))
     assert sum(calls) == 0
+
+
+def test_a_result_stored_under_another_key_is_never_sent_again():
+    """30 Oct 2026: localhost and Render share one database but not one key; the
+    Mac read Render's cached result as missing and paid 8 pages twice."""
+    import asyncio
+    from services.acord_intake import transcriber_intake as T
+
+    class _Client:
+        cfg = type("C", (), {"env": "uat"})()
+        calls = 0
+
+        async def extract(self, *a, **k):
+            _Client.calls += 1
+            raise AssertionError("must not submit")
+
+    async def _get(h, env):
+        return {"status": "held_under_another_key"}
+
+    async def _put(*a, **k):
+        raise AssertionError("must not overwrite")
+
+    g = T.SendGroup(pages=[0], acord_numbers=["807"], kinds=["flattened"], data=b"x", hash="h" * 40)
+    r = asyncio.run(T.fetch(g, client=_Client(), cache_get=_get, cache_put=_put))
+    assert r.result is None and r.error == "held_under_another_key" and _Client.calls == 0
