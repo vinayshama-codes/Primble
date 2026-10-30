@@ -79,6 +79,21 @@ def test_the_footer_tells_the_ca_and_co_variants_apart():
     assert recognize.form_id_for_footer("999") is None
 
 
+def test_a_footer_naming_another_form_beats_matching_box_names(monkeypatch):
+    """Live 137 TX (31 Oct 2026): a Texas 137 shares its box names with our 137 CO.
+    Its own footer names a form we hold no template for, so we never read it
+    through the CO map - the page is left to Transcriber. The real CO footer still
+    reads as CO."""
+    co_names = set(recognize.schema_names()["ACORD_137_CO"])
+    monkeypatch.setattr(recognize, "_names_by_page", lambda _p: {0: co_names})
+    tx = recognize.recognize("x.pdf", page_texts=["...\nACORD 137 TX (2015/12) Page 3 of 3"])
+    assert tx[0].acord_number == "137 TX" and tx[0].form_id is None and tx[0].kind != "fillable"
+    co = recognize.recognize("x.pdf", page_texts=["...\nACORD 137 CO (2017/05) Page 3 of 3"])
+    assert co[0].form_id == "ACORD_137_CO" and co[0].kind == "fillable"
+    bare = recognize.recognize("x.pdf", page_texts=["no footer printed here"])
+    assert bare[0].form_id == "ACORD_137_CO" and bare[0].kind == "fillable"
+
+
 # ── The fillable read ───────────────────────────────────────────────────────
 def test_a_filled_125_reads_back_exactly(tmp_path):
     r = read.read_acord(_filled(tmp_path, "ACORD_125", VALUES_125))

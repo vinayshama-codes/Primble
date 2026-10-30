@@ -196,6 +196,13 @@ def recognize(pdf_path: str, page_texts: Optional[Sequence[str]] = None,
                 pf.edition = foot.group("ed")
             footer_fid = form_id_for_footer(foot.group("num"), foot.group("var")) if foot else None
             by_names = _form_by_names(pf.names, footer_fid)
+            if foot and by_names and by_names != footer_fid:
+                # The page prints its own identity and it is another form: a
+                # Texas 137 shares its box names with our 137 CO, and reading it
+                # through the CO map puts its boxes on the wrong facts. The
+                # footer wins; a form we hold no template for is not ours to read
+                # (live 137 TX, 31 Oct 2026).
+                by_names = None
             if by_names:
                 pf.kind, pf.form_id = "fillable", by_names
             elif foot:

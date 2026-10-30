@@ -370,6 +370,9 @@ def merge_transcriber_copies(copies: List[dict], t_copies: List[dict]) -> List[d
             # Our reader and Transcriber name DIFFERENT forms for the same pages (our
             # footer 126, ASG 125): folding would map one form's boxes through the
             # other's reverse map. Our own read of the page stands (review, 29 Oct).
+            # Our reader claims a page only when its printed footer agrees
+            # (recognize, 31 Oct), so a disagreement here means ASG's grouping is
+            # suspect - none of its pages are kept.
             logger.info("transcriber copy %s on pages %s overlaps another form's read - not folded",
                         t.get("form_id"), sorted(tp))
             continue
