@@ -46,3 +46,65 @@ def test_a_card_only_some_forms_list_belongs_to_those_forms():
     one186 = [r["rec_id"] for r in rows_for_form(rows, "ACORD_186", gen)]
     assert one127 == ["rec_pkg"]
     assert one186 == ["rec_contractor_license_number", "rec_pkg"]
+
+
+def test_every_open_package_issue_is_on_every_one_form_download():
+    """Live 130ad4f4: the ACORD 126 download listed 1 of 8 open items - the
+    package's COPE hard stop, its key details (whose sentences name ACORD 125) and
+    the proposed-term check were judged by "does it hold this form". A package
+    issue is listed on every one-form download; a form issue only on its forms."""
+    from services.needs_attention import rows_for_form
+    rows = [
+        {"rec_id": "iss_cope", "review_issue": True, "code": "legacy_minimum_viable_cope",
+         "recommendation_type": "hard_stop", "forms": [],
+         "message": "Property Minimum Viable COPE incomplete - missing: occupancy type"},
+        {"rec_id": "iss_mail", "review_issue": True, "code": "tier1_missing_Applicant mailing address",
+         "recommendation_type": "soft_warning", "forms": [],
+         "message": "ACORD 125 minimum field missing: Applicant mailing address"},
+        {"rec_id": "iss_term", "review_issue": True, "code": "proposed_term_coverage_gap",
+         "recommendation_type": "soft_warning", "forms": ["ACORD_125"], "cross_form": True,
+         "message": "The proposed effective date is 365 days after the current policies expire"},
+        {"rec_id": "iss_101", "review_issue": True, "code": "acord101_for_expiring_policies",
+         "recommendation_type": "soft_warning", "forms": ["ACORD_101"], "cross_form": True,
+         "message": "ACORD 125's Prior Carrier Information has no column for 6 expiring policies"},
+    ]
+    got = {r["rec_id"] for r in rows_for_form(rows, "ACORD_126", {})}
+    assert got == {"iss_cope", "iss_mail", "iss_term"}
+    assert "iss_101" in {r["rec_id"] for r in rows_for_form(rows, "ACORD_101", {})}
+
+
+def test_a_legacy_stop_and_its_coded_twin_are_one_download_row():
+    """Live 130ad4f4: the missing occupancy was listed as a hard stop AND a
+    warning. One row - the hard stop, since a blocker is never hidden."""
+    from services.needs_attention import fold_twin_issues
+    rows = [
+        {"rec_id": "a", "review_issue": True, "code": "legacy_minimum_viable_cope",
+         "recommendation_type": "hard_stop",
+         "message": "Property Minimum Viable COPE incomplete - missing: occupancy type"},
+        {"rec_id": "b", "review_issue": True, "code": "minimum_viable_cope_missing",
+         "recommendation_type": "soft_warning",
+         "message": "Property submission missing Minimum Viable COPE: occupancy type."},
+        {"rec_id": "c", "review_issue": True, "code": "legacy_gl_no_class_codes",
+         "recommendation_type": "soft_warning", "message": "GL class codes are missing"},
+    ]
+    assert [r["rec_id"] for r in fold_twin_issues(rows)] == ["a", "c"]
+    # Both warnings: the coded row (it carries the fix) is kept.
+    rows[0]["recommendation_type"] = "soft_warning"
+    assert [r["rec_id"] for r in fold_twin_issues(rows)] == ["b", "c"]
+
+
+def test_any_duplicate_row_is_listed_once_hard_stop_wins():
+    """Not one twin: any two rows that say the same problem are one row."""
+    from services.needs_attention import fold_twin_issues
+    rows = [
+        {"rec_id": "w", "review_issue": True, "code": "x", "recommendation_type": "soft_warning",
+         "message": "Proposed term is missing."},
+        {"rec_id": "h", "review_issue": True, "code": "y", "recommendation_type": "hard_stop",
+         "message": "Proposed  term is MISSING"},
+        {"rec_id": "i1", "review_issue": True, "issue_id": "abc", "message": "One wording"},
+        {"rec_id": "i2", "review_issue": True, "issue_id": "abc", "message": "Another wording"},
+        # Same words on two forms' boxes stay two rows.
+        {"rec_id": "b1", "form_id": "ACORD_126", "field": "Policy_A", "message": "Missing: policy number"},
+        {"rec_id": "b2", "form_id": "ACORD_127", "field": "Policy_A", "message": "Missing: policy number"},
+    ]
+    assert [r["rec_id"] for r in fold_twin_issues(rows)] == ["h", "i1", "b1", "b2"]

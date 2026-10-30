@@ -2439,6 +2439,12 @@ async def get_open_recs(
                 r["attention_superseded"] = True
     except Exception as _ex:                              # noqa: BLE001
         logger.warning(f"attention marker skipped for session {session_id}: {_ex}")
+    # One problem, one row: a legacy stop and its coded twin listed once.
+    try:
+        from services.needs_attention import fold_twin_issues
+        recs = fold_twin_issues(recs)
+    except Exception as _tx:                                  # noqa: BLE001
+        logger.warning(f"download review: twin fold skipped for session {session_id}: {_tx}")
     # A one-form download reviews only what holds that form (owner, 30 Oct 2026).
     if form_id:
         try:

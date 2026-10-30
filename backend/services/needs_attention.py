@@ -2265,6 +2265,67 @@ def row_form_ids(row: dict) -> set:
     return out
 
 
+def fold_twin_issues(rows: Iterable[dict]) -> List[dict]:
+    """One problem, one row on the download screen: a legacy stop and its coded
+    twin (`issue_registry._LEGACY_SUPERSEDED_BY_CODE`, the review page's own
+    table) are listed once - the coded row, unless the legacy copy is the hard
+    stop and the coded one is not (a blocker is never hidden behind a warning;
+    the review page's `_collapse_twins` rule). Live 130ad4f4: "Property Minimum
+    Viable COPE incomplete" (hard stop) beside "Property submission missing
+    Minimum Viable COPE" (warning). Returns a new list in the same order."""
+    rows = [r for r in (rows or []) if isinstance(r, dict)]
+    try:
+        from services.issue_registry import _LEGACY_SUPERSEDED_BY_CODE as _twins
+    except Exception:                                          # noqa: BLE001
+        return rows
+    drop: set = set()
+    issues = [(n, r) for n, r in enumerate(rows) if r.get("review_issue")]
+    for code, phrase in _twins.items():
+        coded = [(n, r) for n, r in issues if str(r.get("code") or "") == code]
+        legacy = [(n, r) for n, r in issues
+                  if str(r.get("code") or "") != code and phrase.lower() in str(r.get("message") or "").lower()]
+        if not coded or not legacy:
+            continue
+        coded_hard = any(r.get("recommendation_type") == "hard_stop" for _n, r in coded)
+        legacy_hard = any(r.get("recommendation_type") == "hard_stop" for _n, r in legacy)
+        drop |= {n for n, _r in (coded if (legacy_hard and not coded_hard) else legacy)}
+    # Any other duplicate: two rows that say the same thing (same issue id, or
+    # the same words once case, digits-as-written and punctuation are set
+    # aside) are one row - the hard stop's copy, else the first listed.
+    import re as _re
+
+    def _keys(r):
+        msg = _re.sub(r"[^a-z0-9]+", " ", str(r.get("message") or r.get("title") or "").lower()).strip()
+        # A box row is that box's: the same words on two forms' boxes are two
+        # rows. A review issue / card is the problem itself.
+        where = "" if r.get("review_issue") else "|".join(
+            str(r.get(k) or "") for k in ("form_id", "field", "field_name"))
+        out = []
+        if r.get("issue_id"):
+            out.append("id:" + str(r["issue_id"]))
+        if msg:
+            out.append("msg:" + msg + "@" + where)
+        return out
+
+    owner: Dict[str, int] = {}
+    for n, r in enumerate(rows):
+        if n in drop:
+            continue
+        hits = {owner[k] for k in _keys(r) if k in owner and owner[k] not in drop}
+        if not hits:
+            for k in _keys(r):
+                owner[k] = n
+            continue
+        first = min(hits)
+        if r.get("recommendation_type") == "hard_stop" and rows[first].get("recommendation_type") != "hard_stop":
+            drop.add(first)
+            for k in _keys(rows[first]) + _keys(r):
+                owner[k] = n
+        else:
+            drop.add(n)
+    return [r for n, r in enumerate(rows) if n not in drop]
+
+
 def card_owner_forms(generated_forms: Optional[dict]) -> Dict[str, set]:
     """{rec_id: base forms whose OWN score lists the card} - only for a card some
     forms list and others do not (one listed by every form is the package's).
@@ -2299,6 +2360,25 @@ def rows_for_form(rows: Iterable[dict], form_id: str,
     for r in rows or []:
         if not isinstance(r, dict):
             continue
+        # A REVIEW-PAGE ISSUE (hard stop / warning / cross-form check) is judged by
+        # its SCOPE (`issue_registry.issue_scope`, owner, 30 Oct 2026): a package
+        # item is listed on EVERY one-form download while it is open - the
+        # property COPE stop, a key detail whose sentence names ACORD 125, the
+        # proposed-term check - and a form item only on the forms it names.
+        # (Live 130ad4f4: the ACORD 126 download listed 1 of 8 open items.)
+        if r.get("review_issue") and r.get("code"):
+            try:
+                from services.issue_registry import issue_scope
+                _scope = issue_scope({"code": r.get("code"), "message": r.get("message")})
+            except Exception:                                  # noqa: BLE001
+                _scope = None
+            if _scope == "package":
+                out.append(r)
+                continue
+            if _scope == "form":
+                if base in {base_form_id(str(f)) for f in (r.get("forms") or [])}:
+                    out.append(r)
+                continue
         tied = row_form_ids(r) or owners.get(str(r.get("rec_id") or ""), set())
         if tied:
             if base in tied or any(base.startswith(t) or t.startswith(base) for t in tied):
