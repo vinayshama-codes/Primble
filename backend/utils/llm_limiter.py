@@ -53,8 +53,11 @@ from contextlib import asynccontextmanager, contextmanager
 logger = logging.getLogger(__name__)
 
 _LLM_MAX_CONCURRENT  = int(os.getenv("LLM_MAX_CONCURRENT", "12"))
-_ACQUIRE_TIMEOUT_S   = float(os.getenv("LLM_ACQUIRE_TIMEOUT", "90"))
-_SLOT_TTL_MS         = int(os.getenv("LLM_SLOT_TTL_MS", "180000"))  # 180s auto-release
+# A floor, whatever the environment says: waiting for a slot costs only time, while
+# giving up burns a retry and, on the third, ships a gap-fill batch BLANK. Several users
+# generating at once must queue, never lose answers (multi-user review, 1 Nov 2026).
+_ACQUIRE_TIMEOUT_S   = max(float(os.getenv("LLM_ACQUIRE_TIMEOUT", "600")), 600.0)
+_SLOT_TTL_MS         = int(os.getenv("LLM_SLOT_TTL_MS", "360000"))  # auto-release; above the 300 s call timeout
 _POLL_BASE_S         = 0.05  # initial wait between retries (jittered)
 _POLL_MAX_S          = 0.5
 
@@ -120,7 +123,9 @@ async def _redis_try_acquire():
         None  — all slots occupied; Redis is healthy, just full
         _REDIS_ERROR (sentinel) — Redis call raised an exception
     """
-    now_ms    = int(time.monotonic() * 1000)
+    # Wall clock: PEXPIREAT takes a Unix time. time.monotonic() is a date in 1970, which
+    # deleted the key at once, so this global cap never held (1 Nov 2026).
+    now_ms    = int(time.time() * 1000)
     expiry_ms = now_ms + _SLOT_TTL_MS
     token     = str(uuid.uuid4())
     try:
@@ -141,11 +146,17 @@ async def _redis_release(token: str) -> None:
 
 
 async def _acquire_thread_sem(timeout_s: float) -> bool:
-    """Acquire _thread_sem without blocking the event loop."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, lambda: _thread_sem.acquire(timeout=timeout_s)
-    )
+    """Acquire _thread_sem without blocking the event loop or parking a thread. A waiter
+    per pool thread starved uploads and DNS for every user when Redis was down, and a
+    cancelled waiter's thread still took a slot nobody released (review, 1 Nov 2026)."""
+    deadline = time.monotonic() + timeout_s
+    wait_s = _POLL_BASE_S
+    while not _thread_sem.acquire(blocking=False):
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(wait_s)
+        wait_s = min(wait_s * 2, _POLL_MAX_S)
+    return True
 
 
 @asynccontextmanager

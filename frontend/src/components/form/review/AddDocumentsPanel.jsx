@@ -87,6 +87,7 @@ export default function AddDocumentsPanel({
     setProgress(afterForms ? "Reading your documents - your forms update when they are read..." : "Reading your documents...");
     const token = newToken();
     startPolling(token);
+    let reached = false;
     try {
       const body = new FormData();
       for (const f of files) body.append("files", f);
@@ -98,6 +99,7 @@ export default function AddDocumentsPanel({
       const res = await fetch(`${apiBase}/api/session/${sessionId}/documents`, {
         method: "POST", credentials: "include", body,
       });
+      reached = true;
       const data = await res.json().catch(() => ({}));
       const refusal = integrityRefusal(res.status, data);
       if (refusal) { setIntegrity(refusal); return; }
@@ -110,7 +112,9 @@ export default function AddDocumentsPanel({
       if (inputRef.current) inputRef.current.value = "";
       if (onChanged) await onChanged(data);
     } catch (e) {
-      setError("Could not add the documents: " + (e?.message || "network error"));
+      setError(!reached
+        ? "The upload was interrupted. Please upload it again - you won't lose anything."
+        : "Could not add the documents: " + (e?.message || "network error"));
     } finally {
       stopPolling(); setBusy(false); setProgress("");
     }

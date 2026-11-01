@@ -43,6 +43,7 @@ import json
 import logging
 from typing import List, Optional
 
+from utils.concurrency import one_writer_per_package
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -245,7 +246,7 @@ async def add_session_documents(
         raise HTTPException(400, "Unsupported document type.")
 
     from services.upload_intake import remove_files, store_uploads
-    from utils.concurrency import release_heavy, try_acquire_heavy
+    from utils.concurrency import acquire_heavy_waiting, release_heavy, try_acquire_heavy
     uploaded_paths: list = []
     all_paths: list = []
     sem_token = False
@@ -256,7 +257,9 @@ async def add_session_documents(
     try:
         uploaded_paths, all_paths = await store_uploads(files)
 
-        sem_token = await try_acquire_heavy()
+        from utils.memory_guard import wait_for_room
+        await wait_for_room(all_paths)      # before the slot: a small file must not wait behind it
+        sem_token = await acquire_heavy_waiting(try_acquire_heavy)
         if not sem_token:
             raise HTTPException(
                 429,
@@ -516,6 +519,7 @@ async def keep_document_suggestion(
 
 
 @router.post("/api/session/{session_id}/documents/add-form")
+@one_writer_per_package
 async def add_offered_session_form(
     session_id: str,
     req: AddOfferedFormRequest,

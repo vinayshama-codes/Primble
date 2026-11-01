@@ -701,7 +701,7 @@ def test_the_send_guard_keeps_it():
 def test_send_rebuilds_it_server_side_and_gives_it_a_signing_request():
     src = (BACKEND / "routes" / "arq_routes.py").read_text(encoding="utf-8")
     send = src[src.index("async def send_arq"):src.index("async def client_view")]
-    assert "applicant_signing.signature_question(proc_session)" in send       # never the request body's
+    assert "run_scoring(applicant_signing.signature_question, proc_session)" in send       # never the request body's
     assert "applicant_signing.create_request(" in send and '_q["sign_token"] = _req["token"]' in send
     view = src[src.index("async def client_view"):]
     view = view[:view.index("@router.")]

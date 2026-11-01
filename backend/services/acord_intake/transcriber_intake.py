@@ -132,6 +132,7 @@ def _page_texts(path: str, pages: List[int], ocr_text: str) -> Dict[int, str]:
             for i in pages:
                 if 0 <= i < len(pdf.pages):
                     out[i] = pdf.pages[i].extract_text() or ""
+                    pdf.pages[i].close()    # free the page's parsed objects (memory, 1 Nov 2026)
     except Exception as ex:                                    # noqa: BLE001
         logger.info("transcriber plan: page text unreadable: %s", ex)
     if ocr_text:

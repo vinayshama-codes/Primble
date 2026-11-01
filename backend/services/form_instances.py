@@ -31,6 +31,7 @@ Pure and dependency-free except the registered overlay providers
 """
 from __future__ import annotations
 
+import threading
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -152,19 +153,27 @@ _BINDING_KEYS: Dict[str, Tuple[str, ...]] = {}
 # on import order (a route that never imported them still gets the views).
 _PROVIDER_MODULES = ("services.umbrella_layers",)
 _PROVIDERS_LOADED = False
+_PROVIDERS_LOADING = False
+_PROVIDERS_LOCK = threading.RLock()
 
 
 def _ensure_providers() -> None:
-    global _PROVIDERS_LOADED
+    global _PROVIDERS_LOADED, _PROVIDERS_LOADING
     if _PROVIDERS_LOADED:
         return
-    _PROVIDERS_LOADED = True
-    import importlib
-    for name in _PROVIDER_MODULES:
-        try:
-            importlib.import_module(name)
-        except Exception:                                     # noqa: BLE001
-            pass
+    # A second thread waits here rather than seeing no overlays on a cold start. The
+    # importing thread can come back through this function: it just carries on.
+    with _PROVIDERS_LOCK:
+        if _PROVIDERS_LOADED or _PROVIDERS_LOADING:
+            return
+        _PROVIDERS_LOADING = True
+        import importlib
+        for name in _PROVIDER_MODULES:
+            try:
+                importlib.import_module(name)
+            except Exception:                                 # noqa: BLE001
+                pass
+        _PROVIDERS_LOADED = True
 
 
 def facts_for_form(facts: Any, form_id: Any) -> Any:

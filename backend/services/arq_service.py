@@ -1,3 +1,4 @@
+from utils.concurrency import one_writer_per_package, run_scoring
 import contextlib
 import json
 import logging
@@ -3832,7 +3833,8 @@ async def generate_arq_questions(
     # Figure 15: pull repeating-row fields OUT of the per-field flow so they are
     # answered as ONE table per schedule. Done before the humanization pass below
     # so we never spend an LLM call rewriting a field that is about to collapse.
-    schedule_forms = _partition_schedule_fields(
+    schedule_forms = await run_scoring(
+        _partition_schedule_fields,
         missing_fields, field_current_values,
         # By FORM: a form's second copy carries its form's schedules, listed
         # under the form (7 Oct 2026) - one table, one answer, both copies.
@@ -4212,7 +4214,8 @@ async def generate_arq_questions(
     # C2 2.10: state-driven loss-question gating - one rule for all inject sites.
     questions = _apply_loss_state_question_gate(
         questions, facts, flags, has_loss_run_doc=_lh_has_loss_run)
-    questions = _drop_not_applicable_questions(
+    questions = await run_scoring(
+        _drop_not_applicable_questions,
         questions, facts, (generated_forms or {}).keys(), flags=flags)
     questions = _drop_coinsurance_answered_by_agreed_value(questions, facts)
 
@@ -6584,6 +6587,7 @@ def _rederive_answer_dependent_facts(facts: dict) -> List[str]:
     return changed
 
 
+@one_writer_per_package
 async def apply_arq_answers_to_session(
     arq_id: str,
     processing_session_id: str,
@@ -6720,7 +6724,7 @@ async def apply_arq_answers_to_session(
                     "fact_key": f"property_locations[{_pos}].{_pc_rows.PER_BUILDING_COPE[_fact]}",
                     "previous": "", "new": str(_typed_bld)[:200],
                 })
-                for _fid in _restamp_building_row(generated, facts, _pos,
+                for _fid in await run_scoring(_restamp_building_row, generated, facts, _pos,
                                                   _pc_rows.PER_BUILDING_COPE[_fact]):
                     if _fid not in updated:
                         updated.append(_fid)
@@ -6738,7 +6742,7 @@ async def apply_arq_answers_to_session(
                     "previous": "", "new": str(new_val)[:200],
                 })
                 if _base == PREMISES_INTEREST_FIELD:
-                    for _fid in _restamp_location_interest(generated, facts):
+                    for _fid in await run_scoring(_restamp_location_interest, generated, facts):
                         if _fid not in updated:
                             updated.append(_fid)
             if field_name not in updated:
@@ -6902,7 +6906,7 @@ async def apply_arq_answers_to_session(
                 "previous": f"{_c5_prev_n} row(s)",
                 "new": f"{len(facts.get(list_key) or [])} row(s)",
             })
-            for _fid in _restamp_schedule_into_forms(generated, list_key, facts,
+            for _fid in await run_scoring(_restamp_schedule_into_forms, generated, list_key, facts,
                                                      facts_before=_sched_before,
                                                      provenance="client_arq"):
                 if _fid not in updated:
@@ -7085,8 +7089,8 @@ async def apply_arq_answers_to_session(
             # the box doesn't already show it, so a field_name that IS already a
             # real schema field (the common case) is a harmless no-op re-stamp,
             # not a double-write of different data.
-            _stamped_forms = _restamp_canonical_into_forms(
-                generated, canon, facts,
+            _stamped_forms = await run_scoring(
+                _restamp_canonical_into_forms, generated, canon, facts,
                 skip_forms=_pl_sections if _pl_identity else None,
             )
             for _fid in _stamped_forms:
@@ -7145,7 +7149,8 @@ async def apply_arq_answers_to_session(
         # it - the table save's own rule (`premises_cope.derive_package_cope`).
         _pc_rows.derive_package_cope(facts, source="client_arq")
     for _dk in _rederive_answer_dependent_facts(facts):
-        for _fid in _restamp_canonical_into_forms(generated, _dk, facts, provenance="filled"):
+        for _fid in await run_scoring(_restamp_canonical_into_forms, generated, _dk, facts,
+                                      provenance="filled"):
             if _fid not in updated:
                 updated.append(_fid)
     # The client's landlord prints on ACORD 125's additional-interest row at once
@@ -7158,8 +7163,8 @@ async def apply_arq_answers_to_session(
                 updated.append(_fid)
     _answered = {k for k, v in facts.items()
                  if not str(k).startswith("_") and _facts_before_answers.get(k) is not v}
-    for _fid in _restamp_boxes_the_answer_decides(generated, _facts_before_answers, facts,
-                                                  _answered, None, "client_arq"):
+    for _fid in await run_scoring(_restamp_boxes_the_answer_decides, generated,
+                                  _facts_before_answers, facts, _answered, None, "client_arq"):
         if _fid not in updated:
             updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts,
@@ -7577,6 +7582,7 @@ def _write_schedule_rows(facts: dict, list_key: str, clean_rows: list,
 
 
 # ASYNC-SAFE
+@one_writer_per_package
 async def save_session_schedule(
     processing_session_id: str,
     list_key: str,
@@ -7632,7 +7638,7 @@ async def save_session_schedule(
     # (the re-stamp takes the provenance; it used to stamp `client_arq` and a
     # blanket relabel then also re-attributed boxes an earlier CLIENT save
     # had written). Only boxes whose column moved are re-stamped.
-    touched = _restamp_schedule_into_forms(generated, list_key, facts,
+    touched = await run_scoring(_restamp_schedule_into_forms, generated, list_key, facts,
                                            facts_before=facts_before,
                                            provenance="producer")
     # A table whose rows other boxes are DERIVED from (21 Oct 2026, the GL
@@ -7641,8 +7647,8 @@ async def save_session_schedule(
     # only boxes the save moves, never a box a person typed (the answer doors'
     # rule, `_restamp_boxes_the_answer_decides`).
     if generated and (schedule_capture.get_def(list_key) or {}).get("restamp_derived"):
-        for _fid in _restamp_boxes_the_answer_decides(generated, facts_before, facts,
-                                                      [list_key], None, "producer"):
+        for _fid in await run_scoring(_restamp_boxes_the_answer_decides, generated, facts_before,
+                                      facts, [list_key], None, "producer"):
             if _fid not in touched:
                 touched.append(_fid)
 
@@ -7670,6 +7676,7 @@ async def save_session_schedule(
 
 
 # ASYNC-SAFE
+@one_writer_per_package
 async def apply_producer_answer_to_session(
     processing_session_id: str,
     field_name: str,
@@ -7860,8 +7867,8 @@ async def apply_producer_answer_to_session(
     # Stamp the confirmed value into every generated form whose schema carries it
     # (same deterministic engine used by the initial fill and the ARQ apply path).
     # The PRODUCER typed this, so the boxes say so (not the client's green).
-    _stamped = _restamp_canonical_into_forms(
-        generated, canon, facts, provenance="producer",
+    _stamped = await run_scoring(
+        _restamp_canonical_into_forms, generated, canon, facts, provenance="producer",
         skip_forms=_pl.section_form_ids(generated) if _pl_ctx else None)
     # The carrier this submission goes to decides ACORD 125 page one (29 Sep
     # 2026, Orbin item 8): re-read the page-one verdict and refresh its boxes
@@ -7917,11 +7924,12 @@ async def apply_producer_answer_to_session(
         updated.append(field_name)
 
     for _dk in _rederive_answer_dependent_facts(facts):
-        for _fid in _restamp_canonical_into_forms(generated, _dk, facts, provenance="filled"):
+        for _fid in await run_scoring(_restamp_canonical_into_forms, generated, _dk, facts,
+                                      provenance="filled"):
             if _fid not in updated:
                 updated.append(_fid)
-    for _fid in _restamp_boxes_the_answer_decides(generated, _facts_before_answer, facts,
-                                                  {canon}, new_val, "producer"):
+    for _fid in await run_scoring(_restamp_boxes_the_answer_decides, generated,
+                                  _facts_before_answer, facts, {canon}, new_val, "producer"):
         if _fid not in updated:
             updated.append(_fid)
     _update_payload = {"generated_forms": generated, "facts": facts}
@@ -8363,6 +8371,7 @@ def refreshed_form_list(impact: Any, session: dict) -> dict:
         return {}
 
 
+@one_writer_per_package
 async def recalculate_session_scores(processing_session_id: str, *, trigger: str = "recalc",
                                      before: Optional[dict] = None) -> dict:
     """Re-run scoring after ARQ answers are applied (Beta Report §6.2 / §8.2.7).
@@ -8476,8 +8485,8 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
         triggered = {str(r.get("form_id")) for r in (proc.get("recommendations") or [])
                      if isinstance(r, dict) and r.get("form_id")}
     from services.stops_now import stops_now
-    _door = stops_now({**proc, "facts": facts, "flags": flags}, sorted(triggered),
-                      pre_form=_pre_form, facts=facts, flags=flags)
+    _door = await run_scoring(stops_now, {**proc, "facts": facts, "flags": flags}, sorted(triggered),
+                              pre_form=_pre_form, facts=facts, flags=flags)
     re_hard, re_soft = list(_door["form_hard"]), list(_door["form_soft"])
     hard_stops, soft_stops = list(_door["hard"]), list(_door["soft"])
     cf_deduped = list(_door["cross_issues"])
@@ -8498,7 +8507,8 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
             confidence  = fdata.get("confidence", {})
             schema      = fdata.get("schema", {})
             try:
-                fdata["sqs"] = calculate_sqs(
+                fdata["sqs"] = await run_scoring(
+                    calculate_sqs,
                     facts=facts, flags=flags, mapped_data=field_state,
                     form_schema=schema, selected_form_ids=selected_ids,
                     # SQS design: cross-form stops cap the PACKAGE only, never
@@ -8522,7 +8532,8 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
         sqs_list = []
         for fid in selected_ids:
             try:
-                sqs_list.append(calculate_sqs_from_facts(
+                sqs_list.append(await run_scoring(
+                    calculate_sqs_from_facts,
                     facts=facts, flags=flags, selected_form_ids=selected_ids,
                     hard_stops=hard_stops, soft_stops=soft_stops,
                     tier2_score=tier2_score, form_id=fid,
@@ -8553,7 +8564,8 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
             # ...and with THIS recalculation's cross-form issues: the row still
             # carried the upload-time list, so a cross-form item the producer
             # had fixed kept costing points until a re-upload (G2 audit).
-            package_sqs = score_package_pre_generation(
+            package_sqs = await run_scoring(
+                score_package_pre_generation,
                 {**proc, "facts": facts, "flags": flags,
                  "hard_stops": hard_stops, "soft_stops": soft_stops,
                  "cross_form_issues": cf_deduped},
@@ -8561,7 +8573,8 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
                 calculation_stage="arq_remediated",
             )
         else:
-            package_sqs = calculate_package_sqs(
+            package_sqs = await run_scoring(
+                calculate_package_sqs,
                 facts=facts, flags=flags, form_results=sqs_list,
                 cross_issues=cf_deduped, hard_stops=hard_stops, soft_stops=soft_stops,
                 session_data=proc, session_id=processing_session_id, user_id=user_id,
@@ -8761,12 +8774,19 @@ async def recalculate_session_scores(processing_session_id: str, *, trigger: str
     # it was; `trigger` is stored so the screen can refuse an unattributed one.
     if issue_diff is not None and trigger == CLIENT_ANSWERS_TRIGGER:
         _session_updates["issue_diff_last"] = {**issue_diff, "trigger": trigger}
-    await upd_processing_session(processing_session_id, _session_updates)
+    # Only `sqs` changed in each form here. Writing the whole form back would restore the
+    # boxes as they stood when this run read them, blanking a value a save stamped while
+    # scoring ran (multi-user review, 1 Nov 2026).
+    await upd_processing_session(processing_session_id, {
+        **_session_updates,
+        "generated_forms": {fid: {"sqs": fdata.get("sqs")} for fid, fdata in generated.items()
+                            if isinstance(fdata, dict) and fdata.get("sqs") is not None},
+    })
     # Runtime invariants (30 Oct 2026): log only, never blocks.
     try:
         from services.invariants import log_breaches
         _inv = {**(proc or {}), **_session_updates}
-        log_breaches(_inv, stage="after_forms" if _inv.get("generated_forms") else "pre_form",
+        await run_scoring(log_breaches, _inv, stage="after_forms" if _inv.get("generated_forms") else "pre_form",
                      session_id=processing_session_id)
     except Exception:                                          # noqa: BLE001
         pass

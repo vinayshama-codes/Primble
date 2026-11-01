@@ -40,6 +40,7 @@ No store -> nothing runs, and every existing package is byte-identical.
 """
 from __future__ import annotations
 
+from utils.concurrency import run_scoring
 import asyncio
 import copy
 import hashlib
@@ -1934,9 +1935,10 @@ async def apply_post_generation(session: dict, session_id: str, new_store: dict,
     confirmations = dict(session.get("underwriting_confirmations") or {})
     if confirmations:
         facts = apply_confirmations(facts, confirmations, docs=docs)
-    report = apply_producer_policy_lines(facts, flags, docs, restore_flags=True, force=True)
+    report = await run_scoring(apply_producer_policy_lines, facts, flags, docs,
+                               restore_flags=True, force=True)
 
-    underwriting = assess_underwriting_consistency(docs, facts, confirmations, flags=flags)
+    underwriting = await run_scoring(assess_underwriting_consistency, docs, facts, confirmations, flags=flags)
     delete: List[str] = list(stale_keys(facts_before, facts))
     _confirmed = set(confirmations.keys())
     _withheld = set(unresolved_withheld_keys(underwriting, confirmations))
@@ -1971,10 +1973,10 @@ async def apply_post_generation(session: dict, session_id: str, new_store: dict,
     view_after = {**facts, **flags, "_package_form_ids": pkg}
     states_before = {fid: dict((f or {}).get("field_state") or (f or {}).get("mapped") or {})
                      for fid, f in generated.items() if isinstance(f, dict)}
-    stamped = set(_restamp_changed_boxes(generated, view_before, view_after, own_keys=set(),
-                                         own_value=None, provenance="producer", scope=None) or [])
+    stamped = set(await run_scoring(_restamp_changed_boxes, generated, view_before, view_after, own_keys=set(),
+                                    own_value=None, provenance="producer", scope=None) or [])
     raw_text = "\n".join(str(d.get("text") or "") for d in docs)
-    stamped |= set(restamp_nonfillable_boxes(generated, view_before, view_after, raw_text) or [])
+    stamped |= set(await run_scoring(restamp_nonfillable_boxes, generated, view_before, view_after, raw_text) or [])
     label_producer_boxes(generated, states_before, facts, label=provenance, values=own_values)
     for fid in stamped:
         form = generated.get(fid)

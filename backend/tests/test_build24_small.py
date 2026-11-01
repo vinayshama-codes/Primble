@@ -271,7 +271,10 @@ def _calls_in(func_name):
     tree = ast.parse(open(fr.__file__, encoding="utf-8").read())
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == func_name)
-    return {getattr(c.func, "id", getattr(c.func, "attr", None)) for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    # `run_scoring(scorer, ...)` is a call of the scorer (1 Nov 2026).
+    _through = {c.args[0].id for c in ast.walk(fn) if isinstance(c, ast.Call)
+                and getattr(c.func, "id", "") == "run_scoring" and c.args and isinstance(c.args[0], ast.Name)}
+    return _through | {getattr(c.func, "id", getattr(c.func, "attr", None)) for c in ast.walk(fn) if isinstance(c, ast.Call)}
 
 
 @pytest.mark.parametrize("func_name", ["_bg_lite_generate", "lite_generate_internal"])

@@ -142,6 +142,9 @@ def test_no_production_caller_brings_the_fill_slice_back():
             if not isinstance(node, ast.Call):
                 continue
             name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+            # `run_scoring(scorer, ...)` is a call of the scorer (1 Nov 2026).
+            if name == "run_scoring" and node.args and isinstance(node.args[0], ast.Name):
+                name = node.args[0].id
             if name not in _SCORERS:
                 continue
             for kw in node.keywords:

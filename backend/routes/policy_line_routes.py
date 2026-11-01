@@ -8,6 +8,10 @@ editor after them).
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
+from utils.concurrency import session_write_lock
+
 import asyncio
 import copy
 import logging
@@ -48,8 +52,14 @@ class PolicyLinePriorOtherRequest(BaseModel):
 # otherwise each read the store before the other wrote it. The lock lives with
 # the store (`policy_lines.session_lock`) because the questionnaire's answers
 # about a policy write the same store (22 Oct 2026).
-def _lock_for(session_id: str) -> asyncio.Lock:
-    return pl.session_lock(session_id)
+@asynccontextmanager
+async def _lock_for(session_id: str):
+    """ONE LOCK ORDER: the package's lock first, then the policy store's. A fix-window
+    save takes them in that order, so this route taking the store's first deadlocked
+    against it, for ever (multi-user review, 1 Nov 2026)."""
+    async with session_write_lock(session_id):
+        async with pl.session_lock(session_id):
+            yield
 
 
 def _owner(session: dict, current_user: dict) -> None:

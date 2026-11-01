@@ -295,9 +295,40 @@ def _check_redis_reachable() -> bool:
 _STARTUP_TASKS: set = set()
 
 
+def _remove_leftover_uploads(max_age_s: float = 3600.0) -> None:
+    """A crash mid-upload skips the route's clean-up and strands the client's document
+    on disk. Uploads never outlive their request on the synchronous path, so anything
+    an hour old is a leftover. Queued async jobs keep their files, so that mode is left alone."""
+    if os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true":
+        return
+    from config.settings import UPLOAD_DIR
+    import time as _time
+    removed = 0
+    for entry in os.scandir(UPLOAD_DIR):
+        try:
+            if entry.is_file() and _time.time() - entry.stat().st_mtime > max_age_s:
+                os.remove(entry.path)
+                removed += 1
+        except OSError:
+            continue
+    if removed:
+        logger.info("startup: removed %d leftover upload(s)", removed)
+
+
 @app.on_event("startup")
 async def startup():
     validate_production_config()
+
+    from utils.memory_guard import log_startup_state
+    log_startup_state()
+    from utils.concurrency import watch_event_loop
+    _watch = asyncio.create_task(watch_event_loop())
+    _STARTUP_TASKS.add(_watch)
+    _watch.add_done_callback(_STARTUP_TASKS.discard)
+    try:
+        await asyncio.to_thread(_remove_leftover_uploads)
+    except Exception as _lx:                                   # noqa: BLE001
+        logger.warning(f"startup: leftover upload sweep skipped: {_lx}")
 
     # ACORD's shared field dictionary (29 Oct 2026, ASG_TRANSCRIBER.md "Keep
     # everything"): built once per process OFF the request path, so the first

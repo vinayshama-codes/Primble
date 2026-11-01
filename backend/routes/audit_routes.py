@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
+from utils.concurrency import one_writer_per_package, run_scoring
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -533,6 +534,7 @@ async def _refuse_while_generating(session: dict) -> None:
 
 
 @router.post("/api/audit/dismiss")
+@one_writer_per_package
 async def dismiss_recommendation(
     req: DismissRecommendationRequest,
     current_user: dict = Depends(get_current_user),
@@ -767,6 +769,7 @@ def _term_save_refusal(stored_facts: dict, field: str, value: str,
 
 
 @router.post("/api/audit/answer")
+@one_writer_per_package
 async def answer_recommendation(
     req: AnswerRecommendationRequest,
     current_user: dict = Depends(get_current_user),
@@ -1059,6 +1062,7 @@ async def _forms_payload_with_recs(session_id: str) -> tuple:
 
 
 @router.post("/api/audit/reopen-recommendation")
+@one_writer_per_package
 async def reopen_recommendation(
     req: ReopenRecommendationRequest,
     current_user: dict = Depends(get_current_user),
@@ -1336,8 +1340,8 @@ async def _pre_form_readiness(sess: dict, session_id: str,
             # the same screen fields.
             try:
                 from services.sqs_service import complete_screen_shares
-                _pkg, _kd = complete_screen_shares(
-                    sess, session_id, str(sess.get("user_id") or ""),
+                _pkg, _kd = await run_scoring(
+                    complete_screen_shares, sess, session_id, str(sess.get("user_id") or ""),
                     card["package_sqs"], card["key_details"])
                 if _pkg is not None:
                     card["package_sqs"] = _pkg
@@ -1610,6 +1614,7 @@ async def preview_answer(req: PreviewAnswerRequest, current_user: dict = Depends
 
 
 @router.post("/api/audit/resolve-issue")
+@one_writer_per_package
 async def resolve_issue(
     req: ResolveIssueRequest,
     current_user: dict = Depends(get_current_user),
@@ -2101,6 +2106,7 @@ ANSWERED_BY_DOCUMENTS = "Answered by your documents."
 
 
 @router.post("/api/audit/reopen-issue")
+@one_writer_per_package
 async def reopen_issue(
     req: ReopenIssueRequest,
     current_user: dict = Depends(get_current_user),
@@ -2438,7 +2444,7 @@ async def get_open_recs(
             issues = []
             try:
                 issues = review_issue_rows(
-                    [_review_page_view(session), _grouped_cross_issues_for_panel(
+                    [await run_scoring(_review_page_view, session), _grouped_cross_issues_for_panel(
                         session.get("cross_issues_last") or [], facts=session.get("facts") or {})],
                     await get_issue_statuses(session_id))
             except Exception as _ix:                          # noqa: BLE001

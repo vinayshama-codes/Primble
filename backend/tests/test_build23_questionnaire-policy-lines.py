@@ -1092,8 +1092,10 @@ def test_a_package_answer_never_restamps_a_section_header(door):
     """Every re-stamp of the ANSWERED fact skips the section forms when the
     package has policy records (`skip_forms=`); the derived-fact re-stamps
     (`_dk`) are other facts."""
-    own = [c for c in _calls(door, "_restamp_canonical_into_forms")
-           if len(c.args) >= 2 and getattr(c.args[1], "id", "") == "canon"]
+    # `run_scoring(_restamp..., generated, canon, ...)`: off the event loop (1 Nov 2026).
+    own = [c for c in _calls(door, "run_scoring")
+           if len(c.args) >= 3 and getattr(c.args[0], "id", "") == "_restamp_canonical_into_forms"
+           and getattr(c.args[2], "id", "") == "canon"]
     assert own, door.__name__
     for c in own:
         assert any(k.arg == "skip_forms" for k in c.keywords), door.__name__
@@ -1116,7 +1118,11 @@ def test_the_policy_pass_runs_before_decoration():
 
 def test_one_lock_for_the_table_and_the_questionnaire():
     from routes import policy_line_routes as plr
-    assert plr._lock_for("s-lock") is pl.session_lock("s-lock")
+
+    async def held_inside():
+        async with plr._lock_for("s-lock"):
+            return pl.session_lock("s-lock").locked()
+    assert asyncio.run(held_inside()) is True
 
 
 def test_the_question_wording_has_no_em_dash():

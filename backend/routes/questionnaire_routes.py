@@ -22,6 +22,7 @@ import json
 import logging
 from typing import Any, List, Optional
 
+from utils.concurrency import one_writer_per_package
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -222,6 +223,7 @@ async def get_questionnaire(session_id: str, all: bool = False,
 
 
 @router.post("/api/questionnaire/{session_id}/answer")
+@one_writer_per_package
 async def answer_question(session_id: str, req: QuestionnaireAnswerRequest,
                           current_user: dict = Depends(get_current_user)):
     session = await _owned(session_id, current_user)
@@ -479,6 +481,7 @@ async def draft_narrative(session_id: str, current_user: dict = Depends(get_curr
 
 
 @router.post("/api/questionnaire/{session_id}/narrative/approve")
+@one_writer_per_package
 async def approve_narrative(session_id: str, req: NarrativeApproveRequest,
                             current_user: dict = Depends(get_current_user)):
     session = await _owned(session_id, current_user)

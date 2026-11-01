@@ -59,6 +59,7 @@ cannot place, a box it cannot classify is left exactly as it was.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Optional, Set, Tuple
@@ -377,12 +378,37 @@ def _drop_reference_only(witnesses: List[Doc], line: Optional[str], kind: Option
 
 # ══ (a) Is a value printed in a document? ════════════════════════════════════
 
-_FOLD_CACHE: Dict[Tuple[str, int, str, str], str] = {}
+_FOLD_CACHE: Dict[Tuple[str, str], str] = {}
 _FOLD_CACHE_MAX = 96
 
 
-def _cache_key(doc: Doc) -> Tuple[str, int, str, str]:
-    return (doc.name, len(doc.text), doc.text[:48], doc.text[-48:])
+# Text -> digest, without hashing it again (a document's text is looked up many times in
+# one scoring run, 13 ms a time on a big package) and without keeping the text alive.
+# Python's own string hash is cached on the string, salted per process, and only finds the
+# digest; it is the digest that identifies the text.
+_DIGESTS: Dict[Tuple[int, int], str] = {}
+
+
+def text_fingerprint(text: str) -> str:
+    """SHA-256 of the WHOLE text: what these caches are worked out from, so it is
+    what identifies them. Name, length and the first and last 48 characters are
+    not an identity - two users' same-template declarations can match on all four
+    and be read against each other's text (multi-user review, 1 Nov 2026). The
+    same file from two users shares an entry, which is safe: every value cached
+    here is computed from the text alone and holds no answer, score or account."""
+    text = str(text)
+    key = (hash(text), len(text))
+    digest = _DIGESTS.get(key)
+    if digest is None:
+        digest = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+        if len(_DIGESTS) >= 4096:
+            _DIGESTS.clear()
+        _DIGESTS[key] = digest
+    return digest
+
+
+def _cache_key(doc: Doc) -> Tuple[str, str]:
+    return (doc.name, text_fingerprint(doc.text))
 
 
 def _folded(doc: Doc) -> str:
@@ -424,7 +450,7 @@ def _date_keys(text: str) -> Set[Tuple[int, int, int]]:
     return out
 
 
-_DATE_CACHE: Dict[Tuple[str, int, str, str], Set[Tuple[int, int, int]]] = {}
+_DATE_CACHE: Dict[Tuple[str, str], Set[Tuple[int, int, int]]] = {}
 
 
 def _doc_dates(doc: Doc) -> Set[Tuple[int, int, int]]:
@@ -462,7 +488,7 @@ def _numbers_in(text: str) -> Set[str]:
     return out
 
 
-_NUMBER_CACHE: Dict[Tuple[str, int, str, str], Set[str]] = {}
+_NUMBER_CACHE: Dict[Tuple[str, str], Set[str]] = {}
 
 
 def _doc_numbers(doc: Doc) -> Set[str]:

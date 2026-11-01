@@ -149,8 +149,8 @@ def test_the_editor_confirm_uses_generation_input_and_restamps_premiums():
     src = inspect.getsource(ep.confirm_underwriting_value_in_editor)
     assert '_view_before = {**facts_before, **flags, "_package_form_ids": _pkg}' in src
     assert '_view_after = {**facts, **flags, "_package_form_ids": _pkg}' in src
-    assert "_restamp_changed_boxes(generated, _view_before, _view_after," in src
-    assert "restamp_nonfillable_boxes(generated, _view_before, _view_after, _raw)" in src
+    assert "run_scoring(_restamp_changed_boxes, generated, _view_before, _view_after," in src
+    assert "run_scoring(restamp_nonfillable_boxes, generated, _view_before, _view_after, _raw)" in src
 
 
 # ── 6. a client table is compared as the client saw it (round 4 integration) ─

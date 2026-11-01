@@ -421,7 +421,7 @@ def test_update_pdf_propagates_and_rederives():
     # the dependent facts are re-derived BEFORE the stops are rebuilt (since
     # 22 Oct 2026 by the stops door, on the facts the save will store)
     assert body.index("_rederive_answer_dependent_facts(") < body.index(
-        'stops_now({**session, "facts": updated_facts')
+        'run_scoring(stops_now, {**session, "facts": updated_facts')
 
 
 # ── 4. A stated radius ───────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import re
 import time
 from datetime import datetime, timezone
 
+from utils.concurrency import one_writer_per_package, run_scoring, session_write_lock
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -179,12 +180,18 @@ async def generate_questions(
     # on the forms. A fact we know but could not stamp anywhere is intentionally
     # left out so the client is still asked for it. Persist only when a box was
     # actually stamped so the next PDF render shows the value.
-    present_on_form, _backfilled = _backfill_and_resolve_present(generated, _facts)
-    if _backfilled:
-        try:
-            await upd_processing_session(session_id, {"generated_forms": generated})
-        except Exception as _persist_ex:
-            logger.warning(f"ARQ generate: back-fill persist failed: {_persist_ex}")
+    # Under the package's lock, from a fresh read: it writes whole forms, so a save
+    # landing between an older read and this write would be undone (review, 1 Nov 2026).
+    async with session_write_lock(session_id):
+        proc_session = await get_processing_session(session_id)
+        generated = proc_session.get("generated_forms", {})
+        _facts = proc_session.get("facts", {})
+        present_on_form, _backfilled = await run_scoring(_backfill_and_resolve_present, generated, _facts)
+        if _backfilled:
+            try:
+                await upd_processing_session(session_id, {"generated_forms": generated})
+            except Exception as _persist_ex:
+                logger.warning(f"ARQ generate: back-fill persist failed: {_persist_ex}")
 
     # `_gen_stats` collects the "Duplicate / Merged Questions Removed" metric the
     # client asked for (canonical-fact merges folded during generation).
@@ -218,7 +225,7 @@ async def generate_questions(
 
     # Orbin item 14: the applicant signs the forms as ONE question here, offered
     # (never pre-ticked) whenever a generated form has an applicant line.
-    _sig_q = applicant_signing.signature_question(proc_session)
+    _sig_q = await run_scoring(applicant_signing.signature_question, proc_session)
     if _sig_q:
         questions = [q for q in questions if q.get("field_name") != applicant_signing.SIGNATURE_FIELD] + [_sig_q]
 
@@ -323,7 +330,7 @@ async def send_questions_to_client(
         # Orbin item 14: the signature question is rebuilt from the session,
         # never from the request body; at most one goes out.
         if applicant_signing.is_signature_question(q) or q.get("field_name") == applicant_signing.SIGNATURE_FIELD:
-            _sig = applicant_signing.signature_question(proc_session)
+            _sig = await run_scoring(applicant_signing.signature_question, proc_session)
             if _sig and not any(applicant_signing.is_signature_question(c) for c in clean_questions):
                 clean_questions.append(dict(_sig))
             continue
@@ -1485,6 +1492,7 @@ async def list_session_schedules(
 
 
 @router.put("/schedules/{session_id}")
+@one_writer_per_package
 async def save_session_schedule_route(
     session_id: str,
     request: Request,

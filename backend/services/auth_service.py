@@ -29,7 +29,7 @@ try:
         retry_on_timeout=True,
         decode_responses=True,
     ))
-    logger.info(f"auth_service: Redis connected ({_REDIS_URL})")
+    logger.info("auth_service: Redis connected")
 except Exception as _redis_init_err:
     logger.warning(
         f"auth_service: Redis unavailable ({_redis_init_err}) — auth cache and Redis revocation disabled"

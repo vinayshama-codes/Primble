@@ -803,15 +803,25 @@ class _Serialized:
     def __init__(self, session_id: str):
         self.key = str(session_id)
         self.entry = None
+        self.package = None
 
     async def __aenter__(self):
+        # ONE LOCK ORDER: the package's lock, then this one. The re-score inside takes
+        # the package's lock, so holding this one first could deadlock a save.
+        from utils.concurrency import session_write_lock
+        self.package = session_write_lock(self.key)
+        await self.package.__aenter__()
         loop = asyncio.get_running_loop()
         entry = _LOCKS.get(self.key)
         if entry is None or entry[0] is not loop:
             entry = (loop, asyncio.Lock())
             _LOCKS[self.key] = entry
         self.entry = entry
-        await entry[1].acquire()
+        try:
+            await entry[1].acquire()
+        except BaseException:
+            await self.package.__aexit__(None, None, None)
+            raise
         return self
 
     async def __aexit__(self, *_exc):
@@ -820,6 +830,7 @@ class _Serialized:
         if not lock.locked() and not getattr(lock, "_waiters", None) \
                 and _LOCKS.get(self.key) is self.entry:
             _LOCKS.pop(self.key, None)
+        await self.package.__aexit__(None, None, None)
         return False
 
 

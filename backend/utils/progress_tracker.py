@@ -64,7 +64,7 @@ try:
         retry_on_timeout=True,
         decode_responses=True,
     ))
-    logger.info("progress_tracker: Redis connected (%s)", _REDIS_URL)
+    logger.info("progress_tracker: Redis connected")
 except Exception as _redis_init_err:  # pragma: no cover - depends on env
     logger.warning(
         "progress_tracker: Redis unavailable (%s) — in-process progress active "

@@ -236,7 +236,7 @@ def test_the_package_score_comes_from_the_panels_door():
 
 def test_every_download_route_prints_and_records_the_panels_score():
     one = inspect.getsource(dr.download_pdf)
-    assert "_pkg_now = _package_score_now(proc_session, session_id, fresh[\"id\"])" in one
+    assert "_pkg_now = await run_scoring(_package_score_now, proc_session, session_id, fresh[\"id\"])" in one
     assert "package_score=_pkg_score" in one and "package_sqs=_pkg_now" in one
     assert "_score_at_dl = (_pkg_score if _pkg_score is not None" in one
     allf = inspect.getsource(dr.download_all)

@@ -4787,8 +4787,10 @@ const AcordModal = forwardRef(function AcordModal({
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     fd.append("progress_token", _progressToken);
+    let uploadReachedServer = false;
     try {
       const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
+      uploadReachedServer = true;
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {} window.location.reload(); }, 2000); return; }
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled - please update billing."); else setError(msg); return; }
       if (res.status === 429) { setError("Server busy - too many concurrent uploads. Please wait 30 seconds and try again."); return; }
@@ -4858,8 +4860,8 @@ const AcordModal = forwardRef(function AcordModal({
       await applyPendingMarketingReason(data.session_id);
       setStep(user?.subscription_tier === "essentials" ? "lite" : "review");
     } catch (e) {
-      if (e.message === "Failed to fetch" || e.name === "TypeError") {
-        setError("Upload failed: could not reach the server. Check your connection, or the file may be too large. Please try again.");
+      if (!uploadReachedServer) {
+        setError("The upload was interrupted. Please upload it again - you won't lose anything.");
       } else {
         setError("Upload failed: " + e.message);
       }

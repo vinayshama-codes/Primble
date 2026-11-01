@@ -920,6 +920,14 @@ def _ruled_tables(page) -> List[dict]:
     return out
 
 
+def _close_page(page) -> None:
+    """Free one finished pdfplumber page. Reading it again simply parses it again."""
+    try:
+        page.close()
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _pdfplumber_extract_pages_structured(pdf_path: str) -> List[Tuple[str, str]]:
     """Per page: (native text through the reflow recovery, rendered table block).
 
@@ -959,6 +967,10 @@ def _pdfplumber_extract_pages_structured(pdf_path: str) -> List[Tuple[str, str]]
                     logger.warning("ocr_service: table pass failed on page %d of %s: %s",
                                    idx + 1, pdf_path, ex)
                 pages.append((text, tables_block))
+                # pdfplumber keeps a page's parsed objects until the file closes:
+                # 1,292 MB on a 271-page policy, 63 MB with this line, the text
+                # identical (Render: "Ran out of memory", 1 Nov 2026).
+                _close_page(page)
     except Exception as ex:
         logger.error(f"pdfplumber error on {pdf_path}: {ex}")
     return pages
@@ -1974,7 +1986,7 @@ async def extract_text(file_path: str) -> Tuple[str, List[str]]:
     else:
         logger.warning(f"extract_text: unsupported file type '{ext}' for {file_path}")
         return "", []
-    return clean_text(raw_text), low_conf
+    return await asyncio.to_thread(clean_text, raw_text), low_conf
 
 
 # A ZIP upload is opened in ONE place: services/upload_intake.store_uploads

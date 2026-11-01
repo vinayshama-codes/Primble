@@ -557,9 +557,9 @@ def test_every_route_syncs_after_the_package_is_scored():
     for start in ("async def select_forms_bulk", "async def update_pdf"):
         body = src[src.index(start):]
         body = body[:body.index("\n@router", 10)] if "\n@router" in body[10:] else body
-        assert body.index("calculate_package_sqs(") < body.index("await sync_recommendation_cards("), start
+        assert body.index("calculate_package_sqs,\n") < body.index("await sync_recommendation_cards("), start
     gen = src[src.index("async def select_forms_bulk"):]
-    assert gen.index("calculate_package_sqs(") < gen.index('"generated_forms": results')
+    assert gen.index("calculate_package_sqs,\n") < gen.index('"generated_forms": results')
 
 
 # ══ 8. The policy-wording check reads its own pattern ════════════════════════

@@ -392,11 +392,17 @@ def read_flattened(pdf_path: str, pages: List) -> List[dict]:
         held: Dict[str, set] = {}       # template pages the current copy of a form holds
         count: Dict[str, int] = {}
         with pdfplumber.open(pdf_path) as pl:
+            _prev_page = None
             for pf in todo:
+                # Free the page just finished (memory, 1 Nov 2026). At the top of
+                # the loop because the body below leaves it in several places.
+                if _prev_page is not None:
+                    _prev_page.close()
+                    _prev_page = None
                 tpl = _template(pf.form_id)
                 if not tpl:
                     continue
-                page = pl.pages[pf.page]
+                page = _prev_page = pl.pages[pf.page]
                 pm = _PAGE_OF_RE.search(page.extract_text() or "")
                 ti, fit = _match_page(tpl, _page_words(page), int(pm.group(1)) - 1 if pm else None)
                 if ti < 0 or fit is None:

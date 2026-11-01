@@ -23,6 +23,7 @@ extra_forms_scored  : list[dict]
 unique_low_conf     : list
 available_forms     : list[dict]
 """
+from utils.concurrency import run_scoring
 import asyncio
 import json
 import logging
@@ -733,8 +734,8 @@ async def _finalize_pipeline(
     # on every re-run, so a renamed agency is never stale. Fail-open: no
     # account row means today's documents-only behaviour.
     _submitting_account = await _submitting_account_for(user_id)
-    merged_facts, mflags = merge_facts(active_docs, primary,
-                                       submitting_account=_submitting_account)
+    merged_facts, mflags = await run_scoring(merge_facts, active_docs, primary,
+                                             submitting_account=_submitting_account)
     # ── One person, one role (Chat 5, 14 Sep 2026) ───────────────────────────
     # A Drive Other Car named individual is not a driver. Decided HERE, once,
     # before any consumer reads `auto_drivers` - the stamper, the scorer and the
@@ -1375,7 +1376,7 @@ async def _finalize_pipeline(
     tier1_ok, tier1_missing = check_tier1(_stored_view, mflags)
 
     tier2_score, tier2_missing = check_tier2(_stored_view, mflags)
-    hard_stops, soft_stops     = evaluate_stops(_stored_view, mflags)
+    hard_stops, soft_stops     = await run_scoring(evaluate_stops, _stored_view, mflags)
     # A run with NO stops looks identical to a run where the engine never fired,
     # and the owner asked exactly that question of a clean live package
     # (2026-08-13: "check why i am not getting expected warnings"). The answer
@@ -1615,8 +1616,8 @@ async def _finalize_pipeline(
                        "comparison falls back to the deterministic reader "
                        "exactly as before", _ynex)
 
-    underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations,
-                                                   flags=mflags)
+    underwriting = await run_scoring(assess_underwriting_consistency, active_docs, merged_facts,
+                                     confirmations, flags=mflags)
     # Client 2026-08-15 ("unresolved conflicts must remain unresolved"): facts
     # whose cross-document conflict is unresolved are listed on the session
     # facts so the stamping layer withholds their value until the picker
@@ -1791,7 +1792,7 @@ async def _finalize_pipeline(
         # On the facts this run will STORE (see `_stored_view` above), refreshed
         # here because the underwriting pass has written to `merged_facts`.
         _stored_view = facts_as_stored(prior_facts, merged_facts, _planned_deletes)
-        cross_form_issues = run_cross_form_validation(_stored_view, mflags, triggered_ids)
+        cross_form_issues = await run_scoring(run_cross_form_validation, _stored_view, mflags, triggered_ids)
         # Before forms a check whose only fix is choosing a form is a form
         # choice, not a stop - the same rule `stops_now` applies (13 Oct 2026).
         from services.cross_form_validator import defer_form_choices
@@ -1956,7 +1957,7 @@ async def _finalize_pipeline(
     # Runtime invariants (30 Oct 2026): log only, never blocks.
     try:
         from services.invariants import log_breaches
-        log_breaches(session_payload, stage="merge", session_id=sid)
+        await run_scoring(log_breaches, session_payload, stage="merge", session_id=sid)
     except Exception:                                          # noqa: BLE001
         pass
     _unpersisted = ({"session_payload": session_payload,
@@ -2388,7 +2389,7 @@ async def confirm_underwriting_value(
     pre_candidates: Optional[list] = None
     pre_reason: Optional[str] = None
     try:
-        pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations,
+        pre = await run_scoring(assess_underwriting_consistency, active_docs, session.get("facts") or {}, confirmations,
                                               flags=session.get("flags") or {})
         target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
         if target:
@@ -2532,7 +2533,7 @@ async def confirm_underwriting_value_in_editor(
     pre_reason: Optional[str] = None
     open_before: set = set()
     try:
-        pre = assess_underwriting_consistency(active_docs, facts_before, stored_confirmations,
+        pre = await run_scoring(assess_underwriting_consistency, active_docs, facts_before, stored_confirmations,
                                               flags=flags)
         open_before = {f.get("fact_key") for f in pre.get("fields") or []
                        if f.get("review_required")}
@@ -2566,7 +2567,7 @@ async def confirm_underwriting_value_in_editor(
     # a no-op. The flags are the stored ones and are left alone here.
     try:
         from services.policy_lines import apply_producer_policy_lines
-        apply_producer_policy_lines(facts, None, active_docs)
+        await run_scoring(apply_producer_policy_lines, facts, None, active_docs)
     except Exception as _plx:                                   # noqa: BLE001
         logger.warning("confirm_in_editor: producer policy lines skipped: %s", _plx)
     try:
@@ -2575,7 +2576,7 @@ async def confirm_underwriting_value_in_editor(
     except Exception as _fpx:                                   # noqa: BLE001
         logger.warning("confirm_in_editor: proposed-expiration follow skipped: %s", _fpx)
 
-    underwriting = assess_underwriting_consistency(active_docs, facts, confirmations, flags=flags)
+    underwriting = await run_scoring(assess_underwriting_consistency, active_docs, facts, confirmations, flags=flags)
     # The pipeline's own bookkeeping (see `_finalize_pipeline`), on the stored
     # facts. The facts merge is additive, so an emptied list is DELETED.
     delete_facts: List[str] = []
@@ -2606,16 +2607,16 @@ async def confirm_underwriting_value_in_editor(
         _pkg = list(generated.keys())
     _view_before = {**facts_before, **flags, "_package_form_ids": _pkg}
     _view_after = {**facts, **flags, "_package_form_ids": _pkg}
-    stamped = _restamp_changed_boxes(generated, _view_before, _view_after,
-                                     own_keys={fact_key, *linked_applied},
-                                     own_value=canonical, provenance="producer",
-                                     scope=scope)
+    stamped = await run_scoring(_restamp_changed_boxes, generated, _view_before, _view_after,
+                                own_keys={fact_key, *linked_applied},
+                                own_value=canonical, provenance="producer",
+                                scope=scope)
     # Premium boxes are non-fillable, so `_restamp_changed_boxes` skips them;
     # the one door generation runs for them re-stamps the ones the change moved.
     try:
         from services.policy_lines import restamp_nonfillable_boxes
         _raw = "\n".join(str(d.get("text") or "") for d in active_docs)
-        _np = restamp_nonfillable_boxes(generated, _view_before, _view_after, _raw) or []
+        _np = await run_scoring(restamp_nonfillable_boxes, generated, _view_before, _view_after, _raw) or []
         stamped = list(dict.fromkeys(list(stamped or []) + list(_np)))
     except Exception as _npx:                                   # noqa: BLE001
         logger.warning("confirm_in_editor: premium re-stamp skipped: %s", _npx)

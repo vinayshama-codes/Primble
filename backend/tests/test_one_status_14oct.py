@@ -223,6 +223,10 @@ def _functions(path: Path):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             calls = {getattr(c.func, "id", getattr(c.func, "attr", None))
                      for c in ast.walk(fn) if isinstance(c, ast.Call)}
+            # `run_scoring(scorer, ...)` is a call of the scorer (1 Nov 2026).
+            calls |= {c.args[0].id for c in ast.walk(fn) if isinstance(c, ast.Call)
+                      and getattr(c.func, "id", "") == "run_scoring" and c.args
+                      and isinstance(c.args[0], ast.Name)}
             yield fn, calls
 
 

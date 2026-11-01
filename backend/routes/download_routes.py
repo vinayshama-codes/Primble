@@ -4,6 +4,7 @@ import io
 import logging
 import time
 import zipfile
+from utils.concurrency import run_scoring
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -441,7 +442,7 @@ async def download_pdf(
     # Completeness gate (Figure 35 client feedback): blocks a clean download when a
     # placeholder value or a required COPE-style field remains, unless the caller
     # explicitly asked for a watermarked draft with a typed reason.
-    blocking_items = _enforce_completeness_gate(proc_session, [form_id], draft, override_reason)
+    blocking_items = await run_scoring(_enforce_completeness_gate, proc_session, [form_id], draft, override_reason)
     is_draft       = bool(blocking_items)
     _file_suffix   = "DRAFT" if is_draft else "FILLED"
     generated      = proc_session.get("generated_forms", {})
@@ -451,7 +452,7 @@ async def download_pdf(
     flags       = proc_session.get("flags", {})
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
-    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
+    _pkg_now = await run_scoring(_package_score_now, proc_session, session_id, fresh["id"])
     _pkg_score = _pkg_now.get("package_sqs_score")
 
     # Substantively unresolved recommendations: never reviewed OR acknowledged via
@@ -658,7 +659,7 @@ async def download_all(
     # Completeness gate (Figure 35 client feedback): blocks a clean package download
     # when any form has a placeholder value or an unmet required COPE-style field,
     # unless the caller explicitly asked for a watermarked draft with a typed reason.
-    blocking_items = _enforce_completeness_gate(proc_session, list(generated.keys()), draft, override_reason)
+    blocking_items = await run_scoring(_enforce_completeness_gate, proc_session, list(generated.keys()), draft, override_reason)
     is_draft       = bool(blocking_items)
     _file_suffix   = "DRAFT" if is_draft else "FILLED"
 
@@ -666,8 +667,9 @@ async def download_all(
     acord_pdfs = {}
     for fid in generated.keys():
         try:
-            pb = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
-            acord_pdfs[fid] = apply_draft_watermark(pb) if is_draft else pb
+            pb = await run_scoring(regenerate_pdf_for_form, proc_session, fid, force=True,
+                                   user_signature=user_signature)
+            acord_pdfs[fid] = (await run_scoring(apply_draft_watermark, pb)) if is_draft else pb
         except Exception as ex:
             logger.error(f"Skipping {fid}: {ex}")
 
@@ -682,7 +684,7 @@ async def download_all(
     unresolved_recs = await current_unresolved_recommendations(session_id, proc_session)
     # The package score exactly as the SQS panel shows it (1 Oct 2026) - read
     # first: its open hard stops are the cover's CRITICAL list (22 Oct 2026).
-    _pkg_now = _package_score_now(proc_session, session_id, fresh["id"])
+    _pkg_now = await run_scoring(_package_score_now, proc_session, session_id, fresh["id"])
     _pkg_score = _pkg_now.get("package_sqs_score")
     hard_stops, soft_stops = _split_open_recs(
         unresolved_recs, _unscored_card_ids(proc_session.get("generated_forms")),
@@ -707,8 +709,8 @@ async def download_all(
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
     else:
         logger.debug(f"cover narrative cache hit {_ck[:8]}")
-    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum, package_sqs=_pkg_now)
-    cover_pdf = _cover_with_record(cover_pdf, proc_session)
+    cover_pdf = await run_scoring(build_cover_page_pdf, facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum, package_sqs=_pkg_now)
+    cover_pdf = await run_scoring(_cover_with_record, cover_pdf, proc_session)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -834,7 +836,7 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     # The stops as they stand (6 Oct 2026): the one door, never the stored
     # display cache (see services/stops_now.py).
     from services.stops_now import stops_now as _stops_now
-    _lite_stops = _stops_now(proc_session, None, pre_form=not proc_session.get("generated_forms"))
+    _lite_stops = await run_scoring(_stops_now, proc_session, None, pre_form=not proc_session.get("generated_forms"))
     hard_stops  = _lite_stops["hard"]
     soft_stops  = _lite_stops["soft"]
     tier2_score = proc_session.get("tier2_score", 50)
@@ -847,7 +849,8 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     selected_ids     = [r["form_id"] for r in recs] if recs else ["ACORD_125"]
     primary_form_id  = selected_ids[0]
 
-    sqs = calculate_sqs_from_facts(
+    sqs = await run_scoring(
+        calculate_sqs_from_facts,
         facts=facts, flags=flags,
         selected_form_ids=selected_ids,
         hard_stops=hard_stops, soft_stops=soft_stops,
@@ -885,7 +888,7 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     # The stops as they stand (6 Oct 2026): the one door, never the stored
     # display cache (see services/stops_now.py).
     from services.stops_now import stops_now as _stops_now
-    _brief_stops = _stops_now(proc_session, None, pre_form=not proc_session.get("generated_forms"))
+    _brief_stops = await run_scoring(_stops_now, proc_session, None, pre_form=not proc_session.get("generated_forms"))
     hard_stops  = _brief_stops["hard"]
     soft_stops  = _brief_stops["soft"]
     # The brief PRINTS each problem once (round 5 #15): a legacy stop and its
@@ -910,7 +913,7 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     # panel does (1 Oct 2026) - the one door, never the Clarity snapshot taken at
     # the first analysis, which goes stale as soon as the forms are edited. Before
     # forms, the Lite screen's own source stands (Clarity, then the facts scorer).
-    _pkg = (_package_score_now(proc_session, session_id, current_user["id"])
+    _pkg = (await run_scoring(_package_score_now, proc_session, session_id, current_user["id"])
             if generated_forms else {}) or {}
     _row_label = "Pre-Submission Analysis"
     if _pkg.get("package_sqs_score") is not None:
@@ -943,7 +946,8 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     else:
         from services.sqs_service import calculate_sqs_from_facts
         selected_ids = proc_session.get("selected_form_ids") or ["ACORD_125"]
-        sqs = calculate_sqs_from_facts(
+        sqs = await run_scoring(
+            calculate_sqs_from_facts,
             facts=facts, flags=flags,
             selected_form_ids=selected_ids,
             hard_stops=hard_stops, soft_stops=soft_stops,
@@ -966,7 +970,8 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
         hard_stops=_shown_hard, soft_stops=_shown_soft,
         org_name=org_name, user=fresh,
     )
-    cover_pdf = build_cover_page_pdf(
+    cover_pdf = await run_scoring(
+        build_cover_page_pdf,
         facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[],
         org_name=org_name, narrative=ai_content["narrative"],
         ai_block=ai_content["ai_block"],

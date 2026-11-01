@@ -57,9 +57,9 @@ services:
       - key: LLM_MAX_CONCURRENT
         value: "15"
       # Max seconds a request will wait for a free LLM slot before raising.
-      # 90s absorbs Tier 1 bursts without prematurely failing user requests.
+      # The code floors this at 600 (utils/llm_limiter.py): waiting costs only time.
       - key: LLM_ACQUIRE_TIMEOUT
-        value: "90"
+        value: "600"
       - key: DB_POOL_MIN
         value: "2"
       # Bumped from 10 → 20: each in-flight heavy job can hold a connection
@@ -159,7 +159,7 @@ services:
       - key: LLM_MAX_CONCURRENT
         value: "10"
       - key: LLM_ACQUIRE_TIMEOUT
-        value: "90"
+        value: "600"
       - key: WORKER_MAX_JOB_RETRIES
         value: "5"
       - key: WORKER_FORM_GEN_CONCURRENCY

@@ -719,6 +719,8 @@ def _mark_drawn(pdf_path: str, by_page: Dict[int, List[FilledField]],
                 continue
             for f in fields:
                 f.drawn = _value_drawn(f, chars)
+            del chars
+            pdf.pages[idx].close()      # free the page's parsed objects (memory, 1 Nov 2026)
 
 
 def read_filled_fields(pdf_path: str,

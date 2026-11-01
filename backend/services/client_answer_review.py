@@ -28,6 +28,7 @@ Either way the hold is released, so the row retires and cannot re-fire.
 
 from __future__ import annotations
 
+from utils.concurrency import run_scoring
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -173,7 +174,7 @@ async def _apply_building_answer(session_id: str, building, entry: dict, value: 
     if not _pc.write_building_answer(facts, fact, position, typed, source="producer"):
         return False, [], None
     generated = session.get("generated_forms") or {}
-    touched = _restamp_building_row(generated, facts, position, _pc.PER_BUILDING_COPE[fact],
+    touched = await run_scoring(_restamp_building_row, generated, facts, position, _pc.PER_BUILDING_COPE[fact],
                                     label="producer")
     _pc.derive_package_cope(facts, source="producer")
     update = {"facts": facts}

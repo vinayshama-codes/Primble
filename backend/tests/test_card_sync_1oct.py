@@ -75,6 +75,9 @@ def _calls(path: Path, names):
         if isinstance(node, ast.Call):
             fn = node.func
             name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
+            # `run_scoring(scorer, ...)` is a call of the scorer (1 Nov 2026).
+            if name == "run_scoring" and node.args and isinstance(node.args[0], ast.Name):
+                name = node.args[0].id
             if name in names:
                 yield node
 

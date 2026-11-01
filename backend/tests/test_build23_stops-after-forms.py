@@ -200,9 +200,22 @@ def _scorer_calls(tree):
     return found
 
 
+class _SeeThroughRunScoring(ast.NodeTransformer):
+    """`await run_scoring(scorer, a, k=v)` IS `scorer(a, k=v)`: scoring moved off the event
+    loop (1 Nov 2026), and the guard must keep reading what is really called."""
+
+    def visit_Await(self, node):
+        self.generic_visit(node)
+        call = node.value
+        if isinstance(call, ast.Call) and _call_name(call.func) == "run_scoring" and call.args:
+            return ast.Call(func=call.args[0], args=call.args[1:], keywords=call.keywords,
+                            lineno=call.lineno, col_offset=call.col_offset)
+        return node
+
+
 def _offenders(source: str, label: str = "<src>"):
     """(offences, the functions that score the package) for one module."""
-    tree = ast.parse(source)
+    tree = _SeeThroughRunScoring().visit(ast.parse(source))
     door = _door_names(tree)
     offences, scorers = [], set()
     for call, stack in _scorer_calls(tree):
@@ -736,7 +749,7 @@ def test_both_cover_downloads_hand_the_package_score_to_the_list():
     src = inspect.getsource(dr)
     assert src.count("_live_card_points(proc_session.get(\"generated_forms\")), package_sqs=_pkg_now)") == 2
     body = inspect.getsource(dr.download_all)
-    assert body.index("_pkg_now = _package_score_now(") < body.index("_split_open_recs(")
+    assert body.index("_pkg_now = await run_scoring(_package_score_now,") < body.index("_split_open_recs(")
 
 
 # ══ 3. A save that leaves the proposed term already ended is refused ═════════

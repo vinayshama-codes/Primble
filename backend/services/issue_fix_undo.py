@@ -36,6 +36,7 @@ recorded: reopening never removes a generated form.
 """
 from __future__ import annotations
 
+from utils.concurrency import run_scoring
 import copy
 import json
 import logging
@@ -435,7 +436,7 @@ async def undo_fix(session_id: str, issue_id: str) -> Tuple[str, dict]:
     state, plan = plan_undo(session, receipt)
     if state != "ok":
         return state, plan
-    _restamp_late_forms(session, receipt, plan)
+    await run_scoring(_restamp_late_forms, session, receipt, plan)
     receipts.pop(issue_id, None)
     updates: dict = {RECEIPTS_KEY: dump_receipts(receipts)}
     if plan["set_facts"]:

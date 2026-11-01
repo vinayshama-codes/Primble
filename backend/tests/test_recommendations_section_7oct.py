@@ -157,6 +157,10 @@ def test_pre_form_status_still_scores_through_the_one_door():
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_pre_form_status")
     calls = {getattr(c.func, "id", getattr(c.func, "attr", None)) for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    # Scoring runs off the event loop (1 Nov 2026): the scorer is run_scoring's first argument.
+    calls |= {c.args[0].id for c in ast.walk(fn)
+              if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "run_scoring"
+              and c.args and isinstance(c.args[0], ast.Name)}
     assert "current_package_sqs" in calls and "with_fix_routes" in calls
     assert not calls & {"calculate_package_sqs", "score_package_pre_generation", "calculate_sqs"}
 

@@ -177,7 +177,7 @@ def _door_runs_the_detector():
 def test_arq_rescore_path_reruns_the_cross_document_detector():
     from services.arq_service import recalculate_session_scores
     src = inspect.getsource(recalculate_session_scores)
-    assert "stops_now(" in src and _door_runs_the_detector(), (
+    assert "run_scoring(stops_now," in src and _door_runs_the_detector(), (
         "recalculate_session_scores rebuilds hard_stops from scratch; without "
         "doc_consistency_stops the identity conflicts stop capping the score."
     )
@@ -186,7 +186,7 @@ def test_arq_rescore_path_reruns_the_cross_document_detector():
 def test_producer_edit_path_reruns_the_cross_document_detector():
     from routes import form_routes as _fr
     src = inspect.getsource(_fr.update_pdf)
-    assert "stops_now({**session" in src and _door_runs_the_detector(), (
+    assert "run_scoring(stops_now, {**session" in src and _door_runs_the_detector(), (
         "The update-pdf rescore rebuilds hard_stops from scratch; without "
         "doc_consistency_stops the identity conflicts stop capping the score."
     )

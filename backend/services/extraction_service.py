@@ -1305,7 +1305,7 @@ try:
         retry_on_timeout=True,
         decode_responses=True,
     ))
-    logger.info(f"extract_facts: Redis cache connected ({_REDIS_URL})")
+    logger.info("extract_facts: Redis cache connected")
 except Exception as _redis_init_err:
     logger.warning(
         f"extract_facts: Redis unavailable ({_redis_init_err}) — "

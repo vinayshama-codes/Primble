@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 
+from utils.concurrency import one_writer_per_package
 from fastapi import APIRouter, Depends, HTTPException
 
 from config.database import get_pool
@@ -70,6 +71,7 @@ async def get_signature(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/api/apply-signature/{session_id}/{form_id}")
+@one_writer_per_package
 async def apply_signature(
     session_id: str,
     form_id: str,

@@ -180,6 +180,7 @@ def recognize(pdf_path: str, page_texts: Optional[Sequence[str]] = None,
                     texts.append(t)
                     native_chars.append(len(p.chars))
                     bottoms.append(_bottom_text(p) if p.chars else None)
+                    p.close()       # free the page's parsed objects (memory, 1 Nov 2026)
         names = _names_by_page(pdf_path)
         for i, text in enumerate(texts):
             pf = PageForm(page=i, names=names.get(i, set()), text=text or "")

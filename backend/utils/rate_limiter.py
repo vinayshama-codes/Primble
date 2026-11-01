@@ -32,7 +32,7 @@ try:
         retry_on_timeout=True,
         decode_responses=True,
     ))
-    logger.info(f"rate_limiter: Redis connected ({_REDIS_URL})")
+    logger.info("rate_limiter: Redis connected")
 except Exception as _redis_init_err:
     logger.warning(
         f"rate_limiter: Redis unavailable ({_redis_init_err}) — "

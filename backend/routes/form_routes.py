@@ -78,7 +78,9 @@ from services.audit_service import (
     run_and_log_field_mapping_check,
 )
 from utils.rate_limiter import check_upload_rate_limit
-from utils.concurrency import try_acquire_heavy, release_heavy
+from utils.concurrency import (
+    acquire_heavy_waiting, one_writer_per_package, release_heavy, run_scoring, try_acquire_heavy,
+)
 from utils.mime_validator import validate_file_mime
 from utils.virus_scanner import scan_file_bytes
 
@@ -307,7 +309,7 @@ async def _pre_form_status(
     row = None
     try:
         row = session_row if session_row is not None else await get_processing_session(session_id)
-        pkg = current_package_sqs(row, session_id, str(current_user["id"]))
+        pkg = await run_scoring(current_package_sqs, row, session_id, str(current_user["id"]))
     except Exception as _ex:                                     # noqa: BLE001
         logger.error(f"pre-form status: package SQS unavailable [session={session_id} "
                      f"trace={get_trace_id()}]: {_ex}", exc_info=True)
@@ -345,15 +347,15 @@ async def _pre_form_status(
     try:
         from services.sqs_service import complete_screen_shares
         _credit_rows = await _dismissal_rows_after_forms(session_id, row)
-        pkg, kd = complete_screen_shares(row, session_id, str(current_user["id"]), pkg, kd,
-                                         credit_rows=_credit_rows)
+        pkg, kd = await run_scoring(complete_screen_shares, row, session_id,
+                                    str(current_user["id"]), pkg, kd, credit_rows=_credit_rows)
     except Exception as _ex:                                     # noqa: BLE001
         logger.warning(f"pre-form status: screen shares skipped [session={session_id}]: {_ex}")
     # Runtime invariants (30 Oct 2026): log only, never blocks.
     try:
         from services.invariants import log_breaches
         if isinstance(row, dict) and isinstance(pkg, dict):
-            log_breaches({**row, "facts": facts if facts is not None else row.get("facts"),
+            await run_scoring(log_breaches, {**row, "facts": facts if facts is not None else row.get("facts"),
                           "flags": flags if flags is not None else row.get("flags"),
                           "_page": {"package_sqs": pkg, "saved_pre_form_score": _dash}},
                          stage="pre_form" if not row.get("generated_forms") else "after_forms",
@@ -611,7 +613,7 @@ async def _bg_lite_generate(session_id: str) -> None:
         # A failure here never loses the forms just generated.
         try:
             from services.stops_now import stops_now
-            cross_issues = stops_now(session, form_ids, pre_form=False)["cross_issues"]
+            cross_issues = (await run_scoring(stops_now, session, form_ids, pre_form=False))["cross_issues"]
         except Exception as _sx:                                   # noqa: BLE001
             logger.warning("bg_lite: cross-form issues skipped session=%s: %s", session_id, _sx)
             cross_issues = []
@@ -671,8 +673,13 @@ async def upload_declaration(
         from services.upload_intake import store_uploads
         uploaded_paths, all_paths = await store_uploads(files)
 
+        # Before the slot: a big file waiting for memory must not hold a slot a small
+        # file could use. It waits on disk, with the user's normal spinner.
+        from utils.memory_guard import wait_for_room
+        await wait_for_room(all_paths)
+
         # Acquire the heavy semaphore for synchronous processing.
-        _sem_token = await try_acquire_heavy()
+        _sem_token = await acquire_heavy_waiting(try_acquire_heavy)
         if not _sem_token:
             raise HTTPException(
                 429,
@@ -858,6 +865,15 @@ async def upload_declaration(
             except Exception:
                 pass
         raise
+    except asyncio.CancelledError:
+        # A deploy or restart mid-upload: left on "processing", five of these refuse the
+        # user's next upload for 30 minutes (review, 1 Nov 2026).
+        if _job_id:
+            try:
+                await get_job_queue().update_status(_job_id, STATUS_FAILED, error="cancelled")
+            except Exception:
+                pass
+        raise
     except Exception as ex:
         logger.error(f"Upload error [trace={get_trace_id()}]: {ex}", exc_info=True)
         if _job_id:
@@ -988,6 +1004,7 @@ async def upload_progress(token: str, current_user: dict = Depends(get_current_u
 
 
 @router.post("/api/submission-integrity/resolve")
+@one_writer_per_package
 async def submission_integrity_resolve(
     req: SubmissionIntegrityResolveRequest,
     current_user: dict = Depends(get_current_user),
@@ -1100,6 +1117,7 @@ async def submission_integrity_resolve(
 
 
 @router.post("/api/document/reclassify")
+@one_writer_per_package
 async def document_reclassify(
     req: DocumentReclassifyRequest,
     current_user: dict = Depends(get_current_user),
@@ -1259,6 +1277,7 @@ async def document_reclassify(
 
 
 @router.post("/api/session/{session_id}/marketing-reason")
+@one_writer_per_package
 async def session_marketing_reason(
     session_id: str,
     req: MarketingReasonRequest,
@@ -1311,6 +1330,7 @@ async def session_marketing_reason(
 
 
 @router.post("/api/underwriting/confirm-value")
+@one_writer_per_package
 async def underwriting_confirm_value(
     req: UnderwritingConfirmRequest,
     current_user: dict = Depends(get_current_user),
@@ -1457,6 +1477,7 @@ def _previous_confirm_value(facts: dict, fact_key: str, scope: Optional[str]):
 
 
 @router.post("/api/underwriting/confirm-value-in-editor")
+@one_writer_per_package
 async def underwriting_confirm_value_in_editor(
     req: UnderwritingConfirmRequest,
     current_user: dict = Depends(get_current_user),
@@ -1569,6 +1590,7 @@ async def underwriting_confirm_value_in_editor(
 
 
 @router.post("/api/client-answer/resolve")
+@one_writer_per_package
 async def client_answer_resolve(
     req: ClientAnswerResolveRequest,
     current_user: dict = Depends(get_current_user),
@@ -1863,7 +1885,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         # warning it was before forms (14 Oct 2026 - one status from start to
         # finish: generation never promotes a check).
         from services.stops_now import stops_now
-        _gen_stops           = stops_now(session, combined_ids, pre_form=False)
+        _gen_stops           = await run_scoring(stops_now, session, combined_ids, pre_form=False)
         cross_issues_deduped = _gen_stops["cross_issues"]
 
         # Display copy = cross-form validation issues + any stamp-mismatch
@@ -1882,7 +1904,8 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 
         sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
         try:
-            package_sqs = calculate_package_sqs(
+            package_sqs = await run_scoring(
+                calculate_package_sqs,
                 facts=session["facts"],
                 flags=session["flags"],
                 form_results=sqs_results_list,
@@ -2015,7 +2038,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         # Runtime invariants (30 Oct 2026): log only, never blocks.
         try:
             from services.invariants import log_breaches
-            log_breaches({**session, "generated_forms": results, "package_sqs": package_sqs},
+            await run_scoring(log_breaches, {**session, "generated_forms": results, "package_sqs": package_sqs},
                          stage="generation", session_id=req.session_id)
         except Exception:                                        # noqa: BLE001
             pass
@@ -2122,7 +2145,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     # A failure here never turns a finished generation into a 500.
     try:
         from services.stops_now import stops_now
-        cross_issues_deduped = stops_now(session, form_ids, pre_form=False)["cross_issues"]
+        cross_issues_deduped = (await run_scoring(stops_now, session, form_ids, pre_form=False))["cross_issues"]
     except Exception as _sx:                                       # noqa: BLE001
         logger.warning("lite_generate_internal: cross-form issues skipped session=%s: %s", session_id, _sx)
         cross_issues_deduped = []
@@ -2285,6 +2308,7 @@ async def get_form_fields(
 
 
 @router.post("/api/mark-client-filled/{session_id}/{form_id}")
+@one_writer_per_package
 async def mark_client_filled(
     session_id: str, form_id: str,
     request: Request,
@@ -2508,6 +2532,7 @@ def editor_term_refusal(form_id: str, form: dict, field_updates: dict, facts: di
 
 
 @router.post("/api/update-pdf")
+@one_writer_per_package
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
     import hashlib, json
     session   = await get_processing_session(req.session_id)
@@ -2539,13 +2564,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     if _term_err:
         raise HTTPException(400, _term_err)
 
-    _sem_token = await try_acquire_heavy()
-    if not _sem_token:
-        raise HTTPException(
-            429,
-            "Server busy - too many requests at once. Please retry in 30 seconds.",
-            headers={"Retry-After": "30"},
-        )
+    # No heavy slot here: those exist for reading big documents. A short save must not
+    # wait behind uploads, least of all building on the row it read before waiting.
+    _sem_token = None
 
     try:
         r             = generated[form_id]
@@ -2837,8 +2858,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # stop stays a warning (one status, 14 Oct 2026). `form_hard` /
         # `form_soft` are what ONE form is scored with (spec 10).
         from services.stops_now import stops_now
-        _edit_stops = stops_now({**session, "facts": updated_facts, "flags": fresh_flags},
-                                None, pre_form=False, facts=updated_facts, flags=fresh_flags)
+        _edit_stops = await run_scoring(stops_now, {**session, "facts": updated_facts, "flags": fresh_flags},
+                                        None, pre_form=False, facts=updated_facts, flags=fresh_flags)
         _re_hard, _re_soft = list(_edit_stops["form_hard"]), list(_edit_stops["form_soft"])
         _cf_issues = list(_edit_stops["cross_issues"])
         fresh_hard_stops = list(_edit_stops["hard"])
@@ -2857,7 +2878,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         if isinstance(_edit_app_name, dict):
             _edit_app_name = _edit_app_name.get("value") or ""
         _edit_app_name = str(_edit_app_name).strip() or None
-        sqs = calculate_sqs(
+        sqs = await run_scoring(
+            calculate_sqs,
             facts=updated_facts, flags=fresh_flags,
             mapped_data=current_state, form_schema=r.get("schema", {}),
             selected_form_ids=session.get("selected_form_ids", []),
@@ -3019,7 +3041,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             for _pf in _propagated_forms:
                 _pdata = generated.get(_pf) or {}
                 try:
-                    _pdata["sqs"] = calculate_sqs(
+                    _pdata["sqs"] = await run_scoring(
+                        calculate_sqs,
                         facts=updated_facts, flags=fresh_flags,
                         mapped_data=_pdata.get("field_state") or _pdata.get("mapped", {}),
                         form_schema=_pdata.get("schema", {}),
@@ -3074,7 +3097,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         _display_cross = _cf_deduped + _stamp_issues
         try:
-            pkg_sqs = calculate_package_sqs(
+            pkg_sqs = await run_scoring(
+                calculate_package_sqs,
                 facts=updated_facts,
                 flags=fresh_flags,
                 form_results=_sqs_results_live,
@@ -3528,7 +3552,7 @@ async def get_extraction_result(
     if is_pre_form_session(proc_session) and not integrity.get("review_required"):
         try:
             from services.stops_now import stops_now as _stops_now
-            _st_live = _stops_now(proc_session, pre_form=True)
+            _st_live = await run_scoring(_stops_now, proc_session, pre_form=True)
             hard_stops = list(_st_live.get("hard") or [])
             _final_soft_stops = list(_st_live.get("soft") or [])
             _cross_shown = list(_st_live.get("cross_issues") or [])
@@ -3919,7 +3943,7 @@ async def clarity_analyze(
     # display cache. No form is generated on this path, so cross-form rules
     # are scoped to the recommended forms and demoted (C75).
     from services.stops_now import stops_now as _stops_now
-    _clarity_stops = _stops_now(session, None, pre_form=True)
+    _clarity_stops = await run_scoring(_stops_now, session, None, pre_form=True)
     hard_stops  = _clarity_stops["hard"]
     soft_stops  = _clarity_stops["soft"]
     tier2_score = session.get("tier2_score", 50)
@@ -3949,7 +3973,8 @@ async def clarity_analyze(
     sqs_per_form: dict = {}
     for fid in selected_form_ids:
         try:
-            sqs_per_form[fid] = calculate_sqs_from_facts(
+            sqs_per_form[fid] = await run_scoring(
+                calculate_sqs_from_facts,
                 facts=facts,
                 flags=flags,
                 selected_form_ids=selected_form_ids,
@@ -3988,7 +4013,8 @@ async def clarity_analyze(
     # average of the simplified per-form checklists - drives the Clarity headline
     # too. The averaged fallback built above is retained only if the scorer raises.
     try:
-        _clarity_pkg = calculate_package_sqs(
+        _clarity_pkg = await run_scoring(
+            calculate_package_sqs,
             facts=facts, flags=flags,
             form_results=list(sqs_per_form.values()),
             cross_issues=cross_issues,

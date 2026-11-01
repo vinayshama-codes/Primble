@@ -22,6 +22,7 @@ All rules here are additive - they never remove or modify existing
 stops returned by evaluate_stops() or check_doc_consistency().
 """
 
+import threading
 import functools
 import logging
 import re
@@ -2340,6 +2341,7 @@ _OPS_OVERFLOW_CHAR_THRESHOLD = 300
 # (30 Oct 2026: 1.0 s a call on Choice Electric, and the review plan scores the
 # same facts many times a page read). Keyed by the facts' content; small LRU.
 _EXPIRING_PARTS_MEMO = None   # an OrderedDict once used (LRU of 64)
+_EXPIRING_PARTS_LOCK = threading.Lock()   # scoring runs off the event loop, several at once
 
 
 def _expiring_policy_parts(facts: dict, with_125: bool, with_130: bool) -> tuple:
@@ -2354,10 +2356,14 @@ def _expiring_policy_parts(facts: dict, with_125: bool, with_130: bool) -> tuple
                with_125, with_130)
     except Exception:                                          # noqa: BLE001
         key = None
-    if key is not None and key in _EXPIRING_PARTS_MEMO:
-        _EXPIRING_PARTS_MEMO.move_to_end(key)
-        a, o, e = _EXPIRING_PARTS_MEMO[key]
-        return [dict(x) for x in a], [dict(x) for x in o], [dict(x) for x in e]
+    if key is not None:
+        with _EXPIRING_PARTS_LOCK:
+            _hit = _EXPIRING_PARTS_MEMO.get(key)
+            if _hit is not None:
+                _EXPIRING_PARTS_MEMO.move_to_end(key)
+        if _hit is not None:
+            a, o, e = _hit
+            return [dict(x) for x in a], [dict(x) for x in o], [dict(x) for x in e]
     aside: List[dict] = []
     overflow: List[dict] = []
     endorsements: List[dict] = []
@@ -2369,11 +2375,12 @@ def _expiring_policy_parts(facts: dict, with_125: bool, with_130: bool) -> tuple
         from services.wc_endorsements import schedule
         endorsements = list(schedule(facts) or [])
     if key is not None:
-        _EXPIRING_PARTS_MEMO[key] = ([dict(x) for x in aside if isinstance(x, dict)],
-                                     [dict(x) for x in overflow if isinstance(x, dict)],
-                                     [dict(x) for x in endorsements if isinstance(x, dict)])
-        while len(_EXPIRING_PARTS_MEMO) > 64:
-            _EXPIRING_PARTS_MEMO.popitem(last=False)
+        with _EXPIRING_PARTS_LOCK:
+            _EXPIRING_PARTS_MEMO[key] = ([dict(x) for x in aside if isinstance(x, dict)],
+                                         [dict(x) for x in overflow if isinstance(x, dict)],
+                                         [dict(x) for x in endorsements if isinstance(x, dict)])
+            while len(_EXPIRING_PARTS_MEMO) > 64:
+                _EXPIRING_PARTS_MEMO.popitem(last=False)
     return aside, overflow, endorsements
 
 
