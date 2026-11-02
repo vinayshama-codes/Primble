@@ -40,6 +40,84 @@ export function isDroppableUpload(file) {
   return type === "application/pdf" || type.startsWith("image/");
 }
 
+// Each file's content fingerprint (SHA-256 of its bytes, worked out in the
+// browser - nothing is uploaded), kept per File object.
+const _fingerprints = new WeakMap();
+
+// A file larger than this is never read whole into memory to be hashed: it
+// keeps its name / size / time key (3 Nov 2026). The server still reads a
+// copy of it once.
+export const FINGERPRINT_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Work out the content fingerprint of each file (once per file), ONE FILE AT
+ *  A TIME so a large drop never holds every file in memory at once. Call it
+ *  BEFORE `mergeUploadFiles`, so a renamed copy of a file already in the list
+ *  is recognised by its contents. A file over FINGERPRINT_MAX_BYTES, or one
+ *  the browser cannot hash (no secure context), keeps its name / size / time
+ *  key. */
+export async function fingerprintFiles(files) {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  for (const f of files || []) {
+    if (!f || _fingerprints.has(f)) continue;
+    let fp = "";
+    try {
+      if (subtle && typeof f.arrayBuffer === "function" && Number(f.size || 0) <= FINGERPRINT_MAX_BYTES) {
+        const digest = await subtle.digest("SHA-256", await f.arrayBuffer());
+        fp = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+    } catch { fp = ""; }
+    _fingerprints.set(f, fp);
+  }
+}
+
+function _fileKey(f) {
+  const fp = f && _fingerprints.get(f);
+  return fp ? `sha256:${fp}` : `${f?.name}\u0000${f?.size}\u0000${f?.lastModified}`;
+}
+
+/** The upload list after adding `incoming` and the note to show, worked out
+ *  in ONE step (3 Nov 2026): a file already in the list is not added again,
+ *  nor a repeat within `incoming`. "Already in the list" means the same
+ *  CONTENTS when `fingerprintFiles` has run (a renamed copy too), else the
+ *  same name, size and last-modified time. The server also reads identical
+ *  documents once. Returns {files, note}; note is "" when nothing was left out. */
+export function mergeUploadFiles(current, incoming) {
+  const seen = new Set((current || []).map(_fileKey));
+  const added = [];
+  let left = 0;
+  for (const f of incoming || []) {
+    const k = _fileKey(f);
+    if (seen.has(k)) { left += 1; continue; }
+    seen.add(k);
+    added.push(f);
+  }
+  const note = !left ? ""
+    : left === 1 ? "That file is already in the list, so it was not added again."
+      : `${left} files are already in the list, so they were not added again.`;
+  return { files: [...(current || []), ...added], note };
+}
+
+/** The upload list after adding `incoming` (see `mergeUploadFiles`). */
+export function withoutDuplicateFiles(current, incoming) {
+  return mergeUploadFiles(current, incoming).files;
+}
+
+/** The note shown when files were left out as already in the list, or "". */
+export function alreadyAddedNote(current, incoming) {
+  return mergeUploadFiles(current, incoming).note;
+}
+
+/** The note for files the SERVER read once because they read exactly like
+ *  another file of the upload (a re-saved copy, a PDF and the same PDF inside
+ *  a ZIP), or "". */
+export function readOnceNote(names) {
+  const list = (Array.isArray(names) ? names : []).filter(Boolean);
+  if (!list.length) return "";
+  return list.length === 1
+    ? `${list[0]} is the same document as another file, so it was read once.`
+    : `${joinNames(list)} are the same documents as other files, so each was read once.`;
+}
+
 /** The upload list's badge for a file: {label, kind} - kind is "zip",
  *  "image", "sheet" (a spreadsheet) or "document". The label is the file's
  *  own extension ("PDF", "XLSX", "CSV", "TXT"). */

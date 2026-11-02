@@ -366,6 +366,246 @@ async def _period_ended(user_id) -> bool:
         return False
 
 
+# ── usage months on annual plans (Brent, 3 Nov 2026) ─────────────────────────
+# An annual plan gets its allowance PER MONTH and its extra packages are billed
+# monthly. Primble's usage month is anchored on the plan's start (the
+# subscription's current period start, recorded at checkout and at each yearly
+# renewal): month k starts at anchor + k calendar months, the day clamped to the
+# month's end (31 Jan -> 28/29 Feb -> 31 Mar). When a month has ended the counter
+# rolls over - lazily, under the user row's lock, before the next package is
+# counted, and in the daily job. Monthly plans are untouched: their period is
+# still Stripe's renewal. `billing_period_start` keeps meaning "the last paid
+# renewal" (the stale-failure and stale-invoice checks read it); the month lives
+# in the ledger ("usage_anchor:<user>", "usage_month:<user>").
+_ANCHOR_PREFIX = "usage_anchor:"
+_MONTH_PREFIX = "usage_month:"
+
+
+def add_months(dt: datetime, k: int) -> datetime:
+    """`dt` plus k calendar months, the day clamped to the month's length."""
+    import calendar
+    total = dt.month - 1 + k
+    year, month = dt.year + total // 12, total % 12 + 1
+    return dt.replace(year=year, month=month, day=min(dt.day, calendar.monthrange(year, month)[1]))
+
+
+def usage_month_bounds(anchor: datetime, now: datetime) -> tuple:
+    """(start, next start) of the usage month `now` falls in. Always counted
+    from the anchor - never chained - so a 31st anchor returns to the 31st."""
+    if now < anchor:
+        return anchor, add_months(anchor, 1)
+    k = (now.year - anchor.year) * 12 + (now.month - anchor.month)
+    start = add_months(anchor, k)
+    while start > now:
+        k -= 1
+        start = add_months(anchor, k)
+    return start, add_months(anchor, k + 1)
+
+
+def _as_dt(value):
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+async def _upsert_marker(conn, key: str, kind: str, iso: str) -> None:
+    await conn.execute(
+        "INSERT INTO processed_webhook_events (event_id, event_type, processed_at) VALUES ($1,$2,$3)"
+        " ON CONFLICT (event_id) DO UPDATE SET processed_at = excluded.processed_at",
+        key, kind, iso)
+
+
+async def record_usage_anchor(conn, user_id, anchor_iso: str) -> None:
+    """A new annual plan, or a yearly renewal: months count from this start,
+    and the current usage month is the one it opens."""
+    await _upsert_marker(conn, f"{_ANCHOR_PREFIX}{user_id}", "usage_anchor", anchor_iso)
+    await _upsert_marker(conn, f"{_MONTH_PREFIX}{user_id}", "usage_month", anchor_iso)
+
+
+async def clear_usage_months(conn, user_id) -> None:
+    await conn.execute("DELETE FROM processed_webhook_events WHERE event_id IN ($1, $2)",
+                       f"{_ANCHOR_PREFIX}{user_id}", f"{_MONTH_PREFIX}{user_id}")
+
+
+async def _marker(conn, key: str):
+    row = await conn.fetchrow("SELECT processed_at FROM processed_webhook_events WHERE event_id=$1", key)
+    return dict(row)["processed_at"] if row else None
+
+
+def _is_annual(row: dict) -> bool:
+    return ((row.get("billing_cycle") or "") == "annual"
+            and (row.get("subscription_tier") or "free") in _PACKAGE_TIERS)
+
+
+async def _old_period_units(conn, user_id) -> set:
+    """Sessions whose overage was billed (or held) in an EARLIER period: they
+    stay in that period and are never counted again (the L-3 rule)."""
+    rows = await conn.fetch(
+        "SELECT event_id FROM processed_webhook_events WHERE event_id LIKE $1"
+        " AND event_type IN ('overage_billed','overage_pending','overage_billing','overage_held')",
+        f"{_UNIT_PREFIX}{user_id}:%")
+    return {dict(r)["event_id"].split(":", 2)[2] for r in rows}
+
+
+async def roll_usage_month(conn, row: dict, now: datetime | None = None) -> bool:
+    """Inside the caller's transaction, AFTER the user row's lock: start the
+    current usage month if it has not been started. The new month's count is
+    recounted from the packages themselves (a package billed as an earlier
+    month's overage stays in that month); several skipped months are one
+    rollover. No Stripe call. True when it rolled."""
+    if not _is_annual(row):
+        return False
+    now = now or datetime.now(timezone.utc)
+    uid = row["id"]
+    anchor = _as_dt(await _marker(conn, f"{_ANCHOR_PREFIX}{uid}")) or _as_dt(row.get("billing_period_start"))
+    if anchor is None:
+        return False
+    month_start, _next = usage_month_bounds(anchor, now)
+    current = _as_dt(await _marker(conn, f"{_MONTH_PREFIX}{uid}"))
+    if current is not None and current >= month_start:
+        return False
+    counted = []
+    try:
+        async with conn.transaction():
+            counted = await packages_counted_since(str(uid), month_start.isoformat(), conn=conn)
+            old = await _old_period_units(conn, uid)
+            counted = [c for c in counted if c[0] not in old]
+    except Exception as ex:
+        logger.warning("roll_usage_month: could not recount user=%s: %s", uid, type(ex).__name__)
+        counted = []
+    await conn.execute(
+        "UPDATE users SET packages_used=$1, overage_packages_invoiced=0 WHERE id=$2", len(counted), uid)
+    await _upsert_marker(conn, f"{_MONTH_PREFIX}{uid}", "usage_month", month_start.isoformat())
+    logger.info("usage month rolled for user=%s to %s (%s package(s) already in it)",
+                uid, month_start.isoformat(), len(counted))
+    return True
+
+
+async def recount_period(conn, user_id, since_iso: str) -> list:
+    """The packages of a period that starts at `since_iso`, from the packages
+    themselves, inside the caller's (locked) transaction. A package billed or
+    held as an earlier period's overage stays in that period (the L-3 rule)."""
+    counted = await packages_counted_since(str(user_id), since_iso, conn=conn)
+    old = await _old_period_units(conn, user_id)
+    return [c for c in counted if c[0] not in old]
+
+
+async def start_plan_months(conn, user_id, cycle: str, period_start_iso, period_end_iso) -> None:
+    """Every path that writes a plan onto a row (checkout, the plan sync, the
+    portal restore, verify-upgrade, the /me resync) leaves what the month logic
+    needs (3 Nov 2026): the plan's period end, and on an annual plan the usage
+    months anchored on the plan's period start."""
+    from datetime import datetime as _dt
+    await clear_usage_months(conn, user_id)
+    if cycle == "annual":
+        await record_usage_anchor(conn, user_id, period_start_iso or _dt.now(timezone.utc).isoformat())
+    if period_end_iso:
+        await record_period_end(conn, user_id, period_end_iso)
+    else:
+        await clear_period_end(conn, user_id)
+
+
+async def adopt_plan_usage(conn, user_id, cycle: str, period_start_iso, period_end_iso) -> int:
+    """Inside the caller's transaction: a plan written onto a row from Stripe
+    after the fact (the portal restore, the /me resync, verify-upgrade - 3 Nov
+    2026) gets everything the month logic needs - the period end, an annual
+    plan's months anchored on its period start - and the count of the period
+    it is in, recounted from the packages (annual: the current usage month;
+    monthly: since the period start). Takes the user row's lock first.
+    Returns the count."""
+    await conn.execute("UPDATE users SET packages_used = packages_used WHERE id=$1", user_id)
+    since = period_start_iso or datetime.now(timezone.utc).isoformat()
+    await start_plan_months(conn, user_id, cycle, since, period_end_iso)
+    if cycle == "annual":
+        fresh = await conn.fetchrow("SELECT * FROM users WHERE id=$1", user_id)
+        if fresh and await roll_usage_month(conn, dict(fresh)):
+            again = await conn.fetchrow("SELECT packages_used FROM users WHERE id=$1", user_id)
+            return int((dict(again) if again else {}).get("packages_used") or 0)
+    counted = []
+    try:
+        async with conn.transaction():
+            counted = await recount_period(conn, user_id, since)
+    except Exception as ex:                                        # noqa: BLE001
+        logger.warning("adopt_plan_usage: could not recount user=%s: %s", user_id, type(ex).__name__)
+    await conn.execute("UPDATE users SET packages_used=$1, overage_packages_invoiced=0 WHERE id=$2",
+                       len(counted), user_id)
+    return len(counted)
+
+
+# The last time the user was seen paid up (a paid invoice, a restore): a failure
+# Stripe created before it is stale (3 Nov 2026, R2 - billing_period_start no
+# longer moves for an annual plan's monthly overage invoices).
+_LAST_PAID_PREFIX = "last_paid:"
+
+
+async def record_last_paid(conn, user_id, iso: str) -> None:
+    await _upsert_marker(conn, f"{_LAST_PAID_PREFIX}{user_id}", "last_paid", iso)
+
+
+async def last_paid_at(conn, user_id):
+    return await _marker(conn, f"{_LAST_PAID_PREFIX}{user_id}")
+
+
+async def _month_due(row: dict) -> bool:
+    """Cheap: two ledger reads, no lock - is a new usage month waiting?"""
+    async with get_pool().acquire() as conn:
+        anchor = _as_dt(await _marker(conn, f"{_ANCHOR_PREFIX}{row['id']}")) or _as_dt(row.get("billing_period_start"))
+        current = _as_dt(await _marker(conn, f"{_MONTH_PREFIX}{row['id']}"))
+    if anchor is None:
+        return False
+    month_start, _next = usage_month_bounds(anchor, datetime.now(timezone.utc))
+    return current is None or current < month_start
+
+
+# ASYNC-SAFE
+async def rolled_packages_used(row: dict):
+    """The count a screen shows (3 Nov 2026, display): for an annual plan whose
+    month has ended, the new month is started first (rare; under the lock), so
+    /me and the package limit never show last month's count. Anything else:
+    the row's own count."""
+    used = int(row.get("packages_used") or 0)
+    if not _is_annual(row):
+        return used
+    try:
+        if not await _month_due(row):
+            return used
+        async with get_pool().acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET packages_used = packages_used WHERE id = $1", row["id"])
+                fresh = await conn.fetchrow("SELECT * FROM users WHERE id=$1", row["id"])
+                if not fresh:
+                    return used
+                await roll_usage_month(conn, dict(fresh))
+                again = await conn.fetchrow("SELECT packages_used FROM users WHERE id=$1", row["id"])
+        return int((dict(again) if again else {}).get("packages_used") or 0)
+    except Exception as ex:                                        # noqa: BLE001
+        logger.warning("rolled_packages_used: user=%s kept its stored count: %s", row.get("id"), ex)
+        return used
+
+
+# ASYNC-SAFE
+async def roll_usage_months_due() -> int:
+    """Daily job: every annual account starts its new usage month even when
+    quiet, so the screens show the new month's count."""
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch("SELECT id FROM users WHERE billing_cycle='annual' AND subscription_tier IN"
+                                " ('essentials','professional','business')")
+    rolled = 0
+    for r in [dict(x) for x in rows]:
+        try:
+            async with get_pool().acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("UPDATE users SET packages_used = packages_used WHERE id = $1", r["id"])
+                    fresh = await conn.fetchrow("SELECT * FROM users WHERE id=$1", r["id"])
+                    if fresh and await roll_usage_month(conn, dict(fresh)):
+                        rolled += 1
+        except Exception as ex:
+            logger.error("roll_usage_months_due: user=%s not rolled: %s", r["id"], ex)
+    return rolled
+
+
 # ── counting ─────────────────────────────────────────────────────────────────
 async def count_session_usage(user_id: str, session_id: str, *, reserved_free: bool = False) -> dict:
     """Count one usage for this session - the ONE counter (generation, the
@@ -402,6 +642,9 @@ async def count_session_usage(user_id: str, session_id: str, *, reserved_free: b
             async with conn.transaction():
                 # The user row's lock (a no-op update holds it to commit).
                 await conn.execute("UPDATE users SET packages_used = packages_used WHERE id = $1", fresh["id"])
+                # An annual plan's new usage month starts before this package
+                # is counted, so the package lands in the month it was made in.
+                await roll_usage_month(conn, fresh)
                 claimed = await claim_package_count(session_id, str(fresh["id"]), now_iso, conn=conn)
                 if claimed:
                     # Only a reservation this package still HOLDS stands in for
@@ -479,7 +722,18 @@ async def _evaluate_counted(row: dict, session_id: str) -> dict:
     pkg_eval = {"status": status, "allow": True, "overage_rate_cents": rate,
                 "pkgs_limit": pkgs_limit, "pkgs_used": n, "soft_buffer": hard_limit - pkgs_limit}
     if status == "overage":
-        if not _billable(row):
+        if not _billable(row) and _is_annual(row):
+            # An annual plan's month is not recounted by a renewal: the package
+            # is HELD now and billed when the user is restored (F1).
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                    " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                    overage_unit_key(row["id"], session_id), _UNIT_HELD, datetime.now(timezone.utc).isoformat())
+            logger.info("count_session_usage: annual overage package for user=%s held - payment_status=%s",
+                        row["id"], row.get("payment_status"))
+            pkg_eval["billing"] = "held"
+        elif not _billable(row):
             logger.info("count_session_usage: overage package for user=%s not billed - payment_status=%s;"
                         " the paid renewal recounts the period", row["id"], row.get("payment_status"))
             pkg_eval["billing"] = "not_billable"

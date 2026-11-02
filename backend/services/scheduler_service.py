@@ -181,12 +181,18 @@ async def run_daily_payment_lifecycle(force: bool = False):
                     continue
                 if state.get("paid"):
                     restored = "canceling" if state.get("cancel_at_period_end") else "ok"
+                    from services.usage_service import record_last_paid
                     async with get_pool().acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET payment_status=$2, payment_failed_at=NULL,"
-                            " payment_email_sent_day=0 WHERE id=$1 AND payment_failed_at=$3",
-                            row["id"], restored, row["payment_failed_at"],
-                        )
+                        async with conn.transaction():
+                            done = await conn.execute(
+                                "UPDATE users SET payment_status=$2, payment_failed_at=NULL,"
+                                " payment_email_sent_day=0 WHERE id=$1 AND payment_failed_at=$3",
+                                row["id"], restored, row["payment_failed_at"],
+                            )
+                            # Paid up now: a failure Stripe created before this
+                            # moment is stale (3 Nov 2026, R2).
+                            if int(str(done).split()[-1] or 0):
+                                await record_last_paid(conn, row["id"], now.isoformat())
                     logger.info(f"Lifecycle: user={row['id']} is paid up in Stripe - restored to {restored}")
                     # Overage held while the user was failing is billed now (F1).
                     try:
@@ -214,7 +220,9 @@ async def run_daily_payment_lifecycle(force: bool = False):
     # What Stripe did not take is tried again, once a day.
     from services import stripe_service as _ssvc
     from services import usage_service as _usage
-    for label, retry in (("pending overage", _usage.retry_pending_overage),
+    for label, retry in (("annual usage months", _usage.roll_usage_months_due),
+                         ("annual monthly overage billing", _ssvc.ensure_annual_overage_intervals),
+                         ("pending overage", _usage.retry_pending_overage),
                          ("final plan bills", _ssvc.retry_final_overage),
                          ("duplicate subscriptions", _ssvc.retry_unsettled_duplicates),
                          ("billing alerts", _ssvc.retry_billing_alerts)):

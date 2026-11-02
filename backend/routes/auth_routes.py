@@ -733,6 +733,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
     customer_id   = current_user.get("stripe_customer_id")
     stored_sub_id = current_user.get("stripe_subscription_id")
+    adopted_cycle = None
     if customer_id and sub not in ("free", None):
         # 30-second Redis cache keyed by a short hash of the user ID to avoid
         # blocking the event loop with a synchronous Stripe HTTP call on every request.
@@ -747,7 +748,8 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
         try:
             from config.settings import PLANS as _PLANS
-            from services.stripe_service import belongs_to_user, field as _sfield, plan_from_subscription
+            from services.stripe_service import (belongs_to_user, field as _sfield, subscription_plan,
+                                                 subscription_period)
             # Only a subscription tagged with THIS user's id, and only onto a row
             # with none stored: a resync never swaps a live subscription for
             # another one (an accidental second plan is the webhook's call), and
@@ -762,25 +764,41 @@ async def get_me(current_user: dict = Depends(get_current_user)):
                                  if belongs_to_user(s_, current_user["id"])), None)
             real_sub_id = _sfield(real_sub, "id") if real_sub else None
             if real_sub_id and real_sub_id != stored_sub_id:
-                stripe_plan, stripe_cycle = plan_from_subscription(real_sub)
+                stripe_plan, stripe_cycle = subscription_plan(real_sub)
                 stripe_cycle = stripe_cycle or "monthly"
+                row_cycle = current_user.get("billing_cycle") or "monthly"
                 async with get_pool().acquire() as conn:
-                    if stripe_plan and stripe_plan in _PLANS and stripe_plan != sub:
+                    if (stripe_plan and stripe_plan in _PLANS
+                            and (stripe_plan != sub or stripe_cycle != row_cycle)):
                         cfg = _PLANS[stripe_plan].get(stripe_cycle) or _PLANS[stripe_plan]["monthly"]
                         from datetime import datetime, timezone
+                        from services.usage_service import adopt_plan_usage
                         now = datetime.now(timezone.utc).isoformat()
-                        await conn.execute(
-                            """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
-                               billing_cycle=$3, packages_limit=$4, overage_rate=$5,
-                               packages_used=0, billing_period_start=$6,
-                               payment_status='ok', payment_failed_at=NULL
-                               WHERE id=$7 AND stripe_subscription_id IS NULL""",
-                            real_sub_id, stripe_plan, stripe_cycle,
-                            cfg["packages"], cfg["overage_rate"], now, current_user["id"],
-                        )
+                        _ps, _pe = subscription_period(real_sub)
+                        start_iso = (datetime.fromtimestamp(int(_ps), timezone.utc).isoformat() if _ps else now)
+                        end_iso = datetime.fromtimestamp(int(_pe), timezone.utc).isoformat() if _pe else None
+                        async with conn.transaction():
+                            done = await conn.execute(
+                                """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
+                                   billing_cycle=$3, packages_limit=$4, overage_rate=$5,
+                                   packages_used=0, billing_period_start=$6,
+                                   payment_status='ok', payment_failed_at=NULL
+                                   WHERE id=$7 AND stripe_subscription_id IS NULL""",
+                                real_sub_id, stripe_plan, stripe_cycle,
+                                cfg["packages"], cfg["overage_rate"], start_iso, current_user["id"],
+                            )
+                            # The plan's months and period end (3 Nov 2026).
+                            if int(str(done).split()[-1] or 0):
+                                pkgs_used = await adopt_plan_usage(conn, current_user["id"], stripe_cycle,
+                                                                   start_iso, end_iso)
+                                adopted_cycle = stripe_cycle
                         sub        = stripe_plan
                         pkgs_limit = cfg["packages"]
-                        pkgs_used  = 0
+                        if adopted_cycle == "annual":
+                            # Its extra packages are billed monthly (the daily
+                            # job retries a failure).
+                            from services.stripe_service import ensure_monthly_overage_billing
+                            await ensure_monthly_overage_billing(real_sub_id, check_first=True)
                     else:
                         await conn.execute(
                             "UPDATE users SET stripe_subscription_id=$1 WHERE id=$2 AND stripe_subscription_id IS NULL",
@@ -790,6 +808,11 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         except Exception:
             pass
 
+    if adopted_cycle is None:
+        # An annual plan whose usage month ended shows the new month's count,
+        # never last month's (3 Nov 2026) - two ledger reads, a roll if due.
+        from services.usage_service import rolled_packages_used
+        pkgs_used = await rolled_packages_used(current_user)
     response = {
         "id": current_user["id"], "email": current_user["email"],
         "full_name": current_user.get("full_name", ""),
@@ -797,7 +820,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "organization_name": current_user.get("organization_name", ""),
         "agency_address": current_user.get("agency_address", "") or "",
         "subscription_tier": sub,
-        "billing_cycle": current_user.get("billing_cycle", "monthly") or "monthly",
+        "billing_cycle": adopted_cycle or current_user.get("billing_cycle", "monthly") or "monthly",
         "downloads_remaining": max(0, FREE_PACKAGE_LIMIT - used) if sub == "free" else -1,
         "packages_used": pkgs_used, "packages_limit": pkgs_limit,
         "packages_soft_buffer": soft_buffer,

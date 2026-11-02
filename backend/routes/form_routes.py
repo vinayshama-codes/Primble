@@ -857,6 +857,9 @@ async def upload_declaration(
             # Core Underwriting Data Consistency (Beta Report §4.3) — Gross Sales
             # and similar normalized fields, with source attribution + conflicts.
             "underwriting_consistency": pipeline_result.get("underwriting_consistency") or {},
+            # Files read once because they read exactly like another file of
+            # this upload (a re-saved copy, a PDF and its copy in a ZIP).
+            "duplicates_skipped": list(pipeline_result.get("duplicates_skipped") or []),
         })
     except HTTPException as ex:
         if _job_id:

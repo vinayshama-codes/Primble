@@ -9,7 +9,8 @@ Status words: **Open** (found, not fixed) · **Fixed** (code changed, tests pass
 ## Where things stand
 
 - Brent's live Stripe account is configured (section 1). Payments and payouts are active, no tasks due.
-- Production still runs on the **test key** (`sk_test_...`). The switch to live has NOT happened.
+- **Switched to LIVE on 2 Nov 2026 (evening, IST):** commit `289629a` deployed on Render together with the live
+  `STRIPE_SECRET_KEY` and the live webhook secret. Free live checks passed (section 6, "Done at the switch").
 - Code review found 27 issues (section 3) on top of 4 fixed earlier the same day (section 2). All were fixed
   offline (backend + billing screens); 3 wait on Brent. Full suite after that round: 22,446 passed / 1 known
   failure / 44 skipped.
@@ -72,7 +73,8 @@ Account `acct_1TWJhD9O61RSE3nH` (Primble, live mode). Changes made by Vinay (tea
 | Customer portal | Invoices, customer info, payment methods | On | |
 | Payment methods | Cards + Amazon Pay, Apple Pay, Cash App Pay, Link, MB WAY, Bancontact, EPS, BLIK, Pix, Affirm, Klarna | Left as is | Primble's checkout asks for cards only |
 | Branding | Icon, logo, colours | Not set (optional, Brent's call) | |
-| Developers | API keys / webhooks | No live key created yet; no webhook yet | Created at the switch |
+| Developers | API keys | Live secret key "Primble Render" created 2 Nov (standard key: billing touches customers, checkout, subscriptions, invoices, invoice items, refunds, payments, portal; a restricted key later, once the exact permissions are mapped) | Owner keeps it in a private note; goes only on Render |
+| Developers | Webhook | **Primble Render** `we_1UXOYM9O61RSE3nHf289IAon`, Active, `https://primble.onrender.com/api/stripe/webhook`, Snapshot, **API 2026-04-22.dahlia** (clover not offered; the code's own Stripe calls already use dahlia - the test run exercised those), 7 events: the 6 + `customer.created` (TEMPORARY, for the free signature check - remove after) | Created 2 Nov |
 
 ## 2. Fixed earlier on 2 Nov (tests: `backend/tests/test_stripe_payment_lifecycle_2nov.py`)
 
@@ -312,6 +314,7 @@ own, the alert e-mail to info@primble.com.
 | LT-3 | Owner's click-through: after a counted package the plan panel kept the old count until a refresh (seen on Essentials: "1 / 1200"). Two causes: (1) the screen did not reload the account after the lite score; (2) the real one, server-side: `/api/auth/me` for a paying user and the auth user record are each cached 30 s in Redis, and counting a package cleared neither - so the screen's reload got the stale copy (Professional too) | Wrong usage shown for up to 30 s / until a refresh | Fixed (offline): (1) the lite score's success reloads `/me`; (2) `count_session_usage` calls `invalidate_user_cache` once the count is claimed. Pinned by `test_LT3_*` (2); 553 counting + Stripe tests pass; backend restarted. PASS - owner confirmed: the usage moves without a refresh |
 | LT-4 | Owner's click-through: on Essentials the dashboard showed 56 / 60 and the opened package showed 48 / 45 (vinaynotbinay@gmail.com, uploads 15:28 / 15:34). The Essentials run (`lite_generate_internal`) never scored or saved the PACKAGE score, so its screen fell back to the ACORD 125 form's own score; the dashboard showed the package's pre-form score. Pre-existing | Two different scores for one package | Fixed (offline): the Essentials run scores the package through `calculate_package_sqs` with `stops_now` (like the full generation) and saves it (never a failed None); dashboard and screen read the same number. Pinned by `test_LT4_the_essentials_score_is_the_package_score`; the stops-door guard (`test_build23_stops-after-forms`) caught a first cut that bound the stops to `None` before the door - the CODE was reshaped to take them from `stops_now` only. 60 related files: 3,683 passed; then the 9 touching files 275 passed. Backend restarted. Existing packages correct themselves the next time their score screen opens. PASS - owner confirmed: dashboard and opened package show the same score |
 | LT-5 | The app tells customers to write to **support@primble.ai** (footer "Contact Us", archived messages, dropdown, plan-change note), but primble.ai has **no MX record** - mail to it bounces. primble.com is on Google Workspace (info@primble.com receives: a contact-form test was Delivered); Stripe shows support@primble.com (set by Brent). Pre-existing address | Customers cannot reach support from the app | Open - proposed: support@primble.com everywhere (about 6 places); waits on Brent confirming that inbox (question 4 in the e-mail) |
+| LT-6 | Owner's live check, 3 Nov: the same PDF dropped twice into the first upload was kept twice and read, sent to the AI and merged twice (the "already in the package" check ran only for documents ADDED to an existing package) | Double AI cost; one document counted as two sources | Fixed (offline): the upload list refuses a file it already holds (same name, size, last-modified) and says "That file is already in the list, so it was not added again."; the list also compares CONTENTS (SHA-256 of the file's bytes, worked out in the browser), so a renamed copy is refused too; the server's fresh upload passes its own `known_texts`, so identical documents are read once (no AI call for the copy). Confirmed on primble.ai before the fix (same PDF twice = 2 documents). `tests/test_upload_duplicates_3nov.py` (5); upload-related files 740 passed; build clean. A NEW package with the same document is allowed by design. Not built: the cross-account alert (owner: later) |
 | A1 | Owner's check: plan dropdown on his Professional account (after a refresh) | PASS - "Professional · Monthly", 42 / 100, "To change your plan, contact support@primble.ai.", Manage billing, Cancel Subscription |
 | LT-2 check | Owner signed out and in again with Google, no refresh | PASS - dropdown showed 42 / 100 at once |
 | A2 | Owner: home page plan section | Changed on the owner's ask: the line "To change your plan, contact support@primble.ai. Manage billing" removed from the home page's plan section (it stays in the account dropdown and in the upgrade window). `test_billing_screens_2nov.py` updated (the TEST pinned the old placement); 28 screen tests pass; build clean |
@@ -322,10 +325,70 @@ own, the alert e-mail to info@primble.com.
 
 ### Testing after go-live (decision, 2 Nov)
 
+3 Nov: separate local database created for this - `primble_stripe_test` in Postgres.app on the Mac (empty; the app builds its own tables). The test-mode run uses a second local backend on port 8001 pointed at it, with the TEST key.
+
 Stripe tests stay in TEST mode (free, identical behaviour, test clocks). The live account only ever sees the one real
 purchase + refund at the switch. **After launch, local Stripe tests use a separate local database (Postgres.app on the
 Mac), never the shared one:** the late-payment job acts on every user with a failed payment, so a local run on the shared
 database could e-mail or lock a real customer. On 2 Nov the shared database had 0 such users, which is why it was safe.
+
+## 3c. Brent's answers, 3 Nov 2026
+
+| Question | Answer | Action |
+|---|---|---|
+| USD pricing | "Pricing/billing in USD is great" | Done 2 Nov (Adaptive Pricing off) |
+| Render workspace | He reverts it to Hobby | Brent |
+| Annual plans (M4) | **100 packages per month, not all at once; overage billed monthly** | **Built offline 3 Nov** (Stripe files 450 passed; `tests/test_annual_monthly_allowance_3nov.py` 39): usage month in ledger rows `usage_anchor:` / `usage_month:` (billing_period_start does not move monthly - `_paid_after` and the renewal check read it); `pending_invoice_item_interval` monthly on annual subscriptions (ledger `pii_interval:`, daily retry). Known risk under review: a failed monthly overage invoice while the plan stays active could re-send the day-0 e-mail on each retry. Existing internal annual rows keep 1,200 (now per month). Then: review (running), test-mode run on a separate local database. Original plan: annual allowance 100/month (+5% buffer); Primble's own usage month anchored on the plan start; Stripe's `pending_invoice_item_interval` = monthly on annual subscriptions so the extras are invoiced each month. Then review, then a test-mode run on a SEPARATE local database with a test clock, before any commit |
+| Plan changes through support (B1) | "Works for now"; self-service later | No change |
+| Refunds need a separate cancel | Not answered | Ask later |
+| support@primble.ai -> support@primble.com (LT-5) | Not answered | Ask later |
+| Business e-mails only (new ask) | Not blocking personal e-mails (owner's advice); Brent: build the cross-account document alert after the ACORD work | Closed / FW-2 |
+
+### Annual build: review + test-mode run (3 Nov, separate local database `primble_stripe_test`, TEST key, test clock)
+
+Review (report only): FIX FIRST - a failed monthly overage invoice could loop (repro with fakes: 6 retries = 6 day-0
+e-mails) if the subscription stayed active; a support change of billing cycle on the same tier (monthly <-> annual) is
+not synced; small: late stale failure event, display lag at the month change, three upload-list details. All sent to
+the build agent (running). No live annual customers exist, so the 1,200-per-month-on-old-rows risk does not apply.
+
+| Step | Real Stripe result |
+|---|---|
+| Buy Professional ANNUAL (4242) | Primble: annual, 100 a month, usage month recorded. **Stripe accepted `pending_invoice_item_interval` = monthly** (flexible billing); setting it sends `customer.subscription.updated`; first monthly invoice scheduled one month on |
+| Month 1: 3 extras (#106-#108), clock +1 month | Stripe made a separate invoice, `billing_reason` **automatic_pending_invoice_item_invoice**, $9.00, 3 lines, paid; it became `latest_invoice`; Primble did NOT reset usage (correct - not a renewal) |
+| Month 2: 2 extras, declining card, clock +1 month | The $6.00 extras invoice failed -> **Stripe set the subscription past_due** and the failed invoice is `latest_invoice`; Primble `failed`, day-0 e-mail sent ONCE |
+| Daily job, then a Stripe retry (clock +8 days) | Daily job kept `failed` (no wrong restore); the retry's `invoice.payment_failed` sent NO second e-mail (attempts 2, still past_due). So the review's e-mail loop does not happen on real Stripe; the fix stays as a safety net |
+| Good card pays the overdue extras invoice | Stripe active again; Primble `ok`, failure date and e-mail counter cleared; nothing left pending |
+| Clock to the year end | Renewal $2,868 charged ONCE (`subscription_cycle`); NO invoice in months with no extras; usage reset to 0; usage month re-anchored; monthly extras billing continues into year 2 |
+
+Not provable with a clock (Primble's month uses the real date): the month rollover itself - covered by the 39 unit tests.
+
+Round 6 (the review's fixes) by the build agent: "paid up" = subscription active/trialing AND no attempted open
+invoice (`Invoice.list(subscription=, status="open")`); `last_paid:<uid>` ledger row for stale failure events; plan sync
+on a CYCLE change of the same tier (read from the price's interval, Stripe's live subscription, 503 before claim on a
+transient error); every plan-writing path sets the month data; `/me` and the limit check show the rolled count; upload
+list: one source of truth, hash one file at a time, skip hashing over 25 MB, server tells the user a copy was read once
+(`duplicates_skipped`), Transcriber pre-submit skips re-saved copies. Tests: `test_annual_review_fixes_3nov.py` (30);
+Stripe files + new files 502 passed; related set 9,742 passed / 0 failed.
+
+Re-check on the FIXED code (test backend restarted, same local database and clock):
+| Step | Result |
+|---|---|
+| Failed monthly extras invoice | 1 day-0 e-mail; subscription past_due; daily job keeps `failed` (new open-invoice check accepted by Stripe) |
+| Good card pays it | `ok`, counter cleared, subscription active |
+| Support switches the plan annual -> monthly (an ACTIVE catalogue price) | Primble monthly, 100, usage-month rows cleared, Stripe monthly extras invoicing switched OFF |
+| ... and monthly -> annual | Primble annual, 100, usage month restarted, Stripe monthly extras invoicing ON again |
+
+Full suite after round 6 (3 Nov, 02:45 IST): **22,650 passed, 1 failed (the known `test_arq_acord125_missing_only`), 44 skipped.** Test backend (port 8001) and relay stopped; the local test database `primble_stripe_test` is kept for future runs.
+
+**For Brent / support:** Primble's checkout creates its Stripe products inline, and Stripe marks those INACTIVE, so a
+support plan change cannot reuse them - support creates (once) an active product + prices in Stripe's Product catalogue
+and switches the subscription to those. Primble follows the change from the price's own interval.
+
+**Owner's call (item 7) - DECIDED 3 Nov: Option A, leave it for now; revisit later.** Extra packages HELD while an
+annual customer's payment is failing are billed only when the payment recovers; if the plan ends unpaid (cancelled or
+deleted while failing) they are never billed. They stay in the ledger as `overage_held` rows, so they can be billed
+later. **FUTURE (Option B):** add held units to the final bill at plan end (`settle_final_overage` currently leaves
+`overage_held` out on purpose).
 
 ## 4. Questions for Brent
 
@@ -334,6 +397,17 @@ database could e-mail or lock a real customer. On 2 Nov the shared database had 
 3. Refunds: a refund in Stripe does not remove access; each refund also needs a manual cancel. OK at launch?
 4. Will this Stripe account ever bill anything other than Primble subscriptions (H4)?
 5. Forms blocked at day 10 or day 21 (L6)?
+
+### Future work (logged, not scheduled)
+
+| # | Item | Notes |
+|---|---|---|
+| FW-1 | Bill extra packages held while an annual customer's payment failed, when the plan ends unpaid (Option B) | Owner, 3 Nov: Option A for now. Held units remain as `overage_held` ledger rows |
+| FW-2 | Alert when the same document is uploaded from several accounts (competitor probing) | **APPROVED by Brent, 3 Nov: "a great idea" - build it AFTER the ACORD work.** The text fingerprint exists; the build should also save it (hash only) at upload so deleting a package does not hide it |
+| FW-3 | Business-email-only sign-up | **CLOSED 3 Nov:** personal e-mail accounts stay allowed (owner's recommendation; Brent agreed and chose the fingerprint alert, FW-2, instead) |
+| FW-4 | Refund cancels the plan automatically / support address .ai -> .com | Unanswered questions for Brent (ask later) |
+| FW-5 | In-app plan switching with proration (self-service) | Brent: "near future" |
+| FW-6 | Restricted Stripe key instead of the full secret key | Once the exact permissions are mapped |
 
 ## 5. The switch to live (not done)
 
@@ -348,6 +422,24 @@ database could e-mail or lock a real customer. On 2 Nov the shared database had 
 6. Brent deletes the old key he e-mailed.
 
 ## 6. Live checks after the switch
+
+### Done at the switch (2 Nov, no money moved)
+
+| Check | Result |
+|---|---|
+| Live checkout page | PASS - "Subscribe to Primble Professional - Monthly, $299.00 per month", live session (`cs_live_...`), no Sandbox; Stripe offers the customer an INR / USD choice (Stripe's adaptive pricing; Brent is paid in USD) |
+| Test card on live | PASS - 4242 refused: "Your card was declined. Your request was in live mode, but used a known test card."; account stays free; no subscription in Stripe |
+| One customer per user (new code) | PASS - one live customer created with `metadata.user_id`, idempotency key `primble-customer:<user id>:none` (written by today's code, so Render runs `289629a`) |
+| Webhook secret on Render | PASS - `customer.created` delivered to Primble Render: HTTP 200 `{"received": true}`, `livemode` true, API 2026-04-22.dahlia |
+| `customer.created` on the live webhook | KEPT on purpose (owner): a free connection check any time - Primble verifies and ignores it (200) |
+| Old test webhook to Render (`we_1TWbIFFoRT0iiVSB0JefAsVD`, test account) | Switched OFF - since the switch it could only fail (wrong secret) |
+| Mac `backend/.env` | `STRIPE_SECRET_KEY=` blank; the TEST key kept commented out with a note (for local tests on a separate database only); local backend restarted - no Stripe key loaded |
+| Brent's e-mailed key | Left as is (owner). Risk noted: if it is an `sk_live` key, anyone who reads that e-mail has full access to the account; the owner can delete it himself (API keys -> the OLD key -> Delete) |
+| Adaptive Pricing (local currency) | Turned OFF by the owner: the live checkout had offered INR by default (Rs 29,450.04 = $299 + Stripe's 4% conversion fee). Extra-package charges and final bills are created in USD by the code, so a customer subscribed in another currency risked unbillable extras. Verified: checkout now USD only ("$2,868.00 per year, $239.00 / month billed annually") |
+| Annual checkout wording | The annual checkout says "Includes 100 packages/month" while the app gives annual one 1,200 pot - aligned once Brent answers the annual question (M4) |
+| Manage billing on the new account | Not applicable: a free account has no Manage billing; the live portal settings were set on 2 Nov and the portal itself was proven in test mode |
+| Still to do | E-mail to Brent |
+
 
 1. One real purchase: plan turns on, webhook deliveries all 2xx, receipt e-mail arrives. Then refund it and
    cancel the subscription.

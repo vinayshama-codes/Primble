@@ -76,23 +76,26 @@ STRIPE_YEARLY_AMOUNT = 30000
 # `overage_rate` are copied onto the user row when a subscription is synced
 # (checkout webhook, plan change, verify-upgrade, portal restore); the monthly
 # renewal does not rewrite them. Annual `amount` is the displayed per-month
-# price x 12.
+# price x 12. `packages` is the allowance of ONE usage month on every plan -
+# Brent, 3 Nov 2026: an annual plan gets 100 packages per month (not one 1,200
+# pot) and its extra packages are billed monthly (services/usage_service:
+# usage months; stripe_routes: pending_invoice_item_interval).
 # Keep in step with frontend/src/components/billing/plans.js.
 PLANS = {
     "essentials": {
         "monthly": {"amount": 19900,  "interval": "month", "packages": 100,  "overage_rate": 200},
-        "annual":  {"amount": 190800, "interval": "year",  "packages": 1200, "overage_rate": 200},
+        "annual":  {"amount": 190800, "interval": "year",  "packages": 100,  "overage_rate": 200},
     },
     "professional": {
         "monthly": {"amount": 29900,  "interval": "month", "packages": 100,  "overage_rate": 300},
-        "annual":  {"amount": 286800, "interval": "year",  "packages": 1200, "overage_rate": 300},
+        "annual":  {"amount": 286800, "interval": "year",  "packages": 100,  "overage_rate": 300},
     },
     # RETIRED 2026-09-16 - no longer sold (see SELLABLE_PLANS). Kept so a
     # subscription bought before retirement still syncs through the webhook,
     # verify-upgrade and the billing portal instead of falling back to Essentials.
     "business": {
         "monthly": {"amount": 44900,  "interval": "month", "packages": 400,  "overage_rate": 125},
-        "annual":  {"amount": 399000, "interval": "year",  "packages": 4800, "overage_rate": 125},
+        "annual":  {"amount": 399000, "interval": "year",  "packages": 400,  "overage_rate": 125},
     },
     "enterprise": {
         "monthly": {"amount": 0, "interval": "month", "packages": 0, "overage_rate": 0},

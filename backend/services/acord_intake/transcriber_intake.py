@@ -334,7 +334,7 @@ def reset_client() -> None:
     _CLIENT = None
 
 
-async def presubmit_package(paths: List[str]) -> int:
+async def presubmit_package(paths: List[str], sent_paths: Optional[set] = None) -> int:
     """THE PRE-SUBMIT (29 Oct 2026, review: the wait was inline and sequential - 20
     outside forms = 20 x up to 150 s in one upload). At the start of an upload, every
     PDF whose ACORD pages its own text layer shows (fillable / flattened - a scan
@@ -342,7 +342,12 @@ async def presubmit_package(paths: List[str]) -> int:
     request id remembered in the cache as `pending`. When `extract_document`
     reaches the file, `fetch` finds the mark and collects the result ASG has been
     building meanwhile - the same bytes, the same hash, never paid twice. Live
-    clients only (a stub answers instantly); never raises. Returns the number sent."""
+    clients only (a stub answers instantly); never raises. Returns the number sent.
+
+    A file whose text layer reads exactly like an EARLIER file of the upload (a
+    re-saved copy - other bytes, the same document) is not sent (3 Nov 2026): the
+    upload reads it once, as the earlier file, so its result would never be
+    collected. `sent_paths`, when given, receives every path submitted."""
     cfg = load_config()
     # A FRESH budget for every package: this is the start of an upload, and the
     # worker runs every job in one long-lived task - a budget opened by the first
@@ -354,30 +359,31 @@ async def presubmit_package(paths: List[str]) -> int:
     from repositories.transcriber_repository import get_cached, put_cached
     from services.acord_intake import primble_record
     import asyncio
+    import hashlib
     client = _default_client()
     sem = asyncio.Semaphore(4)
     planned: set = set()                 # group hashes this pre-submit already sent
 
-    async def one(path: str) -> int:
+    async def look(path: str):
+        """Page recognition (the cheap half of the reader), or None."""
         if not str(path).lower().endswith(".pdf"):
-            return 0
+            return None
         async with sem:
             try:
-                # The cheap half of the reader: page recognition only (footer / box
-                # names). The full box read happens once, in `extract_document`
-                # (review, 29 Oct 2026: the pre-submit read every PDF twice).
+                # The full box read happens once, in `extract_document` (review,
+                # 29 Oct 2026: the pre-submit read every PDF twice).
                 from services.acord_intake.recognize import recognize
-                found = await asyncio.to_thread(recognize, path)
+                return await asyncio.to_thread(recognize, path)
+            except Exception as ex:                            # noqa: BLE001
+                logger.info("TRANSCRIBER_PRESUBMIT skipped for %s: %s", os.path.basename(str(path)), ex)
+                return None
+
+    async def one(path: str, found) -> int:
+        async with sem:
+            try:
                 rec = {"pages": [{"page": pf.page + 1, "kind": pf.kind, "form_id": pf.form_id,
                                   "acord_number": pf.acord_number, "edition": pf.edition}
                                  for pf in found if pf.kind]}
-                if any(pf.kind is None and not (pf.text or "").strip() for pf in found):
-                    # A page with no text layer may be a SCAN that OCR recognises
-                    # later: `extract_document` then plans it WITH that page, a
-                    # different sub-PDF and hash - this pre-submit would be paid
-                    # for and never collected, and its pages paid again (bug hunt,
-                    # 29 Oct 2026). Such a file waits for its turn.
-                    return 0
                 ours = await asyncio.to_thread(primble_record.carries_record, path)
                 group = await asyncio.to_thread(plan, path, rec, has_primble_record=ours, cfg=cfg)
                 if group is None:
@@ -399,11 +405,34 @@ async def presubmit_package(paths: List[str]) -> int:
                 await put_cached(group.hash, cfg.env, {"status": "pending", "request_id": rid,
                                                       "submitted_at": _now_iso()},
                                  pages=len(group.pages), form_numbers=group.label)
+                if sent_paths is not None:
+                    sent_paths.add(path)
                 return 1
             except Exception as ex:                            # noqa: BLE001
                 logger.info("TRANSCRIBER_PRESUBMIT skipped for %s: %s", os.path.basename(str(path)), ex)
                 return 0
-    sent = sum(await asyncio.gather(*(one(p) for p in paths)))
+
+    looked = await asyncio.gather(*(look(p) for p in paths))
+    first_text: Dict[str, str] = {}
+    todo = []
+    for path, found in zip(paths, looked):
+        if not found:
+            continue
+        if any(pf.kind is None and not (pf.text or "").strip() for pf in found):
+            # A page with no text layer may be a SCAN that OCR recognises later:
+            # `extract_document` then plans it WITH that page, a different sub-PDF
+            # and hash - this pre-submit would be paid for and never collected,
+            # and its pages paid again (bug hunt, 29 Oct 2026). Such a file waits
+            # for its turn.
+            continue
+        tkey = hashlib.sha256("\f".join((pf.text or "") for pf in found).encode("utf-8")).hexdigest()
+        if tkey in first_text:
+            logger.info("TRANSCRIBER_PRESUBMIT %s reads like %s - not sent", os.path.basename(str(path)),
+                        os.path.basename(str(first_text[tkey])))
+            continue
+        first_text[tkey] = path
+        todo.append((path, found))
+    sent = sum(await asyncio.gather(*(one(p, f) for p, f in todo)))
     if sent:
         logger.info("TRANSCRIBER_PRESUBMIT files=%d sent=%d", len(paths), sent)
     return sent

@@ -184,6 +184,7 @@ def sessions(monkeypatch, clock):
     monkeypatch.setattr(us, "claim_package_count", s.claim)
     monkeypatch.setattr(us, "get_processing_session", s.get)
     monkeypatch.setattr(sr, "packages_counted_since", s.since)
+    monkeypatch.setattr(us, "packages_counted_since", s.since)
     return s
 
 
@@ -236,8 +237,11 @@ class Stripe:
         return cid
 
     def add_sub(self, sid, status="active", customer=CUS, user_id="u1", plan="professional",
-                cycle="monthly", amount=None, interval="month", cancel_at_period_end=False,
+                cycle="monthly", amount=None, interval=None, cancel_at_period_end=False,
                 latest_invoice=None, created=None):
+        # A price bills on its plan's cycle, as in Stripe (3 Nov 2026: the
+        # price's interval decides a plan's cycle).
+        interval = interval or ("year" if cycle == "annual" else "month")
         meta = {}
         if user_id:
             meta["user_id"] = user_id
@@ -310,7 +314,9 @@ class Stripe:
 
     def sub_modify(self, sid, **kw):
         self._call("Subscription.modify", sid, **kw)
-        self.subs[sid].update({k: v for k, v in kw.items() if k == "cancel_at_period_end"})
+        if sid not in self.subs:
+            raise _missing("subscription", sid)
+        self.subs[sid].update({k: v for k, v in kw.items() if k != "idempotency_key"})
 
     # Invoices / refunds / items
     def invoice_payment_list(self, **kw):
@@ -341,7 +347,24 @@ class Stripe:
 
     def invoice_list(self, **kw):
         self._call("Invoice.list", **kw)
-        return _L(dict(i) for i in self.invoices.values() if i["customer"] == kw.get("customer"))
+        out = []
+        for i in self.invoices.values():
+            if "customer" in kw and i.get("customer") != kw["customer"]:
+                continue
+            if "subscription" in kw and i.get("subscription") != kw["subscription"]:
+                continue
+            if "status" in kw and i.get("status") != kw["status"]:
+                continue
+            if "customer" in kw or "subscription" in kw:
+                out.append(dict(i))
+        return _L(out)
+
+    def add_open_invoice(self, iid, sub=SUB, customer=CUS, attempt_count=1, reason="automatic_pending_invoice_item_invoice"):
+        """An invoice of the subscription Stripe has tried to charge and is
+        retrying (3 Nov 2026: the paid-up check)."""
+        self.invoices[iid] = {"id": iid, "status": "open", "customer": customer, "subscription": sub,
+                              "attempt_count": attempt_count, "billing_reason": reason, "metadata": {}}
+        return iid
 
     def invoice_retrieve(self, iid, **kw):
         self._call("Invoice.retrieve", iid, **kw)
@@ -988,7 +1011,8 @@ def test_verify_upgrade_upgrades_a_free_user_from_a_tagged_active_plan(env, no_r
     assert out == {"subscription_tier": "essentials", "upgraded": True, "reason": "stripe_verified"}
     u = db.user()
     assert (u["subscription_tier"], u["billing_cycle"], u["stripe_subscription_id"]) == ("essentials", "annual", "sub_new")
-    assert u["packages_limit"] == 1200
+    # Brent, 3 Nov 2026: an annual plan's allowance is 100 PER MONTH (was one 1,200 pot).
+    assert u["packages_limit"] == 100
 
 
 def test_verify_upgrade_never_replaces_a_live_stored_plan(env, no_rate_limit):

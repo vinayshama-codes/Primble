@@ -20,15 +20,19 @@ from services.auth_service import get_current_user, invalidate_user_cache
 from services.email_service import _send_payment_failed_email
 from services.stripe_service import (
     DUP_PENDING, FAILURE_STATUSES, FINAL_PENDING, PAYING_SUB_STATUSES, LIVE_SUB_STATUSES,
-    StripeUnavailable, allowance_for, final_overage_key, is_transient, send_claimed_payment_email,
+    StripeUnavailable, allowance_for, clear_monthly_overage_billing, ensure_monthly_overage_billing,
+    final_overage_key, is_transient, subscription_payment_state, subscription_period, subscription_plan,
+    send_claimed_payment_email,
     settle_final_overage,
     subscription_status,
     belongs_to_user, checkout_refusal, clear_stale_customer,
     duplicate_key, ensure_stripe_customer, field, is_ending, is_missing_customer, is_missing_subscription,
-    list_all, live_primble_subscriptions, plan_from_subscription, primble_customers_by_email,
+    list_all, live_primble_subscriptions, primble_customers_by_email,
     settle_duplicate_checkout,
 )
 from services.usage_service import (
+    adopt_plan_usage, clear_usage_months, last_paid_at, record_last_paid, record_usage_anchor, recount_period,
+    roll_usage_month, start_plan_months,
     bill_held_overage, bill_overage_for_period, clear_period_end, hold_overage_for_period, record_period_end, record_sub_period_end, sub_period_end,
 )
 from utils.helpers import _safe_parse_dt
@@ -64,17 +68,28 @@ def _ts_to_dt(ts) -> "datetime | None":
         return None
 
 
+def _period_isos(sub) -> tuple:
+    """A subscription's current period as ISO strings (None when unknown)."""
+    start, end = subscription_period(sub)
+    s_dt, e_dt = _ts_to_dt(start), _ts_to_dt(end)
+    return (s_dt.isoformat() if s_dt else None, e_dt.isoformat() if e_dt else None)
+
+
 def _event_created_at(event) -> "datetime | None":
     return _ts_to_dt(event.get("created"))
 
 
 def _paid_after(row, event_created) -> bool:
     """Stripe does not deliver events in order: a failure it created before the
-    user's last successful payment (billing_period_start) is stale and ignored."""
+    user's last successful payment is stale and ignored. The payment is the
+    later of billing_period_start (a paid renewal) and `last_paid_at` (any paid
+    invoice or restore - an annual plan's monthly overage invoice moves no
+    period, 3 Nov 2026, R2)."""
     if event_created is None or not row:
         return False
-    paid = _safe_parse_dt(row.get("billing_period_start"))
-    return bool(paid and paid > event_created)
+    times = [t for t in (_safe_parse_dt(row.get("billing_period_start")),
+                         _safe_parse_dt(row.get("last_paid_at"))) if t]
+    return bool(times and max(times) > event_created)
 
 
 def _failed_before(row, event_created) -> bool:
@@ -375,11 +390,12 @@ async def _handle_subscription_checkout(event_id: str, event_type: str, obj: dic
 
     cfg = PLANS[plan][cycle]
     now = datetime.now(timezone.utc).isoformat()
-    # The new plan's period end, from the subscription itself (Q2).
-    new_period_end = None
+    # The new plan's period, from the subscription itself (Q2).
+    new_period_end = new_period_start = None
     if not duplicate:
         state = await _subscription_state(sub_id, event_id)
         new_period_end = _ts_to_dt((state or {}).get("period_end"))
+        new_period_start = _ts_to_dt((state or {}).get("period_start"))
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             if not await _claim_event(conn, event_id, event_type):
@@ -407,6 +423,11 @@ async def _handle_subscription_checkout(event_id: str, event_type: str, obj: dic
                                else await sub_period_end(conn, sub_id))
                     if end_iso:
                         await record_period_end(conn, user_id, end_iso)
+                    # An annual plan's usage months count from its start (3 Nov 2026).
+                    await clear_usage_months(conn, user_id)
+                    if cycle == "annual":
+                        await record_usage_anchor(conn, user_id, (new_period_start.isoformat()
+                                                                  if new_period_start else now))
             if duplicate:
                 await _claim_key(conn, duplicate_key(user_id, sub_id, invoice_id), DUP_PENDING)
 
@@ -421,15 +442,21 @@ async def _handle_subscription_checkout(event_id: str, event_type: str, obj: dic
         session_id=sub_id,
     )
     await invalidate_user_cache(str(user_id))
+    if cycle == "annual":
+        # Its extra packages are billed monthly (Brent, 3 Nov 2026): Stripe
+        # invoices the plan's pending items each month. A failure here is
+        # retried by the daily job.
+        await ensure_monthly_overage_billing(sub_id)
 
 
-async def _subscription_state(sub_id: str, event_id: str, retry_on_transient: bool = False) -> "dict | None":
+async def _subscription_state(sub_id: str, event_id: str, retry_on_transient: bool = False,
+                              check_open: bool = False) -> "dict | None":
     """The subscription as Stripe has it now - status, cancel_at_period_end and
     its current period - or None when Stripe has no such subscription. A
     failure that may pass answers 503 when `retry_on_transient` (F1): the event
     is not claimed and nothing is spent, so Stripe sends it again."""
     try:
-        return await asyncio.to_thread(subscription_status, sub_id)
+        return await asyncio.to_thread(subscription_status, sub_id, check_open)
     except Exception as ex:
         if retry_on_transient and is_transient(ex):
             logger.error(f"{event_id}: cannot ask Stripe about {sub_id} ({type(ex).__name__}) - 503,"
@@ -450,6 +477,11 @@ def _restore_status(state: "dict | None", sub_id: str, event_id: str) -> "str | 
         return None
     if state.get("status") not in PAYING_SUB_STATUSES:
         logger.info(f"invoice paid {event_id}: subscription {sub_id} is {state.get('status')} - failure kept")
+        return None
+    if state.get("open_attempted"):
+        # 3 Nov 2026: an annual plan stays active while a failed monthly
+        # overage invoice is retried - not paid up until that invoice is.
+        logger.info(f"invoice paid {event_id}: subscription {sub_id} still has a failed open invoice - failure kept")
         return None
     return "canceling" if state.get("cancel_at_period_end") else "ok"
 
@@ -484,7 +516,8 @@ async def _handle_invoice_paid(event_id: str, event_type: str, event_created, ob
     if renewal or (failing and not stale_success):
         # F1: a renewal and a failing user's payment need the subscription; a
         # Stripe failure that may pass answers 503 BEFORE anything is claimed.
-        state = await _subscription_state(sub_id, event_id, retry_on_transient=True)
+        state = await _subscription_state(sub_id, event_id, retry_on_transient=True,
+                                          check_open=failing and not stale_success)
     restore_to = None
     if failing:
         if stale_success:
@@ -519,6 +552,9 @@ async def _handle_invoice_paid(event_id: str, event_type: str, event_created, ob
                 if renewal and period_end is not None:
                     await record_sub_period_end(conn, sub_id, period_end.isoformat())
                 return
+            # Any paid invoice of the plan is a payment: a failure Stripe made
+            # before now is stale (R2).
+            await record_last_paid(conn, row["id"], now)
             if renewal:
                 # The new period's end, or - when nothing gives it - no stored
                 # end at all: a stale one would defer the whole new period's
@@ -573,6 +609,9 @@ async def _handle_invoice_paid(event_id: str, event_type: str, event_created, ob
                     " billing_period_start=$3, overage_packages_invoiced=0 WHERE id=$4",
                     len(counted), used_at_lock, now, row["id"],
                 )
+                if (row.get("billing_cycle") or "") == "annual" and period_from is not None:
+                    # The yearly renewal opens month 0 of the new year (3 Nov 2026).
+                    await record_usage_anchor(conn, row["id"], period_from.isoformat())
             if restore_to:
                 await conn.execute(
                     "UPDATE users SET payment_status=$1, payment_failed_at=NULL, payment_email_sent_day=0"
@@ -615,8 +654,10 @@ async def _handle_payment_failed(event_id: str, event_type: str, event_created, 
                 "FROM users WHERE stripe_subscription_id = $1",
                 sub_id,
             )
-            if row and _paid_after(dict(row), event_created):
-                logger.info(f"invoice.payment_failed: stale event {event_id} - user {dict(row)['id']} paid after it, skipped")
+            if row:
+                row = {**dict(row), "last_paid_at": await last_paid_at(conn, dict(row)["id"])}
+            if row and _paid_after(row, event_created):
+                logger.info(f"invoice.payment_failed: stale event {event_id} - user {row['id']} paid after it, skipped")
                 return
             if row:
                 await conn.execute(_MARK_FAILED + " WHERE id=$2", failed_at, dict(row)["id"])
@@ -650,7 +691,8 @@ async def _handle_payment_failed(event_id: str, event_type: str, event_created, 
                             dict(row)["id"], sub_id,
                         )
                         row = None
-                    elif _paid_after(dict(row), event_created):
+                    elif _paid_after({**dict(row), "last_paid_at": await last_paid_at(conn, dict(row)["id"])},
+                                     event_created):
                         logger.info(f"invoice.payment_failed: stale event {event_id} - user {dict(row)['id']} paid after it, skipped")
                         row = None
                     else:
@@ -714,6 +756,7 @@ async def _handle_subscription_deleted(event_id: str, event_type: str, obj: dict
             )
             if cancelled_row:
                 await clear_period_end(conn, dict(cancelled_row)["id"])     # Q2
+                await clear_usage_months(conn, dict(cancelled_row)["id"])
             # C1: the plan the user actually had has ended - its unbilled extra
             # packages are owed and no renewal invoice will ever carry them.
             # Claimed here, in the event's transaction (a re-delivery finds it
@@ -746,32 +789,92 @@ async def _handle_subscription_updated(event_id: str, event_type: str, event_cre
     # date (LT-1) - the name is kept for the branches below.
     cancel_at_period_end = is_ending(obj)
     status = obj.get("status", "")
-    metadata = obj.get("metadata") or {}
-    new_plan = metadata.get("plan") if isinstance(metadata, dict) else getattr(metadata, "plan", None)
-    new_cycle = (
-        metadata.get("billing_cycle") if isinstance(metadata, dict)
-        else getattr(metadata, "billing_cycle", None)
-    ) or "monthly"
     if not sub_id:
         return
+    ev_plan, ev_cycle = subscription_plan(obj)
+    async with get_pool().acquire() as conn:
+        urow = await conn.fetchrow(
+            "SELECT id, subscription_tier, billing_cycle, payment_status, payment_failed_at"
+            " FROM users WHERE stripe_subscription_id=$1", sub_id)
+    urow = dict(urow) if urow else None
+    row_tier = (urow or {}).get("subscription_tier") or ""
+    row_cycle = (urow or {}).get("billing_cycle") or "monthly"
+    failing = bool(urow and (urow.get("payment_failed_at")
+                             or (urow.get("payment_status") or "ok") in FAILURE_STATUSES))
+    # A plan change - the tier OR the cycle (support switches Professional
+    # monthly <-> annual in Stripe, 3 Nov 2026) - is taken from the
+    # subscription as Stripe has it NOW, never from this payload: Stripe does
+    # not deliver events in order. Never on enterprise.
+    live = None
+    if (status == "active" and urow and ev_plan in PLANS and ev_plan != "enterprise"
+            and row_tier != "enterprise" and (row_tier != ev_plan or row_cycle != ev_cycle)):
+        live = await _subscription_state(sub_id, event_id, retry_on_transient=True)
+        if not (live and live.get("plan") in PLANS and live.get("plan") != "enterprise"
+                and live.get("status") in ("active", "trialing", "past_due")
+                and (live["plan"] != row_tier or (live.get("cycle") or "monthly") != row_cycle)):
+            live = None
+    # "active" restores a failing user only when the plan is paid up - active
+    # AND no open invoice already tried (3 Nov 2026): a card change or our own
+    # interval modify also says "active" while a failed overage invoice is
+    # being retried. Stripe out of reach = keep the failure.
+    paid_up = False
+    if (status == "active" and not cancel_at_period_end and failing
+            and not _failed_before(urow, event_created)):
+        try:
+            paid_up = bool((await asyncio.to_thread(subscription_payment_state, sub_id)).get("paid"))
+        except Exception as ex:
+            logger.warning(f"subscription.updated {event_id}: cannot ask Stripe about {sub_id}"
+                           f" ({type(ex).__name__}) - failure kept")
     restored_user = None
+    synced = None
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             if not await _claim_event(conn, event_id, event_type):
                 return
-            if new_plan and new_plan in PLANS and status == "active":
+            if live:
+                new_plan, new_cycle = live["plan"], live.get("cycle") or "monthly"
                 cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
-                now = datetime.now(timezone.utc).isoformat()
-                exec_status = await conn.execute(
+                p_start, p_end = _ts_to_dt(live.get("period_start")), _ts_to_dt(live.get("period_end"))
+                # The new plan starts at the switch. A cycle change opens a new
+                # Stripe period at that moment (an interval change resets the
+                # billing anchor); a tier change keeps the period and starts a
+                # fresh allowance when it happened. Packages counted from then
+                # on are the new plan's; earlier ones stay with the old plan
+                # (their overage, billed or held, stays as it was).
+                switched = event_created if (event_created and event_created <= now_dt) else now_dt
+                if new_cycle != row_cycle and p_start:
+                    since = p_start
+                else:
+                    since = max(switched, p_start) if p_start else switched
+                await conn.execute("UPDATE users SET packages_used = packages_used WHERE id=$1", urow["id"])
+                counted = []
+                try:
+                    async with conn.transaction():
+                        counted = await recount_period(conn, urow["id"], since.isoformat())
+                except Exception as ex:
+                    logger.warning(f"subscription.updated: could not recount user {urow['id']}: {type(ex).__name__}")
+                await conn.execute(
                     """UPDATE users SET subscription_tier=$1, billing_cycle=$2,
-                        packages_limit=$3, overage_rate=$4, packages_used=0,
-                        billing_period_start=$5
-                        WHERE stripe_subscription_id=$6 AND subscription_tier != $7
-                          AND subscription_tier != 'enterprise'""",
-                    new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], now, sub_id, new_plan,
+                        packages_limit=$3, overage_rate=$4, packages_used=$5,
+                        billing_period_start=$6, overage_packages_invoiced=0
+                       WHERE id=$7 AND subscription_tier != 'enterprise'""",
+                    new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], len(counted),
+                    since.isoformat(), urow["id"],
                 )
-                if int(exec_status.split()[-1]):
-                    logger.info(f"subscription.updated: synced plan={new_plan}, reset packages_used=0 for sub {sub_id}")
+                await start_plan_months(conn, urow["id"], new_cycle, since.isoformat(),
+                                        p_end.isoformat() if p_end else None)
+                if new_cycle == "annual":
+                    # The count is the CURRENT usage month's at once - a period
+                    # that began months ago (a row whose stored cycle was wrong)
+                    # never shows the whole year's packages until the next roll.
+                    fresh = await conn.fetchrow("SELECT * FROM users WHERE id=$1", urow["id"])
+                    if fresh:
+                        await roll_usage_month(conn, dict(fresh))
+                synced = (row_cycle, new_cycle)
+                logger.info(f"subscription.updated: synced plan={new_plan} cycle={new_cycle} for sub {sub_id}"
+                            f" ({len(counted)} package(s) already in the new plan's period)")
             if cancel_at_period_end:
                 await conn.execute(
                     "UPDATE users SET payment_status='canceling'"
@@ -780,11 +883,11 @@ async def _handle_subscription_updated(event_id: str, event_type: str, event_cre
                     sub_id,
                 )
             elif status == "active" and not cancel_at_period_end:
-                st_row = await conn.fetchrow(
-                    "SELECT id, payment_failed_at FROM users WHERE stripe_subscription_id=$1", sub_id)
-                if st_row and _failed_before(dict(st_row), event_created):
+                if urow and _failed_before(urow, event_created):
                     # M2: an "active" Stripe made before the current failure.
                     logger.info(f"subscription.updated: stale active {event_id} for sub {sub_id} - failure kept")
+                elif failing and not paid_up:
+                    logger.info(f"subscription.updated: {sub_id} active but not paid up - failure kept")
                 else:
                     # 'archived' too (2 Nov 2026, L-1): paying restores every stage.
                     restored = await conn.execute(
@@ -794,12 +897,16 @@ async def _handle_subscription_updated(event_id: str, event_type: str, event_cre
                         " AND payment_status IN ('canceling','failed','soft_locked','suspended','archived')",
                         sub_id,
                     )
-                    restored_user = bool(int(str(restored).split()[-1] or 0)) and st_row
+                    restored_user = bool(int(str(restored).split()[-1] or 0)) and urow
+                    if restored_user and failing:
+                        await record_last_paid(conn, urow["id"], now)
             elif status == "past_due":
                 pd_row = await conn.fetchrow(
-                    "SELECT billing_period_start FROM users WHERE stripe_subscription_id=$1", sub_id
+                    "SELECT id, billing_period_start FROM users WHERE stripe_subscription_id=$1", sub_id
                 )
-                if pd_row and _paid_after(dict(pd_row), event_created):
+                if pd_row:
+                    pd_row = {**dict(pd_row), "last_paid_at": await last_paid_at(conn, dict(pd_row)["id"])}
+                if pd_row and _paid_after(pd_row, event_created):
                     logger.info(f"subscription.updated: stale past_due {event_id} for sub {sub_id}, skipped")
                 else:
                     await conn.execute(
@@ -814,6 +921,14 @@ async def _handle_subscription_updated(event_id: str, event_type: str, event_cre
             )
     if affected:
         await invalidate_user_cache(str(dict(affected)["id"]))
+    if synced:
+        was, now_cycle = synced
+        if now_cycle == "annual":
+            # A plan switched to annual bills its extra packages monthly; a
+            # failure here is retried by the daily job.
+            await ensure_monthly_overage_billing(sub_id, key_suffix=event_id)
+        elif was == "annual":
+            await clear_monthly_overage_billing(sub_id, event_id)
     if restored_user:
         try:
             await bill_held_overage(str(dict(restored_user)["id"]))           # F1
@@ -930,27 +1045,36 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
 
         customer, sub = max(candidates, key=lambda cs: int(field(cs[1], "created") or 0))
         sub_id = field(sub, "id")
-        plan, cycle = plan_from_subscription(sub)
+        plan, cycle = subscription_plan(sub)
         if not plan:
             logger.warning(f"verify-upgrade: subscription {sub_id} of user {user_id} names no known plan - not synced")
             return {"subscription_tier": tier, "upgraded": False, "reason": "unknown_plan"}
         cfg = PLANS[plan][cycle]
         now = datetime.now(timezone.utc).isoformat()
+        start_iso, end_iso = _period_isos(sub)
         async with get_pool().acquire() as conn:
-            status = await conn.execute(
-                """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
-                    stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
-                    billing_period_start=$6, overage_rate=$7,
-                    payment_status='ok', payment_failed_at=NULL,
-                    payment_email_sent_day=0
-                   WHERE id=$8 AND (stripe_subscription_id IS NULL OR stripe_subscription_id=$9)""",
-                plan, sub_id, field(customer, "id"), cfg["packages"], cycle,
-                now, cfg["overage_rate"], user_id, stored,
-            )
-        if int(str(status).split()[-1] or 0) == 0:
+            async with conn.transaction():
+                status = await conn.execute(
+                    """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
+                        stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
+                        billing_period_start=$6, overage_rate=$7,
+                        payment_status='ok', payment_failed_at=NULL,
+                        payment_email_sent_day=0
+                       WHERE id=$8 AND (stripe_subscription_id IS NULL OR stripe_subscription_id=$9)""",
+                    plan, sub_id, field(customer, "id"), cfg["packages"], cycle,
+                    now, cfg["overage_rate"], user_id, stored,
+                )
+                synced = int(str(status).split()[-1] or 0) > 0
+                if synced:
+                    # The plan's months and period end, as the checkout webhook
+                    # would leave them (3 Nov 2026) - it may never arrive.
+                    await adopt_plan_usage(conn, user_id, cycle, start_iso or now, end_iso)
+        if not synced:
             return {"subscription_tier": tier, "upgraded": False, "reason": "changed"}
         logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}")
         await invalidate_user_cache(str(user_id))
+        if cycle == "annual":
+            await ensure_monthly_overage_billing(sub_id)
         return {"subscription_tier": plan, "upgraded": True, "reason": "stripe_verified"}
     except HTTPException:
         raise
@@ -1096,18 +1220,29 @@ async def _restore_subscription(user: dict, customer) -> None:
     for sub in active:
         if not belongs_to_user(sub, user["id"], customer=customer):
             continue
-        plan, cycle = plan_from_subscription(sub)
+        plan, cycle = subscription_plan(sub)
         if not plan:
             continue
         cfg = PLANS[plan][cycle]
+        start_iso, end_iso = _period_isos(sub)
         async with get_pool().acquire() as conn:
-            await conn.execute(
-                """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
-                   billing_cycle=$3, packages_limit=$4, overage_rate=$5,
-                   payment_status='ok', payment_failed_at=NULL
-                   WHERE id=$6 AND stripe_subscription_id IS NULL""",
-                field(sub, "id"), plan, cycle, cfg["packages"], cfg["overage_rate"], user["id"],
-            )
+            async with conn.transaction():
+                done = await conn.execute(
+                    """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
+                       billing_cycle=$3, packages_limit=$4, overage_rate=$5,
+                       billing_period_start=$6, payment_status='ok', payment_failed_at=NULL
+                       WHERE id=$7 AND stripe_subscription_id IS NULL""",
+                    field(sub, "id"), plan, cycle, cfg["packages"], cfg["overage_rate"],
+                    start_iso or datetime.now(timezone.utc).isoformat(), user["id"],
+                )
+                adopted = bool(int(str(done).split()[-1] or 0))
+                if adopted:
+                    # Everything the month logic needs (3 Nov 2026).
+                    await adopt_plan_usage(conn, user["id"], cycle, start_iso, end_iso)
+        if not adopted:
+            return
         logger.info(f"Restored subscription {field(sub, 'id')} for user {user['id']} from Stripe")
         await invalidate_user_cache(str(user["id"]))
+        if cycle == "annual":
+            await ensure_monthly_overage_billing(field(sub, "id"), check_first=True)
         return

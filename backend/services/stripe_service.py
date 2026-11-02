@@ -298,8 +298,11 @@ def allowance_for(row: dict) -> tuple:
 
 # ASYNC-SAFE
 async def evaluate_package_limit(fresh: dict) -> dict:
+    from services.usage_service import rolled_packages_used
     sub                = fresh.get("subscription_tier", "free") or "free"
-    pkgs_used          = int(fresh.get("packages_used", 0) or 0)
+    # An annual plan whose usage month ended shows the new month's count, not
+    # last month's (3 Nov 2026): the month is started first when it is due.
+    pkgs_used          = int(await rolled_packages_used(fresh) or 0)
     pkgs_limit         = int(fresh.get("packages_limit", 0) or 0)
     overage_rate_cents = int(fresh.get("overage_rate") or default_overage_rate_cents(sub))
 
@@ -376,23 +379,31 @@ async def release_payment_email(conn, user_id, day: int, prev: int) -> None:
     )
 
 
+def _attempted_open_invoice(sub_id: str) -> bool:
+    """Sync. Does the subscription have an OPEN invoice Stripe has already tried
+    to charge? (3 Nov 2026: an annual plan stays "active" while its failed
+    monthly overage invoice is Smart-Retried - that plan is not paid up.)"""
+    listed = stripe.Invoice.list(subscription=sub_id, status="open", limit=10)
+    return any(int(field(inv, "attempt_count") or 0) > 0 for inv in listed.auto_paging_iter())
+
+
 def subscription_payment_state(sub_id: str) -> dict:
-    """Sync - ask Stripe whether this subscription is paid up (2 Nov 2026, M9).
+    """Sync - is this subscription paid up? (2 Nov 2026, M9; 3 Nov 2026.)
+    Paid up = Stripe reports it active or trialing AND it has no open invoice
+    Stripe already tried to charge. No "latest invoice paid" escape: a past_due
+    plan whose latest invoice is an older paid one is not paid up, and an active
+    plan with a failed overage invoice being retried is not either.
     {"paid": bool, "cancel_at_period_end": bool, "missing": bool}. Raises when
     Stripe cannot be asked."""
     if not stripe.api_key:
         raise StripeUnavailable("stripe is not configured")
     try:
-        sub = stripe.Subscription.retrieve(sub_id, expand=["latest_invoice"])
+        sub = stripe.Subscription.retrieve(sub_id)
     except Exception as ex:
         if is_missing_subscription(ex):
             return {"paid": False, "cancel_at_period_end": False, "missing": True}
         raise
-    inv = field(sub, "latest_invoice")
-    inv_status = field(inv, "status") if inv is not None and not isinstance(inv, str) else None
-    if isinstance(inv, str):
-        inv_status = field(stripe.Invoice.retrieve(inv), "status")
-    paid = field(sub, "status") in PAYING_SUB_STATUSES or inv_status == "paid"
+    paid = field(sub, "status") in PAYING_SUB_STATUSES and not _attempted_open_invoice(sub_id)
     return {"paid": bool(paid), "cancel_at_period_end": is_ending(sub),
             "missing": False}
 
@@ -937,17 +948,43 @@ def subscription_period(sub) -> tuple:
     return (min(starts) if starts else None, max(ends) if ends else None)
 
 
-def subscription_status(sub_id: str) -> dict:
+def price_cycle(sub) -> Optional[str]:
+    """The cycle a subscription's price bills on - "annual" / "monthly" - or
+    None. Support switches a plan's cycle in Stripe, where our metadata may not
+    follow, so the price's own interval decides (3 Nov 2026)."""
+    for item in (field(field(sub, "items") or {}, "data") or []):
+        interval = field(field(field(item, "price") or {}, "recurring") or {}, "interval")
+        if interval in ("year", "month"):
+            return "annual" if interval == "year" else "monthly"
+    return None
+
+
+def subscription_plan(sub) -> tuple:
+    """(plan, cycle) the subscription bills - the price's interval over the
+    metadata's cycle - or (None, None)."""
+    plan, meta_cycle = plan_from_subscription(sub)
+    if plan is None:
+        return None, None
+    cycle = price_cycle(sub) or meta_cycle or "monthly"
+    return plan, (cycle if cycle in PLANS[plan] else "monthly")
+
+
+def subscription_status(sub_id: str, check_open: bool = False) -> dict:
     """Sync - the subscription's own status (2 Nov 2026, M-5): a failure is
     cleared only when the PLAN is paying again, not because one invoice was
-    paid - and its current period (Q1/Q2). Raises when Stripe cannot be asked."""
+    paid - and its current period (Q1/Q2). `check_open` also answers whether an
+    open invoice was already tried (`open_attempted`, 3 Nov 2026), the restore
+    check. Raises when Stripe cannot be asked."""
     if not stripe.api_key:
         raise StripeUnavailable("stripe is not configured")
     sub = stripe.Subscription.retrieve(sub_id)
     start, end = subscription_period(sub)
+    plan, cycle = subscription_plan(sub)
     return {"status": field(sub, "status"),
             "cancel_at_period_end": is_ending(sub),
-            "period_start": start, "period_end": end}
+            "period_start": start, "period_end": end,
+            "plan": plan, "cycle": cycle,
+            "open_attempted": _attempted_open_invoice(sub_id) if check_open else None}
 
 
 # ── a payment e-mail survives a crash (2 Nov 2026, L-9) ──────────────────────
@@ -1036,3 +1073,104 @@ async def resend_unconfirmed_payment_emails(get_pool_fn, sender) -> int:
         except Exception as ex:
             logger.error(f"resend_unconfirmed_payment_emails: {key} not handled: {ex}")
     return resent
+
+
+# ── annual plans: extra packages billed monthly (Brent, 3 Nov 2026) ──────────
+# Stripe's own `pending_invoice_item_interval` on every ANNUAL Primble
+# subscription: each month Stripe invoices that subscription's pending invoice
+# items - our per-package overage items, created with `subscription=` - with
+# billing_reason "automatic_pending_invoice_item_invoice" (never a usage reset:
+# stripe_routes._PERIOD_REASONS). Set right after an annual checkout; the daily
+# job makes sure every stored live annual subscription has it.
+MONTHLY_OVERAGE_INTERVAL = {"interval": "month", "interval_count": 1}
+_PII_PREFIX = "pii_interval:"
+
+
+def _interval_is_monthly(sub) -> bool:
+    pii = field(sub, "pending_invoice_item_interval") or {}
+    return field(pii, "interval") == "month" and int(field(pii, "interval_count") or 1) == 1
+
+
+def set_monthly_overage_billing(sub_id: str, key_suffix: str = "") -> None:
+    """Sync. Raises the Stripe error (the caller decides: retried daily).
+    `key_suffix` (the plan-switch event) gives a re-set after a switch back
+    from monthly its own idempotency key: Stripe would otherwise replay the
+    first set for 24 hours and change nothing."""
+    if not stripe.api_key:
+        raise StripeUnavailable("stripe is not configured")
+    key = f"primble-pii-interval:{sub_id}" + (f":{key_suffix}" if key_suffix else "")
+    stripe.Subscription.modify(sub_id, pending_invoice_item_interval=dict(MONTHLY_OVERAGE_INTERVAL),
+                               idempotency_key=key)
+
+
+# ASYNC-SAFE
+async def ensure_monthly_overage_billing(sub_id: str, check_first: bool = False,
+                                         key_suffix: str = "") -> bool:
+    """Make sure this annual subscription invoices its overage monthly; the
+    ledger remembers one that is done. False when it is not (yet)."""
+    key = _PII_PREFIX + sub_id
+    async with get_pool().acquire() as conn:
+        done = await conn.fetchrow("SELECT 1 FROM processed_webhook_events WHERE event_id=$1", key)
+    if done:
+        return True
+    try:
+        if check_first:
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
+            if field(sub, "status") not in LIVE_SUB_STATUSES:
+                return False
+            if not _interval_is_monthly(sub):
+                # Checked first, so a fresh key per day is safe - and a set
+                # that a switch back to monthly undid is set again.
+                from datetime import datetime, timezone
+                day = datetime.now(timezone.utc).strftime("%Y%m%d")
+                await asyncio.to_thread(set_monthly_overage_billing, sub_id, key_suffix or f"check:{day}")
+        else:
+            await asyncio.to_thread(set_monthly_overage_billing, sub_id, key_suffix)
+    except Exception as ex:
+        if is_missing_subscription(ex):
+            # Not a subscription of this Stripe account (the internal test-mode
+            # accounts after the live switch): noted once, never retried.
+            await _ledger_claim(key, "pii_interval_missing")
+            logger.warning("annual subscription %s not found in Stripe - monthly overage billing skipped", sub_id)
+            return False
+        logger.error("annual subscription %s: monthly overage billing not set (%s) - retried by the daily job",
+                     sub_id, type(ex).__name__)
+        return False
+    await _ledger_claim(key, "pii_interval_set")
+    logger.info("annual subscription %s bills its extra packages monthly", sub_id)
+    return True
+
+
+# ASYNC-SAFE
+async def ensure_annual_overage_intervals() -> int:
+    """Daily job: every stored live annual subscription bills overage monthly."""
+    if not stripe.api_key:
+        return 0
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT stripe_subscription_id FROM users WHERE billing_cycle='annual'"
+            " AND stripe_subscription_id IS NOT NULL"
+            " AND subscription_tier IN ('essentials','professional','business')")
+    done = 0
+    for r in [dict(x) for x in rows]:
+        if await ensure_monthly_overage_billing(r["stripe_subscription_id"], check_first=True):
+            done += 1
+    return done
+
+
+# ASYNC-SAFE
+async def clear_monthly_overage_billing(sub_id: str, event_id: str) -> bool:
+    """A plan switched from annual to monthly (by support, in Stripe): its
+    overage rides the monthly renewal again, so the monthly pending-item
+    invoices stop. False when Stripe could not be asked (logged)."""
+    if not stripe.api_key:
+        return False
+    try:
+        await asyncio.to_thread(stripe.Subscription.modify, sub_id, pending_invoice_item_interval="",
+                                idempotency_key=f"primble-pii-unset:{sub_id}:{event_id}")
+    except Exception as ex:
+        logger.error("subscription %s: monthly overage billing not removed (%s)", sub_id, type(ex).__name__)
+        return False
+    async with get_pool().acquire() as conn:
+        await conn.execute("DELETE FROM processed_webhook_events WHERE event_id=$1", _PII_PREFIX + sub_id)
+    return True

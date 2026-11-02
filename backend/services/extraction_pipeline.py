@@ -278,11 +278,12 @@ async def extract_document(
     the same marks `reclassify_document`'s set_type leaves. None, "" or
     "unknown" leaves the classifier's answer, exactly as before.
 
-    `known_texts` (documents added to a package): `document_text_key`s of the
-    documents already in it. A file that reads exactly like one of them is a
-    duplicate - returned as `{"duplicate": True, ...}` BEFORE the extraction
-    call, so it costs no LLM call and never votes twice in the merge. None
-    (the fresh upload) checks nothing, exactly as before.
+    `known_texts`: `document_text_key`s of the documents already read - the
+    package's documents (a document added to a package) or the files earlier in
+    the same upload (the fresh upload, 3 Nov 2026). A file that reads exactly
+    like one of them is a duplicate - returned as `{"duplicate": True, ...}`
+    BEFORE the extraction call, so it costs no LLM call and never votes twice in
+    the merge. None checks nothing.
     """
     if reporter is None:
         from utils.progress_tracker import make_reporter
@@ -499,19 +500,34 @@ async def run_extraction_pipeline(
     # ASG Transcriber: submit every outside ACORD file NOW so ASG reads them side by
     # side while OCR and extraction run; each document collects its own result
     # (29 Oct 2026). Off / unconfigured: nothing happens.
+    presubmitted: set = set()
     try:
         from services.acord_intake.transcriber_intake import presubmit_package
-        await presubmit_package(list(file_paths))
+        await presubmit_package(list(file_paths), sent_paths=presubmitted)
     except Exception as _psx:                              # noqa: BLE001
         logger.info("transcriber pre-submit skipped: %s", _psx)
 
+    # The same file twice in one upload is read ONCE (3 Nov 2026): it was read,
+    # sent to the AI and merged twice - double the cost, one document counted
+    # as two sources. Same door and key as a document added to a package.
+    seen_texts: set = set()
+    duplicates: list = []
     for i, path in enumerate(file_paths):
         # The one per-document door (`extract_document`), shared with a
         # document added to an existing package (7 Oct 2026).
         doc = await extract_document(path, filenames[i], user_id,
-                                     reporter=reporter, index=i)
+                                     reporter=reporter, index=i, known_texts=seen_texts)
         if doc is None:
             continue
+        if doc.get("duplicate"):
+            # The pre-submit never sends a re-saved copy (it reads like an
+            # earlier file); a copy it did send was paid for and not collected.
+            logger.info("run_extraction_pipeline: %s reads exactly like a file earlier in this upload"
+                        " - read once (transcriber pre-submit sent it: %s)",
+                        filenames[i], path in presubmitted)
+            duplicates.append(filenames[i])
+            continue
+        seen_texts.add(stored_text_key(doc))
         all_low_conf += doc["low_confidence_tokens"]
         processed_docs.append(doc)
 
@@ -520,8 +536,12 @@ async def run_extraction_pipeline(
 
     # The ONE first-extraction path: document text is new here, so this is the
     # only place the umbrella-date probe can learn anything (see its default).
-    return await _finalize_pipeline(processed_docs, user_id, progress_reporter=reporter,
-                                    probe_umbrella=True)
+    result = await _finalize_pipeline(processed_docs, user_id, progress_reporter=reporter,
+                                      probe_umbrella=True)
+    if isinstance(result, dict):
+        # The upload screen names each file read once as another file's copy.
+        result["duplicates_skipped"] = duplicates
+    return result
 
 
 # Flags a HUMAN sets and nothing re-derives from the documents, paired with the

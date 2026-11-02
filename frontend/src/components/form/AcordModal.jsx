@@ -53,6 +53,7 @@ import {
   DOCUMENTS_REVIEW_NOTE, REVIEW_NOTE_STYLE,
   documentNeedsTypeReview, canConfirmDocumentType, CONFIRM_TYPE_LABEL, CONFIRM_TYPE_TIP,
   ACCEPT_UPLOAD, UPLOAD_TYPES_NOTE, isDroppableUpload, uploadBadge, errorText,
+  mergeUploadFiles, fingerprintFiles, readOnceNote,
 } from "../../utils/addDocuments";
 import { SignatureStatusList } from "../signature/ApplicantSignature";
 import { fetchSignatureStatus } from "../../utils/applicantSignature";
@@ -3063,6 +3064,8 @@ const AcordModal = forwardRef(function AcordModal({
 }, ref) {
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
+  // "Already in the list" note for a file added twice (3 Nov 2026).
+  const [dupNote, setDupNote] = useState("");
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [processingStage, setProcessingStage] = useState("");
@@ -3681,12 +3684,36 @@ const AcordModal = forwardRef(function AcordModal({
 
   const handleDragOver = e => { e.preventDefault(); setDragging(true); };
   const handleDragLeave = () => setDragging(false);
+  // A file joins the upload list only if its CONTENTS are not already there -
+  // a renamed copy is refused too (3 Nov 2026). The ref is the list's one
+  // source of truth, updated in the same step as every change, so the merge
+  // and its note are worked out together and two quick drops both land.
+  const uploadListRef = useRef([]);
+  const uploadListGenRef = useRef(0);
+  const setUploadFiles = next => { uploadListRef.current = next; setFiles(next); };
+  const clearUploadFiles = () => {
+    uploadListGenRef.current += 1;          // a drop still being hashed is dropped
+    setUploadFiles([]); setDupNote("");
+  };
+  const addUploadFiles = async incoming => {
+    const gen = uploadListGenRef.current;
+    await fingerprintFiles(incoming);
+    if (gen !== uploadListGenRef.current) return;
+    const merged = mergeUploadFiles(uploadListRef.current, incoming);
+    setUploadFiles(merged.files);
+    setDupNote(merged.note);
+  };
+  const removeUploadFile = index => {
+    setDupNote("");
+    setUploadFiles(uploadListRef.current.filter((_, j) => j !== index));
+  };
+
   const handleDrop = e => {
     e.preventDefault(); setDragging(false);
     // The file picker's own list (utils/addDocuments) - Excel / CSV included,
     // and an .xls kept so the server's "save it as .xlsx" sentence shows.
     const uploaded = Array.from(e.dataTransfer.files).filter(isDroppableUpload);
-    setFiles(prev => [...prev, ...uploaded]);
+    addUploadFiles(uploaded);
   };
 
   // Everything the producer has reviewed - dismissed AND answered. Answered recs
@@ -4138,7 +4165,7 @@ const AcordModal = forwardRef(function AcordModal({
   };
 
   const resetToUpload = () => {
-    setFiles([]); setSessionId(null); setStep("upload"); setError(null);
+    clearUploadFiles(); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setDocumentsResult(null); setDocumentFormOffers([]); setDocChange(null);
     setCanProceedWithWarning(false); setWarningStops([]);
@@ -4157,7 +4184,7 @@ const AcordModal = forwardRef(function AcordModal({
   };
 
   const goToDashboard = () => {
-    setFiles([]); setSessionId(null); setStep("dashboard"); setError(null);
+    clearUploadFiles(); setSessionId(null); setStep("dashboard"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setDocumentsResult(null); setDocumentFormOffers([]); setDocChange(null);
     setKeyDetails(null); setRecommendations([]); setAccountProfile(null); setDryRun(null);
@@ -4839,6 +4866,10 @@ const AcordModal = forwardRef(function AcordModal({
         integrityReviewRequired: !!data.integrity_review_required,
         ...packageIssueCounts(data),
       }));
+      // Files the server read once because they read exactly like another file
+      // of this upload (a re-saved copy, a PDF and its copy in a ZIP) - 3 Nov 2026.
+      const readOnce = readOnceNote(data.duplicates_skipped);
+      if (readOnce) pushToast({ title: "Same document uploaded twice", body: readOnce, ok: true, tone: "info" });
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setAvailableDocTypes(data.available_doc_types || []);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
@@ -8049,7 +8080,7 @@ const AcordModal = forwardRef(function AcordModal({
                 padding: "8px",
               }}>
                 {/* Drop target */}
-                <input ref={fileInputRef} type="file" accept={ACCEPT_UPLOAD} multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
+                <input ref={fileInputRef} type="file" accept={ACCEPT_UPLOAD} multiple disabled={uploadBlocked} onChange={e => { const picked = Array.from(e.target.files); e.target.value = ""; addUploadFiles(picked); }} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
                 <label
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
@@ -8087,6 +8118,10 @@ const AcordModal = forwardRef(function AcordModal({
                   </p>
                 </label>
 
+                {dupNote && (
+                  <p role="status" style={{ margin: "8px 16px 0", fontSize: 12, color: "#92400e" }}>{dupNote}</p>
+                )}
+
                 {/* File list */}
                 {files.length > 0 && (
                   <div style={{ padding: "12px 16px 16px" }}>
@@ -8109,7 +8144,7 @@ const AcordModal = forwardRef(function AcordModal({
                             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1e293b", fontWeight: 500 }}>{f.name}</span>
                             <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)} KB</span>
                             <button
-                              onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                              onClick={() => removeUploadFile(i)}
                               style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 14, padding: "2px 4px", lineHeight: 1, borderRadius: 4, transition: "color 0.15s" }}
                               onMouseEnter={e => e.currentTarget.style.color = "#E61B84"}
                               onMouseLeave={e => e.currentTarget.style.color = "#cbd5e1"}
