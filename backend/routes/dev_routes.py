@@ -63,7 +63,9 @@ async def run_payment_lifecycle(
         action="admin.run_payment_lifecycle",
         ip_address=request.client.host if request.client else None,
     )
-    await run_daily_payment_lifecycle()
+    # Dev tools may run it again the same day; the e-mails are claimed
+    # one by one, so a second run never re-sends (2 Nov 2026).
+    await run_daily_payment_lifecycle(force=True)
     return {
         "processed":  True,
         "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -76,7 +78,9 @@ async def run_lifecycle_local(request: Request):
     host = request.client.host if request.client else ""
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Only accessible from localhost")
-    await run_daily_payment_lifecycle()
+    # Dev tools may run it again the same day; the e-mails are claimed
+    # one by one, so a second run never re-sends (2 Nov 2026).
+    await run_daily_payment_lifecycle(force=True)
     return {"processed": True, "checked_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -202,8 +206,7 @@ async def simulate_payment_failure(
 # ASYNC-SAFE
 @router.post("/api/stripe/reconcile-overage")
 async def reconcile_overage(current_user: dict = Depends(get_current_user)):
-    from config.settings import SOFT_BUFFER_PCT, default_overage_rate_cents
-    from services.stripe_service import create_overage_invoice_item
+    from config.settings import SOFT_BUFFER_PCT
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", current_user["id"])
@@ -220,7 +223,6 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
     pkgs_used          = int(user.get("packages_used", 0) or 0)
     pkgs_limit         = int(user.get("packages_limit", 0) or 0)
     already_invoiced   = int(user.get("overage_packages_invoiced", 0) or 0)
-    overage_rate_cents = int(user.get("overage_rate") or default_overage_rate_cents(sub))
     soft_buffer        = int(pkgs_limit * SOFT_BUFFER_PCT)
 
     billable_overages = max(0, pkgs_used - pkgs_limit - soft_buffer)
@@ -233,21 +235,15 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
             "uninvoiced": 0,
         }
 
-    queued = 0
-    failed = 0
-    for _ in range(uninvoiced):
-        ok = create_overage_invoice_item(user, overage_rate_cents)
-        if ok:
-            queued += 1
-        else:
-            failed += 1
-
-    if queued > 0:
-        async with get_pool().acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET overage_packages_invoiced = overage_packages_invoiced + $1 WHERE id = $2",
-                queued, current_user["id"],
-            )
+    # Billed through the overage ledger (2 Nov 2026, L-10): one unit per counted
+    # package above the allowance, each with its own idempotency key - a second
+    # click (or a later renewal) can never bill one twice.
+    from repositories.session_repository import packages_counted_since
+    from services.usage_service import bill_overage_for_period
+    since = user.get("billing_period_start") or "1970-01-01T00:00:00+00:00"
+    counted = await packages_counted_since(str(user["id"]), since)
+    queued = await bill_overage_for_period(str(user["id"]), counted)
+    failed = max(0, uninvoiced - queued)
 
     logger.info(
         f"Reconcile overage: user={current_user['id']} "

@@ -3058,6 +3058,7 @@ const AcordModal = forwardRef(function AcordModal({
   onClose, user, token, onUserUpdate, onShowUpgrade,
   resumeSessionId, savedSignature, onOpenSignatureModal,
   onOpenBillingPortal, billingPortalLoading,
+  onStepChange,
   fullPage = false,
 }, ref) {
   const fileInputRef = useRef(null);
@@ -3092,6 +3093,9 @@ const AcordModal = forwardRef(function AcordModal({
   // element that hid it - so nothing could release it. The review page opened
   // with no navbar and a blank band at the bottom until a refresh (owner,
   // 8 Oct 2026, the second report). Header.jsx listens for this event.
+  // Before paint, so the app's dashboard-only bar never flashes over another step.
+  useLayoutEffect(() => { onStepChange?.(step); }, [step, onStepChange]);
+
   useEffect(() => {
     document.body.style.overflow = step === "editor" ? "hidden" : "";
     window.scrollTo(0, 0);
@@ -3459,7 +3463,12 @@ const AcordModal = forwardRef(function AcordModal({
     fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (d?.success) setLiteSqsData(d);
+        if (d?.success) {
+          setLiteSqsData(d);
+          // The server counted this score: show the new usage in the plan
+          // panel without a reload (owner's click-through, 2 Nov 2026).
+          refreshUser().catch(() => {});
+        }
         else setError("Could not score submission. Please try again.");
       })
       .catch(() => setError("Could not score submission. Please try again."))
@@ -4792,7 +4801,7 @@ const AcordModal = forwardRef(function AcordModal({
       const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
       uploadReachedServer = true;
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {} window.location.reload(); }, 2000); return; }
-      if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled - please update billing."); else setError(msg); return; }
+      if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Update billing to restore access."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled - please update billing."); else setError(msg); return; }
       if (res.status === 429) { setError("Server busy - too many concurrent uploads. Please wait 30 seconds and try again."); return; }
       if (res.status >= 500) { setError("Server error during upload. Please try again. If this persists, the file may be too large or complex."); return; }
       let data;
@@ -7650,13 +7659,13 @@ const AcordModal = forwardRef(function AcordModal({
 
         {inOverage && (
           <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>You're in overage territory - each additional download will be billed on your next invoice.</span>
+            <span>You're in overage territory - each additional {user?.subscription_tier === "essentials" ? "score" : "package"} will be billed on your next invoice.</span>
           </div>
         )}
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
-          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived - <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
+          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">Account archived -{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing</button>{" "}to restore access.</div>;
           if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
           if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled - Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
           if (ps === "failed") {
@@ -8008,7 +8017,8 @@ const AcordModal = forwardRef(function AcordModal({
           }
           const ps = user?.payment_status;
           const uploadBlocked = ps === "soft_locked" || ps === "suspended" || ps === "archived";
-          const blockMsg = ps === "archived" ? "Account archived - contact support to restore." : ps === "suspended" ? "Account suspended - restore billing to continue." : ps === "soft_locked" ? "Account Disabled - please update your billing." : null;
+          // Each blocked state is lifted by paying, so each offers billing (2 Nov 2026).
+          const blockMsg = ps === "archived" ? ["Account archived - ", "Update billing", " to restore access."] : ps === "suspended" ? ["Account suspended - ", "restore billing", " to continue."] : ps === "soft_locked" ? ["Account Disabled - please ", "update your billing", "."] : null;
           const activeBtn = files.length && !loading && !uploadBlocked;
           return (
             <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 4px" }}>
@@ -8021,7 +8031,13 @@ const AcordModal = forwardRef(function AcordModal({
 
               {/* Blocked banner */}
               {uploadBlocked && (
-                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#dc2626", textAlign: "center" }}>{blockMsg}</div>
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#dc2626", textAlign: "center" }}>
+                  {blockMsg[0]}
+                  {onOpenBillingPortal
+                    ? <button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, fontSize: "inherit", fontFamily: "inherit" }}>{blockMsg[1]}</button>
+                    : blockMsg[1]}
+                  {blockMsg[2]}
+                </div>
               )}
 
               {/* Drop zone card */}

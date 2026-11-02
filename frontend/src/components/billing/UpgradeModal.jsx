@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { API_BASE } from "../../config/constants";
 import { PLANS, ANNUAL_SAVINGS_PCT } from "./plans";
 import { usePageRestore } from "../../hooks/usePageRestore";
+import { startCheckout } from "../../api/stripeApi";
+import { hasPaidPlan } from "../../utils/billing";
+import { PlanChangeNote, CheckoutError } from "./PlanChangeNote";
 import ContactModal from "../account/ContactModal";
 
 const CheckIcon = () => (
@@ -16,51 +18,39 @@ const CrossIcon = () => (
   </svg>
 );
 
-export default function UpgradeModal({ token, user, onClose, onError, openBillingPortal }) {
-  const [billing, setBilling]         = useState("annual");
+export default function UpgradeModal({ user, onClose, openBillingPortal }) {
+  // A paying user never starts a checkout here (2 Nov 2026): a second checkout
+  // opened a second full-price subscription. Their plan reads "Current plan" and
+  // plan changes go through support.
+  const subscribed = hasPaidPlan(user);
+  const currentTier = user?.subscription_tier || "free";
+  const [billing, setBilling]         = useState(subscribed && user?.billing_cycle === "monthly" ? "monthly" : "annual");
   const [loadingPlan, setLoadingPlan] = useState(null);
-  const [portalLoading, setPortalLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
   const [showContactSales, setShowContactSales] = useState(false);
 
   // Back from Stripe restores this page frozen mid-redirect - clear the spinners.
-  usePageRestore(() => { setLoadingPlan(null); setPortalLoading(false); });
-
-  const handleManageBilling = async () => {
-    if (!openBillingPortal) return;
-    setPortalLoading(true);
-    try { await openBillingPortal(); }
-    finally { setPortalLoading(false); }
-  };
+  usePageRestore(() => { setLoadingPlan(null); });
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
       setShowContactSales(true);
       return;
     }
+    if (subscribed) return;
+    setCheckoutError(null);
     setLoadingPlan(planId);
-    try {
-      const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planId, billing_cycle: billing }),
-      });
-      const data = await res.json();
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-      } else {
-        setLoadingPlan(null);
-        onError(data.detail || "Failed to start checkout. Please try again.");
-      }
-    } catch { setLoadingPlan(null); onError("Network error. Please try again."); }
+    const result = await startCheckout(planId, billing);
+    if (result.url) { window.location.assign(result.url); return; }
+    setLoadingPlan(null);
+    setCheckoutError(result);
   };
 
   const anyLoading = !!loadingPlan;
 
   const getCtaLabel = (plan) => {
     if (plan.id === "enterprise") return "Contact sales";
-    if (!user || user.subscription_tier === "free") return "Select";
-    return "Upgrade";
+    return "Select";
   };
 
   return (
@@ -73,7 +63,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
           {/* Header */}
           <div style={{ textAlign: "center", marginBottom: 28 }}>
             <div style={{ display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--primary)", background: "rgba(230,0,122,0.08)", padding: "5px 14px", borderRadius: 999, marginBottom: 14 }}>
-              Choose a plan
+              {subscribed ? "Your plan" : "Choose a plan"}
             </div>
             <h2 style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 8 }}>
               Transparent pricing. Designed to scale.
@@ -83,19 +73,10 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                 You've used all your free submissions. Upgrade to continue.
               </p>
             )}
-            {user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
-              <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 0 }}>
-                Need to update your payment method?{" "}
-                <button
-                  onClick={handleManageBilling}
-                  disabled={portalLoading || anyLoading}
-                  style={{ background: "none", border: "none", padding: 0, color: "var(--primary)", fontWeight: 600, cursor: "pointer", fontSize: 13, textDecoration: "underline" }}
-                >
-                  {portalLoading ? "Opening…" : "Manage billing"}
-                </button>
-              </p>
-            )}
+            {subscribed && <PlanChangeNote openBillingPortal={openBillingPortal} />}
           </div>
+
+          <CheckoutError error={checkoutError} openBillingPortal={openBillingPortal} style={{ marginBottom: 20 }} />
 
           {/* Billing toggle */}
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 32 }}>
@@ -123,6 +104,9 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
             {PLANS.map((plan) => {
               const isLoading = loadingPlan === plan.id;
               const price     = plan.monthlyPrice !== null ? (billing === "annual" ? plan.annualPrice : plan.monthlyPrice) : null;
+              const isCurrent = subscribed && plan.id === currentTier;
+              // A paying user's other priced plans carry no button (support changes plans).
+              const noCta     = subscribed && !isCurrent && plan.id !== "enterprise";
 
               return (
                 <div
@@ -139,9 +123,9 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                     transition: "box-shadow 0.2s, transform 0.2s",
                   }}
                 >
-                  {plan.badge && (
-                    <div style={{ position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", background: "var(--primary)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 14px", borderRadius: 999, whiteSpace: "nowrap" }}>
-                      {plan.badge}
+                  {(isCurrent || plan.badge) && (
+                    <div style={{ position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", background: isCurrent ? "#0f172a" : "var(--primary)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 14px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                      {isCurrent ? "Your plan" : plan.badge}
                     </div>
                   )}
 
@@ -162,6 +146,20 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
                   <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, marginTop: 4, marginBottom: 8 }}>{plan.packageCount}</div>
 
+                  {isCurrent ? (
+                    <div style={{ marginTop: 14, padding: "11px 0", borderRadius: 12, border: "1.5px solid var(--light-gray)", background: "var(--light-bg)", color: "var(--text-secondary)", fontSize: 14, fontWeight: 700, textAlign: "center" }}>
+                      Current plan
+                    </div>
+                  ) : noCta ? (
+                    <button
+                      type="button"
+                      disabled
+                      title="To change your plan, contact support@primble.ai."
+                      style={{ marginTop: 14, width: "100%", padding: "11px 0", borderRadius: 12, border: "1.5px solid var(--light-gray)", background: "transparent", color: "var(--text-secondary)", fontSize: 14, fontWeight: 700, textAlign: "center", opacity: 0.5, cursor: "not-allowed" }}
+                    >
+                      Contact support to change
+                    </button>
+                  ) : (
                   <button
                     onClick={() => handleSelect(plan.id)}
                     disabled={anyLoading}
@@ -194,6 +192,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                       </>
                     ) : getCtaLabel(plan)}
                   </button>
+                  )}
 
                   <div style={{ height: 1, background: "var(--light-gray)", margin: "18px 0" }} />
 
@@ -215,7 +214,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
           </div>
 
           <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-tertiary)", marginTop: 20 }}>
-            No long-term contracts. Cancel anytime. Upgrades take effect immediately.
+            {subscribed ? "No long-term contracts. Cancel anytime." : "No long-term contracts. Cancel anytime. Upgrades take effect immediately."}
           </p>
         </div>
       </div>

@@ -22,3 +22,7 @@ function resolveApiBase(value) {
 export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE);
 export const STRIPE_PORTAL = import.meta.env.VITE_STRIPE_PORTAL || "https://billing.stripe.com/p/login/";
 export const LOGOUT_REDIRECT_URL = import.meta.env.VITE_LOGOUT_REDIRECT_URL || "/";
+
+// The policies live on the public website (Brent, 2 Nov 2026).
+export const PRIVACY_POLICY_URL = "https://primble.com/privacy-policy";
+export const TERMS_OF_SERVICE_URL = "https://primble.com/terms-of-service";

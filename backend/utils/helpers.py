@@ -38,6 +38,12 @@ def _safe_parse_dt(raw) -> Optional[datetime]:
     return None
 
 
+# Paying restores an archived account (2 Nov 2026, L2): the screen says so -
+# never "subscription ended" or "contact support".
+ARCHIVED_MESSAGE = ("Account archived after 60 days of non-payment. "
+                    "Update your billing to restore access.")
+
+
 def check_payment_access(payment_status: str, action: str = "form") -> None:
     """
     Raise HTTPException if the user's payment lifecycle status blocks the requested action.
@@ -47,7 +53,7 @@ def check_payment_access(payment_status: str, action: str = "form") -> None:
     from fastapi import HTTPException
     ps = (payment_status or "ok").lower()
     if ps == "archived":
-        raise HTTPException(403, "Account archived due to non-payment. Contact support@primble.ai to reactivate.")
+        raise HTTPException(403, ARCHIVED_MESSAGE)
     if ps == "suspended":
         raise HTTPException(403, "Account suspended due to non-payment. Please update your billing to restore access.")
     if ps == "soft_locked" and action == "upload":

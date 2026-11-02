@@ -23,6 +23,7 @@ import logging
 from typing import Any, List, Optional
 
 from utils.concurrency import one_writer_per_package
+from utils.helpers import check_payment_access
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -226,6 +227,9 @@ async def get_questionnaire(session_id: str, all: bool = False,
 @one_writer_per_package
 async def answer_question(session_id: str, req: QuestionnaireAnswerRequest,
                           current_user: dict = Depends(get_current_user)):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await _owned(session_id, current_user)
     q = qn.question(req.question_id)
     action = (req.action or "").strip().lower()
@@ -422,6 +426,9 @@ async def _confirm(session_id: str, session: dict, q: qn.Question, current_user:
 @router.post("/api/questionnaire/{session_id}/send-to-client")
 async def send_to_client(session_id: str, req: QuestionnaireSendRequest,
                          current_user: dict = Depends(get_current_user)):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await _owned(session_id, current_user)
     page = qn.build_page(session, all_sections=True)
     chosen = []
@@ -461,6 +468,9 @@ async def send_to_client(session_id: str, req: QuestionnaireSendRequest,
 
 @router.post("/api/questionnaire/{session_id}/narrative/draft")
 async def draft_narrative(session_id: str, current_user: dict = Depends(get_current_user)):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await _owned(session_id, current_user)
     if not qn.narrative_enabled():
         return JSONResponse({"ok": False, "text": None, "error": "The narrative writer is switched off."})
@@ -484,6 +494,9 @@ async def draft_narrative(session_id: str, current_user: dict = Depends(get_curr
 @one_writer_per_package
 async def approve_narrative(session_id: str, req: NarrativeApproveRequest,
                             current_user: dict = Depends(get_current_user)):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await _owned(session_id, current_user)
     await _not_while_generating(session)
     text = str(req.text or "").strip()

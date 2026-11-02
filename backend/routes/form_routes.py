@@ -17,7 +17,7 @@ from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL, FREE_PACKAGE_LIMIT
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
-from utils.helpers import safe_join, check_payment_access
+from utils.helpers import safe_join, check_payment_access, ARCHIVED_MESSAGE
 from services import form_instances as _fi
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import (
@@ -651,7 +651,7 @@ async def upload_declaration(
         r = dict(row)
         ps = r.get("payment_status", "ok") or "ok"
         if ps == "suspended":   raise HTTPException(403, "Account suspended due to non-payment.")
-        if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@primble.ai.")
+        if ps == "archived":    raise HTTPException(403, ARCHIVED_MESSAGE)
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
         if r.get("subscription_tier", "free") == "free" and int(r.get("downloads_used", 0) or 0) >= FREE_PACKAGE_LIMIT:
             from fastapi.responses import JSONResponse as _JSONResponse
@@ -1016,6 +1016,9 @@ async def submission_integrity_resolve(
         (no re-OCR; reuses stored per-document facts).
       • continue_anyway  — keep all documents, record the override, and proceed.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
@@ -1129,6 +1132,9 @@ async def document_reclassify(
     the corrected type updates merged facts, SQS (narrative & loss-history
     pillars), recommendations, cross-form validation, and the integrity verdict.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     if req.action not in ("set_type", "exclude", "include", "supporting_only"):
         raise HTTPException(400, "Unsupported action. Use 'set_type', 'exclude', 'include', or 'supporting_only'.")
 
@@ -1294,6 +1300,9 @@ async def session_marketing_reason(
     NOTE: session_id is a PATH segment (not the body) so this never collides with
     GET /api/session/{session_id}, which previously caught the POST and 405'd it.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
@@ -1342,6 +1351,9 @@ async def underwriting_confirm_value(
     stored documents (no re-OCR), applying the confirmed value consistently
     across every relevant form and into SQS scoring.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
@@ -1491,6 +1503,9 @@ async def underwriting_confirm_value_in_editor(
     same audit row, re-scores, and answers in the resolve-issue shape so the
     editor's side panel refreshes without a reload.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
@@ -1602,6 +1617,9 @@ async def client_answer_resolve(
     through confirm_underwriting_value, which re-runs the pipeline and wipes
     generated_forms. "keep_source" discards the held answer.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
@@ -1620,7 +1638,10 @@ async def client_answer_resolve(
 @router.post("/api/select-forms-bulk")
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
-        used = int(current_user.get("downloads_used", 0) or 0)
+        # The free allowance after a dead run's reservation is settled, not
+        # counting the one THIS package holds - its re-run adopts it (M-2).
+        from services.usage_service import free_packages_in_use
+        used = await free_packages_in_use(str(current_user["id"]), req.session_id)
         if used >= FREE_PACKAGE_LIMIT:
             raise HTTPException(403, "Upgrade required to access form generation.")
 
@@ -1696,6 +1717,8 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     _sem_token = None
     results      = {}
     combined_ids = req.form_ids
+    _free_reserved = False
+    _res_beat = None
     # Orbin item 1: the run proves it is alive while it works, so a reopened
     # package can tell this run from one a restart or a deploy killed
     # (services/generation_state.py). Stopped in the `finally` below.
@@ -1708,6 +1731,19 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 
     try:
         await _heartbeat.start()
+        # The free package is TAKEN when generation starts, in one statement, so
+        # parallel generations cannot all pass the limit; a run that fails before
+        # the package is counted gives it back in `finally` (2 Nov 2026, M3).
+        if ((current_user.get("subscription_tier") or "free") == "free"
+                and not session.get("package_counted_at")):
+            from services.usage_service import reservation_heartbeat, reserve_free_package
+            if not await reserve_free_package(str(current_user["id"]), req.session_id):
+                raise HTTPException(403, "Upgrade required to access form generation.")
+            _free_reserved = True
+            # The reservation stays fresh while this run works - including the
+            # gap after the forms are saved and before they are counted (Q3).
+            _res_beat = reservation_heartbeat(str(current_user["id"]), req.session_id)
+            await _res_beat.__aenter__()
         loop = asyncio.get_event_loop()
 
         # ── Stages 4-6: Combined cross-form gap fill (opt-in via flag) ───────
@@ -1995,16 +2031,17 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         except Exception as _act_ex:
             logger.warning(f"activity log (forms/sqs) failed: {_act_ex}")
 
-        # Usage counting (client 2026-07-01): the free tier consumes one of its 3
-        # credits when it GENERATES forms/SQS, not only on download - otherwise a
-        # user could regenerate forms to read the extracted data without ever
-        # downloading. Paid tiers are counted earlier (professional/business at
-        # the recommendations screen, essentials at SQS generation), so for them
-        # this is already a no-op. Guarded per-session by package_counted_at, so
-        # re-generating within the same session never re-counts.
-        if (current_user.get("subscription_tier") or "free") == "free":
-            from services.usage_service import count_session_usage
-            await count_session_usage(str(current_user["id"]), req.session_id)
+        # Usage counting (client 2026-07-01): a package is counted when it
+        # GENERATES forms/SQS, not only on download - otherwise a user could
+        # regenerate forms to read the extracted data without ever downloading.
+        # Every tier is counted here, on the server (2 Nov 2026, L8): the
+        # browser's count call at the recommendations screen may come first,
+        # and the claimed package_counted_at makes the later one a no-op. The
+        # free tier's reservation becomes its count.
+        from services.usage_service import count_session_usage
+        await count_session_usage(str(current_user["id"]), req.session_id,
+                                  reserved_free=_free_reserved)
+        _free_reserved = False
 
         # The cards every generated form shows, recorded for the download review
         # and the cover - through the one door a save and an answer also use.
@@ -2066,6 +2103,18 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         raise HTTPException(500, "Form generation failed. Please try again.")
     finally:
         await _heartbeat.stop()
+        if _res_beat is not None:
+            await _res_beat.__aexit__(None, None, None)
+        if _free_reserved:
+            # The run ended before its package was counted: the free package
+            # it reserved goes back - unless the package WAS counted (a request
+            # cancelled after counting keeps it) (2 Nov 2026, M3 / M-2).
+            try:
+                from services.usage_service import release_free_package
+                await release_free_package(str(current_user["id"]), req.session_id)
+            except Exception as _rel_ex:                       # noqa: BLE001
+                logger.error("select_forms_bulk: free reservation not released for user=%s: %s",
+                             current_user["id"], _rel_ex)
         # _sem_token is None in the new flow; release_heavy is a no-op then.
         # Kept for safety in case future code paths re-acquire it.
         if _sem_token:
@@ -2080,14 +2129,17 @@ async def select_form(req: FormSelectionRequest, current_user: dict = Depends(ge
 @router.post("/api/lite/generate-internal/{session_id}")
 async def lite_generate_internal(session_id: str, current_user: dict = Depends(get_current_user)):
     """Silently generate forms for scoring/ARQ — forms are never exposed or downloadable."""
-    if current_user.get("subscription_tier") == "free":
-        used = int(current_user.get("downloads_used", 0) or 0)
-        if used >= FREE_PACKAGE_LIMIT:
-            raise HTTPException(403, "Upgrade required.")
-
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    _tier = current_user.get("subscription_tier") or "free"
+    if _tier == "free" and not session.get("package_counted_at"):
+        # The same free allowance and reservation as the full generation
+        # (2 Nov 2026, L-10 / M-2); a counted package re-opens freely.
+        from services.usage_service import free_packages_in_use
+        used = await free_packages_in_use(str(current_user["id"]), session_id)
+        if used >= FREE_PACKAGE_LIMIT:
+            raise HTTPException(403, "Upgrade required.")
     # Submission Integrity gate (Beta Report §4.1): never generate/score forms on a
     # package still pending multi-insured review. Previously this path was only
     # protected by the side effect that recommendations are empty while paused;
@@ -2114,59 +2166,116 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
             raise archived_http_error()
         return _lite_score_response(session, _stored_forms, session.get("package_sqs") or {})
 
-    results = {}
-    loop = asyncio.get_event_loop()
-    # The ONE generation door - see `_bg_lite_generate`.
-    per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
-    for form_id in form_ids:
-        form_meta = _fi.form_meta_for(session["all_forms"], form_id, session.get("facts") or {})
-        if not form_meta:
-            continue
-        try:
-            tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
-        except ValueError:
-            logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
-            continue
-        if not os.path.exists(tpl):
-            continue
-        try:
-            result = await loop.run_in_executor(
-                None, process_single_form, form_meta, session,
-                per_form_pre_filled.get(form_id))
-            results[form_id] = result
-        except Exception as ex:
-            logger.error(f"Lite internal generation error for {form_id}: {ex}")
-
-    if not results:
-        raise HTTPException(400, "No forms could be generated internally.")
-
-    # The one stops door's coded list, like the full generation (see
-    # `_bg_lite_generate`).
-    # A failure here never turns a finished generation into a 500.
+    _free_reserved = False
+    _res_beat = None
+    if _tier == "free" and not session.get("package_counted_at"):
+        from services.usage_service import reservation_heartbeat, reserve_free_package
+        if not await reserve_free_package(str(current_user["id"]), session_id):
+            raise HTTPException(403, "Upgrade required.")
+        _free_reserved = True
+        # This route has no generation job to heartbeat: the reservation beats
+        # itself, so a run past five minutes is never taken for dead (Q3).
+        _res_beat = reservation_heartbeat(str(current_user["id"]), session_id)
+        await _res_beat.__aenter__()
     try:
-        from services.stops_now import stops_now
-        cross_issues_deduped = (await run_scoring(stops_now, session, form_ids, pre_form=False))["cross_issues"]
-    except Exception as _sx:                                       # noqa: BLE001
-        logger.warning("lite_generate_internal: cross-form issues skipped session=%s: %s", session_id, _sx)
-        cross_issues_deduped = []
+        results = {}
+        loop = asyncio.get_event_loop()
+        # The ONE generation door - see `_bg_lite_generate`.
+        per_form_pre_filled = await _lite_shared_gap_fill(loop, session, form_ids)
+        for form_id in form_ids:
+            form_meta = _fi.form_meta_for(session["all_forms"], form_id, session.get("facts") or {})
+            if not form_meta:
+                continue
+            try:
+                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+            except ValueError:
+                logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
+                continue
+            if not os.path.exists(tpl):
+                continue
+            try:
+                result = await loop.run_in_executor(
+                    None, process_single_form, form_meta, session,
+                    per_form_pre_filled.get(form_id))
+                results[form_id] = result
+            except Exception as ex:
+                logger.error(f"Lite internal generation error for {form_id}: {ex}")
 
-    await upd_processing_session(session_id, {
-        "selected_form_ids": form_ids,
-        "generated_forms": results,
-        "active_form_id": form_ids[0] if form_ids else None,
-        "cross_issues_last": cross_issues_deduped,
-        # each generated copy stays on its own subject (form_instances)
-        **_fi.binding_update(session.get("facts"), list(results)),
-    })
+        if not results:
+            raise HTTPException(400, "No forms could be generated internally.")
 
-    # Usage counting (client 2026-07-01): essentials consumes one package the
-    # moment the SQS is generated here - we no longer wait for the cover-sheet
-    # download. Deduped per session via package_counted_at, so re-opening the
-    # same submission (this endpoint runs again on every visit to the SQS view)
-    # never re-counts. The later cover-sheet download becomes a no-op.
-    if (current_user.get("subscription_tier") or "") == "essentials":
-        from services.usage_service import count_session_usage
-        await count_session_usage(str(current_user["id"]), session_id)
+        # The one stops door's coded list, like the full generation (see
+        # `_bg_lite_generate`).
+        # A failure here never turns a finished generation into a 500.
+        _stops_ok = False
+        try:
+            from services.stops_now import stops_now
+            _lite_stops = await run_scoring(stops_now, session, form_ids, pre_form=False)
+            cross_issues_deduped = _lite_stops["cross_issues"]
+            _stops_ok = True
+        except Exception as _sx:                                       # noqa: BLE001
+            logger.warning("lite_generate_internal: cross-form issues skipped session=%s: %s", session_id, _sx)
+            cross_issues_deduped = []
+
+        # The package's OWN score, through the one package scorer like the full
+        # generation (owner's click-through, 2 Nov 2026): without it this screen
+        # fell back to the ACORD form's own score (48) while the dashboard showed
+        # the package score (56). Scored before the forms are saved, as there.
+        package_sqs = None
+        if _stops_ok:
+            try:
+                package_sqs = await run_scoring(
+                    calculate_package_sqs,
+                    facts=session.get("facts") or {},
+                    flags=session.get("flags") or {},
+                    form_results=[r["sqs"] for r in results.values() if r.get("sqs")],
+                    cross_issues=_lite_stops["cross_issues"],
+                    hard_stops=_lite_stops["hard"],
+                    soft_stops=_lite_stops["soft"],
+                    session_data=session,
+                    session_id=session_id,
+                    user_id=str(current_user["id"]),
+                    calculation_stage="form_generated",
+                )
+            except Exception as _pkg_ex:                               # noqa: BLE001
+                logger.error(f"calculate_package_sqs failed [session={session_id} forms={form_ids}"
+                             f" trace={get_trace_id()}] (lite): {_pkg_ex}", exc_info=True)
+                package_sqs = None
+
+        await upd_processing_session(session_id, {
+            "selected_form_ids": form_ids,
+            "generated_forms": results,
+            "active_form_id": form_ids[0] if form_ids else None,
+            "cross_issues_last": cross_issues_deduped,
+            # each generated copy stays on its own subject (form_instances)
+            **_fi.binding_update(session.get("facts"), list(results)),
+        })
+        # A failed (None) score is never written - it would erase the last good
+        # one (see select_forms_bulk).
+        if package_sqs:
+            _pkg_updates = {"package_sqs": package_sqs}
+            if isinstance(package_sqs, dict) and package_sqs.get("sqs_history"):
+                _pkg_updates["sqs_history"] = package_sqs["sqs_history"]
+            try:
+                await upd_processing_session(session_id, _pkg_updates)
+            except Exception as _persist_ex:                           # noqa: BLE001
+                logger.warning(f"lite_generate_internal: persist package_sqs failed: {_persist_ex}")
+        # Usage counting (client 2026-07-01): essentials consumes one package the
+        # moment the SQS is generated here - we no longer wait for the cover-sheet
+        # download - and a free package is counted here like the full generation
+        # (L-10). Deduped per session via package_counted_at, so re-opening the
+        # same submission (this endpoint runs again on every visit to the SQS
+        # view) never re-counts. The later cover-sheet download becomes a no-op.
+        if _tier in ("essentials", "free"):
+            from services.usage_service import count_session_usage
+            await count_session_usage(str(current_user["id"]), session_id, reserved_free=_free_reserved)
+            _free_reserved = False
+    finally:
+        if _res_beat is not None:
+            await _res_beat.__aexit__(None, None, None)
+        if _free_reserved:
+            from services.usage_service import release_free_package
+            await release_free_package(str(current_user["id"]), session_id)
 
     _pkg = (await get_processing_session(session_id)).get("package_sqs") or {}
     return _lite_score_response(session, results, _pkg)
@@ -3762,7 +3871,7 @@ async def list_sessions(
     current_user: dict = Depends(get_current_user),
 ):
     if (current_user.get("payment_status") or "ok") == "archived":
-        raise HTTPException(403, "Account archived due to non-payment. Contact support@primble.ai to reactivate.")
+        raise HTTPException(403, ARCHIVED_MESSAGE)
     from repositories.session_repository import list_sessions_for_user, count_sessions_for_user
     uid      = str(current_user["id"])
     offset   = (page - 1) * page_size

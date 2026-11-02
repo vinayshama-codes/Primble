@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel
 
 from utils.concurrency import one_writer_per_package, run_scoring
+from utils.helpers import check_payment_access
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -539,6 +540,9 @@ async def dismiss_recommendation(
     req: DismissRecommendationRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
     # The price is the SERVER's (hostile review, 30 Oct 2026): a dismissal with a
     # reason earns the number the package's own plan gives the row, never more
@@ -780,6 +784,9 @@ async def answer_recommendation(
     fact, re-runs the SQS / cross-form rules, and returns the before/after impact
     plus the recomputed per-form scores. The dismiss/waiver path is untouched.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
     if not ENABLE_PRODUCER_ANSWERS:
         return JSONResponse({
@@ -1081,6 +1088,9 @@ async def reopen_recommendation(
     `override_reason` / `producer_answer` are preserved throughout - see
     audit_service.reopen_recommendation.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
 
     row = await get_recommendation_audit_row(req.session_id, req.rec_id)
@@ -1640,6 +1650,9 @@ async def resolve_issue(
     route would have meant a second copy of the response builder, and the two
     would have drifted the first time either changed.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _refuse_while_generating(await _verify_session_owner(req.session_id, current_user))
     if not ENABLE_PRODUCER_ANSWERS:
         return JSONResponse({
@@ -1813,8 +1826,9 @@ async def resolve_issue(
         # session by `package_counted_at`, and `select_forms_bulk`'s free-tier
         # `downloads_used >= FREE_PACKAGE_LIMIT` gate is a GENERATION gate - re-applying it here
         # would lock a free user out of finishing a package they had already
-        # paid for. So only the account-level lock is re-checked.
-        from utils.helpers import check_payment_access
+        # paid for. So only the account-level lock is re-checked (module import:
+        # a local one here made the name local to the whole function and broke
+        # the gate at its top - 2 Nov 2026).
         check_payment_access(current_user.get("payment_status", "ok"), "form")
         from services.form_addition import (
             OK as _ADD_OK, add_form_to_session, message_for as _add_message,
@@ -2132,6 +2146,9 @@ async def reopen_issue(
     Those two modes (and `none`) just flip the status marker, exactly as
     Resolve/Dismiss already do.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _refuse_while_generating(await _verify_session_owner(req.session_id, current_user))
 
     from services.issue_registry import resolution_for
@@ -2370,6 +2387,9 @@ async def resolve_recommendation(
     req: ResolveRecommendationRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
     success = await mark_recommendation_resolved(
         session_id=req.session_id,
@@ -2574,6 +2594,9 @@ async def set_issue_status_route(
     it never runs SQS scoring or dismiss-credit logic, so hard-stop / cross-form
     acknowledgments stay a display-only work-tracking marker.
     """
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
     status = (req.status or "").strip().lower()
     if status not in _ISSUE_STATUS_VALUES:
@@ -2619,6 +2642,9 @@ async def download_anyway(
     req: DownloadAnywayRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    # Payment lifecycle gate (2 Nov 2026, L5): a suspended / archived
+    # account cannot change package data.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await _verify_session_owner(req.session_id, current_user)
     count = await log_download_with_open_recs(
         session_id=req.session_id,

@@ -2,6 +2,7 @@ import { API_BASE } from "../../config/constants";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createHeaderAutoHide, HIDE_AFTER } from "../../utils/headerAutoHide";
 import AdminNavDropdown from "./AdminNavDropdown";
+import { CHANGE_PLAN_NOTE, apiErrorMessage } from "../../utils/billing";
 
 const ChevronDown = ({ rotated }) => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
@@ -50,7 +51,10 @@ const TIER_LABELS = {
   free: "Free",
 };
 
-function InlinePlanPanel({ user, onChangePlan, onBillingPortal, onCanceled }) {
+// Shown only to a paying user. "Change Plan" used to open the plan cards, whose
+// buttons opened a SECOND full-price subscription (2 Nov 2026). Plan changes go
+// through support; Manage billing covers the card and invoices.
+function InlinePlanPanel({ user, onBillingPortal, onCanceled }) {
   const [canceling, setCanceling] = useState(false);
   const [cancelDone, setCancelDone] = useState(false);
   const [cancelError, setCancelError] = useState("");
@@ -77,7 +81,7 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal, onCanceled }) {
         method: "POST", credentials: "include",
       });
       const data = await res.json();
-      if (!res.ok) { setCancelError(data.detail || data.message || "Failed to cancel."); return; }
+      if (!res.ok) { setCancelError(apiErrorMessage(data, "Failed to cancel.")); return; }
       setCancelDone(true); setConfirmCancel(false);
       onCanceled?.();
     } catch { setCancelError("Network error. Please try again."); }
@@ -87,6 +91,7 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal, onCanceled }) {
   return (
     <div className="udrop-plan-panel">
       {/* Plan name + billing cycle */}
+      <div className="udrop-plan-usage-label" style={{ marginBottom: 4 }}>Current plan</div>
       <div className="udrop-plan-header">
         <span className="udrop-plan-tier">{tierLabel}</span>
         {!isFree && (
@@ -142,9 +147,12 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal, onCanceled }) {
         </div>
       ) : (
         <div className="udrop-plan-actions">
-          <button onClick={onChangePlan} className="udrop-plan-btn udrop-plan-btn--primary">
-            Change Plan
-          </button>
+          <div className="udrop-plan-confirm-text" style={{ marginBottom: 2 }}>{CHANGE_PLAN_NOTE}</div>
+          {onBillingPortal && (
+            <button onClick={onBillingPortal} className="udrop-plan-btn udrop-plan-btn--primary">
+              Manage billing
+            </button>
+          )}
           {isCanceling ? (
             <div className="udrop-plan-cancel-done">✓ Subscription will cancel at end of billing period.</div>
           ) : !isFree && tier !== "enterprise" && (
@@ -239,9 +247,15 @@ function UserDropdown({
         </div>
       </div>
     );
+    // Paying restores an archived account, so it gets the billing button like
+    // suspended / soft_locked (2 Nov 2026) - not "Contact support".
     if (user.payment_status === "archived") return (
       <div className="udrop-status udrop-status--muted">
-        🗄️ Account archived - <a href="mailto:support@primble.ai" className="udrop-link">Contact support</a>
+        Account archived -{" "}
+        <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
+          {billingPortalLoading && <BillingSpinner />}Update billing
+        </button>{" "}
+        to restore access
       </div>
     );
     if (user.payment_status === "suspended") return (
@@ -347,8 +361,7 @@ function UserDropdown({
                 {showPlan && (
                   <InlinePlanPanel
                     user={user}
-                    onChangePlan={() => { setShowPlan(false); setOpen(false); onUpgradeClick(); }}
-                    onBillingPortal={openBillingPortal}
+                    onBillingPortal={() => { setShowPlan(false); setOpen(false); openBillingPortal?.(); }}
                     onCanceled={() => setUser?.(u => (u ? { ...u, payment_status: "canceling" } : u))}
                   />
                 )}

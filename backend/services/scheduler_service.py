@@ -12,6 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config.database import get_pool
 from config.settings import DATABASE_URL
 from services.email_service import _send_payment_failed_email
+from services.stripe_service import (
+    resend_unconfirmed_payment_emails, send_claimed_payment_email, subscription_payment_state,
+)
 from utils.helpers import _safe_parse_dt
 
 logger = logging.getLogger(__name__)
@@ -42,89 +45,183 @@ _ADVISORY_LOCK_ID = 7654321098
 _lock_guard       = threading.Lock()
 
 
+_STAGE_RANK = {"soft_locked": 1, "suspended": 2, "archived": 3}
+
+
+def _lifecycle_day_key(now: datetime) -> str:
+    """The calendar day of a lifecycle run, on the scheduler's own clock."""
+    try:
+        return now.astimezone(_scheduler_timezone()).date().isoformat()
+    except Exception:
+        return now.date().isoformat()
+
+
+async def _claim_lifecycle_run(day_key: str, now: datetime) -> bool:
+    """ONE lifecycle run per day across every path and process - the APScheduler
+    job (one process, by the advisory lock) and POST /api/stripe/trigger-lifecycle
+    (any process) alike (2 Nov 2026, M8). A row in the idempotency table, taken
+    in one statement: durable across restarts and processes, and it needs no
+    Redis and no extra connection. A run that crashes before it starts gives the
+    day back."""
+    async with get_pool().acquire() as conn:
+        status = await conn.execute(
+            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+            f"lifecycle_run:{day_key}", "lifecycle_run", now.isoformat(),
+        )
+    try:
+        return int(str(status).split()[-1]) > 0
+    except Exception:
+        return False
+
+
+async def _release_lifecycle_run(day_key: str) -> None:
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute("DELETE FROM processed_webhook_events WHERE event_id=$1",
+                               f"lifecycle_run:{day_key}")
+    except Exception as ex:
+        logger.error("Lifecycle: could not give back the run of %s: %s", day_key, ex)
+
+
+def _lifecycle_action(days_since: int, current_status: str, email_already_sent: int):
+    """(new_status, email_day) Brent's schedule asks for today. The stage follows
+    the day; the status only ever moves forward; the stage's e-mail is decided
+    apart from the status move, so a send that failed is retried next run."""
+    if days_since >= 60:
+        stage_status, stage_day = "archived", 60
+    elif days_since >= 21:
+        stage_status, stage_day = "suspended", 21
+    elif days_since >= 10:
+        stage_status, stage_day = "soft_locked", 10
+    elif days_since >= 7:
+        stage_status, stage_day = None, 7
+    else:
+        stage_status, stage_day = None, None
+    new_status = current_status
+    email_day = None
+    if stage_status and _STAGE_RANK[stage_status] > _STAGE_RANK.get(current_status, 0):
+        new_status = stage_status
+    if stage_day and email_already_sent < stage_day and (
+            stage_day != 7 or current_status == "failed"):
+        email_day = stage_day
+    elif stage_day is None and current_status == "failed" and email_already_sent < 1:
+        # The day-0 e-mail a failed send never delivered (2 Nov 2026, L3).
+        email_day = 1
+    return new_status, email_day
+
+
 # ASYNC-SAFE
-async def run_daily_payment_lifecycle():
+async def run_daily_payment_lifecycle(force: bool = False):
+    """Brent's non-payment schedule: day 0 e-mail, day 7 e-mail, day 10
+    soft_locked, day 21 suspended, day 60 archived - each e-mail once.
+
+    2 Nov 2026: one run per day (M8) - a dev run (`force`) or a process with no
+    Stripe key never takes the day (L-8); Stripe is asked about EVERY user in a
+    failure state each run - a paid-up user is restored, Stripe out of reach
+    moves nobody (M9, L-1); the lifecycle never charges a card itself - Stripe's
+    Smart Retries do (M8); every Stripe call runs off the event loop (M7); an
+    e-mail a crash left unsent goes out once more (L-9); overage units, final
+    plan bills, accidental duplicates and billing alerts Stripe did not take are
+    retried (M6, C1, M-1)."""
+    if not stripe.api_key:
+        logger.warning("Lifecycle: no Stripe key in this process - nothing run, the day is left to the live server")
+        return
     try:
         now = datetime.now(timezone.utc)
+        day_key = _lifecycle_day_key(now)
+        claimed_run = False
+        if not force:
+            claimed_run = await _claim_lifecycle_run(day_key, now)
+            if not claimed_run:
+                logger.info("Lifecycle: the run of %s already happened - skipped", day_key)
+                return
+    except Exception as ex:
+        logger.error(f"Lifecycle cron failed before it started: {ex}")
+        return
+    try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id, email, full_name, payment_failed_at, payment_status, stripe_customer_id, "
+                "stripe_subscription_id, "
                 "COALESCE(payment_email_sent_day, 0) AS payment_email_sent_day "
                 "FROM users WHERE payment_failed_at IS NOT NULL"
             )
         rows = [dict(r) for r in rows]
-
-        for row in rows:
-            try:
-                failed_at = _safe_parse_dt(row["payment_failed_at"])
-                if failed_at is None:
-                    continue
-                days_since         = (now - failed_at).days
-                current_status     = row.get("payment_status", "failed") or "failed"
-                new_status         = current_status
-                email_day          = None
-                email_already_sent = int(row.get("payment_email_sent_day") or 0)
-
-                if days_since in (2, 4, 6) and current_status == "failed":
-                    customer_id = row.get("stripe_customer_id")
-                    if customer_id:
-                        try:
-                            invoices = stripe.Invoice.list(customer=customer_id, status="open", limit=5)
-                            for invoice in invoices.auto_paging_iter():
-                                invoice_id = getattr(invoice, "id", None)
-                                if not invoice_id:
-                                    continue
-                                try:
-                                    stripe.Invoice.pay(invoice_id)
-                                    logger.info(f"Silent retry day {days_since}: invoice {invoice_id} for {customer_id}")
-                                except stripe.error.CardError:
-                                    logger.info(f"Silent retry day {days_since}: card declined for {customer_id}")
-                                except Exception as e:
-                                    logger.warning(f"Silent retry day {days_since}: invoice {invoice_id} failed: {e}")
-                        except Exception as e:
-                            logger.warning(f"Silent retry day {days_since}: could not list invoices for {customer_id}: {e}")
-
-                if days_since >= 60 and current_status != "archived":
-                    new_status = "archived"
-                    if email_already_sent < 60:
-                        email_day = 60
-                elif days_since >= 21 and current_status not in ("suspended", "archived"):
-                    new_status = "suspended"
-                    if email_already_sent < 21:
-                        email_day = 21
-                elif days_since >= 10 and current_status not in ("soft_locked", "suspended", "archived"):
-                    new_status = "soft_locked"
-                    if email_already_sent < 10:
-                        email_day = 10
-                elif 7 <= days_since < 10 and current_status == "failed":
-                    if email_already_sent < 7:
-                        email_day = 7
-
-                if new_status != current_status:
-                    async with get_pool().acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET payment_status=$1 WHERE id=$2",
-                            new_status, row["id"],
-                        )
-                    logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
-
-                if email_day:
-                    sent_ok = await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: _send_payment_failed_email(row["email"], row.get("full_name", ""), day=email_day)
-                    )
-                    if sent_ok:
-                        async with get_pool().acquire() as conn:
-                            await conn.execute(
-                                "UPDATE users SET payment_email_sent_day=$1 WHERE id=$2",
-                                email_day, row["id"],
-                            )
-                    else:
-                        logger.error(f"Lifecycle: day-{email_day} email send returned False for user={row['id']} — will retry tomorrow")
-
-            except Exception as ex:
-                logger.error(f"Lifecycle error user={row['id']}: {ex}")
     except Exception as ex:
         logger.error(f"Lifecycle cron failed: {ex}")
+        if claimed_run:
+            await _release_lifecycle_run(day_key)
+        return
+
+    try:
+        await resend_unconfirmed_payment_emails(get_pool, _send_payment_failed_email)
+    except Exception as ex:
+        logger.error(f"Lifecycle: unconfirmed e-mails not checked: {ex}")
+
+    for row in rows:
+        try:
+            failed_at = _safe_parse_dt(row["payment_failed_at"])
+            if failed_at is None:
+                continue
+            days_since         = (now - failed_at).days
+            current_status     = row.get("payment_status", "failed") or "failed"
+            email_already_sent = int(row.get("payment_email_sent_day") or 0)
+
+            # Ask Stripe about every failed user, every run (M9, L-1): a
+            # paid-up subscription restores the user whatever their stage;
+            # Stripe out of reach = nothing moves for this user today.
+            sub_id = row.get("stripe_subscription_id")
+            if sub_id:
+                try:
+                    state = await asyncio.to_thread(subscription_payment_state, sub_id)
+                except Exception as ex:
+                    logger.warning(f"Lifecycle: user={row['id']} - Stripe unreachable ({type(ex).__name__});"
+                                   f" no change today, retried tomorrow")
+                    continue
+                if state.get("paid"):
+                    restored = "canceling" if state.get("cancel_at_period_end") else "ok"
+                    async with get_pool().acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET payment_status=$2, payment_failed_at=NULL,"
+                            " payment_email_sent_day=0 WHERE id=$1 AND payment_failed_at=$3",
+                            row["id"], restored, row["payment_failed_at"],
+                        )
+                    logger.info(f"Lifecycle: user={row['id']} is paid up in Stripe - restored to {restored}")
+                    # Overage held while the user was failing is billed now (F1).
+                    try:
+                        from services.usage_service import bill_held_overage
+                        await bill_held_overage(str(row["id"]))
+                    except Exception as ex:
+                        logger.error(f"Lifecycle: held overage of user={row['id']} not billed: {ex}")
+                    continue
+
+            new_status, email_day = _lifecycle_action(days_since, current_status, email_already_sent)
+            if new_status != current_status:
+                async with get_pool().acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET payment_status=$1 WHERE id=$2",
+                        new_status, row["id"],
+                    )
+                logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
+
+            if email_day:
+                await send_claimed_payment_email(get_pool, _send_payment_failed_email,
+                                                 row, email_day, email_already_sent)
+        except Exception as ex:
+            logger.error(f"Lifecycle error user={row['id']}: {ex}")
+
+    # What Stripe did not take is tried again, once a day.
+    from services import stripe_service as _ssvc
+    from services import usage_service as _usage
+    for label, retry in (("pending overage", _usage.retry_pending_overage),
+                         ("final plan bills", _ssvc.retry_final_overage),
+                         ("duplicate subscriptions", _ssvc.retry_unsettled_duplicates),
+                         ("billing alerts", _ssvc.retry_billing_alerts)):
+        try:
+            await retry()
+        except Exception as ex:
+            logger.error(f"Lifecycle: {label} not retried: {ex}")
 
 
 # ASYNC-SAFE

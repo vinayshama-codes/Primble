@@ -39,6 +39,31 @@ body {
   line-height: 1.6;
 }
 
+/* The beta notice above the header, styled like the public website's bar. */
+.announcement-bar {
+  position: relative;
+  background: #111;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+  padding: 10px 48px;
+}
+.acord-disclaimer-label a { color: #C0157A; text-decoration: underline; }
+.announcement-bar-close {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+
 /* ==================== LANDING PAGE (same as before) ==================== */
 .landing-container { background: var(--white); min-height: 100vh; }
 .landing-header {

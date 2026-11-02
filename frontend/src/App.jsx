@@ -3,13 +3,15 @@ import "./App.css";
 import "./styles/injected.js";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
-import { GOOGLE_CLIENT_ID, API_BASE } from "./config/constants";
+import { GOOGLE_CLIENT_ID, API_BASE, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "./config/constants";
+import AnnouncementBar from "./components/layout/AnnouncementBar";
 import { useAuth }            from "./hooks/useAuth";
 import { useSignature }       from "./hooks/useSignature";
 import { useUpgradePolling, useBillingReturnPolling } from "./hooks/useUpgradePolling";
 import { useToasts }         from "./hooks/useToasts";
 import { usePageRestore }    from "./hooks/usePageRestore";
-import { applyOverage }       from "./api/stripeApi";
+import { startCheckout }      from "./api/stripeApi";
+import { hasPaidPlan, apiErrorMessage, needsBillingFix, OPEN_BILLING_PARAM, OPEN_BILLING_KEY } from "./utils/billing";
 
 import UpgradeStageOverlay    from "./components/overlays/UpgradeStageOverlay";
 import Header                 from "./components/layout/Header";
@@ -74,7 +76,12 @@ function MarketingFooter() {
   return (
     <footer className="footer">
       <div><h4 className="footer-h4">About Us</h4><p className="footer-p">Primble automates ACORD form processing for insurance brokers and underwriting teams.</p></div>
-      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@primble.ai</p></div>
+      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@primble.ai</p>
+        <p className="footer-p">
+          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">Terms of Service</a>
+        </p>
+      </div>
       <div>
         <h4 className="footer-h4">Follow Us</h4>
         <p className="footer-p">
@@ -93,7 +100,7 @@ function MarketingFooter() {
 }
 
 function AppContent() {
-  const { user, setUser, token, login, logout } = useAuth();
+  const { user, setUser, token, authLoading, login, logout } = useAuth();
   const { savedSignature, updateSignature }      = useSignature(token, user);
 
   const _resumeFromUrl = () => {
@@ -103,6 +110,7 @@ function AppContent() {
 
   const _hasResume = !!new URLSearchParams(window.location.search).get("resume_session");
   const [showModal,           setShowModal]           = useState(false);
+  const [modalStep,           setModalStep]           = useState(null);
   const [resumeLoading,       setResumeLoading]       = useState(_hasResume);
   const [showAuthModal,       setShowAuthModal]       = useState(false);
   const [authModalMode,       setAuthModalMode]       = useState("signin");
@@ -127,7 +135,7 @@ function AppContent() {
   // defect - it auto-dismissed at 8s but had no close button, and its bare
   // setTimeout was never cleared, so it fired setState into an unmounted
   // component if the user navigated away first.
-  const { toasts: overageToasts, push: pushOverageToast, dismiss: dismissOverageToast } = useToasts();
+  const { toasts: overageToasts, dismiss: dismissOverageToast } = useToasts();
   const [marketingPage,       setMarketingPage]       = useState(null);
   const [portalRedirecting,   setPortalRedirecting]   = useState(false);
   const acordModalRef = useRef(null);
@@ -186,41 +194,63 @@ function AppContent() {
     setShowModal(true);
   }, [user]);
 
-  useEffect(() => {
-    const params          = new URLSearchParams(window.location.search);
-    if (params.get("overage_paid") !== "true") return;
-    const qty             = params.get("qty") || "?";
-    const stripeSessionId = params.get("stripe_session_id");
-    const savedSid        = localStorage.getItem("acordly_overage_session");
-    window.history.replaceState({}, "", "/");
-    localStorage.removeItem("acordly_overage_session");
-    localStorage.removeItem("acordly_prev_limit");
-    if (!stripeSessionId) return;
-    applyOverage(stripeSessionId, parseInt(qty) || 1)
-      .then(({ data }) => {
-        fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
-          .then(r => r.ok ? r.json() : null).then(me => { if (me) setUser(me); });
-        const applied = data.credited || data.already_applied;
-        pushOverageToast(applied
-          ? { body: `${qty} extra package${qty !== "1" ? "s" : ""} added!`, tone: "success" }
-          : { body: `Could not verify payment. Contact support if packages were not credited.`, tone: "warning" });
-        if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }
-      })
-      .catch(() => {
-        pushOverageToast({ body: "Payment received but could not auto-credit. Please refresh.", tone: "warning" });
-        if (savedSid) { setResumeSessionId(savedSid); setShowModal(true); }
-      });
-  }, []); // eslint-disable-line
+  // The extra-package checkout and its return handler were retired on 2 Nov 2026
+  // (the endpoints are gone); overage is billed on the next invoice.
 
   const openBillingPortal = async () => {
     setPortalRedirecting(true);
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-portal-session`, { method: "POST", credentials: "include" });
-      const data = await res.json();
-      if (data.url) { window.location.href = data.url; }
-      else { setPortalRedirecting(false); setHeaderError(data.detail || "Could not open billing portal."); }
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) { window.location.href = data.url; return; }
+      // e.g. 400 no_billing_account: "There's no billing account to manage yet."
+      setPortalRedirecting(false);
+      setHeaderError(apiErrorMessage(data, "Could not open billing portal."));
     } catch { setPortalRedirecting(false); setHeaderError("Network error. Please try again."); }
   };
+
+  // Billing e-mails link to /?open=billing (2 Nov 2026): open Manage billing once.
+  // Signed out, the intent waits through sign-in (sessionStorage, and memory when
+  // storage is blocked); closing the sign-in window drops it. It is cleared BEFORE
+  // the portal opens, so a failure (no billing account yet) never loops.
+  const [billingIntent, setBillingIntent] = useState(() => {
+    let wanted = false;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("open") === OPEN_BILLING_PARAM) {
+        wanted = true;
+        url.searchParams.delete("open");
+        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    } catch { /* an unreadable URL carries no intent */ }
+    try {
+      if (wanted) sessionStorage.setItem(OPEN_BILLING_KEY, "1");
+      else wanted = sessionStorage.getItem(OPEN_BILLING_KEY) === "1";
+    } catch { /* storage blocked: the in-memory flag still carries this load */ }
+    return wanted;
+  });
+  const billingOpenedRef     = useRef(false);
+  const billingSignInAskedRef = useRef(false);
+  const dropBillingIntent = () => {
+    try { sessionStorage.removeItem(OPEN_BILLING_KEY); } catch { /* storage blocked */ }
+    setBillingIntent(false);
+  };
+
+  useEffect(() => {
+    if (!billingIntent || authLoading) return;
+    if (!user) {
+      if (!billingSignInAskedRef.current) {
+        billingSignInAskedRef.current = true;
+        setAuthModalMode("signin");
+        setShowAuthModal(true);
+      }
+      return;
+    }
+    if (billingOpenedRef.current) return;
+    billingOpenedRef.current = true;
+    dropBillingIntent();
+    openBillingPortal();
+  }, [billingIntent, authLoading, user]);
 
   const handleGetStarted = (planId, billingCycle, authMode) => {
     if (planId) {
@@ -230,7 +260,7 @@ function AppContent() {
     setMarketingPage(null);
     if (user) {
       if (planId) {
-        triggerPendingCheckout();
+        triggerPendingCheckout(user);
       } else {
         setShowModal(true);
         window.history.pushState({ acordly: true }, "");
@@ -241,30 +271,24 @@ function AppContent() {
     }
   };
 
-  const triggerPendingCheckout = async () => {
+  // `forUser` is the account that just signed in (or the signed-in one): the
+  // state `user` is not updated yet inside the sign-in callbacks.
+  const triggerPendingCheckout = async (forUser) => {
     const planId       = sessionStorage.getItem("acordly_pending_plan");
     const billingCycle = sessionStorage.getItem("acordly_pending_billing_cycle") || "monthly";
     if (!planId) return false;
     sessionStorage.removeItem("acordly_pending_plan");
     sessionStorage.removeItem("acordly_pending_billing_cycle");
+    // A paying user never starts a second subscription (2 Nov 2026): show their
+    // plan and how to change it instead.
+    if (hasPaidPlan(forUser)) { setShowUpgradeModal(true); return false; }
     setPortalRedirecting(true);
-    try {
-      const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planId, billing_cycle: billingCycle }),
-      });
-      const data = await res.json();
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-        return true;
-      }
-      setPortalRedirecting(false);
-      setHeaderError(data.detail || "Failed to start checkout. Please try again.");
-    } catch {
-      setPortalRedirecting(false);
-      setHeaderError("Network error. Please try again.");
-    }
+    const result = await startCheckout(planId, billingCycle);
+    if (result.url) { window.location.href = result.url; return true; }
+    setPortalRedirecting(false);
+    // 409 payment_due is fixed in Manage billing, so that one offers it.
+    setHeaderError(needsBillingFix(result.code) ? { message: result.message, billing: true } : result.message);
+    window.scrollTo({ top: 0, behavior: "smooth" });   // the bar sits under the header
     return false;
   };
 
@@ -366,6 +390,9 @@ function AppContent() {
 
       {signingIn && <AppLoadingOverlay label="Signing you in..." />}
 
+      {/* The public pages and the dashboard only - never over the package work. */}
+      {(!(showModal && user) || modalStep === "dashboard") && <AnnouncementBar />}
+
       {/* Persistent header — always visible */}
       <Header
         user={user} token={token} savedSignature={savedSignature}
@@ -394,13 +421,28 @@ function AppContent() {
         } : undefined}
       />
       {headerError && (
-        <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+        <div className="header-error-bar">
+          <span>
+            {typeof headerError === "string" ? headerError : headerError.message}
+            {headerError.billing && (
+              <>
+                {" "}
+                <button type="button" onClick={() => { setHeaderError(""); openBillingPortal(); }}
+                  style={{ fontSize: 13, fontWeight: 700, textDecoration: "underline", padding: 0 }}>
+                  Manage billing
+                </button>
+              </>
+            )}
+          </span>
+          <button onClick={() => setHeaderError("")}>✕</button>
+        </div>
       )}
 
       {/* Page content — switches between landing, marketing pages, and app */}
       {showModal && user ? (
         <AcordModal
           ref={acordModalRef}
+          onStepChange={setModalStep}
           onClose={() => { setShowModal(false); setResumeSessionId(null); }}
           user={user} token={token} onUserUpdate={setUser}
           onShowUpgrade={() => setShowUpgradeModal(true)}
@@ -426,7 +468,7 @@ function AppContent() {
       {showAuthModal && (
         <AuthModal
           initialMode={authModalMode}
-          onClose={() => setShowAuthModal(false)}
+          onClose={() => { setShowAuthModal(false); if (billingIntent) dropBillingIntent(); }}
           onSuccess={(usr, profileIncomplete, pendingToken) => {
             setShowAuthModal(false);
             if (profileIncomplete) {
@@ -441,7 +483,7 @@ function AppContent() {
                 const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
                 sessionStorage.removeItem("acordly_resume_after_login");
                 const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
-                if (hasPendingPlan)   { await triggerPendingCheckout(); }
+                if (hasPendingPlan)   { await triggerPendingCheckout(usr); }
                 else if (pendingResume) { setResumeSessionId(pendingResume); setShowModal(true); }
                 else                  { setShowModal(true); }
               }, 80);
@@ -460,15 +502,14 @@ function AppContent() {
             setPendingGoogleToken(null);
             setPendingGoogleUser(null);
             const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
-            if (hasPendingPlan) { await triggerPendingCheckout(); } else { setShowModal(true); }
+            if (hasPendingPlan) { await triggerPendingCheckout(u); } else { setShowModal(true); }
           }}
         />
       )}
 
       {showUpgradeModal && (
-        <UpgradeModal token={token} user={user}
+        <UpgradeModal user={user}
           onClose={() => setShowUpgradeModal(false)}
-          onError={(msg) => { setShowUpgradeModal(false); setHeaderError(msg); }}
           openBillingPortal={openBillingPortal}
         />
       )}

@@ -198,9 +198,12 @@ async def _post_form_response(session_id: str, forms_updated: list) -> dict:
 
 
 async def _change(session_id: str, current_user: dict, action: str, **kw) -> JSONResponse:
+    from utils.helpers import check_payment_access
     session = await get_processing_session(session_id)
     _owner(session, current_user)
     await _refuse_while_running(session)
+    # Payment lifecycle gate (2 Nov 2026, L5): every policy-line write.
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     user_id = str(current_user["id"])
     async with _lock_for(session_id):
         session = await get_processing_session(session_id)

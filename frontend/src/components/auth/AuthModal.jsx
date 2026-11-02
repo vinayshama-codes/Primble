@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
-import { API_BASE } from "../../config/constants";
+import { API_BASE, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "../../config/constants";
 
 function AuthLoadingOverlay({ label }) {
   return (
@@ -330,7 +330,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               <div className="acord-disclaimer-box">
                 <label className="acord-disclaimer-label">
                   <input type="checkbox" checked={disclaimerChecked} onChange={(e) => setDisclaimerChecked(e.target.checked)} className="acord-disclaimer-checkbox" />
-                  <span>By creating a Primble account, you acknowledge that <strong>ACORD Corporation</strong> requires a separate license to build and distribute <strong>ACORD Forms</strong> and agree to obtain such license.</span>
+                  <span>By creating a Primble account, you acknowledge that <strong>ACORD Corporation</strong> requires a separate license to build and distribute <strong>ACORD Forms</strong> and agree to obtain such license. You also agree to Primble's <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
                 </label>
               </div>
             )}

@@ -96,6 +96,16 @@ class _FakeConn:
         if "downloads_used" in sql and "+ 1" in sql:
             self.user["downloads_used"] = int(self.user.get("downloads_used") or 0) + 1
 
+    def transaction(self):
+        # 2 Nov 2026 (L-4): the counter and the claim move in one transaction.
+        class _Tx:
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, *exc):
+                return False
+        return _Tx()
+
 
 class _FakePool:
     def __init__(self, user):
@@ -117,11 +127,19 @@ class _FakePool:
 def _generate(monkeypatch, user, sessions, session_id):
     """Run the real generation-time counter against an in-memory user/session."""
     monkeypatch.setattr(usage_service, "get_pool", lambda: _FakePool(user))
-    monkeypatch.setattr(usage_service, "_usage_redis", None)
     monkeypatch.setattr(usage_service, "get_processing_session",
                         lambda sid, **kw: _async(sessions.setdefault(sid, {})))
-    monkeypatch.setattr(usage_service, "upd_processing_session",
-                        lambda sid, upd: _async(sessions.setdefault(sid, {}).update(upd)))
+
+    # 2 Nov 2026: the stamp is CLAIMED in one statement
+    # (session_repository.claim_package_count) - no Redis rapid-lock, no
+    # read-then-write through upd_processing_session.
+    async def _claim(sid, uid, at_iso, conn=None):
+        sess = sessions.setdefault(sid, {})
+        if sess.get("package_counted_at"):
+            return False
+        sess["package_counted_at"] = at_iso
+        return True
+    monkeypatch.setattr(usage_service, "claim_package_count", _claim)
     return asyncio.run(usage_service.count_session_usage(user["id"], session_id))
 
 
@@ -158,7 +176,6 @@ def test_regenerating_the_same_package_does_not_spend_another_credit(monkeypatch
     user = {"id": "u3", "subscription_tier": "free", "downloads_used": 0}
     sessions = {}
     _generate(monkeypatch, user, sessions, "pkg-1")
-    usage_service._dedup_seen.clear()
     _generate(monkeypatch, user, sessions, "pkg-1")
     assert user["downloads_used"] == 1
 

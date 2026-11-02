@@ -13,8 +13,14 @@ export function useAuth() {
       .finally(() => setAuthLoading(false));
   }, []);
 
+  // A sign-in response is a short record (no package numbers, limits or
+  // payment status): show it at once, then load the full account the way a
+  // reload does - else the plan panel read "0 used" until a refresh (LT-2).
   const login = (usr) => {
     setUser(usr);
+    fetchCurrentUser()
+      .then((full) => { if (full) setUser(full); })
+      .catch(() => { /* signed out meanwhile: keep what the sign-in gave */ });
   };
 
   const logout = () => {

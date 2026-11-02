@@ -747,15 +747,23 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
         try:
             from config.settings import PLANS as _PLANS
-            active_subs = await _asyncio.to_thread(
-                stripe_lib.Subscription.list, customer=customer_id, status="active", limit=1
-            )
-            real_sub    = active_subs.data[0] if active_subs.data else None
-            real_sub_id = getattr(real_sub, "id", None) if real_sub else None
+            from services.stripe_service import belongs_to_user, field as _sfield, plan_from_subscription
+            # Only a subscription tagged with THIS user's id, and only onto a row
+            # with none stored: a resync never swaps a live subscription for
+            # another one (an accidental second plan is the webhook's call), and
+            # never adopts another product's subscription (2 Nov 2026, H4).
+            real_sub = None
+            # An enterprise plan is Primble's: never replaced by a resync (L-5).
+            if not stored_sub_id and sub != "enterprise":
+                active_subs = await _asyncio.to_thread(
+                    stripe_lib.Subscription.list, customer=customer_id, status="active", limit=10
+                )
+                real_sub = next((s_ for s_ in (_sfield(active_subs, "data") or [])
+                                 if belongs_to_user(s_, current_user["id"])), None)
+            real_sub_id = _sfield(real_sub, "id") if real_sub else None
             if real_sub_id and real_sub_id != stored_sub_id:
-                raw_meta     = getattr(real_sub, "metadata", None) or {}
-                stripe_plan  = (raw_meta.get("plan") if isinstance(raw_meta, dict) else getattr(raw_meta, "plan", None))
-                stripe_cycle = (raw_meta.get("billing_cycle") if isinstance(raw_meta, dict) else getattr(raw_meta, "billing_cycle", None)) or "monthly"
+                stripe_plan, stripe_cycle = plan_from_subscription(real_sub)
+                stripe_cycle = stripe_cycle or "monthly"
                 async with get_pool().acquire() as conn:
                     if stripe_plan and stripe_plan in _PLANS and stripe_plan != sub:
                         cfg = _PLANS[stripe_plan].get(stripe_cycle) or _PLANS[stripe_plan]["monthly"]
@@ -765,7 +773,8 @@ async def get_me(current_user: dict = Depends(get_current_user)):
                             """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
                                billing_cycle=$3, packages_limit=$4, overage_rate=$5,
                                packages_used=0, billing_period_start=$6,
-                               payment_status='ok', payment_failed_at=NULL WHERE id=$7""",
+                               payment_status='ok', payment_failed_at=NULL
+                               WHERE id=$7 AND stripe_subscription_id IS NULL""",
                             real_sub_id, stripe_plan, stripe_cycle,
                             cfg["packages"], cfg["overage_rate"], now, current_user["id"],
                         )
@@ -774,7 +783,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
                         pkgs_used  = 0
                     else:
                         await conn.execute(
-                            "UPDATE users SET stripe_subscription_id=$1 WHERE id=$2",
+                            "UPDATE users SET stripe_subscription_id=$1 WHERE id=$2 AND stripe_subscription_id IS NULL",
                             real_sub_id, current_user["id"],
                         )
                 stored_sub_id = real_sub_id
@@ -923,31 +932,64 @@ async def delete_account(
             raise HTTPException(403, "Incorrect password.")
 
     user_id     = current_user["id"]
-    email       = current_user.get("email", "")
     customer_id = current_user.get("stripe_customer_id")
     sub_id      = current_user.get("stripe_subscription_id")
 
-    # Cancel Stripe subscription immediately
+    # Cancel every live Primble subscription of the user's customer BEFORE
+    # anything is deleted. One that cannot be cancelled (or Stripe out of
+    # reach) stops the deletion: deleting the account would leave it charging
+    # a user who no longer exists (2 Nov 2026, M10).
     if customer_id or sub_id:
+        import stripe as _stripe
+        from services.stripe_service import field as _sfield, is_missing_subscription, live_primble_subscriptions
         try:
-            import stripe as _stripe
-            if sub_id:
-                try:
-                    await asyncio.to_thread(_stripe.Subscription.cancel, sub_id)
-                    logger.info(f"delete_account: cancelled Stripe sub {sub_id} for user {user_id}")
-                except Exception as se:
-                    logger.warning(f"delete_account: could not cancel sub {sub_id}: {se}")
-            else:
-                subs = await asyncio.to_thread(
-                    _stripe.Subscription.list, customer=customer_id, status="active", limit=10
-                )
-                for s in subs.data:
-                    try:
-                        await asyncio.to_thread(_stripe.Subscription.cancel, s.id)
-                    except Exception as se:
-                        logger.warning(f"delete_account: could not cancel sub {s.id}: {se}")
+            try:
+                live = await live_primble_subscriptions(current_user, customer_id)
+            except Exception as ex:
+                if not (customer_id and "no such customer" in str(ex).lower()):
+                    raise
+                live = await live_primble_subscriptions(current_user, None)
         except Exception as ex:
-            logger.warning(f"delete_account: Stripe cancellation error for user {user_id}: {ex}")
+            logger.error(f"delete_account: could not list subscriptions for user {user_id}: {type(ex).__name__}")
+            raise HTTPException(503, "We couldn't reach our payment provider to cancel your plan. "
+                                     "Nothing was deleted - please try again in a minute.")
+        failed = []
+        for _sub in live:
+            _sid = _sfield(_sub, "id")
+            try:
+                await asyncio.to_thread(_stripe.Subscription.cancel, _sid)
+                logger.info(f"delete_account: cancelled Stripe sub {_sid} for user {user_id}")
+            except Exception as se:
+                if is_missing_subscription(se):
+                    continue
+                logger.error(f"delete_account: could not cancel sub {_sid} for user {user_id}: {type(se).__name__}")
+                failed.append(_sid)
+        if failed:
+            raise HTTPException(502, "We couldn't cancel your subscription, so your account was not deleted. "
+                                     "Please try again, or contact support@primble.ai.")
+        # The plan ended now: its unbilled extra packages are owed and no
+        # renewal will carry them - billed on a final invoice at this moment
+        # (2 Nov 2026, C1). The ledger row outlives the account, so a Stripe
+        # failure here is retried by the daily job without the user row; the
+        # subscription.deleted that follows finds the bill already claimed.
+        if customer_id:
+            from config.settings import default_overage_rate_cents
+            from services.stripe_service import FINAL_PENDING, final_overage_key, settle_final_overage
+            _rate = int(current_user.get("overage_rate")
+                        or default_overage_rate_cents(current_user.get("subscription_tier") or ""))
+            _fkey = final_overage_key(user_id, sub_id, customer_id, _rate)
+            async with get_pool().acquire() as conn:
+                _claimed = await conn.execute(
+                    "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                    " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                    _fkey, FINAL_PENDING, datetime.now(timezone.utc).isoformat(),
+                )
+            if str(_claimed).strip().endswith(" 1"):
+                try:
+                    await settle_final_overage(_fkey)
+                except Exception as _fex:                      # noqa: BLE001
+                    logger.error(f"delete_account: final overage of user {user_id} not billed now ({_fex})"
+                                 f" - retried daily")
 
     # Revoke all sessions
     token = acordly_session
@@ -994,7 +1036,7 @@ async def delete_account(
             # Hard-delete the user row; cascade handles FK-linked tables
             await conn.execute("DELETE FROM users WHERE id = $1", user_id)
 
-    logger.info(f"delete_account: user {user_id} ({email}) deleted their account")
+    logger.info(f"delete_account: user {user_id} deleted their account")
     resp = JSONResponse({"success": True, "message": "Account deleted."})
     _clear_session_cookie(resp)
     return resp

@@ -323,7 +323,7 @@ def _send_generic_email(
     if from_addr is None:
         from_addr = os.getenv("EMAIL_FROM", "noreply@primble.ai")
 
-    logger.info(f"Sending email provider={provider!r} to={to_email} subject={subject!r}")
+    logger.info(f"Sending email provider={provider!r} to={_mask_email(to_email)} subject={subject!r}")
 
     if provider == "resend":
         api_key = os.getenv("RESEND_API_KEY", "")
@@ -361,10 +361,10 @@ def _send_generic_email(
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 pool.submit(_do_resend).result(timeout=15)
-            logger.info(f"Resend: email sent to {to_email} from={from_addr}")
+            logger.info(f"Resend: email sent to {_mask_email(to_email)} from={from_addr}")
             return True
         except Exception as ex:
-            logger.error(f"Resend email FAILED to={to_email} from={from_addr}: {ex}")
+            logger.error(f"Resend email FAILED to={_mask_email(to_email)} from={from_addr}: {ex}")
             return False
 
     elif provider == "sendgrid":
@@ -393,10 +393,10 @@ def _send_generic_email(
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 result = pool.submit(_do_sendgrid).result(timeout=20)
-            logger.info(f"SendGrid: email sent to {to_email}")
+            logger.info(f"SendGrid: email sent to {_mask_email(to_email)}")
             return result
         except Exception as ex:
-            logger.error(f"SendGrid email failed to={to_email}: {ex}")
+            logger.error(f"SendGrid email failed to={_mask_email(to_email)}: {ex}")
             return False
 
     elif provider == "smtp":
@@ -428,26 +428,43 @@ def _send_generic_email(
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 result = pool.submit(_do_smtp).result(timeout=45)
-            logger.info(f"SMTP: email sent to {to_email}")
+            logger.info(f"SMTP: email sent to {_mask_email(to_email)}")
             return result
         except Exception as ex:
-            logger.error(f"SMTP email failed to={to_email}: {ex}")
+            logger.error(f"SMTP email failed to={_mask_email(to_email)}: {ex}")
             return False
 
     else:
         logger.error(
             f"EMAIL_PROVIDER='{provider}' is not set or unrecognised — "
-            f"email to {to_email} was NOT sent. Set EMAIL_PROVIDER=resend in your .env"
+            f"email to {_mask_email(to_email)} was NOT sent. Set EMAIL_PROVIDER=resend in your .env"
         )
         return False
 
 
+def billing_link() -> str:
+    """Where every payment e-mail sends the customer: the app, opened on Manage
+    billing (2 Nov 2026, L2)."""
+    return f"{(FRONTEND_URL or '').rstrip('/')}/?open=billing"
+
+
+def _mask_email(addr: str) -> str:
+    """An address as logs may show it (2 Nov 2026, L4): first letter + domain."""
+    addr = str(addr or "")
+    local, _, domain = addr.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else "***"
+
+
 def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
-    portal = FRONTEND_URL
+    import html as _html
+    portal = _html.escape(billing_link(), quote=True)
+    name_txt = name or "there"
+    # The name is the customer's own text: escaped before it enters the HTML.
+    name = _html.escape(name or "", quote=True)
     if day == 1:
         subject  = "Action required: Payment failed for your subscription"
-        body_txt = (f"Hi {name or 'there'},\n\nWe could not process your payment. "
-                    f"Update here: {portal}\n\nThe Team")
+        body_txt = (f"Hi {name_txt},\n\nWe could not process your payment. "
+                    f"Update here: {billing_link()}\n\nThe Team")
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#1e293b;">Payment failed</h2>
           <p>Hi {name or 'there'},</p><p>We could not process your payment.</p>
@@ -455,7 +472,7 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
         </div>"""
     elif day == 7:
         subject  = "Important: Your payment is still overdue"
-        body_txt = f"Hi {name or 'there'},\nPayment still outstanding. Update: {portal}"
+        body_txt = f"Hi {name_txt},\nPayment still outstanding. Update: {billing_link()}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#dc2626;">Payment still overdue</h2>
           <p>Hi {name or 'there'},</p>
@@ -464,7 +481,7 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
         </div>"""
     elif day == 10:
         subject  = "Account Disabled: Update Billing"
-        body_txt = f"Hi {name or 'there'},\nYour account has been disabled. Please update your billing to restore access: {portal}"
+        body_txt = f"Hi {name_txt},\nYour account has been disabled. Please update your billing to restore access: {billing_link()}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#b45309;">Account Disabled</h2>
           <p>Hi {name or 'there'},</p><p>Your account has been disabled. Please update your billing to restore access.</p>
@@ -472,21 +489,20 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
         </div>"""
     elif day == 21:
         subject  = "Account suspended: access restricted"
-        body_txt = f"Hi {name or 'there'},\nAccount suspended. Update: {portal}"
+        body_txt = f"Hi {name_txt},\nAccount suspended. Update your billing to restore access: {billing_link()}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#dc2626;">Account suspended</h2>
-          <p>Hi {name or 'there'},</p><p>Suspended — 21 days of non-payment.</p>
+          <p>Hi {name or 'there'},</p><p>Suspended after 21 days of non-payment. Update your billing to restore access.</p>
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Update Billing</a></p>
         </div>"""
     elif day == 60:
-        subject  = "Account archived: subscription ended"
-        body_txt = (f"Hi {name or 'there'},\nYour account has been archived after 60 days of non-payment. "
-                    f"To reactivate, please contact support or update your billing: {portal}")
+        subject  = "Account archived: update your billing to reactivate"
+        body_txt = (f"Hi {name_txt},\nYour account has been archived after 60 days of non-payment; "
+                    f"update your billing to reactivate: {billing_link()}")
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#64748b;">Account Archived</h2>
           <p>Hi {name or 'there'},</p>
-          <p>Your account has been archived after 60 days of non-payment. All your data is preserved.</p>
-          <p>To reactivate your account, please update your billing details.</p>
+          <p>Your account has been archived after 60 days of non-payment; update your billing to reactivate. All your data is preserved.</p>
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Reactivate Account</a></p>
         </div>"""
     else:

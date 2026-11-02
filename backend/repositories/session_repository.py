@@ -331,6 +331,46 @@ async def set_active_form(sid: str, user_id: str, form_id: str) -> bool:
 
 
 # ASYNC-SAFE
+async def claim_package_count(sid: str, user_id: str, at_iso: str, conn=None) -> bool:
+    """Stamp `package_counted_at` on the owner's session only if it is not
+    stamped yet - one statement, so two paths (generation, a download, the
+    browser's count call) can never both count one package (2 Nov 2026, M3/L9).
+    True when THIS call stamped it. `conn` runs it inside the caller's
+    transaction (the counter moves with it - L-4)."""
+    sql = ("UPDATE processing_sessions"
+           " SET data = jsonb_set(data, '{package_counted_at}', to_jsonb($3::text), true)"
+           " WHERE id = $1 AND user_id = $2 AND (data->>'package_counted_at') IS NULL")
+    if conn is not None:
+        status = await conn.execute(sql, sid, str(user_id), at_iso)
+        return str(status or "").strip().endswith(" 1")
+    async with get_pool().acquire() as own:
+        status = await own.execute(sql, sid, str(user_id), at_iso)
+    return str(status or "").strip().endswith(" 1")
+
+
+# ASYNC-SAFE
+_COUNTED_SINCE_SQL = (
+    "SELECT id, data->>'package_counted_at' AS counted_at FROM processing_sessions"
+    " WHERE user_id = $1 AND (data->>'package_counted_at') IS NOT NULL"
+    "   AND (data->>'package_counted_at') >= $2"
+    " ORDER BY (data->>'package_counted_at'), id"
+)
+
+
+async def packages_counted_since(user_id: str, since_iso: str, conn=None) -> list:
+    """[(session_id, counted_at)] of the user's packages counted at or after
+    `since_iso`, oldest first - the per-package record a billing period is
+    recounted from. A package the user deleted is gone from it. `conn` reads it
+    inside the caller's (locked) transaction."""
+    if conn is not None:
+        rows = await conn.fetch(_COUNTED_SINCE_SQL, str(user_id), since_iso)
+    else:
+        async with get_pool().acquire() as own:
+            rows = await own.fetch(_COUNTED_SINCE_SQL, str(user_id), since_iso)
+    return [(dict(r)["id"], dict(r)["counted_at"]) for r in rows]
+
+
+# ASYNC-SAFE
 async def upd_processing_session(
     sid: str,
     updates: dict,

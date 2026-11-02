@@ -424,6 +424,7 @@ _ALLOWED_SESSION_WRITERS = {
     ("repositories/session_repository.py", "new_processing_session"): "door - records lineage",
     ("repositories/session_repository.py", "upd_processing_session"): "door - records lineage",
     ("repositories/session_repository.py", "set_active_form"): "active_form_id only",
+    ("repositories/session_repository.py", "claim_package_count"): "package_counted_at only (2 Nov 2026 billing claim)",
     ("repositories/session_repository.py", "_backfill_search_names"): "search_name copy only",
     ("routes/audit_routes.py", "_apply_dismiss_score_credit"): "score paths only",
     ("services/scheduler_service.py", "run_facts_retention"): "retention tombstone; lineage values purged with it",

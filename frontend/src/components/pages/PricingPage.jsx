@@ -1,28 +1,28 @@
 import { useState } from "react";
-import { API_BASE } from "../../config/constants";
 import { PLANS, ANNUAL_SAVINGS_PCT } from "../billing/plans";
 import { usePageRestore } from "../../hooks/usePageRestore";
+import { startCheckout } from "../../api/stripeApi";
+import { hasPaidPlan } from "../../utils/billing";
+import { CheckoutError } from "../billing/PlanChangeNote";
 import ContactModal from "../account/ContactModal";
 
 // "business" is retired (no card) but keeps its rank so a legacy Business
 // subscriber keeps the same button labels on the remaining cards.
 const PLAN_ORDER = ["essentials", "professional", "business", "enterprise"];
 
-export default function PricingPage({ onGetStarted, token, user, onError, openBillingPortal }) {
-  const [annual, setAnnual]           = useState(false);
+export default function PricingPage({ onGetStarted, token, user, openBillingPortal }) {
+  // A paying user never starts a checkout here (2 Nov 2026) - not for another
+  // tier, not for monthly <-> annual: a second checkout opened a second
+  // full-price subscription. Plan changes go through support. The cookie
+  // session leaves `token` null, so this reads the user, not the token.
+  const subscribed = hasPaidPlan(user);
+  const [annual, setAnnual]           = useState(subscribed && user?.billing_cycle === "annual");
   const [loadingPlan, setLoadingPlan] = useState(null);
-  const [portalLoading, setPortalLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
   const [showContactSales, setShowContactSales] = useState(false);
 
   // Back from Stripe restores this page frozen mid-redirect - clear the spinners.
-  usePageRestore(() => { setLoadingPlan(null); setPortalLoading(false); });
-
-  const handleManageBilling = async () => {
-    if (!openBillingPortal) return;
-    setPortalLoading(true);
-    try { await openBillingPortal(); }
-    finally { setPortalLoading(false); }
-  };
+  usePageRestore(() => { setLoadingPlan(null); });
 
   const currentTier = user?.subscription_tier || "free";
   const currentIdx  = PLAN_ORDER.indexOf(currentTier);
@@ -36,11 +36,8 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
 
   const getCtaLabel = (plan) => {
     if (plan.id === "enterprise") return "Contact sales";
-    if (!token) return "Select";
-    const state = getPlanState(plan.id);
-    if (state === "current") return "Current plan";
-    if (currentTier === "free" || currentIdx === -1) return "Select";
-    return "Upgrade";
+    if (getPlanState(plan.id) === "current" && (token || subscribed)) return "Current plan";
+    return "Select";
   };
 
   const handleSelect = async (planId) => {
@@ -48,30 +45,18 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
       setShowContactSales(true);
       return;
     }
+    if (subscribed) return;
     if (!token) {
       onGetStarted(planId, annual ? "annual" : "monthly");
       return;
     }
     if (planId === currentTier) return;
+    setCheckoutError(null);
     setLoadingPlan(planId);
-    try {
-      const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planId, billing_cycle: annual ? "annual" : "monthly" }),
-      });
-      const data = await res.json();
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-      } else {
-        setLoadingPlan(null);
-        if (onError) onError(data.detail || "Failed to start checkout. Please try again.");
-      }
-    } catch {
-      setLoadingPlan(null);
-      if (onError) onError("Network error. Please try again.");
-    }
+    const result = await startCheckout(planId, annual ? "annual" : "monthly");
+    if (result.url) { window.location.assign(result.url); return; }
+    setLoadingPlan(null);
+    setCheckoutError(result);
   };
 
   const anyLoading = !!loadingPlan;
@@ -83,18 +68,6 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
       {/* HERO */}
       <section className="mkt-hero" style={{ paddingTop: 64, paddingBottom: 0 }}>
         <h1 className="pricing-section-h1">Choose the Plan That Fits Your Business</h1>
-        {token && user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
-          <p style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>
-            Need to update your payment method?{" "}
-            <button
-              onClick={handleManageBilling}
-              disabled={portalLoading}
-              style={{ background: "none", border: "none", padding: 0, color: "#E61B84", fontWeight: 600, cursor: "pointer", fontSize: 13, textDecoration: "underline" }}
-            >
-              {portalLoading ? "Opening…" : "Manage billing"}
-            </button>
-          </p>
-        )}
       </section>
 
 
@@ -116,6 +89,8 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
             </button>
           </div>
 
+          <CheckoutError error={checkoutError} openBillingPortal={openBillingPortal} style={{ maxWidth: 640, margin: "0 auto 20px" }} />
+
           <div className="mkt-plans-grid">
             {PLANS.map((plan) => {
               const isLoading = loadingPlan === plan.id;
@@ -123,8 +98,10 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
 
               const planState  = getPlanState(plan.id);
               const ctaLabel   = getCtaLabel(plan);
-              const isCurrent  = token && planState === "current";
+              const isCurrent  = (token || subscribed) && planState === "current";
               const isDisabled = anyLoading || isCurrent;
+              // A paying user's other priced plans carry no button (support changes plans).
+              const noCta      = subscribed && !isCurrent && plan.id !== "enterprise";
 
               return (
                 <div key={plan.id} className={`mkt-plan-card ${plan.featured ? "mkt-plan-featured" : ""} ${isCurrent ? "mkt-plan-current" : ""}`}>
@@ -151,6 +128,17 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
 
                   <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, margin: "6px 0 8px" }}>{plan.packageCount}</div>
 
+                  {noCta ? (
+                    <button
+                      type="button"
+                      className="mkt-plan-cta mkt-plan-cta-outline"
+                      disabled
+                      title="To change your plan, contact support@primble.ai."
+                      style={{ opacity: 0.5, cursor: "not-allowed", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      Contact support to change
+                    </button>
+                  ) : (
                   <button
                     className={plan.featured ? "btn-primary mkt-plan-cta" : "mkt-plan-cta mkt-plan-cta-outline"}
                     onClick={() => handleSelect(plan.id)}
@@ -170,6 +158,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
                       </>
                     ) : ctaLabel}
                   </button>
+                  )}
 
                   <div className="mkt-plan-divider" />
 

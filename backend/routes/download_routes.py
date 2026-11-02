@@ -50,7 +50,8 @@ def _cover_with_record(cover_pdf, proc_session):
 from services.field_qa import check_hard_block
 # Download file names: a form's second copy is "ACORD_131_Excess" (7 Oct 2026).
 from services.form_instances import file_stem
-from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
+from services.stripe_service import evaluate_package_limit
+from services.usage_service import count_session_usage, holds_free_reservation
 from services.sqs_service import calculate_sqs, current_package_sqs, tier_for_score
 from services.audit_service import current_unresolved_recommendations
 from utils.crypto import decrypt_field, decrypt_field_soft
@@ -390,7 +391,7 @@ async def _refresh_user(user_id: str) -> dict:
 
 
 # ASYNC-SAFE
-def _free_limit_blocks(sub: str, used: int, proc_session: dict) -> bool:
+def _free_limit_blocks(sub: str, used: int, proc_session: dict, reserved: bool = False) -> bool:
     """True when a free account has spent its allowance on OTHER packages.
 
     A free package is counted when its forms are GENERATED (usage_service), so by
@@ -400,7 +401,10 @@ def _free_limit_blocks(sub: str, used: int, proc_session: dict) -> bool:
     always downloads; an uncounted session would spend a new credit, so it is
     refused once the allowance is gone.
     """
-    if sub != "free" or used < FREE_PACKAGE_LIMIT:
+    if sub != "free" or used < FREE_PACKAGE_LIMIT or reserved:
+        # `reserved`: this package holds the free reservation its generation
+        # took - a run that died after saving the forms but before counting
+        # still downloads, and the download counts it (2 Nov 2026, M-2).
         return False
     return not proc_session.get("package_counted_at")
 
@@ -433,7 +437,9 @@ async def download_pdf(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    if _free_limit_blocks(sub, used, proc_session):
+    _reserved = (sub == "free" and not proc_session.get("package_counted_at")
+                 and await holds_free_reservation(str(fresh["id"]), session_id))
+    if _free_limit_blocks(sub, used, proc_session, _reserved):
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     # Submission Integrity gate (Beta Report §4.1): never serve a generated form for
     # a package still pending multi-insured review. Explicit server-side enforcement,
@@ -526,30 +532,9 @@ async def download_pdf(
     _ids_hash        = hashlib.md5(form_id.encode()).hexdigest()[:8]
     _already_counted = bool(proc_session.get("package_counted_at"))
     if not _already_counted and await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
-        _now_iso = datetime.now(timezone.utc).isoformat()
-        await upd_processing_session(session_id, {"package_counted_at": _now_iso})
-        async with get_pool().acquire() as conn:
-            if sub == "free":
-                await conn.execute(
-                    "UPDATE users SET downloads_used = COALESCE(downloads_used, 0) + 1 WHERE id = $1", fresh["id"]
-                )
-            elif sub in ("professional", "business") and pkg_eval:
-                await conn.execute(
-                    "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
-                    fresh["id"],
-                )
-                if pkg_eval["status"] == "overage":
-                    stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
-                    if stripe_queued:
-                        await conn.execute(
-                            "UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = $1",
-                            fresh["id"],
-                        )
-                    else:
-                        await conn.execute(
-                            "UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = $1",
-                            fresh["id"],
-                        )
+        # The ONE counter (2 Nov 2026): it claims package_counted_at in one
+        # statement and bills an overage package once (usage_service).
+        await count_session_usage(str(fresh["id"]), session_id)
     else:
         logger.info("download_pdf: already counted — skipping for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
@@ -648,7 +633,9 @@ async def download_all(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    if _free_limit_blocks(sub, used, proc_session):
+    _reserved = (sub == "free" and not proc_session.get("package_counted_at")
+                 and await holds_free_reservation(str(fresh["id"]), session_id))
+    if _free_limit_blocks(sub, used, proc_session, _reserved):
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     # Submission Integrity gate (Beta Report §4.1): never serve the package bundle
     # for a flagged, unresolved multi-insured submission.
@@ -722,30 +709,9 @@ async def download_all(
     _ids_hash        = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
     _already_counted = bool(proc_session.get("package_counted_at"))
     if not _already_counted and await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
-        _now_iso = datetime.now(timezone.utc).isoformat()
-        await upd_processing_session(session_id, {"package_counted_at": _now_iso})
-        async with get_pool().acquire() as conn:
-            if sub == "free":
-                await conn.execute(
-                    "UPDATE users SET downloads_used = COALESCE(downloads_used, 0) + 1 WHERE id = $1", fresh["id"]
-                )
-            elif sub in ("professional", "business") and pkg_eval:
-                await conn.execute(
-                    "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
-                    fresh["id"],
-                )
-                if pkg_eval["status"] == "overage":
-                    stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
-                    if stripe_queued:
-                        await conn.execute(
-                            "UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = $1",
-                            fresh["id"],
-                        )
-                    else:
-                        await conn.execute(
-                            "UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = $1",
-                            fresh["id"],
-                        )
+        # The ONE counter (2 Nov 2026): it claims package_counted_at in one
+        # statement and bills an overage package once (usage_service).
+        await count_session_usage(str(fresh["id"]), session_id)
     else:
         logger.info("download_all: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
@@ -999,25 +965,8 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
             pkg_eval = await evaluate_package_limit(fresh)
             _ids_hash = hashlib.md5(b"cover").hexdigest()[:8]
             if await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
-                _now_iso = datetime.now(timezone.utc).isoformat()
-                await upd_processing_session(session_id, {"package_counted_at": _now_iso})
-                async with get_pool().acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
-                        fresh["id"],
-                    )
-                    if pkg_eval["status"] == "overage":
-                        stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
-                        if stripe_queued:
-                            await conn.execute(
-                                "UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = $1",
-                                fresh["id"],
-                            )
-                        else:
-                            await conn.execute(
-                                "UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = $1",
-                                fresh["id"],
-                            )
+                # The ONE counter (2 Nov 2026, usage_service).
+                await count_session_usage(str(fresh["id"]), session_id)
         else:
             logger.info("lite_cover_sheet: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
