@@ -193,11 +193,15 @@ async def run_daily_payment_lifecycle(force: bool = False):
                             # moment is stale (3 Nov 2026, R2).
                             if int(str(done).split()[-1] or 0):
                                 await record_last_paid(conn, row["id"], now.isoformat())
+                                # Held units become pending in this transaction,
+                                # so a failed bill below is retried (pass 3 #4).
+                                from services.usage_service import release_held_overage
+                                await release_held_overage(conn, str(row["id"]))
                     logger.info(f"Lifecycle: user={row['id']} is paid up in Stripe - restored to {restored}")
                     # Overage held while the user was failing is billed now (F1).
                     try:
-                        from services.usage_service import bill_held_overage
-                        await bill_held_overage(str(row["id"]))
+                        from services.usage_service import retry_pending_overage
+                        await retry_pending_overage(str(row["id"]))
                     except Exception as ex:
                         logger.error(f"Lifecycle: held overage of user={row['id']} not billed: {ex}")
                     continue
@@ -205,10 +209,16 @@ async def run_daily_payment_lifecycle(force: bool = False):
             new_status, email_day = _lifecycle_action(days_since, current_status, email_already_sent)
             if new_status != current_status:
                 async with get_pool().acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET payment_status=$1 WHERE id=$2",
-                        new_status, row["id"],
+                    # Only the failure this run read (3 Nov 2026, pass 5 #3): a
+                    # restore committing since the Stripe check above is never
+                    # overwritten with a lock.
+                    moved = await conn.execute(
+                        "UPDATE users SET payment_status=$1 WHERE id=$2 AND payment_failed_at=$3",
+                        new_status, row["id"], row["payment_failed_at"],
                     )
+                if not int(str(moved).split()[-1] or 0):
+                    logger.info(f"Lifecycle: user={row['id']} changed since it was read - no stage move")
+                    continue
                 logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
 
             if email_day:

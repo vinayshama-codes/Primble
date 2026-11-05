@@ -528,7 +528,9 @@ async def _refuse_while_generating(session: dict) -> None:
     if (session or {}).get("generated_forms"):
         return
     from routes.form_routes import _generation_state_for
-    from services.generation_state import STATE_RUNNING, forms_locked_reason
+    from services.generation_state import PREPARING_LOCKED, STATE_RUNNING, forms_locked_reason, preparing
+    if preparing(session):
+        raise HTTPException(409, PREPARING_LOCKED)
     state, _job = await _generation_state_for(session)
     if state == STATE_RUNNING:
         raise HTTPException(409, forms_locked_reason(session, STATE_RUNNING))

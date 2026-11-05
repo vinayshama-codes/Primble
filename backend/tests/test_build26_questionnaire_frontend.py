@@ -404,7 +404,8 @@ def test_send_to_client_takes_the_contact_on_file(tmp_path):
     out = _node(tmp_path, f"""
 console.log(JSON.stringify([Q.clientContact({json.dumps(model)}), Q.clientContact(null)]));
 """)
-    assert out == [{"email": "erin@example.com", "name": "Erin Royal"}, {"email": "", "name": ""}]
+    # 3 Nov 2026: the contact also carries the phone on file, for "Text the link" (utils/smsShare.js)
+    assert out == [{"email": "erin@example.com", "name": "Erin Royal", "phone": ""}, {"email": "", "name": "", "phone": ""}]
     page = _PAGE.read_text(encoding="utf-8")
     assert "{ question_ids: ids, client_email: toEmail, client_name: toName }" in page
     assert 'placeholder="Client e-mail"' in page and 'placeholder="Client name"' in page

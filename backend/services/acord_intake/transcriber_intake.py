@@ -147,13 +147,13 @@ def _page_texts(path: str, pages: List[int], ocr_text: str) -> Dict[int, str]:
 def _plan_image(path: str, ocr_text: str, cfg) -> Optional[SendGroup]:
     """A photographed / scanned form uploaded as an image: the ACORD footer is in
     the OCR text; the whole image is the page."""
-    from services.acord_intake.recognize import footer_of
+    from services.acord_intake.recognize import footer_number, footer_of
     foot = footer_of(ocr_text or "", tail=True)
     if not foot or not looks_like_acord_page(ocr_text):
         return None
     with open(path, "rb") as fh:
         data = fh.read()
-    num = f"{foot.group('num')} {foot.group('var')}" if foot.group("var") else foot.group("num")
+    num = footer_number(foot)
     g = SendGroup(pages=[0], acord_numbers=[num], kinds=["scanned"], data=data, input_format="IMAGE",
                   whole_file=True)
     g.hash = content_hash(data, "IMAGE|ELABEL|latest")

@@ -299,6 +299,13 @@ async def extract_document(
         await reporter.file_phase(index, "extracted")
         return {"duplicate": True, "filename": display_name,
                 "text_key": document_text_key(text)}
+    # The cross-account document alert (FW-2, Brent 3 Nov 2026): a keyed hash of this document, kept apart from the
+    # package; the admins are told when an unrelated account uploaded it before. Never blocks, never raises.
+    try:
+        from services.document_fingerprints import record_upload
+        await record_upload(user_id, display_name, text, path)
+    except Exception:                                     # noqa: BLE001
+        pass
 
     # Schedule rows reach the LLM as proper row-by-row tables, emitted INLINE
     # with their page by extract_text() above (see extraction_arch_change.md).

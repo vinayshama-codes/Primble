@@ -80,6 +80,7 @@ from services.audit_service import (
 from utils.rate_limiter import check_upload_rate_limit
 from utils.concurrency import (
     acquire_heavy_waiting, one_writer_per_package, release_heavy, run_scoring, try_acquire_heavy,
+    session_write_lock,
 )
 from utils.mime_validator import validate_file_mime
 from utils.virus_scanner import scan_file_bytes
@@ -231,7 +232,9 @@ async def _refuse_once_forms_exist(session: dict) -> None:
     (Orbin item 1). These actions re-read the documents and never touch forms
     that already exist, so the forms - and their score - would keep the old
     values; a run in flight would race their wholesale writes."""
-    from services.generation_state import forms_locked_reason
+    from services.generation_state import PREPARING_LOCKED, forms_locked_reason, preparing
+    if preparing(session):
+        raise HTTPException(409, PREPARING_LOCKED)
     state, _job = await _generation_state_for(session)
     reason = forms_locked_reason(session, state)
     if reason:
@@ -1669,6 +1672,31 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     # live, so "Continue to form selection" can generate again.
     await _refuse_once_forms_exist(session)
 
+    # ACORD forms picked from ASG's list (3 Nov 2026, Accommodate800forms.md D-ASG-7): only while the
+    # feature is on for this user, and at most ASG_FORMS_MAX of them in one PACKAGE. Every id is taken in one
+    # spelling first (trimmed, once each), so " ACORD_27" and a repeated id can neither slip past the cap nor
+    # be stored twice (review 3 Nov). The frontend always sends clean, distinct ids - nothing changes for it.
+    from services import asg_forms as _asg
+    req.form_ids = _asg.clean_form_ids(req.form_ids)
+    # Every form in one package, ours and ASG's together (Brent, 4 Nov 2026: 15; more = an account upgrade).
+    _in_package = _asg.package_form_count(req.form_ids, session.get("generated_forms"))
+    if _in_package > _asg.max_forms_per_package():
+        raise HTTPException(400, _asg.PACKAGE_FULL_MESSAGE.format(max=_asg.max_forms_per_package())
+                            + f" This package would have {_in_package}.")
+    _asg_ids = _asg.asg_form_ids(req.form_ids)
+    if _asg_ids:
+        _not_pc = [f for f in _asg_ids if not _asg.is_pc_form(f)]
+        if _not_pc:
+            raise HTTPException(400, "Only property & casualty ACORD forms can be added to a package - remove "
+                                     + ", ".join(_asg.label_of(f) for f in _not_pc) + ".")
+        if not _asg.enabled_for(current_user):
+            raise HTTPException(403, "Adding ACORD forms from the full ACORD library is not available "
+                                     "on this account yet.")
+        _asg_in_package = _asg.asg_count_in_package(req.form_ids, session.get("generated_forms"))
+        if _asg_in_package > _asg.max_per_package():
+            raise HTTPException(400, f"You can add up to {_asg.max_per_package()} extra ACORD forms to "
+                                     f"one package - this package would have {_asg_in_package}.")
+
     # Submission Integrity gate (Beta Report §4.1): do not generate forms on a
     # package that may belong to multiple insureds until the user has reviewed.
     enforce_integrity_gate(session)
@@ -1682,28 +1710,83 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     _in_flight = await _queue.count_user_active_jobs(current_user["id"])
     if _in_flight >= 5:
         raise HTTPException(429, "Too many jobs in progress. Please wait.")
-    _fg_payload = {
-        "session_id": req.session_id,
-        "form_ids":   req.form_ids,
-        "user_id":    str(current_user["id"]),
-    }
-    _job_id = await _queue.enqueue(JOB_TYPE_FORM_GENERATION, _fg_payload, str(current_user["id"]), session_id=req.session_id)
-    await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Generating ACORD forms...")
 
-    # Beta Report Fig 8: persist a durable "generation in progress" marker so a
-    # producer who closes the tab and reopens the session mid-run sees the same
-    # progress overlay with the time remaining (recomputed from started_at)
-    # instead of dropping back to the recommendations screen. Set before the
-    # sync/async branch so both paths leave a resumable marker; cleared when the
-    # generated forms are persisted below.
+    # Every ASG form is downloaded FIRST - in parallel, on a small pool of its own, within a deadline - so a
+    # form ACORD Solutions cannot give stops the run here, while nothing is generated and the user can remove
+    # it or try again (review rounds 2-3). The run's RAM copy then serves the gap fill and the fill: one
+    # download per form. Meanwhile the package is marked "preparing" so nothing else starts on it.
+    from services.generation_state import PREPARING_KEY
+    _prep_marked = False        # the package carries the "preparing" mark ...
+    _run_marked = False         # ... until the run's own marker replaces it
     try:
-        await upd_processing_session(req.session_id, {
-            "generation_job_id":     _job_id,
-            "generation_started_at": time.time(),
-            "generation_form_count": len(req.form_ids),
-        })
-    except Exception as _mark_ex:
-        logger.warning(f"select_forms_bulk: could not persist generation marker: {_mark_ex}")
+        # CLAIM the package before anything slow: under the package's lock, re-read it, re-check "no run, no forms"
+        # and the form cap, and mark it preparing. Two Generate clicks at once (two tabs) used to both pass on the
+        # row read at the top and build up to 30 forms past the 15-form cap (review pass 5, 4 Nov 2026).
+        async with session_write_lock(req.session_id):
+            _fresh = await get_processing_session(req.session_id)
+            await _refuse_once_forms_exist(_fresh)
+            if _asg.package_form_count(req.form_ids, _fresh.get("generated_forms")) > _asg.max_forms_per_package():
+                raise HTTPException(400, _asg.PACKAGE_FULL_MESSAGE.format(max=_asg.max_forms_per_package()))
+            # The run works on THIS read: a save that held the lock just before (an answer, a confirmed value) is in
+            # the forms and the score (review pass 6). The gates read it too.
+            session = _fresh
+            enforce_integrity_gate(session)
+            enforce_building_value_gate(session)
+            try:
+                await upd_processing_session(req.session_id, {PREPARING_KEY: time.time()})
+                _prep_marked = True
+            except HTTPException:
+                raise                       # e.g. an archived package: refused BEFORE any download (round 4)
+            except Exception as _prep_ex:                           # noqa: BLE001
+                logger.warning("select_forms_bulk: could not mark the package preparing: %s", _prep_ex)
+        if _asg_ids:
+            # One wave on the download pool; a form that has not arrived within the deadline is the only one
+            # reported - forms that did arrive are not (review round 4).
+            _pre_loop = asyncio.get_event_loop()
+            _pre_futs = {_pre_loop.run_in_executor(_asg.download_pool(), _asg.try_fetch, _asg.meta_for(_fid)): _fid
+                         for _fid in _asg_ids}
+            _done, _pending = await asyncio.wait(list(_pre_futs), timeout=_asg.PREFETCH_DEADLINE_SECONDS)
+            _pre_failed = [f.result() for f in _done if f.result()]
+            for _f in _pending:
+                _f.cancel()
+                _pre_failed.append({"form_id": _pre_futs[_f], "reason": "asg_error"})
+            if _pre_failed:
+                _order = {f: i for i, f in enumerate(_asg_ids)}      # named in the order the user picked them
+                _pre_failed.sort(key=lambda x: _order.get(x.get("form_id"), len(_order)))
+                raise HTTPException(503, _asg.prefetch_failure_message(_pre_failed))
+        _fg_payload = {
+            "session_id": req.session_id,
+            "form_ids":   req.form_ids,
+            "user_id":    str(current_user["id"]),
+        }
+        _job_id = await _queue.enqueue(JOB_TYPE_FORM_GENERATION, _fg_payload, str(current_user["id"]), session_id=req.session_id)
+        await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Generating ACORD forms...")
+
+        # Beta Report Fig 8: persist a durable "generation in progress" marker so a
+        # producer who closes the tab and reopens the session mid-run sees the same
+        # progress overlay with the time remaining (recomputed from started_at)
+        # instead of dropping back to the recommendations screen. Set before the
+        # sync/async branch so both paths leave a resumable marker; cleared when the
+        # generated forms are persisted below.
+        try:
+            await upd_processing_session(req.session_id, {
+                "generation_job_id":     _job_id,
+                "generation_started_at": time.time(),
+                "generation_form_count": len(req.form_ids),
+                PREPARING_KEY: None,               # the run's own marker takes over (every run is claimed - pass 6)
+            })
+            _run_marked = True
+        except Exception as _mark_ex:
+            logger.warning(f"select_forms_bulk: could not persist generation marker: {_mark_ex}")
+    finally:
+        # Whatever stopped the request before the run's marker was written (a failed download, a refused
+        # request, a dropped connection, an error), the "preparing" mark comes off now - never left to block
+        # the package (review round 4). It also expires by itself.
+        if _prep_marked and not _run_marked:
+            try:
+                await upd_processing_session(req.session_id, {PREPARING_KEY: None})
+            except BaseException:                                   # noqa: BLE001
+                pass
 
     if ENABLE_ASYNC_PROCESSING:
         return JSONResponse(
@@ -1779,23 +1862,33 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                                           session.get("facts") or {})
             if not form_meta:
                 return form_id, None
-            try:
-                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
-            except ValueError:
-                logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
-                return form_id, None
-            if not os.path.exists(tpl):
-                return form_id, None
+            if not _asg.is_asg_meta(form_meta):        # an ASG form's template comes from ASG
+                try:
+                    tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+                except ValueError:
+                    logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
+                    return form_id, None
+                if not os.path.exists(tpl):
+                    return form_id, None
             try:
                 pre_filled = per_form_pre_filled.get(form_id) if per_form_pre_filled else None
                 result = await loop.run_in_executor(
                     _FORM_EXECUTOR, process_single_form, form_meta, session, pre_filled,
                 )
                 return form_id, result
+            except _asg.AsgFormUnavailable as ex:
+                # ASG could not give the form (not offered, ASG down): said on screen, never a crash.
+                logger.warning("select_forms_bulk: ASG form %s not generated - %s", form_id, ex)
+                _asg_not_generated.append({"form_id": form_id, "reason": ex.reason})
+                return form_id, None
             except Exception as ex:
                 logger.error(f"Error processing {form_id}: {ex}")
+                if _asg.is_asg_meta(form_meta):
+                    # Any failure of an ASG form leaves it out of the package and says so (review round 3).
+                    _asg_not_generated.append({"form_id": form_id, "reason": "error"})
                 return form_id, None
 
+        _asg_not_generated: list = []
         gen_results = await asyncio.gather(
             *[_generate_one(fid) for fid in req.form_ids],
             return_exceptions=True,
@@ -1807,6 +1900,12 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             fid, result = item
             if result is not None:
                 results[fid] = result
+        if _asg_not_generated:
+            # An ASG form ACORD Solutions failed to give during the run is not in the package: never listed,
+            # never the form the editor opens on (review round 2).
+            _failed_ids = {x["form_id"] for x in _asg_not_generated}
+            combined_ids = [f for f in combined_ids if f not in _failed_ids]
+            bind_generation_package(session, combined_ids)
 
         # ── What the declarations pages printed, and what reached a form ─────
         # Owner's question, 2026-08-13: "what about the data that was present in
@@ -1883,6 +1982,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             # The job is marked FAILED by the handler below and the marker STAYS,
             # so a reopened package says "Generation didn't finish" (Orbin item
             # 1) - it used to be cleared here, which read as never generated.
+            if _asg_not_generated and all(x.get("reason") != "error" for x in _asg_not_generated):
+                raise HTTPException(503, "ACORD Solutions could not provide the selected form right now. "
+                                         "Please try again shortly.")
             raise HTTPException(400, "No forms could be generated")
 
         # ── §4.3 item 2: post-generation cross-form consistency assertion ────
@@ -2093,6 +2195,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 _display_cross, facts=session.get("facts") or {}),
             "package_sqs": package_sqs,
             "stamp_consistency": _stamp_check,
+            **({"asg_not_generated": _asg_not_generated} if _asg_not_generated else {}),
         })
     except HTTPException as hex_:
         # The run ended without storing forms: say so on the job, so a reopened
@@ -2334,12 +2437,21 @@ async def get_form_fields(
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
     r   = generated[form_id]
-    try:
-        tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
-    except ValueError:
-        raise HTTPException(400, "Invalid template path")
-    if not os.path.exists(tpl):
-        raise HTTPException(404, "Template not found")
+    from services.asg_forms import is_asg_record, layout_source
+    if is_asg_record(r):
+        # An ASG form (3 Nov 2026): box positions come from the package's own copy - the boxes sit
+        # where the form puts them whatever their values; no template file, no ASG call.
+        tpl = layout_source(r)
+        if tpl is None:
+            from services.asg_forms import CANNOT_SHOW as _CANNOT_SHOW
+            raise HTTPException(503, _CANNOT_SHOW)
+    else:
+        try:
+            tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+        except ValueError:
+            raise HTTPException(400, "Invalid template path")
+        if not os.path.exists(tpl):
+            raise HTTPException(404, "Template not found")
     _loop   = asyncio.get_event_loop()
     fields    = await _loop.run_in_executor(None, extract_form_fields_with_positions, tpl)
     page_dims = await _loop.run_in_executor(None, get_page_dims_pikepdf, tpl)
@@ -2353,7 +2465,8 @@ async def get_form_fields(
             viewer_form_schema as _viewer_form_schema,
         )
         _schema = await _loop.run_in_executor(None, _viewer_form_schema, form_id, r.get("schema"))
-        fields = await _loop.run_in_executor(None, _annotate_viewer_fields, fields, _schema, tpl)
+        fields = await _loop.run_in_executor(None, _annotate_viewer_fields, fields, _schema,
+                                             None if is_asg_record(r) else tpl)
     except Exception as _ex:                                        # noqa: BLE001
         logger.warning("get_form_fields: Y/N annotation skipped for %s: %s", form_id, _ex)
     field_state = r.get("field_state") or r.get("mapped", {})
@@ -2391,7 +2504,7 @@ async def get_form_fields(
     # drops its "still to sign" highlight.
     try:
         from services.signature_boxes import signed_applicant_boxes
-        _applicant_boxes = signed_applicant_boxes(proc_session, form_id)
+        _applicant_boxes = await run_scoring(signed_applicant_boxes, proc_session, form_id)   # off the loop
     except Exception:                                               # noqa: BLE001
         _applicant_boxes = {}
     for f in fields:
@@ -2667,6 +2780,13 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
     if not form_id or form_id not in generated:
         raise HTTPException(400, "No active form to update")
+
+    # An ASG form is drawn from the package's own copy (3 Nov 2026). Without it the save would store the edit
+    # with no PDF and drop the signature - refuse before anything changes (review 3 Nov).
+    from services.asg_forms import base_copy as _asg_base_copy, is_asg_record as _is_asg_record
+    if _is_asg_record(generated[form_id]) and _asg_base_copy(generated[form_id]) is None:
+        from services.asg_forms import EDIT_NOT_SAVED as _EDIT_NOT_SAVED
+        raise HTTPException(503, _EDIT_NOT_SAVED)
 
     # A save that would leave the proposed term backwards or already ended is
     # refused (22 Oct 2026, the one door `validators.term_save_refusal`), like
@@ -3016,12 +3136,24 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         new_pdf_bytes   = None
         new_sig_applied = False
 
-        try:
-            tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
-        except ValueError:
-            raise HTTPException(400, "Invalid template path")
+        from services.asg_forms import is_asg_record, template_source
         _pdf_loop = asyncio.get_event_loop()
-        if os.path.exists(tpl):
+        if is_asg_record(r):
+            # An ASG form (3 Nov 2026): the clean form rebuilt from the package's own copy - off the event loop.
+            # Nothing has been saved yet; a copy that cannot be read refuses the edit (never a save that drops
+            # the PDF and the signature - review round 2).
+            tpl = await _pdf_loop.run_in_executor(None, template_source, r)
+            if tpl is None:
+                from services.asg_forms import EDIT_NOT_SAVED as _EDIT_NOT_SAVED
+                raise HTTPException(503, _EDIT_NOT_SAVED)
+            _tpl_ok = True
+        else:
+            try:
+                tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+            except ValueError:
+                raise HTTPException(400, "Invalid template path")
+            _tpl_ok = os.path.exists(tpl)
+        if _tpl_ok:
             new_pdf_bytes = await _pdf_loop.run_in_executor(None, fill_pdf, tpl, current_state, confidence)
             if was_signed:
                 async with get_pool().acquire() as conn:
@@ -3443,7 +3575,12 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     # Omit the full `form` field data — it can be megabytes and is not needed to
     # restore the editor shell. The PDF viewer fetches form data lazily per-form.
     summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
-                        "sqs": r.get("sqs", {})} for fid, r in generated.items()}
+                        "sqs": r.get("sqs", {}),
+                        # An ASG form: the editor's "Sample" test-copy notice on
+                        # every visit, not only the one that generated it (fresh review, 3 Nov 2026).
+                        **({"form": {"source": "asg", "asg_sample": bool((r.get("form") or {}).get("asg_sample"))}}
+                           if (r.get("form") or {}).get("source") == "asg" else {})}
+                   for fid, r in generated.items()}
 
     _cross = proc_session.get("cross_issues_last", []) or []
     # V1 C1-D: client questionnaire answers that disagreed with the documents are
@@ -3911,6 +4048,8 @@ async def delete_session(session_id: str, current_user: dict = Depends(get_curre
             await conn.execute(
                 "DELETE FROM session_pdf_bytes WHERE session_id = $1", session_id
             )
+            from services.asg_forms import forget_package as _asg_forget_package
+            _asg_forget_package(session_id)          # its ASG copies leave this process's memory too
             await conn.execute(
                 "DELETE FROM signature_requests WHERE session_id = $1 AND user_id = $2",
                 session_id, str(current_user["id"]),

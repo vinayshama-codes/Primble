@@ -30,6 +30,7 @@ from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
 from utils.validators import validate_password
 from utils.rate_limiter import check_auth_rate_limit, get_client_ip, _redis as _rate_limiter_redis
+from services import captcha
 from repositories.audit_repository import write_audit_log
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -235,9 +236,16 @@ def _clear_session_cookie(response: JSONResponse) -> None:
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
+@router.get("/captcha-config")
+async def captcha_config():
+    """Public: the captcha site key the sign-in page draws its widget with ("" = no captcha)."""
+    return captcha.public_config()
+
+
 @router.post("/signup")
 async def signup(req: SignupRequest, request: Request):
     await check_auth_rate_limit(req.email.lower())
+    await captcha.verify(req.turnstile_token, "signup")
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer to create an account.")
     if not req.organization_name or not req.organization_name.strip():
@@ -362,6 +370,7 @@ async def resend_verification(request: Request):
     if not email:
         raise HTTPException(400, "Email required")
     await check_auth_rate_limit(str(email).lower())
+    await captcha.verify(body.get("turnstile_token"), "resend_verification")
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM pending_signups WHERE email = $1", email)
@@ -384,6 +393,7 @@ async def resend_verification(request: Request):
 @router.post("/login")
 async def login(req: LoginRequest, request: Request):
     await check_auth_rate_limit(req.email.lower())
+    await captcha.verify(req.turnstile_token, "login")
     await _check_lockout(req.email)
 
     async with get_pool().acquire() as conn:
@@ -457,6 +467,7 @@ async def forgot_password(request: Request):
     if not email:
         raise HTTPException(400, "Email required")
     await check_auth_rate_limit(email)
+    await captcha.verify(body.get("turnstile_token"), "forgot_password")
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
@@ -989,7 +1000,7 @@ async def delete_account(
                 failed.append(_sid)
         if failed:
             raise HTTPException(502, "We couldn't cancel your subscription, so your account was not deleted. "
-                                     "Please try again, or contact support@primble.ai.")
+                                     "Please try again, or contact support@primble.com.")
         # The plan ended now: its unbilled extra packages are owed and no
         # renewal will carry them - billed on a final invoice at this moment
         # (2 Nov 2026, C1). The ledger row outlives the account, so a Stripe
@@ -1002,11 +1013,16 @@ async def delete_account(
                         or default_overage_rate_cents(current_user.get("subscription_tier") or ""))
             _fkey = final_overage_key(user_id, sub_id, customer_id, _rate)
             async with get_pool().acquire() as conn:
-                _claimed = await conn.execute(
-                    "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
-                    " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
-                    _fkey, FINAL_PENDING, datetime.now(timezone.utc).isoformat(),
-                )
+                async with conn.transaction():
+                    _claimed = await conn.execute(
+                        "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                        " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                        _fkey, FINAL_PENDING, datetime.now(timezone.utc).isoformat(),
+                    )
+                    # Units held while the plan was failing are never billed
+                    # (3 Nov 2026, pass 4 #3).
+                    from services.usage_service import forgive_held_overage
+                    await forgive_held_overage(conn, user_id)
             if str(_claimed).strip().endswith(" 1"):
                 try:
                     await settle_final_overage(_fkey)
@@ -1028,6 +1044,13 @@ async def delete_account(
 
     # Cascade-delete all user data
     async with get_pool().acquire() as conn:
+        # The account's packages' ASG copies leave this process's memory too (fresh review, 3 Nov 2026).
+        try:
+            from services.asg_forms import forget_package as _asg_forget_package
+            for _row in await conn.fetch("SELECT id FROM processing_sessions WHERE user_id = $1", user_id):
+                _asg_forget_package(str(dict(_row)["id"]))
+        except Exception:                                      # noqa: BLE001
+            pass
         async with conn.transaction():
             await conn.execute("DELETE FROM sessions            WHERE user_id = $1", user_id)
             # A rendered PDF may carry a signature; it goes with its package.

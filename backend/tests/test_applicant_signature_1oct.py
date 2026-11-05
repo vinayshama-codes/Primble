@@ -612,7 +612,8 @@ def test_every_render_path_keeps_the_applicants_signature():
     sr = (BACKEND / "routes" / "signature_routes.py").read_text(encoding="utf-8")
     assert "applicant_signature_for(session, form_id, current_state)" in fr          # save
     assert "applicant_signature_for(proc_session, form_id, field_data)" in sr        # producer Sign
-    assert "signed_applicant_boxes(proc_session, form_id)" in fr                     # viewer boxes
+    # viewer boxes - read off the event loop since 4 Nov 2026 (an ASG form's lines come from its stored copy)
+    assert "run_scoring(signed_applicant_boxes, proc_session, form_id)" in fr
 
 
 # ══ 8. The screens ═══════════════════════════════════════════════════════════

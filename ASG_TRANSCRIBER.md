@@ -517,3 +517,315 @@ inline - verdicts identical to the per-name lookup (pinned). Tests: `tests/test_
 the flattened ACORD 807 (Transcriber, ~3 pages) + two loss runs, to prove the three routes side by side
 (`TRANSCRIBER_SUBMIT ... label=807` once; none for the Primble form). Outside forms feed only package-scoped facts
 (the 807: the insured name); `form_values` marks "used" only what the merge kept.
+
+### 3 Nov 2026 - Download API (forms) - findings and open questions
+The "generate any ACORD form" work is logged in `Accommodate800forms.md` (sections 8.10-8.17); the ASG side in brief:
+- **PoC, 11:35 IST, owner's yes, 7 calls (cap 7):** `GET {uat-api-v1}/oauth/forms/download` served ACORD 27, 75,
+  137 CA (`geoCode=CA`), 130 latest (= **2026/08**, newer than ASG's own supported list), 130 `edition=2017/09`;
+  4-10 s each, 22 s on a cold first call; a non-existent form (9999) -> HTTP 400 `{"code":"Invalid Form",
+  "message":"This form has no acroform PDF for download."}`. Every box carries its e-label key, type and ACORD's
+  description (100% on all six forms). The UAT credentials in `.env` / Render serve downloads.
+- **Watermark:** every UAT download carries a full-page "Sample" picture (`/Im2`); forms from ACORD directly (Brent's
+  kit) and our 17 templates do not. Not in any ASG document. Untested remedies: `orgId` / `userId` on the download,
+  a portal download for comparison, PROD credentials.
+- **New ASG documents (3 Nov):** the supported-forms list (316 form numbers, 1,199 with state versions, 3,881
+  editions), the ACORD Forms page (any form, any edition, portal search, no search API), the dashboard (4,164
+  downloadable versions), error replies, Converter onboarding (IP whitelisting; Brent registered India + USA).
+- **Owner rules:** the server may call ASG for real users in production; Claude never calls ASG without the
+  owner's yes for each test.
+
+**Questions for Brent / ASG (open):**
+1. Do PROD credentials give forms WITHOUT the "Sample" watermark, or must ASG enable licensed downloads for
+   Primble's organisation (which `orgId` to send)? When do PROD credentials arrive?
+2. Search scope: P&C only, P&C + Surety, or every domain (Life / Health / Annuity)?
+3. Cap: 8 ASG forms per package for now - right number; per package or per user per month? Do downloads count
+   against our ASG usage?
+4. Can ASG give the forms list as a spreadsheet (with domain and line of business), or the list API their portal
+   uses?
+5. ASG serves ACORD 130 2026/08; Primble's own 130 is 2026/01 - switch now?
+
+**Update, 3 Nov 2026, 12:20 IST - watermark settled:** the owner downloaded ACORD 27 by hand from the UAT portal -
+the same "Sample" picture as the API download, so nothing in our request causes it. UAT profile: organisation
+"Primble", role User. The PRODUCTION portal (`transcriber.acordsolutions.net`) refuses the same login - **Primble has
+no production ASG account yet.** Real (watermark-free) forms need a PRODUCTION account + PROD API credentials for
+Primble (question 1 above; the owner is raising it with Brent). Portal numbers: P&C = 3,821 of 4,164 downloadable
+versions (question 2). Details: `Accommodate800forms.md` 8.19.
+
+### 3 Nov 2026 - the server now calls ASG's Download API (any ACORD form, built; feature dark by default)
+`services/asg_forms.fetch_blank` downloads a form's fillable PDF at GENERATION only (pre-download before anything is
+generated), with the same OAuth token + x-api-key as the Transcriber client, on its own 8-thread pool, 10 s connect /
+60 s read, 45 s retry budget, 120 s deadline per request; failures remembered (6 h "no fillable version", 3 min
+outage / bad file; sign-in failures 60 s). Never called after generation (the package's own copy is used). Off unless
+`ASG_FORMS=1`; on UAT credentials in production only for `ASG_FORMS_ALLOWED_EMAILS`. Full design, eight review rounds
+and the owner's open questions: `Accommodate800forms.md` section 10. Questions for ASG added there: what the list's
+suffixes mean ("INS", "CIS", "ONI", "PCIS" ...) and how to fetch the 12 non-state variants ("126_GL", "25_FR" ...).
+**Status 3 Nov 2026, 15:58 IST:** reviews clean (the eight rounds, then general, end-user and fresh reviews); full
+suite done 16:11 (only the known failure, plus one outdated test - fixed). **The live localhost test is STILL REMAINING** (`Accommodate800forms.md` 10.8). It makes the
+feature's first real Download API calls from Primble: about 3 (1 sign-in + 2 downloads), on the owner's own clicks.
+So far the only Download API calls are the PoC's 7 (11:35, a scratchpad script run with the owner's yes). The local
+backend running since 15:49 has made none. Log each live call here when it happens.
+**First live Download API calls from Primble - 3 Nov 2026, 16:22:49 IST (the owner's own Generate, localhost,
+UAT):** 1 sign-in + 1 download - ACORD 807 (Directors & Officers Liability Section), latest edition = 2016/03,
+211,365 bytes, 24.2 s including the sign-in; "Sample" watermark detected (UAT, expected). After generation the
+editor, a reload and the package download made 0 further calls. Details: `Accommodate800forms.md` 10.20.
+
+
+**3 Nov 2026 - the Download API's variant parameter is unconfirmed.** ASG's download doc says forms are chosen by
+"Form Number, Geocode, Geocode suffix and Edition", but its parameter table names only `formNumber`, `geoCode` and
+`edition`. Primble sends the variant code as `geoCodeSuffix` (a guess, never tested). Every download is now checked
+against the identity printed in its footer and refused if it is another form (`Accommodate800forms.md` 10.22). Ask
+ASG: the parameter's name, and whether every supported form has a fillable version.
+
+**Status 3 Nov 2026, 17:37 IST - "any ACORD form" PARKED until Brent's production credentials** (`Accommodate800forms.md`
+section 0 / 10.0):
+- Done on UAT and live-tested by the owner; not committed.
+- Download API calls to date: the PoC's 7, plus 1 sign-in + 1 download from the owner's live Generate (ACORD 807).
+- Next live calls: the owner's six verification calls (10.22) - two variants, two state versions, two plain forms -
+  made by his own Generate click.
+
+### 4 Nov 2026 - Brent: AL3 download through the Converter, and e-mail integration (relayed by the owner, 02:04 IST)
+- **AL3:** "5. AL3: Let's add this as a download file option to loop in ASG's Converter. Most producers and carriers are familiar with this file type, so It's important to offer, especially as more and more organizations start creating their own AMS. Which further highlights the importance of our system agnostic approach."
+  - Means AL3 OUT first: a package's forms offered as an .al3 download (beside the PDFs) via ASG's Converter. Before
+    building: a sample AL3 file and one live Converter call (the owner's yes) to see ASG's real output and the exact
+    request (input format, which of our data it takes - ACORD XML?).
+- **E-mail integration:** "Email Integration: This is a lower priority than the forms, but Transcriber has the capability to integrate with user emails, we'll need to experiment with that sooner rather than later. Just wanted to put it on your radar for now."
+  - Lower priority than the forms. Transcriber reads e-mails (EML / MSG with attachments); the experiment: one sample
+    e-mail through Transcriber, then decide how producers send e-mails in (forwarding address vs mailbox access).
+- Both recorded in `OPEN_ITEMS.md`. No ASG call made.
+- **4 Nov 2026, 02:41 IST** - ASG PRODUCTION onboarding doc received (`Transcriber_Onboarding_AccountSetup_PRIMBLE_PROD.pdf`, Downloads, 02:33); the owner completes it first thing on 5 Nov. A production download (`template (2).pdf`, ACORD 144, 3 pages, 253 fillable boxes) has NO "Sample" watermark per `asg_forms.has_sample_watermark` (the 3 Nov UAT ACORD 807 reads True - the detector separates them). Next: production credentials into `.env` / Render, the six verification calls, one full suite, then the one commit + deploy.
+
+### 4 Nov 2026, 10:38 IST - PRODUCTION credentials + v2.0 specs: what changes (checked offline, no ASG call)
+- **New documents (ASG_DOCUMENTATION/, saved 10:27-10:29 with a `Prod-` prefix)** - five "v2.0" specs, each the
+  same API as an old guide: ACORD Form Extraction (= Extraction1), AIML Generic Model (= Extraction2), AL3 to USPNC XML
+  (= Extraction3), NER (= Extraction5), Population (= Population1). Their own revision history: "2.0 - 13 October 2026 -
+  Updated document formatting and layout." Compared word by word: no new endpoint, parameter or header (the optional
+  `x-asg-extraction-with-presigned-s3-url` was there before). Same as before: everything else in the folder; there is
+  no new Download API document. The PROD onboarding PDF (Downloads) differs from the UAT one only in the date, the
+  portal URL, the four credentials and the token URL.
+- **Production endpoints (from the specs):** API `https://prod-api-v1-transcriber.acordsolutions.net/oauth/...`;
+  token `https://prod-token-transcriber.acordsolutions.net/oauth2/token`; portal / large-file upload
+  `https://transcriber.acordsolutions.net/...`. UAT was `uat-api-v1-...`, `nonprod-token-...`, `uat-transcriber...`.
+- **Code: NO change needed.** `asg_transcriber.load_config` already builds all three URLs from `TRANSCRIBER_ENV`
+  (`prod` -> the hosts above); the filled-ACORD reading (Transcriber extraction) and the any-form downloads
+  (`asg_forms`, `{base_url}/forms/download`) both use that one config.
+- **The one trap:** `backend/.env` sets `TRANSCRIBER_TOKEN_URL` explicitly to the UAT (nonprod) token host, which
+  OVERRIDES the env switch - production keys would be sent to the UAT token server and fail. Change it to the prod
+  token URL or delete the line (the default then follows `TRANSCRIBER_ENV`).
+- **Mapping:** Access Key -> `TRANSCRIBER_CLIENT_ID`; Secret Key -> `TRANSCRIBER_CLIENT_SECRET`; API Key ->
+  `TRANSCRIBER_API_KEY`; Access Token URL -> `TRANSCRIBER_TOKEN_URL`; plus `TRANSCRIBER_ENV=prod`.
+- **Other layers:** the UAT-in-production guard and the "allow-list required on UAT" rule switch off by themselves on
+  `TRANSCRIBER_ENV=prod` (any-form opens to every user unless `ASG_FORMS_ALLOWED_EMAILS` is set); Transcriber results
+  cached under the UAT key are not reused under the PROD key (they are read again - costs pages once); restart the
+  backend so the token cache starts clean; ASG may whitelist caller IPs (the Converter sheet asks for them; Brent
+  registered India + USA) - a 403 on the first PROD call from Render means Render's outbound IPs must be registered.
+- Note: the comparison printed the onboarding PDFs' key values in the session's tool output (not written to any repo
+  file); the scratch copies were deleted. The owner was told.
+
+### 4 Nov 2026, 10:45 IST - deep read of every production document + every address the code calls (offline)
+- **9 new `Prod-` files.** Five API specs v2.0 (their revision history: "Updated document formatting and layout") and
+  four portal pages (Download, Encryption & Authentication, Error Handling, Webforms). Compared word by word with the
+  old files (wrapped words joined): the four portal pages are IDENTICAL to the old ones; the five specs differ only by a
+  revision-history table and a support paragraph. `Error-Handeling.pdf` (3 Nov) and `ErrorHandling-HomePage.pdf`
+  (29 Oct) are identical to each other too. No two files are byte-identical (PDF prints of web pages).
+- **Old files the new ones replace (safe to delete):** Extraction1 / 2 / 3 / 5 guides, Population1 guide,
+  Download-HomePage, Encryption&Authentication-HomePage, ErrorHandling-HomePage, Error-Handeling. Keep the rest
+  (Converter brochure + sheet, Acord27 template, AcordForms / Extraction / Population overview pages, supported-forms
+  list, dashboard, 3 Postman files) - nothing else repeats them.
+- **Two address families in ASG's documents:** `https://{env}-api-v1-transcriber.acordsolutions.net/oauth/...` signed
+  with an OAuth token (what we use), and `https://{env}-api-transcriber.acordsolutions.net/v2/...` signed with AWS
+  SigV4 (we do not use it).
+- **Every call, with `TRANSCRIBER_ENV=prod`, against the production specs:**
+  token `POST https://prod-token-transcriber.acordsolutions.net/oauth2/token` - MATCHES;
+  submit `POST https://prod-api-v1-transcriber.acordsolutions.net/oauth/forms/extract` with inpFormat=PDF,
+  outFormat=ELABEL, sort, latestEdition, confidenceScore, returnCoordinates + headers x-api-key, Authorization - MATCHES;
+  poll `GET .../oauth/forms/extract/{requestId}` - MATCHES; large file (> 5 MB) `POST https://transcriber.acordsolutions.net/
+  Iforms-webforms-app/v2/iforms/extract/uploadfile` (multipart contentMimeType + file, Authorization) then submit with
+  contentLocation and an empty body - MATCHES; large replies (gzip header, download link) - HANDLED.
+  Form download `GET https://prod-api-v1-transcriber.acordsolutions.net/oauth/forms/download` - NOT in the documents
+  (they show only the AWS-signed `{env}-api-transcriber.../v2/forms/download`); the same OAuth route was PROVEN on UAT
+  (29 Oct, 3 Nov PoC + live test). Production unproven until the first verification call; fallback if it 403s / 404s:
+  ask ASG for the OAuth download route on PROD, or add AWS SigV4 signing.
+
+### 4 Nov 2026, 11:38 IST - FIRST PRODUCTION CALLS (owner's yes: "a few, only those needed")
+**Calls made: 21 HTTP requests in all** - 3 token, 12 form downloads, 1 extraction submit, 4 status polls (+ 1 token for
+the poll run, counted in the 3). Transcriber pages read: **1**. Downloads: 12 (6 were spent by our own bug, below).
+- **Form downloads (`/oauth/forms/download` on prod-api-v1) WORK on production** - the undocumented OAuth route is
+  confirmed. BUT production sends the PDF **base64-encoded as text** (body starts `JVBERi0`, still labelled
+  `application/pdf`); UAT sent raw PDF bytes. Our code took only raw bytes, so the first run of the 6 forms refused all
+  six although ASG answered 200 (6 downloads wasted). Fixed: `asg_forms._pdf_from_reply` accepts both; test added.
+- **The six verification forms (production, no "Sample" watermark on any):**
+  ACORD 27 - right form, 2016/03, 1 page, 89 boxes; ACORD 75 - right form, 2016/03, 2 pages, 147 boxes;
+  ACORD 137 TX - right STATE version (2015/12, 3 pages, 439 boxes) -> `geoCode` works;
+  ACORD 50 NY - right form ("New York State Insurance Identification Card", 1 page, 9 boxes);
+  ACORD 125 CIS - right VARIANT ("Contact Information Schedule", 1 page, 217 boxes) -> `geoCodeSuffix` works for CIS;
+  **ACORD 25 INS - ASG sent the plain ACORD 25** -> our identity check refused it ("ACORD Solutions sent ACORD 25 instead
+  of ACORD 25 INS"), as designed. Open: ask ASG how 25 INS is requested, or whether PROD has it.
+- **Footer reader widened:** 50 NY prints "ACORD 50 NY (1/98)" and 125 CIS prints "APPLIED 125CIS (2009/08)" - both
+  were right forms but unread; `_FOOTER_IDENTITY_RE` now reads ACORD or APPLIED and 1-4 / 2-4 digit dates. Test added.
+- **Filled-ACORD reading (Transcriber extraction) WORKS on production:** page 1 of an outside-filled ACORD 137 TX
+  (`~/Downloads/ACORD 137_TX (2015-12) Filled.pdf`, sent alone = 1 transaction): recognised as 137 TX 2015/12,
+  accuracy 98, done in 21.2 s (1 submit -> 202, 4 polls at 3 s). Of 123 typed boxes it returned, 120 values match
+  exactly; the 3 others: the hidden edition box, and two vehicle-table STATE boxes where Transcriber put rows A, B and
+  C into row A ("KY OH TN") - a Transcriber quirk on repeated state rows, not ours.
+- No usage was written to our database (the test ran the client without the usage hook). The local backend now runs on
+  the production settings (restarted 11:38 IST).
+
+### 4 Nov 2026, 12:05 IST - a fresh outside test form (no ASG call)
+`~/Downloads/ACORD 137_TX (2015-12) Filled.pdf` (used for the 1-page production read) is ASG's own published SAMPLE
+(downloaded 31 Oct from support.acordsolutions.com; ACORD's 2016 Silverlake blank filled 4 Nov 2022 with fake data;
+"Sample" watermark). Its watermark was NOT edited out. Instead a fresh test form was built:
+`~/Downloads/ACORD 137_TX (2015-12) Fresh test - no watermark.pdf` = today's clean PRODUCTION blank 137 TX (2015/12,
+no watermark) filled with new made-up data (Bluebonnet Plumbing & Drain LLC / Lone Star Risk Advisors / Gulf Coast
+Mutual Insurance Company, policy TXA-7731-0925, 12/01/2026), 261 boxes on 3 pages, appearances drawn, no Primble record
+(treated as an outside form). Script: scratchpad `prod_probe/make_fresh_137tx.py` (Primble's own `fill_pdf`).
+
+### 4 Nov 2026, 12:12-12:15 IST - the owner's live localhost run on production keys (log `backend_local9.log`)
+- **Filled-ACORD reading: PASS.** The fresh 137 TX test form (3 pages, no Primble record) ->
+  `TRANSCRIBER_SUBMIT env=prod pages=3 label=137 TX`, `TRANSCRIBER_PRESUBMIT files=1 sent=1`, then
+  `TRANSCRIBER_DONE status=done forms=['137-TXx3']`. 3 pages.
+- **Generation of ACORD 101 + 25 INS + 137 TX INS:** 101 never went to ASG (our template); exactly 2 downloads (21.5 s
+  and 25.0 s). **Both INS came back as the PLAIN form** (`ASG_FORM_MISMATCH ... printed='ACORD 25'` / `'ACORD 137 TX'`)
+  - refused by the identity check, nothing generated (503, by design: ASG forms cannot be added later).
+- **So the edition fix (variant_edition) did not bring INS:** ASG ignores `geoCodeSuffix=INS` (CIS worked with it this
+  morning). ASG's download page names a separate "form source" parameter beside geo code / geo code suffix - INS is most
+  likely a form source. **Ask ASG: the exact parameter (name + value) for INS forms.** The edition fix stays (harmless).
+- Fixed after the run (12:22 IST): the download log printed `edition=latest` even when an edition was asked - now
+  `suffix=... asked_edition=...`; the failure message read "so it was not used - remove them" for two forms - now
+  "A and B, so they were not used". Tests 177 passed. Backend restarted (`backend_local10.log`), which also clears the
+  server's 6-hour memory of the two refused forms.
+
+### 4 Nov 2026, 12:29 IST - a form ASG refused is never asked for again (owner)
+Owner: users would press Generate again and again on a form ASG answers wrongly and waste our ASG allowance. Built:
+`asg_forms.remember_refused` / `refused_forms` - a form ASG answered with ANOTHER form (`wrong_form`) or with no fillable
+version (`not_available`) is remembered for `ASG_REFUSED_DAYS` (30) in Redis (key `asg:refused:<form id>`, shared by
+every worker, survives restarts; in-process fallback when Redis is down). `fetch_blank` answers a remembered refusal
+WITHOUT calling ASG; the search marks the row `available: false` and the screen will not let it be ticked ("Not
+available from ACORD Solutions - choose another form."). Passing problems (busy, timeout) still clear in minutes. No
+database change. Tests 180 passed; frontend build clean. Local Redis seeded with the two forms refused in the 12:15 run
+(25 INS, 137 TX INS) - no ASG call. On Render each refused form is learned at its first refusal (one call), then never
+again for 30 days. To retry a form sooner (e.g. once ASG tells us the INS parameter): delete its Redis key.
+
+### 4 Nov 2026, 12:36 IST - why INS forms do not download (investigation, no ASG call)
+- **Our form list comes from ASG's "Supported ACORD forms" PDF**, whose own first line reads "ACORD Transcriber supports
+  the following forms and editions for Extraction and Population." It is the list of forms Transcriber can READ / FILL,
+  not the download catalogue. It writes variants as one name: `125_INS`, `125_CIS`, `1_CA`, `25_INS` (76 INS rows, 1
+  CIS row, all on pages 58-59, no legend explaining INS).
+- `build_asg_forms_index.py` split such names: a US state after the number -> `geoCode`; anything else -> our guessed
+  `geoCodeSuffix`. The Download spec's parameter table lists only formNumber, orgId, geoCode, userId, edition (its prose
+  mentions "Geocode suffix" and "form source" without parameter names).
+- **Results:** geoCode (137 TX, 50 NY) -> right form; geoCodeSuffix=CIS -> right form; geoCodeSuffix=INS -> the PLAIN
+  form (25, 137 TX), with "latest" and with the INS form's own edition alike. So "INS" is NOT the geo code suffix ASG's
+  download service knows; an unknown suffix is ignored and the base form is returned.
+- **Not known yet:** whether the INS versions exist in ASG's DOWNLOAD catalogue at all (the portal's Forms tab, 4,164
+  versions, has a "Geo Code Suffix" column) or only in the extraction / population library.
+- **Decisive check (owner, ~2 min, 1 download):** PROD portal -> Forms -> search 25 -> is there a row with an INS suffix,
+  and what exactly does its "Geo Code Suffix" column say? If listed: open the browser's developer tools (Network tab),
+  click its PDF, and read the request's parameters - that is the exact way ASG asks for it. If not listed: INS forms are
+  not downloadable; hide them from our search.
+
+### 4 Nov 2026, 12:52 IST - ASG's REAL download catalogue captured; the INS cause found (no ASG transaction)
+- The owner captured the portal Forms tab's own list (`GET .../search?pageSize=5000&pageNum=0&geoCode=All`) ->
+  `ASG_DOCUMENTATION/Prod-forms-download-catalogue.json`: 4,012 entries (1,162 distinct forms, every edition), each with
+  number, name, edition, **geoCode, geoCodeSuffix**, title, source (all "ACORD") and **downloadInd** ("1" on 1,328
+  entries = the downloadable editions, "0" on 2,682).
+- **Cause of the INS failures:** 25 INS and 137 TX INS DO NOT EXIST in the download catalogue (25 has plain editions up
+  to 2025/12, 25_GA, 25_FR, 25-S, 25_-N; 137 TX has only plain editions). ASG returned the plain form because there is no
+  INS version to download. Only 16 INS entries exist anywhere, 2 downloadable (84 INS, 36 INS). Our search list came from
+  the "Supported ACORD forms" PDF = what Transcriber can READ / POPULATE, which never marks downloadability.
+- **Our list vs the catalogue:** 901 forms downloadable; our list 1,174; 866 in both; **308 in our list are not
+  downloadable** (all 50 INS, 125 ONI / PCIS, 126 HAZ, 130 API / ARI / PCS, many state versions ...); **35 downloadable are
+  missing** (plain 137 and 138, 25 GA, 200, 201, 212, 61, 62, 65, 38 CA / CT / IL ...); 57 have a newer downloadable edition
+  than our list shows (130 -> 2026/08, 137 GA -> 2025/08 ...).
+- Caveat: 125 CIS is not in this ACORD-source catalogue yet downloaded correctly (an Applied Systems form) - the
+  catalogue does not cover every form ASG can serve; being in it as downloadable is the strong signal.
+- **For later (not Friday):** ASG now offers newer editions of several of OUR 17 forms - 25 (2025/12), 125 (2025/03),
+  126 (2025/03), 130 (2026/08), 133 (2025/05), 137 CA (2023/01), 131 (2017/11). The ACORD licence makes current editions
+  Primble's responsibility - compare with our templates.
+- Proposed: rebuild `forms_catalog/asg_forms_index.json` from this catalogue (downloadable editions only). Waiting for the
+  owner's go.
+
+### 4 Nov 2026, 12:55 IST - what the captured catalogue does and does not give us (owner asked "do we have everything?")
+**The file:** `ASG_DOCUMENTATION/Prod-forms-download-catalogue.json` (5.4 MB, UTF-8). Captured by the owner from the
+PRODUCTION portal's Forms tab (Chrome developer tools -> Network -> the page's own request
+`search?pageSize=5000&pageNum=0&geoCode=All` -> Copy response; saved with `pbpaste`). No ASG transaction.
+**Complete for ACORD forms:** 4,012 entries = exactly the "Showing 1-10 of 4012" the portal shows; 1,162 distinct forms
+with every edition; per entry ASG's own number, title, edition, geoCode, geoCodeSuffix and download flag. No guessing of
+which forms exist or of their codes any more.
+**Catches:**
+1. ACORD-source only (all 4,012 `source = "ACORD"`). Forms of other publishers ASG can serve are not in it (125 CIS -
+   an Applied Systems form - downloaded fine on 4 Nov but is not listed).
+2. `downloadInd` ("1" on 1,328 entries / 901 forms) is our reading, not documented: it fits the evidence (137 TX flag 1
+   downloaded; 25 INS absent -> plain form). Prove both ways later with one or two downloads (a flag-0 form; 84 INS).
+3. A snapshot of 4 Nov. The portal fetches it with the owner's LOGIN; whether our API keys may call that address is
+   unknown - refresh = repeat the 5-minute capture (monthly), or ask ASG for API access to the list.
+4. Non-state geo codes (FR, US, WM ...) and the two real INS forms are untested downloads.
+5. It describes forms, not their boxes - boxes still come from the downloaded form (as now).
+**Decision (owner, 12:55 IST): rebuild our search list from it** - downloadable forms only, ASG's own codes and newest
+downloadable editions; keep 125 CIS (proven 4 Nov); leave untested non-state geo codes out for now.
+
+### 4 Nov 2026, 13:04 IST - search list REBUILT from ASG's real catalogue (and a correction)
+- **Correction:** `downloadInd` does NOT mean "cannot be downloaded" - ACORD 50 NY is "0" in the catalogue yet downloaded
+  correctly from production at 11:38. The earlier "308 of our forms are not downloadable" leaned on the flag and was
+  OVERSTATED. What the catalogue settles is EXISTENCE + ASG's own codes.
+- **Rule now** (`scripts/build_asg_forms_index.py build_from_catalogue`): every form + US state + variant the catalogue
+  lists (any flag), its newest edition, ASG's own geoCode / geoCodeSuffix; a state form ASG coded only in its NAME
+  ("61_VA", empty geoCode) is kept with the state from the name when no properly coded entry exists; non-state geo codes
+  (FR, US, WM, S, e) left out until one is proven; 125 CIS kept as proven (Applied, outside the ACORD catalogue).
+- **Result:** `backend/forms_catalog/asg_forms_index.json` = **1,140 forms** (was 1,174 from the "Supported forms" PDF).
+  **Dropped 72** that are NOT in ASG's catalogue at all (38 INS incl. 25 INS / 137 TX INS, 13 other guessed variants -
+  ONI, PCIS, HAZ, COV, API, ARI, PCS, IS, S - plus life / annuity forms already hidden, Australia 3831, ACORD 601, the
+  mis-titled 136 OH). **Added 38** (25 GA 2026/09, 130 OH / OK / OR / PA / PR / RI, 200, 201, 212, 1001-1003, 38 CA / CT /
+  IL ...). Real INS forms kept: 84 INS, 36 INS, 143 INS ... Old list backed up in the scratchpad.
+- Tests: 5 named 25 INS / 137 TX INS (the TEST was outdated - those forms do not exist) -> switched to 84 INS / 36 INS.
+  `test_asg_forms_3nov.py` 180 passed; the 18 other files touching the feature 1,066 passed.
+- Refresh: re-capture the catalogue monthly and re-run `py backend/scripts/build_asg_forms_index.py
+  "ASG_DOCUMENTATION/Prod-forms-download-catalogue.json"`.
+
+### 4 Nov 2026, 13:57 IST - full-feature review (owner: "check if everything is in and correct") - fixed
+A fresh reviewer read the whole any-form feature + Transcriber reading (no ASG / network / database). Fixed:
+- **B1 HIGH (deliverable 2):** `acord_intake/recognize._FOOTER_RE` read only "ACORD + 2-3 digits (YYYY/MM)", so an
+  outside filled ACORD 1 / 2 loss notice, a 4-digit form (1001), an older "(1/98)" edition, an INS variant or an Applied
+  form was never sent to Transcriber. Now every shape ("ACORD 1", "ACORD 84 INS", "ACORD 137 TX INS", "ACORD 50 NY
+  (1/98)" -> 1998/01, "APPLIED 125CIS"); `footer_number` / `footer_edition` shared by recognize + `_plan_image`.
+- **B2:** 7 state insurance cards (50 TX / AR / GA / IA / KY, 51 GA, 830) were not certificates (printed the PROPOSED
+  term, carried the record, wrote the package term back) - `_CERTIFICATE_TITLE_RE` widened; exactly those 7 change.
+- **B3:** the list offered forms with NO fillable file at ASG (130 OH / OK / OR / PA / PR / RI, 133 MT / NC, 1001-1003, 200,
+  201, 66 AR, 7 INS ...): each would spend a call, get "no fillable version" and lock for 30 days. The builder now keeps
+  only editions whose ASG file is `..._ACRO.pdf` (every form proven to download has one), newest such edition (141 INS
+  -> 2003/07, 134 FL, 97 SC); empty titles borrow the plain form's. List: **1,116 forms**.
+- **B4:** a plain request accepted a variant footer ("ACORD 163 INS") - refused now (`_VARIANT_CODES`).
+- **B5:** after generation, a generated ASG form whose stored copy did not load was downloaded again by the gap fill -
+  now only a first generation downloads (`elif _rec is None and _asg.feature_on()`).
+- **B6 (edition half):** `pdf_service._form_edition_identifier` decided "ASG form" from the search list; a form a later
+  rebuild drops would print one of OUR editions (ACORD 2 -> "ACORD 25 (...)") - now decided from our own list.
+- **Withdrawn:** "variants ask for their listed edition" (built 11:53 on the wrong INS guess; a variant's listed
+  edition often equals its plain form's). Variants ask for the LATEST again (proven for 125 CIS). New, narrower rule:
+  plain 60 / 68 / 80 ask for their listed edition (`ask_edition`) - ASG filed newer state forms under those plain
+  numbers with no state code.
+- **Commit list corrected** (10.10): every untracked file, incl. captcha.py / document_fingerprints.py /
+  TurnstileWidget.jsx / smsShare.js - the old list would have broken startup and the frontend build.
+- Tests: `test_asg_forms_3nov.py` 186 passed (6 new); the 51 files touching the feature / upload reading 2,908 passed.
+**Open, not fixed:** B6 certificate half (an already generated ASG certificate dropped by a FUTURE list rebuild loses
+its certificate rules - decide from the stored record; low, only after a rebuild); first production call from RENDER
+unproven (ASG IP allow-list); INS downloads unproven (36 / 84 / 139 / 141 / 163 / 829 INS - the six left in the list); L-4 / L-5 (now on real forms).
+**Tell Brent (by design):** ASG forms cannot be added after generation; an outside
+filled form's boxes with no fact behind them are not carried onto a generated ASG copy of that form.
+- **4 Nov 2026, 14:26 IST - full suite on this code: 22,989 passed, 1 failed (the known `test_arq_acord125_missing_only`),
+  46 skipped** (3 shards, 13:57-14:26). The local backend was restarted at 13:57 on the fixed code and the 1,116-form list;
+  its log showed no ASG call and no error over the next 30 minutes. Nothing committed.
+- **4 Nov 2026, 14:40 IST - the applicant's e-signature on ASG forms BUILT (was D-ASG-10; owner's ask, uncommitted).**
+  Why it was missing: the line-finder read a template FILE from disk, and an ASG form has none (it is rebuilt in memory
+  from the package's stored copy). Now `signature_boxes.applicant_lines_for(generated_form)` reads the lines the same way
+  for both (an applicant SIGNATURE box whose printed cell label says SIGNATURE, its date paired by row), the ASG lines
+  cached by the stored copy's SHA-256; `template_for` gives the render path or the in-memory bytes; `applicant_signing.
+  signable_form_ids` uses the new door, so Send to Client pre-ticks the signature question for an ASG form. On 137 TX the
+  three applicant lines (A / B / C) are signed and dated; initials and the producer's boxes are untouched. The producer's
+  saved signature never goes on the applicant's line. Editor: the "not added" sentence removed, the "Sample" warning
+  kept. Tests `tests/test_asg_signatures_4nov.py` (10). Live check on localhost: owner.
+- **4 Nov 2026, 14:45 IST - related tests after the e-signature build: 3,230 passed, 0 failed, 15 skipped** (every test file
+  touching signatures, applicant signing, ASG forms or the editor). Frontend build clean.
+- **4 Nov 2026, 17:29 IST - ASG form downloads: the request and footer check rebuilt on ASG's own contract** (the
+  portal's DevTools capture + its Postman collection, both in `ASG_DOCUMENTATION/`). Each form asks for its own catalogue
+  row (edition + geoCode only when the row has one + geoCodeSuffix); a variant that prints no code (ASG's INS forms) is
+  proven by its edition; list 1,131 forms. Full entry: Accommodate800forms.md 10.25. Questions for ASG now include an
+  API or webhook for the forms list (owner's ask). Proof pending: 5 downloads, owner's yes.

@@ -302,6 +302,11 @@ def form_meta_for(all_forms: Any, form_id: Any, facts: Any = None) -> Optional[d
     base = base_form_id(fid)
     row = next((f for f in (all_forms or [])
                 if isinstance(f, dict) and f.get("form_id") == base), None)
+    if row is None and not is_instance(fid):
+        # An ACORD form the user picked from ASG's list (3 Nov 2026, services/asg_forms): its row comes
+        # from that list, never from the package's snapshot of our own forms. None for anything else.
+        from services.asg_forms import meta_for as _asg_meta_for
+        return _asg_meta_for(fid)
     if row is None or not is_instance(fid):
         return row
     if facts is not None and not is_valid_form_id(facts, fid):

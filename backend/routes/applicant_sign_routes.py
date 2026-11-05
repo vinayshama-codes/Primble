@@ -40,7 +40,10 @@ async def signature_status(session_id: str, current_user: dict = Depends(get_cur
     requests = await asg.requests_for_session(session_id, str(current_user["id"]))
     for r in requests:
         r.pop("token", None)                 # the client's key, never the producer's to see
-    return JSONResponse({"success": True, "forms": asg.form_statuses(sess), "requests": requests})
+    # Off the event loop: an ASG form's lines are read from its stored copy (~1 s cold) - review B, 4 Nov 2026.
+    from utils.concurrency import run_scoring
+    forms = await run_scoring(asg.form_statuses, sess)
+    return JSONResponse({"success": True, "forms": forms, "requests": requests})
 
 
 # ── Client (token) ────────────────────────────────────────────────────────────

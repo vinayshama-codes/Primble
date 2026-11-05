@@ -795,6 +795,14 @@ async def _refresh_after_restamp(session_id: str, user_id: str) -> None:
 _LOCKS: Dict[str, Tuple[Any, asyncio.Lock]] = {}
 
 
+async def _refuse_if_a_run_is_starting(session: dict) -> None:
+    """409 when a Generate has claimed (or is running) a package with no forms yet - checked on the read taken
+    UNDER the lock, so a run that claimed the package while this change waited never generates without it (review
+    pass 7, 4 Nov 2026). The one rule is `audit_routes._refuse_while_generating`."""
+    from routes.audit_routes import _refuse_while_generating
+    await _refuse_while_generating(session)
+
+
 class _Serialized:
     """`async with _Serialized(session_id):` - one documents change at a time
     per package, in this process. The lock belongs to the running event loop;
@@ -851,6 +859,7 @@ async def add_documents(
     from services.extraction_pipeline import stored_text_key
     async with _Serialized(session_id):
         session = await get_processing_session(session_id)
+        await _refuse_if_a_run_is_starting(session)
         stored = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
         held = {stored_text_key(d) for d in stored} - {""}
         adding, skipped = [], []
@@ -891,6 +900,7 @@ async def change_document(
     then the door. Raises ValueError(code) like the pre-form path."""
     async with _Serialized(session_id):
         session = await get_processing_session(session_id)
+        await _refuse_if_a_run_is_starting(session)
         stored = [d for d in (session.get("docs") or []) if isinstance(d, dict)]
         if not stored:
             raise ValueError("reclassify_no_docs")

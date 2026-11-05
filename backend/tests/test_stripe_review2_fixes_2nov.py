@@ -749,7 +749,7 @@ def test_L5_E_enterprise_cannot_open_a_checkout(env):
         checkout(db, plan="essentials")
     assert ei.value.status_code == 409
     assert ei.value.detail == {"code": "subscription_exists",
-                               "message": "Your plan is managed by Primble. Contact support@primble.ai to change it."}
+                               "message": "Your plan is managed by Primble. Contact support@primble.com to change it."}
     assert fs.calls == []
 
 
@@ -892,8 +892,8 @@ def test_L9_the_webhooks_day0_email_is_marked_too(env, monkeypatch):
     seen = {}
     real = svc.claim_payment_email
 
-    async def spy(conn, uid, day, prev):
-        ok = await real(conn, uid, day, prev)
+    async def spy(conn, uid, day, prev, *rest):
+        ok = await real(conn, uid, day, prev, *rest)
         seen["marked"] = db.keys(svc.EMAIL_MARK_PREFIX)
         return ok
     monkeypatch.setattr(svc, "claim_payment_email", spy)

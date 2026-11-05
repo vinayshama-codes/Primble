@@ -171,7 +171,26 @@ def _widget_positions_cached(path: str, mtime: float) -> Dict[str, Tuple[int, fl
     return out
 
 
+@lru_cache(maxsize=16)
+def _asg_widget_positions(src: bytes) -> Dict[str, Tuple[int, float, float]]:
+    """An ASG form's box positions, cached by the copy's own bytes (review round 2: a suggestion list asked for
+    them once per row, re-reading the PDF each time). Positions never change for a given copy."""
+    return _widget_positions_cached.__wrapped__(src, 0.0)
+
+
 def widget_positions(form_id: str, generated_form: Optional[dict] = None) -> Dict[str, Tuple[int, float, float]]:
+    # An ASG form (3 Nov 2026) has no template file: its boxes' positions are read off the package's own copy
+    # (boxes sit where the form puts them, whatever their values). Not cached - the copy is the package's.
+    from services.asg_forms import is_asg_record, layout_source
+    if is_asg_record(generated_form):
+        src = layout_source(generated_form)
+        if src is None:
+            return {}
+        try:
+            return _asg_widget_positions(src)
+        except Exception as exc:                           # noqa: BLE001
+            logger.warning("needs_attention: widget positions unavailable for %s - %s", form_id, exc)
+            return {}
     path = _template_path(form_id, generated_form)
     if not path:
         return {}
@@ -1180,7 +1199,7 @@ def needs_attention(generated_form: Optional[dict], facts: Optional[dict], form_
         # producer only, so a signed form still lists them.
         applicant_step = _is_applicant_step(field, tip)
         if (applicant_step and applicant_state == "signed"
-                and _signature_kind(field, tip) in ("signature", "date")):
+                and _signature_kind(field, tip) in ("signature", "date", "time")):
             continue                                       # the applicant signed it
         status = reason = None
         found = None

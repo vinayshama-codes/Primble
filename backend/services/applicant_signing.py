@@ -192,8 +192,7 @@ def signable_form_ids(proc_session: Any) -> List[str]:
     generated = proc_session.get("generated_forms") or {}
     out = []
     for fid in _form_order(proc_session):
-        tpl = sb.template_path_for(generated.get(fid) or {})
-        if tpl and sb.applicant_signature_lines(tpl):
+        if sb.applicant_lines_for(generated.get(fid) or {}):   # our forms and ASG forms alike (4 Nov 2026)
             out.append(fid)
     return out
 
@@ -408,7 +407,8 @@ async def sign(token: str, signer_name: Any, consent: Any, image: Any,
     picture = normalize_signature_image(image)
 
     proc_session = await _session_for(row)
-    forms = forms_to_sign(row, proc_session)
+    from utils.concurrency import run_scoring
+    forms = await run_scoring(forms_to_sign, row, proc_session)   # off the event loop (review B, 4 Nov 2026)
     if not forms:
         raise SigningError("no_forms", "There is nothing left to sign. Ask your agent.", 409)
     current = form_versions(proc_session, forms)
@@ -460,7 +460,8 @@ async def finalize(token: str) -> Optional[dict]:
         proc_session = await _session_for(row)
     except SigningError:
         return None
-    forms = forms_to_sign(row, proc_session)
+    from utils.concurrency import run_scoring
+    forms = await run_scoring(forms_to_sign, row, proc_session)   # off the event loop (review B, 4 Nov 2026)
     if not forms:
         return None
     # Recorded once: re-recording later would re-validate a signature the

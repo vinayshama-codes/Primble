@@ -755,3 +755,6 @@ period totals (a WC loss run with claim rows), archive and Form Assistant usage 
 ## 29 Oct - Brent's reply on the deadlines
 - Fri 30 Oct: extract ANY ACORD form in an uploaded package (Transcriber). Fri 6 Nov: generate / download ANY ACORD form (70-90% fill from the 125 + core forms). Templates to come through ASG. Tracker: `ASG_TRANSCRIBER.md`.
 - Owner on leave 6, 9, 11 Nov (Diwali).
+
+## OPEN LIST - moved 3 Nov 2026
+The one living open list is now `OPEN_ITEMS.md` (repo root).

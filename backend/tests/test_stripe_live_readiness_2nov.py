@@ -560,7 +560,7 @@ def test_checkout_refused_while_a_plan_is_live(env, status, code):
 def test_the_409_messages_are_the_agreed_contract():
     assert svc.SUBSCRIPTION_EXISTS == {
         "code": "subscription_exists",
-        "message": "You already have an active Primble plan. To change your plan, contact support@primble.ai."}
+        "message": "You already have an active Primble plan. To change your plan, contact support@primble.com."}
     assert svc.PAYMENT_DUE == {
         "code": "payment_due",
         "message": "Your last payment didn't go through. Update your card in Manage billing to restore your plan."}
@@ -1763,7 +1763,7 @@ def test_archived_says_paying_restores_access():
     assert "Update your billing to restore access" in ARCHIVED_MESSAGE and "support" not in ARCHIVED_MESSAGE
     for rel in ("routes/form_routes.py", "utils/helpers.py"):
         src = (ROOT / rel).read_text()
-        assert "Contact support@primble.ai to reactivate" not in src
+        assert "Contact support@primble.com to reactivate" not in src
         assert "Account archived. Contact support" not in src
 
 

@@ -221,9 +221,14 @@ def _strip_null_bytes(obj):
     return obj
 
 
+# Bytes a generated form carries that live in `session_pdf_bytes`, never in the session's JSON:
+# the rendered form, and an ASG form's values-only copy (3 Nov 2026, services/asg_forms D-ASG-3).
+_PDF_BYTE_KEYS = ("pdf_bytes", "asg_base_pdf", "_asg_base_stored")
+
+
 def _session_to_db(data: dict) -> dict:
     generated  = data.get("generated_forms", {})
-    clean_gen  = {fid: {k: v for k, v in fd.items() if k != "pdf_bytes"} for fid, fd in generated.items()}
+    clean_gen  = {fid: {k: v for k, v in fd.items() if k not in _PDF_BYTE_KEYS} for fid, fd in generated.items()}
     clean      = {k: v for k, v in data.items() if k != "generated_forms"}
     clean["generated_forms"] = clean_gen
     return _strip_null_bytes(clean)
@@ -236,13 +241,51 @@ async def _session_from_db(data: dict, sid: str) -> dict:
             "SELECT * FROM session_pdf_bytes WHERE session_id = $1", sid
         )
     generated = data.get("generated_forms", {})
+    from services.asg_forms import form_id_of_base_row, prepare_loaded_session
+    bases = {}
     for row in rows:
         row = dict(row)
         fid = row["form_id"]
         pb  = bytes(row["pdf_bytes"]) if row.get("pdf_bytes") else None
-        if pb is not None and fid in generated:
+        if pb is None:
+            continue
+        base_of = form_id_of_base_row(fid)
+        if base_of is not None:
+            bases[base_of] = pb           # an ASG form's stored copy (attached below, never re-saved)
+        elif fid in generated:
             generated[fid]["pdf_bytes"] = pb
-    return data
+    if bases:
+        from services.asg_forms import remember_copies
+        remember_copies(sid, bases)
+    return prepare_loaded_session(data, bases)
+
+
+# ASYNC-SAFE
+async def _attach_asg_base_rows(data: dict, sid: str) -> dict:
+    """An ASG form's stored copy and printed box order, on EVERY read of a package that has ASG forms
+    (3 Nov 2026 review: the editor, preview and edit save read the package without its PDFs, and an ASG form
+    cannot be drawn without its copy). One small query, only for such packages; others are untouched."""
+    from services.asg_forms import (BASE_ROW_SUFFIX, asg_form_ids_of, cached_copies, form_id_of_base_row,
+                                    prepare_loaded_session, remember_copies)
+    asg_ids = asg_form_ids_of(data)
+    if not asg_ids:
+        return data
+    cached = cached_copies(sid, asg_ids)      # copies never change after generation: read once per process
+    if cached is not None:
+        return prepare_loaded_session(data, cached)
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT form_id, pdf_bytes FROM session_pdf_bytes WHERE session_id = $1 AND form_id LIKE $2",
+            sid, f"%{BASE_ROW_SUFFIX}",
+        )
+    bases = {}
+    for row in rows:
+        row = dict(row)
+        base_of = form_id_of_base_row(row["form_id"])
+        if base_of is not None and row.get("pdf_bytes"):
+            bases[base_of] = bytes(row["pdf_bytes"])
+    remember_copies(sid, bases)
+    return prepare_loaded_session(data, bases)
 
 
 # ASYNC-SAFE
@@ -253,19 +296,21 @@ async def _save_pdf_bytes(sid: str, generated: dict) -> None:
 
     async with get_pool().acquire() as conn:
         async with conn.transaction():
+            from services.asg_forms import base_row_id
             for fid, form_data in generated.items():
-                pb = form_data.get("pdf_bytes")
-                if pb is None:
-                    continue
-                await conn.execute(
-                    """INSERT INTO session_pdf_bytes
-                           (session_id, form_id, pdf_bytes, updated_at)
-                       VALUES ($1,$2,$3,$4)
-                       ON CONFLICT (session_id, form_id)
-                       DO UPDATE SET pdf_bytes=EXCLUDED.pdf_bytes,
-                                     updated_at=EXCLUDED.updated_at""",
-                    sid, fid, pb, now,
-                )
+                for row_id, pb in ((fid, form_data.get("pdf_bytes")),
+                                   (base_row_id(fid), form_data.get("asg_base_pdf"))):
+                    if pb is None:
+                        continue
+                    await conn.execute(
+                        """INSERT INTO session_pdf_bytes
+                               (session_id, form_id, pdf_bytes, updated_at)
+                           VALUES ($1,$2,$3,$4)
+                           ON CONFLICT (session_id, form_id)
+                           DO UPDATE SET pdf_bytes=EXCLUDED.pdf_bytes,
+                                         updated_at=EXCLUDED.updated_at""",
+                        sid, row_id, pb, now,
+                    )
 
 
 # ASYNC-SAFE
@@ -309,7 +354,7 @@ async def get_processing_session(sid: str, include_pdf: bool = False) -> dict:
     data.pop(_FACTS_CIPHERTEXT_PRESERVED, None)
     if include_pdf:
         return await _session_from_db(data, sid)
-    return data
+    return await _attach_asg_base_rows(data, sid)
 
 
 # ASYNC-SAFE

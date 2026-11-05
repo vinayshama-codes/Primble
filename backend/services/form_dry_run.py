@@ -693,7 +693,8 @@ def classify(generated: Dict[str, dict], qa: dict, attention: dict, facts: dict,
             tip = str((meta or {}).get("tu") or "")
             if is_applicant_step(field, tip):
                 return R_APPLICANT
-            if signature_box(field, tip):
+            box = signature_box(field, tip)
+            if box and box[0] != "time":      # the Sign button never fills a signing TIME (review B, 4 Nov 2026)
                 return R_SIGNATURE
         except Exception:                                      # noqa: BLE001
             return None

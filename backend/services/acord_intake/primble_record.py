@@ -254,6 +254,16 @@ def _printed_values(pdf, boxes: list) -> Dict[str, str]:
 # Certificates (ACORD 25 / 28) go to certificate holders and other third
 # parties - they never carry the package's answers, encrypted or not.
 _NO_RECORD_FORMS = ("ACORD_25", "ACORD_28")
+
+
+def _is_asg_certificate(form_id: str) -> bool:
+    """A certificate / evidence form from ACORD Solutions never carries the package's record either (it leaves
+    the agency for a third party) - final review, 3 Nov 2026."""
+    try:
+        from services.asg_forms import is_certificate_form
+        return is_certificate_form(form_id)
+    except Exception:                                     # noqa: BLE001
+        return False
 # The record on the package's SQS summary (the cover page in every download,
 # 27 Oct 2026, owner): the same answers, tables and stores, no form of its own -
 # re-uploaded with the declarations alone it restores everything.
@@ -328,7 +338,8 @@ def _document_read_facts(facts: Dict[str, Any]) -> Dict[str, str]:
 
 
 def attach(pdf_bytes: bytes, session: dict, form_id: str) -> bytes:
-    if not _on() or not pdf_bytes or str(form_id or "").split("__", 1)[0] in _NO_RECORD_FORMS:
+    _base = str(form_id or "").split("__", 1)[0]
+    if not _on() or not pdf_bytes or _base in _NO_RECORD_FORMS or _is_asg_certificate(_base):
         return pdf_bytes
     try:
         import pikepdf

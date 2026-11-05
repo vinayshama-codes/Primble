@@ -24,3 +24,9 @@ os.environ.setdefault("CARRIER_NARRATIVE", "0")
 os.environ.setdefault("TRANSCRIBER", "0")
 os.environ.setdefault("TRANSCRIBER_STUB_DIR",
                       os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "transcriber_stub"))
+# ASG form downloads (services/asg_forms, 3 Nov 2026): OFF in the suite, and the stub
+# directory is ALWAYS set, so a test that turns the feature on downloads from disk -
+# stub mode wins over the network. The suite never reaches ASG.
+os.environ.setdefault("ASG_FORMS", "0")
+os.environ["ASG_FORMS_STUB_DIR"] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "asg_forms_stub")

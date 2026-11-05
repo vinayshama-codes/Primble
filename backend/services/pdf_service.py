@@ -986,7 +986,7 @@ def proposed_term_fact(form_id: Any, field_name: Any) -> Optional[str]:
         base = base_form_id(form_id)
     except Exception:                                     # noqa: BLE001
         base = str(form_id or "")
-    if (base in _CERTIFICATE_FORM_IDS or _ANOTHER_POLICYS_BOX_RE.match(name)
+    if (_is_certificate_form(base) or _ANOTHER_POLICYS_BOX_RE.match(name)
             or not scalar_rules_reach(name)):
         return None
     return fact
@@ -2962,6 +2962,13 @@ def _form_edition_identifier(form_id: str) -> Optional[str]:
         return None
     from services.form_instances import base_form_id as _base_form_id
     form_id = _base_form_id(form_id)     # a form's copy prints its form's edition
+    # An ASG form has no template file here: the glob below would read one of OURS ("ACORD_1*" is the 101,
+    # "ACORD_12*" the 125) and print its edition. The box keeps ASG's own printing (review 3 Nov 2026).
+    # Decided from OUR form list (`forms_database`), never from ASG's search list: a form a later list rebuild drops
+    # would otherwise fall through to the glob and print one of our editions (review, 4 Nov 2026).
+    from services.asg_forms import our_form_ids as _our_form_ids
+    if form_id not in _our_form_ids():
+        return None
     try:
         import glob as _glob
         candidates = [os.path.join(TEMPLATE_DIR, f"{form_id}.pdf")]
@@ -12110,6 +12117,19 @@ _RENEWAL_PROPOSED_RE = re.compile(r"^Policy_(EffectiveDate|ExpirationDate)_[A-N]
 _CERTIFICATE_FORM_IDS = frozenset({"ACORD_25", "ACORD_28"})
 
 
+def _is_certificate_form(form_id: Any) -> bool:
+    """A form that documents the EXISTING policy: our ACORD 25 / 28, or a certificate / evidence / ID-card form
+    from ACORD Solutions (`asg_forms.is_certificate_form`, final review 3 Nov 2026). Our 17: unchanged."""
+    fid = str(form_id or "")
+    if fid in _CERTIFICATE_FORM_IDS:
+        return True
+    try:
+        from services.asg_forms import is_certificate_form
+        return is_certificate_form(fid)
+    except Exception:                                     # noqa: BLE001
+        return False
+
+
 def _moved_current_term(facts: dict, attr: str) -> Optional[str]:
     """The current policy's own date the merge moved to prior_* (marked
     `routed_from: current_term`), or None when no term was moved there."""
@@ -12121,13 +12141,29 @@ def _moved_current_term(facts: dict, attr: str) -> Optional[str]:
     return s or None
 
 
-def _resolve_renewal_proposed_period(field_name: str, facts: dict):
-    m = _RENEWAL_PROPOSED_RE.match(field_name)
-    if not m:
+def _resolve_asg_certificate_term(field_name: str, facts: dict):
+    """An ASG certificate / evidence form (`_is_certificate_form`, not our 25 / 28 - their own resolvers own these
+    boxes) prints the EXISTING policy's term in EVERY box whose rule writes the policy dates - the moved current
+    term, or an owned blank - never the derived proposal (fresh review, 3 Nov 2026: "OtherPolicy_PolicyEffective
+    Date_A" printed the proposed term on an ASG 25 variant)."""
+    fid = str((facts or {}).get("_form_id") or "")
+    if not fid or fid in _CERTIFICATE_FORM_IDS or not _is_certificate_form(fid):
         return _SCHED_SKIP
     if not _fv(facts, "renewal_dates_routed"):
         return _SCHED_SKIP
-    if str((facts or {}).get("_form_id") or "") in _CERTIFICATE_FORM_IDS:
+    fact = next((k for p, k in _ACORD_FIELD_RULES if k and not k.startswith("_") and p in field_name), None)
+    if fact not in ("effective_date", "expiration_date"):
+        return _SCHED_SKIP
+    return _moved_current_term(facts, "EffectiveDate" if fact == "effective_date" else "ExpirationDate")
+
+
+def _resolve_renewal_proposed_period(field_name: str, facts: dict):
+    m = _RENEWAL_PROPOSED_RE.match(field_name)
+    if not m:
+        return _resolve_asg_certificate_term(field_name, facts)
+    if not _fv(facts, "renewal_dates_routed"):
+        return _SCHED_SKIP
+    if _is_certificate_form((facts or {}).get("_form_id")):
         # A certificate documents the EXISTING policy. Once the merge moved that
         # term out of the proposed dates (15 Sep 2026: every in-force current
         # policy, not only an ended renewal), it prints the moved term - never
@@ -16649,9 +16685,17 @@ def _draw_highlight_rects(pdf: pikepdf.Pdf, page_rects: dict) -> None:
             page["/Contents"] = pikepdf.Array([overlay_stream, existing])
 
 
+def _template_input(template):
+    """A template as pikepdf / pdfplumber open it: a path (our 17 forms, unchanged) or, for an ASG form
+    (services/asg_forms, 3 Nov 2026), the form's bytes held in memory - never written to disk."""
+    if isinstance(template, (bytes, bytearray)):
+        return io.BytesIO(bytes(template))
+    return template
+
+
 def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) -> bytes:
     try:
-        pdf = pikepdf.open(template_path)
+        pdf = pikepdf.open(_template_input(template_path))
         if "/AcroForm" in pdf.Root:
             acro = pdf.Root["/AcroForm"]
             # A plain Python bool, never `pikepdf.Boolean` (17 Sep 2026): that
@@ -16677,6 +16721,8 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
         return buf.getvalue()
     except Exception as ex:
         logger.error(f"fill_pdf error: {ex}")
+        if isinstance(template_path, (bytes, bytearray)):
+            return bytes(template_path)
         with open(template_path, "rb") as f:
             return f.read()
 
@@ -16744,6 +16790,9 @@ def apply_draft_watermark(pdf_bytes: bytes, label: str = "DRAFT - INCOMPLETE") -
             ]
             overlay_bytes = ("\n".join(lines) + "\n").encode("latin-1")
             overlay_stream = pikepdf.Stream(pdf, overlay_bytes)
+            # Sealed first (4 Nov 2026): a page that ends scaled (ACORD's "0.12 0 0 0.12 0 0 cm") had drawn the
+            # watermark at 1/8 size in the bottom-left corner on every form.
+            _seal_page_content(pdf, page)
             existing = page.get("/Contents")
             if existing is None:
                 page["/Contents"] = overlay_stream
@@ -31501,7 +31550,7 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
     # Liability" and "Liquor Liability" are real other coverages). Certificates
     # keep their own rule; 141 / 160 are frozen.
     _fid = str(facts.get("_form_id") or "") if isinstance(facts, dict) else ""
-    if _fid and _fid not in ("ACORD_141", "ACORD_160") and _fid not in _CERTIFICATE_FORM_IDS:
+    if _fid and _fid not in ("ACORD_141", "ACORD_160") and not _is_certificate_form(_fid):
         try:
             from services.lob_canon import canon_line as _canon
         except Exception:                                 # noqa: BLE001
@@ -32510,6 +32559,64 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                         "beside it", _copied)
     except Exception:
         pass
+
+    # ── The "Other symbol" code box never holds a symbol the grid prints ──
+    try:
+        _grid = _blank_grid_symbols_in_other_box(mapped, gpt_filled_set or set(), schema)
+        if _grid:
+            logger.info("post_fill_guard OTHER_SYMBOL_ON_GRID blanked=%s - the box is for a "
+                        "symbol the grid does not print; this one has its own tick", _grid)
+    except Exception:
+        pass
+
+
+# ACORD 137 / 138 / 160 symbol grids: "Vehicle_BusinessAutoSymbol_OtherSymbolCode_A".
+_OTHER_SYMBOL_CODE_RE = re.compile(
+    r"^Vehicle_(BusinessAuto|Truckers|MotorCarrier|GarageAndDealers)Symbol_OtherSymbolCode_[A-Z]{1,2}$")
+
+
+def _blank_grid_symbols_in_other_box(mapped: dict, gpt_filled_set: set,
+                                     schema: Optional[dict] = None) -> List[str]:
+    """Blank an AI value in a covered-auto grid's "Other symbol" CODE box when every symbol in it has its OWN tick on
+    that row of the grid - and the AI's "Other" tick beside it. Live run 4 Nov 2026: ASG's ACORD 137 TX ticked Symbol
+    1 and printed "1" in the Other box.
+    - Judged per ROW, from the boxes the form prints on it (review B: row E - towing - prints only 3 and 7, so a 2
+      belongs in its Other box; row C - UM - prints no 8);
+    - a value with any word besides "symbol" (a company's own symbol, "7A", "S2") is kept - ACORD's tooltip asks for
+      a company-unique symbol there;
+    - AI values only; a deterministic value is never judged."""
+    if not gpt_filled_set:
+        return []
+    try:
+        from services import auto_symbols as _sym
+    except Exception:                                      # pragma: no cover
+        return []
+    family_of = {"BusinessAuto": _sym.BUSINESS_AUTO, "Truckers": _sym.TRUCKERS,
+                 "MotorCarrier": _sym.MOTOR_CARRIER, "GarageAndDealers": _sym.GARAGE}
+    names = set(schema or {}) | set(mapped)
+    blanked: List[str] = []
+    for field in sorted(gpt_filled_set):
+        m = re.match(r"^Vehicle_(BusinessAuto|Truckers|MotorCarrier|GarageAndDealers)Symbol_OtherSymbolCode_"
+                     r"([A-Z]{1,2})$", field)
+        value = str(mapped.get(field) or "").strip()
+        if not m or not value:
+            continue
+        words = re.findall(r"[A-Za-z]+", value)
+        if any(w.lower() not in ("symbol", "symbols", "and", "or") for w in words):
+            continue                                       # a company's own symbol - its tooltip asks for it
+        numbers = [int(n) for n in re.findall(r"\d+", value)]
+        family = family_of[m.group(1)]
+        on_row = {s.number for s in _sym.BY_FAMILY.get(family, {}).values()
+                  if f"Vehicle_{m.group(1)}Symbol_{s.word}Indicator_{m.group(2)}" in names}
+        if numbers and on_row and all(n in on_row for n in numbers):
+            logger.info("gpt_fill DROP_OTHER_SYMBOL_ON_GRID: field=%s value=%r", field, value)
+            mapped[field] = None
+            blanked.append(field)
+            tick = f"Vehicle_{m.group(1)}Symbol_OtherSymbolIndicator_{m.group(2)}"
+            if tick in gpt_filled_set and mapped.get(tick) not in (None, "", "Off", "No"):
+                mapped[tick] = None
+                blanked.append(tick)
+    return blanked
 
 
 # A box whose ACORD instruction asks for the TYPE of something, or a NUMBER.
@@ -39463,10 +39570,10 @@ def map_facts_to_form(
 
 def extract_form_fields_with_positions(path: str) -> List[dict]:
     fields: List[dict] = []
-    if not os.path.exists(path):
+    if not isinstance(path, (bytes, bytearray)) and not os.path.exists(path):
         return fields
     try:
-        pdf = pikepdf.open(path)
+        pdf = pikepdf.open(_template_input(path))
         for page_idx, page in enumerate(pdf.pages):
             raw_annots = page.get("/Annots", None)
             if raw_annots is None:
@@ -39529,7 +39636,7 @@ def extract_form_fields_with_positions(path: str) -> List[dict]:
 def get_page_dims_pikepdf(path: str) -> List[dict]:
     dims = []
     try:
-        pdf = pikepdf.open(path)
+        pdf = pikepdf.open(_template_input(path))
         for page in pdf.pages:
             mb = page.get("/MediaBox", None)
             if mb:
@@ -39792,7 +39899,11 @@ def regenerate_pdf_for_form(
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
     r          = generated[form_id]
-    tpl        = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+    from services.asg_forms import is_asg_record, template_source
+    _asg_form  = is_asg_record(r)
+    # An ASG form's template is rebuilt from the package's own copy - only when a render is really needed
+    # (below, after the cache checks). Our 17: the template file, exactly as before.
+    tpl        = None if _asg_form else os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
     field_data = r.get("field_state") or r.get("mapped", {})
     confidence = r.get("confidence", {})
 
@@ -39815,6 +39926,12 @@ def regenerate_pdf_for_form(
     if r.get("signature_applied"):
         sig_b64 = r.get("signature_b64") or user_signature
 
+    if _asg_form:
+        tpl = template_source(r)
+        if tpl is None:
+            from services.asg_forms import CANNOT_SHOW as _CANNOT_SHOW
+            raise HTTPException(503, _CANNOT_SHOW)
+
     if sig_b64:
         # Regenerate with latest field values and re-stamp signature
         pdf_bytes = inject_signature_into_pdf(tpl, field_data, confidence, sig_b64)
@@ -39828,50 +39945,24 @@ def regenerate_pdf_for_form(
     return pdf_bytes
 
 
-def _get_page_content_scale(page) -> float:
-    """Return the uniform scale factor applied by the first 'cm' operator in the
-    page content stream, or 1.0 if none is found.
+def _seal_page_content(pdf, page) -> None:
+    """Wrap the page's existing content in q ... Q so content appended after it
+    starts from the default graphics state (plain page space).
 
-    Many ACORD templates open their content stream with a line like:
-        0.12 0 0 0.12 0 0 cm
-    which maps widget /Rect coordinates (in PDF user space) to a scaled internal
-    coordinate system. When we append new content we must use the internal space,
-    so all user-space coordinates need to be divided by this scale.
-
-    Only handles the simple uniform-scale case (a == d, b == 0, c == 0, e == 0,
-    f == 0). Returns 1.0 for any other transform so painting degrades gracefully.
-    """
-    import re as _re
-    try:
-        contents = page.get("/Contents")
-        if contents is None:
-            return 1.0
-        if isinstance(contents, pikepdf.Array):
-            raw = b"".join(bytes(s.read_bytes()) for s in contents)
-        else:
-            raw = bytes(contents.read_bytes())
-        text = raw[:500].decode("latin-1", errors="replace")
-        # Match "sx 0[.0] 0[.0] sy tx ty cm" — the zero components may be 0.00
-        m = _re.search(
-            r"([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+cm",
-            text,
-        )
-        if m:
-            sx  = float(m.group(1))
-            shx = float(m.group(2))
-            shy = float(m.group(3))
-            sy  = float(m.group(4))
-            tx  = float(m.group(5))
-            ty  = float(m.group(6))
-            # Only trust as a pure uniform scale (no shear, no translation)
-            if (abs(shx) < 0.001 and abs(shy) < 0.001
-                    and abs(sx - sy) < 0.001
-                    and abs(tx) < 0.001 and abs(ty) < 0.001
-                    and sx > 0):
-                return sx
-    except Exception:
-        pass
-    return 1.0
+    Many ACORD templates open their content with a scale ("0.12 0 0 0.12 0 0 cm")
+    they never restore, and ASG's copies do so on some pages and not others, so
+    the state at the end of a page's content cannot be read from its first bytes.
+    Sealing it is the standard overlay technique (qpdf / pypdf do the same) and
+    needs no guess. Painting twice on one page (producer, then applicant) seals
+    twice - one extra nesting level each, harmless."""
+    existing = page.get("/Contents")
+    if existing is None:
+        return
+    parts = list(existing) if isinstance(existing, pikepdf.Array) else [existing]
+    parts = [p if p.is_indirect else pdf.make_indirect(p) for p in parts]
+    page["/Contents"] = pikepdf.Array(
+        [pdf.make_indirect(pikepdf.Stream(pdf, b"q\n"))] + parts
+        + [pdf.make_indirect(pikepdf.Stream(pdf, b"\nQ\n"))])
 
 
 def inject_signature_into_pdf(
@@ -40001,13 +40092,14 @@ def inject_signature_into_pdf(
             if not sig_rects:
                 continue
 
-            # Detect the page's global CTM scale so we can paint in the correct
-            # coordinate space.  Many ACORD templates open their content stream
-            # with "sx 0 0 sy 0 0 cm" which scales all internal coordinates.
-            # Widget /Rect values are always in PDF user-space (post-transform),
-            # but when we append new content the current graphics state already
-            # has that scale applied — so we must invert it.
-            page_scale = _get_page_content_scale(page)  # e.g. 0.12 for ACORD 125
+            # The page's own content may END with its graphics state changed: ACORD
+            # templates open with "0.12 0 0 0.12 0 0 cm" and never restore it. This
+            # used to be GUESSED from the first 500 bytes (the first `cm`), which was
+            # wrong on ASG's 137 TX pages 1 and 3 (4 Nov 2026, live run: every
+            # signature drawn at 1/8 size in the corner - invisible). Not guessed any
+            # more: the page's content is sealed in q ... Q once, so what follows runs
+            # in plain page space, where widget /Rect values live.
+            _seal_page_content(pdf, page)
 
             # Paint each signature image directly into the page content stream
             for draw_x, draw_y, draw_w, draw_h, jpeg_bytes, px_w, px_h in sig_rects:
@@ -40036,16 +40128,8 @@ def inject_signature_into_pdf(
                         xobj_name = f"/SigImg{counter}"
                     res["/XObject"][pikepdf.Name(xobj_name)] = indirect_img
 
-                    # Convert user-space coordinates to the page's internal space.
-                    # Widget rects are in user space; the content stream may have a
-                    # global scale (e.g. 0.12) already applied, so we divide by it.
-                    if page_scale and page_scale != 1.0:
-                        ix = draw_x / page_scale
-                        iy = draw_y / page_scale
-                        iw = draw_w / page_scale
-                        ih = draw_h / page_scale
-                    else:
-                        ix, iy, iw, ih = draw_x, draw_y, draw_w, draw_h
+                    # Plain page space - the page's content is sealed above.
+                    ix, iy, iw, ih = draw_x, draw_y, draw_w, draw_h
 
                     # q ... cm Image Do Q — save/restore graphics state so we
                     # don't disturb any transforms that follow in the stream.

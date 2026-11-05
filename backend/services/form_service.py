@@ -2427,14 +2427,35 @@ def shared_gap_fill(session: dict, form_ids: List[str]) -> dict:
             form_meta = _fi.form_meta_for(_all_forms, form_id, _session_facts)
             if not form_meta:
                 continue
+            from services import asg_forms as _asg
+            if _asg.is_asg_meta(form_meta):
+                tpl = None                  # an ASG form: its box list comes from its download below
+            else:
+                try:
+                    tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+                except ValueError:
+                    continue
+                if not os.path.exists(tpl):
+                    continue
             try:
-                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
-            except ValueError:
-                continue
-            if not os.path.exists(tpl):
-                continue
-            try:
-                schema = extract_form_schema(tpl, form_id)
+                if tpl is None:
+                    # A form this package already generated (a document added after forms): its box list from
+                    # the package's own copy - never a new ASG download. A first generation downloads it (the
+                    # RAM copy then serves `process_single_form`); with the switch off, no download at all.
+                    _rec = (session.get("generated_forms") or {}).get(form_id)
+                    _own = _asg.base_copy(_rec)
+                    if _own is not None:
+                        schema = _asg.schema_from_pdf(_own)
+                    elif _rec is None and _asg.feature_on():
+                        # only a FIRST generation downloads; a generated form whose stored copy did not load is
+                        # skipped, never re-downloaded (nothing calls ASG after generation - review, 4 Nov 2026)
+                        schema = _asg.schema_from_pdf(_asg.fetch_blank(form_meta)[0])
+                    else:
+                        logger.warning("combined_gap_fill: ASG form %s skipped - %s", form_id,
+                                       "its stored copy is missing" if _rec is not None else "the feature is off")
+                        continue
+                else:
+                    schema = extract_form_schema(tpl, form_id)
                 schemas[form_id] = schema
                 form_facts = _fi.facts_for_form(facts_with_flags, form_id)
                 mapped, unmatched, _det = compute_form_gaps(
@@ -2600,8 +2621,19 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     # A plain id: base == form_id and, without a view, the very same facts.
     form_id          = str(form_meta["form_id"])
     base_id          = _fi.base_form_id(form_id)
-    tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
-    schema           = extract_form_schema(tpl, form_id=base_id)
+    from services import asg_forms as _asg
+    asg_blank        = None
+    if _asg.is_asg_meta(form_meta):
+        # An ACORD form from ASG (3 Nov 2026, Accommodate800forms.md section 10): downloaded for this run
+        # (one call, shared with the gap fill's box list through the RAM copy), its boxes read in memory.
+        # Raises AsgFormUnavailable - the caller reports the form as not generated.
+        asg_blank, _asg_edition, _asg_sample = _asg.fetch_blank(form_meta)
+        form_meta    = _asg.with_download(form_meta, _asg_edition, _asg_sample)
+        tpl          = asg_blank
+        schema       = _asg.schema_from_pdf(asg_blank)
+    else:
+        tpl          = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
+        schema       = extract_form_schema(tpl, form_id=base_id)
     raw_text         = active_document_text(session)
     # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
     # is_contractor, has_auto_coverage, etc. for checkbox resolution.
@@ -2726,7 +2758,7 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
         narrative_doc_text=_narr_text,
     )
     pdf_bytes = fill_pdf(tpl, mapped, confidence)
-    return {
+    result = {
         "form_id":    form_meta["form_id"],
         "form_name":  form_meta["form_name"],
         "form":       form_meta,
@@ -2738,3 +2770,9 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
         "pdf_bytes":  pdf_bytes,
         "guard_blanks": guard_blanks,
     }
+    if asg_blank is not None:
+        # The package's own values-only copy (D-ASG-3): every later render rebuilds the clean form from it.
+        result[_asg.NEW_BASE_KEY] = _asg.values_only_copy(asg_blank, mapped)
+        # The boxes in printed order: the stored schema comes back key-sorted from JSONB.
+        result[_asg.ORDER_KEY] = list(schema.keys())
+    return result

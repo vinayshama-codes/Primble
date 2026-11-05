@@ -19,7 +19,7 @@ FAILURE_STATUSES = ("failed", "soft_locked", "suspended", "archived")
 
 SUBSCRIPTION_EXISTS = {
     "code": "subscription_exists",
-    "message": "You already have an active Primble plan. To change your plan, contact support@primble.ai.",
+    "message": "You already have an active Primble plan. To change your plan, contact support@primble.com.",
 }
 PAYMENT_DUE = {
     "code": "payment_due",
@@ -203,24 +203,65 @@ def checkout_refusal(live_subs: list) -> Optional[dict]:
     return dict(PAYMENT_DUE)
 
 
-def plan_from_subscription(sub) -> tuple:
-    """(plan, cycle) a subscription bills, or (None, None). Metadata first; else
-    an EXACT price + interval match in PLANS - never a default plan."""
-    plan = metadata_value(sub, "plan")
-    cycle = metadata_value(sub, "billing_cycle")
-    if plan in PLANS and plan != "enterprise":
-        cycle = cycle if cycle in PLANS[plan] else "monthly"
-        return plan, cycle
+def plan_from_price(price) -> tuple:
+    """(plan, cycle) whose PLANS amount AND interval this price is exactly, or
+    (None, None). A price billed every N months / years (N > 1), in another
+    currency, or with no amount is no plan of ours; neither is a $0 price."""
     try:
-        items = field(field(sub, "items"), "data") or []
-        price = field(items[0], "price")
         amount = field(price, "unit_amount")
-        interval = field(field(price, "recurring"), "interval")
+        recurring = field(price, "recurring") or {}
+        interval = field(recurring, "interval")
+        count = int(field(recurring, "interval_count") or 1)
+        currency = field(price, "currency")
     except Exception:
+        return None, None
+    if amount is None or interval is None or count != 1:
+        return None, None
+    if currency and str(currency).lower() != "usd":
+        return None, None
+    try:
+        amount = int(amount)
+    except (TypeError, ValueError):
         return None, None
     matches = [(p, c) for p, cfg in PLANS.items() if p != "enterprise"
                for c, v in cfg.items() if v["amount"] == amount and v["interval"] == interval]
     return matches[0] if len(matches) == 1 else (None, None)
+
+
+def plan_from_subscription(sub) -> tuple:
+    """(plan, cycle) a subscription bills, or (None, None) - never a default plan.
+
+    The PRICE decides first (3 Nov 2026, H-A): support changes a tier by moving
+    the subscription onto another price, and Stripe keeps our metadata as it
+    was, so the metadata can name the plan the customer USED to pay for. A
+    checkout's inline price carries the PLANS amount and interval, so it
+    resolves to the plan it was sold as. The metadata decides only when no
+    price matches one plan (an unknown price, or items naming two plans)."""
+    plan, cycle, _priced = _plan_and_source(sub)
+    return plan, cycle
+
+
+def _plan_and_source(sub) -> tuple:
+    """(plan, cycle, priced): `priced` is True when a price named the plan -
+    its cycle is then that price's own interval, never another item's."""
+    try:
+        items = field(field(sub, "items") or {}, "data") or []
+    except Exception:
+        items = []
+    priced = set()
+    for item in items:
+        p, c = plan_from_price(field(item, "price"))
+        if p:
+            priced.add((p, c))
+    if len(priced) == 1:
+        p, c = next(iter(priced))
+        return p, c, True
+    plan = metadata_value(sub, "plan")
+    cycle = metadata_value(sub, "billing_cycle")
+    if plan in PLANS and plan != "enterprise":
+        cycle = cycle if cycle in PLANS[plan] else "monthly"
+        return plan, cycle, False
+    return None, None, False
 
 
 def create_overage_invoice_item(user: dict, overage_rate_cents: int, unit_key: Optional[str] = None) -> bool:
@@ -362,7 +403,17 @@ async def get_or_create_stripe_customer(user: dict) -> Optional[str]:
 # from the value the caller read to the stage's day. Two runs (the scheduler and
 # the cron endpoint, or two webhook deliveries) can never both send it. A send
 # that fails puts the counter back, so the next run retries it.
-async def claim_payment_email(conn, user_id, day: int, prev: int) -> bool:
+async def claim_payment_email(conn, user_id, day: int, prev: int, failed_at=None) -> bool:
+    """`failed_at`: the failure the caller read - the claim (and so the e-mail)
+    fails when a restore cleared or replaced it since (3 Nov 2026, pass 6)."""
+    if failed_at is not None:
+        row = await conn.fetchrow(
+            "UPDATE users SET payment_email_sent_day=$2 WHERE id=$1"
+            " AND COALESCE(payment_email_sent_day, 0) < $2"
+            " AND COALESCE(payment_email_sent_day, 0) = $3 AND payment_failed_at = $4 RETURNING id",
+            user_id, int(day), int(prev), failed_at,
+        )
+        return bool(row)
     row = await conn.fetchrow(
         "UPDATE users SET payment_email_sent_day=$2 WHERE id=$1"
         " AND COALESCE(payment_email_sent_day, 0) < $2"
@@ -464,6 +515,33 @@ async def send_billing_alert(ref_key: str, subject: str, body: str) -> bool:
         if not row or dict(row)["event_type"] != ALERT_PENDING:
             return False
     return await _deliver_alert(key, subject, body)
+
+
+def admin_alert_recipients() -> list:
+    """The admins (ADMIN_EMAILS); the billing inbox when none is set."""
+    from config.settings import ADMIN_EMAILS
+    return sorted(ADMIN_EMAILS) or [BILLING_ALERT_TO]
+
+
+async def notify_admins(subject: str, body: str) -> int:
+    """One e-mail to each admin through the generic e-mail helper. Returns how
+    many were sent; a failed send is logged at ERROR (the caller's own ERROR
+    log and audit row stay the record for a person)."""
+    import html as _html
+    from services import email_service
+    html_body = f"<pre style=\"font-family:Arial,sans-serif\">{_html.escape(body)}</pre>"
+    sent = 0
+    for to in admin_alert_recipients():
+        try:
+            ok = await asyncio.to_thread(email_service._send_generic_email, to, subject, body, html_body)
+        except Exception as ex:
+            logger.error("admin alert %r not sent: %s", subject, type(ex).__name__)
+            ok = False
+        if ok:
+            sent += 1
+        else:
+            logger.error("admin alert %r not delivered to one admin", subject)
+    return sent
 
 
 async def _deliver_alert(key: str, subject: str, body: str) -> bool:
@@ -711,8 +789,28 @@ FINAL_NONE = "final_none"
 FINAL_MANUAL = "final_manual"
 
 
+def _as_utc(value):
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(str(value))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
 def final_overage_key(user_id, sub_id: Optional[str], customer_id: str, rate_cents: int) -> str:
     return f"{FINAL_PREFIX}{user_id}:{sub_id or 'none'}:{customer_id}:{int(rate_cents)}"
+
+
+def item_subscription(item) -> Optional[str]:
+    """The subscription an invoice item is scoped to, or None. API 2026-04-22
+    .dahlia moved it under `parent.subscription_details.subscription`; older
+    shapes carry a top-level `subscription` (3 Nov 2026, L-E). Both are read."""
+    sub = object_id(field(item, "subscription"))
+    if sub:
+        return sub
+    parent = field(item, "parent") or {}
+    return object_id(field(field(parent, "subscription_details") or {}, "subscription"))
 
 
 def _bill_final_overage(key: str, user_id: str, sub_id: str, customer_id: str, owed: list) -> dict:
@@ -732,7 +830,7 @@ def _bill_final_overage(key: str, user_id: str, sub_id: str, customer_id: str, o
             on_an_invoice.add(uk)
         else:
             pending.setdefault(uk, []).append(
-                (int(field(item, "amount") or 0), field(item, "id"), object_id(field(item, "subscription"))))
+                (int(field(item, "amount") or 0), field(item, "id"), item_subscription(item)))
     for uk in on_an_invoice & set(pending):
         for _amt, item_id, _sub in pending.pop(uk):
             _drop_pending_item(item_id)
@@ -746,7 +844,9 @@ def _bill_final_overage(key: str, user_id: str, sub_id: str, customer_id: str, o
             for _amt, extra_id, _sub in mine[1:]:
                 _drop_pending_item(extra_id)
     for uk, amount in owed:
-        if uk not in on_an_invoice:
+        # A unit whose only Stripe copy is pending on ANOTHER plan rides that
+        # plan's invoice - never a second copy here (3 Nov 2026, pass 3 #5).
+        if uk not in on_an_invoice and not (uk in pending and uk not in units):
             units.setdefault(uk, (int(amount), None))
 
     found = [inv for inv in stripe.Invoice.list(customer=customer_id, limit=100).auto_paging_iter()
@@ -850,14 +950,49 @@ async def settle_final_overage(key: str) -> dict:
     unit_prefix = f"overage_unit:{uid}:"
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT event_id, event_type FROM processed_webhook_events WHERE event_id LIKE $1",
+            "SELECT event_id, event_type, processed_at FROM processed_webhook_events WHERE event_id LIKE $1",
             unit_prefix + "%",
         )
     rows = [dict(r) for r in rows]
     if not rows:
         await _ledger_set(key, FINAL_NONE)          # never billed any overage: nothing can be owed
         return {"state": "none"}
-    owed = [(r["event_id"], rate) for r in rows if r["event_type"] in ("overage_pending", "overage_billing")]
+    # A unit in flight (overage_billing, claimed under an hour ago) is the
+    # counting path's own Stripe call - possibly for the NEW plan: never owed
+    # here; the daily retry takes it once stale (pass 3 #5).
+    from datetime import datetime, timezone
+    from services.usage_service import _STALE_BILLING
+    stale_before = datetime.now(timezone.utc) - _STALE_BILLING
+
+    def _stale(at) -> bool:
+        try:
+            when = datetime.fromisoformat(str(at))
+            when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+            return when < stale_before
+        except Exception:
+            return True
+    # Only units of the plan being closed (pass 5 #4): a package COUNTED after
+    # this bill was claimed (the plan's end) belongs to a later plan and rides
+    # that plan's invoice. Read from the packages' own counted_at; when that
+    # cannot be read, nothing is excluded (the per-plan Stripe copies above
+    # still keep another plan's pending items off this invoice).
+    later = set()
+    async with get_pool().acquire() as conn:
+        claim = await conn.fetchrow("SELECT processed_at FROM processed_webhook_events WHERE event_id=$1", key)
+    plan_end = _as_utc(dict(claim)["processed_at"]) if claim else None
+    if plan_end is not None:
+        try:
+            from services import usage_service as _usage
+            later = {f"{unit_prefix}{sid}"
+                     for sid, at in await _usage.packages_counted_since(uid, plan_end.isoformat())
+                     if (_as_utc(at) or plan_end) > plan_end}
+        except Exception as ex:
+            logger.warning("final overage of user %s: packages after the plan's end not read (%s)",
+                           uid, type(ex).__name__)
+    owed = [(r["event_id"], rate) for r in rows
+            if r["event_id"] not in later
+            and (r["event_type"] == "overage_pending"
+                 or (r["event_type"] == "overage_billing" and _stale(r.get("processed_at"))))]
     try:
         result = await asyncio.to_thread(_bill_final_overage, key, uid,
                                          None if sub_id == "none" else sub_id, customer_id, owed)
@@ -867,8 +1002,15 @@ async def settle_final_overage(key: str) -> dict:
                          uid, type(ex).__name__)
             return {"state": "pending"}
         await _ledger_set(key, FINAL_MANUAL)
-        logger.error("MANUAL BILLING NEEDED: final overage of user %s (plan %s) refused by Stripe: %s",
-                     uid, sub_id, type(ex).__name__)
+        # A person bills these by hand now: no retry may bill them again, on
+        # this plan or a later one (3 Nov 2026, pass 4 #7).
+        async with get_pool().acquire() as conn:
+            for uk, _amt in owed:
+                await conn.execute(
+                    "UPDATE processed_webhook_events SET event_type='overage_manual' WHERE event_id=$1"
+                    " AND event_type IN ('overage_pending','overage_billing')", uk)
+        logger.error("MANUAL BILLING NEEDED: final overage of user %s (plan %s) refused by Stripe: %s"
+                     " - %s unit(s) left to a person", uid, sub_id, type(ex).__name__, len(owed))
         await write_audit_log({"id": uid, "email": ""}, "payment.final_overage_manual",
                               session_id=sub_id, form_name=key)
         await send_billing_alert(
@@ -953,19 +1095,53 @@ def price_cycle(sub) -> Optional[str]:
     None. Support switches a plan's cycle in Stripe, where our metadata may not
     follow, so the price's own interval decides (3 Nov 2026)."""
     for item in (field(field(sub, "items") or {}, "data") or []):
-        interval = field(field(field(item, "price") or {}, "recurring") or {}, "interval")
-        if interval in ("year", "month"):
+        recurring = field(field(item, "price") or {}, "recurring") or {}
+        interval = field(recurring, "interval")
+        # Only a price billed every ONE month / year is a cycle we sell; "every
+        # 12 months" or "every 3 months" is neither (3 Nov 2026, pass 3 #3).
+        if interval in ("year", "month") and _interval_count(recurring) == 1:
             return "annual" if interval == "year" else "monthly"
     return None
 
 
+def _interval_count(recurring) -> int:
+    try:
+        return int(field(recurring, "interval_count") or 1)
+    except (TypeError, ValueError):
+        return 0
+
+
+def off_cycle_price(sub) -> bool:
+    """Does the subscription carry a recurring price billed every N months /
+    years with N > 1? No Primble plan is - Primble cannot meter it."""
+    for item in (field(field(sub, "items") or {}, "data") or []):
+        recurring = field(field(item, "price") or {}, "recurring") or {}
+        if field(recurring, "interval") and _interval_count(recurring) != 1:
+            return True
+    return False
+
+
 def subscription_plan(sub) -> tuple:
-    """(plan, cycle) the subscription bills - the price's interval over the
-    metadata's cycle - or (None, None)."""
-    plan, meta_cycle = plan_from_subscription(sub)
+    """(plan, cycle) the subscription bills - its price first (amount +
+    interval), the metadata only when no price matches; the price's interval
+    over the metadata's cycle - or (None, None)."""
+    plan, cycle, priced = _plan_and_source(sub)
     if plan is None:
         return None, None
-    cycle = price_cycle(sub) or meta_cycle or "monthly"
+    if not priced and off_cycle_price(sub):
+        # Metadata names a plan but the subscription bills every 3 / 12 / N
+        # months: no cycle Primble meters. Nothing syncs - a person decides
+        # (3 Nov 2026, pass 3 #3; the subscription.updated handler alerts).
+        logger.error("subscription %s bills on a price every N > 1 months/years - plan not synced;"
+                     " a person must check it", field(sub, "id"))
+        return None, None
+    if not priced:
+        # Metadata named the plan: the price's interval still beats the
+        # metadata's cycle (support switches a cycle in Stripe). A price that
+        # named the plan keeps ITS cycle - an add-on item on another interval
+        # (flexible billing allows mixed intervals) never decides it (3 Nov
+        # 2026, pass 2 #4).
+        cycle = price_cycle(sub) or cycle or "monthly"
     return plan, (cycle if cycle in PLANS[plan] else "monthly")
 
 
@@ -1007,7 +1183,7 @@ async def send_claimed_payment_email(get_pool_fn, sender, row: dict, day: int, p
     marker = email_marker_key(day, prev, row["id"], row.get("payment_failed_at"))
     async with get_pool_fn().acquire() as conn:
         async with conn.transaction():
-            if not await claim_payment_email(conn, row["id"], day, prev):
+            if not await claim_payment_email(conn, row["id"], day, prev, row.get("payment_failed_at")):
                 return False
             await conn.execute(
                 "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"

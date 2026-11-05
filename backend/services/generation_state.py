@@ -112,6 +112,28 @@ def generation_state(session: Any, job: Any, now: Optional[float] = None) -> str
     return STATE_INTERRUPTED                # failed, or a status we do not know
 
 
+# A generate request that is downloading its ACORD Solutions forms (3 Nov 2026, services/asg_forms) has not
+# started its run yet - for those seconds the package is marked "preparing", so a second generate request or a
+# pre-form change waits instead of racing the run (review round 3). The mark lives on the package row (every
+# server sees it), is cleared when the run's own marker is written or the download fails, and expires by
+# itself. Read ONLY by the refusal checks - the package page's run state is unchanged.
+PREPARING_KEY = "asg_preparing_at"
+PREPARING_TTL_SECONDS = 300.0   # well past the pre-download's own deadline (asg_forms.PREFETCH_DEADLINE_SECONDS,
+                                # 120 s; a test keeps the margin): the mark never expires while a run is starting
+PREPARING_LOCKED = "Forms are being prepared for this package - wait a moment."
+
+
+def preparing(session: Any, now: Optional[float] = None) -> bool:
+    session = session if isinstance(session, dict) else {}
+    if session.get("generated_forms"):
+        return False
+    try:
+        started = float(session.get(PREPARING_KEY) or 0)
+    except (TypeError, ValueError):
+        return False
+    return started > 0 and ((now or time.time()) - started) < PREPARING_TTL_SECONDS
+
+
 def forms_locked_reason(session: Any, state: Optional[str] = None) -> Optional[str]:
     """Why the package's PRE-FORM actions (resolve integrity, confirm a value
     through the pre-form route, generate again) must refuse, or None. Those

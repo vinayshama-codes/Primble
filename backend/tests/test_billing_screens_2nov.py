@@ -77,7 +77,7 @@ def test_sign_in_callbacks_pass_the_account_that_signed_in():
 
 def test_paying_users_see_current_plan_and_the_support_note():
     billing = _BILLING.read_text(encoding="utf-8")
-    assert 'SUPPORT_EMAIL = "support@primble.ai"' in billing
+    assert 'SUPPORT_EMAIL = "support@primble.com"' in billing
     assert "CHANGE_PLAN_NOTE = `To change your plan, contact ${SUPPORT_EMAIL}.`" in billing
 
     header = _read("components/layout/Header.jsx")
@@ -124,7 +124,7 @@ console.log(JSON.stringify([null, {{}}, {{ subscription_tier: "free" }}, {{ subs
 def test_server_messages_are_read_from_either_detail_shape(tmp_path):
     out = _node(tmp_path, f"""
 import * as B from {json.dumps(_BILLING.as_uri())};
-const exists = {{ detail: {{ code: "subscription_exists", message: "You already have an active Primble plan. To change your plan, contact support@primble.ai." }} }};
+const exists = {{ detail: {{ code: "subscription_exists", message: "You already have an active Primble plan. To change your plan, contact support@primble.com." }} }};
 const due = {{ detail: {{ code: "payment_due", message: "Your last payment didn't go through. Update your card in Manage billing to restore your plan." }} }};
 const portal = {{ detail: {{ code: "no_billing_account", message: "There's no billing account to manage yet." }} }};
 console.log(JSON.stringify({{
@@ -134,7 +134,7 @@ console.log(JSON.stringify({{
 }}));
 """)
     assert out["msgs"] == [
-        "You already have an active Primble plan. To change your plan, contact support@primble.ai.",
+        "You already have an active Primble plan. To change your plan, contact support@primble.com.",
         "Your last payment didn't go through. Update your card in Manage billing to restore your plan.",
         "There's no billing account to manage yet.",
         "plain", "fallback", "fallback",
@@ -152,7 +152,7 @@ def test_start_checkout_returns_the_servers_words(tmp_path):
     out = _node(tmp_path, f"""
 const replies = [
   [200, {{ checkout_url: "https://checkout.example/x" }}],
-  [409, {{ detail: {{ code: "subscription_exists", message: "You already have an active Primble plan. To change your plan, contact support@primble.ai." }} }}],
+  [409, {{ detail: {{ code: "subscription_exists", message: "You already have an active Primble plan. To change your plan, contact support@primble.com." }} }}],
   [409, {{ detail: {{ code: "payment_due", message: "Your last payment didn't go through. Update your card in Manage billing to restore your plan." }} }}],
   [503, {{ detail: "Billing is temporarily unavailable. Please try again shortly." }}],
   [503, null],
@@ -171,7 +171,7 @@ console.log(JSON.stringify(out));
 """)
     assert out[0] == {"url": "https://checkout.example/x"}
     assert out[1] == {"code": "subscription_exists",
-                      "message": "You already have an active Primble plan. To change your plan, contact support@primble.ai."}
+                      "message": "You already have an active Primble plan. To change your plan, contact support@primble.com."}
     assert out[2]["code"] == "payment_due"
     assert out[3] == {"code": None, "message": "Billing is temporarily unavailable. Please try again shortly."}
     assert out[4]["code"] is None and "try again" in out[4]["message"]
@@ -251,7 +251,7 @@ def test_archived_banner_offers_billing_not_support():
     line = next(l for l in modal.splitlines() if 'if (ps === "archived") return' in l)
     assert "Account archived -" in line and "onClick={onOpenBillingPortal}" in line
     assert "Update billing</button>" in line and "to restore access." in line
-    assert "mailto:support@primble.ai" not in line
+    assert "mailto:support@primble.com" not in line
 
     block = next(l for l in modal.splitlines() if "const blockMsg = " in l)
     assert '["Account archived - ", "Update billing", " to restore access."]' in block

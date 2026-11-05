@@ -71,7 +71,9 @@ async def _refuse_while_running(session: dict) -> None:
     """409 while a generation run is live - its forms are stamped from the
     facts it read (the existing lock text, `generation_state`)."""
     from routes.form_routes import _generation_state_for
-    from services.generation_state import STATE_RUNNING
+    from services.generation_state import PREPARING_LOCKED, STATE_RUNNING, preparing
+    if preparing(session):
+        raise HTTPException(409, PREPARING_LOCKED)
     state, _job = await _generation_state_for(session)
     if state == STATE_RUNNING:
         raise HTTPException(409, "Forms are being generated - wait for them to finish.")
@@ -207,6 +209,9 @@ async def _change(session_id: str, current_user: dict, action: str, **kw) -> JSO
     user_id = str(current_user["id"])
     async with _lock_for(session_id):
         session = await get_processing_session(session_id)
+        # Checked again on the read taken UNDER the lock: a Generate that claimed the package while this request
+        # waited would otherwise generate without this change (review pass 7, 4 Nov 2026).
+        await _refuse_while_running(session)
         try:
             new_store, audit_rows = pl.plan_change(session, action, user=user_id, **kw)
         except pl.PolicyLineError as e:

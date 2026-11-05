@@ -11056,6 +11056,12 @@ def stops_for_form(stops: Optional[List[str]], form_id: Any) -> List[str]:
     if not m_self:
         return out
     lines_here = _FORM_LINES.get(m_self.group(1))
+    try:
+        from services.asg_forms import same_subject_as_ours
+        if lines_here is not None and not same_subject_as_ours(base):
+            lines_here = None      # ASG's 186 SC (auto UM) is not our 186 (contractors GL) - review C, 4 Nov 2026
+    except Exception:                                          # noqa: BLE001
+        pass
     kept = []
     for msg in out:
         m = _STOP_SUBJECT_FORM_RE.match(str(msg))

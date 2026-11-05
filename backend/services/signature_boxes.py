@@ -51,11 +51,15 @@ KIND_SIGNATURE = "signature"
 KIND_DATE = "date"
 KIND_INITIALS = "initials"
 KIND_PRINTED_NAME = "printed_name"
+KIND_TIME = "time"            # the time (and its AM / PM ticks) beside a signature - never painted, never a line
 
 # Stored on a generated form when the Sign button painted the producer's boxes
 # only. A signed form WITHOUT it was signed before 1 Oct 2026, when every box
 # got the producer's signature - its cached PDF is never served again.
-SIGNATURE_SCOPE = SIGNER_PRODUCER
+# The signed-PDF cache version: a cached signed PDF is reused only when it carries this exact value. Bumped
+# 4 Nov 2026 ("|sealed"): the painter stopped GUESSING the page's drawing scale (wrong on ASG's 137 TX / 25 GA -
+# signatures drawn invisible), so every signed PDF cached before is painted again on its next render.
+SIGNATURE_SCOPE = SIGNER_PRODUCER + "|sealed"
 
 _SIGN_TIP = re.compile(r"^\s*sign here\s*:", re.IGNORECASE)
 _INITIAL_TIP = re.compile(r"^\s*initial here\s*:", re.IGNORECASE)
@@ -63,6 +67,11 @@ _INITIAL_TIP = re.compile(r"^\s*initial here\s*:", re.IGNORECASE)
 _SIGNED_DATE_TIP = re.compile(r"\bdate\b[^.]{0,40}\bsigned\b", re.IGNORECASE)
 # "The name of the authorized representative ... that signed the form."
 _SIGNER_NAME_TIP = re.compile(r"\bname\b[^.]*\b(?:that|who) signed\b", re.IGNORECASE)
+# "Enter time: The time the form was signed ..." / "Indicates the time the form was signed ..." (ASG's ACORD 97 SC, 4 Nov
+# 2026: the box name says "SignatureTime", which the name rule read as a SIGNATURE - the Sign button painted the time
+# box and both AM / PM ticks).
+_SIGNED_TIME_TIP = re.compile(r"\btime\b[^.]{0,40}\bsigned\b", re.IGNORECASE)
+# NOT every "Enter time:" box: a policy's effective time and business hours are no signing step (review B, 4 Nov 2026)
 _AS_USED = re.compile(r"\bas used here\b", re.IGNORECASE)
 
 _APPLICANT_WORDS = re.compile(r"\b(?:applicant|named insured|insured)\b", re.IGNORECASE)
@@ -108,6 +117,8 @@ def _kind(field: str, tooltip: str, field_type: str) -> Optional[str]:
     if _SIGNER_NAME_TIP.search(tip):
         return KIND_PRINTED_NAME
     low = (field or "").lower()
+    if _SIGNED_TIME_TIP.search(tip) or "signaturetime" in low or "timesigned" in low or "signedtime" in low:
+        return KIND_TIME
     if "signaturedate" in low or "signeddate" in low or "datesigned" in low:
         return KIND_DATE
     if "initials" in low:
@@ -152,8 +163,9 @@ def is_applicant_step(field: str, tooltip: str = "") -> bool:
     """A box the applicant completes when signing: their signature, its date,
     their initials. Never the producer's to fill in."""
     box = signature_box(field, tooltip)
+    # the time the applicant signed is theirs too (ASG's 97 SC) - never a box that holds the producer's form back
     return bool(box) and box[1] == SIGNER_APPLICANT and box[0] in (
-        KIND_SIGNATURE, KIND_DATE, KIND_INITIALS)
+        KIND_SIGNATURE, KIND_DATE, KIND_INITIALS, KIND_TIME)
 
 
 def _tooltip(schema: Optional[dict], field: str) -> str:
@@ -341,7 +353,13 @@ def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = Fals
         cached = r["pdf_bytes"]
         return cached if isinstance(cached, bytes) else bytes(cached)
     from config.settings import TEMPLATE_DIR
-    tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+    from services.asg_forms import is_asg_record, template_source
+    if is_asg_record(r):
+        tpl = template_source(r)             # an ASG form: rebuilt from the package's own copy
+        if tpl is None:
+            return _regenerate(proc_session, form_id, force, user_signature)
+    else:
+        tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
     field_data = r.get("field_state") or r.get("mapped", {})
     confidence = r.get("confidence", {})
     pdf_bytes = inject_producer_signature(tpl, field_data, confidence, sig_b64)
@@ -381,6 +399,8 @@ STATE_STALE = "stale"
 _LABEL_BAND = 16.0          # points above a box that hold its printed cell label
 _LABEL_SLACK = 6.0          # the label starts a hair left of the box
 _LINE_WORD = "SIGNATURE"
+_LEFT_REACH = 160.0         # points left of a box where a same-row label may sit ("Applicant's Signature ____")
+_LABEL_BELOW = 14.0         # points under a box where its label may be printed (ACORD 97 SC)
 
 
 def _widgets(pdf) -> Iterable[Tuple[int, str, str, str, List[float]]]:
@@ -402,10 +422,20 @@ def _widgets(pdf) -> Iterable[Tuple[int, str, str, str, List[float]]]:
 
 @lru_cache(maxsize=64)
 def _applicant_lines_cached(template_path: str, mtime: float) -> Tuple[Tuple[str, Optional[str]], ...]:
+    return _read_applicant_lines(template_path)
+
+
+def _read_applicant_lines(template: Any) -> Tuple[Tuple[str, Optional[str]], ...]:
+    """The reading itself, for a template FILE (our 17 forms) or a template held in memory as bytes (an ASG
+    form, rebuilt from the package's own copy - 4 Nov 2026)."""
     import pdfplumber
     import pikepdf
+
+    def _src():
+        return io.BytesIO(bytes(template)) if isinstance(template, (bytes, bytearray)) else template
+
     sigs, dates = [], []
-    pdf = pikepdf.open(template_path)
+    pdf = pikepdf.open(_src())
     try:
         for pi, name, tu, ft, rect in _widgets(pdf):
             box = signature_box(name, tu, ft)
@@ -421,15 +451,38 @@ def _applicant_lines_cached(template_path: str, mtime: float) -> Tuple[Tuple[str
         return ()
     lines: List[Tuple[str, Optional[str]]] = []
     used = set()
-    with pdfplumber.open(template_path) as plumb:
+
+    def band(page, x0b, topb, x1b, bottomb) -> str:
+        # A band of zero width or height (a box at the page's edge) reads as nothing - pdfplumber raises on it, and
+        # one such box once wiped out every line of the form (review B, 4 Nov 2026).
+        x0b, topb = max(0.0, x0b), max(0.0, topb)
+        x1b, bottomb = min(page.width, x1b), min(page.height, bottomb)
+        if x1b - x0b <= 0.5 or bottomb - topb <= 0.5:
+            return ""
+        try:
+            return " ".join((page.within_bbox((x0b, topb, x1b, bottomb)).extract_text() or "").split()).upper()
+        except Exception:                                   # noqa: BLE001
+            return ""
+
+    with pdfplumber.open(_src()) as plumb:
         for pi, name, (x0, y0, x1, y1) in sorted(sigs, key=lambda s: (s[0], -s[2][3], s[2][0])):
             page = plumb.pages[pi]
             top = page.height - y1
-            band = page.within_bbox((max(0.0, x0 - _LABEL_SLACK), max(0.0, top - _LABEL_BAND),
-                                     min(page.width, x1), min(page.height, top + 1.0)))
-            label = " ".join((band.extract_text() or "").split()).upper()
-            if _LINE_WORD not in label:
-                continue
+            above = band(page, x0 - _LABEL_SLACK, top - _LABEL_BAND, x1, top + 1.0)
+            beside = False
+            if _LINE_WORD not in above:
+                # The other ACORD layouts (live run, 4 Nov 2026): the label printed to the LEFT of the line on its
+                # row (ACORD 60) or just UNDER it (ACORD 97 SC). Only for a line that stands alone - nothing printed
+                # just above it - AND carries its own applicant date on its row (below). An attestation box has no
+                # date: ACORD 130's "I have no employees" lines (Minnesota, Utah) have "(Applicant's Signature):" to
+                # their left, and in the 2026/08 edition a blank line above them (review B, 4 Nov 2026).
+                if above:
+                    continue
+                left = band(page, x0 - _LEFT_REACH, top - 1.0, x0 - 1.0, top + (y1 - y0) + 1.0)
+                under = band(page, x0 - _LABEL_SLACK, page.height - y0, x1, page.height - y0 + _LABEL_BELOW)
+                if _LINE_WORD not in left and _LINE_WORD not in under:
+                    continue
+                beside = True
             best, best_gap = None, None
             for dpi, dname, (dx0, dy0, dx1, dy1) in dates:
                 if dpi != pi or dname in used:
@@ -440,6 +493,8 @@ def _applicant_lines_cached(template_path: str, mtime: float) -> Tuple[Tuple[str
                 gap = dx0 - x1
                 if best_gap is None or gap < best_gap:
                     best, best_gap = dname, gap
+            if beside and best is None:
+                continue
             if best:
                 used.add(best)
             lines.append((name, best))
@@ -459,7 +514,58 @@ def applicant_signature_lines(template_path: str) -> List[Dict[str, Optional[str
         return []
 
 
+# An ASG form's lines, by the hash of the package's stored copy: the copy never changes once generated, and the
+# clean template rebuilt from it is not byte-stable (a PDF save writes a fresh /ID), so the copy is the key.
+_ASG_LINES_MAX = 64
+_asg_lines: "Dict[str, Tuple[Tuple[str, Optional[str]], ...]]" = {}
+
+
+def applicant_lines_for(generated_form: Any) -> List[Dict[str, Optional[str]]]:
+    """The application's signature lines on this generated form - [{"signature", "date"}], [] when none.
+
+    Our 17 forms: read off the template file. An ASG form (4 Nov 2026, was D-ASG-10): read the same way off its
+    clean template, rebuilt from the package's own stored copy - never an ASG call. The printed cell label above
+    the box must say SIGNATURE, exactly as on our forms, so an attestation box is never signed."""
+    from services.asg_forms import base_copy, is_asg_record, template_source
+    if not is_asg_record(generated_form):
+        tpl = template_path_for(generated_form)
+        return applicant_signature_lines(tpl) if tpl else []
+    base = base_copy(generated_form)
+    if not base:
+        return []
+    key = hashlib.sha256(base).hexdigest()
+    lines = _asg_lines.get(key)
+    if lines is None:
+        fid = ((generated_form or {}).get("form") or {}).get("form_id")
+        tpl = template_source(generated_form)
+        if tpl is None:
+            return []
+        try:
+            lines = _read_applicant_lines(tpl)
+        except Exception as ex:                                 # noqa: BLE001
+            logger.warning("applicant signature lines unavailable for %s: %s", fid, ex)
+            return []
+        if len(_asg_lines) >= _ASG_LINES_MAX:
+            _asg_lines.pop(next(iter(_asg_lines)))
+        _asg_lines[key] = lines
+    return [{"signature": s, "date": d} for s, d in lines]
+
+
+def template_for(generated_form: dict) -> Any:
+    """The clean template to render this generated form from: our forms' template FILE path, or an ASG form's
+    template as bytes rebuilt from the package's own copy (never an ASG call). None when neither is available."""
+    from services.asg_forms import is_asg_record, template_source
+    if is_asg_record(generated_form):
+        return template_source(generated_form)
+    return template_path_for(generated_form)
+
+
 def template_path_for(generated_form: dict) -> Optional[str]:
+    # A template FILE path - our 17 forms only. An ASG form has no file (it is rebuilt in memory): None here;
+    # `template_for` / `applicant_lines_for` are the doors that handle it.
+    from services.asg_forms import is_asg_record
+    if is_asg_record(generated_form):
+        return None
     try:
         from config.settings import TEMPLATE_DIR
         return os.path.join(TEMPLATE_DIR, (generated_form or {})["form"]["template_file"])
@@ -521,8 +627,7 @@ def applicant_signature_for(proc_session: Any, form_id: str,
             return None
         from utils.crypto import decrypt_field_soft
         image = decrypt_field_soft(enc)
-        tpl = template_path_for(gen)
-        lines = applicant_signature_lines(tpl) if tpl else []
+        lines = applicant_lines_for(gen)
         if not image or not lines:
             return None
         return {"image": image, "date": str(meta.get("signed_date") or ""),
@@ -539,8 +644,7 @@ def signed_applicant_boxes(proc_session: Any, form_id: str) -> Dict[str, bool]:
     gen = ((proc_session or {}).get("generated_forms") or {}).get(form_id)
     if applicant_signature_for(proc_session, form_id) is None:
         return {}
-    tpl = template_path_for(gen)
-    lines = applicant_signature_lines(tpl) if tpl else []
+    lines = applicant_lines_for(gen)
     painted = {l["signature"] for l in lines} | {l["date"] for l in lines if l["date"]}
     schema = _schema_for(form_id, gen.get("schema"))
     out = {}
@@ -580,7 +684,8 @@ def add_applicant_signature(pdf_bytes: bytes, template_path: str, applicant: dic
     hidden, held = _hide_other_signature_boxes(dated, keep=lambda name, _tu, _ft: name in sig_names)
     painted = inject_signature_into_pdf(template_path, {}, {}, applicant["image"], hidden)
     if painted is hidden:
-        logger.error("applicant signature could not be painted on %s", template_path)
+        logger.error("applicant signature could not be painted on %s",
+                     template_path if isinstance(template_path, str) else "an ACORD Solutions form")
         return pdf_bytes
     return _restore_held_boxes(painted, held) if held else painted
 
@@ -591,16 +696,22 @@ def _render_with_applicant(r: dict, form_id: str, force: bool,
     has signed, then dated and signed on the applicant's lines. Cached against
     the field values AND the signature it carries."""
     from services.pdf_service import fill_pdf
-    tpl = template_path_for(r)
     field_data = _field_data_of(r)
     confidence = r.get("confidence", {})
     producer_sig = (r.get("signature_b64") or user_signature) if r.get("signature_applied") else None
     state_hash = hashlib.md5(json.dumps(field_data, sort_keys=True).encode()).hexdigest()
-    render_key = f"{applicant.get('request_id')}|{'p' if producer_sig else '-'}"
+    render_key = f"{applicant.get('request_id')}|{'p' if producer_sig else '-'}|{SIGNATURE_SCOPE}"
     if (not force and r.get("pdf_bytes") and r.get("_pdf_cache_hash") == state_hash
             and r.get(APPLICANT_RENDER_KEY) == render_key):
         cached = r["pdf_bytes"]
         return cached if isinstance(cached, bytes) else bytes(cached)
+    # Rebuilt only when a render is really needed - after the cache check (review B, 4 Nov 2026: every cached view
+    # of a signed ASG form rebuilt its template for nothing).
+    tpl = template_for(r)
+    if tpl is None:                     # an ASG form whose stored copy cannot be read: the unsigned render's answer
+        from fastapi import HTTPException
+        from services.asg_forms import CANNOT_SHOW as _CANNOT_SHOW
+        raise HTTPException(503, _CANNOT_SHOW)
     if producer_sig:
         base = inject_producer_signature(tpl, field_data, confidence, producer_sig)
     else:

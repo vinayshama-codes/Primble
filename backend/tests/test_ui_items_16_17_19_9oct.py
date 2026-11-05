@@ -287,7 +287,13 @@ def test_the_modal_ticks_125_on_form_selection_and_keeps_the_order():
     assert "setCheckedFormIds(prev => withUploadedForms(withAnchorForm(prev, recommendations, declined125)," in effect
     # Every reset of the ticks also forgets the untick and the "touched" mark.
     assert modal.count("setCheckedFormIds(new Set())") == 1          # only inside resetFormTicks
-    assert "const resetFormTicks = () => { setCheckedFormIds(new Set()); setDeclined125(false); setFormTicksTouched(false); };" in modal
+    reset = modal[modal.index("const resetFormTicks = () => {"):]
+    reset = reset[:reset.index("};")]
+    # 3 Nov 2026 (any ACORD form, Accommodate800forms.md 10.9 F1): the forms added from ACORD Solutions and a typed
+    # search belong to ONE package, so every reset forgets them too. The test pins what the reset does, not its text.
+    for part in ("setCheckedFormIds(new Set());", "setDeclined125(false);", "setFormTicksTouched(false);",
+                 "setAddedForms([]);", 'setAcordQuery("");'):
+        assert part in reset, part
     assert modal.count("resetFormTicks();") == 5
     # The producer's own changes: an untick of 125 sticks; the checks follow the ticks.
     toggle = modal[modal.index("const toggleForm = formId => {"):modal.index("useLayoutEffect(() => {\n    if (step !== \"form_selection\")")]
@@ -295,8 +301,14 @@ def test_the_modal_ticks_125_on_form_selection_and_keeps_the_order():
     assert "if (formId === ANCHOR_FORM_ID) setDeclined125(checkedFormIds.has(formId));" in toggle
     add = modal[modal.index("const addFormBeforeGeneration = (formId) => {"):]
     assert "setFormTicksTouched(true);" in add[:add.index("};")]
-    assert modal.count("checkedFormsForReview(checkedFormIds, formTicksTouched)") == 2
-    assert "[...checkedFormIds]" not in modal
+    # The review page's dry run and its tick list read ONE value, built by `checkedFormsForReview` (3 Nov 2026: the
+    # forms added from ACORD Solutions are left out of it - the dry run checks our forms only, 10.10 R2-8). The raw
+    # ticks are spread only there, straight into that helper.
+    assert modal.count("checkedFormsForReview(") == 1
+    assert ("const reviewTicks = checkedFormsForReview([...checkedFormIds].filter(id => !asgAddedIds.has(id)), "
+            "formTicksTouched);") in modal
+    assert "dryRunFormIds={reviewTicks}" in modal and "tickedFormIds={reviewTicks}" in modal
+    assert modal.count("[...checkedFormIds]") == 1
     # Order: still the backend's confidence order within each tier, no re-sort.
     assert "Order within a\n  // tier is preserved from the backend (confidence-sorted)." in modal
     assert "ANCHOR_FORM_ID)" not in modal[modal.index("const groupedRecs = TIER_ORDER"):][:400]

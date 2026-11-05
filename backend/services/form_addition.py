@@ -192,6 +192,11 @@ async def add_form_to_session(
     if form_id in present:
         return ALREADY_PRESENT, {}
 
+    # NO 15-form cap here (owner, 4 Nov 2026): after generation a form is added only when Primble offers it - a hard
+    # stop, a warning or a cross-form check asking for it, a policy line or a new document - never one the user picks
+    # freely, and only one of our own forms (an ACORD Solutions form has no template here). Capping it would leave a
+    # hard stop the user cannot fix. The 15 limits what the user CHOOSES at form selection.
+
     if enforce_requested and form_id not in requested_form_ids(session):
         return NOT_REQUESTED, {}
 

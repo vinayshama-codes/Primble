@@ -23,7 +23,27 @@ logger = logging.getLogger(__name__)
 
 _BACKEND = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _SCHEMA_DIR = os.path.join(_BACKEND, "forms_schemas")
-_FOOTER_RE = re.compile(r"\bACORD\s+(?P<num>\d{2,3})(?:\s+(?P<var>[A-Z]{2}))?\s*\((?P<ed>\d{4}/\d{2})\)")
+# Every footer shape ACORD forms print (review, 4 Nov 2026 - only "ACORD 2-3 digits (YYYY/MM)" was read, so a filled
+# ACORD 1 / 2 loss notice, a 4-digit form, an older "(1/98)" edition, an INS variant or an Applied form was never sent
+# to Transcriber): "ACORD 25 (2016/03)", "ACORD 137 CA (2023/01)", "ACORD 84 INS (2013/09)", "ACORD 137 TX INS (...)",
+# "ACORD 1001 (2017/09)", "ACORD 50 NY (1/98)", "APPLIED 125CIS (2009/08)". The same shapes as the download check
+# (`asg_forms._FOOTER_IDENTITY_RE`).
+_FOOTER_RE = re.compile(r"\b(?:ACORD|APPLIED)\s+(?P<num>\d{1,4})(?:\s*(?P<var>[A-Z]{2,4})\b)?(?:\s+(?P<var2>[A-Z]{2,4})\b)?"
+                        r"\s*\((?P<ed>\d{1,4}\s*/\s*\d{2,4})\)")
+
+
+def footer_number(m: re.Match) -> str:
+    """The form as printed: "137", "137 CA", "84 INS", "137 TX INS"."""
+    return " ".join(p for p in (m.group("num"), m.group("var"), m.group("var2")) if p)
+
+
+def footer_edition(m: re.Match) -> str:
+    """The edition as YYYY/MM ("1/98" -> "1998/01"; "2016/03" stays)."""
+    a, b = [x.strip() for x in m.group("ed").split("/")]
+    if len(a) == 4:
+        return f"{a}/{b.zfill(2)[-2:]}"
+    yy = int(b[-2:])
+    return f"{1900 + yy if yy > 30 else 2000 + yy}/{int(a):02d}"
 _MIN_NAME_SHARE = 0.9
 _MIN_NAMES = 5
 _SCHEMA_NAMES: Optional[Dict[str, Set[str]]] = None
@@ -192,10 +212,10 @@ def recognize(pdf_path: str, page_texts: Optional[Sequence[str]] = None,
             else:
                 foot = footer_of(text, tail=True)
             if foot:
-                pf.acord_number = (f"{foot.group('num')} {foot.group('var')}" if foot.group("var")
-                                   else foot.group("num"))
-                pf.edition = foot.group("ed")
-            footer_fid = form_id_for_footer(foot.group("num"), foot.group("var")) if foot else None
+                pf.acord_number = footer_number(foot)
+                pf.edition = footer_edition(foot)
+            footer_fid = (form_id_for_footer(foot.group("num"), foot.group("var"))
+                          if foot and not foot.group("var2") else None)
             by_names = _form_by_names(pf.names, footer_fid)
             if foot and by_names and by_names != footer_fid:
                 # The page prints its own identity and it is another form: a

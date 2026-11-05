@@ -4663,3 +4663,31 @@ fewer questions (the absent sections) and a smaller document per call; a form wi
 A layer copy keeps its 7 Oct rule (deterministic only). `_line_dec_limits` (each line's declarations limits, kept past the
 dec-index purge for the policies table and ACORD 101 - `policy_lines.DEC_LINE_LIMITS_KEY`) is in
 `pdf_service._GAP_FILL_FACTS_EXCLUDE`, so the facts block is byte-identical. Tests: `tests/test_lane_a_27oct.py`.
+
+### C113 (3 Nov 2026) - ACORD Solutions forms join the shared gap fill (any ACORD form, Accommodate800forms.md section 10)
+**What changed:** a form the user adds from ACORD Solutions' library (up to `ASG_FORMS_MAX` = 8 per package) is
+stamped by the same pipeline as our 17 - so its boxes that Pass 1 cannot fill go into the SAME `shared_gap_fill` /
+`combined_gap_fill` call as the package's other forms. No prompt, system prompt, batch size or chunking changed; the
+union simply holds more boxes. Their box descriptions are ACORD's own (`/TU` read off the downloaded PDF), the same
+source our 17 schemas were built from. Feature OFF by default (`ASG_FORMS=0`).
+**Measured offline (3 Nov 2026, no API call):** 8 real ACORD forms (27, 75, 1, 2, 35, 37, 50, 80) on the Orbin test
+package - 1,584 boxes, **927 unmatched after Pass 1** (deduped across the 8; only 33 also on the ACORD 125), i.e.
+about **+24 gap-fill calls per document chunk** at 40 boxes a call (compliance Y/N go 10 a call - more). A typical
+125 + 126 + 127 package is in the order of 50 calls, so a FULL ASG selection can add roughly half again in cost and
+time; one or two small ASG forms (a 27 or a 75: ~60 boxes each) add 2-3 calls.
+**Risks / follow-ups:** (1) the generate request is synchronous on Render (`--timeout 600`): a heavy package plus 8
+large ASG forms has not been timed live - measure on the owner's localhost test before customers; (2) Life / Health /
+Annuity forms can be picked and are filled from P&C facts (search ranks them last; scope question for Brent); (3) a
+per-package switch to stamp ASG forms deterministically only (no AI) is the obvious lever if the cost matters.
+**Status 3 Nov 2026, 15:58 IST:** risk (1) is still OPEN. The live timing waits for the owner's localhost test
+(`Accommodate800forms.md` 10.8: ACORD 125 + ACORD 27 + ACORD 137 TX). Record there, and here, the gap-fill call count
+and the generation time it adds.
+**First live measurement, 3 Nov 2026, 16:22 IST (one ASG form alone - ACORD 807, 270 boxes, 227 to the gap fill;
+Choice Electric package, 7 decs):**
+- AI calls: 12 gap fill + 3 compliance + 2 evidence judge = 17. Input 401k tokens, 76% cached; output 5.3k tokens.
+- 50 values printed and 98 thrown out by the guards.
+- Time: about 71 s for the whole generate request - 24 s the ASG download (cold sign-in), about 47 s the fill and
+  checks.
+- Matches the offline estimate for one mid-size form: about +5 general calls per chunk plus its Y/N batches. The
+  heavy case (8 ASG forms beside 125 / 126 / 127) is still to be timed.
+

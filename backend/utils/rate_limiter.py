@@ -1,3 +1,5 @@
+import ipaddress
+import uuid
 import logging
 import os
 import time
@@ -51,26 +53,104 @@ if _redis is None and _WEB_CONCURRENCY > 1:
 _windows: dict = defaultdict(list)
 
 
-async def _redis_sliding_window(key: str, max_per_window: int) -> int:
+async def _redis_sliding_window(key: str, max_per_window: int, window_seconds: int = 0) -> int:
     """
     Sliding-window rate limit check via Redis sorted sets.
     Returns the current request count after recording this request.
     Uses ZADD + ZREMRANGEBYSCORE + ZCARD in a pipeline for atomicity.
+    `window_seconds` (0 = RATE_LIMIT_WINDOW_SECONDS) lets a limit run over an hour as well as a minute.
     """
+    window = window_seconds or _WINDOW_SECONDS
     now = time.time()
-    cutoff = now - _WINDOW_SECONDS
+    cutoff = now - window
+    member = f"{now}:{uuid.uuid4().hex[:8]}"           # two requests in one tick are two entries
     async with _redis.pipeline() as pipe:
         pipe.zremrangebyscore(key, "-inf", cutoff)
-        pipe.zadd(key, {str(now): now})
+        pipe.zadd(key, {member: now})
         pipe.zcard(key)
-        pipe.expire(key, _WINDOW_SECONDS * 2)
+        pipe.expire(key, window * 2)
         results = await pipe.execute()
-    return results[2]  # ZCARD result
+    count = results[2]  # ZCARD result
+    if count > max_per_window:
+        # A refused attempt never stays in the window, as in the in-process path: retrying while blocked must not
+        # keep a user blocked past the window (review pass 2, 3 Nov 2026).
+        try:
+            await _redis.zrem(key, member)
+        except Exception:                                  # noqa: BLE001 - it expires with the key
+            pass
+    return count
+
+
+_ip_source_logged = False
+
+
+def _without_port(entry: str) -> str:
+    """"203.0.113.7:51234" -> "203.0.113.7"; "[2001:db8::1]:443" -> "2001:db8::1"; a bare IPv6 stays whole."""
+    e = entry.strip()
+    if e.startswith("["):
+        return e[1:e.index("]")] if "]" in e else e
+    if e.count(":") == 1:
+        return e.split(":", 1)[0]
+    return e
+
+
+def _limit_identity(identifier: str) -> str:
+    """The bucket a limit counts in. An IPv6 address counts as its /64 - one home or office gets a whole /64, so a
+    client rotating addresses inside it would otherwise get a fresh bucket each time (review pass 2, 3 Nov 2026).
+    Anything else (an IPv4 address, a user id) is itself. `get_client_ip` still returns the exact address."""
+    try:
+        ip = ipaddress.ip_address(str(identifier))
+    except ValueError:
+        return identifier
+    if ip.version == 6:
+        if ip.ipv4_mapped:                                 # "::ffff:203.0.113.7" is that IPv4 address
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
 
 
 def get_client_ip(request) -> str:
-    """Return the real client IP from request.client.host (never trusting forwarded headers)."""
-    return request.client.host if request.client else "unknown"
+    """The client's IP for IP-keyed limits.
+
+    Behind a proxy (Render) `request.client.host` is the PROXY's address, so every IP-keyed limit was one shared
+    bucket (3 Nov 2026). `TRUSTED_PROXY_HOPS` = how many proxies sit in front of the app (Render alone: 1; Cloudflare
+    in front of Render: 2). Each proxy APPENDS the address that connected to it to X-Forwarded-For, so the entry that
+    many places from the END is the real client; entries further left were written by the client and can be forged,
+    so they are never used. 0 (the default) = `request.client.host`, exactly as before. Uvicorn's own
+    "trust forwarded headers" switch is deliberately not used: trusting every hop lets a client pick its own IP.
+    Set 2 ONLY when the origin refuses traffic that did not come through Cloudflare: with 2, a request sent straight
+    to primble.onrender.com can forge the second-to-last entry (review pass 3).
+    """
+    global _ip_source_logged
+    peer = request.client.host if getattr(request, "client", None) else "unknown"
+    try:
+        hops = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "0") or 0))
+    except ValueError:
+        hops = 0
+    if hops == 0:
+        return peer
+    headers = getattr(request, "headers", None)
+    # A request can carry the header more than once; the proxies' entries are in the LAST one, so all are read in
+    # order (hard review, 3 Nov 2026).
+    if headers is None:
+        values = []
+    elif hasattr(headers, "getlist"):
+        values = headers.getlist("x-forwarded-for")
+    else:
+        values = [headers.get("x-forwarded-for")]
+    entries = [e.strip() for v in values for e in str(v or "").split(",") if e.strip()]
+    if not _ip_source_logged and entries:
+        _ip_source_logged = True
+        # Counts only, never an address: tells whether TRUSTED_PROXY_HOPS matches the real number of proxies.
+        logger.info("CLIENT_IP_SOURCE trusted_hops=%d forwarded_entries=%d", hops, len(entries))
+    if len(entries) < hops:
+        return peer
+    candidate = _without_port(entries[-hops])
+    try:
+        candidate = str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return peer
+    return candidate
 
 
 async def check_upload_rate_limit(user_id: str) -> None:
@@ -121,18 +201,21 @@ async def check_upload_rate_limit(user_id: str) -> None:
     _windows[user_id].append(now)
 
 
-async def _check_rate_limit_by_key(namespace: str, identifier: str, max_per_window: int) -> None:
+async def _check_rate_limit_by_key(namespace: str, identifier: str, max_per_window: int,
+                                   window_seconds: int = 0,
+                                   message: str = "Too many requests. Please try again later.") -> None:
     """Generic rate limiter keyed by namespace:identifier. Raises HTTP 429 when exceeded."""
     from fastapi import HTTPException
 
+    window  = window_seconds or _WINDOW_SECONDS
     now     = time.time()
-    key_str = f"rl:{namespace}:{identifier}"
+    key_str = f"rl:{namespace}:{_limit_identity(identifier)}"
 
     if _redis is not None:
         try:
-            count = await _redis_sliding_window(key_str, max_per_window)
+            count = await _redis_sliding_window(key_str, max_per_window, window)
             if count > max_per_window:
-                raise HTTPException(429, "Too many requests. Please try again later.")
+                raise HTTPException(429, message)
             return
         except HTTPException:
             raise
@@ -140,11 +223,24 @@ async def _check_rate_limit_by_key(namespace: str, identifier: str, max_per_wind
             logger.warning(f"rate_limiter: Redis error for {key_str}: {ex}")
 
     # In-process sliding window fallback (single-worker only)
-    cutoff = now - _WINDOW_SECONDS
+    cutoff = now - window
     _windows[key_str] = [t for t in _windows[key_str] if t > cutoff]
     if len(_windows[key_str]) >= max_per_window:
-        raise HTTPException(429, "Too many requests. Please try again later.")
+        raise HTTPException(429, message)
     _windows[key_str].append(now)
+
+
+_CLIENT_SENDS_PER_MINUTE = int(os.getenv("RATE_LIMIT_CLIENT_SENDS_PER_MINUTE", "10"))
+_CLIENT_SENDS_PER_HOUR   = int(os.getenv("RATE_LIMIT_CLIENT_SENDS_PER_HOUR", "60"))
+_CLIENT_SENDS_MESSAGE    = "Too many questionnaires sent. Please wait a few minutes and try again."
+
+
+async def check_client_send_rate_limit(user_id: str) -> None:
+    """Questionnaire sends AND reminders, per producer (3 Nov 2026): each one is an e-mail to an address the
+    producer types, so an unlimited route could be used to spam. 10 a minute and 60 an hour by default."""
+    await _check_rate_limit_by_key("client_send_m", user_id, _CLIENT_SENDS_PER_MINUTE, 60, _CLIENT_SENDS_MESSAGE)
+    await _check_rate_limit_by_key("client_send_h", user_id, _CLIENT_SENDS_PER_HOUR, 3600,
+                                   "Too many questionnaires sent this hour. Please try again later.")
 
 
 async def check_arq_public_rate_limit(ip: str) -> None:

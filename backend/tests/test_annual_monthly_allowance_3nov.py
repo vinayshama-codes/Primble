@@ -289,7 +289,10 @@ def test_a_yearly_renewal_on_a_month_boundary_still_resets_and_re_anchors(env, m
     deliver(paid_event("evt_year", "in_year", created=clock.now, inv_created=year,
                        lines=[_line(year, us.add_months(year, 12))]))
     u = db.user()
-    assert u["packages_used"] == 1 and u["billing_period_start"] == clock.now.isoformat()
+    # The period starts where the renewal's own period starts (3 Nov 2026, pass 2 #2 - it was the
+    # time the event was handled); the paid time is kept in last_paid.
+    assert u["packages_used"] == 1 and u["billing_period_start"] == year.isoformat()
+    assert _marker(db, "last_paid:u1") == clock.now.isoformat()
     assert _marker(db, "usage_anchor:u1") == year.isoformat()
     assert _marker(db, "billing_period_end:u1") == us.add_months(year, 12).isoformat()
 

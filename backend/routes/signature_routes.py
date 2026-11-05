@@ -100,13 +100,21 @@ async def apply_signature(
         raise HTTPException(404, f"Form '{form_id}' not found in session")
 
     r   = generated[form_id]
-    try:
-        tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
-    except ValueError:
-        raise HTTPException(400, "Invalid template path")
+    from services.asg_forms import is_asg_record, template_source
+    if is_asg_record(r):
+        # An ASG form (3 Nov 2026): the clean form rebuilt from the package's own copy - off the event loop.
+        tpl = await asyncio.get_event_loop().run_in_executor(None, template_source, r)
+        if tpl is None:
+            from services.asg_forms import NOT_SIGNED as _NOT_SIGNED
+            raise HTTPException(503, _NOT_SIGNED)
+    else:
+        try:
+            tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+        except ValueError:
+            raise HTTPException(400, "Invalid template path")
 
-    if not os.path.exists(tpl):
-        raise HTTPException(404, f"Template not found: {r['form']['template_file']}")
+        if not os.path.exists(tpl):
+            raise HTTPException(404, f"Template not found: {r['form']['template_file']}")
 
     field_data = dict(r.get("field_state") or r.get("mapped", {}))
     confidence = dict(r.get("confidence", {}))

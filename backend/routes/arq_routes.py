@@ -62,7 +62,7 @@ from services.activity_service import (
     EVENT_ARQ_SUBMITTED, EVENT_ANSWERS_APPLIED, EVENT_REMINDER_SENT,
 )
 from services.email_service import send_arq_email, send_arq_submitted_notification
-from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip
+from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip, check_client_send_rate_limit
 from utils.helpers import check_payment_access
 
 router = APIRouter(prefix="/api/arq", tags=["arq"])
@@ -283,6 +283,7 @@ async def send_questions_to_client(
     `routes/questionnaire_routes`) both come through here, so there is one
     mailer and one set of guards. Raises HTTPException exactly as the route
     always has; returns the route's response body."""
+    await check_client_send_rate_limit(current_user["id"])   # both send buttons come through here (3 Nov 2026)
     session_id   = _sanitize_str(session_id or "", 128)
     client_email = _sanitize_str(client_email or "", 254).lower()
     client_name  = _sanitize_str(client_name or "", 100)
@@ -1439,6 +1440,7 @@ async def send_reminder(
     if arq["user_id"] != current_user["id"]:
         raise HTTPException(403, "Access denied")
     check_payment_access(current_user.get("payment_status", "ok"), "form")
+    await check_client_send_rate_limit(current_user["id"])     # a reminder is an e-mail too (3 Nov 2026)
     if arq["status"] == "submitted":
         raise HTTPException(400, "Client has already submitted this questionnaire")
 

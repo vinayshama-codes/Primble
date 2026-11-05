@@ -61,6 +61,9 @@ _UNIT_BILLED  = "overage_billed"
 # A package over the allowance of a period recounted while the user's payment
 # was failing: owed, billed the moment the user is restored (F1, 2 Nov 2026).
 _UNIT_HELD    = "overage_held"
+# Terminal states (3 Nov 2026, pass 4): never billed by any retry.
+_UNIT_FORGIVEN = "overage_forgiven"   # held on a plan that ended unpaid (Option A)
+_UNIT_MANUAL   = "overage_manual"     # a person was told to bill it by hand
 # An in-flight unit older than this was left by a process that died.
 _STALE_BILLING = timedelta(hours=1)
 
@@ -316,7 +319,15 @@ async def release_free_package(user_id: str, session_id: str) -> None:
 _PERIOD_PREFIX = "billing_period_end:"
 
 
-async def record_period_end(conn, user_id, end_iso: str) -> None:
+async def record_period_end(conn, user_id, end_iso: str, only_later: bool = False) -> None:
+    """`only_later`: an OLDER invoice paid late (two open renewals paid after a
+    long failure) never moves the stored end back (3 Nov 2026, pass 2 #2)."""
+    if only_later:
+        row = await conn.fetchrow("SELECT processed_at FROM processed_webhook_events WHERE event_id=$1",
+                                  f"{_PERIOD_PREFIX}{user_id}")
+        stored, new = _as_dt(dict(row)["processed_at"] if row else None), _as_dt(end_iso)
+        if stored is not None and (new is None or new <= stored):
+            return
     await conn.execute(
         "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
         " VALUES ($1,'billing_period_end',$2)"
@@ -351,19 +362,23 @@ async def sub_period_end(conn, sub_id: str):
     return dict(row)["processed_at"] if row else None
 
 
+async def _stored_period_end(conn, user_id):
+    row = await conn.fetchrow("SELECT processed_at FROM processed_webhook_events WHERE event_id=$1",
+                              f"{_PERIOD_PREFIX}{user_id}")
+    return _as_dt(dict(row)["processed_at"]) if row else None
+
+
+async def _period_state(conn, user_id) -> str:
+    """"ended", "open" (a stored end still ahead) or "unknown" (no end stored)."""
+    end = await _stored_period_end(conn, user_id)
+    if end is None:
+        return "unknown"
+    return "ended" if datetime.now(timezone.utc) >= end else "open"
+
+
 async def _period_ended(user_id) -> bool:
     async with get_pool().acquire() as conn:
-        row = await conn.fetchrow("SELECT processed_at FROM processed_webhook_events WHERE event_id=$1",
-                                  f"{_PERIOD_PREFIX}{user_id}")
-    if not row:
-        return False
-    try:
-        end = datetime.fromisoformat(str(dict(row)["processed_at"]))
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) >= end
-    except Exception:
-        return False
+        return (await _period_state(conn, user_id)) == "ended"
 
 
 # ── usage months on annual plans (Brent, 3 Nov 2026) ─────────────────────────
@@ -374,9 +389,11 @@ async def _period_ended(user_id) -> bool:
 # month's end (31 Jan -> 28/29 Feb -> 31 Mar). When a month has ended the counter
 # rolls over - lazily, under the user row's lock, before the next package is
 # counted, and in the daily job. Monthly plans are untouched: their period is
-# still Stripe's renewal. `billing_period_start` keeps meaning "the last paid
-# renewal" (the stale-failure and stale-invoice checks read it); the month lives
-# in the ledger ("usage_anchor:<user>", "usage_month:<user>").
+# still Stripe's renewal. `billing_period_start` keeps meaning "the start of the
+# last paid renewal's own period" (the stale-invoice check compares an invoice's
+# period start with it; the stale-failure check also reads `last_paid`, the
+# paid time - 3 Nov 2026); the month lives in the ledger ("usage_anchor:<user>",
+# "usage_month:<user>").
 _ANCHOR_PREFIX = "usage_anchor:"
 _MONTH_PREFIX = "usage_month:"
 
@@ -540,7 +557,38 @@ async def adopt_plan_usage(conn, user_id, cycle: str, period_start_iso, period_e
 _LAST_PAID_PREFIX = "last_paid:"
 
 
+_SWITCH_PREFIX = "plan_switch:"
+
+
+async def record_plan_switch(conn, user_id, switch_iso: str, old_tier, old_cycle) -> None:
+    """A tier sync at `switch_iso`: the plan BEFORE it, named in the alert a
+    renewal straddling the switch raises for a person (3 Nov 2026, pass 6 -
+    nothing is billed from it). The ledger row's processed_at holds the label."""
+    await _upsert_marker(conn, f"{_SWITCH_PREFIX}{user_id}:{switch_iso}", "plan_switch",
+                         f"{old_tier or '?'}/{old_cycle or 'monthly'}")
+
+
+async def plan_switches(conn, user_id, from_iso: str, to_iso: str) -> list:
+    """[(switch time, plan before it)] of the switches in (from, to], oldest first."""
+    prefix = f"{_SWITCH_PREFIX}{user_id}:"
+    rows = await conn.fetch("SELECT event_id, processed_at FROM processed_webhook_events WHERE event_id LIKE $1",
+                            prefix + "%")
+    lo, hi = _as_dt(from_iso), _as_dt(to_iso)
+    out = []
+    for r in [dict(x) for x in rows]:
+        at = r["event_id"][len(prefix):]
+        when = _as_dt(at)
+        if when is not None and lo is not None and hi is not None and lo < when <= hi:
+            out.append((at, r["processed_at"]))
+    return sorted(out, key=lambda p: _as_dt(p[0]))
+
+
 async def record_last_paid(conn, user_id, iso: str) -> None:
+    """Never moves back: callers stamp Stripe's own paid time (3 Nov 2026, L-C),
+    so an OLDER payment handled late must not hide a newer one."""
+    old, new = _as_dt(await last_paid_at(conn, user_id)), _as_dt(iso)
+    if old is not None and new is not None and new <= old:
+        return
     await _upsert_marker(conn, f"{_LAST_PAID_PREFIX}{user_id}", "last_paid", iso)
 
 
@@ -637,6 +685,8 @@ async def count_session_usage(user_id: str, session_id: str, *, reserved_free: b
 
         now_iso = datetime.now(timezone.utc).isoformat()
         row = None
+        period_at_count = None
+        held_in_count = False
         res_key = free_reservation_key(fresh["id"], session_id)
         async with get_pool().acquire() as conn:
             async with conn.transaction():
@@ -668,6 +718,18 @@ async def count_session_usage(user_id: str, session_id: str, *, reserved_free: b
                             " payment_status, overage_rate, stripe_customer_id, stripe_subscription_id",
                             fresh["id"],
                         )
+                        # The period this package was counted in, read under the
+                        # same lock: a renewal's reset committing right after this
+                        # transaction never makes it look like the OLD period's
+                        # overage (3 Nov 2026, pass 4 #6).
+                        period_at_count = await _period_state(conn, fresh["id"])
+                        # A package to HOLD is written here, under the same lock
+                        # and in the same transaction as its count (3 Nov 2026,
+                        # pass 5 #1): a restore (which releases held units) or a
+                        # plan's end (which forgives them) committing right after
+                        # this one always sees it.
+                        if row:
+                            held_in_count = await _hold_in_count(conn, dict(row), session_id, period_at_count)
         if not claimed:
             if reserved_free:
                 await release_free_package(user_id, session_id)
@@ -689,7 +751,8 @@ async def count_session_usage(user_id: str, session_id: str, *, reserved_free: b
             # Enterprise: stamped, never metered.
             return {"counted": True, "pkg_eval": None}
 
-        pkg_eval = await _evaluate_counted(dict(row) if row else dict(fresh), session_id)
+        pkg_eval = await _evaluate_counted(dict(row) if row else dict(fresh), session_id,
+                                           period_state=period_at_count, held=held_in_count)
         logger.info("count_session_usage: counted 1 usage for user=%s session=%s tier=%s status=%s",
                     fresh["id"], session_id, sub, (pkg_eval or {}).get("status"))
         return {"counted": True, "pkg_eval": pkg_eval}
@@ -707,7 +770,31 @@ async def count_session_usage(user_id: str, session_id: str, *, reserved_free: b
         return {"counted": False, "reason": "error"}
 
 
-async def _evaluate_counted(row: dict, session_id: str) -> dict:
+def _should_hold(row: dict, period_state) -> bool:
+    """An overage package of a user who cannot be billed now is HELD when the
+    counter is the period's own count: an annual plan's month, or a monthly
+    plan failing MID-period (its stored end still ahead - pass 4 #5). With the
+    period ended, or no end stored, the counter may still carry an unpaid
+    earlier period: left to the paid renewal's recount."""
+    return not _billable(row) and (_is_annual(row) or period_state == "open")
+
+
+async def _hold_in_count(conn, row: dict, session_id: str, period_state) -> bool:
+    """Inside the counting transaction: record the package HELD when it is an
+    overage package that must be held (pass 5 #1). True when it is held."""
+    n = int(row.get("packages_used") or 0)
+    _limit, hard_limit = allowance_for(row)
+    if n <= hard_limit or not _should_hold(row, period_state):
+        return False
+    await conn.execute(
+        "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+        " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+        overage_unit_key(row["id"], session_id), _UNIT_HELD, datetime.now(timezone.utc).isoformat())
+    return True
+
+
+async def _evaluate_counted(row: dict, session_id: str, period_state: str | None = None,
+                            held: bool = False) -> dict:
     """The counter was incremented and read back in the locked transaction: the
     number is this package's own place in the period, so two packages at the
     limit can never both read "within the buffer" (2 Nov 2026, L9)."""
@@ -722,22 +809,33 @@ async def _evaluate_counted(row: dict, session_id: str) -> dict:
     pkg_eval = {"status": status, "allow": True, "overage_rate_cents": rate,
                 "pkgs_limit": pkgs_limit, "pkgs_used": n, "soft_buffer": hard_limit - pkgs_limit}
     if status == "overage":
-        if not _billable(row) and _is_annual(row):
-            # An annual plan's month is not recounted by a renewal: the package
-            # is HELD now and billed when the user is restored (F1).
+        if period_state is None:
             async with get_pool().acquire() as conn:
-                await conn.execute(
-                    "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
-                    " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
-                    overage_unit_key(row["id"], session_id), _UNIT_HELD, datetime.now(timezone.utc).isoformat())
-            logger.info("count_session_usage: annual overage package for user=%s held - payment_status=%s",
+                period_state = await _period_state(conn, row["id"])
+        # A monthly plan failing MID-period (a proration / manual invoice): the
+        # counter is this period's own count while its stored end is still
+        # ahead, so the package is HELD like an annual one and billed on the
+        # restore - no renewal recount would ever place it (pass 4 #5). With
+        # the period ended, or no end stored, the counter may still carry an
+        # unpaid earlier period: left to the paid renewal's recount.
+        if held or _should_hold(row, period_state):
+            # Held (F1): billed when the user is restored. Written in the
+            # counting transaction when the count came through it (pass 5 #1).
+            if not held:
+                async with get_pool().acquire() as conn:
+                    await conn.execute(
+                        "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                        " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                        overage_unit_key(row["id"], session_id), _UNIT_HELD,
+                        datetime.now(timezone.utc).isoformat())
+            logger.info("count_session_usage: overage package for user=%s held - payment_status=%s",
                         row["id"], row.get("payment_status"))
             pkg_eval["billing"] = "held"
         elif not _billable(row):
             logger.info("count_session_usage: overage package for user=%s not billed - payment_status=%s;"
                         " the paid renewal recounts the period", row["id"], row.get("payment_status"))
             pkg_eval["billing"] = "not_billable"
-        elif await _period_ended(row["id"]):
+        elif period_state == "ended":
             logger.info("count_session_usage: overage package for user=%s counted after its period ended"
                         " - the paid renewal places it (L-3)", row["id"])
             pkg_eval["billing"] = "deferred"
@@ -792,6 +890,71 @@ async def hold_overage_for_period(conn, user_id: str, counted: list, hard_limit:
             overage_unit_key(user_id, session_id), _UNIT_HELD, datetime.now(timezone.utc).isoformat())
         held += _rows_changed(status)
     return held
+
+
+async def place_period_overage(conn, user_id: str, counted: list, hard_limit: int, *, hold: bool) -> int:
+    """Inside the caller's (locked) transaction: record the packages of a
+    recounted period that sit above the allowance + buffer - HELD while the
+    user is still failing, else PENDING (the daily retry bills a pending unit
+    whatever happens after the commit; 3 Nov 2026, pass 3 #4).
+
+    Never double: a unit already in the ledger (any state) is not recorded
+    again, and the period never gets more new units than its extras minus the
+    units the ledger already holds for its packages - a package billed at count
+    time under a different place in the counter still counts against the
+    period's extras (pass 3 #2). Returns the number of units recorded."""
+    extras = list(counted)[hard_limit:]
+    if not extras:
+        return 0
+    prefix = f"{_UNIT_PREFIX}{user_id}:"
+    rows = await conn.fetch("SELECT event_id FROM processed_webhook_events WHERE event_id LIKE $1", prefix + "%")
+    in_ledger = {dict(r)["event_id"] for r in rows}
+    period_keys = {overage_unit_key(user_id, sid) for sid, _at in counted}
+    budget = len(extras) - len(period_keys & in_ledger)
+    state = _UNIT_HELD if hold else _UNIT_PENDING
+    now_iso = datetime.now(timezone.utc).isoformat()
+    placed = 0
+    for session_id, _at in extras:
+        if budget <= 0:
+            break
+        key = overage_unit_key(user_id, session_id)
+        if key in in_ledger:
+            continue
+        status = await conn.execute(
+            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING", key, state, now_iso)
+        if _rows_changed(status):
+            placed += 1
+            budget -= 1
+    if placed and not hold:
+        await conn.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + $2"
+                           " WHERE id = $1", user_id, placed)
+    return placed
+
+
+async def forgive_held_overage(conn, user_id: str) -> int:
+    """Inside the transaction that claims a plan's final bill: units HELD while
+    that plan was failing are never billed (Option A - a plan that ended
+    unpaid), so they leave the held state for good and no later restore of
+    ANOTHER plan bills them (3 Nov 2026, pass 4 #3)."""
+    status = await conn.execute(
+        "UPDATE processed_webhook_events SET event_type=$1 WHERE event_type=$2 AND event_id LIKE $3",
+        _UNIT_FORGIVEN, _UNIT_HELD, f"{_UNIT_PREFIX}{user_id}:%")
+    return _rows_changed(status)
+
+
+async def release_held_overage(conn, user_id: str) -> int:
+    """Inside a restore's transaction: the user pays again, so the units HELD
+    while failing become PENDING - billed right after the commit, and by the
+    daily retry if that fails (3 Nov 2026, pass 3 #4). Returns how many."""
+    status = await conn.execute(
+        "UPDATE processed_webhook_events SET event_type=$1 WHERE event_type=$2 AND event_id LIKE $3",
+        _UNIT_PENDING, _UNIT_HELD, f"{_UNIT_PREFIX}{user_id}:%")
+    moved = _rows_changed(status)
+    if moved:
+        await conn.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + $2"
+                           " WHERE id = $1", user_id, moved)
+    return moved
 
 
 # ASYNC-SAFE

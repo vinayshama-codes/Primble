@@ -6,7 +6,36 @@ Stripe account. Started 2 Nov 2026. Update it with every change, fix and verific
 Status words: **Open** (found, not fixed) · **Fixed** (code changed, tests pass offline) · **Verified**
 (confirmed on the live site) · **Decision** (waits on Brent or the owner) · **Done** (a setting, confirmed).
 
-## Where things stand
+## Where things stand (3 Nov 2026, 02:50 IST)
+
+**LIVE since 2 Nov evening.** Brent's live Stripe account takes real payments: commit `289629a` (all payment fixes,
+LT-1..LT-4) deployed on Render with the live secret key and the live webhook (`we_1UXOYM9O61RSE3nHf289IAon`, API
+2026-04-22.dahlia, 6 events + `customer.created` kept as a free connection check). Free live checks passed (section 6).
+Adaptive Pricing is OFF (USD only). The Mac's Stripe key is blank (the TEST key is kept commented in `backend/.env`);
+the old test webhook to Render is switched off.
+
+**Built 3 Nov, tested, NOT yet committed - the owner commits and deploys:**
+- Annual plans = 100 packages per month, extras billed monthly (Brent's 3 Nov answer): Primble's own usage month +
+  Stripe's `pending_invoice_item_interval`; review round 6 fixes (no e-mail loop on a failed extras invoice, support
+  cycle changes sync, every plan path sets the month data). Proven end to end on real Stripe test mode with a test
+  clock on a SEPARATE local database (section 3c).
+- Duplicate files in one upload (LT-6): the list refuses a copy (by contents, renamed too); the server reads
+  identical documents once and tells the user.
+- Full suite 3 Nov 02:45: **22,650 passed, 1 known failure, 44 skipped.**
+- After deploying: drop the same PDF twice (and renamed) on primble.ai - the list must refuse the copies; check the
+  Render logs for errors.
+
+**Open / later:** Future work FW-1..FW-6 (section before 5) - Brent: ACORD forms first, then FW-2 (cross-account
+document alert). Two questions still unasked: refunds needing a separate cancel, support@primble.ai -> .com (primble.ai
+has no mail; LT-5). The 4 internal accounts keep their test-mode plans (never charged).
+
+**How to test billing from now on:** Stripe TEST mode only, on the local database `primble_stripe_test`
+(Postgres.app; Python is allowed in its App Permissions), with the TEST key passed at launch - never the shared
+database, never the live key. Scripts used on 3 Nov are in the session scratchpad (`annual_run/`).
+
+### History (2 Nov)
+
+
 
 - Brent's live Stripe account is configured (section 1). Payments and payouts are active, no tasks due.
 - **Switched to LIVE on 2 Nov 2026 (evening, IST):** commit `289629a` deployed on Render together with the live
@@ -25,7 +54,6 @@ Status words: **Open** (found, not fixed) · **Fixed** (code changed, tests pass
 - Every code item is now Fixed (offline) or a Decision. Full suite 2 Nov 22:03: 22,568 passed / 1 known failure / 44 skipped. Next: commit, then deploy (each needs the owner's yes).
 - Local test on the test Stripe account (section 3b, 2 Nov evening): every fix PASSED on real Stripe; one new defect
   (LT-1, a portal cancel never showed "canceling") found, fixed, re-tested. All 5 late-payment e-mails received.
-- Nothing in this file is committed or deployed yet.
 
 ### Progress log
 
@@ -477,3 +505,268 @@ later. **FUTURE (Option B):** add held units to the final bill at plan end (`set
 23. A 503 from our webhook makes Stripe resend the same event id (backoff, up to about 3 days).
 24. `InvoiceItem.list(customer=...)` returns invoiced items with `invoice` set, and `subscription` set when created
     with `subscription=`.
+
+## Apple Pay (3 Nov 2026) - no code change; Brent tests it from the US
+**Finding (Stripe docs, read 3 Nov):** hosted Checkout with `payment_method_types=["card"]` (both our `Session.create`
+calls, `stripe_routes.py:237` subscription and `:1168` setup) shows Apple Pay and Google Pay as card WALLETS - "For
+Payment Links or hosted Checkout, Apple Pay works with no additional configuration" (docs.stripe.com/apple-pay). No
+domain registration (that is only for Elements / embedded Checkout). Renewals use Apple merchant tokens; the Customer
+Portal lets a customer add Apple Pay for future invoices. Brent's dashboard has Apple Pay ON; Google Pay looks OFF.
+**Do NOT drop `payment_method_types`:** dynamic methods would add Link / Amazon Pay / Cash App and possibly ACH, and
+`_handle_subscription_checkout` grants the plan without checking `payment_status` (OPEN_ITEMS).
+**Stripe never shows Apple Pay from an Indian IP** - the owner cannot see the button; Brent must test.
+
+**Test script for Brent (Stripe TEST mode first, the owner's local test setup on `primble_stripe_test`):**
+1. On his iPhone (Safari, a card in Wallet, not a private window) open https://docs.stripe.com/testing/wallets and
+   confirm the Apple Pay button shows - checks the device.
+2. The owner starts the local TEST backend + `stripe listen`, starts a Professional monthly checkout and sends Brent the
+   `checkout.stripe.com/c/pay/cs_test_...` link (valid 24 h).
+3. Brent pays with Apple Pay (a real card in Wallet - test mode never charges it).
+4. Check: payment method `card` with `wallet.type = apple_pay`; the subscription's `default_payment_method` set; our
+   webhook granted the plan (`payment_status='ok'`, period end stored). The redirect to localhost fails on his phone -
+   harmless.
+5. Renewal on a test-clock customer: advance the clock; the renewal charges the Apple Pay card.
+6. Portal: Manage billing in Safari -> add Apple Pay -> make it default.
+7. Live: one real Apple Pay purchase by Brent on primble.ai, then refund it.
+
+## Adversarial review, 3 Nov 2026 (22:27 IST) - 1 high, 3 medium, 6 low (7 proven offline)
+Repro tests (each asserts the CURRENT wrong behaviour): scratchpad `review_stripe/test_break_stripe.py` (8, all
+reproduce). No Stripe call, no database.
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| H-A | HIGH (proven) | A tier change by support is never followed: support swaps the subscription onto an active catalogue price, Stripe keeps `metadata.plan`, and `plan_from_subscription` reads metadata first - Stripe charges $299 while Primble stays Essentials (or $199 with Professional kept) | Decide the plan by the price's amount + interval first (metadata as fallback); a test that swaps the price only |
+| M-A | MED (proven) | A checkout handled after its subscription was deleted (refund + cancel while the completed event is delayed) grants a paid tier on a dead plan, permanently | Refuse the grant when the live subscription is not in a live status; log + alert |
+| M-B | MED | No dispute / chargeback handler: the plan stays active and renewals keep charging | Handle `charge.dispute.created`: alert the admins + audit (cancel or lock = owner / Brent decision) |
+| M-C | MED (proven) | A late checkout webhook after verify-upgrade resets `packages_used` to 0 for the same subscription | Same subscription already stored = leave usage alone |
+| L-A | LOW (proven) | "Account deleted" branch refunds a plan the user already used (delete-account cancelled it) | Skip the refund when the subscription is already cancelled |
+| L-B | LOW (proven) | Cancelling an enterprise account's old subscription drops it to free | `subscription_tier <> 'enterprise'` guard on the downgrade (still bill the final overage) |
+| L-C | LOW (proven) | Out-of-order success hides a real failure: `last_paid` / period start stamped with processing time, compared with Stripe's event time | Stamp with the event's / invoice's paid time |
+| L-D | LOW (proven) | The cancel route lifts a lock (`payment_status='canceling'` unconditionally) and can repoint the stored subscription at a duplicate | Guard `payment_status NOT IN FAILURE_STATUSES`; never replace the stored subscription |
+| L-E | LOW | The final bill's per-plan scoping reads `item.subscription`; on dahlia it is under `parent.subscription_details` | Read both |
+| L-F | LOW | verify-upgrade grants an `active` subscription whose first payment may still be processing (delayed methods only); `async_payment_failed` only logs | verify-upgrade checks the latest invoice is paid; failed reverses a grant |
+Held up: replays / dedupe, async_payment re-delivery, concurrent checkouts, two tabs, event order (invoice.paid first),
+metadata tampering, signatures, other accounts, USD only, wallets (nothing reads brand / last4 / type), annual month
+math (31st, Feb 29), overage once, dunning e-mails once, lifecycle stages forward only.
+
+### Fixed (3 Nov) - offline, uncommitted; the owner commits and deploys
+- **H-A** `stripe_service.plan_from_subscription` (+ new `plan_from_price`): the PRICE decides first - an exact
+  unit amount + interval (interval_count 1, USD) match in PLANS, both cycles; metadata only when no price names one
+  plan. Every reader goes through it (`subscription_plan`: webhook updates, verify-upgrade, portal restore, /me
+  resync). Checkout's inline prices carry the PLANS amounts, so they resolve to the plan sold. The checkout handler
+  (`stripe_routes._handle_subscription_checkout`) also grants what the subscription bills NOW (its price), the
+  session metadata only when Stripe cannot say.
+- **M-A** `_handle_subscription_checkout`: a subscription Stripe reports outside the live statuses (canceled,
+  incomplete_expired) grants nothing - event claimed, ERROR log, audit row `payment.checkout_subscription_not_live`.
+- **M-B** new `stripe_routes._handle_dispute` (+ `stripe_service.notify_admins`): `charge.dispute.created` -> ERROR
+  log (user id + Stripe ids, no e-mail address), audit `payment.dispute_opened`, one e-mail per address in
+  ADMIN_EMAILS (billing inbox if none) with the account e-mail, amount, reason, evidence deadline and the
+  dispute / charge / payment intent / customer / subscription ids. `charge.dispute.closed` -> outcome logged (ERROR
+  when lost), audit `payment.dispute_closed`. **Nothing is cancelled or locked - the owner / Brent decide**; the
+  log and e-mail say so. **OWNER ACTION: add `charge.dispute.created` and `charge.dispute.closed` to the live
+  webhook endpoint's events** (Developers - Webhooks - Primble Render - Edit destination). Until then no dispute
+  reaches us. (Noted while here: `checkout.session.async_payment_succeeded` / `_failed` are not in that list
+  either - the other reviewer's area.)
+- **M-C** `_handle_subscription_checkout`: the row already carrying THIS subscription (verify-upgrade first) is
+  left as it is - only a missing customer id is filled; usage, `billing_period_start`, period end, annual usage
+  months and payment state untouched. The compare-and-set no longer matches its own subscription; when verify-upgrade
+  stores it between the read and the write, it is the same plan, never a duplicate refund.
+- **L-A** `_handle_subscription_checkout` (deleted-account branch): asks Stripe first (503 when out of reach,
+  nothing claimed); a subscription already ended (delete-account cancelled it) is not refunded - WARNING log, audit
+  `payment.deleted_account_checkout_not_refunded`, no duplicate ledger row (the daily job refunds nothing later).
+- **L-B** `_handle_subscription_deleted`: an enterprise row keeps tier, allowance and usage; only the dead
+  subscription link and its failure state are cleared (no Stripe plan is left to clear or lock it). The final
+  overage is still claimed and billed.
+- **L-C** `stripe_routes._paid_time`: `last_paid` takes the invoice's `status_transitions.paid_at`, else the event
+  time, else now (`_handle_invoice_paid`; a renewal's `billing_period_start` is its own period start since pass 2 #2); a restore by
+  `customer.subscription.updated` takes the event time. `usage_service.record_last_paid` never moves back.
+- **L-D** `stripe_routes.cancel_subscription`: a failure stage (failed / soft_locked / suspended / archived) stays;
+  "canceling" only when the row's own plan is one just set to end; the stored subscription id is never replaced
+  (an empty one is filled).
+- **L-E** `stripe_service.item_subscription` (used by `_bill_final_overage`): reads `subscription` and
+  `parent.subscription_details.subscription` (dahlia).
+- **L-F** `stripe_routes._first_payment_settled` in `verify_upgrade`: grants only when the latest invoice is paid or
+  asks for nothing (trial, $0, no invoice); otherwise `reason: payment_pending` and the webhook decides. Cards and
+  wallets are paid at Checkout - unchanged. (`async_payment_failed` still only logs: nothing is granted before the
+  payment is confirmed, so there is nothing to reverse.)
+
+Tests: `backend/tests/test_stripe_review_fixes_3nov.py` - 48 passed (the 8 repros turned around + the new cases).
+The reviewer's 8 repros now all FAIL (each asserted the wrong behaviour). Billing consumers (every
+`test_stripe_*`, billing screens, annual allowance + review, beta bar, multi-user readiness, free package limit,
+owner asks, audit lineage, lane C, scheduler on Render) plus the tree-scanning invariant tests (module names, async
+safety, secret URLs, cap wording, lane B, audit history, 27 Oct main, 3 Nov captcha / fingerprints / SMS):
+**1,335 passed, 0 failed** (before the fixes the same billing set was 798 passed). No old test was changed.
+Not changed, worth knowing: the portal restore and the /me resync still adopt an "active" subscription without the
+L-F paid-invoice check (they only relink a row that lost its plan); a failed admin dispute e-mail is logged at ERROR
+and not retried (the ERROR log + audit row stay).
+
+#### Pass 2 (3 Nov) - six more, four of them in or next to the fixes above; offline, uncommitted
+Repros: scratchpad `review_stripe2/test_break_stripe2.py` (8: 7 defects + 1 control). After the fixes all 7 defect
+repros FAIL and the control passes.
+- **#1 HIGH** `stripe_routes._is_proration_line` in `_subscription_line_periods` (feeds `_invoice_period_start` / `_end`
+  and the "plan line seen" check): a proration line (`parent.subscription_item_details.proration`, the invoice-item
+  twin, or the legacy top-level `proration`) is never the period an invoice opens. A support plan change's renewal
+  no longer recounts from the switch - packages after the switch were being counted again in the new period.
+- **#2 MEDIUM** `_handle_invoice_paid` + `usage_service.record_period_end(only_later=)`: a renewal is "newer" by its
+  OWN period start against the stored `billing_period_start`; on a reset `billing_period_start` = that period start
+  (the paid time stays in `last_paid` - **this revises L-C**, which had stored the paid time there); an older
+  invoice never moves the stored period end back (it may still push a missing end forward). Two open renewals paid
+  together after a long failure now each open their own period, in either order.
+- **#3 MEDIUM** `_handle_payment_failed` (the by-customer fallback): a row with no stored subscription whose tier is
+  free OR enterprise is never re-linked to the invoice's dead plan, so an enterprise account (L-B keeps it with no
+  subscription) is never failed and locked by its old plan's invoice. A paying row found by customer is still
+  re-linked and failed as before.
+- **#4 LOW** `stripe_service._plan_and_source` / `subscription_plan`: when a price named the plan, the cycle is that
+  price's own interval; `price_cycle` (first item) only on the metadata fallback. An annual plan with a monthly
+  add-on listed first stays annual.
+- **#5 LOW** new `stripe_routes._claim_replaced_plan_bill` / `_settle_replaced_plan_bill`, called by verify-upgrade
+  and the checkout compare-and-set when they replace a DEAD stored subscription: its `final_overage_key` is claimed
+  in the same transaction (the key the delete handler uses - one claim, whoever comes first) and settled after the
+  commit. Its late `customer.subscription.deleted` finds no row and changes nothing more.
+- **#6 LOW** new `stripe_routes._plan_was_carried` in the deleted-account branch: an ended subscription is left
+  unrefunded only when a `final_overage:<user>:<subscription>:...` ledger row names it (delete-account, the delete
+  handler or a replacement wrote it because the row carried the plan - exact match, never a prefix). Paid, never
+  granted, account deleted = refunded, as before L-A.
+
+Tests: new `backend/tests/test_stripe_review2_fixes_3nov.py` - 15 passed. Old tests changed, all TEST-outdated by
+the pass 2 rules (no code was wrong): `test_annual_monthly_allowance_3nov::test_a_yearly_renewal_on_a_month_boundary_
+still_resets_and_re_anchors` (pinned `billing_period_start` = time handled; now the period start, plus `last_paid` =
+paid time); in `test_stripe_review_fixes_3nov.py` the L-C renewal test (same rule) and the L-A test (it deleted the
+row without the final-bill row delete-account writes, so it no longer simulated delete-account). Billing set +
+tree-scanning invariant tests: **1,354 passed, 0 failed**.
+
+#### Pass 3 (3 Nov) - five more; offline, uncommitted
+Repros: scratchpad `review_stripe3/` (7 defects + 1 control). After the fixes all 7 defect repros FAIL and the
+control passes. (Pass 1's F5 repro passes again since pass 2 #6: it deletes the row WITHOUT the final-bill row
+delete-account writes, so it now takes the refund path - the intended pass 2 rule; `test_LA` in the pass 1 file
+writes that row and holds.)
+- **#1 MEDIUM** `stripe_routes._handle_invoice_paid`: the user row's lock is taken first thing after the event claim
+  (`UPDATE users SET packages_used = packages_used ... RETURNING billing_period_start, packages_used`) and the
+  period decision (`newer` / `older`, the period end) reads THAT row - never the copy read before the Stripe
+  calls. Two renewals handled at once can no longer rewind the period. The same lock gives the recount's
+  `used_at_lock` (one lock per event, not two).
+- **#2 LOW-MEDIUM** chose the window recount, NOT count-time holding for monthly plans. Why: a failing monthly
+  user's counter still includes the unreset earlier period, so a unit held at count time can sit above the
+  allowance only because of the earlier period's packages - holding it would bill packages that were inside the
+  real period's allowance. The recount reads the real window. `_handle_invoice_paid`: an OLDER renewal (its period
+  start before the stored one) with a known end recounts [start, end) and places what is above the allowance.
+  This runs only for monthly plans; annual plans already hold at count time. New
+  `usage_service.place_period_overage` places them: held while failing, else pending. Double billing is ruled out
+  three ways:
+  - a unit already in the ledger in any state is skipped;
+  - the period never gets more new units than its extras minus the units the ledger already holds for its
+    packages;
+  - every insert is ON CONFLICT DO NOTHING.
+- **#3 LOW** `stripe_service.price_cycle` reads a price only when billed every ONE month / year;
+  `off_cycle_price`; `subscription_plan` returns (None, None) (ERROR log) when the metadata names the plan but a
+  price bills every N > 1 - nothing syncs; `_handle_subscription_updated` sends one billing alert per
+  subscription (`off_cycle_price:<sub>`).
+- **#4 LOW** the reset (and the older-window recount) records the units above the allowance INSIDE its
+  transaction: pending, or held while still failing. `overage_packages_pending` moves with them. After the commit,
+  `retry_pending_overage(user)` bills them. If that fails, the daily retry does. New
+  `usage_service.release_held_overage` turns held units into pending inside every restore's own transaction:
+  invoice.paid, subscription.updated and the lifecycle's Stripe check. Each of those then calls
+  `retry_pending_overage`.
+- **#5 LOW** `stripe_service._bill_final_overage`: an owed unit whose only pending copy is scoped to another plan is
+  skipped (it rides that plan's invoice); `settle_final_overage` leaves out of `owed` an `overage_billing` unit
+  younger than `_STALE_BILLING` (a Stripe call in flight).
+
+Tests: new `backend/tests/test_stripe_review3_fixes_3nov.py` - 13 passed. No old test changed. Billing set +
+tree-scanning invariant tests: **1,367 passed, 0 failed**.
+
+#### Pass 4 (3 Nov) - seven more, #1 introduced by pass 3 #2; offline, uncommitted
+Repros: scratchpad `review_stripe4/` (8 defect tests). After the fixes all 8 FAIL. The earlier repro dirs are
+unchanged: each has its 7 defect repros failing and 1 passing (pass 1 F5, see pass 3; the pass 2 and 3 controls).
+- **#1 MEDIUM-HIGH** `_handle_invoice_paid`: a renewal is OLDER only when its period END is at or before the stored
+  start, and the older-window recount stops at min(period end, stored start). A delayed twin of the current
+  renewal, after a mid-period tier change moved the stored start to the switch, is neither newer nor older and
+  recounts nothing.
+- **#2 MEDIUM** `_handle_invoice_paid`: a newer reset places extras only from packages counted before ITS period
+  end. The counter still counts everything since its start. The "already placed elsewhere" filter now includes
+  `overage_held`. An older renewal paid first can no longer hold or bill the next period's packages as its own.
+  **Reachable only while `SCHEDULER_ENABLED` is not true on Render.** With the daily lifecycle running, a failing
+  user is checked against Stripe and restored daily, so two open renewals rarely pile up. The owner confirmed on 4 Nov
+  that the Render dashboard has `SCHEDULER_ENABLED=true`.
+- **#3 MEDIUM** new `usage_service.forgive_held_overage`: every place that claims a plan's final bill moves that
+  user's `overage_held` units to the terminal `overage_forgiven` in the SAME transaction. Those places are the
+  delete handler, delete-account (its claim is now one transaction) and the replaced-plan claim. This is Option A:
+  a plan that ended unpaid is never billed for them, and no later plan's restore can release them.
+  `release_held_overage` therefore only ever finds the current plan's held units.
+- **#4 LOW-MEDIUM** `_handle_invoice_paid`: the lock's RETURNING also reads `payment_status` / `payment_failed_at`.
+  It holds only if that locked row is still failing. If another restore committed first, the extras go pending and
+  are billed.
+- **#5 LOW-MEDIUM** `usage_service._evaluate_counted`: a monthly plan whose stored period end is still AHEAD now
+  HOLDS an overage package counted while failing. It used to be marked "not billable": a mid-period failure on a
+  proration / manual invoice, and no renewal recount would ever place it. With the period ended, or no end stored,
+  the counter may still carry an unpaid earlier period, so the package is left to the paid renewal's recount, as
+  before. No double billing with the pass 3 recounts: `place_period_overage` counts every ledger unit against a
+  period's extras, and the reset's filter excludes held units.
+- **#6 LOW** `usage_service.count_session_usage` reads the period state ("ended" / "open" / "unknown",
+  `_period_state`) INSIDE the counting transaction, under the user row's lock, and passes it to
+  `_evaluate_counted`. A reset committing right after the count cannot make the package look like the old
+  period's overage.
+- **#7 LOW** `stripe_service.settle_final_overage`, FINAL_MANUAL branch: the owed units move to the terminal
+  `overage_manual`. No retry bills them again, on this plan or a later one. The ERROR log gives the count.
+
+Tests: new `backend/tests/test_stripe_review4_fixes_3nov.py` - 11 passed. No old test changed. Billing set +
+tree-scanning invariant tests: **1,379 passed, 0 failed**.
+
+#### Pass 5 (3 Nov) - four more, all LOW / LOW-MEDIUM; offline, uncommitted
+Repros: scratchpad `review_stripe5/test_break_stripe5.py` (4). After the fixes all 4 FAIL; the earlier dirs are
+unchanged.
+- **#1 LOW-MEDIUM** `usage_service.count_session_usage` + new `_hold_in_count` / `_should_hold`: an overage package
+  to HOLD is written INSIDE the counting transaction, under the user row's lock, beside its count; billing stays
+  outside. A restore committing right after the count now always releases the held unit, and a plan's end always
+  forgives it. Before, either could slip into the gap. `verify_upgrade`: the replaced plan's final-bill claim
+  (which forgives its held units) now runs BEFORE `adopt_plan_usage`.
+- **#2 LOW** `_handle_invoice_paid`: a renewal that is neither newer nor older, because it STRADDLES the stored
+  start a tier sync moved inside its period, now recounts [its start, the switch) against the OLD plan's
+  allowance. The window ends at the switch. The old plan's allowance + buffer is recorded at the sync
+  (`usage_service.record_prior_allowance`, ledger `prior_allowance:<user>:<switch>`, written by the tier sync in
+  `_handle_subscription_updated`). The budget in `place_period_overage` absorbs ledger units, so pass 4 #1's
+  delayed twin still places nothing. **When the old allowance is not on record** (a switch made before this code)
+  nothing is guessed or billed: ERROR log, audit `payment.overage_before_switch_unknown` and one billing alert. A
+  guessed allowance could bill inside it; a person can check one invoice.
+- **#3 LOW** `scheduler_service.run_daily_payment_lifecycle`: the stage move is `... WHERE id=$2 AND
+  payment_failed_at=$3`, the failure this run read, the same guard the restore branch uses. A restore committing
+  after the Stripe check is never overwritten with a lock. No e-mail goes out for a row that moved.
+- **#4 LOW** `stripe_service.settle_final_overage`: a unit whose package was COUNTED after the bill was claimed
+  (the plan's end) is not owed - it belongs to a later plan and rides that plan's invoice. Read from the
+  packages' own `counted_at` through `packages_counted_since`. When that cannot be read, nothing is excluded, and
+  the per-plan Stripe copies (pass 3 #5) still keep another plan's pending items off. A first cut compared the
+  ledger rows' own timestamps; it broke three old tests because it mixed clocks, and it was replaced (the CODE was
+  wrong, not the tests).
+
+Tests: new `backend/tests/test_stripe_review5_fixes_3nov.py` - 8 passed. No old test changed. Billing set +
+tree-scanning invariant tests: **1,387 passed, 0 failed**.
+
+#### Pass 6 (final, 3 Nov) - the owner's safe end state; offline, uncommitted
+Repros: scratchpad `review_stripe6/test_break_stripe6.py` (3, all in the pass 5 #2 straddle recount: annual months
+judged as one allowance, two switches judged against the last one, old-plan packages billed at the new rate).
+After the change all 3 FAIL. Pass 5's R2 repro now PASSES again ("nothing billed") - that IS the decided end
+state, with the alert added.
+- **Straddling renewal = billed by hand, never automatically** (`stripe_routes._handle_invoice_paid`). This covers
+  every cycle, annual included, and any number of switches: a renewal that is neither newer nor older with its
+  period start before the stored start. Nothing is placed, held or billed. It always takes the alert path:
+  - an ERROR log;
+  - the audit row `payment.overage_before_switch_manual`;
+  - ONE billing alert, `straddle:<user>:<invoice>`, claimed in the ledger, so a re-delivery sends none.
+  The alert names the window [period start, stored start), the package count in it, every plan before a switch
+  ("<tier>/<cycle> until <switch time>") and the plan now. A person checks each old plan's allowance and rate and
+  bills by hand.
+- `record_prior_allowance` / `prior_allowance` are REMOVED, together with their writer in the tier sync. The tier
+  sync now writes only `usage_service.record_plan_switch` (ledger `plan_switch:<user>:<switch>` = the plan before
+  it), read only by that alert (`plan_switches`). No allowance is recorded or used for billing.
+- **Stage e-mail guard** (`stripe_service.claim_payment_email(..., failed_at=)`, passed by
+  `send_claimed_payment_email`): the claim, and so the e-mail, needs `payment_failed_at` to still equal the failure
+  the caller read. A user restored mid-run gets no "payment failed" e-mail.
+
+Old tests changed (each TEST was outdated, no code wrong):
+- the pass 5 straddle tests in `test_stripe_review5_fixes_3nov.py`. Two became one: it expects nothing billed plus
+  one alert naming the window, the count and the plans; it was 5 billed / the unknown-allowance path.
+- `test_stripe_review2_fixes_2nov.py::test_L9_the_webhooks_day0_email_is_marked_too`: its spy pinned the claim's
+  old 4-argument signature.
+
+Tests: new `backend/tests/test_stripe_review6_fixes_3nov.py` - 7 passed (the 3 shapes, both plans named,
+re-delivery alerts once, the e-mail guard and its control). Billing set + tree-scanning invariant tests:
+**1,393 passed, 0 failed**.

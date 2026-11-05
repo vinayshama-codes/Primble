@@ -158,11 +158,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "default-src 'self'; "
             # TODO: remove 'unsafe-inline' requires migrating any inline scripts in
             # frontend/index.html and frontend/src to external files or CSP nonces.
-            "script-src 'self' https://accounts.google.com https://apis.google.com; "
+            "script-src 'self' https://accounts.google.com https://apis.google.com https://challenges.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
-            "frame-src https://accounts.google.com; "
+            "frame-src https://accounts.google.com https://challenges.cloudflare.com; "
             "connect-src 'self' https://accounts.google.com https://api.stripe.com; "
             "object-src 'none'; base-uri 'self'"
         )
@@ -263,6 +263,8 @@ app.include_router(dry_run_router)
 app.include_router(questionnaire_router)
 from routes.package_history_routes import router as package_history_router   # noqa: E402
 app.include_router(package_history_router)
+from routes.asg_forms_routes import router as asg_forms_router   # noqa: E402  (3 Nov 2026, any ACORD form)
+app.include_router(asg_forms_router)
 
 if _IS_PROD and _DEV_ROUTES_ENABLED:
     raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")
@@ -456,6 +458,11 @@ async def shutdown():
 
     if _SCHEDULER_ENABLED:
         stop_scheduler()
+    try:                                       # cross-account alert e-mails still sending: finish (or give the hour back)
+        from services.document_fingerprints import drain as _drain_alerts
+        await _drain_alerts(timeout=15)
+    except Exception as _dx:                   # noqa: BLE001
+        logger.warning("document alert drain failed: %s", type(_dx).__name__)
     await close_pool()
     logger.info("Database pool closed")
 

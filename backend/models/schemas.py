@@ -303,11 +303,13 @@ class SignupRequest(BaseModel):
     full_name: str
     organization_name: str
     acord_disclaimer_accepted: bool = False
+    turnstile_token: Optional[str] = None      # the captcha answer (services/captcha.py), when the captcha is on
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    turnstile_token: Optional[str] = None
 
 
 class VerifyEmailRequest(BaseModel):

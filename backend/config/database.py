@@ -477,6 +477,11 @@ async def init_db() -> None:
             )
         """)
 
+        # The cross-account document alert (FW-2, 3 Nov 2026): keyed hashes only (services/document_fingerprints).
+        from services.document_fingerprints import TABLE_SQL as _FP_TABLE, INDEX_SQL as _FP_INDEX
+        await conn.execute(_FP_TABLE)
+        await conn.execute(_FP_INDEX)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS processed_webhook_events (
                 event_id     TEXT PRIMARY KEY,
