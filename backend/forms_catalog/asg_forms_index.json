@@ -1,8 +1,8 @@
 {
  "source": "Prod-forms-download-catalogue.json",
- "built_at": "2026-11-04T16:28:28+00:00",
+ "built_at": "2026-11-05T07:58:52+00:00",
  "note": "ASG's production download catalogue (portal Forms tab, captured 4 Nov 2026): every form + state + variant, its newest FILLABLE edition, and the exact request ASG's portal sends for it. Text only.",
- "count": 1127,
+ "count": 1126,
  "skipped_names": [
   "50_WM TR_NJ",
   "63_life_OK",
@@ -39,9 +39,13 @@
   "ACORD_131_S",
   "ACORD_140_S",
   "ACORD_25_N",
+  "ACORD_25_S",
   "ACORD_350_WM",
   "ACORD_360_WM",
   "ACORD_370_WM"
+ ],
+ "skipped_unproven_suffix": [
+  "ACORD_25_S"
  ],
  "contradictory_rows_passed_over": [
   "ACORD_135_NJ@2009/09: titled after another state",
@@ -452,31 +456,6 @@
    "unique_edition": true,
    "twin_editions": [
     "1995/01"
-   ]
-  },
-  {
-   "form_id": "ACORD_25_S",
-   "number": "25",
-   "state": "",
-   "suffix": "S",
-   "title": "Certificate of Liability Insurance - Simplified",
-   "edition": "1995/01",
-   "editions": 1,
-   "request": {
-    "edition": "1995/01",
-    "geoCode": "",
-    "geoCodeSuffix": "S"
-   },
-   "unique_edition": true,
-   "twin_editions": [
-    "2001/08",
-    "2009/01",
-    "2009/09",
-    "2010/05",
-    "2013/04",
-    "2014/01",
-    "2016/03",
-    "2025/12"
    ]
   },
   {

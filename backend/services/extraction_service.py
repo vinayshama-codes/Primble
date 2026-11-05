@@ -12758,6 +12758,30 @@ def _header_carrier_name(line: str) -> Optional[str]:
     return name
 
 
+# ── ONLY A LEGAL COMPANY NAME BINDS A CONTRACT ───────────────────────────────
+# Live run, 5 Nov 2026 (primble.ai, session a726512b): a dec page headed
+# "EMC INSURANCE COMPANIES" bound the Inland Marine contract to "EMC INSURANCE"
+# - a company that does not exist (the lazy match stops at INSURANCE; the
+# legal-form tail takes COMPANY, not the plural) - and replaced the row's
+# correct "Employers Mutual Casualty Company", printed on the same page under
+# that contract. The class is wider than the plural (hard review, 5 Nov):
+# "COMPANIES.", "COMPANIES(R)", "COMPANY'S", the logo split over two OCR lines,
+# a bare "EMC INSURANCE", "... Insurance Group, Inc." all end the name at a
+# BRAND. A brand or a group names a family of carriers and cannot say which one
+# writes the contract, so a header name binds only when it is a legal company
+# name - it carries a legal-form word (Company, Corporation, Inc., Exchange,
+# Association, Limited, LLC), the "of America" tail allowed after it. Anything
+# else votes nothing; a legal name on a later header line still binds.
+_LEGAL_FORM_WORD_RE = re.compile(
+    r"\b(?:COMPANY|CO\.|CORPORATION|CORP\.?|INCORPORATED|INC\.?|EXCHANGE|ASSOCIATION|"
+    r"LIMITED|LTD\.?|LLC)(?=\W|$)", re.I)
+
+
+def _is_legal_carrier_name(name: str) -> bool:
+    """True when a header carrier name is a legal company name, not a brand or a group."""
+    return bool(_LEGAL_FORM_WORD_RE.search(str(name or "")))
+
+
 def _page_blocks(text: Any) -> List[Tuple[int, str]]:
     """[(page number, page body)] for a document carrying OCR page markers."""
     parts = _PAGE_MARKER_RE.split(str(text or ""))
@@ -12840,6 +12864,8 @@ def _contract_carriers_from_page_headers(docs: Any, mf: dict) -> Dict[str, str]:
                 full = _header_carrier_name(ln)
                 if not full:
                     continue
+                if not _is_legal_carrier_name(full):
+                    continue                 # a brand / group letterhead, not the writing company
                 name = full.strip(" ,*")
                 if (_NOT_A_CARRIER_RE.search(name) or is_insurance_bureau(name)
                         or _is_insureds_own_name(name, mf)):

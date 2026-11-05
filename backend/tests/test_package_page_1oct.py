@@ -718,7 +718,8 @@ def test_fixes_cannot_be_written_while_a_run_is_stamping_from_older_facts(monkey
 
 def test_a_run_that_made_no_forms_keeps_its_marker():
     body = _fn_src(BACKEND / "routes" / "form_routes.py", "select_forms_bulk")
-    nf = body[body.index("if not results:"):body.index('raise HTTPException(400, "No forms could be generated")')]
+    # 5 Nov 2026: the 400 also names the forms left out ("No forms could be generated." + names)
+    nf = body[body.index("if not results:"):body.index('raise HTTPException(400, "No forms could be generated."')]
     assert '"generation_job_id": None' not in nf
 
 

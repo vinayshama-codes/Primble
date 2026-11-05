@@ -727,14 +727,19 @@ def test_a_reply_that_is_not_a_fillable_form_is_refused(monkeypatch, tmp_path):
     monkeypatch.setenv("ASG_FORMS_STUB_DIR", str(tmp_path))
     with pytest.raises(A.AsgFormUnavailable) as ex:
         A.fetch_blank(A.meta_for("ACORD_27"))
-    assert ex.value.reason == "bad_file"                                    # minutes, never hours
-    assert A._FAIL_TTL["bad_file"] <= 5 * 60 < A._FAIL_TTL["not_available"]
+    assert ex.value.reason == "bad_file"          # left out of the run, remembered for half an hour (5 Nov 2026)
+    assert A._FAIL_TTL["bad_file"] <= 30 * 60 < A._FAIL_TTL["not_available"]
     assert A._ram_get(A._ram_key(A.meta_for("ACORD_27"), None)) is None    # never cached
 
 
 def test_the_pre_download_message_says_what_to_do():
     one = A.prefetch_failure_message([{"form_id": "ACORD_27", "reason": "asg_error"}])
-    assert "ACORD 27" in one and "remove it" in one and "Nothing was generated" in one
+    assert "ACORD 27" in one and "try again" in one and "Nothing was generated" in one
+    # other forms selected: nothing is lost - the run can go on without the failed form (live, 5 Nov 2026)
+    skip = A.prefetch_failure_message([{"form_id": "ACORD_27", "reason": "asg_error"}], can_skip=True)
+    assert "not generated yet" in skip and "generate without it" in skip and "does not download them again" in skip
+    assert "cannot be added to this package later" in skip
+    assert "Nothing was generated" not in skip
     two = A.prefetch_failure_message([{"form_id": "ACORD_27", "reason": "asg_error"},
                                       {"form_id": "ACORD_137_TX", "reason": "not_available"}])
     assert "ACORD 27" in two and "ACORD 137 TX" in two and "no fillable version of ACORD 137 TX" in two
@@ -819,12 +824,14 @@ def test_a_failure_after_the_download_clears_the_preparing_mark(monkeypatch):
     assert marks and marks[0] and marks[-1] is None        # set before the download, cleared after the failure
 
 
-def test_a_failed_download_refuses_with_503_and_clears_the_mark(monkeypatch):
+def test_a_failed_download_refuses_and_clears_the_mark(monkeypatch):
     asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
     req.form_ids = ["ACORD_75"]                             # the stub has no ACORD 75
     with pytest.raises(HTTPException) as ex:
         asyncio.run(fr.select_forms_bulk(req, current_user=user))
-    assert ex.value.status_code == 503 and "ACORD 75" in ex.value.detail
+    # ASG can never give it and nothing else is selected: a refusal (400), never "service unavailable"
+    assert ex.value.status_code == 400 and "ACORD 75" in ex.value.detail["message"]
+    assert ex.value.detail["failed"] == ["ACORD_75"] and ex.value.detail["rest"] == []   # nothing else to make
     assert [w["asg_preparing_at"] for w in writes if "asg_preparing_at" in w][-1] is None
 
 
@@ -869,10 +876,87 @@ def test_a_hung_asg_stops_retrying_after_the_budget(monkeypatch):
 
 def test_failed_forms_are_named_in_the_order_picked(monkeypatch):
     asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
-    req.form_ids = ["ACORD_137_TX", "ACORD_75", "ACORD_1"]              # the stub has neither 75 nor 1
+    req.form_ids = ["ACORD_137_TX", "ACORD_75", "ACORD_1"]
+    busy = {"ACORD_75", "ACORD_1"}                                       # ASG busy for these two: a retry may work
+    monkeypatch.setattr(A, "try_fetch", lambda meta: ({"form_id": meta["form_id"], "reason": "asg_error"}
+                                                      if meta["form_id"] in busy else None))
     with pytest.raises(HTTPException) as ex:
         asyncio.run(fr.select_forms_bulk(req, current_user=user))
-    assert ex.value.status_code == 503 and "ACORD 75 and ACORD 1" in ex.value.detail   # in the order picked
+    assert ex.value.status_code == 503 and "ACORD 75 and ACORD 1" in ex.value.detail["message"]   # in the order picked
+    assert ex.value.detail["failed"] == ["ACORD_75", "ACORD_1"] and ex.value.detail["rest"] == ["ACORD_137_TX"]
+    assert "generate without them" in ex.value.detail["message"]
+
+
+def _capture_queue(monkeypatch, fr):
+    jobs = []
+
+    class Queue:
+        async def count_user_active_jobs(self, uid):
+            return 0
+
+        async def enqueue(self, job_type, payload, *a, **k):
+            jobs.append(payload)
+            return "job-1"
+
+        async def update_status(self, *a, **k):
+            return None
+    monkeypatch.setattr(fr, "get_job_queue", lambda: Queue())
+    monkeypatch.setattr(fr, "ENABLE_ASYNC_PROCESSING", True)            # the run itself is not under test
+    return jobs
+
+
+def test_a_form_asg_can_never_give_is_left_out_and_the_rest_generate(monkeypatch):
+    """Live, 5 Nov 2026: one refused ACORD 25 S stopped a package whose two other ASG forms had downloaded -
+    two paid downloads wasted, nothing made. A form ASG can NEVER give is left out; the rest generate."""
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_125", "ACORD_137_TX", "ACORD_75", "ACORD_27"]   # the stub has no ACORD 75
+    res = asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    body = json.loads(res.body)
+    assert res.status_code == 202 and jobs[0]["form_ids"] == ["ACORD_125", "ACORD_137_TX", "ACORD_27"]
+    assert body["asg_not_generated"] == [{"form_id": "ACORD_75", "reason": "not_available"}]
+    assert "no fillable version of ACORD 75" in body["asg_not_generated_message"]
+    assert "Your other forms are ready" in body["asg_not_generated_message"]
+    for gen in (w for w in writes if "generation_form_count" in w):
+        assert gen["generation_form_count"] == 3
+
+
+def test_a_wrong_form_is_left_out_too_and_a_mix_with_a_busy_asg_still_asks(monkeypatch):
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_125", "ACORD_137_TX", "ACORD_27"]
+    reasons = {"ACORD_137_TX": "wrong_form", "ACORD_27": "asg_error"}
+    monkeypatch.setattr(A, "try_fetch", lambda meta: ({"form_id": meta["form_id"], "reason": reasons[meta["form_id"]]}
+                                                      if meta["form_id"] in reasons else None))
+    with pytest.raises(HTTPException) as ex:                          # ASG busy on one: the user decides
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert ex.value.status_code == 503 and ex.value.detail["rest"] == ["ACORD_125"] and jobs == []
+    reasons.pop("ACORD_27")                                            # only the wrong form left: it is left out
+    res = asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert res.status_code == 202 and jobs[-1]["form_ids"] == ["ACORD_125", "ACORD_27"]
+
+
+def test_a_setup_failure_never_leaves_forms_out_silently(monkeypatch):
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_125", "ACORD_27"]
+    monkeypatch.setattr(A, "try_fetch", lambda meta: {"form_id": meta["form_id"], "reason": "auth"})
+    with pytest.raises(HTTPException) as ex:
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert ex.value.status_code == 503 and ex.value.detail["message"].startswith(A.NOT_SET_UP)
+    assert ex.value.detail["rest"] == ["ACORD_125"] and jobs == []
+
+
+def test_the_left_out_message_names_each_reason():
+    m = A.left_out_message([{"form_id": "ACORD_25_FR", "reason": "not_available"},
+                            {"form_id": "ACORD_60_US", "reason": "not_available"},
+                            {"form_id": "ACORD_75_N", "reason": "wrong_form"},
+                            {"form_id": "ACORD_35", "reason": "error"}])
+    assert "no fillable version of ACORD 25 FR and ACORD 60 US, so they were left out" in m
+    assert "sent a different form than ACORD 75 N, so it was left out" in m
+    assert "ACORD 35 could not be generated, so it is not in this package" in m and m.endswith("ready.")
+    assert A.left_out_message([]) == ""
 
 
 # ── review round 6 (3 Nov 2026) ──────────────────────────────────────────────
@@ -1640,7 +1724,7 @@ def test_editions_are_read_in_every_shape_acord_and_asg_write_them():
 
 def test_the_list_adds_asgs_other_codes_and_its_newest_editions():
     idx = A._index()
-    for fid in ("ACORD_25_FR", "ACORD_25_S", "ACORD_126_S", "ACORD_155_BM", "ACORD_50_WM", "ACORD_60_US",
+    for fid in ("ACORD_25_FR", "ACORD_126_S", "ACORD_155_BM", "ACORD_50_WM", "ACORD_60_US",
                 "ACORD_62_US", "ACORD_64_US", "ACORD_66_US", "ACORD_75_N", "ACORD_829_CLAP", "ACORD_829_LOB"):
         assert fid in idx and A.is_pc_form(fid), fid
     assert not A.is_pc_form("ACORD_951_E")                       # a Life form: listed, never offered
@@ -1652,7 +1736,10 @@ def test_the_list_adds_asgs_other_codes_and_its_newest_editions():
     assert idx["ACORD_61_VA"]["request"] == {"edition": "2023/08", "geoCode": "VA", "geoCodeSuffix": ""}
     assert idx["ACORD_80_MS"]["request"]["geoCode"] == "MS"
     assert idx["ACORD_62_AK"]["request"]["geoCode"] == "AK"
-    assert idx["ACORD_25_S"]["request"]["geoCodeSuffix"] == "S"
+    # a geoCodeSuffix ASG has never served is never chosen (live, 5 Nov 2026: 25 S 1995/01 + suffix S answered "no
+    # acroform PDF"); every suffix still listed is one ASG served on production
+    assert "ACORD_25_S" not in idx
+    assert {e["request"].get("geoCodeSuffix") for e in idx.values()} - {"", None} <= {"INS", "CIS"}
     for gone in ("ACORD_131_S", "ACORD_140_S"):
         assert gone not in idx, gone
     for e in idx.values():
@@ -1734,8 +1821,9 @@ def test_the_refusal_memory_can_be_turned_off(monkeypatch):
 def test_a_plural_typed_after_a_number_is_not_the_s_form():
     for q in ("25s", "acord 25's", "25's"):
         assert [r["form_id"] for r in A.search_full(q, 3)[0]][0] == "ACORD_25", q
-    assert [r["form_id"] for r in A.search_full("25 s", 3)[0]][0] == "ACORD_25_S"
-    assert [r["form_id"] for r in A.search_full("25-s", 3)[0]][0] == "ACORD_25_S"
+    for q in ("25 s", "25-s"):                     # 25 S left the list (5 Nov 2026): our ACORD 25 comes first
+        got = [r["form_id"] for r in A.search_full(q, 3)[0]]
+        assert got[0] == "ACORD_25" and "ACORD_25_S" not in got, q
 
 
 def test_the_builder_handles_odd_catalogue_shapes(tmp_path):
@@ -1841,3 +1929,181 @@ def test_a_state_version_about_another_subject_does_not_inherit_our_scoring_line
     from services.sqs_service import stops_for_form
     gl = "GL coverage detected but no class codes on ACORD 126"
     assert gl not in stops_for_form([gl], "ACORD_127") or True     # unchanged behaviour for ours (smoke)
+
+
+def test_a_form_no_longer_offered_is_left_out_and_named_never_dropped_silently(monkeypatch):
+    """A tab opened before 25 S left the list (5 Nov 2026) still sends it: it is named, the rest generate."""
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_125", "ACORD_25_S", "ACORD_131__excess", "ACORD_27"]
+    res = asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    body = json.loads(res.body)
+    assert jobs[0]["form_ids"] == ["ACORD_125", "ACORD_131__excess", "ACORD_27"]   # a layer copy is ours
+    assert body["asg_not_generated"] == [{"form_id": "ACORD_25_S", "reason": "not_listed"}]
+    assert "ACORD 25 S is no longer offered, so it was left out of this package." in body["asg_not_generated_message"]
+
+
+def test_only_forms_no_longer_offered_is_a_400_that_names_them(monkeypatch):
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_25_S"]
+    with pytest.raises(HTTPException) as ex:
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert ex.value.status_code == 400 and "ACORD 25 S is no longer offered" in ex.value.detail and jobs == []
+    assert "ready" not in ex.value.detail
+
+
+def test_a_left_out_unlisted_and_a_refused_form_are_both_named(monkeypatch):
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    _capture_queue(monkeypatch, fr)
+    req.form_ids = ["ACORD_125", "ACORD_25_S", "ACORD_75"]           # 25 S unlisted; the stub has no ACORD 75
+    body = json.loads(asyncio.run(fr.select_forms_bulk(req, current_user=user)).body)
+    assert [x["form_id"] for x in body["asg_not_generated"]] == ["ACORD_25_S", "ACORD_75"]
+    msg = body["asg_not_generated_message"]
+    assert "ACORD 25 S is no longer offered" in msg and "no fillable version of ACORD 75" in msg
+
+
+
+# ── hard review of the left-out change (5 Nov 2026) ───────────────────────────
+
+def _counting(monkeypatch, slow=None, fail=None):
+    import time as _t
+    calls = []
+    real = A._stub_fetch
+
+    def fake(meta):
+        fid = meta["form_id"]
+        calls.append(fid)
+        if slow and fid in slow:
+            _t.sleep(slow[fid])
+        if fail and fid in fail:
+            raise A.AsgFormUnavailable(fail[fid], "x")
+        return real(meta)
+    monkeypatch.setattr(A, "_stub_fetch", fake)
+    return calls
+
+
+def test_a_retry_while_a_download_still_runs_never_pays_twice(monkeypatch):
+    import time as _t
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    _capture_queue(monkeypatch, fr)
+    monkeypatch.setattr(A, "PREFETCH_DEADLINE_SECONDS", 0.3)
+    calls = _counting(monkeypatch, slow={"ACORD_27": 1.5})
+    req.form_ids = ["ACORD_125", "ACORD_27"]
+    with pytest.raises(HTTPException) as ex:                           # ACORD 27 misses the deadline
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert ex.value.status_code == 503 and ex.value.detail["rest"] == ["ACORD_125"]
+    monkeypatch.setattr(A, "PREFETCH_DEADLINE_SECONDS", 5.0)
+    res = asyncio.run(fr.select_forms_bulk(req, current_user=user))   # Retry at once: waits for the running one
+    assert res.status_code == 202
+    _t.sleep(0.2)
+    assert calls.count("ACORD_27") == 1, calls
+
+
+def test_a_second_caller_takes_the_running_downloads_failure(monkeypatch):
+    import threading
+    calls = _counting(monkeypatch, slow={"ACORD_75": 0.5})              # the stub has no ACORD 75
+    out = []
+
+    def one():
+        try:
+            A.fetch_blank(A.meta_for("ACORD_75"))
+        except A.AsgFormUnavailable as ex:
+            out.append(ex.reason)
+    ts = [threading.Thread(target=one) for _ in range(3)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert calls == ["ACORD_75"] and out == ["not_available"] * 3
+
+
+@pytest.mark.parametrize("reason", ["bad_file", "rejected"])
+def test_a_file_that_cannot_be_filled_or_a_rejected_request_is_left_out(monkeypatch, reason):
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    calls = _counting(monkeypatch, fail={"ACORD_27": reason})
+    req.form_ids = ["ACORD_125", "ACORD_27"]
+    body = json.loads(asyncio.run(fr.select_forms_bulk(req, current_user=user)).body)
+    assert jobs[-1]["form_ids"] == ["ACORD_125"]
+    assert body["asg_not_generated"] == [{"form_id": "ACORD_27", "reason": reason}]
+    assert "ACORD 27" in body["asg_not_generated_message"] and "cannot be added to this package later" in \
+        body["asg_not_generated_message"]
+    asyncio.run(fr.select_forms_bulk(req, current_user=user))          # pressed again: remembered, no new download
+    assert calls.count("ACORD_27") == 1
+
+
+def test_asg_rejecting_a_request_is_not_retried(monkeypatch):
+    import httpx
+    monkeypatch.delenv("ASG_FORMS_STUB_DIR", raising=False)
+    for k, v in (("TRANSCRIBER_CLIENT_ID", "x"), ("TRANSCRIBER_CLIENT_SECRET", "y"), ("TRANSCRIBER_API_KEY", "z"),
+                 ("TRANSCRIBER_ENV", "uat"), ("ENVIRONMENT", "development")):
+        monkeypatch.setenv(k, v)
+    A._token.update(value="tok", expiry=10 ** 12, bearer=False)
+    monkeypatch.setattr(A, "remember_refused", lambda *a, **k: None)
+    gets = []
+    for status, body, want in ((404, "not found", "rejected"), (422, "bad", "rejected"),
+                               (400, "bad request", "rejected"), (200, "<html>oops</html>", "bad_file")):
+        A.clear_ram()
+        A._failed.clear()
+
+        def reply(self, request, _s=status, _b=body, **kw):
+            gets.append(request.url.path)
+            return httpx.Response(_s, text=_b, request=request)
+        monkeypatch.setattr(httpx.Client, "send", reply)
+        before = len(gets)
+        with pytest.raises(A.AsgFormUnavailable) as ex:
+            A.fetch_blank(A.meta_for("ACORD_27"))
+        assert ex.value.reason == want and len(gets) - before == 1, (status, ex.value.reason)
+    A._token.update(value="", expiry=0.0, bearer=None, failed_until=0.0)
+
+
+def test_a_form_no_longer_offered_is_named_when_the_run_stops_too(monkeypatch):
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    _capture_queue(monkeypatch, fr)
+    real_try_fetch = A.try_fetch
+    monkeypatch.setattr(A, "try_fetch", lambda meta: {"form_id": meta["form_id"], "reason": "asg_error"}
+                        if meta["form_id"] == "ACORD_27" else None)
+    req.form_ids = ["ACORD_125", "ACORD_25_S", "ACORD_27"]
+    with pytest.raises(HTTPException) as ex:
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    d = ex.value.detail
+    assert ex.value.status_code == 503 and "ACORD 25 S is no longer offered" in d["message"]
+    assert d["left_out"] == [{"form_id": "ACORD_25_S", "reason": "not_listed"}] and d["rest"] == ["ACORD_125"]
+    monkeypatch.setattr(A, "try_fetch", real_try_fetch)                # the stub has no ACORD 75
+    req.form_ids = ["ACORD_25_S", "ACORD_75"]                          # nothing left: a 400 naming both
+    with pytest.raises(HTTPException) as ex:
+        asyncio.run(fr.select_forms_bulk(req, current_user=user))
+    assert ex.value.status_code == 400
+    assert "ACORD 25 S is no longer offered" in ex.value.detail["message"] and "ACORD 75" in ex.value.detail["message"]
+
+
+def test_a_setup_failure_names_support_and_still_offers_the_other_forms():
+    msg = A.prefetch_failure_message([{"form_id": "ACORD_27", "reason": "auth"}], can_skip=True)
+    assert msg.startswith(A.NOT_SET_UP) and "generate your other forms without" in msg
+    assert A.prefetch_failure_message([{"form_id": "ACORD_27", "reason": "auth"}]) == A.NOT_SET_UP
+
+
+@pytest.mark.parametrize("raw,canon", [("acord_125", "ACORD_125"), ("ACORD_137_ca", "ACORD_137_CA"),
+                                       (" acord_131__excess ", "ACORD_131__excess"), ("ACORD_27", "ACORD_27")])
+def test_one_spelling_for_every_form_id(raw, canon):
+    assert A.clean_form_ids([raw]) == [canon]
+
+
+def test_a_lower_case_id_of_our_own_form_is_never_called_no_longer_offered(monkeypatch):
+    import json
+    asyncio, HTTPException, fr, req, user, writes = _generate_route_harness(monkeypatch)
+    jobs = _capture_queue(monkeypatch, fr)
+    req.form_ids = ["acord_125", "ACORD_137_ca"]
+    body = json.loads(asyncio.run(fr.select_forms_bulk(req, current_user=user)).body)
+    assert jobs[-1]["form_ids"] == ["ACORD_125", "ACORD_137_CA"] and "asg_not_generated" not in body
+
+
+def test_a_failed_list_load_is_not_kept(monkeypatch):
+    A._index.cache_clear()
+    monkeypatch.setattr(A, "INDEX_PATH", "/nonexistent/asg_forms_index.json")
+    assert A._index() == {}
+    monkeypatch.undo()
+    assert len(A._index()) > 1000                                      # the next call loads the real list

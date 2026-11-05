@@ -327,6 +327,9 @@ since 28 Oct). HEAD = d81794b; the working tree holds only the uncommitted "any 
    scrub the history.
 2. backend/sess.json + backend/run.json (client PII) are still tracked - git rm --cached, add to .gitignore, scrub.
 3. render.yaml sets SCHEDULER_ENABLED twice for acordly-api ("false" line 30, "true" line 77) - the dashboard decides. **Owner confirmed 4 Nov: the Render dashboard has SCHEDULER_ENABLED=true** (daily retries and the payment lifecycle run).
+4. **Uploads are not virus-scanned in production** (found in the live log, 5 Nov 2026 13:12 IST (07:42 UTC)): every upload logs
+   "VIRUS_SCANNER=none in production - uploads are unscanned". Owner's call: ClamAV on Render (memory: the 2 GB box
+   already ran out once) or a hosted scanner (VIRUS_SCANNER=custom).
 
 ### 1. V2 roadmap - Brent's own order (14 Oct 2026; his words relayed again by the owner 4 Nov 02:06 IST)
 **Brent:** "We've already discussed the importance of separating our SQS and ACORD e-labels from reliance on the actual
@@ -401,8 +404,10 @@ table cells print as filled, not "Please verify"; primble_record._fact_backed re
 documents' ACORD applications disagree -> first upload wins; record gaps (integrity resolutions, reclassifications).
 9. Brent's six-core-forms "Check" list against his kit + the five planted cross-form checks. 10. Tidy-up (SCORING_RULES
 "TO BE REPLACED", dead _share_group_releases). 11. Parked by the owner (his go): per-form side-panel points; extraction
-cut-off "continue" + the false CUT OFF flag (seen again 3 Nov, 4 of 7 decs); FW-1; FW-5. 12. ASG forms before PROD:
-L-4 / L-5 line identity; O-ASG-1; the full suite + commit.
+cut-off "continue" + the false CUT OFF flag (seen again 3 Nov, 4 of 7 decs; again live 5 Nov on a 2-page dec - 5,003 output tokens, nowhere near the cap, one extra call); FW-1; FW-5. 12. ASG forms before PROD:
+L-4 / L-5 line identity; O-ASG-1; the full suite + commit. 14. ASG forms on the ASYNC path (dormant - production runs sync): the worker process downloads each ASG form again after the web process's pre-download (its memory is empty) - hand the bytes over or store them before async is turned on (hard review, 5 Nov 2026). 13. Log noise on Render (live 5 Nov): one upload printed
+"check_doc_consistency: 4 contracts evidenced ..." about 70 times in 5 s (the review plan's scoring probes) and every
+"lob-grid ... left blank" line twice - move both to DEBUG.
 
 ### 3. Brent asks pushed back / deferred (who decided)
 - "No automatic 60 cap" (19 Oct) - DECLINED by the owner (D72, caps restored), Brent told 20 Oct, no objection.
@@ -415,6 +420,10 @@ L-4 / L-5 line identity; O-ASG-1; the full suite + commit.
 - Business-e-mail-only sign-up - replaced by the fingerprint alert (Brent agreed).
 
 ### 4. Waiting on Brent / ASG
+- **ASG (owner asking, 5 Nov 2026):** which forms the Download API serves as fillable, with exact parameters (so the list
+  is built from what the API serves, not the portal catalogue); 25-S 1995/01 refused "no acroform PDF"; name-only
+  variant rows (131 -S, 140 S, 25 N, 350/360/370 WM); change notifications; an availability check without a
+  download; whether refused requests count as usage. Draft in the 5 Nov chat.
 **Brent's reply (relayed by the owner 4 Nov 02:24 IST):** USD pricing fine; he will revert the Render account; annual
 = **100 packages per month** (not 1,200 at once - so overage bills monthly; already built 3 Nov); plan changes by e-mail
 to support "for now", self-service later. **Not answered:** the support address (support@primble.com?) - asked
@@ -485,6 +494,11 @@ until production terms", 29 Oct); Supabase "Project One"; CE #6; CH125 tracker; 
 SCORING_UNOWNED_DEDUCTION / SQS_NOT_SCORED / LOOP_BLOCKED / MEMORY_GUARD_HOLD.
 
 ## Done (moved here with the date)
+- **5 Nov 2026, 13:17 IST (uncommitted) - a carrier GROUP's letterhead no longer names a contract's writing company.**
+  Live on primble.ai (package a726512b): a dec page headed "EMC INSURANCE COMPANIES" bound Inland Marine to "EMC
+  INSURANCE" (no such company) over the row's correct "Employers Mutual Casualty Company". `extraction_service.
+  _names_a_carrier_group`: a header line naming "... Companies" / "... Group" / "... Cos." votes nothing; a legal name
+  below it still binds. Tests: `tests/test_carrier_group_letterhead_5nov.py` + the binder's five test files, 399 passed.
 - **4 Nov 2026, 22:37 IST (uncommitted) - ASG forms: two proof rounds (9 approved downloads), three adversarial reviews
   (A list / footer check, B signatures / drawing, C what would embarrass us), every finding fixed and pinned; full suite
   23,077 passed, 1 failed (the known), 46 skipped.** Detail: Accommodate800forms.md 10.25. Parked for the owner: hide

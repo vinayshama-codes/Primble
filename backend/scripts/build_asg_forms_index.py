@@ -122,6 +122,13 @@ _PROVEN_EXTRA = [
 ]
 
 
+# The geoCodeSuffix values ASG has SERVED on production (proof downloads, 4 Nov 2026: 84 INS; 125 CIS). A suffix is a
+# value ASG maps to a file, not a request shape: on 5 Nov 2026 (live, primble.ai) ASG answered "no acroform PDF" to
+# ACORD 25 S (1995/01 + suffix S) although its catalogue row names an _ACRO file. A row with any other suffix is
+# unproven and never chosen - add a suffix here only after a proof download (owner's yes) succeeds.
+_PROVEN_SUFFIXES = frozenset({"INS", "CIS"})
+
+
 # ASG's catalogue typos, and the characters it lost as "?" (live search, 4 Nov 2026): quotes, apostrophes, dashes.
 # Order matters - a quoted phrase first, then possessives, then a dash. Plain ASCII out (no em-dashes in UI text).
 _TITLE_FIXES = (
@@ -300,7 +307,7 @@ def build_from_catalogue(json_path: str) -> dict:
             shared[k2] = shared.get(k2, 0) + 1
     by_id: dict = {}
     titles: dict = {}
-    skipped, no_fillable, ambiguous, name_only = set(), set(), set(), set()
+    skipped, no_fillable, ambiguous, name_only, unproven_suffix = set(), set(), set(), set(), set()
     passed_over, contradictory = set(), set()
     # The core applications' own titles (the plain, newest fillable row of each of our 17 numbers) - a row of ANOTHER
     # number titled or filed as one of them contradicts itself (66 CO - review C, 4 Nov 2026).
@@ -327,6 +334,9 @@ def build_from_catalogue(json_path: str) -> dict:
         all_by_id.setdefault(fid, []).append(r)
         if code_in_name_only and not state:
             name_only.add(fid)                        # a variant only in the name: unproven - never chosen
+            continue
+        if str(r.get("geoCodeSuffix") or "").strip().upper() not in _PROVEN_SUFFIXES | {""}:
+            unproven_suffix.add(fid)                  # a suffix ASG has never served (25 S, 5 Nov 2026)
             continue
         if not str(r.get("acroFileName") or "").endswith("_ACRO.pdf"):
             no_fillable.add(fid)
@@ -423,6 +433,8 @@ def build_from_catalogue(json_path: str) -> dict:
         "skipped_ambiguous": sorted(ambiguous - set(by_id)),
         # forms ASG lists only under rows whose VARIANT code is in the NAME alone - unproven, never chosen
         "skipped_code_in_name_only": sorted(name_only - set(by_id)),
+        # forms whose only fillable rows carry a geoCodeSuffix ASG has never served (see _PROVEN_SUFFIXES)
+        "skipped_unproven_suffix": sorted(unproven_suffix - set(by_id)),
         # rows whose own data contradicts itself (review C) - the form keeps its next consistent edition, or leaves
         "contradictory_rows_passed_over": sorted(contradictory),
         "skipped_contradictory": sorted({c.split("@")[0] for c in contradictory} - set(by_id)),

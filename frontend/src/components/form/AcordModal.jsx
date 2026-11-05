@@ -3146,6 +3146,9 @@ const AcordModal = forwardRef(function AcordModal({
   }, [showUploadOverlay]);
 
   const [error, setError] = useState(null);
+  // ACORD Solutions could not give some forms right now: {message, failed, rest} - the banner offers
+  // "Generate without them" (live, 5 Nov 2026). Shown only while the banner holds its own message.
+  const [asgSkip, setAsgSkip] = useState(null);
   const [sessionId, setSessionId] = useState(resumeSessionId || null);
   const [docSummary, setDocSummary] = useState([]);
   // Choice Electric #25 (7 Oct 2026): documents added to / changed on the
@@ -5616,8 +5619,12 @@ const AcordModal = forwardRef(function AcordModal({
     return true;
   };
 
-  const handleGenerateAll = async () => {
-    const ids = Array.from(checkedFormIds);
+  // The "Generate without ..." offer belongs to the answer it came with: a changed tick or another step ends it.
+  useEffect(() => { setAsgSkip(null); }, [checkedFormIds, step]);
+
+  const handleGenerateAll = async (idsOverride) => {
+    const ids = Array.isArray(idsOverride) ? idsOverride : Array.from(checkedFormIds);
+    setAsgSkip(null);
     if (!ids.length) { setError("Select at least one form"); return; }
     await _requestNotificationPermission();
     _markJobStart();
@@ -5668,6 +5675,7 @@ const AcordModal = forwardRef(function AcordModal({
       if (res.status === 202) {
         const queued = await res.json();
         _persistActiveJob(queued.job_id, "generate");
+        const _leftOut = queued.asg_not_generated, _leftOutMsg = queued.asg_not_generated_message;
         try { await _pollJobStatus(queued.job_id, 1200); }
         finally { _clearActiveJob(); }
         _notifyJobDone("generate", true);
@@ -5675,11 +5683,23 @@ const AcordModal = forwardRef(function AcordModal({
         if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
         const sessData = await sessRes.json();
         const _ordered = inProducerOrder(sessData.generated_forms || {}, sessData.form_order);
-        data = { success: true, generated: _ordered, form_ids: Object.keys(_ordered), cross_issues: sessData.cross_issues, grouped_cross_issues: sessData.grouped_cross_issues, package_sqs: sessData.package_sqs || null };
+        data = { success: true, generated: _ordered, form_ids: Object.keys(_ordered), cross_issues: sessData.cross_issues, grouped_cross_issues: sessData.grouped_cross_issues, package_sqs: sessData.package_sqs || null, asg_not_generated: _leftOut, asg_not_generated_message: _leftOutMsg };
       } else {
         data = await res.json();
       }
-      if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
+      if (!data.success) {
+        // A structured refusal (ACORD Solutions could not give a form right now): its sentence, and the forms a
+        // run without the failed ones would make. Never render the object itself.
+        const det = data.detail;
+        if (det && typeof det === "object") {
+          const msg = det.message || "Form generation failed";
+          if (Array.isArray(det.rest) && det.rest.length && Array.isArray(det.failed) && det.failed.length) {
+            setAsgSkip({ message: msg, failed: det.failed, rest: det.rest });
+          }
+          setError(msg); return;
+        }
+        setError(det || data.message || "Form generation failed"); return;
+      }
       _notifyJobDone("generate", true);
       // Generated: the added forms are in the package now. The list is emptied too, or the save effect writes it
       // straight back on the next tick change (hard review, 3 Nov 2026).
@@ -5687,7 +5707,9 @@ const AcordModal = forwardRef(function AcordModal({
       if (Array.isArray(data.asg_not_generated) && data.asg_not_generated.length) {
         const names = data.asg_not_generated.map(x => String(x.form_id || "").replace(/_/g, " ")).join(", ");
         const _several = data.asg_not_generated.length > 1;
-        pushToast({ title: "Some forms could not be generated", body: `${names} could not be generated, so ${_several ? "they are" : "it is"} not in this package and cannot be added to it later. Your other forms are ready.`, ok: false, tone: "error" });
+        const body = data.asg_not_generated_message
+          || `${names} could not be generated, so ${_several ? "they are" : "it is"} not in this package and cannot be added to it later. Your other forms are ready.`;
+        pushToast({ title: _several ? "Some forms were left out" : "One form was left out", body, ok: false, tone: "error" });
       }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       setCrossGrouped(data.grouped_cross_issues || null);
@@ -7858,6 +7880,22 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <span style={{ flex: 1 }}>{error}</span>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {step === "form_selection" && asgSkip && asgSkip.message === error && !acordSearchActive && (
+                <button
+                  onClick={() => {
+                    // The ticks as they are NOW, minus the forms that failed - never the server's snapshot, which a
+                    // tick changed after the answer would make stale (hard review, 5 Nov 2026).
+                    const gone = new Set(asgSkip.failed);
+                    const ids = Array.from(checkedFormIds).filter(f => !gone.has(f));
+                    if (!ids.length) { setAsgSkip(null); return; }
+                    setCheckedFormIds(new Set(ids));
+                    setError(null); handleGenerateAll(ids);
+                  }}
+                  style={{ padding: "5px 14px", background: "#fff", color: "#E61B84", border: "1px solid #E61B84", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Generate without {asgSkip.failed.length === 1 ? asgSkip.failed[0].replace(/_/g, " ") : "them"}
+                </button>
+              )}
               {step === "form_selection" && checkedFormIds.size > 0 && !acordSearchActive && (
                 <button
                   onClick={() => { setError(null); handleGenerateAll(); }}

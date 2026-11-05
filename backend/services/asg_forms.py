@@ -52,7 +52,11 @@ _RAM_TTL_SECONDS = 60 * 60          # one generation run, long packages included
 _RAM_MAX_BYTES = 48 * 1024 * 1024   # bounded by SIZE (review round 3: a count let other users push a run's
                                     # forms out between its pre-download and its fill)
 _FAIL_TTL = {"not_available": 6 * 60 * 60, "asg_error": 3 * 60, "auth": 3 * 60,
-             "bad_file": 3 * 60,   # remembered failures (6 h only for ASG's own "no fillable version")
+             # A file that is not a fillable form, or ASG rejecting the request (400 / 404 / 422): the form is left
+             # out of the run and not asked for again for half an hour - every ask is a paid download of the same
+             # useless answer (hard review, 5 Nov 2026). Not the weeks-long refusal store: an ASG-side outage that
+             # answers 404 for an hour must not hide forms for a month.
+             "bad_file": 30 * 60, "rejected": 30 * 60,
              "wrong_form": 6 * 60 * 60}   # ASG sent another form for this request - the same answer for hours
 PREFETCH_DEADLINE_SECONDS = 120.0   # the whole pre-download of one generate request (one wave of 8 cold
                                     # downloads ~22 s each, with room for other users' downloads - round 4)
@@ -133,15 +137,31 @@ def max_per_package() -> int:
 
 # ── the search list (D-ASG-2) ─────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
+_index_loaded: Dict[str, dict] = {}
+
+
 def _index() -> Dict[str, dict]:
+    """The search list, loaded once. A failed or empty load is NOT kept (hard review, 5 Nov 2026: a cached
+    empty list made every ASG form read "no longer offered" until a restart) - the next call tries again."""
+    if _index_loaded:
+        return _index_loaded
     try:
         with open(INDEX_PATH) as f:
             data = json.load(f)
     except Exception as ex:                                  # noqa: BLE001
         logger.warning("asg_forms: search list unavailable (%s): %s", INDEX_PATH, ex)
         return {}
-    return {str(e["form_id"]): e for e in data.get("forms") or [] if isinstance(e, dict) and e.get("form_id")}
+    got = {str(e["form_id"]): e for e in data.get("forms") or [] if isinstance(e, dict) and e.get("form_id")}
+    if got:
+        _index_loaded.update(got)
+    return got
+
+
+def _index_cache_clear() -> None:
+    _index_loaded.clear()
+
+
+_index.cache_clear = _index_cache_clear                     # the old lru_cache door, kept for callers and tests
 
 
 @lru_cache(maxsize=1)
@@ -170,10 +190,17 @@ def asg_form_ids(form_ids: Any) -> List[str]:
     return [str(f) for f in (form_ids or []) if is_asg_form(f)]
 
 
+def _one_spelling(form_id: str) -> str:
+    """"acord_137_ca" -> "ACORD_137_CA"; a layer copy keeps its own key ("ACORD_131__excess")."""
+    base, sep, key = form_id.partition("__")
+    return (base.upper() if base[:6].upper() == "ACORD_" else base) + sep + key
+
+
 def clean_form_ids(form_ids: Any) -> List[str]:
-    """Requested form ids in ONE spelling: trimmed, empty ones dropped, each once, order kept - so a padded or
-    repeated id can neither slip past the cap nor be generated twice (review 3 Nov 2026)."""
-    return list(dict.fromkeys(s for s in (str(f or "").strip() for f in (form_ids or [])) if s))
+    """Requested form ids in ONE spelling: trimmed, empty ones dropped, the ACORD id upper-case, each once, order
+    kept - so a padded, repeated or lower-case id can neither slip past the cap, be generated twice, nor read as
+    "no longer offered" (review 3 Nov 2026; hard review 5 Nov 2026)."""
+    return list(dict.fromkeys(_one_spelling(s) for s in (str(f or "").strip() for f in (form_ids or [])) if s))
 
 
 def asg_count_in_package(requested: Any, generated: Any) -> int:
@@ -1076,6 +1103,13 @@ def _download(httpx, cfg, url: str, params: dict, bearer: bool, meta: dict, edit
                 return pdf
             if r.status_code == 400 and "acroform" in (r.text or "").lower():
                 raise AsgFormUnavailable("not_available", "This form has no acroform PDF for download.")
+            if r.status_code == 200:
+                # A reply that is no PDF at all: asking again pays for the same answer (hard review, 5 Nov 2026).
+                raise AsgFormUnavailable("bad_file", "ACORD Solutions sent a file that is not a fillable form.")
+            if r.status_code in (400, 404, 422):
+                logger.warning("ASG_FORM_DOWNLOAD_FAILED form=%s state=%s status=%s - rejected, not retried",
+                               meta["asg_number"], meta.get("asg_state") or "-", r.status_code)
+                raise AsgFormUnavailable("rejected", f"ACORD Solutions answered {r.status_code} for this form.")
             if r.status_code == 401 and attempt == 0:
                 with _token_lock:
                     _token["value"] = ""
@@ -1278,6 +1312,41 @@ def fetch_blank(meta: dict, edition: Optional[str] = None) -> Tuple[bytes, Optio
         # Remembered for a while (hours for "no fillable version", minutes for an outage): a user pressing
         # Generate again does not spend ASG calls on a form that just failed (review round 3).
         raise AsgFormUnavailable(known_failure[1], known_failure[2])
+    # ONE download per form at a time (hard review, 5 Nov 2026): a retry pressed while a download that missed the
+    # pre-download deadline is still running used to pay for the same form twice. A second caller waits for the
+    # running download and takes its copy (or its failure).
+    with _inflight_lock:
+        running = _inflight.get(key)
+        if running is None:
+            running = _inflight[key] = threading.Event()
+            mine = True
+        else:
+            mine = False
+    if not mine:
+        running.wait(timeout=_DOWNLOAD_BUDGET_SECONDS + _HTTP_TIMEOUT)
+        hit = _ram_get(key)
+        if hit:
+            return hit[1], hit[2], hit[3]
+        known_failure = _failure_get(key)
+        if known_failure:
+            raise AsgFormUnavailable(known_failure[1], known_failure[2])
+        raise AsgFormUnavailable("asg_error", f"ACORD Solutions is still sending {label_of(meta.get('form_id'))}.")
+    try:
+        return _download_and_keep(meta, edition, key)
+    finally:
+        with _inflight_lock:
+            if _inflight.get(key) is running:
+                del _inflight[key]
+        running.set()
+
+
+_inflight: Dict[tuple, threading.Event] = {}
+_inflight_lock = threading.Lock()
+
+
+def _download_and_keep(meta: dict, edition: Optional[str], key: tuple) -> Tuple[bytes, Optional[str], bool]:
+    """`fetch_blank`'s one download: ask ASG (or the test stub), check the file is the form asked for, keep the
+    copy in RAM (or the failure in the failure memory) BEFORE the in-flight mark comes off."""
     try:
         if _stub_dir():
             data = _stub_fetch(meta)
@@ -1332,33 +1401,94 @@ def download_pool():
         return _download_pool
 
 
-def prefetch_failure_message(failures: List[dict]) -> str:
-    """What the generate route says when the pre-download fails: a setup problem is not "try again"."""
-    if any(f.get("reason") in ("not_configured", "auth") for f in failures):
-        return NOT_SET_UP
-    never = [f for f in failures if f.get("reason") == "not_available"]
-    wrong = [f for f in failures if f.get("reason") == "wrong_form"]
-    now = [f for f in failures if f.get("reason") not in ("not_available", "wrong_form")]
+def _form_names(fs: List[dict]) -> str:
+    """"A", "A and B", "A, B and C" - in the order given."""
+    labels = [label_of(f.get("form_id")) for f in fs]
+    return labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
+# A failure that leaves the form OUT of the run while the rest generate: ASG has no fillable version, sent another
+# form, sent a file that is not a fillable form, or rejected the request (400 / 404 / 422). Asking again pays for
+# the same answer. Every other failure (ASG down or slow, signing in) may clear with a retry.
+LEFT_OUT_REASONS = REFUSED_REASONS + ("bad_file", "rejected")
+
+
+def split_prefetch_failures(failures: List[dict]) -> Tuple[List[dict], List[dict]]:
+    """(forms a retry cannot fix - left out, the rest generate - , failures a retry may fix)."""
+    gone = [f for f in failures if f.get("reason") in LEFT_OUT_REASONS]
+    return gone, [f for f in failures if f.get("reason") not in LEFT_OUT_REASONS]
+
+
+def _it(fs: List[dict], one: str, many: str) -> str:
+    return one if len(fs) == 1 else many
+
+
+def _left_out_parts(left_out: List[dict], rest: bool) -> List[str]:
+    """One sentence per kind of left-out form ("not_listed" = no longer in the list - a tab opened before it left)."""
+    unlisted = [f for f in left_out if f.get("reason") == "not_listed"]
+    gone, other = split_prefetch_failures([f for f in left_out if f.get("reason") != "not_listed"])
+    kinds = (
+        (unlisted, "{names} {is_are} no longer offered"),
+        ([f for f in gone if f.get("reason") == "not_available"], "ACORD Solutions has no fillable version of {names}"),
+        ([f for f in gone if f.get("reason") == "wrong_form"], "ACORD Solutions sent a different form than {names}"),
+        ([f for f in gone if f.get("reason") == "bad_file"],
+         "ACORD Solutions sent {names} as a file that cannot be filled in"),
+        ([f for f in gone if f.get("reason") == "rejected"], "ACORD Solutions would not provide {names}"),
+    )
     parts = []
+    for fs, lead in kinds:
+        if fs:
+            parts.append(lead.format(names=_form_names(fs), is_are=_it(fs, "is", "are")) + ", so "
+                         + _it(fs, "it was", "they were") + " left out"
+                         + (" of this package." if rest else " - choose another form."))
+    if other:
+        parts.append(f"{_form_names(other)} could not be generated, so {_it(other, 'it is', 'they are')} not in "
+                     f"this package.")
+    return parts
 
-    def _names(fs):                                   # "A", "A and B", "A, B and C"
-        labels = [label_of(f.get("form_id")) for f in fs]
-        return labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
 
-    def _it(fs, one, many):
-        return one if len(fs) == 1 else many
-    if never:
-        parts.append(f"ACORD Solutions has no fillable version of {_names(never)}, so "
-                     f"{_it(never, 'it cannot', 'they cannot')} be generated - remove {_it(never, 'it', 'them')} "
-                     f"from your selection.")
-    if wrong:
-        parts.append(f"ACORD Solutions sent a different form than {_names(wrong)}, so "
-                     f"{_it(wrong, 'it was', 'they were')} not used - remove {_it(wrong, 'it', 'them')} "
-                     f"from your selection.")
+def left_out_message(left_out: List[dict], rest: bool = True) -> str:
+    """The notice beside a generated package that is missing forms (live, 5 Nov 2026: one refused form used to stop
+    the whole package and waste the downloads that had worked). `rest` = other forms were made. An ASG form cannot
+    be added to a package after generation, so the notice says so."""
+    if not left_out:
+        return ""
+    parts = _left_out_parts(left_out, rest)
+    if rest:
+        parts.append(f"{_it(left_out, 'It', 'They')} cannot be added to this package later. Your other forms are "
+                     f"ready.")
+    return " ".join(parts)
+
+
+def prefetch_failure_detail(failures: List[dict], rest: List[str], left_out: Optional[List[dict]] = None) -> dict:
+    """The answer the generate route gives when it stops before generating: the sentence, the forms that failed,
+    `rest` - the forms "Generate without them" would make (empty: nothing else to make) - and `left_out`, forms
+    already left out of the run (no longer offered), named too. A download that worked is kept in memory for a
+    while, so a retry soon after, or a run without the failed forms, does not download it again."""
+    left_out = list(left_out or [])
+    msg = prefetch_failure_message(failures, can_skip=bool(rest))
+    if left_out:
+        msg += " " + " ".join(_left_out_parts(left_out, rest=False))
+    return {"error": "asg_download_failed", "message": msg,
+            "failed": [str(f.get("form_id") or "") for f in failures], "rest": list(rest),
+            "left_out": [{"form_id": f.get("form_id"), "reason": f.get("reason")} for f in left_out]}
+
+
+def prefetch_failure_message(failures: List[dict], can_skip: bool = False) -> str:
+    """What the generate route says when it stops before generating: a setup problem is not "try again"."""
+    if any(f.get("reason") in ("not_configured", "auth") for f in failures):
+        return NOT_SET_UP + (" You can generate your other forms without the ACORD Solutions ones." if can_skip
+                             else "")
+    gone, now = split_prefetch_failures(failures)
+    parts = _left_out_parts(gone, rest=False)
     if now:
-        parts.append(f"ACORD Solutions could not provide {_names(now)} right now - remove "
-                     f"{_it(now, 'it', 'them')} from your selection, or try again in a few minutes.")
-    return "Nothing was generated. " + " ".join(parts)
+        parts.append(f"ACORD Solutions could not provide {_form_names(now)} right now - try again in a few minutes"
+                     + (f", or generate without {_it(now, 'it', 'them')} ({_it(now, 'it', 'they')} cannot be "
+                        f"added to this package later)." if can_skip else "."))
+    lead = "Your forms were not generated yet. " if can_skip else "Nothing was generated. "
+    tail = (" Forms that already downloaded are kept for a while, so trying again soon does not download them "
+            "again." if can_skip else "")
+    return lead + " ".join(parts) + tail
 
 
 def try_fetch(meta: dict) -> Optional[dict]:

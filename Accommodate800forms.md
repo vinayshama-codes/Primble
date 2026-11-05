@@ -2421,3 +2421,55 @@ Plan: 15 checks; ASG budget = 4 downloads (137 TX, 25 GA, 60, 84 INS), 0 Transcr
     variants (OPEN_ITEMS.md). Accuracy-round items (not now): 137 TX "$7" deductible / "$185" hired cost / "CO" in 18
     state cells; 25 GA "Fungi Or Bacteria Exclusion ($33)".
 - **22:37 - full suite on review C's fixes: 23,077 passed, 1 failed (the known), 46 skipped.**
+
+### 10.26 Live check on primble.ai after the 5 Nov deploy (owner, 5 Nov 2026, from 13:12 IST)
+- **13:12 - one insured, three paths (package `a726512b`, Orbin Contracting LLC): PASSED.** Dec page = normal AI
+  reading; filled ACORD 25 = Transcriber, 1 page (one submit, resumed under the same request id; ASG dashboard
+  EXTRACTION 1 page / 118 e-labels); our own downloaded ACORD 125 = read from its Primble record, no Transcriber.
+  Integrity: review not required, no "Different insured". Kit: `~/Downloads/Primble live test 5 Nov - one insured
+  (Orbin)/`. One wrong value found: the dec's letterhead "EMC INSURANCE COMPANIES" re-bound Inland Marine's carrier
+  to "EMC INSURANCE" - fixed offline (`extraction_service._names_a_carrier_group`, OPEN_ITEMS Done 13:17).
+- **Search checks: all 9 passed** (125, evidence of property, bop, acord 25's, virginia, epli, 61 va, annuity, zzzz).
+  ACORD 800 does not exist in ASG's catalogue (the 800 series starts at 801). ACORD 27 (Evidence of Property
+  Insurance) and our ACORD 28 (Evidence of COMMERCIAL Property Insurance) are two different forms - correct.
+- **Generate 25 S + 75 N + 35: "Nothing was generated."** ASG answered "no acroform PDF" for 25 S (1995/01 + suffix
+  S) although its catalogue row names an _ACRO file; 75 N (one-letter code N) and 35 downloaded (dashboard DOWNLOAD:
+  2 forms, 3 pages) and were thrown away by the all-or-nothing pre-download. Proven today: one-letter ASG geoCode
+  ("N"). Refused: suffix "S".
+- **Fixed offline (owner: "fix it for all", no ASG calls), 13:39 IST:**
+  1. A form ASG can NEVER give (no fillable version, another form sent - `REFUSED_REASONS`) is left out and every
+     other form generates; the toast names it and why (`asg_forms.left_out_message`, `asg_not_generated_message`).
+     A failure a retry may fix (ASG down / slow / sign-in) still stops, with "Try again" and "Generate without ..."
+     (503 detail `{message, failed, rest}`); the forms already downloaded are kept in memory for an hour, so
+     neither path downloads them again.
+  2. A form no longer in the list (a tab opened before it left - 25 S) is left out and named ("no longer offered"),
+     never dropped without a word; only such forms = 400.
+  3. The list builder chooses a geoCodeSuffix row only for a suffix ASG has served (`_PROVEN_SUFFIXES` = INS, CIS):
+     25 S left the list (1,127 -> 1,126; nothing else changed).
+  Tests: `test_asg_forms_3nov.py` (+8 route / message tests, 3 updated). Hard reviewer running; full suite after
+  every finding is fixed.
+- **13:58 IST - hard review of those fixes: 11 findings, all fixed** (no ASG call; probes on the stub only).
+  1. HIGH: the letterhead rule caught only the exact live string ("COMPANIES.", "(R)", "COMPANY'S", the logo split
+     over two OCR lines, a bare "EMC INSURANCE" still re-bound the carrier). Now a header name binds a contract only
+     when it is a LEGAL company name (Company / Corporation / Inc. / Exchange / Association / Limited / LLC -
+     `extraction_service._is_legal_carrier_name`); brands and groups never bind.
+  2. A retry pressed while a timed-out download was still running paid for it twice - `fetch_blank` now runs ONE
+     download per form at a time; a second caller waits and takes its copy or its failure.
+  3. A file that cannot be filled (a 200 that is no PDF, an unreadable / flat file) and a rejected request (400 / 404 /
+     422) were "try again" forever, each a paid download - now LEFT OUT like a refusal (`LEFT_OUT_REASONS`), the rest
+     generate, remembered 30 minutes (not the weeks-long store: an ASG outage must not hide forms for a month).
+  4. A form no longer offered vanished unnamed when a 503 came first - the 503 / 400 detail carries `left_out` and
+     names it.
+  5. "Generate without" sent the server's snapshot - now the ticks as they are at the click; the offer ends when a
+     tick or the step changes.
+  6. The notice says an ASG form cannot be added to this package later (it cannot - `form_addition` needs a template).
+  7. "Not downloaded again" overclaimed - now "kept for a while, so trying again soon does not download them again".
+     OPEN (dormant while async is off in production): on the async path the worker process downloads each ASG form a
+     second time (its memory is empty) - OPEN_ITEMS.
+  8. A setup failure names support AND offers the other forms; nothing else to make = 400, not 503.
+  9. A failed list load is no longer cached (every ASG form read "no longer offered" until a restart); ids are upper-
+     cased ("acord_125" was called "no longer offered").
+  10. Every remaining form failing during generation names every form (was "the selected form", singular).
+  11. Not changed, noted: ASG's unproven non-state codes (25 FR, 126 S, 155 BM, 50 WM, 829 CLAP) stay listed while
+     suffix S left - with the left-out path a failure there no longer blocks a package.
+- **14:27 IST - full suite on all of the above: 23,132 passed, 3 failed, 46 skipped.** The known `test_arq_acord125_missing_only` plus two source-text pins (`test_package_page_1oct` - test anchor updated; `test_ui_items_16_17_19_9oct` - code switched to `Array.from` to keep its one-spread rule); both files re-run green (83 passed), frontend builds. Uncommitted; deploy is the owner's call.

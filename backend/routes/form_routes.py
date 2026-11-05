@@ -1678,6 +1678,19 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     # be stored twice (review 3 Nov). The frontend always sends clean, distinct ids - nothing changes for it.
     from services import asg_forms as _asg
     req.form_ids = _asg.clean_form_ids(req.form_ids)
+    # Forms the run leaves out and names on screen: ACORD Solutions can never give them, or they are no longer
+    # offered at all - a tab opened before the list changed still holds them (25 S left it on 5 Nov 2026). Before,
+    # an id that was neither ours nor ASG's was dropped without a word.
+    _asg_left_out: list = []
+    from services.form_instances import base_form_id as _base_form_id
+    _ours = _asg.our_form_ids()
+    _unlisted = [f for f in req.form_ids if _base_form_id(f) not in _ours and not _asg.is_asg_form(f)]
+    if _unlisted:
+        req.form_ids = [f for f in req.form_ids if f not in set(_unlisted)]
+        _asg_left_out = [{"form_id": f, "reason": "not_listed"} for f in _unlisted]
+        logger.warning("select_forms_bulk: form(s) no longer offered, left out - %s", ", ".join(_unlisted))
+        if not req.form_ids:
+            raise HTTPException(400, "Nothing was generated. " + _asg.left_out_message(_asg_left_out, rest=False))
     # Every form in one package, ours and ASG's together (Brent, 4 Nov 2026: 15; more = an account upgrade).
     _in_package = _asg.package_form_count(req.form_ids, session.get("generated_forms"))
     if _in_package > _asg.max_forms_per_package():
@@ -1753,7 +1766,22 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             if _pre_failed:
                 _order = {f: i for i, f in enumerate(_asg_ids)}      # named in the order the user picked them
                 _pre_failed.sort(key=lambda x: _order.get(x.get("form_id"), len(_order)))
-                raise HTTPException(503, _asg.prefetch_failure_message(_pre_failed))
+                # A form ACORD Solutions can NEVER give (no fillable version, another form sent) is left out and
+                # the rest generate - the downloads that worked are used, not wasted (owner, live 5 Nov 2026: one
+                # refused ACORD 25 S stopped a package whose two other ASG forms had downloaded). A failure a
+                # retry may fix (ASG down, slow) still stops here and offers "Generate without it"; the forms
+                # already downloaded are kept for an hour, so neither path downloads them again.
+                _gone, _retry = _asg.split_prefetch_failures(_pre_failed)
+                _failed_ids = {f.get("form_id") for f in _pre_failed}
+                _rest = [f for f in req.form_ids if f not in _failed_ids]
+                if _retry:                       # a retry may fix it: the user decides (try again / without it)
+                    raise HTTPException(503, _asg.prefetch_failure_detail(_pre_failed, _rest, _asg_left_out))
+                if not _rest:                        # nothing else to make: a refusal, not "service unavailable"
+                    raise HTTPException(400, _asg.prefetch_failure_detail(_pre_failed, [], _asg_left_out))
+                req.form_ids = _rest
+                _asg_left_out += [{"form_id": f.get("form_id"), "reason": f.get("reason")} for f in _gone]
+                logger.warning("select_forms_bulk: ASG form(s) left out, the rest generate - %s",
+                               ", ".join(f"{x['form_id']}:{x['reason']}" for x in _asg_left_out))
         _fg_payload = {
             "session_id": req.session_id,
             "form_ids":   req.form_ids,
@@ -1791,7 +1819,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     if ENABLE_ASYNC_PROCESSING:
         return JSONResponse(
             status_code=202,
-            content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status"},
+            content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status",
+                     **({"asg_not_generated": _asg_left_out,
+                         "asg_not_generated_message": _asg.left_out_message(_asg_left_out)} if _asg_left_out else {})},
         )
 
     # NOTE: We no longer acquire the global heavy-ops semaphore here.
@@ -1982,10 +2012,12 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             # The job is marked FAILED by the handler below and the marker STAYS,
             # so a reopened package says "Generation didn't finish" (Orbin item
             # 1) - it used to be cleared here, which read as never generated.
+            # Every form that was left out or failed is named (hard review, 5 Nov 2026: "the selected form",
+            # singular, and the left-out forms dropped from the sentence).
+            _named = _asg.left_out_message(_asg_left_out + _asg_not_generated, rest=False)
             if _asg_not_generated and all(x.get("reason") != "error" for x in _asg_not_generated):
-                raise HTTPException(503, "ACORD Solutions could not provide the selected form right now. "
-                                         "Please try again shortly.")
-            raise HTTPException(400, "No forms could be generated")
+                raise HTTPException(503, "Nothing was generated. " + _named + " Please try again shortly.")
+            raise HTTPException(400, "No forms could be generated." + (" " + _named if _named else ""))
 
         # ── §4.3 item 2: post-generation cross-form consistency assertion ────
         # Confirm the value actually stamped into every generated form for each
@@ -2195,7 +2227,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 _display_cross, facts=session.get("facts") or {}),
             "package_sqs": package_sqs,
             "stamp_consistency": _stamp_check,
-            **({"asg_not_generated": _asg_not_generated} if _asg_not_generated else {}),
+            **({"asg_not_generated": _asg_left_out + _asg_not_generated,
+                "asg_not_generated_message": _asg.left_out_message(_asg_left_out + _asg_not_generated)}
+               if (_asg_left_out or _asg_not_generated) else {}),
         })
     except HTTPException as hex_:
         # The run ended without storing forms: say so on the job, so a reopened
