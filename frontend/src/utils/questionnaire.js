@@ -188,7 +188,8 @@ export function clientContact(model) {
     if (shown) return shown;
     return q.value !== null && typeof q.value !== "object" ? clean(q.value) : "";
   };
-  return { email: pick("A.1f", "contact_email"), name: pick("A.1d", "contact_name") };
+  return { email: pick("A.1f", "contact_email"), name: pick("A.1d", "contact_name"),
+           phone: pick("A.1g", "contact_phone") };    // "Text the link" (3 Nov 2026)
 }
 
 // A choice list as [{ value, label }] - strings or objects alike.

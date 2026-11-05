@@ -243,7 +243,7 @@ function UserDropdown({
               })
               .catch(() => { setUpgradeFailed(true); setUpgradeChecking(false); });
           }}>Retry</button>
-          <a href="mailto:support@primble.ai" className="udrop-link">Contact support</a>
+          <a href="mailto:support@primble.com" className="udrop-link">Contact support</a>
         </div>
       </div>
     );

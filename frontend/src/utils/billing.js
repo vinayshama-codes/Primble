@@ -5,7 +5,7 @@
 // support until in-app switching is built; the server refuses a second
 // checkout with 409 either way.
 
-export const SUPPORT_EMAIL = "support@primble.ai";
+export const SUPPORT_EMAIL = "support@primble.com";
 export const CHANGE_PLAN_NOTE = `To change your plan, contact ${SUPPORT_EMAIL}.`;
 
 // Billing e-mails link to /?open=billing; the intent survives sign-in here.

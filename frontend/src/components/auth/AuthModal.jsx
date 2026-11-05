@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
+import TurnstileWidget from "./TurnstileWidget";
 import { API_BASE, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "../../config/constants";
 
 function AuthLoadingOverlay({ label }) {
@@ -49,6 +50,33 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [showNewPass, setShowNewPass]             = useState(false);
   const [fieldErrors, setFieldErrors]             = useState({});
   const SIGNUP_STAGES = ["Verifying your email..."];
+  // Captcha (3 Nov 2026): the server says whether it is on by handing out a site key; each answer is single-use.
+  const [captchaKey, setCaptchaKey]               = useState("");
+  const [captchaToken, setCaptchaToken]           = useState("");
+  const [captchaReset, setCaptchaReset]           = useState(0);
+  // Asked again until the server answers (a deploy or a cold start can fail the first ask), and again whenever the
+  // server refuses for a missing security check while no widget is shown - otherwise the window would offer nothing
+  // to complete (review pass 2, 3 Nov 2026).
+  const captchaLive = useRef(true);
+  const loadCaptchaConfig = (attempt = 0) => {
+    fetch(`${API_BASE}/api/auth/captcha-config`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => { if (captchaLive.current && d && typeof d.site_key === "string") setCaptchaKey(d.site_key); })
+      .catch(() => {
+        if (captchaLive.current && attempt < 4) setTimeout(() => loadCaptchaConfig(attempt + 1), [2000, 5000, 10000, 20000][attempt]);
+      });
+  };
+  useEffect(() => {
+    captchaLive.current = true;
+    loadCaptchaConfig();
+    return () => { captchaLive.current = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const noteRefusal = (data) => {
+    if (!captchaKey && /security check/i.test(extractError(data && data.detail) || "")) loadCaptchaConfig();
+  };
+  const captchaMissing = !!captchaKey && !captchaToken;
+  const withCaptcha = (body) => (captchaKey ? { ...body, turnstile_token: captchaToken } : body);
+  const spendCaptcha = () => { if (captchaKey) { setCaptchaToken(""); setCaptchaReset((n) => n + 1); } };
 
   const clearFieldError = (field) => setFieldErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
 
@@ -84,15 +112,17 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
 
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
+    if (captchaMissing) { setError("Please complete the security check."); return; }
     setLoading(true);
 
     if (mode === "signup") {
       if (!disclaimerChecked) { setError("You must accept the ACORD disclaimer to create an account."); setLoading(false); return; }
     }
     const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-    const body     = mode === "signup"
+    const body     = withCaptcha(mode === "signup"
       ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked }
-      : { email, password };
+      : { email, password });
+    spendCaptcha();
     try {
       const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
@@ -102,7 +132,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
         setTransitioning(true); onSuccess(data.user);
       }
       else if (data.requires_verification) { setLoading(false); setNeedsVerify(true); }
-      else { setLoading(false); setError(extractError(data.detail) || data.message || "Authentication failed"); }
+      else { setLoading(false); noteRefusal(data); setError(extractError(data.detail) || data.message || "Authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
   };
 
@@ -123,9 +153,19 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
 
   const handleForgotRequest = async (e) => {
     e.preventDefault();
-    setError(""); setResetMsg(""); setLoading(true);
+    setError(""); setResetMsg("");
+    if (captchaMissing) { setError("Please complete the security check."); return; }
+    setLoading(true);
+    const body = withCaptcha({ email });
+    spendCaptcha();
     try {
-      await fetch(`${API_BASE}/api/auth/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const res = await fetch(`${API_BASE}/api/auth/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!res.ok) {                                     // 400 security check, 429 too many tries, 5xx
+        const data = await res.json().catch(() => ({}));
+        noteRefusal(data);
+        setError(extractError(data.detail) || (res.status === 429 ? "Too many tries. Please wait a few minutes." : "Please try again."));
+        return;
+      }
       setResetMsg("If that email is registered, a reset code has been sent.");
       setMode2("resetcode");
     } catch { setError("Network error. Please try again."); }
@@ -182,8 +222,17 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
                   </div>
                   <button type="submit" className="btn btn-modal-primary btn-block" disabled={loading}>{loading ? "Verifying..." : "Verify Email"}</button>
                 </form>
+                <TurnstileWidget siteKey={captchaKey} onToken={setCaptchaToken} resetSignal={captchaReset} action="resend_verification" />
                 <div className="auth-switch">
-                  <button onClick={async () => { await fetch(`${API_BASE}/api/auth/resend-verification`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); }}>Resend code</button>
+                  <button disabled={captchaMissing} onClick={async () => {
+                    setError("");
+                    const body = withCaptcha({ email });
+                    spendCaptcha();
+                    try {
+                      const res = await fetch(`${API_BASE}/api/auth/resend-verification`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                      if (!res.ok) { const data = await res.json().catch(() => ({})); noteRefusal(data); setError(extractError(data.detail) || "Could not resend the code."); }
+                    } catch { setError("Network error. Please try again."); }
+                  }}>Resend code</button>
                 </div>
               </>
             )}
@@ -208,7 +257,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
                 <label>Email Address</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@youragency.com" required className="form-input" />
               </div>
-              <button type="submit" className="btn btn-modal-primary btn-block" disabled={loading}>{loading ? "Sending..." : "Send Reset Code"}</button>
+              <TurnstileWidget siteKey={captchaKey} onToken={setCaptchaToken} resetSignal={captchaReset} action="forgot_password" />
+              <button type="submit" className="btn btn-modal-primary btn-block" disabled={loading || captchaMissing}>{loading ? "Sending..." : "Send Reset Code"}</button>
             </form>
             <div className="auth-switch"><button onClick={() => { setMode2(""); setError(""); }}>← Back to Sign In</button></div>
           </div>
@@ -334,7 +384,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
                 </label>
               </div>
             )}
-            <button type="submit" className="btn btn-modal-primary btn-block" disabled={loading || (mode === "signup" && !disclaimerChecked)}>
+            <TurnstileWidget siteKey={captchaKey} onToken={setCaptchaToken} resetSignal={captchaReset} action={mode === "signup" ? "signup" : "login"} />
+            <button type="submit" className="btn btn-modal-primary btn-block" disabled={loading || captchaMissing || (mode === "signup" && !disclaimerChecked)}>
               {loading ? "Please wait..." : mode === "signin" ? "Sign In" : "Create Account"}
             </button>
           </form>

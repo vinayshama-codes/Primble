@@ -133,7 +133,7 @@ export default function PricingPage({ onGetStarted, token, user, openBillingPort
                       type="button"
                       className="mkt-plan-cta mkt-plan-cta-outline"
                       disabled
-                      title="To change your plan, contact support@primble.ai."
+                      title="To change your plan, contact support@primble.com."
                       style={{ opacity: 0.5, cursor: "not-allowed", display: "flex", alignItems: "center", justifyContent: "center" }}
                     >
                       Contact support to change

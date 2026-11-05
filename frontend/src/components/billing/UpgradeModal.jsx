@@ -154,7 +154,7 @@ export default function UpgradeModal({ user, onClose, openBillingPortal }) {
                     <button
                       type="button"
                       disabled
-                      title="To change your plan, contact support@primble.ai."
+                      title="To change your plan, contact support@primble.com."
                       style={{ marginTop: 14, width: "100%", padding: "11px 0", borderRadius: 12, border: "1.5px solid var(--light-gray)", background: "transparent", color: "var(--text-secondary)", fontSize: 14, fontWeight: 700, textAlign: "center", opacity: 0.5, cursor: "not-allowed" }}
                     >
                       Contact support to change

@@ -76,7 +76,7 @@ function MarketingFooter() {
   return (
     <footer className="footer">
       <div><h4 className="footer-h4">About Us</h4><p className="footer-p">Primble automates ACORD form processing for insurance brokers and underwriting teams.</p></div>
-      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@primble.ai</p>
+      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@primble.com</p>
         <p className="footer-p">
           <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
           <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">Terms of Service</a>

@@ -752,6 +752,8 @@ body {
   margin-top: 4px;
 }
 
+.auth-captcha { display:flex; flex-direction:column; align-items:center; gap:6px; margin:6px 0 10px; }
+.auth-captcha-note { font-size:12px; color:#b45309; text-align:center; max-width:320px; }
 .auth-switch {
   text-align: center;
   margin-top: 10px;
@@ -2220,6 +2222,31 @@ body {
   color:#1e293b;
 }
 .add-forms-section { margin:12px 0; }
+/* Search ACORD's full form library on the form selection screen (3 Nov 2026, AcordFormSearch.jsx). */
+.acord-form-search { margin:14px 0 4px; display:flex; flex-direction:column; gap:10px; }
+.acord-form-search-notice { font-size:13px; line-height:1.5; color:#334155; background:#f8fafc; border:1px solid #e2e8f0; border-left:3px solid var(--primary); border-radius:8px; padding:10px 14px; }
+.acord-form-search-notice strong { color:#1e293b; }
+.acord-form-search-bar { display:flex; gap:10px; align-items:center; }
+.acord-form-search-field { position:relative; flex:1; min-width:0; display:flex; }
+.acord-form-search-input { flex:1; width:100%; min-width:0; padding:10px 46px 10px 14px; font-size:14px; border:1.5px solid #e2e8f0; border-radius:10px; background:#fff; color:#1e293b; outline:none; transition:border-color 0.15s; }
+.acord-form-search-input:focus { border-color:rgba(230,0,122,0.5); }
+/* The browser's own clear button is hidden: ours is always visible while something is typed. */
+.acord-form-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; display:none; }
+.acord-form-search-clear { position:absolute; right:6px; top:50%; transform:translateY(-50%); width:32px; height:32px; display:flex; align-items:center; justify-content:center; border:none; border-radius:50%; background:#f1f5f9; color:#475569; font-family:inherit; font-size:20px; line-height:1; cursor:pointer; }
+.acord-form-search-clear:hover, .acord-form-search-clear:focus-visible { background:rgba(230,0,122,0.10); color:var(--primary); outline:none; }
+.acord-form-search-done { flex-shrink:0; padding:9px 18px; }
+.acord-form-search-note { font-size:12px; color:#b45309; }
+.acord-form-search-results { margin:4px 0 8px; }
+.acord-form-search-empty { font-size:13px; color:#64748b; padding:6px 2px; }
+/* Kept on screen while empty (a live region must exist before its text arrives); the negative margin
+   cancels the column gap so an empty note takes no space. */
+.acord-form-search-note:empty { min-height:0; margin-top:-10px; }
+.acord-added-remove { flex-shrink:0; background:none; border:none; padding:4px 6px; font-family:inherit; font-size:12px; font-weight:600; color:#64748b; cursor:pointer; }
+.acord-added-remove:hover { color:var(--primary); text-decoration:underline; }
+.editor-main > .acord-asg-editor-note { flex:0 0 auto !important; height:auto !important; display:block !important; }
+.acord-asg-editor-note { font-size:12px; line-height:1.5; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; margin:0 0 8px; }
+.acord-form-search-pending { font-size:13px; color:#334155; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; }
+.acord-search-retry { background:none; border:none; padding:0; font-family:inherit; font-size:13px; font-weight:600; color:var(--primary); text-decoration:underline; cursor:pointer; }
 /* Text-only toggle - bold pink label with no button chrome. Self-contained
    (no .btn classes) so the shared button styles can never re-add a background. */
 .add-forms-toggle {
@@ -5319,6 +5346,7 @@ body.app-header-collapsed .acord-modal-editor-root {
   .form-select-row { padding: 16px; }
   .form-select-checkbox { width: 20px; height: 20px; }
   .form-select-checkbox-label { min-height: 44px; }
+  .acord-added-remove { min-height: 44px; padding: 4px 10px; }
 }
 
 @media (max-width: 520px) {
@@ -5360,3 +5388,8 @@ body.app-header-collapsed .acord-modal-editor-root {
   color: #b8c2cf;
   opacity: 1;
 }
+
+/* A form ACORD Solutions refused before: shown, never tickable (4 Nov 2026) */
+.form-row-unavailable { opacity: 0.6; }
+.form-row-unavailable .form-select-checkbox-label { cursor: not-allowed; }
+.form-select-unavailable { color: #b91c1c; font-weight: 600; }

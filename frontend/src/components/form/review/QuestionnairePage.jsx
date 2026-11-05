@@ -23,6 +23,7 @@ import {
   draftOf, canConfirm, answerBody, insuredConfirmable, questionDomId, narrativeOf, approvedText, replyError,
   isSecureQuestion, isComputed, reloadsPage, clientContact,
 } from "../../../utils/questionnaire";
+import { smsHref, smsMessage } from "../../../utils/smsShare";
 import "./ReviewRailLayout.css";
 import "./QuestionnairePage.css";
 
@@ -298,7 +299,10 @@ function SendToClient({ sessionId, model, selected, setSelected, lockedText }) {
       const { res, data } = await postJson(`${API_BASE}/api/questionnaire/${sessionId}/send-to-client`,
         { question_ids: ids, client_email: toEmail, client_name: toName });
       if (!res.ok || data.ok === false) setResult({ error: replyError(data, "Could not send. Try again.") });
-      else setResult({ link: data.link || "" });
+      // The text is built from THIS send - its name, and the phone on file only when it went to the contact on file
+      // (review pass 2: typing a second contact afterwards must not re-address the first one's link).
+      else setResult({ link: data.link || "", emailFailed: data.email_sent === false, name: toName,
+        phone: toEmail.toLowerCase() === String(onFile.email || "").trim().toLowerCase() ? onFile.phone : "" });
     } catch {
       setResult({ error: "Could not reach the server. Try again." });
     } finally {
@@ -339,10 +343,16 @@ function SendToClient({ sessionId, model, selected, setSelected, lockedText }) {
         {result?.error && <div className="qn-error" role="alert">{result.error}</div>}
         {result && !result.error && (
           <div className="qn-sent">
-            <span>Sent.</span>
+            <span>{result.emailFailed ? "The e-mail could not be sent - copy or text the link." : "Sent."}</span>
             {result.link && <a href={result.link} target="_blank" rel="noreferrer" className="qn-link">{result.link}</a>}
             {result.link && (
               <button type="button" className="rr-mini-btn" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+            )}
+            {/* Opens the producer's own Messages with the link typed (3 Nov 2026) - the client's phone on file, if any */}
+            {result.link && (
+              <a className="rr-mini-btn" href={smsHref(result.phone, smsMessage({ clientName: result.name, link: result.link }))}>
+                Text the link
+              </a>
             )}
           </div>
         )}

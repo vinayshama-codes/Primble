@@ -31,6 +31,7 @@ import ResolutionModal from "./ResolutionModal";
 import ContactModal from "../account/ContactModal";
 import { openArqCount, openArqTooltip, isExpiredArq, arqDisplayStatus } from "../../utils/arqStatus";
 import { useToasts } from "../../hooks/useToasts";
+import AcordFormSearch from "./AcordFormSearch";
 import { getReviewLayout } from "../../utils/reviewLayout";
 import { heldScoreLine, packageCapReasons, packageCapItems, splitCapStops, uniqueRows, routeGhostIssues, stillCappedNote } from "../../utils/reviewedStops";
 import { listedIssues, fixLeftOpen } from "../../utils/fixProgress";
@@ -58,6 +59,7 @@ import {
 import { SignatureStatusList } from "../signature/ApplicantSignature";
 import { fetchSignatureStatus } from "../../utils/applicantSignature";
 import { lossCoverageNoteFor, lossRunDocNote } from "../../utils/lossCoverage";
+import { smsHref, smsMessage } from "../../utils/smsShare";
 import {
   GEN_NONE, GEN_RUNNING, GEN_DONE, GEN_INTERRUPTED,
   generationStateOf, inProducerOrder, formToOpen, lockedReason, confirmLockedReason, continueLabel, scoreHeading, formRows,
@@ -1583,6 +1585,10 @@ function ARQModal({ sessionId, token, questions: allQuestions, summary, onClose,
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
+  // After sending: the link, with Copy link and "Text the link" (3 Nov 2026, SMS sharing) - the window used to close
+  // at once and the link was never shown here.
+  const [sent, setSent] = useState(null);           // { link, data }
+  const [linkCopied, setLinkCopied] = useState(false);
   const [showAgency, setShowAgency] = useState(false);
   const [showUnderwriting, setShowUnderwriting] = useState(false);
   const [showNeverSend, setShowNeverSend] = useState(false);
@@ -1705,7 +1711,7 @@ function ARQModal({ sessionId, token, questions: allQuestions, summary, onClose,
         }),
       });
       const data = await res.json();
-      if (res.ok && data.success) onSuccess(data);
+      if (res.ok && data.success) { if (data.link) setSent({ link: data.link, data }); else onSuccess(data); }
       else setError(data.detail || data.message || "Failed to send questionnaire.");
     } catch (e) { setError("Network error: " + e.message); }
     finally { setSending(false); }
@@ -1790,6 +1796,33 @@ function ARQModal({ sessionId, token, questions: allQuestions, summary, onClose,
       </div>
     );
   };
+
+  if (sent) {
+    const done = () => onSuccess(sent.data);
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(8px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 520, padding: "24px 28px", boxShadow: "0 32px 80px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Client Questionnaire</div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>{sent.data.email_sent === false ? "Link ready - the e-mail did not go" : "Questions sent"}</h2>
+          <p style={{ fontSize: 13, color: sent.data.email_sent === false ? "#b91c1c" : "#64748b", margin: "0 0 14px" }}>
+            {sent.data.email_sent === false
+              ? `The e-mail to ${sanitizeEmail(clientEmail)} could not be sent. Copy the link or text it to your client from your own phone.`
+              : `E-mailed to ${sanitizeEmail(clientEmail)}. You can also text the link to your client from your own phone.`}
+          </p>
+          <div style={{ fontSize: 12, color: "#334155", wordBreak: "break-all", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>{sent.link}</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button type="button" className="btn btn-modal-primary" style={{ padding: "8px 14px" }}
+              onClick={async () => { try { await navigator.clipboard.writeText(sent.link); setLinkCopied(true); } catch { setLinkCopied(false); } }}>
+              {linkCopied ? "Copied" : "Copy link"}
+            </button>
+            <a className="btn btn-modal-primary" style={{ padding: "8px 14px", textDecoration: "none" }}
+              href={smsHref("", smsMessage({ clientName, link: sent.link }))}>Text the link</a>
+            <button type="button" className="btn btn-modal-primary" style={{ padding: "8px 14px" }} onClick={done}>Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(8px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
@@ -3291,7 +3324,17 @@ const AcordModal = forwardRef(function AcordModal({
   // has changed one - until then they check the recommended forms, as before.
   const [declined125, setDeclined125] = useState(false);
   const [formTicksTouched, setFormTicksTouched] = useState(false);
-  const resetFormTicks = () => { setCheckedFormIds(new Set()); setDeclined125(false); setFormTicksTouched(false); };
+  // Any ACORD form from ACORD Solutions (3 Nov 2026, Accommodate800forms.md section 10): the search's
+  // switch / cap from the server, what is typed, and the forms added with "Done" (shown at the bottom).
+  // They belong to ONE package: every reset of the ticks clears them too (review 3 Nov).
+  const [acordSearch, setAcordSearch] = useState({ enabled: false, max: 15, maxTotal: 15, loaded: false });
+  const [acordQuery, setAcordQuery] = useState("");
+  const [addedForms, setAddedForms] = useState([]);
+  const [acordPending, setAcordPending] = useState(0);   // ticks in the search not yet added with Done
+  const resetFormTicks = () => {
+    setCheckedFormIds(new Set()); setDeclined125(false); setFormTicksTouched(false);
+    setAddedForms([]); setAcordQuery("");
+  };
   const [showAddForms, setShowAddForms] = useState(false);
   const [generatedForms, setGeneratedForms] = useState({});
   const [activeFormId, setActiveFormId] = useState(null);
@@ -5638,6 +5681,14 @@ const AcordModal = forwardRef(function AcordModal({
       }
       if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
       _notifyJobDone("generate", true);
+      // Generated: the added forms are in the package now. The list is emptied too, or the save effect writes it
+      // straight back on the next tick change (hard review, 3 Nov 2026).
+      forgetAddedForms(); setAddedForms([]);
+      if (Array.isArray(data.asg_not_generated) && data.asg_not_generated.length) {
+        const names = data.asg_not_generated.map(x => String(x.form_id || "").replace(/_/g, " ")).join(", ");
+        const _several = data.asg_not_generated.length > 1;
+        pushToast({ title: "Some forms could not be generated", body: `${names} could not be generated, so ${_several ? "they are" : "it is"} not in this package and cannot be added to it later. Your other forms are ready.`, ok: false, tone: "error" });
+      }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       setCrossGrouped(data.grouped_cross_issues || null);
       // Replace, never keep: packageSqs may hold the PRE-generation score the
@@ -5726,12 +5777,101 @@ const AcordModal = forwardRef(function AcordModal({
     setCheckedFormIds(prev => withUploadedForms(withAnchorForm(prev, recommendations, declined125),
                                                 recommendations, formTicksTouched));
   }, [step, recommendations, declined125, formTicksTouched]);
+  // Whether ACORD Solutions forms are on for this user: asked as soon as the package opens (the review pages come
+  // first) and refreshed quietly on form selection, so the search bar is already there on arrival. Asking only on
+  // arrival drew it about a second late and pushed the list down (live test L-1, 3 Nov 2026).
+  useEffect(() => {
+    if (acordSearch.loaded && step !== "form_selection") return undefined;
+    let live = true;
+    fetch(`${API_BASE}/api/asg-forms/search?q=`, { credentials: "include" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live && d) setAcordSearch({ enabled: !!d.enabled, max: d.max_per_package ?? 15, maxTotal: d.max_forms_per_package ?? 15, loaded: true }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The added forms of THIS package survive a reload (final review: a reload used to drop them silently).
+  const addedKey = sessionId ? `primble_acord_added_${sessionId}` : null;
+  // Saved only while it has forms: the empty list a reload starts with must not erase it before it is read.
+  // Emptied on purpose (the last Remove, or generation) -> `forgetAddedForms`.
+  useEffect(() => {
+    if (!addedKey || !addedForms.length) return;
+    try { localStorage.setItem(addedKey, JSON.stringify(addedForms.map(f => ({ ...f, ticked: checkedFormIds.has(f.form_id) })))); }
+    catch { /* storage unavailable: the list just lives for this visit */ }
+  }, [addedForms, addedKey, checkedFormIds]);
+  const forgetAddedForms = () => {
+    if (!addedKey) return;
+    try { localStorage.removeItem(addedKey); } catch { /* nothing stored */ }
+  };
+  useEffect(() => {
+    if (step !== "form_selection" || !addedKey || addedForms.length) return;
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(addedKey) || "[]"); } catch { saved = []; }
+    if (!Array.isArray(saved) || !saved.length) return;
+    // Only forms from ACORD Solutions live in this list; our own forms are ticked where they normally sit (live test,
+    // 3 Nov 2026). A list saved before that rule may hold one of ours - it is left out, and forgotten if nothing
+    // else is in it.
+    // A form no longer offered (Brent, 4 Nov 2026: P&C only) is left out of a list saved before that rule.
+    const clean = saved.filter(f => f && f.source === "asg" && typeof f.form_id === "string" && typeof f.form_name === "string"
+        && f.pc === true)      // a list saved before the rule has no flag: left out (the form can be searched again)
+      .map(f => ({ form_id: f.form_id, form_name: f.form_name, source: f.source, pc: true, ticked: f.ticked !== false }));
+    if (!clean.length) { forgetAddedForms(); return; }
+    setAddedForms(clean.map(({ ticked, ...f }) => f));
+    setCheckedFormIds(prev => { const next = new Set(prev); clean.filter(f => f.ticked).forEach(f => next.add(f.form_id)); return next; });
+  }, [step, addedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!acordSearch.loaded || !addedForms.length) return;
+    const asg = addedForms.filter(f => f.source === "asg");
+    const keep = acordSearch.enabled ? asg.slice(0, Math.max(0, acordSearch.max)) : [];
+    if (keep.length === asg.length) return;
+    const drop = new Set(asg.filter(f => !keep.includes(f)).map(f => f.form_id));
+    setAddedForms(prev => prev.filter(f => !drop.has(f.form_id)));
+    setCheckedFormIds(prev => { const next = new Set(prev); drop.forEach(id => next.delete(id)); return next; });
+  }, [acordSearch, addedForms]);
+  const acordSearchActive = acordSearch.enabled && (acordQuery.trim().length > 0 || acordPending > 0);
+  const acordQueryActive = acordSearch.enabled && acordQuery.trim().length > 0;   // results replace the list
+  // "Done" in the search. A form from ACORD Solutions joins the "Additional ACORD forms" list. One of OUR forms is
+  // simply ticked where it normally sits (owner, live test 3 Nov 2026): in its tier when recommended, otherwise in
+  // "Add more ACORD forms", which opens so the tick is seen.
+  const addSearchedForms = (chosen) => {
+    if (!chosen.length) return;
+    const listed = new Set(addedForms.map(f => f.form_id));
+    setAddedForms(prev => [...prev, ...chosen
+      .filter(r => r.source === "asg" && !listed.has(r.form_id))
+      .map(r => ({ form_id: r.form_id, form_name: r.form_name, source: r.source, pc: r.pc !== false }))]);
+    const recommended = new Set(recommendations.map(r => r.form_id));
+    if (chosen.some(r => r.source !== "asg" && !recommended.has(r.form_id))) setShowAddForms(true);
+    const companions = chosen.some(r => baseFormId(r.form_id) === "ACORD_127")
+      ? stateAutoCompanions().filter(id => !declinedStateAutoForms.has(id)) : [];
+    setCheckedFormIds(prev => {
+      const next = new Set(prev);
+      chosen.forEach(r => next.add(r.form_id));
+      companions.forEach(id => next.add(id));
+      return next;
+    });
+    setFormTicksTouched(true);
+  };
+  // "Remove" on an added form: off the list and out of the package, so its place under the cap is free again.
+  const removeAddedForm = (formId) => {
+    setAddedForms(prev => {
+      const next = prev.filter(f => f.form_id !== formId);
+      if (!next.length) forgetAddedForms();
+      return next;
+    });
+    if (!(recommendations || []).some(r => r.form_id === formId)) {
+      setCheckedFormIds(prev => { const next = new Set(prev); next.delete(formId); return next; });
+    }
+    setFormTicksTouched(true);
+  };
   const missingStateAutoForms = checkedFormIds.has("ACORD_127")
     ? stateAutoCompanions().filter(id => !checkedFormIds.has(id))
     : [];
 
   const recommendedIds = new Set(recommendations.map(r => r.form_id));
   const extraForms = allAvailableForms.filter(f => !recommendedIds.has(f.form_id));
+  const addedShown = addedForms.filter(f => f.source === "asg" && !recommendedIds.has(f.form_id));
+  // The review page's "Before you generate" checks our own forms only (the dry run cannot stamp an ASG form).
+  const asgAddedIds = new Set(addedForms.filter(f => f.source === "asg").map(f => f.form_id));
+  const reviewTicks = checkedFormsForReview([...checkedFormIds].filter(id => !asgAddedIds.has(id)), formTicksTouched);
   // Group recommendations by tier for display (Beta Report §7). Order within a
   // tier is preserved from the backend (confidence-sorted). Any recommendation
   // without a known tier falls back to "recommended" so nothing is dropped.
@@ -7718,7 +7858,7 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <span style={{ flex: 1 }}>{error}</span>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {step === "form_selection" && checkedFormIds.size > 0 && (
+              {step === "form_selection" && checkedFormIds.size > 0 && !acordSearchActive && (
                 <button
                   onClick={() => { setError(null); handleGenerateAll(); }}
                   style={{ padding: "5px 14px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -7761,8 +7901,10 @@ const AcordModal = forwardRef(function AcordModal({
           // rough ETA. Forms aren't generated strictly one-by-one (shared LLM pass),
           // so these describe the real phases instead of faking "form 1 of N". The
           // overlay holds on the last stage until the response lands.
+          const _fromAcord = addedForms.some(f => f.source === "asg" && checkedFormIds.has(f.form_id));
           const _stages = [
             "Preparing Form Package",
+            ...(_fromAcord ? ["Getting Forms from ACORD Solutions"] : []),
             "Gathering Submission Data",
             "Mapping ACORD Fields",
             "Validating Data",
@@ -8499,7 +8641,7 @@ const AcordModal = forwardRef(function AcordModal({
             onFixKeyDetail={openKeyDetailFix}
             dryRun={dryRun}
             dryRunSessionId={sessionId}
-            dryRunFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
+            dryRunFormIds={reviewTicks}
             onDryRunUpdate={setDryRun}
             onFixDryRunItem={openDryRunFix}
             onFixScoreItem={openScoreFix}
@@ -9182,7 +9324,7 @@ const AcordModal = forwardRef(function AcordModal({
                   const el = document.getElementById("review-add-documents");
                   if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
                 }}
-                dryRun={dryRun} sessionId={sessionId} tickedFormIds={checkedFormsForReview(checkedFormIds, formTicksTouched)}
+                dryRun={dryRun} sessionId={sessionId} tickedFormIds={reviewTicks}
                 onDryRunUpdate={setDryRun} onOpenDryRunFix={openDryRunFix} onOpenScoreFix={openScoreFix}
                 onAddForm={addFormBeforeGeneration} formOffers={documentFormOffers} onAddOffer={addOfferedForm}
                 onOpenForm={openFormAtBox} formsExist={pkgGen.state === GEN_DONE}
@@ -9268,6 +9410,21 @@ const AcordModal = forwardRef(function AcordModal({
               <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
               <p className="step-subtitle">Select the forms you need, then generate all at once.</p>
             </div>
+            {acordSearch.enabled && (
+              <AcordFormSearch
+                query={acordQuery}
+                onQueryChange={setAcordQuery}
+                onPendingChange={setAcordPending}
+                maxForms={acordSearch.max}
+                maxTotal={acordSearch.maxTotal}
+                companionsOf={r => (baseFormId(r.form_id) === "ACORD_127"
+                  ? stateAutoCompanions().filter(id => !declinedStateAutoForms.has(id)) : [])}
+                addedForms={addedForms}
+                checkedFormIds={checkedFormIds}
+                onDone={addSearchedForms}
+              />
+            )}
+            {!acordQueryActive && (<>
             <div className="form-selection-list">
               <div className="form-selection-header">
                 <span className="form-selection-title">Recommended Forms</span>
@@ -9344,6 +9501,33 @@ const AcordModal = forwardRef(function AcordModal({
                   </div>
                 );
               })}
+              {addedShown.length > 0 && (
+                <div className="form-tier-group" style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 7px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#475569", background: "#f1f5f9", padding: "2px 10px", borderRadius: 20 }}>Additional ACORD forms</span>
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>{addedShown.length} form{addedShown.length !== 1 ? "s" : ""} · added by you</span>
+                  </div>
+                  {addedShown.map(f => (
+                    <div key={f.form_id} className={`form-select-row ${checkedFormIds.has(f.form_id) ? "form-row-checked" : ""}`}>
+                      <label className="form-select-checkbox-label">
+                        <input type="checkbox" checked={checkedFormIds.has(f.form_id)} onChange={() => toggleForm(f.form_id)} className="form-select-checkbox" />
+                        <div className="form-select-info">
+                          <div className="form-select-name">{f.form_name}</div>
+                          <div className="form-select-meta">
+                            <span className="form-select-reason">
+                              {f.source === "asg" ? "From ACORD Solutions - fetched when you generate" : "Primble form"}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                      <button type="button" className="acord-added-remove" onClick={() => removeAddedForm(f.form_id)}
+                              aria-label={`Remove ${f.form_name}`}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             {extraForms.length > 0 && (
               <div className="add-forms-section">
@@ -9401,9 +9585,22 @@ const AcordModal = forwardRef(function AcordModal({
                 </button>
               </div>
             )}
+            </>)}
+            {/* While something is typed the screen is the search: no Back / Generate (owner, live test 3 Nov 2026).
+                Clearing the search (its X, or Esc) brings the list and these buttons back. */}
+            {!acordQueryActive && (
             <div className="step-footer-actions">
               {checkedFormIds.size === 0 && (
                 <span className="step-footer-note">Select at least one form to generate.</span>
+              )}
+              {acordSearchActive && (
+                <span className="step-footer-note">Press Done to add the forms you ticked.</span>
+              )}
+              {!acordSearchActive && checkedFormIds.size > acordSearch.maxTotal && (
+                <span className="step-footer-note">A package can hold up to {acordSearch.maxTotal} forms - untick {checkedFormIds.size - acordSearch.maxTotal}, or contact support@primble.com to upgrade your account.</span>
+              )}
+              {!acordSearchActive && addedForms.some(f => f.source === "asg" && checkedFormIds.has(f.form_id)) && (
+                <span className="step-footer-note">Forms from ACORD Solutions can only be added before you generate - add every form you need now.</span>
               )}
               {/* Back sits beside Generate rather than in a top strip, and uses
                   the same solid btn-modal-primary pink as every other button in
@@ -9418,14 +9615,17 @@ const AcordModal = forwardRef(function AcordModal({
                   type="button"
                   className="btn btn-modal-primary step-footer-back"
                   onClick={(e) => { if (e.detail > 1) return; setStep("review"); }}
+                  disabled={acordSearchActive}
+                  title={acordSearchActive ? "Press Done (or untick) first - leaving now would drop the forms you ticked." : undefined}
                 >
                   ← Back to review
                 </button>
-                <button className="btn btn-modal-primary btn-large step-footer-primary" onClick={(e) => { if (e.detail > 1) return; handleGenerateAll(); }} disabled={loading || checkedFormIds.size === 0}>
+                <button className="btn btn-modal-primary btn-large step-footer-primary" onClick={(e) => { if (e.detail > 1) return; handleGenerateAll(); }} disabled={loading || checkedFormIds.size === 0 || acordSearchActive || checkedFormIds.size > acordSearch.maxTotal}>
 {loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
                 </button>
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -10911,6 +11111,11 @@ const AcordModal = forwardRef(function AcordModal({
                 <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show SQS &amp; Actions">
                   <span className="sidebar-open-label">SQS &amp; ACTIONS</span>
                 </button>
+              )}
+              {generatedForms[activeFormId]?.form?.source === "asg" && generatedForms[activeFormId].form.asg_sample && (
+                <div className="acord-asg-editor-note" role="note">
+                  <strong>Test copy from ACORD Solutions.</strong> This form carries a "Sample" watermark - do not send it to a client or carrier.
+                </div>
               )}
               <PDFJsViewer
                 key={`${activeFormId}::${pdfRefreshTick}`}
